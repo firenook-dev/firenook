@@ -1,6 +1,6 @@
 # Combined-candidate qualification status
 
-Updated 2026-09-11. Exact-source quality and platform qualification have passed.
+Updated 2026-09-16. Exact-source quality and platform qualification have passed.
 A private representative consumer completed its paired cheap checks and frozen
 sequential full-data/endurance/lifecycle run. This is not a release receipt or
 permission to publish: final audit, scope limitations and registry-installed
@@ -24,14 +24,25 @@ remain private and are not publication artifacts.
 Known performance limitations of this candidate, from the same private
 acceptance and short idle/light-load component measurements on one host:
 
-- Under that consumer's two-hour concurrent workload, a limit-1 collection query
-  and a 64 KiB Storage upload/metadata/download/delete cycle had higher medians
-  than the official emulator. Idle and under a steady ~8 writes/s background
-  stream, the same query was several times faster than official and did not
-  grow with collection size, and the Storage cycle cost about 16 ms versus
-  9–11 ms. The remaining gap appears only under that workload's batched
-  commits plus listener fan-out and is not yet attributed further; a
-  soak-shaped micro-load is the first post-release performance task.
+- Superseded 2026-09-15. Under that consumer's two-hour concurrent workload,
+  the first acceptance recorded a limit-1 collection query and a 64 KiB Storage
+  upload/metadata/download/delete cycle with higher medians than the official
+  emulator. Small tests then showed the harness was measuring its own process:
+  every workload lane shared one start clock, and the memory/health sampler
+  (a `/proc` scan and a full boot-journal capture) ran in the same event loop
+  on that clock, so each timed read included the harness's own work; an idle
+  observer process issuing the same read at the same instants saw idle latency
+  throughout. The private harness was corrected (distinct lane phase offsets,
+  out-of-process sampling, an idle observer control recorded beside every busy
+  read) and both two-hour soaks were re-run on the same host, frozen seed and
+  candidate binary. The query then measured about 6 ms in the busy process and
+  7 ms in the observer, equal to its idle figure and about five times faster
+  than the official emulator under the same load; the Storage cycle fell to
+  about 56 ms but stays roughly five times the official cycle and 3.5 times its
+  own idle cycle, and that remainder is unattributed because the cycle has no
+  observer lane yet. The official emulator's own cells also improved once the
+  clock was staggered, so the two acceptance tables are not comparable to each
+  other. The engine did not change for this correction.
 - Storage upload and delete pay an fsync per mutation for immediate durability
   of object bytes and metadata; that cost matches the host's measured disk
   write+fsync floor and is a design choice, not a defect.
@@ -68,6 +79,36 @@ audit signatures` reports verified attestations. The `next` dist-tag points at
 The representative private consumer updated its exact pin to `0.1.0-next.4`
 through its own reviewed dependency change. Node/firebase-tools for Functions
 and Java for Storage rules remain explicit compatibility dependencies.
+
+`0.1.0-next.4` could not start that consumer's default project: its three
+Firebase Extensions include two task-queue handlers that firebase-tools 15.22.0
+discovers without a trigger and ignores on the official emulator, and the
+Functions host treated any upstream-ignored record as a startup failure. The
+acceptance had not exercised extensions. The host now classifies ignored
+records with the pinned service resolver: a handler upstream cannot type is
+reported with its reason and counted in the readiness receipt, while a handler
+that fails registration with this suite still fails startup. The oracle fixture
+gained an extension-shaped backend built with the pinned host's own
+`extension.yaml` normalizer. That correction is `@fireside-dev/cli@0.1.0-next.5`
+(engine `40c9f3f4fd32e9cc4409b14bee5ba390b1bf3c12`, tag `npm-v0.1.0-next.5`,
+[release run 34675478799](https://github.com/sanjevirau/fireside/actions/runs/34675478799),
+[prerelease](https://github.com/sanjevirau/fireside/releases/tag/npm-v0.1.0-next.5)):
+registry contents and attestations were verified against the release assets
+for all six packages, `next` now selects `next.5`, and `latest` still selects
+`next.2`. The engine is otherwise the qualified candidate plus that host
+correction and a stdout announcement after each Functions routing refresh, so
+the full-data acceptance was not re-run; the consumer verified the correction
+with a private local build on its real three-extension project before
+publication and pinned `next.5` exactly.
+
+Consequently a consumer-side extensions admission gate is now a required
+receipt before any pin bump: it starts the consumer's real project with its
+extensions through the normal launcher and checks the installed CLI against an
+inventory captured from the official emulator on the same project (every
+extension backend and handler with the same trigger kinds, upstream-ignored
+handlers reported and counted rather than fatal, a clean stop). It fails on
+`next.4` with the original error and passes on `next.5`. Acceptance evidence
+recorded with extensions omitted does not stand in for it.
 
 Candidate `fc54e341a6da4fc6ca26849287f92f335a6184ce` passed all seven jobs in
 [CI 34538321458](https://github.com/sanjevirau/fireside/actions/runs/34538321458)

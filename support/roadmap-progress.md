@@ -49,6 +49,18 @@ The 10-minute CI schedule checks for actionable changes and advances authorized
 reviews/merges; it does not replace implementation or define roadmap completion.
 Tagging and npm publication remain separate approval boundaries.
 
+## Post-publication corrections (2026-09-12 to 2026-09-16)
+
+`0.1.0-next.5` corrected the Functions host's admission of upstream-ignored
+extension handlers, the regression that kept `next.4` from starting a real
+extension project; see the qualification status for the receipt. The
+consumer-side extensions admission gate is now a required pre-pin receipt.
+The private acceptance harness was corrected to stop measuring its own
+process (staggered lanes, out-of-process sampling, idle observer control); the
+re-measured soak retires the recorded catalogue-query limitation and leaves the
+Storage cycle partly unattributed. No engine change accompanied the
+re-measurement.
+
 ## Developer-tool qualification index
 
 These concrete checks distinguish working interfaces from merely serving assets.
