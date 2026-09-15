@@ -16,6 +16,7 @@ use std::time::Duration;
 use std::os::unix::process::ExitStatusExt as _;
 
 use axum::Router;
+use axum::serve::{ListenerExt as _, TapIo};
 use fireside_auth_front::AuthRuntime;
 use fireside_core_store::{
     DatabaseName, DiskOptions, DocumentKey, Precondition, Store, StoreOptions, Write,
@@ -66,6 +67,8 @@ pub use control::wait_for_shutdown;
 mod auxiliary_tests;
 #[cfg(test)]
 mod diagnostics_tests;
+#[cfg(test)]
+mod no_delay_tests;
 #[cfg(test)]
 mod transport_tests;
 
@@ -924,6 +927,20 @@ fn spawn_static_servers(
     Ok(servers)
 }
 
+/// Disables Nagle's algorithm on every accepted HTTP connection.
+///
+/// Responses that reach the socket in several writes, such as a streamed
+/// Storage download, otherwise stall for the peer's delayed-ACK timer (40 ms
+/// on Linux) once a reused connection has left the kernel's initial quick-ACK
+/// phase. The gRPC front already disables it through tonic's default.
+pub fn no_delay(listener: TcpListener) -> TapIo<TcpListener, fn(&mut tokio::net::TcpStream)> {
+    listener.tap_io(|stream| {
+        if let Err(error) = stream.set_nodelay(true) {
+            eprintln!("fireside: TCP_NODELAY unavailable on an accepted connection: {error}");
+        }
+    })
+}
+
 fn spawn_axum(
     name: &'static str,
     listener: TcpListener,
@@ -932,7 +949,7 @@ fn spawn_axum(
     failed: mpsc::UnboundedSender<String>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let result = axum::serve(listener, application)
+        let result = axum::serve(no_delay(listener), application)
             .with_graceful_shutdown(async move {
                 while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
             })

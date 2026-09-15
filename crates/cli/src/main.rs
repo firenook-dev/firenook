@@ -843,7 +843,7 @@ async fn start_requests_listener(
     let application =
         fireside_suite_front::requests_router(rules.request_history(), shutdown.clone());
     Ok(Some(tokio::spawn(async move {
-        if let Err(error) = axum::serve(listener, application)
+        if let Err(error) = axum::serve(fireside_suite_runtime::no_delay(listener), application)
             .with_graceful_shutdown(async move {
                 let _ = shutdown.wait_for(|stopping| *stopping).await;
             })
