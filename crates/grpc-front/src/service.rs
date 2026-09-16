@@ -586,8 +586,33 @@ impl FirestoreService {
             return (Vec::new(), String::new());
         }
 
+        // A named collection is served from the store's scoped collection
+        // iterator, which yields exactly the direct documents of that
+        // collection in resource-id order, instead of scanning every document
+        // in the database. Only a listing without a collection id (every
+        // direct child of the parent, any collection) still needs the scan.
+        let scoped_collection = (!request.collection_id.is_empty()).then(|| {
+            parent.map_or_else(
+                || request.collection_id.clone(),
+                |parent| format!("{parent}/{}", request.collection_id),
+            )
+        });
+        let source = match &scoped_collection {
+            Some(collection_path) => snapshot.iter_collection(database, collection_path),
+            None => snapshot.iter_documents(database),
+        };
+        // The scoped iterator's order is the default `__key__` ascending order,
+        // so once a full page plus one witness document is collected, no later
+        // document can precede them and the scan stops.
+        let stop_after_page = scoped_collection.is_some()
+            && orders
+                == [ListOrder {
+                    path: QueryFieldPath::DocumentId,
+                    direction: QueryDirection::Ascending,
+                }];
+
         let mut documents: Vec<ListedDocument> = Vec::with_capacity(page_size.saturating_add(1));
-        for (key, document) in snapshot.iter_documents(database) {
+        for (key, document) in source {
             if !direct_child_matches(key.path(), parent, &request.collection_id) {
                 continue;
             }
@@ -628,6 +653,9 @@ impl FirestoreService {
             documents.insert(insertion, candidate);
             if documents.len() > page_size.saturating_add(1) {
                 documents.pop();
+            }
+            if stop_after_page && documents.len() > page_size {
+                break;
             }
         }
 
@@ -2281,6 +2309,129 @@ mod tests {
         assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(paths.first().map(String::as_str), Some("items/000"));
         assert_eq!(paths.last().map(String::as_str), Some("items/249"));
+    }
+
+    /// Seeds `items/<id>` for every returned id plus neighbours a database-wide
+    /// scan would have to skip: another top-level collection, a subcollection
+    /// below a listed document, and a collection sharing the listed prefix.
+    fn seed_scoped_listing(store: &Store, database: &DatabaseName) -> [&'static str; 12] {
+        let key = |path: &str| DocumentKey::new(database.clone(), path).expect("key");
+        // Plain ids order bytewise; Datastore-style numeric ids order
+        // numerically and before every string id.
+        let listed_ids = [
+            "1", "10", "11", "12", "2", "3", "4", "5", "9", "__id10__", "__id2__", "__id9__",
+        ];
+        let mut writes = listed_ids
+            .iter()
+            .map(|id| Write::Create {
+                key: key(&format!("items/{id}")),
+                fields: fireside_core_store::Fields::new(),
+            })
+            .collect::<Vec<_>>();
+        for path in [
+            "others/a",
+            "items/3/children/c1",
+            "items/3/children/c2",
+            "itemsArchive/z",
+        ] {
+            writes.push(Write::Create {
+                key: key(path),
+                fields: fireside_core_store::Fields::new(),
+            });
+        }
+        store.commit(&writes).expect("seed");
+        listed_ids
+    }
+
+    #[test]
+    fn scoped_listing_serves_only_the_named_collection_on_both_backends() {
+        let directory = std::env::temp_dir().join(format!(
+            "fireside-grpc-scoped-listing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let disk = Store::open_disk(&directory, fireside_core_store::DiskOptions::default())
+            .expect("disk store");
+        for store in [Store::default(), disk] {
+            let database = DatabaseName::new("scoped-list", "(default)").expect("database");
+            let listed_ids = seed_scoped_listing(&store, &database);
+            let service = FirestoreService::new(store);
+            let orders = parse_list_order("").expect("default order");
+            let snapshot = service.store().snapshot();
+
+            let mut request = ListDocumentsRequest {
+                parent: database.to_string(),
+                collection_id: "items".to_owned(),
+                page_size: 5,
+                ..ListDocumentsRequest::default()
+            };
+            let mut paths = Vec::new();
+            loop {
+                let (page, token) = service
+                    .collect_list_documents(&snapshot, &database, None, &request, &orders)
+                    .expect("page");
+                assert!(page.len() <= 5);
+                paths.extend(page.into_iter().map(|listed| listed.key.path().to_owned()));
+                if token.is_empty() {
+                    break;
+                }
+                request.page_token = token;
+            }
+            let mut expected = listed_ids
+                .iter()
+                .map(|id| format!("items/{id}"))
+                .collect::<Vec<_>>();
+            expected
+                .sort_by(|left, right| fireside_core_store::compare_resource_paths(left, right));
+            assert_eq!(
+                expected[..3],
+                ["items/__id2__", "items/__id9__", "items/__id10__"]
+            );
+            assert_eq!(
+                paths, expected,
+                "no neighbour leaks and pages stay in key order"
+            );
+
+            let (nested, token) = service
+                .collect_list_documents(
+                    &snapshot,
+                    &database,
+                    Some("items/3"),
+                    &ListDocumentsRequest {
+                        parent: format!("{database}/documents/items/3"),
+                        collection_id: "children".to_owned(),
+                        page_size: 1,
+                        ..ListDocumentsRequest::default()
+                    },
+                    &orders,
+                )
+                .expect("nested page");
+            assert_eq!(nested.len(), 1);
+            assert_eq!(nested[0].key.path(), "items/3/children/c1");
+            assert!(token.ends_with("items/3/children/c1"));
+
+            // Without a collection id every direct child of the parent is
+            // listed, across collections; this path still scans.
+            let (all, _) = service
+                .collect_list_documents(
+                    &snapshot,
+                    &database,
+                    None,
+                    &ListDocumentsRequest {
+                        parent: database.to_string(),
+                        page_size: 100,
+                        ..ListDocumentsRequest::default()
+                    },
+                    &orders,
+                )
+                .expect("unscoped page");
+            assert_eq!(all.len(), 14);
+        }
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
