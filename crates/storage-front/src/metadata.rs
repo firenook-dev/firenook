@@ -290,7 +290,10 @@ impl MetadataStore {
             return Ok(());
         }
         for path in std::mem::take(&mut state.pending_files) {
-            match File::open(&path) {
+            // Opened with write access: Win32 `FlushFileBuffers` refuses a
+            // read-only handle with "Access is denied", while Unix syncs
+            // either kind of descriptor.
+            match OpenOptions::new().read(true).write(true).open(&path) {
                 Ok(file) => file.sync_all().map_err(error)?,
                 // Deleted since it was written: nothing references it.
                 Err(io) if io.kind() == std::io::ErrorKind::NotFound => {}
