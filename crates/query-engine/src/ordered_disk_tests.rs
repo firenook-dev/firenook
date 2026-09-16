@@ -268,3 +268,180 @@ fn ordered_disk_iterator_retains_keys_not_unrelated_document_payloads() {
     assert!(ordered.snapshot.is_disk_backed());
     assert_eq!(iterator.count(), 123);
 }
+
+fn reference(db: &DatabaseName, path: &str) -> Value {
+    Value::Reference(std::sync::Arc::from(key(db, path).to_string()))
+}
+
+/// Seeds the same documents into a memory store and a disk store so results
+/// can be compared across the decoded and encoded candidate paths.
+fn paired_stores(dir: &TestDirectory, db: &DatabaseName) -> (Store, Store) {
+    let memory = Store::default();
+    let disk = Store::open_disk(&dir.0, DiskOptions::default()).unwrap();
+    let mut writes = (0..40)
+        .map(|index| write(db, &format!("items/{index:02}"), Value::Integer(index % 7)))
+        .collect::<Vec<_>>();
+    writes.push(write(db, "others/x", Value::Integer(1)));
+    writes.push(write(db, "items/05/children/c", Value::Integer(1)));
+    writes.push(write(db, "itemsArchive/z", Value::Integer(1)));
+    memory.commit(&writes).unwrap();
+    disk.commit(&writes).unwrap();
+    (memory, disk)
+}
+
+/// Like `signature` but without commit times, which differ between two
+/// separately committed stores.
+fn timeless_signature(documents: impl Iterator<Item = QueryDocument>) -> Vec<String> {
+    documents
+        .map(|d| {
+            format!(
+                "{:?}|{:?}|{:?}",
+                d.key(),
+                d.document().fields(),
+                d.projected_fields()
+            )
+        })
+        .collect()
+}
+
+fn same_on_both_backends(memory: &Store, disk: &Store, db: &DatabaseName, query: &Query) {
+    let edition = DatabaseEdition::Standard;
+    let expected =
+        timeless_signature(execute_iter(&memory.snapshot(), db, query, edition).unwrap());
+    let actual = timeless_signature(execute_iter(&disk.snapshot(), db, query, edition).unwrap());
+    assert_eq!(actual, expected, "{query:?}");
+    assert!(
+        !expected.is_empty(),
+        "query must select something: {query:?}"
+    );
+    compare(&disk.snapshot(), db, query, edition);
+    assert_eq!(
+        count(&disk.snapshot(), db, query, edition).unwrap(),
+        u64::try_from(expected.len()).unwrap(),
+        "count on disk: {query:?}"
+    );
+    assert_eq!(
+        count(&memory.snapshot(), db, query, edition).unwrap(),
+        u64::try_from(expected.len()).unwrap(),
+        "count in memory: {query:?}"
+    );
+}
+
+#[test]
+fn encoded_candidates_match_decoded_results_for_every_query_shape() {
+    let dir = TestDirectory::new();
+    let db = DatabaseName::new("lazy-scan", "(default)").unwrap();
+    let (memory, disk) = paired_stores(&dir, &db);
+    let scope = || QueryScope::collection("items").unwrap();
+    let queries = vec![
+        Query::new(scope()),
+        Query::new(scope()).order_by(field("rank"), Direction::Descending),
+        Query::new(scope())
+            .order_by(field("rank"), Direction::Ascending)
+            .limit(Limit::First(5)),
+        Query::new(scope())
+            .order_by(field("rank"), Direction::Ascending)
+            .limit(Limit::Last(4)),
+        Query::new(scope()).filter(Filter::Field(FieldFilter {
+            path: field("rank"),
+            operator: FieldOperator::GreaterThanOrEqual,
+            value: Value::Integer(4),
+        })),
+        Query::new(scope())
+            .filter(Filter::Field(FieldFilter {
+                path: FieldPath::field(["nested", "score"]).unwrap(),
+                operator: FieldOperator::Equal,
+                value: Value::Integer(2),
+            }))
+            .order_by(field("rank"), Direction::Ascending)
+            .start_after(vec![Value::Integer(2)])
+            .limit(Limit::First(6)),
+        Query::new(scope())
+            .filter(Filter::Field(FieldFilter {
+                path: FieldPath::DocumentId,
+                operator: FieldOperator::In,
+                value: Value::Array(vec![
+                    reference(&db, "items/07"),
+                    reference(&db, "items/03"),
+                    reference(&db, "items/03"),
+                    reference(&db, "others/x"),
+                    reference(&db, "items/05/children/c"),
+                    reference(&db, "items/99"),
+                ]),
+            }))
+            .order_by(field("rank"), Direction::Descending),
+        Query::new(scope()).filter(Filter::And(vec![
+            Filter::Field(FieldFilter {
+                path: FieldPath::DocumentId,
+                operator: FieldOperator::Equal,
+                value: reference(&db, "items/11"),
+            }),
+            Filter::Field(FieldFilter {
+                path: field("rank"),
+                operator: FieldOperator::Equal,
+                value: Value::Integer(4),
+            }),
+        ])),
+        Query::new(QueryScope::collection_group("children").unwrap()).filter(Filter::Field(
+            FieldFilter {
+                path: FieldPath::DocumentId,
+                operator: FieldOperator::In,
+                value: Value::Array(vec![
+                    reference(&db, "items/05/children/c"),
+                    reference(&db, "items/05"),
+                ]),
+            },
+        )),
+    ];
+    for query in queries {
+        same_on_both_backends(&memory, &disk, &db, &query);
+    }
+}
+
+#[test]
+fn named_candidates_respect_scope_database_and_order() {
+    let db = DatabaseName::new("lazy-scan", "(default)").unwrap();
+    let other = DatabaseName::new("lazy-scan", "other").unwrap();
+    let query =
+        Query::new(QueryScope::collection("items").unwrap()).filter(Filter::Field(FieldFilter {
+            path: FieldPath::DocumentId,
+            operator: FieldOperator::In,
+            value: Value::Array(vec![
+                reference(&db, "items/10"),
+                reference(&db, "items/9"),
+                reference(&db, "items/9"),
+                reference(&other, "items/1"),
+                reference(&db, "others/1"),
+                reference(&db, "items/1/children/2"),
+                Value::Reference(std::sync::Arc::from("not/a/document/name")),
+            ]),
+        }));
+    let keys = named_candidates(&query, &db).unwrap();
+    assert_eq!(
+        keys.iter().map(DocumentKey::path).collect::<Vec<_>>(),
+        ["items/10", "items/9"]
+    );
+
+    // A string value is not a reference: no point lookup, scan instead.
+    let string_query =
+        Query::new(QueryScope::collection("items").unwrap()).filter(Filter::Field(FieldFilter {
+            path: FieldPath::DocumentId,
+            operator: FieldOperator::Equal,
+            value: Value::String("items/1".into()),
+        }));
+    assert!(named_candidates(&string_query, &db).is_none());
+    // Membership inside an `or` cannot name the whole candidate set.
+    let or_query = Query::new(QueryScope::collection("items").unwrap()).filter(Filter::Or(vec![
+        Filter::Field(FieldFilter {
+            path: FieldPath::DocumentId,
+            operator: FieldOperator::Equal,
+            value: reference(&db, "items/1"),
+        }),
+        Filter::Field(FieldFilter {
+            path: field("rank"),
+            operator: FieldOperator::Equal,
+            value: Value::Integer(1),
+        }),
+    ]));
+    assert!(named_candidates(&or_query, &db).is_none());
+}

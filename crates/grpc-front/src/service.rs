@@ -10,9 +10,9 @@ use fireside_core_store::{
     Write, compare_resource_paths, database_name_logical_bytes, document_key_logical_bytes,
 };
 use fireside_query_engine::{
-    DatabaseEdition, Direction as QueryDirection, FieldPath as QueryFieldPath, IndexConfigError,
-    Query as StructuredQuery, QueryDocument, QueryPolicy, QueryScope, aggregate, compare_values,
-    execute, execute_iter, partition,
+    Aggregation as QueryAggregation, DatabaseEdition, Direction as QueryDirection,
+    FieldPath as QueryFieldPath, IndexConfigError, Query as StructuredQuery, QueryDocument,
+    QueryPolicy, QueryScope, aggregate, compare_values, count, execute, execute_iter, partition,
 };
 use fireside_rules_runtime::{
     AtomicEvaluationResult, Authorization, EvaluationResult, RequestOperation, RulesQuery,
@@ -1470,12 +1470,7 @@ impl Firestore for FirestoreService {
             )));
         }
         let started = Instant::now();
-        let documents = execute(&snapshot, &database, &query, self.query_policy.edition())
-            .map_err(|error| query_status(&error))?;
-        for document in &documents {
-            self.record_read(&token, document.key(), Some(document.document().as_ref()));
-        }
-        let result = aggregate_query_result(&documents, aggregation)?;
+        let result = self.aggregate_snapshot(&snapshot, &database, &query, &token, aggregation)?;
         let execution_duration = started.elapsed();
         let mut responses = Vec::with_capacity(
             1 + usize::from(new_transaction) + usize::from(explain_options.is_some()),
@@ -2008,6 +2003,57 @@ fn aggregation_plan_stream(
         ..RunAggregationQueryResponse::default()
     });
     Box::pin(iter(responses.into_iter().map(Ok)))
+}
+
+impl FirestoreService {
+    /// A count outside a transaction needs no document payloads and no
+    /// read-set entries, so it is answered from the lazy scan; every other
+    /// aggregation materializes the result set as before.
+    fn aggregate_snapshot(
+        &self,
+        snapshot: &Snapshot,
+        database: &DatabaseName,
+        query: &StructuredQuery,
+        token: &[u8],
+        aggregation: crate::query_codec::DecodedAggregation,
+    ) -> Result<proto::AggregationResult, Status> {
+        if token.is_empty()
+            && aggregation
+                .operations
+                .iter()
+                .all(|operation| matches!(operation, QueryAggregation::Count { .. }))
+        {
+            let matched = count(snapshot, database, query, self.query_policy.edition())
+                .map_err(|error| query_status(&error))?;
+            return count_only_result(matched, &aggregation);
+        }
+        let documents = execute(snapshot, database, query, self.query_policy.edition())
+            .map_err(|error| query_status(&error))?;
+        for document in &documents {
+            self.record_read(token, document.key(), Some(document.document().as_ref()));
+        }
+        aggregate_query_result(&documents, aggregation)
+    }
+}
+
+fn count_only_result(
+    matched: u64,
+    aggregation: &crate::query_codec::DecodedAggregation,
+) -> Result<proto::AggregationResult, Status> {
+    let mut fields = fireside_core_store::Fields::new();
+    for operation in &aggregation.operations {
+        if let QueryAggregation::Count { alias } = operation {
+            let bound = aggregation
+                .count_bounds
+                .get(alias)
+                .map_or(u64::MAX, |bound| u64::try_from(*bound).unwrap_or(u64::MAX));
+            let count = i64::try_from(matched.min(bound)).unwrap_or(i64::MAX);
+            fields.insert(alias.clone(), Value::Integer(count));
+        }
+    }
+    Ok(proto::AggregationResult {
+        aggregate_fields: encode_fields(&fields)?.into_iter().collect(),
+    })
 }
 
 fn aggregate_query_result(

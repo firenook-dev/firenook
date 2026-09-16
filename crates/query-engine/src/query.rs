@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -5,7 +6,7 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 use fireside_core_store::{
-    DatabaseName, Document, DocumentKey, Fields, Snapshot, SnapshotDocumentIterator, Value,
+    DatabaseName, Document, DocumentKey, Fields, LazyDocument, Snapshot, Value,
     compare_resource_paths,
 };
 
@@ -472,6 +473,30 @@ pub fn execute(
     Ok(execute_iter(snapshot, database, query, edition)?.collect())
 }
 
+/// Counts a query's results without decoding disk documents that only need
+/// their filter and order fields inspected.
+pub fn count(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    query: &Query,
+    edition: DatabaseEdition,
+) -> Result<u64, QueryError> {
+    let mut iterator = execute_iter(snapshot, database, query, edition)?;
+    let count = match &mut iterator.inner {
+        QueryDocumentIteratorInner::Streaming(streaming) => {
+            let mut count = 0_u64;
+            while streaming.next_lazy().is_some() {
+                count = count.saturating_add(1);
+            }
+            count
+        }
+        QueryDocumentIteratorInner::OrderedDisk(_) | QueryDocumentIteratorInner::Buffered(_) => {
+            u64::try_from(iterator.count()).unwrap_or(u64::MAX)
+        }
+    };
+    Ok(count)
+}
+
 /// Creates a lazy result iterator for a structured query.
 ///
 /// Queries whose normalized order is ascending document name are evaluated
@@ -591,39 +616,12 @@ fn ordered_disk_iterator(
     let mut candidates = scoped_documents(snapshot, database, query)
         .filter(|(key, document)| candidate_matches(query, orders, edition, key, document))
         .map(|(key, document)| {
-            let values = orders
-                .iter()
-                .map(|order| {
-                    match field_value(&key, &document, &order.path)
-                        .expect("candidate order field exists")
-                    {
-                        FieldValue::Borrowed(value) => Some(value.clone()),
-                        FieldValue::DocumentName(_) => None,
-                    }
-                })
-                .collect::<Vec<_>>();
+            let values = order_values(&key, &document, orders);
             (key, values)
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|(left_key, left), (right_key, right)| {
-        for ((left, right), order) in left.iter().zip(right).zip(orders) {
-            let left = left.as_ref().map_or_else(
-                || FieldValue::DocumentName(left_key.to_string()),
-                FieldValue::Borrowed,
-            );
-            let right = right.as_ref().map_or_else(
-                || FieldValue::DocumentName(right_key.to_string()),
-                FieldValue::Borrowed,
-            );
-            let ordering = apply_direction(
-                compare_field_values(&left, &right, edition),
-                order.direction,
-            );
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        Ordering::Equal
+        compare_order_values(left_key, left, right_key, right, orders, edition)
     });
     let keys = candidates
         .into_iter()
@@ -643,7 +641,7 @@ fn ordered_disk_iterator(
 
 /// Lazy evaluator for queries already ordered by the store's scope index.
 struct StreamingQueryDocumentIterator {
-    candidates: SnapshotDocumentIterator,
+    candidates: ScopedCandidates,
     edition: DatabaseEdition,
     orders: Vec<Order>,
     query: Query,
@@ -651,10 +649,10 @@ struct StreamingQueryDocumentIterator {
     remaining_offset: usize,
 }
 
-impl Iterator for StreamingQueryDocumentIterator {
-    type Item = QueryDocument;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl StreamingQueryDocumentIterator {
+    /// The next result before it is decoded, so counting or key-only
+    /// consumers never pay for document payloads.
+    fn next_lazy(&mut self) -> Option<(DocumentKey, LazyDocument)> {
         if self.remaining_limit == Some(0) {
             return None;
         }
@@ -669,18 +667,28 @@ impl Iterator for StreamingQueryDocumentIterator {
             if let Some(remaining) = &mut self.remaining_limit {
                 *remaining -= 1;
             }
-            let projected_fields = self
-                .query
-                .projection
-                .as_ref()
-                .map(|projection| project(document.fields(), projection));
-            return Some(QueryDocument {
-                key,
-                document,
-                projected_fields,
-            });
+            return Some((key, document));
         }
         None
+    }
+}
+
+impl Iterator for StreamingQueryDocumentIterator {
+    type Item = QueryDocument;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key, document) = self.next_lazy()?;
+        let document = document.into_document();
+        let projected_fields = self
+            .query
+            .projection
+            .as_ref()
+            .map(|projection| project(document.fields(), projection));
+        Some(QueryDocument {
+            key,
+            document,
+            projected_fields,
+        })
     }
 }
 
@@ -695,12 +703,18 @@ fn execute_buffered(
         return execute_nearest(snapshot, database, query, nearest, edition);
     }
 
+    // Order keys are extracted once per candidate; the payload of a disk
+    // candidate is decoded only after it survives ordering and the limit.
     let candidates = scoped_documents(snapshot, database, query)
-        .filter(|(key, document)| candidate_matches(query, orders, edition, key, document));
+        .filter(|(key, document)| candidate_matches(query, orders, edition, key, document))
+        .map(|(key, document)| {
+            let values = order_values(&key, &document, orders);
+            (key, values, document)
+        });
 
     let mut documents = collect_bounded_candidates(candidates, query, orders, edition);
-    documents.sort_by(|(left_key, left), (right_key, right)| {
-        compare_documents(left_key, left, right_key, right, orders, edition)
+    documents.sort_by(|(left_key, left, _), (right_key, right, _)| {
+        compare_order_values(left_key, left, right_key, right, orders, edition)
     });
 
     let after_offset = documents.into_iter().skip(query.offset);
@@ -716,13 +730,16 @@ fn execute_buffered(
 
     Ok(limited
         .into_iter()
-        .map(|(key, document)| QueryDocument {
-            projected_fields: query
-                .projection
-                .as_ref()
-                .map(|projection| project(document.fields(), projection)),
-            key,
-            document,
+        .map(|(key, _, document)| {
+            let document = document.into_document();
+            QueryDocument {
+                projected_fields: query
+                    .projection
+                    .as_ref()
+                    .map(|projection| project(document.fields(), projection)),
+                key,
+                document,
+            }
         })
         .collect())
 }
@@ -732,7 +749,7 @@ fn candidate_matches(
     orders: &[Order],
     edition: DatabaseEdition,
     key: &DocumentKey,
-    document: &Document,
+    document: &LazyDocument,
 ) -> bool {
     query
         .filter
@@ -751,12 +768,14 @@ fn candidate_matches(
         })
 }
 
+type OrderedCandidate = (DocumentKey, Vec<Option<Value>>, LazyDocument);
+
 fn collect_bounded_candidates(
-    candidates: impl Iterator<Item = (DocumentKey, Arc<Document>)>,
+    candidates: impl Iterator<Item = OrderedCandidate>,
     query: &Query,
     orders: &[Order],
     edition: DatabaseEdition,
-) -> Vec<(DocumentKey, Arc<Document>)> {
+) -> Vec<OrderedCandidate> {
     let Some(limit) = query.limit else {
         return candidates.collect();
     };
@@ -767,11 +786,11 @@ fn collect_bounded_candidates(
         return Vec::new();
     }
     let bound = query.offset.saturating_add(limit_count);
-    let mut selected: Vec<(DocumentKey, Arc<Document>)> = Vec::with_capacity(bound.min(4_096));
+    let mut selected: Vec<OrderedCandidate> = Vec::with_capacity(bound.min(4_096));
     for candidate in candidates {
         let insertion = selected
-            .binary_search_by(|(key, document)| {
-                compare_documents(key, document, &candidate.0, &candidate.1, orders, edition)
+            .binary_search_by(|(key, values, _)| {
+                compare_order_values(key, values, &candidate.0, &candidate.1, orders, edition)
             })
             .unwrap_or_else(|index| index);
         selected.insert(insertion, candidate);
@@ -812,7 +831,7 @@ fn execute_nearest(
                 .is_none_or(|filter| filter_matches(filter, key, document, edition))
         })
         .filter_map(|(key, document)| {
-            let distance = vector_distance(document.fields(), nearest)?;
+            let distance = vector_distance(&document, nearest)?;
             threshold_matches(distance, nearest).then_some((key, document, distance))
         })
     {
@@ -828,22 +847,25 @@ fn execute_nearest(
         .into_iter()
         .skip(query.offset)
         .take(limit)
-        .map(|(key, document, distance)| QueryDocument {
-            projected_fields: projected_nearest_fields(
-                document.fields(),
-                query.projection.as_deref(),
-                nearest.distance_result_field.as_ref(),
-                distance,
-            ),
-            key,
-            document,
+        .map(|(key, document, distance)| {
+            let document = document.into_document();
+            QueryDocument {
+                projected_fields: projected_nearest_fields(
+                    document.fields(),
+                    query.projection.as_deref(),
+                    nearest.distance_result_field.as_ref(),
+                    distance,
+                ),
+                key,
+                document,
+            }
         })
         .collect())
 }
 
 fn compare_nearest_candidates(
-    left: &(DocumentKey, Arc<Document>, f64),
-    right: &(DocumentKey, Arc<Document>, f64),
+    left: &(DocumentKey, LazyDocument, f64),
+    right: &(DocumentKey, LazyDocument, f64),
     nearest: &Nearest,
 ) -> Ordering {
     let ordering = left.2.total_cmp(&right.2);
@@ -855,11 +877,12 @@ fn compare_nearest_candidates(
     ordering.then_with(|| compare_resource_paths(left.0.path(), right.0.path()))
 }
 
-fn vector_distance(fields: &Fields, nearest: &Nearest) -> Option<f64> {
+fn vector_distance(document: &LazyDocument, nearest: &Nearest) -> Option<f64> {
     let FieldPath::Field(segments) = &nearest.vector_field else {
         return None;
     };
-    let Value::Vector(vector) = nested_value(fields, segments)? else {
+    let value = document.field(segments)?;
+    let Value::Vector(vector) = value.as_ref() else {
         return None;
     };
     if vector.len() != nearest.query_vector.len() {
@@ -1107,17 +1130,116 @@ fn contains_field_filter(filter: &Filter, path: &FieldPath, operator: FieldOpera
     }
 }
 
+type ScopedCandidates = Box<dyn Iterator<Item = (DocumentKey, LazyDocument)> + Send>;
+
+/// The candidates a query must inspect, in the scope's `__name__` order.
+///
+/// A top-level `__name__ ==` or `__name__ in` filter names its candidates
+/// outright, so they are read individually instead of scanning the scope.
 fn scoped_documents(
     snapshot: &Snapshot,
     database: &DatabaseName,
     query: &Query,
-) -> SnapshotDocumentIterator {
+) -> ScopedCandidates {
+    if let Some(keys) = named_candidates(query, database) {
+        let snapshot = snapshot.clone();
+        return Box::new(keys.into_iter().filter_map(move |key| {
+            snapshot
+                .get(&key)
+                .map(|document| (key, LazyDocument::Decoded(document)))
+        }));
+    }
     match &query.scope {
         QueryScope::Collection(collection_path) => {
-            snapshot.iter_collection(database, collection_path)
+            Box::new(snapshot.iter_collection(database, collection_path).lazy())
         }
+        QueryScope::CollectionGroup(collection_id) => Box::new(
+            snapshot
+                .iter_collection_group(database, collection_id, query.ancestor.as_deref())
+                .lazy(),
+        ),
+    }
+}
+
+/// Keys named by a top-level `__name__` equality or membership filter that
+/// also lie inside the query scope, deduplicated and in `__name__` order.
+/// `None` when no such filter exists or a value is not a document reference.
+fn named_candidates(query: &Query, database: &DatabaseName) -> Option<Vec<DocumentKey>> {
+    let filters: Vec<&FieldFilter> = match query.filter.as_ref()? {
+        Filter::Field(filter) => vec![filter],
+        Filter::And(filters) => filters
+            .iter()
+            .filter_map(|filter| match filter {
+                Filter::Field(filter) => Some(filter),
+                Filter::And(_) | Filter::Or(_) => None,
+            })
+            .collect(),
+        Filter::Or(_) => return None,
+    };
+    let filter = filters.into_iter().find(|filter| {
+        filter.path == FieldPath::DocumentId
+            && matches!(filter.operator, FieldOperator::Equal | FieldOperator::In)
+    })?;
+    let names: Vec<&str> = match (&filter.operator, &filter.value) {
+        (FieldOperator::Equal, Value::Reference(name)) => vec![name.as_ref()],
+        (FieldOperator::In, Value::Array(values)) => values
+            .iter()
+            .map(|value| match value {
+                Value::Reference(name) => Some(name.as_ref()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    let mut keys = names
+        .into_iter()
+        .filter_map(|name| document_key_from_name(name, database))
+        .filter(|key| key_in_scope(key, query))
+        .collect::<Vec<_>>();
+    keys.sort_by(|left, right| compare_resource_paths(left.path(), right.path()));
+    keys.dedup();
+    Some(keys)
+}
+
+fn document_key_from_name(name: &str, database: &DatabaseName) -> Option<DocumentKey> {
+    let mut segments = name.splitn(7, '/');
+    let (project, database_id, path) = match (
+        segments.next()?,
+        segments.next()?,
+        segments.next()?,
+        segments.next()?,
+        segments.next()?,
+        segments.next()?,
+        segments.next()?,
+    ) {
+        ("projects", project, "databases", database_id, "documents", first, rest) => {
+            (project, database_id, format!("{first}/{rest}"))
+        }
+        _ => return None,
+    };
+    if project != database.project_id() || database_id != database.database_id() {
+        return None;
+    }
+    DocumentKey::new(database.clone(), path).ok()
+}
+
+fn key_in_scope(key: &DocumentKey, query: &Query) -> bool {
+    let Some((collection_path, _)) = key.path().rsplit_once('/') else {
+        return false;
+    };
+    match &query.scope {
+        QueryScope::Collection(scope_path) => collection_path == scope_path,
         QueryScope::CollectionGroup(collection_id) => {
-            snapshot.iter_collection_group(database, collection_id, query.ancestor.as_deref())
+            let immediate = collection_path
+                .rsplit_once('/')
+                .map_or(collection_path, |(_, id)| id);
+            immediate == collection_id
+                && query.ancestor.as_deref().is_none_or(|ancestor| {
+                    key.path()
+                        .strip_prefix(ancestor)
+                        .and_then(|suffix| suffix.strip_prefix('/'))
+                        .is_some_and(|descendant| descendant.split('/').count() >= 2)
+                })
         }
     }
 }
@@ -1131,7 +1253,7 @@ fn split_path(path: &str) -> Vec<&str> {
 fn filter_matches(
     filter: &Filter,
     key: &DocumentKey,
-    document: &Document,
+    document: &LazyDocument,
     edition: DatabaseEdition,
 ) -> bool {
     match filter {
@@ -1148,7 +1270,7 @@ fn filter_matches(
 fn field_filter_matches(
     filter: &FieldFilter,
     key: &DocumentKey,
-    document: &Document,
+    document: &LazyDocument,
     edition: DatabaseEdition,
 ) -> bool {
     let Some(left) = field_value(key, document, &filter.path) else {
@@ -1212,21 +1334,22 @@ fn is_membership_sentinel(value: &Value) -> bool {
 }
 
 enum FieldValue<'a> {
-    Borrowed(&'a Value),
+    /// Borrowed from a decoded document or decoded on demand from an encoded one.
+    Value(Cow<'a, Value>),
     DocumentName(String),
 }
 
 impl FieldValue<'_> {
     fn as_value(&self) -> Option<&Value> {
         match self {
-            Self::Borrowed(value) => Some(value),
+            Self::Value(value) => Some(value.as_ref()),
             Self::DocumentName(_) => None,
         }
     }
 
     fn compare(&self, right: &Value, edition: DatabaseEdition) -> Ordering {
         match self {
-            Self::Borrowed(left) => compare_values(left, right, edition),
+            Self::Value(left) => compare_values(left, right, edition),
             Self::DocumentName(left) => match right {
                 Value::Reference(right) => compare_resource_paths(left, right),
                 Value::String(right) => compare_resource_paths(left, right),
@@ -1237,7 +1360,7 @@ impl FieldValue<'_> {
 
     fn range_compare(&self, right: &Value, edition: DatabaseEdition) -> Option<Ordering> {
         match self {
-            Self::Borrowed(left) if values_share_range_domain(left, right) => {
+            Self::Value(left) if values_share_range_domain(left, right) => {
                 Some(compare_values(left, right, edition))
             }
             Self::DocumentName(left) => match right {
@@ -1245,7 +1368,7 @@ impl FieldValue<'_> {
                 Value::String(right) => Some(compare_resource_paths(left, right)),
                 _ => None,
             },
-            Self::Borrowed(_) => None,
+            Self::Value(_) => None,
         }
     }
 }
@@ -1272,15 +1395,60 @@ fn values_share_range_domain(left: &Value, right: &Value) -> bool {
 
 fn field_value<'a>(
     key: &DocumentKey,
-    document: &'a Document,
+    document: &'a LazyDocument,
     path: &FieldPath,
 ) -> Option<FieldValue<'a>> {
     match path {
         FieldPath::DocumentId => Some(FieldValue::DocumentName(key.to_string())),
-        FieldPath::Field(segments) => {
-            nested_value(document.fields(), segments).map(FieldValue::Borrowed)
+        FieldPath::Field(segments) => document.field(segments).map(FieldValue::Value),
+    }
+}
+
+/// Extracts a candidate's order keys once. `None` denotes the resource name;
+/// `Some` is a real Firestore value, including Null. Missing order fields
+/// were already excluded by `candidate_matches`.
+fn order_values(
+    key: &DocumentKey,
+    document: &LazyDocument,
+    orders: &[Order],
+) -> Vec<Option<Value>> {
+    orders
+        .iter()
+        .map(|order| {
+            match field_value(key, document, &order.path).expect("candidate order field exists") {
+                FieldValue::Value(value) => Some(value.into_owned()),
+                FieldValue::DocumentName(_) => None,
+            }
+        })
+        .collect()
+}
+
+fn compare_order_values(
+    left_key: &DocumentKey,
+    left: &[Option<Value>],
+    right_key: &DocumentKey,
+    right: &[Option<Value>],
+    orders: &[Order],
+    edition: DatabaseEdition,
+) -> Ordering {
+    for ((left, right), order) in left.iter().zip(right).zip(orders) {
+        let left = left.as_ref().map_or_else(
+            || FieldValue::DocumentName(left_key.to_string()),
+            |value| FieldValue::Value(Cow::Borrowed(value)),
+        );
+        let right = right.as_ref().map_or_else(
+            || FieldValue::DocumentName(right_key.to_string()),
+            |value| FieldValue::Value(Cow::Borrowed(value)),
+        );
+        let ordering = apply_direction(
+            compare_field_values(&left, &right, edition),
+            order.direction,
+        );
+        if ordering != Ordering::Equal {
+            return ordering;
         }
     }
+    Ordering::Equal
 }
 
 fn nested_value<'a>(fields: &'a Fields, segments: &[String]) -> Option<&'a Value> {
@@ -1295,48 +1463,24 @@ fn nested_value<'a>(fields: &'a Fields, segments: &[String]) -> Option<&'a Value
     Some(value)
 }
 
-fn compare_documents(
-    left_key: &DocumentKey,
-    left: &Document,
-    right_key: &DocumentKey,
-    right: &Document,
-    orders: &[Order],
-    edition: DatabaseEdition,
-) -> Ordering {
-    for order in orders {
-        let left_value = field_value(left_key, left, &order.path)
-            .expect("documents missing order fields are filtered before sorting");
-        let right_value = field_value(right_key, right, &order.path)
-            .expect("documents missing order fields are filtered before sorting");
-        let ordering = compare_field_values(&left_value, &right_value, edition);
-        let ordering = apply_direction(ordering, order.direction);
-        if ordering != Ordering::Equal {
-            return ordering;
-        }
-    }
-    Ordering::Equal
-}
-
 fn compare_field_values(
     left: &FieldValue<'_>,
     right: &FieldValue<'_>,
     edition: DatabaseEdition,
 ) -> Ordering {
     match (left, right) {
-        (FieldValue::Borrowed(left), FieldValue::Borrowed(right)) => {
-            compare_values(left, right, edition)
-        }
+        (FieldValue::Value(left), FieldValue::Value(right)) => compare_values(left, right, edition),
         (FieldValue::DocumentName(left), FieldValue::DocumentName(right)) => {
             compare_resource_paths(left, right)
         }
-        (FieldValue::Borrowed(_), FieldValue::DocumentName(_)) => Ordering::Less,
-        (FieldValue::DocumentName(_), FieldValue::Borrowed(_)) => Ordering::Greater,
+        (FieldValue::Value(_), FieldValue::DocumentName(_)) => Ordering::Less,
+        (FieldValue::DocumentName(_), FieldValue::Value(_)) => Ordering::Greater,
     }
 }
 
 fn compare_document_cursor(
     key: &DocumentKey,
-    document: &Document,
+    document: &LazyDocument,
     cursor: &Cursor,
     orders: &[Order],
     edition: DatabaseEdition,

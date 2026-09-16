@@ -23,7 +23,7 @@ pub use indexes::{
 pub use query::{
     Aggregation, Cursor, Direction, DistanceMeasure, FieldFilter, FieldOperator, FieldPath, Filter,
     Limit, Nearest, Order, PartitionCursor, Query, QueryDocument, QueryDocumentIterator,
-    QueryError, QueryScope, aggregate, execute, execute_iter, partition,
+    QueryError, QueryScope, aggregate, count, execute, execute_iter, partition,
 };
 
 const STANDARD_INDEXED_VALUE_BYTES: usize = 1_500;

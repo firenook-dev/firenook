@@ -17,10 +17,11 @@ use redb::{
 
 use super::{
     Change, CommitError, CommitPlan, CommitResult, DatabaseName, DiskCacheMemoryUsage,
-    DiskWriteBufferMemoryUsage, Document, DocumentKey, ListenerMemoryUsage, LogicalMemoryUsage,
-    ResetRequired, Revision, Snapshot, SnapshotError, State, StoreMemoryUsage, StoreOptions,
-    Timestamp, TransactionMemoryUsage, Write, WriteBufferMemoryUsage, compare_resource_paths,
-    document_entry_logical_bytes, numeric_resource_id, usize_to_u64,
+    DiskWriteBufferMemoryUsage, Document, DocumentKey, EncodedDocument, LazyDocument,
+    ListenerMemoryUsage, LogicalMemoryUsage, ResetRequired, Revision, Snapshot, SnapshotError,
+    State, StoreMemoryUsage, StoreOptions, Timestamp, TransactionMemoryUsage, Write,
+    WriteBufferMemoryUsage, compare_resource_paths, decode_stored_document,
+    document_entry_logical_bytes, encode_stored_document, numeric_resource_id, usize_to_u64,
 };
 
 const LEGACY_DOCUMENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("documents_v1");
@@ -308,7 +309,7 @@ impl DiskSnapshot {
         let encoded_key = encode_document_key(key).ok()?;
         let table = self.transaction.open_table(DOCUMENTS).ok()?;
         let value = table.get(encoded_key.as_slice()).ok()??;
-        decode(value.value()).ok().map(Arc::new)
+        decode_stored_document(value.value()).ok().map(Arc::new)
     }
 
     pub(crate) fn iter_documents(&self, database: &DatabaseName) -> DiskDocumentIterator {
@@ -372,12 +373,14 @@ impl DiskSnapshot {
     }
 
     pub(crate) fn documents(&self, database: &DatabaseName) -> Vec<(DocumentKey, Arc<Document>)> {
-        self.iter_documents(database).collect()
+        self.iter_documents(database)
+            .map(|(key, document)| (key, document.into_document()))
+            .collect()
     }
 }
 
 pub(crate) struct DiskDocumentIterator {
-    next_disk: Option<(DocumentKey, Arc<Document>)>,
+    next_disk: Option<(DocumentKey, LazyDocument)>,
     next_overlay: Option<(DocumentKey, Option<Arc<Document>>)>,
     overlay: std::vec::IntoIter<(DocumentKey, Option<Arc<Document>>)>,
     scope: DiskDocumentScope,
@@ -442,7 +445,7 @@ impl DiskDocumentScope {
 }
 
 impl Iterator for DiskDocumentIterator {
-    type Item = (DocumentKey, Arc<Document>);
+    type Item = (DocumentKey, LazyDocument);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -458,7 +461,7 @@ impl Iterator for DiskDocumentIterator {
                 (None, Some(_)) => {
                     let (key, document) = self.next_overlay.take()?;
                     if let Some(document) = document {
-                        return Some((key, document));
+                        return Some((key, LazyDocument::Decoded(document)));
                     }
                 }
                 (Some((disk_key, _)), Some((overlay_key, _))) => {
@@ -468,13 +471,13 @@ impl Iterator for DiskDocumentIterator {
                             self.next_disk.take();
                             let (key, document) = self.next_overlay.take()?;
                             if let Some(document) = document {
-                                return Some((key, document));
+                                return Some((key, LazyDocument::Decoded(document)));
                             }
                         }
                         std::cmp::Ordering::Greater => {
                             let (key, document) = self.next_overlay.take()?;
                             if let Some(document) = document {
-                                return Some((key, document));
+                                return Some((key, LazyDocument::Decoded(document)));
                             }
                         }
                     }
@@ -484,10 +487,13 @@ impl Iterator for DiskDocumentIterator {
     }
 }
 
+// Documents stay encoded here: a scan that filters or orders on one field
+// decodes only that field, and a candidate is decoded in full only once it is
+// part of the result (see `LazyDocument`).
 fn next_disk_document(
     source: &mut DiskRange,
     scope: &DiskDocumentScope,
-) -> Option<(DocumentKey, Arc<Document>)> {
+) -> Option<(DocumentKey, LazyDocument)> {
     loop {
         match source {
             DiskRange::Documents(range) => {
@@ -501,10 +507,10 @@ fn next_disk_document(
                 if !scope.matches(&key) {
                     continue;
                 }
-                let Ok(document) = decode::<Document>(document.value()) else {
-                    continue;
-                };
-                return Some((key, Arc::new(document)));
+                return Some((
+                    key,
+                    LazyDocument::Encoded(EncodedDocument::new(document.value())),
+                ));
             }
             DiskRange::Indexed { documents, range } => {
                 let entry = range.next()?;
@@ -520,10 +526,10 @@ fn next_disk_document(
                 let Ok(Some(document)) = documents.get(encoded_key.value()) else {
                     continue;
                 };
-                let Ok(document) = decode::<Document>(document.value()) else {
-                    continue;
-                };
-                return Some((key, Arc::new(document)));
+                return Some((
+                    key,
+                    LazyDocument::Encoded(EncodedDocument::new(document.value())),
+                ));
             }
             DiskRange::Empty => return None,
         }
@@ -598,7 +604,13 @@ fn load_write_documents_from<T: ReadableTable<&'static [u8], &'static [u8]>>(
     for key in keys {
         let encoded_key = encode_document_key(key)?;
         if let Some(document) = table.get(encoded_key.as_slice()).map_err(DiskError::redb)? {
-            documents.insert(key.clone(), Arc::new(decode(document.value())?));
+            documents.insert(
+                key.clone(),
+                Arc::new(
+                    decode_stored_document(document.value())
+                        .map_err(|error| DiskError::Encoding(error.to_string()))?,
+                ),
+            );
         }
     }
     Ok(documents)
@@ -793,7 +805,8 @@ fn load_database(database: &Database) -> Result<LoadedDatabase, DiskError> {
         for entry in entries {
             let (key, document) = entry.map_err(DiskError::redb)?;
             let key = decode_document_key(key.value())?;
-            let document: Document = decode(document.value())?;
+            let document = decode_stored_document(document.value())
+                .map_err(|error| DiskError::Encoding(error.to_string()))?;
             current_documents.entries = current_documents.entries.saturating_add(1);
             current_documents.logical_bytes = current_documents
                 .logical_bytes
@@ -883,8 +896,12 @@ fn apply_mutations(
             let collection_key = encode_collection_index_key(&mutation.key)?;
             let collection_group_key = encode_collection_group_index_key(&mutation.key)?;
             if let Some(document) = &mutation.document {
-                let value =
-                    encode_write_buffer(document, write_buffers, WriteBufferOwner::RedbDocument)?;
+                let value = track_write_buffer(
+                    encode_stored_document(document)
+                        .map_err(|error| DiskError::Encoding(error.to_string()))?,
+                    write_buffers,
+                    WriteBufferOwner::RedbDocument,
+                );
                 documents
                     .insert(key.as_slice(), value.as_slice())
                     .map_err(DiskError::redb)?;

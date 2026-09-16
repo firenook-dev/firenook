@@ -49,6 +49,30 @@ as a query without a field index would, and a listing with no collection id
 (every direct child of a parent across collections) or with `showMissing`
 still scans, matching the official emulator's semantics for those rare shapes.
 
+### Scans decode fields, not documents
+
+A query that is not served in `__name__` order reads every document in its
+scope. Disk scans hand those documents to the query engine still encoded
+(`LazyDocument::Encoded`); filters, order keys, cursors and vector distances
+read single fields from the encoding, and a document is decoded in full only
+once it is part of the result page. Stored document values carry a field
+directory (a `0xFF` marker, then the byte range of every top-level field, then
+the plain bincode document) so a top-level field is reached without walking the
+values before it; nested paths walk only inside their top-level subtree. Values
+written before the directory existed have no marker and are read by walking,
+so no migration is required, and they gain the directory when next rewritten.
+A top-level `__name__ ==` or `__name__ in` filter reads its named documents
+directly instead of scanning, and a count-only aggregation outside a
+transaction counts the lazy scan without decoding anything.
+
+Measured on the Twodart full-data seed (a 10,918-document collection of about
+30 KiB documents, Apple Silicon Mac, disk/WAL) against the official emulator
+at p50: order by a field with limit 20 went from 642 ms to 106 ms (official
+70 ms), an integer range from 630 ms to 107 ms (80 ms), `count()` from 737 ms
+to 91 ms (65 ms), `__name__ in` ten ids from 646 ms to 10 ms (403 ms), and
+`array-contains` from 257 ms to 50 ms (554 ms). The remaining gap on ordered
+scans is the read and copy of every candidate's bytes out of redb.
+
 ### Seed import path
 
 A fresh start seeds the disk store through `Store::begin_bulk_commit`, not
