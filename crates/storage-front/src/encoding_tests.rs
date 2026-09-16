@@ -21,6 +21,7 @@ async fn storage_content_encoding_replays_official_sdk_fixture_and_export_import
     let runtime = StorageRuntime::start(
         StorageConfig {
             project: "demo-encoding".to_owned(),
+            durability: StorageDurability::default(),
             origin: "http://127.0.0.1:21002".to_owned(),
             data_dir: root.join("data"),
             rules: None,

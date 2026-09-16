@@ -20,6 +20,7 @@ async fn missing_object_responses_match_the_official_route_contract() {
     let runtime = StorageRuntime::start(
         StorageConfig {
             project: fixture["projectId"].as_str().expect("project").to_owned(),
+            durability: StorageDurability::default(),
             origin: "http://127.0.0.1:21002".to_owned(),
             data_dir: root.clone(),
             rules: None,

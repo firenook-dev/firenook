@@ -18,6 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = StorageRuntime::start(
         StorageConfig {
             project: "demo-storage-encoding".to_owned(),
+            durability: fireside_storage_front::StorageDurability::default(),
             origin: origin.clone(),
             data_dir: directory,
             rules: None,

@@ -19,8 +19,8 @@ use axum::Router;
 use axum::serve::{ListenerExt as _, TapIo};
 use fireside_auth_front::AuthRuntime;
 use fireside_core_store::{
-    DatabaseName, DiskOptions, DocumentKey, Precondition, Store, StoreOptions, Write,
-    document_key_logical_bytes, fields_logical_bytes,
+    DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
+    Write, document_key_logical_bytes, fields_logical_bytes,
 };
 use fireside_export_format::{ExportReader, ExportedDocument, write_export};
 use fireside_functions_bridge::{
@@ -32,7 +32,9 @@ use fireside_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
 use fireside_rest_front::router_with_shared_service as rest_router;
 use fireside_rules_runtime::RulesRuntime;
 use fireside_rules_runtime::request_history::RequestHistory;
-use fireside_storage_front::{BucketRules, RulesRuntimeConfig, StorageConfig, StorageRuntime};
+use fireside_storage_front::{
+    BucketRules, RulesRuntimeConfig, StorageConfig, StorageDurability, StorageRuntime,
+};
 use fireside_suite_front::{
     ExportCommand, HubConfig, HubRuntime, LoggingRuntime, ServiceInfo, SuiteDirectory, UiConfig,
     requests_router, ui_router,
@@ -110,6 +112,8 @@ pub struct SuiteConfig {
     pub state_dir: PathBuf,
     pub resume_state: bool,
     pub firestore_in_memory: bool,
+    /// When Firestore commits and Storage writes reach stable storage.
+    pub durability: DiskDurability,
     /// Bounded local Requests and coverage; may retain decoded document/auth values.
     pub diagnostics: bool,
     pub firestore_rules: Option<PathBuf>,
@@ -559,6 +563,11 @@ async fn finish_suite(
     drop(suite.hub);
     suite.exporter.abort();
     let _ = suite.exporter.await;
+    // Every acknowledged commit is durable before this process reports a
+    // clean shutdown; the working state is resumed without a journal replay.
+    if let Err(error) = suite.store.flush() {
+        failures.push(format!("Firestore flush failed: {error}"));
+    }
     let auth_users = suite.auth.user_count();
     let firestore_documents = suite.store.snapshot().logical_memory_usage().entries;
     let storage_objects = suite.storage.object_count();
@@ -629,6 +638,13 @@ fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {
     Ok(())
 }
 
+const fn storage_durability(durability: DiskDurability) -> StorageDurability {
+    match durability {
+        DiskDurability::PerCommit => StorageDurability::PerCommit,
+        DiskDurability::WriteBehind { interval } => StorageDurability::WriteBehind { interval },
+    }
+}
+
 fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
     if config.firestore_in_memory {
         return Ok(Store::new(StoreOptions::default()));
@@ -639,6 +655,7 @@ fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
             store: StoreOptions::default(),
             journal: true,
             cache_size_bytes: fireside_core_store::DEFAULT_REDB_CACHE_SIZE_BYTES,
+            durability: config.durability,
         },
     )
     .map_err(|error| failure(format!("Firestore state failed to open: {error}")))
@@ -710,6 +727,7 @@ async fn start_storage(
             project: config.project_id.clone(),
             origin: format!("http://{}:{}", config.host, config.ports.storage),
             data_dir: config.state_dir.join("storage"),
+            durability: storage_durability(config.durability),
             rules: Some(RulesRuntimeConfig {
                 java: config.java.clone(),
                 jar: config.storage_rules_jar.clone(),

@@ -77,6 +77,13 @@ Without resume, never reuse a state directory as an implicit reset/reimport.
 `--export-on-exit` without a directory follows `--import`; never use this with
 an immutable resume seed. Ctrl-C requests graceful export; await completion.
 
+Writes are acknowledged as soon as they are journaled and are synced to the
+drive once a second and on shutdown (write-behind durability). Killing the
+emulator loses nothing; only a kernel crash or power cut can lose the last
+second of writes, and the state stays consistent. `--durability per-commit`
+syncs every write before acknowledging it, at the drive's flush latency
+(typically 10 to 30 ms per write) instead of under a millisecond.
+
 Roll back by cleanly stopping Fireside, retaining its completed official-format
 export, then starting the official CLI on separate working state. Never run
 both on the same ports or let both own a working directory.

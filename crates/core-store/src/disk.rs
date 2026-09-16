@@ -7,7 +7,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write as _};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::thread;
+use std::time::Duration;
 
 use bincode::{Decode, Encode, config};
 use redb::{
@@ -48,15 +50,55 @@ type LoadedDatabase = (Revision, Timestamp, LogicalMemoryUsage);
 /// 64 MiB budget. Operators can override it explicitly for capacity planning.
 pub const DEFAULT_REDB_CACHE_SIZE_BYTES: usize = 64 * 1024 * 1024;
 
+/// How long an acknowledged commit may wait before it is flushed to stable
+/// storage under [`DiskDurability::WriteBehind`].
+pub const DEFAULT_WRITE_BEHIND_INTERVAL: Duration = Duration::from_secs(1);
+
+/// When an acknowledged commit becomes durable against power loss.
+///
+/// Both modes survive the emulator process dying: every commit is appended
+/// to the journal with a plain `write` before it is acknowledged, and the
+/// operating system keeps those bytes even when the process does not. They
+/// differ only in when `fsync` runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskDurability {
+    /// Every commit syncs the journal and commits redb durably before it is
+    /// acknowledged. Nothing is lost on power loss; each commit pays the
+    /// drive's flush latency.
+    PerCommit,
+    /// Commits are acknowledged after the journal `write` and a non-durable
+    /// redb commit. A background flusher syncs the journal, commits redb
+    /// durably and truncates the journal every `interval`; shutdown and
+    /// explicit [`DiskStore::flush`] do the same. Power loss can lose at
+    /// most the commits of the last interval.
+    WriteBehind {
+        /// Maximum age of an unflushed commit.
+        interval: Duration,
+    },
+}
+
+impl Default for DiskDurability {
+    fn default() -> Self {
+        Self::WriteBehind {
+            interval: DEFAULT_WRITE_BEHIND_INTERVAL,
+        }
+    }
+}
+
 /// Disk-store resource and durability settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiskOptions {
     /// Shared MVCC and listener replay limits.
     pub store: StoreOptions,
-    /// Write and sync an application-level journal before each redb commit.
+    /// Write an application-level journal before each redb commit. Under
+    /// write-behind durability the journal is what makes an acknowledged
+    /// commit survive the process; disabling it there widens the loss
+    /// window to the flush interval for a process crash as well.
     pub journal: bool,
     /// Maximum bytes used by redb's combined read/write page cache.
     pub cache_size_bytes: usize,
+    /// When commits reach stable storage.
+    pub durability: DiskDurability,
 }
 
 impl Default for DiskOptions {
@@ -65,6 +107,7 @@ impl Default for DiskOptions {
             store: StoreOptions::default(),
             journal: true,
             cache_size_bytes: DEFAULT_REDB_CACHE_SIZE_BYTES,
+            durability: DiskDurability::default(),
         }
     }
 }
@@ -114,16 +157,35 @@ impl DiskStore {
             current_documents,
         );
 
+        let inner = Arc::new(Mutex::new(DiskState {
+            memory,
+            database,
+            journal: journal.map(|(journal, _)| journal),
+            cache_size_bytes: options.cache_size_bytes,
+            requires_restart: false,
+            durability: options.durability,
+            unflushed: false,
+        }));
+        if let DiskDurability::WriteBehind { interval } = options.durability {
+            spawn_flusher(Arc::downgrade(&inner), Arc::clone(&write_buffers), interval);
+        }
         Ok(Self {
-            inner: Arc::new(Mutex::new(DiskState {
-                memory,
-                database,
-                journal: journal.map(|(journal, _)| journal),
-                cache_size_bytes: options.cache_size_bytes,
-                requires_restart: false,
-            })),
+            inner,
             write_buffers,
         })
+    }
+
+    /// Makes every acknowledged commit durable now. A no-op under per-commit
+    /// durability or when nothing has been committed since the last flush.
+    pub fn flush(&self) -> Result<(), DiskError> {
+        let mut state = self.state();
+        flush_state(&mut state, &self.write_buffers)
+    }
+
+    /// Whether acknowledged commits are still waiting for a durable flush.
+    #[must_use]
+    pub fn has_unflushed_commits(&self) -> bool {
+        self.state().unflushed
     }
 
     /// Returns an immutable snapshot at the current revision.
@@ -191,15 +253,23 @@ impl DiskStore {
         let documents = load_write_documents(&state.database, writes)?;
         let plan = state.memory.plan_with_documents(writes, documents)?;
         let record = WalRecord::from_plan(&plan);
+        let per_commit = state.durability == DiskDurability::PerCommit;
 
+        // The journal `write` is what lets an acknowledged commit outlive the
+        // process; only per-commit durability also syncs it here.
         if let Some(journal) = &mut state.journal
-            && let Err(error) = journal.append(&record, &self.write_buffers)
+            && let Err(error) = journal.append(&record, &self.write_buffers, per_commit)
         {
             state.requires_restart = true;
             return Err(error);
         }
 
-        if let Err(error) = persist_record(&state.database, &record, &self.write_buffers) {
+        if let Err(error) = persist_record(
+            &state.database,
+            &record,
+            &self.write_buffers,
+            redb_durability(state.durability),
+        ) {
             state.requires_restart = true;
             return Err(error);
         }
@@ -208,10 +278,14 @@ impl DiskStore {
         let changes = plan.changes.clone();
         state.memory.install_disk(plan);
 
-        // A checkpoint failure cannot make the acknowledged commit unsafe:
-        // recovery skips records already represented by redb's revision.
-        if let Some(journal) = &mut state.journal {
-            let _ = journal.checkpoint();
+        if per_commit {
+            // A checkpoint failure cannot make the acknowledged commit unsafe:
+            // recovery skips records already represented by redb's revision.
+            if let Some(journal) = &mut state.journal {
+                let _ = journal.checkpoint();
+            }
+        } else {
+            state.unflushed = true;
         }
 
         Ok((result, changes))
@@ -632,6 +706,101 @@ struct DiskState {
     journal: Option<Journal>,
     cache_size_bytes: usize,
     requires_restart: bool,
+    durability: DiskDurability,
+    /// Commits acknowledged since the last durable flush (write-behind only).
+    unflushed: bool,
+}
+
+const fn redb_durability(durability: DiskDurability) -> Durability {
+    match durability {
+        DiskDurability::PerCommit => Durability::Immediate,
+        DiskDurability::WriteBehind { .. } => Durability::None,
+    }
+}
+
+/// Syncs the journal, commits redb durably (which persists every earlier
+/// non-durable commit) and truncates the journal. Holds the state lock for
+/// the flush, so commits and reads wait on the drive once per interval
+/// rather than on every write.
+fn flush_state(
+    state: &mut DiskState,
+    write_buffers: &WriteBufferAccounting,
+) -> Result<(), DiskError> {
+    if !state.unflushed {
+        return Ok(());
+    }
+    if state.requires_restart {
+        return Err(DiskError::RequiresRestart);
+    }
+    let flushed = (|| {
+        if let Some(journal) = &mut state.journal {
+            journal.sync()?;
+        }
+        persist_state_durably(&state.database, &state.memory, write_buffers)?;
+        if let Some(journal) = &mut state.journal {
+            journal.checkpoint()?;
+        }
+        Ok(())
+    })();
+    match flushed {
+        Ok(()) => {
+            state.unflushed = false;
+            Ok(())
+        }
+        Err(error) => {
+            // The journal still holds every acknowledged commit; reopening
+            // replays it. Refuse further commits until then.
+            state.requires_restart = true;
+            Err(error)
+        }
+    }
+}
+
+/// An empty durable redb commit: redb persists all preceding non-durable
+/// commits before acknowledging it.
+fn persist_state_durably(
+    database: &Database,
+    memory: &State,
+    write_buffers: &WriteBufferAccounting,
+) -> Result<(), DiskError> {
+    let mut transaction = database.begin_write().map_err(DiskError::redb)?;
+    transaction
+        .set_durability(Durability::Immediate)
+        .map_err(DiskError::redb)?;
+    persist_state(
+        &transaction,
+        memory.revision,
+        memory.last_commit_time,
+        write_buffers,
+    )?;
+    transaction.commit().map_err(DiskError::redb)
+}
+
+fn spawn_flusher(
+    state: Weak<Mutex<DiskState>>,
+    write_buffers: Arc<WriteBufferAccounting>,
+    interval: Duration,
+) {
+    let spawned = thread::Builder::new()
+        .name("fireside-disk-flusher".to_owned())
+        .spawn(move || {
+            loop {
+                thread::sleep(interval);
+                // The last store handle dropping ends the flusher.
+                let Some(inner) = state.upgrade() else { return };
+                let mut state = inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                // A failed flush marks the store as requiring a restart and
+                // every later commit is refused; nothing more to do here.
+                let _ = flush_state(&mut state, &write_buffers);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!(
+            "fireside: write-behind flusher unavailable, commits stay unflushed until shutdown: {error}"
+        );
+    }
 }
 
 #[derive(Debug, Encode, Decode)]
@@ -859,10 +1028,11 @@ fn persist_record(
     database: &Database,
     record: &WalRecord,
     write_buffers: &WriteBufferAccounting,
+    durability: Durability,
 ) -> Result<(), DiskError> {
     let mut transaction = database.begin_write().map_err(DiskError::redb)?;
     transaction
-        .set_durability(Durability::Immediate)
+        .set_durability(durability)
         .map_err(DiskError::redb)?;
     apply_mutations(&transaction, &record.mutations, write_buffers)?;
     persist_state(
@@ -1083,7 +1253,7 @@ fn replay_records(
                 "journal commit timestamps are not strictly increasing".to_owned(),
             ));
         }
-        persist_record(database, record, write_buffers)?;
+        persist_record(database, record, write_buffers, Durability::Immediate)?;
         state.revision = record.revision;
         state.last_commit_time = record.commit_time;
     }
@@ -1451,6 +1621,7 @@ impl Journal {
         &mut self,
         record: &WalRecord,
         write_buffers: &WriteBufferAccounting,
+        sync: bool,
     ) -> Result<(), DiskError> {
         let payload = encode_write_buffer(record, write_buffers, WriteBufferOwner::WalPayload)?;
         if payload.len() > MAX_WAL_RECORD_BYTES {
@@ -1471,6 +1642,13 @@ impl Journal {
         self.file.seek(SeekFrom::End(0))?;
         self.file.write_all(&header)?;
         self.file.write_all(payload.as_slice())?;
+        if sync {
+            self.file.sync_all()?;
+        }
+        Ok(())
+    }
+
+    fn sync(&mut self) -> Result<(), DiskError> {
         self.file.sync_all()?;
         Ok(())
     }
@@ -1940,26 +2118,172 @@ mod tests {
         assert_eq!(store.revision().get(), 1);
     }
 
-    #[test]
-    fn journal_is_enabled_and_checkpointed_by_default() {
-        let directory = TestDirectory::new();
-        let store = DiskStore::open(directory.path(), DiskOptions::default())
-            .expect("disk store should open");
-        store
-            .commit(&[Write::Set {
-                key: key("items/one"),
-                fields: fields(Value::Integer(1)),
-                transforms: Vec::new(),
-                precondition: Precondition::None,
-            }])
-            .expect("commit should succeed");
+    fn per_commit() -> DiskOptions {
+        DiskOptions {
+            durability: DiskDurability::PerCommit,
+            ..DiskOptions::default()
+        }
+    }
 
+    fn journal_len(directory: &TestDirectory) -> u64 {
+        fs::metadata(directory.path().join(JOURNAL_FILE))
+            .expect("journal should exist")
+            .len()
+    }
+
+    #[test]
+    fn per_commit_durability_checkpoints_the_journal_after_every_commit() {
+        let directory = TestDirectory::new();
+        let store =
+            DiskStore::open(directory.path(), per_commit()).expect("disk store should open");
+        store
+            .commit(&[set("items/one", 1)])
+            .expect("commit should succeed");
+        assert_eq!(journal_len(&directory), 0);
+        assert!(!store.has_unflushed_commits());
+    }
+
+    #[test]
+    fn write_behind_is_the_default_and_defers_the_flush() {
         assert_eq!(
-            fs::metadata(directory.path().join(JOURNAL_FILE))
-                .expect("journal should exist")
-                .len(),
-            0
+            DiskOptions::default().durability,
+            DiskDurability::WriteBehind {
+                interval: DEFAULT_WRITE_BEHIND_INTERVAL
+            }
         );
+        let directory = TestDirectory::new();
+        let options = DiskOptions {
+            durability: DiskDurability::WriteBehind {
+                interval: Duration::from_secs(3_600),
+            },
+            ..DiskOptions::default()
+        };
+        {
+            let store = DiskStore::open(directory.path(), options).expect("disk store should open");
+            store.commit(&[set("items/one", 1)]).expect("commit");
+            store.commit(&[set("items/two", 2)]).expect("commit");
+            // Acknowledged, readable, journaled, not yet flushed.
+            assert!(journal_len(&directory) > 0);
+            assert!(store.has_unflushed_commits());
+            assert_eq!(store.revision().get(), 2);
+            assert!(store.snapshot().get(&key("items/two")).is_some());
+
+            store.flush().expect("flush");
+            assert_eq!(journal_len(&directory), 0);
+            assert!(!store.has_unflushed_commits());
+            store.flush().expect("a second flush is a no-op");
+
+            store.commit(&[set("items/three", 3)]).expect("commit");
+            assert!(store.has_unflushed_commits());
+        }
+        // The journal carries the unflushed commit across a clean drop, and
+        // the flushed ones are in redb without it.
+        let reopened = DiskStore::open(directory.path(), options).expect("reopen");
+        assert_eq!(reopened.revision().get(), 3);
+        for (path, value) in [("items/one", 1), ("items/two", 2), ("items/three", 3)] {
+            assert_eq!(
+                reopened.snapshot().get(&key(path)).expect(path).fields(),
+                &fields(Value::Integer(value))
+            );
+        }
+        assert_eq!(journal_len(&directory), 0, "replay checkpoints the journal");
+    }
+
+    #[test]
+    fn flushed_commits_are_in_redb_even_when_the_journal_is_discarded() {
+        let directory = TestDirectory::new();
+        let options = DiskOptions {
+            durability: DiskDurability::WriteBehind {
+                interval: Duration::from_secs(3_600),
+            },
+            ..DiskOptions::default()
+        };
+        {
+            let store = DiskStore::open(directory.path(), options).expect("open");
+            store.commit(&[set("items/one", 1)]).expect("commit");
+            store.flush().expect("flush");
+        }
+        fs::remove_file(directory.path().join(JOURNAL_FILE)).expect("discard journal");
+        let reopened = DiskStore::open(directory.path(), options).expect("reopen");
+        assert_eq!(reopened.revision().get(), 1);
+        assert!(reopened.snapshot().get(&key("items/one")).is_some());
+    }
+
+    #[test]
+    fn the_background_flusher_checkpoints_within_the_interval() {
+        let directory = TestDirectory::new();
+        let store = DiskStore::open(
+            directory.path(),
+            DiskOptions {
+                durability: DiskDurability::WriteBehind {
+                    interval: Duration::from_millis(20),
+                },
+                ..DiskOptions::default()
+            },
+        )
+        .expect("open");
+        store.commit(&[set("items/one", 1)]).expect("commit");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while store.has_unflushed_commits() {
+            assert!(std::time::Instant::now() < deadline, "flusher did not run");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(journal_len(&directory), 0);
+    }
+
+    /// A real process kill: the child commits under write-behind and aborts
+    /// before any flush; the parent reopens the directory and must find every
+    /// acknowledged commit, replayed from the journal the OS retained.
+    #[test]
+    fn acknowledged_write_behind_commits_survive_a_process_abort() {
+        const CHILD_ENVIRONMENT: &str = "FIRESIDE_TEST_ABORT_CHILD";
+        if let Ok(directory) = std::env::var(CHILD_ENVIRONMENT) {
+            let store = DiskStore::open(
+                &directory,
+                DiskOptions {
+                    durability: DiskDurability::WriteBehind {
+                        interval: Duration::from_secs(3_600),
+                    },
+                    ..DiskOptions::default()
+                },
+            )
+            .expect("child open");
+            for index in 0..25 {
+                store
+                    .commit(&[set(&format!("items/{index}"), index)])
+                    .expect("child commit");
+            }
+            assert!(store.has_unflushed_commits());
+            std::process::abort();
+        }
+
+        let directory = TestDirectory::new();
+        let status = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "disk::tests::acknowledged_write_behind_commits_survive_a_process_abort",
+                "--nocapture",
+            ])
+            .env(CHILD_ENVIRONMENT, directory.path())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("spawn child");
+        assert!(!status.success(), "the child must have aborted");
+
+        let reopened =
+            DiskStore::open(directory.path(), DiskOptions::default()).expect("reopen after abort");
+        assert_eq!(reopened.revision().get(), 25);
+        for index in 0..25_i64 {
+            assert_eq!(
+                reopened
+                    .snapshot()
+                    .get(&key(&format!("items/{index}")))
+                    .expect("committed document")
+                    .fields(),
+                &fields(Value::Integer(index))
+            );
+        }
     }
 
     #[test]
@@ -2316,7 +2640,7 @@ mod tests {
                 .journal
                 .as_mut()
                 .expect("journal should be enabled")
-                .append(&WalRecord::from_plan(&plan), &store.write_buffers)
+                .append(&WalRecord::from_plan(&plan), &store.write_buffers, true)
                 .expect("journal should sync");
         }
 
@@ -2346,10 +2670,15 @@ mod tests {
                 .journal
                 .as_mut()
                 .expect("journal should be enabled")
-                .append(&record, &store.write_buffers)
+                .append(&record, &store.write_buffers, true)
                 .expect("journal should sync");
-            persist_record(&state.database, &record, &store.write_buffers)
-                .expect("redb commit should complete");
+            persist_record(
+                &state.database,
+                &record,
+                &store.write_buffers,
+                Durability::Immediate,
+            )
+            .expect("redb commit should complete");
         }
 
         let reopened = DiskStore::open(directory.path(), DiskOptions::default())
@@ -2384,7 +2713,7 @@ mod tests {
                 .journal
                 .as_mut()
                 .expect("journal should be enabled")
-                .append(&WalRecord::from_plan(&plan), &store.write_buffers)
+                .append(&WalRecord::from_plan(&plan), &store.write_buffers, true)
                 .expect("complete frame should sync");
         }
         OpenOptions::new()

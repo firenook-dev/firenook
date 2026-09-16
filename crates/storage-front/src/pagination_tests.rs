@@ -82,6 +82,7 @@ async fn gcs_and_firebase_routes_emit_sdk_compatible_continuation_pages() {
     let runtime = StorageRuntime::start(
         StorageConfig {
             project: PROJECT.to_owned(),
+            durability: StorageDurability::default(),
             origin: "http://127.0.0.1:21002".to_owned(),
             data_dir: root.clone(),
             rules: None,

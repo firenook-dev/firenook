@@ -13,8 +13,8 @@ use std::process::Command as ProcessCommand;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fireside_core_store::{
-    DEFAULT_REDB_CACHE_SIZE_BYTES, DatabaseName, DiskOptions, DocumentKey, Precondition, Store,
-    StoreOptions, Write,
+    DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DatabaseName, DiskDurability,
+    DiskOptions, DocumentKey, Precondition, Store, StoreOptions, Write,
 };
 use fireside_export_format::ExportReader;
 use fireside_functions_bridge::{DeliveryPolicy, DeliveryRuntime, TriggerRegistry};
@@ -109,6 +109,28 @@ enum Command {
     Suite(Box<SuiteArgs>),
 }
 
+/// When acknowledged writes reach stable storage in disk mode.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+enum Durability {
+    /// Acknowledge after the journal write; sync every second and on
+    /// shutdown. Survives the process; power loss can lose the last second.
+    #[default]
+    WriteBehind,
+    /// Sync every commit before acknowledging it.
+    PerCommit,
+}
+
+impl Durability {
+    const fn disk(self) -> DiskDurability {
+        match self {
+            Self::WriteBehind => DiskDurability::WriteBehind {
+                interval: DEFAULT_WRITE_BEHIND_INTERVAL,
+            },
+            Self::PerCommit => DiskDurability::PerCommit,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 enum DatabaseEdition {
     #[default]
@@ -176,6 +198,9 @@ struct FirestoreArgs {
     /// Override redb's combined read/write cache budget in disk mode, in bytes.
     #[arg(long = "redb-cache-size", requires = "data_dir")]
     redb_cache_size: Option<usize>,
+    /// When acknowledged writes reach stable storage in disk mode.
+    #[arg(long, value_enum, default_value_t, requires = "data_dir")]
+    durability: Durability,
     /// Tokio worker threads. Defaults to at most four to bound per-worker allocator pages.
     #[arg(long = "worker-threads", default_value_t = default_worker_threads())]
     worker_threads: usize,
@@ -252,6 +277,9 @@ struct SuiteArgs {
     minimum_functions: usize,
     #[arg(long = "firestore-memory")]
     firestore_memory: bool,
+    /// When acknowledged Firestore and Storage writes reach stable storage.
+    #[arg(long, value_enum, default_value_t, conflicts_with = "firestore_memory")]
+    durability: Durability,
     #[arg(long = "worker-threads", default_value_t = default_worker_threads())]
     worker_threads: usize,
     #[arg(long = "firestore-port")]
@@ -415,6 +443,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         state_dir: absolute_path(&arguments.state_dir)?,
         resume_state: arguments.resume_state,
         firestore_in_memory: arguments.firestore_memory,
+        durability: arguments.durability.disk(),
         diagnostics: !arguments.no_diagnostics,
         firestore_rules: firestore
             .and_then(|config| config.rules.as_ref())
@@ -770,7 +799,7 @@ async fn run_firestore(
         rules.clone(),
     );
     let http_routes = firestore_http_router(
-        store,
+        store.clone(),
         query_policy,
         Some(Arc::new(MimallocMemoryReporter {
             runtime_worker_threads: arguments.worker_threads,
@@ -804,7 +833,15 @@ async fn run_firestore(
         let _ = server.await;
     }
     stop_functions_delivery(delivery).await;
+    firestore_exit_code(result, &store)
+}
 
+/// Every acknowledged commit is durable before a clean exit is reported.
+fn firestore_exit_code(result: Result<(), tonic::transport::Error>, store: &Store) -> ExitCode {
+    if let Err(error) = store.flush() {
+        eprintln!("Firestore flush failed: {error}");
+        return ExitCode::FAILURE;
+    }
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -865,8 +902,12 @@ fn report_firestore_configuration(
         } else {
             "write-ahead journal enabled"
         };
+        let durability = match arguments.durability {
+            Durability::WriteBehind => "write-behind durability",
+            Durability::PerCommit => "per-commit durability",
+        };
         eprintln!(
-            "fireside Firestore persistence: {} ({journal}, redb cache {} bytes)",
+            "fireside Firestore persistence: {} ({journal}, {durability}, redb cache {} bytes)",
             data_dir.display(),
             arguments
                 .redb_cache_size
@@ -947,10 +988,14 @@ fn open_store(arguments: &FirestoreArgs) -> Result<Store, String> {
                 cache_size_bytes: arguments
                     .redb_cache_size
                     .unwrap_or(DEFAULT_REDB_CACHE_SIZE_BYTES),
+                durability: arguments.durability.disk(),
             },
         )
         .map_err(|error| error.to_string()),
-        None if arguments.no_wal || arguments.redb_cache_size.is_some() => {
+        None if arguments.no_wal
+            || arguments.redb_cache_size.is_some()
+            || arguments.durability != Durability::default() =>
+        {
             Err("disk-only options require --data-dir <path>".to_owned())
         }
         None => Ok(Store::new(StoreOptions::default())),

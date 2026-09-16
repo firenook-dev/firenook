@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'java', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'java', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'durability']);
+const durabilities = new Set(['write-behind', 'per-commit']);
 const switches = new Set(['resume-state', 'no-diagnostics', 'help']);
 export function parseOptions(argv) {
   const options = {'storage-bucket': []};
@@ -26,6 +27,9 @@ export function parseOptions(argv) {
       if (Object.hasOwn(options, name)) throw new Error(`Duplicate --${name}`);
       options[name] = value;
     }
+  }
+  if (options.durability !== undefined && !durabilities.has(options.durability)) {
+    throw new Error(`--durability must be write-behind (default) or per-commit, not ${options.durability}`);
   }
   return {options, command};
 }

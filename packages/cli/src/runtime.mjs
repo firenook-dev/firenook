@@ -43,6 +43,7 @@ export function prepareLaunch(diagnostic, options) {
   if (p.exported) args.push('--export-on-exit', p.exported);
   if (options['resume-state']) args.push('--resume-state');
   if (options['no-diagnostics']) args.push('--no-diagnostics');
+  if (options.durability) args.push('--durability', options.durability);
   const env = {...process.env, GOOGLE_CLOUD_PROJECT:p.project, GCLOUD_PROJECT:p.project,
     GOOGLE_APPLICATION_CREDENTIALS:credentials, CLOUDSDK_CONFIG:join(run, 'gcloud'),
     FIRESTORE_EMULATOR_HOST:`${p.host}:${p.ports.firestore}`, FIREBASE_AUTH_EMULATOR_HOST:`${p.host}:${p.ports.auth}`,
