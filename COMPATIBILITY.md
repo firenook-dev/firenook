@@ -13,12 +13,11 @@ Fireside is not yet a universal Firebase Emulator Suite replacement.
 | Other services | None claimed | Realtime Database, Hosting, App Hosting, Data Connect and universal extensions |
 | CLI | Complete local suite, explicit setup, doctor, start/exec, state/resume | Arbitrary service subsets, cloud deploy or real-project configuration |
 
-The currently published preview does not include the completed source-side
-Firestore Requests/rule-evaluation tracing and rules-coverage tooling. Their
-[scoped source qualification](support/phase-bcd-qualification.md) is complete,
-but full combined acceptance and publication remain pending. Do not infer that
-installing the current npm version provides these unreleased improvements.
-Auxiliary Eventarc/Tasks ports
+Since `0.1.0-next.4` the published engine includes the Firestore
+Requests/rule-evaluation tracing and rules-coverage tooling whose
+[scoped source qualification](support/phase-bcd-qualification.md) preceded it;
+`fireside emulators:start` records bounded diagnostics by default and
+`--no-diagnostics` disables them. Auxiliary Eventarc/Tasks ports
 support host startup registration only. Unsupported task/event delivery routes
 return HTTP 501 `UNIMPLEMENTED`; registration is not a promise of delivery.
 
