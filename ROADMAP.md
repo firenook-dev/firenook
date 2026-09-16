@@ -161,7 +161,10 @@ and startup measurements are recorded as known limitations of this release with
 component attribution, not hidden. `0.1.0-next.4` was published through the
 protected release workflow on 2026-09-11 and verified from the registry; see
 the qualification status for the receipt. Phase F is complete for this scoped
-release. Stable promotion (`latest`) remains a separate reviewed decision.
+release. `0.1.0-next.5` corrected a Functions admission regression and
+`0.1.0-next.6` (2026-09-17) retired the recorded catalogue-query, Storage-cycle
+and startup limitations after a second full consumer acceptance on its exact
+engine. Stable promotion (`latest`) remains a separate reviewed decision.
 
 - [x] Batch fixes with short targeted tests, then run the required exact-candidate
   quality, SDK, native-package and representative consumer acceptance checks.

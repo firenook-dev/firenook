@@ -1,6 +1,6 @@
 # Scoped roadmap progress
 
-Updated 2026-09-10 UTC. The A–F roadmap remains active; no full-release,
+Updated 2026-09-17 UTC. The A–F roadmap remains active; no full-release,
 universal-compatibility, publication or performance-win claim is made here.
 
 | Phase | Current state | Remaining qualification |
@@ -60,6 +60,19 @@ process (staggered lanes, out-of-process sampling, idle observer control); the
 re-measured soak retires the recorded catalogue-query limitation and leaves the
 Storage cycle partly unattributed. No engine change accompanied the
 re-measurement.
+
+## `0.1.0-next.6` (2026-09-17)
+
+The second qualified engine, `572d4fb5f9d986accf2473858930c1e9bc3e5d57`,
+closes the performance items the first acceptance recorded: write-behind
+durability by default with a per-commit opt-out, `TCP_NODELAY` on every HTTP
+front, scans that decode fields rather than documents, scoped REST document
+listing and a single-transaction seed import. The representative consumer's
+full paired acceptance passed on that exact engine before publication; see the
+[qualification status](phase-f-qualification.md) for the receipts and the
+remaining limitations (ordered whole-collection scans and `count()` at about
+half the Java emulator's speed, fresh large-seed import slower than the
+in-memory import). `latest` remains a separate reviewed decision.
 
 ## Developer-tool qualification index
 

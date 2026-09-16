@@ -65,8 +65,10 @@ Requests feed on that port. Source-built suites enable bounded diagnostics by
 default; `fireside emulators:start --no-diagnostics` (or native `suite
 --no-diagnostics`) disables recording and returns an explicit unavailable response
 from the debug endpoint. Reports can contain document data and decoded auth
-claims, so keep them local. These source features do not imply they are in an already published npm
-version or that the full suite's developer tools are qualified.
+claims, so keep them local. The published `next` packages since
+`0.1.0-next.4` carry these features; a source build ahead of the published
+engine may carry more, and this README does not qualify the full suite's
+developer tools for every application.
 
 [DESIGN.md](DESIGN.md) describes the component boundaries;
 [COMPATIBILITY.md](COMPATIBILITY.md) records limits and

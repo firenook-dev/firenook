@@ -1,6 +1,6 @@
 # Combined-candidate qualification status
 
-Updated 2026-09-16. Exact-source quality and platform qualification have passed.
+Updated 2026-09-17. Exact-source quality and platform qualification have passed.
 A private representative consumer completed its paired cheap checks and frozen
 sequential full-data/endurance/lifecycle run. This is not a release receipt or
 permission to publish: final audit, scope limitations and registry-installed
@@ -43,16 +43,37 @@ acceptance and short idle/light-load component measurements on one host:
   observer lane yet. The official emulator's own cells also improved once the
   clock was staggered, so the two acceptance tables are not comparable to each
   other. The engine did not change for this correction.
-- Storage upload and delete pay an fsync per mutation for immediate durability
-  of object bytes and metadata; that cost matches the host's measured disk
-  write+fsync floor and is a design choice, not a defect.
+- Superseded 2026-09-16 by `0.1.0-next.6`. Storage upload and delete paid an
+  fsync per mutation, and every Firestore commit paid a journal sync, a
+  durable redb commit and a checkpoint, for immediate durability. Write-behind
+  durability (acknowledge after the journal write, sync once a second and on
+  shutdown, `--durability per-commit` to opt out) removed that cost: on the
+  same host and workload the consumer's write-commit median went from 23.9 ms
+  to 3.2 ms and its 64 KiB Storage upload from 18.0 ms to 2.7 ms. The
+  remaining Storage-cycle gap of the re-measure was the server socket's Nagle
+  delay on reused keep-alive connections (a 64 KiB download 40.7 ms reused
+  versus 0.7 ms fresh), fixed by `TCP_NODELAY` on every HTTP front.
 - Fresh-start import of a ~8 GB dataset (about 211,000 documents and 33,000
   objects) into the disk/WAL store was about 11 s slower than the Java
-  in-memory import at the emulator-suite level. Persistent-dataset resume was
-  not measured in that acceptance.
+  in-memory import at the emulator-suite level. With `0.1.0-next.6`'s
+  single-transaction seed import the consumer's whole-application readiness
+  reached parity with the official stack (45.6 s versus 45.4 s), while a
+  standalone Firestore import of the same seed is still 16 s versus 7 s: the
+  Java emulator only deserializes into memory, Fireside builds a durable store
+  and its field directory. Persistent-dataset resume is unaffected (about 2 s).
+- Queries that read a whole large collection in field order, or count it, run
+  at roughly half the Java emulator's speed on `0.1.0-next.6` (a 10,918
+  document collection of ~30 KiB documents: `orderBy` limit 20 189 ms versus
+  94 ms, `count()` 133 ms versus 84 ms on the consumer's host) because every
+  candidate's bytes are copied out of the store to sort or count it. Point
+  reads, equality and membership filters, offsets, collection groups, writes
+  and first listener snapshots are faster than the Java emulator on that host
+  (18 of the 26 measured shapes).
 
 Peak resident memory of the native emulator process was about 88% lower than
-the official main emulator process on the same run, and write-commit and
+the official main emulator process on the first acceptance run and 91.5% lower
+on the `0.1.0-next.6` run (1.67 GiB versus 19.52 GiB sampled PSS; whole
+application stack 4.65 GiB versus 23.18 GiB), and write-commit and
 listener-delivery p99 were several times lower. Those figures describe one
 host and one workload, not a universal guarantee.
 
@@ -100,6 +121,47 @@ correction and a stdout announcement after each Functions routing refresh, so
 the full-data acceptance was not re-run; the consumer verified the correction
 with a private local build on its real three-extension project before
 publication and pinned `next.5` exactly.
+
+`@fireside-dev/cli@0.1.0-next.6` pins engine
+`572d4fb5f9d986accf2473858930c1e9bc3e5d57` (the merge of PR #39 on `main`:
+`TCP_NODELAY` on every HTTP front, the single-transaction seed import, scoped
+REST listing, lazy scan decoding and write-behind durability by default). That
+exact engine passed the seven-job CI on its merge commit
+([run 35089506458](https://github.com/sanjevirau/fireside/actions/runs/35089506458))
+and, as the release PR's head, the five-platform packed-install matrix; the
+prior head of PR #39 had failed the Windows packed install (Storage metadata
+flush through a read-only handle, `Access is denied`), which was corrected
+before the merge and is retained as a failure. The representative private
+consumer then ran its full paired acceptance on that engine (2026-09-16): a
+fresh official-then-Fireside sequence with no banked baseline and no host
+waiver, two two-hour soaks, initial and post-restart browser journeys,
+lifecycle parity, fresh setup and regression commands, all with zero errors,
+60,000 of 60,000 listener deliveries on both backends and no swap activity on
+Fireside. A first attempt on the same inputs failed before any measurement
+when the official emulator's editor page did not load within 300 s; it is
+retained as a failure, not relabelled. The consumer's private report holds the
+raw evidence and an independent audit that re-derives every percentile and
+memory peak from the recorded samples.
+
+`0.1.0-next.6` was published on 2026-09-16 (UTC) by
+[release run 35132738094](https://github.com/sanjevirau/fireside/actions/runs/35132738094)
+from tag `npm-v0.1.0-next.6` at main commit
+`65d9dce6067c8885ae7bb92c9c63322435e48c07` (the merge of release PR #40). All
+seven quality jobs, five fresh native platform builds with npm/Bun/suite
+smokes and the combined artifact verifier passed inside that run; the
+downloaded artifacts were re-checked locally with
+`publish-packages.mjs --check` before the protected `npm-release` environment
+was approved. Publication used OIDC trusted publishing. Registry-installed
+verification on macOS arm64 (`npm install --save-exact --ignore-scripts` into
+an empty project from the public registry): all six exact versions resolve,
+`fireside --version` reports the package version and engine
+`572d4fb5f9d986accf2473858930c1e9bc3e5d57`, `fireside binary-path` verifies the
+packaged native hash and exits 0, `npm audit signatures` reports verified
+attestations, and the registry `dist.integrity` of every tarball equals the
+SHA-512 of the corresponding asset on the
+[GitHub prerelease](https://github.com/sanjevirau/fireside/releases/tag/npm-v0.1.0-next.6).
+`next` now selects `0.1.0-next.6`; `latest` still selects `next.2` and remains
+a separate reviewed decision.
 
 Consequently a consumer-side extensions admission gate is now a required
 receipt before any pin bump: it starts the consumer's real project with its
