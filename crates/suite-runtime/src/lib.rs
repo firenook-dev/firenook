@@ -1279,6 +1279,10 @@ fn read_export_metadata(root: &Path) -> Result<ExportMetadata, SuiteRuntimeError
 
 fn seed_store(store: &Store, path: &Path, project: &str) -> Result<u64, SuiteRuntimeError> {
     let reader = ExportReader::open(path)
+        .map_err(|error| failure(format!("Firestore import failed: {error}")))?
+        .into_background();
+    let mut bulk = store
+        .begin_bulk_commit()
         .map_err(|error| failure(format!("Firestore import failed: {error}")))?;
     let mut writes = Vec::with_capacity(IMPORT_BATCH_SIZE);
     let mut batch_logical_bytes = 0_u64;
@@ -1298,8 +1302,7 @@ fn seed_store(store: &Store, path: &Path, project: &str) -> Result<u64, SuiteRun
                 || batch_logical_bytes.saturating_add(write_logical_bytes)
                     > IMPORT_BATCH_LOGICAL_BYTES)
         {
-            store
-                .commit(&writes)
+            bulk.commit(&writes)
                 .map_err(|error| failure(error.to_string()))?;
             writes.clear();
             batch_logical_bytes = 0;
@@ -1314,10 +1317,11 @@ fn seed_store(store: &Store, path: &Path, project: &str) -> Result<u64, SuiteRun
         count = count.saturating_add(1);
     }
     if !writes.is_empty() {
-        store
-            .commit(&writes)
+        bulk.commit(&writes)
             .map_err(|error| failure(error.to_string()))?;
     }
+    bulk.finish()
+        .map_err(|error| failure(format!("Firestore import failed: {error}")))?;
     Ok(count)
 }
 

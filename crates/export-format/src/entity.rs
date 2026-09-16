@@ -3,7 +3,10 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
-use fireside_core_store::{DatabaseName, DocumentKey, Fields, Timestamp, Value};
+use fireside_core_store::{
+    DatabaseName, DocumentKey, Fields, Timestamp, Value, document_key_logical_bytes,
+    fields_logical_bytes,
+};
 use prost::Message;
 
 const DEFAULT_DATABASE: &str = "(default)";
@@ -52,6 +55,12 @@ impl ExportedDocument {
     #[must_use]
     pub fn into_parts(self) -> (DocumentKey, Fields) {
         (self.key, self.fields)
+    }
+
+    /// Store-accounted logical size of the key and fields.
+    #[must_use]
+    pub fn logical_bytes(&self) -> u64 {
+        document_key_logical_bytes(&self.key).saturating_add(fields_logical_bytes(&self.fields))
     }
 }
 

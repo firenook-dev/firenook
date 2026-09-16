@@ -5,6 +5,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
@@ -193,6 +195,131 @@ impl Iterator for ExportReader {
             self.entry_index += 1;
             self.shard_index = 0;
             self.entry_count = 0;
+        }
+    }
+}
+
+/// Documents per message on the background decoder channel.
+const BACKGROUND_BATCH_DOCUMENTS: usize = 64;
+/// Decoded bytes per message before the decoder hands the batch over.
+const BACKGROUND_BATCH_BYTES: usize = 4 * 1024 * 1024;
+/// Messages the decoder may run ahead of the consumer.
+const BACKGROUND_QUEUE_DEPTH: usize = 4;
+
+impl ExportReader {
+    /// Moves log reading and entity decoding onto a dedicated thread.
+    ///
+    /// The returned iterator yields the same documents in the same order, but
+    /// the consumer overlaps its own work (for a seed import, redb inserts)
+    /// with decoding instead of alternating between them. Look-ahead is
+    /// bounded: at most [`BACKGROUND_QUEUE_DEPTH`] batches of up to
+    /// [`BACKGROUND_BATCH_DOCUMENTS`] documents or [`BACKGROUND_BATCH_BYTES`]
+    /// of entity bytes wait in the channel, and the decoder stops as soon as
+    /// the consumer drops the iterator. The first error ends the stream, as
+    /// with direct iteration.
+    #[must_use]
+    pub fn into_background(self) -> BackgroundExportReader {
+        let (sender, receiver) = sync_channel(BACKGROUND_QUEUE_DEPTH);
+        let worker = thread::Builder::new()
+            .name("fireside-export-decode".to_owned())
+            .spawn(move || decode_in_background(self, &sender))
+            .ok();
+        BackgroundExportReader {
+            receiver,
+            pending: Vec::new().into_iter(),
+            worker,
+            finished: false,
+        }
+    }
+}
+
+fn decode_in_background(
+    reader: ExportReader,
+    sender: &SyncSender<Vec<Result<ExportedDocument, ExportError>>>,
+) {
+    let mut batch = Vec::with_capacity(BACKGROUND_BATCH_DOCUMENTS);
+    let mut batch_bytes = 0_usize;
+    for item in reader {
+        let failed = item.is_err();
+        if let Ok(document) = &item {
+            batch_bytes = batch_bytes
+                .saturating_add(usize::try_from(document.logical_bytes()).unwrap_or(usize::MAX));
+        }
+        batch.push(item);
+        if failed
+            || batch.len() >= BACKGROUND_BATCH_DOCUMENTS
+            || batch_bytes >= BACKGROUND_BATCH_BYTES
+        {
+            if sender
+                .send(std::mem::replace(
+                    &mut batch,
+                    Vec::with_capacity(BACKGROUND_BATCH_DOCUMENTS),
+                ))
+                .is_err()
+            {
+                return;
+            }
+            batch_bytes = 0;
+        }
+        if failed {
+            return;
+        }
+    }
+    if !batch.is_empty() {
+        let _ = sender.send(batch);
+    }
+}
+
+/// An [`ExportReader`] whose decoding runs on a background thread.
+pub struct BackgroundExportReader {
+    receiver: Receiver<Vec<Result<ExportedDocument, ExportError>>>,
+    pending: std::vec::IntoIter<Result<ExportedDocument, ExportError>>,
+    worker: Option<JoinHandle<()>>,
+    finished: bool,
+}
+
+impl Iterator for BackgroundExportReader {
+    type Item = Result<ExportedDocument, ExportError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        loop {
+            if let Some(item) = self.pending.next() {
+                if item.is_err() {
+                    self.finished = true;
+                }
+                return Some(item);
+            }
+            let Ok(batch) = self.receiver.recv() else {
+                self.finished = true;
+                // A decoder thread that could not be spawned or that panicked
+                // must surface as an error, never as a short but apparently
+                // complete export.
+                return match self.worker.take() {
+                    None => Some(Err(ExportError::invalid(
+                        "export decoder thread was unavailable",
+                    ))),
+                    Some(worker) => match worker.join() {
+                        Ok(()) => None,
+                        Err(_) => Some(Err(ExportError::invalid("export decoder thread panicked"))),
+                    },
+                };
+            };
+            self.pending = batch.into_iter();
+        }
+    }
+}
+
+impl Drop for BackgroundExportReader {
+    fn drop(&mut self) {
+        // Closing the channel makes the decoder's next send fail and return.
+        self.pending = Vec::new().into_iter();
+        let (_, receiver) = sync_channel(0);
+        drop(std::mem::replace(&mut self.receiver, receiver));
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
     }
 }
@@ -552,6 +679,7 @@ impl From<MetadataError> for ExportError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::io::{Seek as _, Write as _};
 
     use fireside_core_store::Value;
 
@@ -600,6 +728,67 @@ mod tests {
             Value::Vector(vec![1.25, -2.5, 0.0])
         );
         fs::remove_dir_all(&test_root).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn background_reader_yields_the_same_documents_in_order() {
+        let direct = ExportReader::open(FIXTURE)
+            .unwrap()
+            .map(|document| document.unwrap().key().path().to_owned())
+            .collect::<Vec<_>>();
+        let background = ExportReader::open(FIXTURE)
+            .unwrap()
+            .into_background()
+            .map(|document| document.unwrap().key().path().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(direct, background);
+        assert_eq!(background.len(), 4);
+    }
+
+    #[test]
+    fn background_reader_surfaces_a_decode_error_once_and_stops() {
+        let documents = ExportReader::open(FIXTURE)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let test_root = unique_test_directory();
+        fs::create_dir(&test_root).expect("test parent should be created");
+        let destination = test_root.join("truncated_export");
+        let summary = write_export(&destination, &documents).expect("export should write");
+        let shard = destination
+            .join(ALL_NAMESPACES)
+            .join(ALL_KINDS)
+            .join(OUTPUT_FILE);
+        // Corrupt framing in the second half without changing the byte count
+        // that the metadata declares.
+        let length = fs::metadata(&shard).unwrap().len();
+        let mut file = OpenOptions::new().write(true).open(&shard).unwrap();
+        file.seek(io::SeekFrom::Start(length / 2)).unwrap();
+        file.write_all(&[0xFF; 4096]).unwrap();
+        drop(file);
+
+        let mut reader = ExportReader::open(summary.overall_metadata_path())
+            .unwrap()
+            .into_background();
+        let mut errors = 0;
+        let mut successes = 0;
+        for item in reader.by_ref() {
+            match item {
+                Ok(_) => successes += 1,
+                Err(_) => errors += 1,
+            }
+        }
+        assert_eq!(errors, 1, "exactly one error ends the stream");
+        assert!(successes < 4);
+        assert!(reader.next().is_none());
+        fs::remove_dir_all(&test_root).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn dropping_the_background_reader_early_stops_the_decoder() {
+        let mut reader = ExportReader::open(FIXTURE).unwrap().into_background();
+        assert!(reader.next().unwrap().is_ok());
+        drop(reader);
     }
 
     fn unique_test_directory() -> PathBuf {
