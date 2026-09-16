@@ -551,3 +551,16 @@ Private consumer acceptance is an additional, separately pinned check; it never
 runs untrusted public PR code with consumer credentials. Historical receipts or
 old binaries do not qualify a changed candidate. Publication remains disabled
 until the source review and owner-controlled cutover are complete.
+
+## HTTP fronts and Nagle's algorithm
+
+Every HTTP front (REST, Storage, Auth, hub, UI, Requests) disables Nagle's
+algorithm on accepted connections. A response that reaches the socket in
+several writes, such as a streamed Storage download, otherwise waits for the
+peer's delayed-ACK timer, 40 ms on Linux, once a reused keep-alive connection
+has left the kernel's initial quick-ACK phase. The private consumer soak
+measured the effect as a bimodal 2 ms / 42 ms download stage and an idle
+observer reproduced it on the same host; a cold connection never showed it,
+which is why idle component measurements missed it. The gRPC front already
+had it disabled through tonic's default.
+
