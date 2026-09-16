@@ -36,6 +36,19 @@ its fixed latency and RSS bounds; a macOS skip is not a Linux memory pass.
 Process memory must be measured separately from browsers, application runtimes
 and compatibility helpers. The default redb cache budget is 64 MiB.
 
+### Document listing
+
+`ListDocuments` (the REST `GET .../documents/<collection>` shape and the
+Admin SDK's `listDocuments`) serves a named collection from the store's scoped
+collection iterator, the same index the query engine uses, and stops after one
+page plus a witness document when the order is the default `__key__` ascending.
+It never scans the database. Measured on the Twodart full-data seed the
+`pageSize=1` listing went from 1.3 s (a 211,202-document scan per request) to
+1-4 ms. A listing ordered by a document field still reads the whole collection,
+as a query without a field index would, and a listing with no collection id
+(every direct child of a parent across collections) or with `showMissing`
+still scans, matching the official emulator's semantics for those rare shapes.
+
 ### Seed import path
 
 A fresh start seeds the disk store through `Store::begin_bulk_commit`, not
