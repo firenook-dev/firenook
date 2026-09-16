@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use bincode::{Decode, Encode, config};
 use redb::{
     Builder, Database, Durability, ReadOnlyTable, ReadTransaction, ReadableDatabase, ReadableTable,
-    TableDefinition,
+    TableDefinition, WriteTransaction,
 };
 
 use super::{
@@ -584,9 +584,16 @@ fn load_write_documents(
     database: &Database,
     writes: &[Write],
 ) -> Result<im::OrdMap<DocumentKey, Arc<Document>>, DiskError> {
-    let keys = writes.iter().map(write_key).collect::<BTreeSet<_>>();
     let transaction = database.begin_read().map_err(DiskError::redb)?;
     let table = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
+    load_write_documents_from(&table, writes)
+}
+
+fn load_write_documents_from<T: ReadableTable<&'static [u8], &'static [u8]>>(
+    table: &T,
+    writes: &[Write],
+) -> Result<im::OrdMap<DocumentKey, Arc<Document>>, DiskError> {
+    let keys = writes.iter().map(write_key).collect::<BTreeSet<_>>();
     let mut documents = im::OrdMap::new();
     for key in keys {
         let encoded_key = encode_document_key(key)?;
@@ -844,6 +851,21 @@ fn persist_record(
     transaction
         .set_durability(Durability::Immediate)
         .map_err(DiskError::redb)?;
+    apply_mutations(&transaction, &record.mutations, write_buffers)?;
+    persist_state(
+        &transaction,
+        record.revision,
+        record.commit_time,
+        write_buffers,
+    )?;
+    transaction.commit().map_err(DiskError::redb)
+}
+
+fn apply_mutations(
+    transaction: &WriteTransaction,
+    mutations: &[PersistedMutation],
+    write_buffers: &WriteBufferAccounting,
+) -> Result<(), DiskError> {
     {
         let mut documents = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
         let mut collections = transaction
@@ -852,7 +874,7 @@ fn persist_record(
         let mut collection_groups = transaction
             .open_table(COLLECTION_GROUPS)
             .map_err(DiskError::redb)?;
-        for mutation in &record.mutations {
+        for mutation in mutations {
             let key = track_write_buffer(
                 encode_document_key(&mutation.key)?,
                 write_buffers,
@@ -883,21 +905,138 @@ fn persist_record(
             }
         }
     }
-    {
-        let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
-        let state = encode_write_buffer(
-            &PersistedState {
-                revision: record.revision,
-                last_commit_time: record.commit_time,
-            },
-            write_buffers,
-            WriteBufferOwner::RedbMetadata,
-        )?;
-        metadata
-            .insert(STATE_KEY, state.as_slice())
+    Ok(())
+}
+
+fn persist_state(
+    transaction: &WriteTransaction,
+    revision: Revision,
+    last_commit_time: Timestamp,
+    write_buffers: &WriteBufferAccounting,
+) -> Result<(), DiskError> {
+    let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+    let state = encode_write_buffer(
+        &PersistedState {
+            revision,
+            last_commit_time,
+        },
+        write_buffers,
+        WriteBufferOwner::RedbMetadata,
+    )?;
+    metadata
+        .insert(STATE_KEY, state.as_slice())
+        .map_err(DiskError::redb)?;
+    Ok(())
+}
+
+/// A pre-serving bulk load that keeps every batch inside one redb transaction.
+///
+/// Each batch is validated and installed in memory exactly like an ordinary
+/// commit, so revisions, commit times, scope indexes and the change log advance
+/// as usual. Durable work differs: the journal is bypassed and redb pages are
+/// written under a single write transaction that [`finish`](Self::finish)
+/// commits with immediate durability, so a seed of hundreds of thousands of
+/// documents pays one fsync instead of three per batch.
+///
+/// Nothing is durable before `finish` returns. Dropping the session without
+/// finishing aborts the transaction and marks the store as requiring a restart,
+/// because its in-memory revision has moved past the durable state. Callers
+/// must therefore hold this only while nothing else can observe the store, and
+/// must not acknowledge imported writes to clients before `finish` returns.
+pub struct DiskBulkCommit<'a> {
+    state: MutexGuard<'a, DiskState>,
+    transaction: Option<WriteTransaction>,
+    write_buffers: Arc<WriteBufferAccounting>,
+    batches: u64,
+}
+
+impl DiskStore {
+    /// Starts a bulk load; see [`DiskBulkCommit`].
+    pub fn begin_bulk_commit(&self) -> Result<DiskBulkCommit<'_>, DiskError> {
+        let state = self.state();
+        if state.requires_restart {
+            return Err(DiskError::RequiresRestart);
+        }
+        let mut transaction = state.database.begin_write().map_err(DiskError::redb)?;
+        transaction
+            .set_durability(Durability::Immediate)
             .map_err(DiskError::redb)?;
+        Ok(DiskBulkCommit {
+            state,
+            transaction: Some(transaction),
+            write_buffers: Arc::clone(&self.write_buffers),
+            batches: 0,
+        })
     }
-    transaction.commit().map_err(DiskError::redb)
+}
+
+impl DiskBulkCommit<'_> {
+    /// Validates and applies one batch inside the open transaction.
+    ///
+    /// A validation failure leaves both the transaction and the in-memory
+    /// state untouched, so the caller may continue or abandon the load. A redb
+    /// failure abandons the load: the transaction is aborted and the store
+    /// requires a restart.
+    pub fn commit(&mut self, writes: &[Write]) -> Result<(CommitResult, Vec<Change>), DiskError> {
+        let transaction = self
+            .transaction
+            .as_ref()
+            .ok_or(DiskError::RequiresRestart)?;
+        let documents = {
+            let table = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
+            load_write_documents_from(&table, writes)?
+        };
+        let plan = self.state.memory.plan_with_documents(writes, documents)?;
+        let record = WalRecord::from_plan(&plan);
+        if let Err(error) = apply_mutations(transaction, &record.mutations, &self.write_buffers) {
+            self.abandon();
+            return Err(error);
+        }
+        let result = plan.result;
+        let changes = plan.changes.clone();
+        self.state.memory.install_disk(plan);
+        self.batches = self.batches.saturating_add(1);
+        Ok((result, changes))
+    }
+
+    /// Commits every applied batch with immediate durability.
+    pub fn finish(mut self) -> Result<(), DiskError> {
+        let Some(transaction) = self.transaction.take() else {
+            return Err(DiskError::RequiresRestart);
+        };
+        if self.batches == 0 {
+            return transaction.abort().map_err(DiskError::redb);
+        }
+        let committed = persist_state(
+            &transaction,
+            self.state.memory.revision,
+            self.state.memory.last_commit_time,
+            &self.write_buffers,
+        )
+        .and_then(|()| transaction.commit().map_err(DiskError::redb));
+        if committed.is_err() {
+            self.state.requires_restart = true;
+        }
+        committed
+    }
+
+    fn abandon(&mut self) {
+        if let Some(transaction) = self.transaction.take() {
+            let _ = transaction.abort();
+        }
+        // Installed batches have advanced the in-memory revision past disk.
+        if self.batches > 0 {
+            self.state.requires_restart = true;
+        }
+    }
+}
+
+impl Drop for DiskBulkCommit<'_> {
+    fn drop(&mut self) {
+        if self.transaction.is_some() {
+            self.abandon();
+        }
+    }
 }
 
 fn replay_records(
@@ -1661,6 +1800,127 @@ mod tests {
             reopened.changes_since(Revision::ZERO),
             Err(ResetRequired { .. })
         ));
+    }
+
+    fn set(path: &str, value: i64) -> Write {
+        Write::Set {
+            key: key(path),
+            fields: fields(Value::Integer(value)),
+            transforms: Vec::new(),
+            precondition: Precondition::None,
+        }
+    }
+
+    #[test]
+    fn bulk_commit_batches_share_one_transaction_and_become_durable_on_finish() {
+        let directory = TestDirectory::new();
+        {
+            let store = DiskStore::open(directory.path(), DiskOptions::default())
+                .expect("disk store should open");
+            let mut bulk = store.begin_bulk_commit().expect("bulk load should start");
+            let (first, first_changes) = bulk
+                .commit(&[set("items/one", 1), set("items/two", 2)])
+                .expect("first batch");
+            assert_eq!(first.revision.get(), 1);
+            assert_eq!(first_changes.len(), 2);
+
+            // A later batch sees the earlier batch's writes inside the transaction.
+            let (second, second_changes) = bulk
+                .commit(&[set("items/two", 20), set("items/three", 3)])
+                .expect("second batch");
+            assert_eq!(second.revision.get(), 2);
+            assert_eq!(second_changes.len(), 2);
+            let overwritten = second_changes
+                .iter()
+                .find(|change| change.key == key("items/two"))
+                .expect("overwrite change");
+            assert_eq!(
+                overwritten.before.as_ref().expect("previous").fields(),
+                &fields(Value::Integer(2))
+            );
+
+            // Validation failures leave the session usable.
+            let rejected = bulk.commit(&[Write::Create {
+                key: key("items/one"),
+                fields: fields(Value::Integer(9)),
+            }]);
+            assert!(matches!(rejected, Err(DiskError::Commit(_))));
+            assert_eq!(bulk.state.memory.revision.get(), 2);
+
+            // The journal is never touched by a bulk load.
+            assert_eq!(
+                fs::metadata(directory.path().join(JOURNAL_FILE))
+                    .expect("journal exists")
+                    .len(),
+                0
+            );
+            bulk.finish().expect("finish should be durable");
+            assert_eq!(store.revision().get(), 2);
+            store
+                .commit(&[set("items/four", 4)])
+                .expect("ordinary commits continue after a bulk load");
+        }
+
+        let reopened = DiskStore::open(directory.path(), DiskOptions::default())
+            .expect("disk store should reopen");
+        assert_eq!(reopened.revision().get(), 3);
+        let snapshot = reopened.snapshot();
+        for (path, value) in [
+            ("items/one", 1),
+            ("items/two", 20),
+            ("items/three", 3),
+            ("items/four", 4),
+        ] {
+            assert_eq!(
+                snapshot.get(&key(path)).expect(path).fields(),
+                &fields(Value::Integer(value)),
+                "{path}"
+            );
+        }
+        assert_eq!(snapshot.documents(&database()).len(), 4);
+    }
+
+    #[test]
+    fn bulk_commit_dropped_before_finish_persists_nothing_and_requires_restart() {
+        let directory = TestDirectory::new();
+        {
+            let store = DiskStore::open(directory.path(), DiskOptions::default())
+                .expect("disk store should open");
+            let mut bulk = store.begin_bulk_commit().expect("bulk load should start");
+            bulk.commit(&[set("items/one", 1)]).expect("batch");
+            drop(bulk);
+            assert!(matches!(
+                store.commit(&[set("items/two", 2)]),
+                Err(DiskError::RequiresRestart)
+            ));
+            assert!(matches!(
+                store.begin_bulk_commit().map(|_| ()),
+                Err(DiskError::RequiresRestart)
+            ));
+        }
+
+        let reopened = DiskStore::open(directory.path(), DiskOptions::default())
+            .expect("disk store should reopen");
+        assert_eq!(reopened.revision(), Revision::ZERO);
+        assert!(reopened.snapshot().get(&key("items/one")).is_none());
+        reopened
+            .commit(&[set("items/one", 1)])
+            .expect("a reopened store accepts commits");
+    }
+
+    #[test]
+    fn empty_bulk_commit_leaves_the_store_unchanged() {
+        let directory = TestDirectory::new();
+        let store = DiskStore::open(directory.path(), DiskOptions::default())
+            .expect("disk store should open");
+        store
+            .begin_bulk_commit()
+            .expect("bulk load should start")
+            .finish()
+            .expect("empty finish");
+        assert_eq!(store.revision(), Revision::ZERO);
+        store.commit(&[set("items/one", 1)]).expect("commit");
+        assert_eq!(store.revision().get(), 1);
     }
 
     #[test]

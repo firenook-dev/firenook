@@ -993,7 +993,12 @@ fn seed_store_from_export(
     overall_metadata: &std::path::Path,
     target_project: Option<&str>,
 ) -> Result<u64, String> {
-    let reader = ExportReader::open(overall_metadata).map_err(|error| error.to_string())?;
+    let reader = ExportReader::open(overall_metadata)
+        .map_err(|error| error.to_string())?
+        .into_background();
+    let mut bulk = store
+        .begin_bulk_commit()
+        .map_err(|error| error.to_string())?;
     let mut writes = Vec::with_capacity(IMPORT_BATCH_SIZE);
     let mut count = 0_u64;
     for document in reader {
@@ -1016,13 +1021,14 @@ fn seed_store_from_export(
             .checked_add(1)
             .ok_or_else(|| "import entity count overflows u64".to_owned())?;
         if writes.len() == IMPORT_BATCH_SIZE {
-            store.commit(&writes).map_err(|error| error.to_string())?;
+            bulk.commit(&writes).map_err(|error| error.to_string())?;
             writes.clear();
         }
     }
     if !writes.is_empty() {
-        store.commit(&writes).map_err(|error| error.to_string())?;
+        bulk.commit(&writes).map_err(|error| error.to_string())?;
     }
+    bulk.finish().map_err(|error| error.to_string())?;
     Ok(count)
 }
 

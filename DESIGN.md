@@ -36,6 +36,29 @@ its fixed latency and RSS bounds; a macOS skip is not a Linux memory pass.
 Process memory must be measured separately from browsers, application runtimes
 and compatibility helpers. The default redb cache budget is 64 MiB.
 
+### Seed import path
+
+A fresh start seeds the disk store through `Store::begin_bulk_commit`, not
+through ordinary commits. Each 500-document batch is still validated and
+installed in memory exactly like a commit, so revisions, commit times, scope
+indexes and the change log are identical to a batch-by-batch import, but every
+batch's redb writes stay inside one write transaction and the journal is
+bypassed. Nothing is durable until `finish` commits with immediate durability,
+which is safe only because the import precedes serving and the suite's
+native-state receipt is written after it: a crash mid-import restarts from the
+seed, and dropping the session marks the store as requiring a restart. Export
+decoding runs on a dedicated thread (`ExportReader::into_background`) with a
+bounded look-ahead of four batches of at most 64 documents or 4 MiB, so
+`LevelDB` framing and protobuf decoding overlap the redb inserts instead of
+alternating with them. Storage imports copy objects with bounded concurrency
+(16) and commit their metadata once at the end. Measured on the Twodart
+full-data seed (211,202 documents, 33,353 objects) on an Apple Silicon Mac,
+these changes took the Firestore seed from 14.7 s to 12.1 s and the Storage
+import from 11.1 s to 3.9 s; the remaining Firestore time is redb's
+copy-on-write leaf rebuilding on insert, which a larger cache or a deeper queue
+did not move. Persistent resume of the same state opens in about 2 s and is
+unaffected.
+
 ## Browser transport
 
 WebChannel v8 supports long-poll and streaming Listen/Write on the same HTTP

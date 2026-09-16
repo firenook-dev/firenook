@@ -23,7 +23,7 @@ pub use smol_str::SmolStr as FirestoreString;
 
 mod disk;
 
-pub use disk::{DEFAULT_REDB_CACHE_SIZE_BYTES, DiskError, DiskOptions, DiskStore};
+pub use disk::{DEFAULT_REDB_CACHE_SIZE_BYTES, DiskBulkCommit, DiskError, DiskOptions, DiskStore};
 
 /// Firestore document fields in deterministic field-name order.
 pub type Fields = BTreeMap<String, Value>;
@@ -832,6 +832,46 @@ impl Default for StoreOptions {
     }
 }
 
+fn commit_error(error: DiskError) -> CommitError {
+    match error {
+        DiskError::Commit(error) => error,
+        error => CommitError::PersistenceUnavailable(error.to_string()),
+    }
+}
+
+/// A bulk load session created by [`Store::begin_bulk_commit`].
+pub struct BulkCommit<'a> {
+    store: &'a Store,
+    backend: BulkCommitBackend<'a>,
+}
+
+enum BulkCommitBackend<'a> {
+    Memory,
+    Disk(Box<DiskBulkCommit<'a>>),
+}
+
+impl BulkCommit<'_> {
+    /// Validates and applies one batch.
+    pub fn commit(&mut self, writes: &[Write]) -> Result<CommitResult, CommitError> {
+        match &mut self.backend {
+            BulkCommitBackend::Memory => self.store.commit(writes),
+            BulkCommitBackend::Disk(bulk) => {
+                let (result, changes) = bulk.commit(writes).map_err(commit_error)?;
+                self.store.notify_commit_observers(result, changes);
+                Ok(result)
+            }
+        }
+    }
+
+    /// Makes every applied batch durable.
+    pub fn finish(self) -> Result<(), CommitError> {
+        match self.backend {
+            BulkCommitBackend::Memory => Ok(()),
+            BulkCommitBackend::Disk(bulk) => bulk.finish().map_err(commit_error),
+        }
+    }
+}
+
 /// Thread-safe MVCC store.
 #[derive(Clone)]
 pub struct Store {
@@ -919,22 +959,41 @@ impl Store {
                 state.install(plan);
                 Ok((result, changes))
             }
-            StoreBackend::Disk(store) => {
-                store.commit_observed(writes).map_err(|error| match error {
-                    DiskError::Commit(error) => error,
-                    error => CommitError::PersistenceUnavailable(error.to_string()),
-                })
-            }
+            StoreBackend::Disk(store) => store.commit_observed(writes).map_err(commit_error),
         }?;
 
-        if !changes.is_empty() {
-            let observation = CommitObservation { result, changes };
-            for observer in lock(&self.commit_observers).clone() {
-                observer.committed(&observation);
-            }
-        }
-
+        self.notify_commit_observers(result, changes);
         Ok(result)
+    }
+
+    /// Starts a bulk load for pre-serving imports.
+    ///
+    /// Batches are validated, installed and reported to observers exactly like
+    /// [`commit`](Self::commit). On the disk backend nothing is durable until
+    /// [`BulkCommit::finish`] returns, and the store's commit lock is held for
+    /// the whole session; see [`DiskBulkCommit`]. The in-memory backend simply
+    /// commits each batch.
+    pub fn begin_bulk_commit(&self) -> Result<BulkCommit<'_>, CommitError> {
+        let backend = match &self.backend {
+            StoreBackend::Memory(_) => BulkCommitBackend::Memory,
+            StoreBackend::Disk(store) => {
+                BulkCommitBackend::Disk(Box::new(store.begin_bulk_commit().map_err(commit_error)?))
+            }
+        };
+        Ok(BulkCommit {
+            store: self,
+            backend,
+        })
+    }
+
+    fn notify_commit_observers(&self, result: CommitResult, changes: Vec<Change>) {
+        if changes.is_empty() {
+            return;
+        }
+        let observation = CommitObservation { result, changes };
+        for observer in lock(&self.commit_observers).clone() {
+            observer.committed(&observation);
+        }
     }
 
     /// Registers a process-local observer invoked after each successful commit.
@@ -2585,6 +2644,48 @@ mod tests {
                 .fields(),
             &fields(Value::Integer(1))
         );
+    }
+
+    #[test]
+    fn bulk_commit_reports_each_batch_to_observers_on_both_backends() {
+        let directory = std::env::temp_dir().join(format!(
+            "fireside-core-store-bulk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        for store in [Store::default(), disk] {
+            let observer = Arc::new(RecordingObserver::default());
+            store.add_commit_observer(observer.clone());
+            let mut bulk = store.begin_bulk_commit().expect("bulk load");
+            let first = bulk
+                .commit(&[Write::Create {
+                    key: key(&database("(default)"), "items/one"),
+                    fields: fields(Value::Integer(1)),
+                }])
+                .expect("first batch");
+            let second = bulk
+                .commit(&[Write::Create {
+                    key: key(&database("(default)"), "items/two"),
+                    fields: fields(Value::Integer(2)),
+                }])
+                .expect("second batch");
+            bulk.finish().expect("finish");
+            let observations = lock(&observer.observations);
+            assert_eq!(
+                observations
+                    .iter()
+                    .map(|observation| observation.result)
+                    .collect::<Vec<_>>(),
+                vec![first, second]
+            );
+            assert_eq!(store.revision().get(), 2);
+            assert_eq!(store.snapshot().documents(&database("(default)")).len(), 2);
+        }
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

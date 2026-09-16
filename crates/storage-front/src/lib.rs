@@ -23,7 +23,7 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use fireside_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
-use futures_util::StreamExt as _;
+use futures_util::{StreamExt as _, TryStreamExt as _};
 use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
@@ -2241,12 +2241,16 @@ async fn export_directory(state: &StorageState, root: &FilePath) -> Result<usize
     Ok(objects.len())
 }
 
+/// Concurrent object copies during an import. Bounded so a large export
+/// neither serialises on per-file latency nor floods the disk queue.
+const IMPORT_COPY_CONCURRENCY: usize = 16;
+
 async fn import_directory(state: &StorageState, root: &FilePath) -> Result<usize, StorageError> {
     let _guard = state.mutation.lock().await;
     let mut directory = tokio::fs::read_dir(root.join("metadata"))
         .await
         .map_err(|error| StorageError(format!("failed to read import metadata: {error}")))?;
-    let mut imported = Vec::new();
+    let mut entries = Vec::new();
     while let Some(entry) = directory
         .next_entry()
         .await
@@ -2255,38 +2259,15 @@ async fn import_directory(state: &StorageState, root: &FilePath) -> Result<usize
         if entry.path().extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
-        let id = entry
-            .path()
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .ok_or_else(|| StorageError("invalid import metadata filename".to_owned()))?
-            .to_owned();
-        let bytes = tokio::fs::read(entry.path())
-            .await
-            .map_err(|error| StorageError(format!("failed to read import metadata: {error}")))?;
-        let mut value: JsonValue = serde_json::from_slice(&bytes)
-            .map_err(|error| StorageError(format!("invalid import metadata: {error}")))?;
-        normalize_import_metadata(&mut value);
-        let bucket = value
-            .get("bucket")
-            .and_then(JsonValue::as_str)
-            .ok_or_else(|| StorageError("import metadata requires bucket".to_owned()))?;
-        let name = value
-            .get("name")
-            .and_then(JsonValue::as_str)
-            .ok_or_else(|| StorageError("import metadata requires name".to_owned()))?;
-        let data_file = format!("objects/{}", stable_id(&[bucket, name]));
-        value["dataFile"] = json!(data_file);
-        let object: StoredObject = serde_json::from_value(value)
-            .map_err(|error| StorageError(format!("invalid import metadata fields: {error}")))?;
-        tokio::fs::copy(
-            root.join("blobs").join(id),
-            state.config.data_dir.join(&object.data_file),
-        )
-        .await
-        .map_err(|error| StorageError(format!("failed to import object bytes: {error}")))?;
-        imported.push(object);
+        entries.push(entry.path());
     }
+    // Order is irrelevant: every object lands in the keyed map below, and the
+    // first failure aborts the whole import before any metadata is committed.
+    let imported: Vec<StoredObject> = futures_util::stream::iter(entries)
+        .map(|metadata_path| import_object(state, root, metadata_path))
+        .buffer_unordered(IMPORT_COPY_CONCURRENCY)
+        .try_collect()
+        .await?;
     let count = imported.len();
     let mut data = lock(&state.inner);
     for object in imported {
@@ -2296,6 +2277,43 @@ async fn import_directory(state: &StorageState, root: &FilePath) -> Result<usize
     state.metadata.replace(&data)?;
     write_json_atomic(&state.config.data_dir.join("metadata.json"), &*data)?;
     Ok(count)
+}
+
+async fn import_object(
+    state: &StorageState,
+    root: &FilePath,
+    metadata_path: PathBuf,
+) -> Result<StoredObject, StorageError> {
+    let id = metadata_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| StorageError("invalid import metadata filename".to_owned()))?
+        .to_owned();
+    let bytes = tokio::fs::read(&metadata_path)
+        .await
+        .map_err(|error| StorageError(format!("failed to read import metadata: {error}")))?;
+    let mut value: JsonValue = serde_json::from_slice(&bytes)
+        .map_err(|error| StorageError(format!("invalid import metadata: {error}")))?;
+    normalize_import_metadata(&mut value);
+    let bucket = value
+        .get("bucket")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| StorageError("import metadata requires bucket".to_owned()))?;
+    let name = value
+        .get("name")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| StorageError("import metadata requires name".to_owned()))?;
+    let data_file = format!("objects/{}", stable_id(&[bucket, name]));
+    value["dataFile"] = json!(data_file);
+    let object: StoredObject = serde_json::from_value(value)
+        .map_err(|error| StorageError(format!("invalid import metadata fields: {error}")))?;
+    tokio::fs::copy(
+        root.join("blobs").join(id),
+        state.config.data_dir.join(&object.data_file),
+    )
+    .await
+    .map_err(|error| StorageError(format!("failed to import object bytes: {error}")))?;
+    Ok(object)
 }
 
 fn normalize_import_metadata(value: &mut JsonValue) {
