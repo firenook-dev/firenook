@@ -22,8 +22,11 @@ use serde::{Deserialize, Serialize};
 pub use smol_str::SmolStr as FirestoreString;
 
 mod disk;
+mod lazy;
 
 pub use disk::{DEFAULT_REDB_CACHE_SIZE_BYTES, DiskBulkCommit, DiskError, DiskOptions, DiskStore};
+pub use lazy::{EncodedDocument, LazyDocument};
+use lazy::{decode_stored_document, encode_stored_document};
 
 /// Firestore document fields in deterministic field-name order.
 pub type Fields = BTreeMap<String, Value>;
@@ -1370,6 +1373,35 @@ impl Iterator for SnapshotDocumentIterator {
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.inner {
             SnapshotDocumentIteratorInner::Memory(documents) => documents.next(),
+            SnapshotDocumentIteratorInner::Disk(documents) => documents
+                .next()
+                .map(|(key, document)| (key, document.into_document())),
+        }
+    }
+}
+
+impl SnapshotDocumentIterator {
+    /// Yields documents without decoding disk entries up front; see
+    /// [`LazyDocument`]. Memory entries are already decoded.
+    #[must_use]
+    pub fn lazy(self) -> SnapshotLazyDocumentIterator {
+        SnapshotLazyDocumentIterator { inner: self.inner }
+    }
+}
+
+/// The lazy form of [`SnapshotDocumentIterator`].
+pub struct SnapshotLazyDocumentIterator {
+    inner: SnapshotDocumentIteratorInner,
+}
+
+impl Iterator for SnapshotLazyDocumentIterator {
+    type Item = (DocumentKey, LazyDocument);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            SnapshotDocumentIteratorInner::Memory(documents) => documents
+                .next()
+                .map(|(key, document)| (key, LazyDocument::Decoded(document))),
             SnapshotDocumentIteratorInner::Disk(documents) => documents.next(),
         }
     }
