@@ -65,7 +65,8 @@ test('options preserve argv; no ignored flags, duplicate options or shell interp
   assert.deepEqual(parsed.command,['echo','hello;touch nope']);
   assert.equal(parseOptions(['--no-diagnostics']).options['no-diagnostics'], true);
   assert.throws(() => parseOptions(['--no-diagnostics=false']));
-  for (const args of [['--wat'],['--project'],['--project=a','--project=b'],['--resume-state=false']]) assert.throws(()=>parseOptions(args));
+  for (const args of [['--wat'],['--project'],['--project=a','--project=b'],['--resume-state=false'],['--durability','eventually']]) assert.throws(()=>parseOptions(args));
+  assert.equal(parseOptions(['--durability=per-commit']).options.durability, 'per-commit');
 });
 test('existing config, project aliases and exact full --only selection', () => {
   const {dir,options} = project();
@@ -117,6 +118,9 @@ test('state and credential isolation stay outside original config and seed', () 
   assert.ok(!launch.args.includes('--firestore-memory'));
   assert.ok(!launch.args.includes('--no-diagnostics'));
   assert.ok(prepareLaunch(diagnostic, {...options, 'no-diagnostics': true}).args.includes('--no-diagnostics'));
+  assert.ok(!launch.args.includes('--durability'));
+  const perCommit = prepareLaunch(diagnostic, {...options, durability: 'per-commit'}).args;
+  assert.equal(perCommit[perCommit.indexOf('--durability') + 1], 'per-commit');
   assert.equal(launch.env.GCLOUD_PROJECT,'demo-fixture');
   assert.equal(launch.env.FIREBASE_AUTH_EMULATOR_HOST,'127.0.0.1:9099');
   assert.equal(launch.env.FIREBASE_TOKEN,undefined);

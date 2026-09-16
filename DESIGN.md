@@ -49,6 +49,39 @@ as a query without a field index would, and a listing with no collection id
 (every direct child of a parent across collections) or with `showMissing`
 still scans, matching the official emulator's semantics for those rare shapes.
 
+### Write-behind durability
+
+Disk mode acknowledges a commit after two cheap steps: the journal record is
+written with a plain `write` (no sync) and redb commits with
+`Durability::None`. Both stores are then flushed together once a second by a
+background flusher, and by `Store::flush` at shutdown: the journal is synced,
+an empty durable redb commit persists every earlier non-durable commit, and
+the journal is truncated. redb's non-durable commits live in its own write
+buffer, not the operating system's cache, so the journal is what makes an
+acknowledged commit survive the process: the OS retains written bytes when the
+process dies, and reopening replays journal records newer than redb's durable
+revision. A kernel crash or power cut can lose at most the last interval's
+commits; the journal's framing and CRCs end replay at a torn tail. A flush
+failure marks the store as requiring a restart, exactly like a failed commit.
+`DiskDurability::PerCommit` keeps the previous behaviour (sync the journal,
+durable redb commit, checkpoint, on every commit) as the `--durability
+per-commit` opt-in.
+
+Storage follows the same contract with its own `metadata.journal`: each
+metadata mutation is journaled with a `write`, committed to redb without a
+sync, and uploaded object files are recorded rather than synced; the flusher
+syncs those files first, then the journal, then commits redb durably with the
+applied journal sequence, so metadata never becomes durable ahead of the bytes
+it references. Whole-state replacement (import, reset) is always durable and
+supersedes the journal.
+
+Measured on an Apple Silicon Mac against the standalone Firestore front:
+a single document set went from 13.1 ms to 0.59 ms, a 20-document batch from
+14.1 ms to 0.81 ms, a read-modify-write transaction from 17.9 ms to 3.3 ms
+and one thousand sequential sets from 14.7 s to 0.27 s; reads are unchanged.
+The process-kill guarantee is tested by a child process that commits, aborts
+before any flush, and is reopened by the parent, for both stores.
+
 ### Scans decode fields, not documents
 
 A query that is not served in `__name__` order reads every document in its

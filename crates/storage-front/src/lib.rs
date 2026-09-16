@@ -78,7 +78,11 @@ pub struct StorageConfig {
     pub data_dir: PathBuf,
     /// Optional rules runtime. Absence is explicit open emulator mode.
     pub rules: Option<RulesRuntimeConfig>,
+    /// When object writes and metadata commits reach stable storage.
+    pub durability: StorageDurability,
 }
+
+pub use metadata::StorageDurability;
 
 /// Shared Storage state and HTTP application.
 pub struct StorageRuntime {
@@ -102,7 +106,7 @@ impl StorageRuntime {
         tokio::fs::create_dir_all(config.data_dir.join("uploads"))
             .await
             .map_err(|error| StorageError(format!("failed to create upload root: {error}")))?;
-        let (metadata, data) = metadata::MetadataStore::open(&config.data_dir)?;
+        let (metadata, data) = metadata::MetadataStore::open(&config.data_dir, config.durability)?;
         let rules = match config.rules.as_ref() {
             Some(rules) => Some(RulesRuntime::start(rules).await?),
             None => None,
@@ -117,12 +121,40 @@ impl StorageRuntime {
             queue,
             background,
         };
+        if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
+            // A weak handle: the flusher never keeps the metadata database
+            // open after the runtime's last owner drops it.
+            let metadata = Arc::downgrade(&state.metadata);
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(interval);
+                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    ticker.tick().await;
+                    let Some(store) = metadata.upgrade() else {
+                        return;
+                    };
+                    let flushed = tokio::task::spawn_blocking(move || store.flush()).await;
+                    if let Ok(Err(error)) = flushed {
+                        eprintln!("fireside Storage: write-behind flush failed: {error}");
+                    }
+                }
+            });
+        }
         let application = routes(state.clone());
         Ok(Self {
             application,
             state,
             rules,
         })
+    }
+
+    /// Makes every acknowledged mutation durable now; see
+    /// [`StorageDurability::WriteBehind`].
+    pub async fn flush(&self) -> Result<(), StorageError> {
+        let metadata = Arc::clone(&self.state.metadata);
+        tokio::task::spawn_blocking(move || metadata.flush())
+            .await
+            .map_err(|error| StorageError(format!("Storage flush task failed: {error}")))?
     }
 
     /// Cloneable Axum application.
@@ -181,10 +213,34 @@ impl StorageRuntime {
 
     /// Stops the child rules runtime.
     pub async fn shutdown(mut self) -> Result<(), StorageError> {
+        self.flush().await?;
         if let Some(rules) = self.rules.take() {
             rules.shutdown().await?;
         }
         Ok(())
+    }
+}
+
+fn config_durability(state: &StorageState) -> StorageDurability {
+    state.metadata.durability()
+}
+
+/// Syncs a freshly written file now under per-commit durability, or defers
+/// it to the next flush under write-behind.
+async fn settle_written_file(
+    state: &StorageState,
+    file: &mut tokio::fs::File,
+    path: &FilePath,
+) -> Result<(), StorageApiError> {
+    match config_durability(state) {
+        StorageDurability::PerCommit => file.sync_all().await.map_err(io_error),
+        StorageDurability::WriteBehind { .. } => {
+            // tokio performs file writes on a blocking thread; `flush` waits
+            // for them to reach the kernel without asking the drive to sync.
+            file.flush().await.map_err(io_error)?;
+            state.metadata.note_unsynced_file(path.to_path_buf());
+            Ok(())
+        }
     }
 }
 
@@ -553,7 +609,12 @@ async fn firebase_resumable(
     }
     if command.contains("upload") {
         session.received = session.received.saturating_add(
-            append_body(state.config.data_dir.join(&session.staging_file), body).await?,
+            append_body(
+                state,
+                state.config.data_dir.join(&session.staging_file),
+                body,
+            )
+            .await?,
         );
         let mut data = lock(&state.inner);
         data.uploads.insert(id.clone(), session.clone());
@@ -763,7 +824,7 @@ async fn gcs_multipart_upload(
     let path = staging_path(state, "upload");
     let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
     file.write_all(multipart.data).await.map_err(io_error)?;
-    file.sync_all().await.map_err(io_error)?;
+    settle_written_file(state, &mut file, &path).await?;
     let object = commit_staging(
         state,
         CommitSpec {
@@ -920,7 +981,12 @@ async fn gcs_resumable_chunk(
             "Bad Request",
         ));
     }
-    let appended = append_body(state.config.data_dir.join(&session.staging_file), body).await?;
+    let appended = append_body(
+        &state,
+        state.config.data_dir.join(&session.staging_file),
+        body,
+    )
+    .await?;
     session.received = session.received.saturating_add(appended);
     let total = range
         .and_then(|value| value.total)
@@ -1328,7 +1394,7 @@ async fn firebase_upload(
     let path = staging_path(state, "upload");
     let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
     file.write_all(multipart.data).await.map_err(io_error)?;
-    file.sync_all().await.map_err(io_error)?;
+    settle_written_file(state, &mut file, &path).await?;
     let content_type = multipart
         .metadata
         .get("contentType")
@@ -1434,7 +1500,7 @@ async fn stream_to_staging(state: &StorageState, body: Body) -> Result<Uploaded,
         crc = crc32c::crc32c_append(crc, &chunk);
         size = size.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
     }
-    file.sync_all().await.map_err(io_error)?;
+    settle_written_file(state, &mut file, &path).await?;
     Ok(Uploaded {
         path,
         size,
@@ -1443,10 +1509,14 @@ async fn stream_to_staging(state: &StorageState, body: Body) -> Result<Uploaded,
     })
 }
 
-async fn append_body(path: PathBuf, body: Body) -> Result<u64, StorageApiError> {
+async fn append_body(
+    state: &StorageState,
+    path: PathBuf,
+    body: Body,
+) -> Result<u64, StorageApiError> {
     let mut file = tokio::fs::OpenOptions::new()
         .append(true)
-        .open(path)
+        .open(&path)
         .await
         .map_err(io_error)?;
     let mut stream = body.into_data_stream();
@@ -1456,7 +1526,7 @@ async fn append_body(path: PathBuf, body: Body) -> Result<u64, StorageApiError> 
         file.write_all(&chunk).await.map_err(io_error)?;
         size = size.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
     }
-    file.sync_all().await.map_err(io_error)?;
+    settle_written_file(state, &mut file, &path).await?;
     Ok(size)
 }
 
@@ -1600,6 +1670,8 @@ async fn commit_staging(
     tokio::fs::rename(&uploaded.path, &final_path)
         .await
         .map_err(io_error)?;
+    // The bytes were recorded under the staging path; sync the published one.
+    state.metadata.note_unsynced_file(final_path.clone());
     {
         let mut data = lock(&state.inner);
         data.objects
@@ -2626,6 +2698,7 @@ mod tests {
         let runtime = StorageRuntime::start(
             StorageConfig {
                 project: PROJECT.to_owned(),
+                durability: StorageDurability::default(),
                 origin: "http://127.0.0.1:21002".to_owned(),
                 data_dir: root.clone(),
                 rules,
@@ -2896,6 +2969,7 @@ mod tests {
         let reopened = StorageRuntime::start(
             StorageConfig {
                 project: PROJECT.to_owned(),
+                durability: StorageDurability::default(),
                 origin: "http://127.0.0.1:21002".to_owned(),
                 data_dir: root.clone(),
                 rules: None,
@@ -3068,6 +3142,7 @@ mod tests {
         let runtime = StorageRuntime::start(
             StorageConfig {
                 project: PROJECT.to_owned(),
+                durability: StorageDurability::default(),
                 origin: "http://127.0.0.1:21002".to_owned(),
                 data_dir: root.clone(),
                 rules: None,

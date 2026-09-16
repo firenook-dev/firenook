@@ -24,7 +24,10 @@ pub use smol_str::SmolStr as FirestoreString;
 mod disk;
 mod lazy;
 
-pub use disk::{DEFAULT_REDB_CACHE_SIZE_BYTES, DiskBulkCommit, DiskError, DiskOptions, DiskStore};
+pub use disk::{
+    DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DiskBulkCommit, DiskDurability,
+    DiskError, DiskOptions, DiskStore,
+};
 pub use lazy::{EncodedDocument, LazyDocument};
 use lazy::{decode_stored_document, encode_stored_document};
 
@@ -914,6 +917,15 @@ impl Store {
     #[must_use]
     pub const fn is_disk_backed(&self) -> bool {
         matches!(self.backend, StoreBackend::Disk(_))
+    }
+
+    /// Makes every acknowledged commit durable now; see
+    /// [`DiskDurability::WriteBehind`]. A no-op for the in-memory backend.
+    pub fn flush(&self) -> Result<(), CommitError> {
+        match &self.backend {
+            StoreBackend::Memory(_) => Ok(()),
+            StoreBackend::Disk(store) => store.flush().map_err(commit_error),
+        }
     }
 
     /// Returns an immutable snapshot at the current revision.

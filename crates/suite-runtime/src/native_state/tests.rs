@@ -21,6 +21,7 @@ impl Case {
         fs::write(seed.join("firebase-export-metadata.json"), b"{}").unwrap();
         fs::write(seed.join("documents"), "seed-\u{706b}\u{1f525}").unwrap();
         let config = SuiteConfig {
+            durability: fireside_core_store::DiskDurability::default(),
             host: "127.0.0.1".into(),
             project_id: "demo-native-resume".into(),
             project_dir: root.clone(),
