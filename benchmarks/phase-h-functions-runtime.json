@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-h-functions-runtime",
+  "frozen": true,
+  "frozenAt": "2026-09-17T18:10:00+08:00",
+  "plan": "support/phase-h-functions-runtime.md",
+  "baseline": {
+    "engineRevision": "ef0f04cd84b27bfcb7020a3f78f6b83caa04c2bf",
+    "branch": "plan/phase-g-storage-rules",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.6",
+    "functionsExecutionToday": "support/functions-host.cjs loads the consumer's firebase-tools 15.22.0 FunctionsEmulator and ExtensionsEmulator; Rust owns registration, event envelopes, delivery, Pub/Sub, scheduling and readiness"
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "node": "24.20.0",
+    "firebaseToolsOracle": "15.22.0",
+    "firebaseFunctionsSdk": "7.2.5",
+    "firebaseAdminSdk": "13.10.0",
+    "oracleModuleSha256Prefixes": {
+      "lib/emulator/functionsEmulator.js": "0c16fe813bc5a034",
+      "lib/emulator/functionsEmulatorRuntime.js": "5bef9577eaa8e6ed",
+      "lib/emulator/functionsEmulatorShared.js": "ede6357feb23a126",
+      "lib/emulator/functionsRuntimeWorker.js": "9e6963e55e9b4f9d",
+      "lib/emulator/extensionsEmulator.js": "e8be125cee4d2809",
+      "lib/extensions/emulator/triggerHelper.js": "f7c389aa791cd726",
+      "lib/extensions/emulator/specHelper.js": "61255a9e3ef5934e",
+      "lib/extensions/emulator/optionsHelper.js": "c445874e2263e4ae",
+      "lib/deploy/extensions/planner.js": "ba616b140d0663a0",
+      "lib/deploy/functions/runtimes/discovery/v1alpha1.js": "02503adc2d1f5ed4",
+      "lib/deploy/functions/build.js": "397208379661e08d",
+      "lib/functions/env.js": "8d6a5e640f827300",
+      "lib/emulator/events/types.js": "45bff5e257fb5642"
+    }
+  },
+  "oracles": {
+    "precedence": [
+      "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "production-cloud-functions-only-where-the-emulator-is-known-to-diverge",
+      "firebase-functions-sdk-7.2.5-source"
+    ],
+    "ownership": {
+      "httpRoutesStatusesBodies": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "callableEnvelopesAndErrors": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "eventEnvelopesAsReceivedByHandlers": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "handlerEnvironment": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "discoveryWireManifest": "firebase-functions-sdk-7.2.5-source (lib/runtime/manifest.js stackToWire, served as JSON at /__/functions.yaml when FUNCTIONS_CONTROL_API=true)",
+      "extensionsResolutionAndParameters": "official-firebase-tools-functions-and-extensions-emulator-15.22.0"
+    },
+    "classificationRule": "match the official emulator; where Fireside deliberately differs (it must not fail startup on an upstream-ignored export, one worker per codebase instead of one per trigger, no Google Analytics call per invocation) the difference is recorded in the fixture invariants and asserted by the replay; no divergence is adopted silently and no fixture is edited after freezing",
+    "production": {
+      "usedFor": "nothing unless H1 finds an emulator behaviour the SDK documents as different in production; every such case is listed here before implementation",
+      "cases": []
+    }
+  },
+  "supportedTriggerMatrix": {
+    "policy": "every row is captured in H1 and replayed in H2; anything outside the matrix is an ignored export with a recorded reason, never a silent drop and never a startup failure",
+    "v2": [
+      "onRequest",
+      "onCall",
+      "onCall streaming (Accept: text/event-stream, response.sendChunk)",
+      "onDocumentCreated",
+      "onDocumentUpdated",
+      "onDocumentDeleted",
+      "onDocumentWritten",
+      "onDocument*WithAuthContext",
+      "onObjectFinalized",
+      "onObjectDeleted",
+      "onObjectMetadataUpdated",
+      "onMessagePublished",
+      "onSchedule",
+      "beforeUserCreated",
+      "beforeUserSignedIn",
+      "onCustomEventPublished (only if H1 shows the official emulator delivers Extensions events)"
+    ],
+    "v1": [
+      "https.onRequest",
+      "https.onCall",
+      "firestore.document().onCreate/onUpdate/onDelete/onWrite",
+      "storage.object().onFinalize/onDelete/onMetadataUpdate",
+      "pubsub.topic().onPublish",
+      "pubsub.schedule().onRun",
+      "auth.user().onCreate/onDelete",
+      "auth.user().beforeCreate/beforeSignIn"
+    ],
+    "extensions": [
+      "firebaseextensions.v1beta.function httpsTrigger",
+      "firebaseextensions.v1beta.function eventTrigger (Firestore, Storage, Pub/Sub, Auth)",
+      "firebaseextensions.v1beta.function scheduleTrigger",
+      "firebaseextensions.v1beta.v2function eventTrigger"
+    ],
+    "ignoredWithReason": [
+      "taskQueueTrigger (extension resources: dropped by firebase-tools 15.22.0 triggerHelper; user functions: Tasks emulator delivery stays unimplemented)",
+      "Realtime Database, Remote Config, Test Lab, Crashlytics, Analytics, Firebase Alerts and Eventarc channel events outside the Extensions case",
+      "Python and Dart runtimes",
+      "onCall genkitAction and Data Connect GraphQL triggers",
+      "functions.config() (removed from firebase-functions 7)"
+    ]
+  },
+  "decisions": {
+    "workerModel": {
+      "policy": "one Node worker per codebase (user codebase or extension instance), started at readiness, restarted on crash and on source reload; FUNCTION_TARGET, FUNCTION_SIGNATURE_TYPE and K_SERVICE are set synchronously before each invocation; the official emulator starts one worker per trigger lazily",
+      "recordedIn": "fixture invariants: handlers observe the same per-invocation environment on both engines; process identity is not part of the contract"
+    },
+    "discovery": {
+      "policy": "spawn the codebase's own node_modules/.bin/firebase-functions with FUNCTIONS_CONTROL_API=true and read /__/functions.yaml (JSON body), then /__/quitquitquit; a static functions.yaml in the source directory takes precedence as in firebase-tools; the manifest is the SDK's stackToWire v1alpha1 contract"
+    },
+    "extensionsRegistry": {
+      "policy": "reuse the Firebase CLI's stored account (configstore) refresh token when present, accept FIREBASE_TOKEN, and add `fireside ext:vendor` offline mode; an own OAuth login flow is not in this phase",
+      "cacheDirectory": "FIREBASE_EXTENSIONS_CACHE_PATH or ~/.cache/firebase/extensions/<publisher>/<name>@<version>, shared with firebase-tools so nothing is downloaded twice",
+      "vendoredSources": "<project>/extensions/.sources/<publisher>/<name>@<version> (or the configured directory) preferred over the cache; a fully vendored project starts with no network and no token"
+    },
+    "taskQueueTrigger": {
+      "policy": "extension resources with taskQueueTrigger are admitted without delivery and reported as ignored with reason `firebase-tools 15.22.0 drops taskQueueTrigger from emulated extension definitions`, so the Twodart extensions gate keeps its 2 ignored records"
+    },
+    "eventarc": {
+      "policy": "registration routes stay; delivery of Extensions custom events to user onCustomEventPublished handlers is added only if H1 shows the official emulator delivers them (measured, recorded under receipts.h1)"
+    },
+    "credentialIsolation": {
+      "policy": "workers never receive the developer's ADC or CLI credentials; GOOGLE_APPLICATION_CREDENTIALS is unset in worker environments and the registry token is used by the Rust parent only"
+    }
+  },
+  "capture": {
+    "requiredBeforeProductImplementation": true,
+    "root": "conformance/fixtures/functions-runtime-v1",
+    "fixtureSchemaVersion": 1,
+    "tool": "conformance/src/functions-runtime/capture-emulator.ts",
+    "script": "capture:functions:runtime",
+    "minimumPrograms": 40,
+    "minimumSteps": 250,
+    "requiredCategories": [
+      "discovery-and-inventory",
+      "http",
+      "callable",
+      "callable-streaming",
+      "cors",
+      "firestore-events",
+      "storage-events",
+      "pubsub-and-schedules",
+      "auth-events",
+      "blocking-functions",
+      "environment",
+      "lifecycle",
+      "extensions"
+    ],
+    "handlerObservation": "every handler appends {invocation, env subset, request shape or event envelope, auth context} to a JSONL file the harness reads back; the fixture records the observation next to the HTTP step that caused it",
+    "fixturesFrozen": false,
+    "frozenProgramCount": 0,
+    "frozenStepCount": 0,
+    "frozenFixtureSha256": {}
+  },
+  "firebaseToolsSurfacesToRemove": [
+    { "where": "support/functions-host.cjs", "what": "the whole file (loads firebase-tools FunctionsEmulator/ExtensionsEmulator)" },
+    { "where": "crates/suite-runtime/src/lib.rs", "what": "FUNCTIONS_HOST_SOURCE include_str!, SuiteConfig.firebase_tools_root, preflight row (\"firebase-tools\", ...), spawn_functions_host --firebase-tools-root" },
+    { "where": "crates/suite-runtime/src/functions_readiness.rs", "what": "Receipt.firebase_tools_version == \"15.22.0\" check" },
+    { "where": "crates/cli/src/main.rs", "what": "--firebase-tools-root suite argument and its absolute_path" },
+    { "where": "crates/functions-bridge/src/lib.rs", "what": "doc comments naming the pinned firebase-tools host (behaviour unchanged)" },
+    { "where": "crates/suite-front/src/lib.rs", "what": "firebase-tools references in comments" },
+    { "where": "packages/cli/src/runtime.mjs", "what": "require.resolve('firebase-tools/package.json') and the 15.22.0 version gate; --firebase-tools-root passthrough" },
+    { "where": "packages/cli/README.md, README.md, COMPATIBILITY.md, DESIGN.md, docs", "what": "every statement that firebase-tools is required by the Fireside path" }
+  ],
+  "gates": {
+    "emulatorReplay": {
+      "programsMinimum": 40,
+      "stepsMinimum": 250,
+      "allowedUnexplainedStatusDivergences": 0,
+      "allowedUnexplainedHandlerObservationDivergences": 0,
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "test": "crates/functions-runtime replay of conformance/fixtures/functions-runtime-v1 over HTTP against a started runtime"
+    },
+    "existingFixturesUnchanged": {
+      "fixtures": [
+        "functions-readiness-v1",
+        "functions-topic-reload-v1",
+        "developer-tools-functions-lifecycle-v1",
+        "firebase-suite-v1/functions-callable-http-and-error-contract",
+        "firebase-suite-v1/functions-startup-discovery",
+        "firebase-suite-v1/pubsub-schedule-and-function-dispatch",
+        "firebase-suite-v1/firestore-trigger-registration-and-v1-v2-dispatch",
+        "firebase-suite-v1/auth-import-export-and-trigger-dispatch"
+      ],
+      "policy": "their contracts are the suite's, not the host's; they keep passing without edits"
+    },
+    "noFirebaseTools": {
+      "productNeverResolvesFirebaseTools": true,
+      "suiteStartsWithFirebaseToolsAbsentFromNodeModules": true,
+      "ciStep": "Verify suite start without firebase-tools in node_modules"
+    },
+    "extensions": {
+      "twodartExtensionsGate": "bun test:fireside-extensions passes on the packed candidate with 26 definitions, 24 admitted, 2 ignored with reasons",
+      "offlineStart": "a project with every extension vendored starts with the network blocked and no CLI token"
+    },
+    "performance": {
+      "profile": "Hetzner paired acceptance function lane and suite readiness",
+      "functionLaneP99RegressionPercentAllowed": 0,
+      "readinessRegressionAllowed": false
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "workerSourceMaximumLines": 1500
+    }
+  },
+  "acceptance": {
+    "exactCandidateCi": "all jobs including the new no-firebase-tools step",
+    "twodartCheapGates": [
+      "bun test:fireside-integration",
+      "bun test:fireside-extensions",
+      "journeys 1-9",
+      "Stripe webhook round trip reaches the handler in the credential-free profile",
+      "Algolia index trigger reaches the handler in the credential-free profile",
+      "--inspect-functions attach"
+    ],
+    "hetznerPairedAttempt": "candidate-attempt-11.json",
+    "cleanSetup": "without firebase-tools and without Java; fully offline start with vendored extensions",
+    "release": "0.1.0-next.8",
+    "receipts": null
+  },
+  "receipts": {}
+}

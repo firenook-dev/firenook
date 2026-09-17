@@ -247,7 +247,8 @@ replaces firebase-tools as the host.
 | H4 | firebase-tools removed; `--inspect-functions`, `functions:invoke`, `ext:vendor` added | Suite starts with `firebase-tools` absent from `node_modules`; docs updated |
 | H5 | Exact-candidate CI, consumer gates, paired acceptance, offline clean setup, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
 
-- [ ] H0 — Freeze the gate and the supported trigger matrix.
+- [x] H0 — Freeze the gate and the supported trigger matrix (2026-09-17,
+  `benchmarks/phase-h-functions-runtime.json`).
 - [ ] H1 — Record the official-emulator Functions and Extensions corpus;
   commit fixtures before implementation.
 - [ ] H2 — Build the Rust supervisor and the Node worker; replay the corpus.
