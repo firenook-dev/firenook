@@ -254,11 +254,16 @@ struct SuiteArgs {
     storage_buckets: Vec<String>,
     #[arg(long = "project-id")]
     project_id: String,
-    /// Exact installed firebase-tools package root retained for Functions only.
-    #[arg(long = "firebase-tools-root")]
-    firebase_tools_root: PathBuf,
+    /// Accepted for compatibility with earlier launchers; the owned Functions
+    /// runtime no longer loads firebase-tools.
+    #[arg(long = "firebase-tools-root", hide = true)]
+    firebase_tools_root: Option<PathBuf>,
     #[arg(long)]
     node: PathBuf,
+    /// Start the Node Functions workers with `--inspect`; an explicit port
+    /// applies to the single codebase, otherwise ports are assigned from 9229.
+    #[arg(long = "inspect-functions", num_args = 0..=1, default_missing_value = "auto", value_name = "PORT")]
+    inspect_functions: Option<String>,
     #[arg(long = "ui-archive")]
     ui_archive: PathBuf,
     #[arg(long = "state-dir")]
@@ -449,7 +454,15 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         project_id: arguments.project_id.clone(),
         project_dir,
         firebase_json,
-        firebase_tools_root: absolute_path(&arguments.firebase_tools_root)?,
+        inspect_functions: match arguments.inspect_functions.as_deref() {
+            None => None,
+            Some("auto" | "true") => Some(fireside_suite_runtime::InspectConfig { port: None }),
+            Some(port) => Some(fireside_suite_runtime::InspectConfig {
+                port: Some(port.parse().map_err(|_| {
+                    format!("--inspect-functions expects a TCP port, found {port}")
+                })?),
+            }),
+        },
         node: absolute_path(&arguments.node)?,
         ui_archive: absolute_path(&arguments.ui_archive)?,
         state_dir: absolute_path(&arguments.state_dir)?,

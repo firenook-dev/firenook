@@ -1,19 +1,15 @@
 //! Lifecycle coordinator for the complete Fireside emulator suite.
 //!
-//! The coordinator owns every data and control listener. The one retained
-//! Node child is an isolated firebase-tools Functions/Extensions workload host.
+//! The coordinator owns every data and control listener, including the
+//! Functions port: user and Extension JavaScript runs in Node workers
+//! supervised by the owned Functions runtime.
 
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeSet;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
-
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt as _;
 
 use axum::Router;
 use axum::serve::{ListenerExt as _, TapIo};
@@ -25,6 +21,11 @@ use fireside_core_store::{
 use fireside_export_format::{ExportReader, ExportedDocument, write_export};
 use fireside_functions_bridge::{
     DeliveryHealth, DeliveryPolicy, DeliveryRuntime, FunctionsInventory, TriggerRegistry,
+};
+pub use fireside_functions_runtime::InspectConfig;
+use fireside_functions_runtime::{
+    CodebaseConfig, EmulatorHosts, FunctionsRuntime, LogEvent, LogSink,
+    RuntimeConfig as FunctionsRuntimeConfig, codebases_from_config,
 };
 use fireside_grpc_front::FirestoreService;
 use fireside_pubsub_front::{SchedulerRuntime, router as pubsub_router};
@@ -38,31 +39,26 @@ use fireside_storage_front::{
     StorageDurability, StorageRuntime,
 };
 use fireside_suite_front::{
-    ExportCommand, HubConfig, HubRuntime, LoggingRuntime, ServiceInfo, SuiteDirectory, UiConfig,
-    requests_router, ui_router,
+    BackgroundRequest, ExportCommand, HubConfig, HubRuntime, LoggingRuntime, ServiceInfo,
+    SuiteDirectory, UiConfig, requests_router, ui_router,
 };
 use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::OffsetDateTime;
-use tokio::io::BufReader;
 use tokio::net::TcpListener;
-use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tonic::transport::server::TcpIncoming;
 
-const FUNCTIONS_HOST_SOURCE: &str = include_str!("../../../support/functions-host.cjs");
 const EXPORT_VERSION: &str = "15.22.0";
 const IMPORT_BATCH_SIZE: usize = 500;
 const IMPORT_BATCH_LOGICAL_BYTES: u64 = 8 * 1024 * 1024;
-const READY_TIMEOUT: Duration = Duration::from_secs(120);
 
 mod auxiliary;
 mod control;
 mod functions_readiness;
-mod log_input;
 mod native_state;
 mod shutdown_io;
 pub use control::wait_for_shutdown;
@@ -115,8 +111,9 @@ pub struct SuiteConfig {
     pub project_id: String,
     pub project_dir: PathBuf,
     pub firebase_json: PathBuf,
-    pub firebase_tools_root: PathBuf,
     pub node: PathBuf,
+    /// `--inspect-functions`: debug ports for the Node workers.
+    pub inspect_functions: Option<InspectConfig>,
     pub ui_archive: PathBuf,
     pub state_dir: PathBuf,
     pub resume_state: bool,
@@ -233,6 +230,7 @@ struct PreparedSuite {
     hub: HubRuntime,
     ui: Router,
     export_receiver: mpsc::Receiver<ExportCommand>,
+    background_receiver: mpsc::UnboundedReceiver<BackgroundRequest>,
 }
 
 struct ShutdownSuite {
@@ -243,12 +241,73 @@ struct ShutdownSuite {
     storage: Arc<StorageRuntime>,
     hub: HubRuntime,
     exporter: JoinHandle<()>,
-    functions: Child,
+    functions: FunctionsRuntime,
     scheduler: SchedulerRuntime,
     servers: Vec<JoinHandle<()>>,
     shutdown: watch::Sender<bool>,
     function_count: usize,
     schedule_count: usize,
+}
+
+/// Checks the discovered inventory against the configured minimum and the
+/// readiness receipt, then prints the receipt line the harnesses wait for.
+async fn verify_functions_readiness(
+    config: &SuiteConfig,
+    functions: &FunctionsRuntime,
+    logging: &LoggingRuntime,
+) -> Result<(FunctionsInventory, usize), SuiteRuntimeError> {
+    let inventory = functions
+        .inventory()
+        .await
+        .map_err(|error| failure(format!("Functions inventory failed: {error}")))?;
+    let receipt = functions
+        .receipt()
+        .await
+        .map_err(|error| failure(format!("Functions readiness failed: {error}")))?;
+    let function_count = inventory.functions().count();
+    if function_count < config.minimum_functions {
+        return Err(failure(format!(
+            "Functions runtime discovered {function_count} functions; at least {} required",
+            config.minimum_functions
+        )));
+    }
+    if receipt.inventory_sha256 != functions_readiness::fingerprint(&inventory).map_err(failure)? {
+        return Err(failure(
+            "Functions inventory does not match the readiness receipt",
+        ));
+    }
+    let receipt_line =
+        serde_json::to_string(&receipt).map_err(|error| failure(error.to_string()))?;
+    println!("FIRESIDE_FUNCTIONS_HOST_READY {receipt_line}");
+    logging.record(
+        "INFO",
+        Some("functions"),
+        format!("FIRESIDE_FUNCTIONS_HOST_READY {receipt_line}"),
+    );
+    Ok((inventory, function_count))
+}
+
+/// Serves the Functions and Eventarc ports from the owned runtime's routers.
+fn spawn_functions_servers(
+    functions: &FunctionsRuntime,
+    listeners: &mut ListenerSet,
+    shutdown: &watch::Sender<bool>,
+    server_failure: &mpsc::UnboundedSender<String>,
+    servers: &mut Vec<JoinHandle<()>>,
+) -> Result<(), SuiteRuntimeError> {
+    for (name, router) in [
+        ("functions", functions.router()),
+        ("eventarc", functions.eventarc_router()),
+    ] {
+        servers.push(spawn_axum(
+            name,
+            listeners.take(name)?,
+            router,
+            shutdown.subscribe(),
+            server_failure.clone(),
+        ));
+    }
+    Ok(())
 }
 
 /// Runs the complete suite until SIGINT/SIGTERM or a child/listener failure.
@@ -269,8 +328,8 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         hub,
         ui,
         export_receiver,
+        background_receiver,
     } = prepared;
-    let functions_endpoint = format!("http://{}:{}/", config.host, config.ports.functions);
     let mut listeners = bind_listeners(&config).await?;
     let (shutdown, _) = watch::channel(false);
     let (server_failure, mut failed_server) = mpsc::unbounded_channel();
@@ -297,15 +356,17 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         Arc::clone(&auth),
         Arc::clone(&storage),
     );
-    let (mut functions, mut functions_ready) = spawn_functions_host(&config, &logging).await?;
-    let inventory = wait_for_functions(
-        &mut functions,
-        &mut functions_ready,
-        &functions_endpoint,
-        config.minimum_functions,
-    )
-    .await?;
-    let function_count = inventory.functions().count();
+    let functions = start_functions_runtime(&config, triggers.clone(), &logging).await?;
+    spawn_functions_servers(
+        &functions,
+        &mut listeners,
+        &shutdown,
+        &server_failure,
+        &mut servers,
+    )?;
+    let (inventory, function_count) =
+        verify_functions_readiness(&config, &functions, &logging).await?;
+    auth.set_blocking_functions(Arc::new(BlockingBridge(functions.blocking_handle())));
     let mut pubsub = pubsub_router(&config.project_id, &inventory, delivery.queue(), triggers);
     let schedule_count = pubsub.schedules().len();
     let mut scheduler = pubsub
@@ -318,28 +379,20 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         shutdown.subscribe(),
         server_failure,
     ));
+    let mut functions_updates = functions.updates();
 
     announce_ready(&logging, function_count);
 
-    // Child::wait closes child.stdin immediately, even when its future is
-    // later cancelled by select. Keep our Windows control pipe alive outside
-    // Child until the explicit shutdown path is ready to send its command.
-    let functions_control = functions.stdin.take();
     let failure_reason = tokio::select! {
         signal = wait_for_shutdown() => signal.err().map(|error| error.to_string()),
-        status = functions.wait() => {
-            let status = status.map_err(|error| failure(format!("Functions host wait failed: {error}")))?;
-            Some(format!("Functions host exited before suite shutdown: {status}"))
-        }
         failed = failed_server.recv() => {
             Some(failed.unwrap_or_else(|| "service monitor closed".to_owned()))
         }
         error = follow_functions_inventory(
-            &mut functions_ready, &functions_endpoint, &config.project_id,
+            &functions, &mut functions_updates, background_receiver, &config.project_id,
             &mut pubsub, &mut scheduler, &logging,
         ) => Some(error),
     };
-    functions.stdin = functions_control;
 
     finish_suite(
         ShutdownSuite {
@@ -372,26 +425,31 @@ fn announce_ready(logging: &LoggingRuntime, function_count: usize) {
 }
 
 async fn follow_functions_inventory(
-    updates: &mut watch::Receiver<functions_readiness::Signal>,
-    endpoint: &str,
+    functions: &FunctionsRuntime,
+    updates: &mut watch::Receiver<u64>,
+    mut background: mpsc::UnboundedReceiver<BackgroundRequest>,
     project: &str,
     pubsub: &mut fireside_pubsub_front::PubsubRuntime,
     scheduler: &mut SchedulerRuntime,
     logging: &LoggingRuntime,
 ) -> String {
-    while updates.changed().await.is_ok() {
-        let Some(receipt) = updates.borrow_and_update().clone() else {
-            continue;
-        };
-        let receipt = match receipt {
-            Ok(receipt) => receipt,
-            Err(error) => return error,
-        };
-        let inventory = match functions_readiness::discover(endpoint, &receipt, 0).await {
+    loop {
+        tokio::select! {
+            changed = updates.changed() => {
+                if changed.is_err() {
+                    return "Functions inventory stream closed".to_owned();
+                }
+            }
+            request = background.recv() => {
+                if let Some(request) = request {
+                    functions.set_background_enabled(request.enabled).await;
+                    let _ = request.done.send(());
+                }
+                continue;
+            }
+        }
+        let inventory = match functions.inventory().await {
             Ok(inventory) => inventory,
-            // A newer registration may supersede the receipt while HTTP is in
-            // flight. Consume its queued notification, not an old mixed view.
-            Err(_) if updates.has_changed().unwrap_or(false) => continue,
             Err(error) => {
                 return format!("Functions reload inventory verification failed: {error}");
             }
@@ -408,13 +466,10 @@ async fn follow_functions_inventory(
             Some("functions"),
             format!("Functions routing refreshed; {count} registered functions"),
         );
-        // Upstream's /backends lists a handler as soon as it is registered,
-        // before this native refresh finishes. Announce completion on stdout
-        // so a supervisor or harness can wait for native delivery readiness
-        // instead of racing the upstream inventory.
+        // Announce completion on stdout so a supervisor or harness can wait
+        // for native delivery readiness after a reload.
         println!("fireside functions routing refreshed: {count} registered functions");
     }
-    "Functions inventory stream closed".to_owned()
 }
 
 async fn prepare_native_suite(
@@ -495,12 +550,14 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     }
     let directory = suite_directory(config)?;
     let (export_sender, export_receiver) = mpsc::channel(4);
+    let (background_sender, background_receiver) = mpsc::unbounded_channel();
     let hub = HubRuntime::start(HubConfig {
         directory: directory.clone(),
         locator_file: locator_path(config),
         pid: std::process::id(),
         exporter: export_sender,
         triggers: triggers.clone(),
+        background: Some(background_sender),
     })
     .map_err(|error| failure(format!("Hub failed to start: {error}")))?;
     let ui = ui_router(UiConfig {
@@ -522,6 +579,7 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         hub,
         ui,
         export_receiver,
+        background_receiver,
     })
 }
 
@@ -553,15 +611,11 @@ async fn finish_suite(
         ));
     }
     suite.scheduler.shutdown().await;
-    // Drain background delivery while both the Node workload host and the Rust
-    // data services it calls remain available. The scheduler is stopped first,
-    // and a coordinated suite shutdown has no external clients admitting new
-    // work. Stopping either side before this drain can strand handlers that use
-    // Admin SDK calls and make firebase-tools wait until the hard timeout.
+    // Drain background delivery while both the Node workers and the Rust data
+    // services they call remain available. The scheduler is stopped first, and
+    // a coordinated suite shutdown has no external clients admitting new work.
     let delivery = suite.delivery.shutdown().await.into();
-    if let Err(error) = stop_functions_host(&mut suite.functions).await {
-        failures.push(error.to_string());
-    }
+    suite.functions.shutdown().await;
     let _ = suite.shutdown.send(true);
     for server in suite.servers {
         let _ = server.await;
@@ -631,7 +685,6 @@ fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {
     for (name, path) in [
         ("project directory", &config.project_dir),
         ("firebase.json", &config.firebase_json),
-        ("firebase-tools", &config.firebase_tools_root),
         ("Node", &config.node),
         ("UI archive", &config.ui_archive),
     ] {
@@ -786,12 +839,12 @@ fn suite_directory(config: &SuiteConfig) -> Result<SuiteDirectory, SuiteRuntimeE
             listening("firestore", config.ports.firestore),
             listening("auth", config.ports.auth),
             listening("storage", config.ports.storage),
-            dependency("functions", config.ports.functions),
+            listening("functions", config.ports.functions),
             pubsub,
             listening("hub", config.ports.hub),
             listening("ui", config.ports.ui),
             listening("logging", config.ports.logging),
-            dependency("eventarc", config.ports.eventarc),
+            listening("eventarc", config.ports.eventarc),
             dependency("tasks", config.ports.tasks),
             listening("firestore.websocket", config.ports.firestore_websocket),
         ],
@@ -891,6 +944,7 @@ async fn bind_listeners(config: &SuiteConfig) -> Result<ListenerSet, SuiteRuntim
         ("firestore", config.ports.firestore),
         ("auth", config.ports.auth),
         ("storage", config.ports.storage),
+        ("functions", config.ports.functions),
         ("pubsub", config.ports.pubsub),
         ("hub", config.ports.hub),
         ("ui", config.ports.ui),
@@ -960,15 +1014,13 @@ fn spawn_static_servers(
             failed.clone(),
         ),
     ];
-    for name in ["eventarc", "tasks"] {
-        servers.push(spawn_axum(
-            name,
-            listeners.take(name)?,
-            auxiliary::router(name, &applications.project_id),
-            shutdown.subscribe(),
-            failed.clone(),
-        ));
-    }
+    servers.push(spawn_axum(
+        "tasks",
+        listeners.take("tasks")?,
+        auxiliary::router("tasks", &applications.project_id),
+        shutdown.subscribe(),
+        failed.clone(),
+    ));
     servers.push(spawn_axum(
         "firestore.websocket",
         listeners.take("firestore.websocket")?,
@@ -1043,188 +1095,77 @@ fn spawn_firestore(
     })
 }
 
-async fn spawn_functions_host(
-    config: &SuiteConfig,
-    logging: &LoggingRuntime,
-) -> Result<(Child, watch::Receiver<functions_readiness::Signal>), SuiteRuntimeError> {
-    let script = config.state_dir.join("functions-host.cjs");
-    tokio::fs::write(&script, FUNCTIONS_HOST_SOURCE)
-        .await
-        .map_err(|error| failure(format!("failed to materialize Functions host: {error}")))?;
-    let mut command = Command::new(&config.node);
-    command
-        .arg(&script)
-        .arg("--firebase-tools-root")
-        .arg(&config.firebase_tools_root)
-        .arg("--project-dir")
-        .arg(&config.project_dir)
-        .arg("--config")
-        .arg(&config.firebase_json)
-        .arg("--project-id")
-        .arg(&config.project_id)
-        .arg("--host")
-        .arg(&config.host)
-        .arg("--functions-port")
-        .arg(config.ports.functions.to_string())
-        .arg("--firestore-port")
-        .arg(config.ports.firestore.to_string())
-        .arg("--auth-port")
-        .arg(config.ports.auth.to_string())
-        .arg("--storage-port")
-        .arg(config.ports.storage.to_string())
-        .arg("--pubsub-port")
-        .arg(config.ports.pubsub.to_string())
-        .arg("--hub-port")
-        .arg(config.ports.hub.to_string())
-        .arg("--ui-port")
-        .arg(config.ports.ui.to_string())
-        .arg("--eventarc-port")
-        .arg(config.ports.eventarc.to_string())
-        .arg("--tasks-port")
-        .arg(config.ports.tasks.to_string())
-        .arg("--default-bucket")
-        .arg(&config.default_bucket)
-        .current_dir(&config.project_dir)
-        .stdin(if cfg!(windows) {
-            Stdio::piped()
-        } else {
-            Stdio::null()
+/// Adapts the runtime's blocking-function configuration for the Auth front.
+struct BlockingBridge(fireside_functions_runtime::BlockingHandle);
+
+impl fireside_auth_front::BlockingResolver for BlockingBridge {
+    fn resolve(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = fireside_auth_front::BlockingFunctions> + Send + '_>,
+    > {
+        Box::pin(async move {
+            let config = self.0.config().await;
+            fireside_auth_front::BlockingFunctions {
+                before_create: config.before_create,
+                before_sign_in: config.before_sign_in,
+                forward_access_token: config.forward_access_token,
+                forward_id_token: config.forward_id_token,
+                forward_refresh_token: config.forward_refresh_token,
+            }
         })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = command
-        .spawn()
-        .map_err(|error| failure(format!("failed to start Functions host: {error}")))?;
-    let (ready_sender, ready) = watch::channel(None);
-    if let Some(stdout) = child.stdout.take() {
-        let logging = logging.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout);
-            while let Ok(Some(line)) = log_input::next(&mut lines).await {
-                if let Some(receipt) = line.strip_prefix("FIRESIDE_FUNCTIONS_HOST_READY ") {
-                    let _ = ready_sender.send(Some(functions_readiness::Receipt::parse(receipt)));
-                } else if let Some(receipt) = line.strip_prefix("FIRESIDE_FUNCTIONS_HOST_UPDATED ")
-                {
-                    let _ = ready_sender
-                        .send(Some(functions_readiness::Receipt::parse_update(receipt)));
-                }
-                println!("{line}");
-                logging.record("INFO", Some("functions"), line);
-            }
-        });
-    }
-    if let Some(stderr) = child.stderr.take() {
-        let logging = logging.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr);
-            while let Ok(Some(line)) = log_input::next(&mut lines).await {
-                eprintln!("{line}");
-                logging.record("WARN", Some("functions"), line);
-            }
-        });
-    }
-    Ok((child, ready))
-}
-
-async fn wait_for_functions(
-    child: &mut Child,
-    ready: &mut watch::Receiver<functions_readiness::Signal>,
-    endpoint: &str,
-    minimum: usize,
-) -> Result<FunctionsInventory, SuiteRuntimeError> {
-    let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| failure(format!("Functions host status failed: {error}")))?
-        {
-            return Err(failure(format!(
-                "Functions host exited before readiness: {status}"
-            )));
-        }
-        // Mark only the receipt being verified. A registration arriving during
-        // the HTTP check stays pending for the running-suite refresh loop.
-        let receipt = ready.borrow_and_update().clone();
-        if let Some(receipt) = receipt {
-            let receipt = receipt.map_err(failure)?;
-            return tokio::time::timeout_at(
-                deadline,
-                functions_readiness::discover(endpoint, &receipt, minimum),
-            )
-            .await
-            .map_err(|_| failure("Functions readiness deadline expired while checking inventory"))?
-            .map_err(failure);
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(failure(format!(
-                "Functions host did not discover {minimum} functions within {} seconds",
-                READY_TIMEOUT.as_secs()
-            )));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
     }
 }
 
-async fn stop_functions_host(child: &mut Child) -> Result<(), SuiteRuntimeError> {
-    if child
-        .try_wait()
-        .map_err(|error| failure(format!("Functions host status failed: {error}")))?
-        .is_some()
-    {
-        return Ok(());
-    }
-    #[cfg(windows)]
-    if let Some(mut input) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt as _;
-        input
-            .write_all(b"FIRESIDE_SHUTDOWN\n")
+async fn start_functions_runtime(
+    config: &SuiteConfig,
+    triggers: TriggerRegistry,
+    logging: &LoggingRuntime,
+) -> Result<FunctionsRuntime, SuiteRuntimeError> {
+    let firebase_json: serde_json::Value = serde_json::from_slice(
+        &tokio::fs::read(&config.firebase_json)
             .await
-            .map_err(|error| failure(format!("failed to stop Functions host: {error}")))?;
-        input
-            .shutdown()
-            .await
-            .map_err(|error| failure(format!("failed to close Functions control: {error}")))?;
-    }
-    #[cfg(unix)]
-    if let Some(pid) = child.id() {
-        let status = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status()
-            .await
-            .map_err(|error| failure(format!("failed to signal Functions host: {error}")))?;
-        if !status.success() {
-            return Err(failure(format!(
-                "failed to signal Functions host: {status}"
-            )));
+            .map_err(|error| failure(format!("failed to read firebase.json: {error}")))?,
+    )
+    .map_err(|error| failure(format!("invalid firebase.json: {error}")))?;
+    let codebases: Vec<CodebaseConfig> = codebases_from_config(&firebase_json, &config.project_dir);
+    let host = |port: u16| format!("{}:{port}", config.host);
+    let runtime_config = FunctionsRuntimeConfig {
+        project_id: config.project_id.clone(),
+        project_alias: None,
+        host: config.host.clone(),
+        functions_port: config.ports.functions,
+        project_dir: config.project_dir.clone(),
+        node: config.node.clone(),
+        state_dir: config.state_dir.clone(),
+        default_bucket: config.default_bucket.clone(),
+        hosts: EmulatorHosts {
+            firestore: host(config.ports.firestore),
+            auth: host(config.ports.auth),
+            storage: host(config.ports.storage),
+            pubsub: host(config.ports.pubsub),
+            hub: host(config.ports.hub),
+            eventarc: host(config.ports.eventarc),
+            tasks: host(config.ports.tasks),
+        },
+        codebases,
+        extensions: Vec::new(),
+        inspect: config.inspect_functions.clone(),
+    };
+    let sink_logging = logging.clone();
+    let sink = LogSink::new(move |event: LogEvent| {
+        let label = event.label.clone();
+        let line = format!("{label}: {}", event.message);
+        match event.level.as_str() {
+            "ERROR" | "WARN" => eprintln!("fireside {line}"),
+            "DEBUG" => {}
+            _ => println!("fireside {line}"),
         }
-    }
-    match tokio::time::timeout(Duration::from_secs(30), child.wait()).await {
-        Ok(Ok(status)) if expected_functions_shutdown(status) => Ok(()),
-        Ok(Ok(status)) => Err(failure(format!("Functions host shutdown failed: {status}"))),
-        Ok(Err(error)) => Err(failure(format!("Functions host wait failed: {error}"))),
-        Err(_) => {
-            child
-                .start_kill()
-                .map_err(|error| failure(format!("Functions host kill failed: {error}")))?;
-            let _ = child.wait().await;
-            Err(failure("Functions host did not stop within 30 seconds"))
-        }
-    }
-}
-
-fn expected_functions_shutdown(status: std::process::ExitStatus) -> bool {
-    if status.success() {
-        return true;
-    }
-    #[cfg(unix)]
-    {
-        status.signal() == Some(15)
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
+        sink_logging.record(&event.level, Some("functions"), line);
+    });
+    FunctionsRuntime::start(runtime_config, triggers, sink)
+        .await
+        .map_err(|error| failure(format!("Functions runtime failed to start: {error}")))
 }
 
 async fn shutdown_signal() -> Result<(), SuiteRuntimeError> {
@@ -1531,15 +1472,6 @@ mod tests {
             .validate(&query)
             .expect("the official suite does not enforce production indexes");
         assert!(suite_query_policy(Some("not-json")).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn coordinator_sigterm_is_a_clean_functions_shutdown() {
-        use std::os::unix::process::ExitStatusExt as _;
-
-        let status = std::process::ExitStatus::from_raw(15);
-        assert!(expected_functions_shutdown(status));
     }
 
     #[cfg(unix)]

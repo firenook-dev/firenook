@@ -1757,13 +1757,16 @@ async fn commit_staging(
         data.next_id = data.next_id.saturating_add(1);
         let generation = generation(&mut data);
         let token = spec.firebase.then(|| {
-            stable_id(&[
-                &state.config.project,
-                spec.bucket,
-                spec.name,
-                "download",
-                &data.next_id.to_string(),
-            ])
+            uuid_shaped(&Sha256::digest(
+                stable_id(&[
+                    &state.config.project,
+                    spec.bucket,
+                    spec.name,
+                    "download",
+                    &data.next_id.to_string(),
+                ])
+                .as_bytes(),
+            ))
         });
         (generation, token)
     };
@@ -1810,7 +1813,11 @@ async fn commit_staging(
         let _ = tokio::fs::remove_file(uploaded.path).await;
         return Err(error.upload_final());
     }
-    if spec.firebase && object.content_disposition.is_none() {
+    // The official emulator dispatches finalize before defaulting the
+    // disposition on the (shared) stored record, so the finalize event lacks
+    // it while later events and responses carry "inline".
+    let disposition_defaulted = spec.firebase && object.content_disposition.is_none();
+    if disposition_defaulted {
         object.content_disposition = Some("inline".to_owned());
     }
     let final_path = state.config.data_dir.join(&data_file);
@@ -1829,7 +1836,13 @@ async fn commit_staging(
             metadata::Change::Object(&object_key(spec.bucket, spec.name)),
         )?;
     }
-    state.dispatch(StorageEvent::Finalize, &object);
+    if disposition_defaulted {
+        let mut event_object = object.clone();
+        event_object.content_disposition = None;
+        state.dispatch(StorageEvent::Finalize, &event_object);
+    } else {
+        state.dispatch(StorageEvent::Finalize, &object);
+    }
     Ok(object)
 }
 
@@ -1994,7 +2007,7 @@ impl StorageState {
             (
                 "v1",
                 json!({
-                    "eventId": stable_id(&[&self.config.project, &object.bucket, &object.name, legacy, &object.generation.to_string(), &object.metageneration.to_string()]),
+                    "eventId": decimal_id(&stable_id(&[&self.config.project, &object.bucket, &object.name, legacy, &object.generation.to_string(), &object.metageneration.to_string()])),
                     "timestamp": timestamp,
                     "eventType": legacy,
                     "resource": {
@@ -2010,7 +2023,7 @@ impl StorageState {
                 "v2",
                 json!({
                     "specversion": "1.0",
-                    "id": stable_id(&[&self.config.project, &object.bucket, &object.name, cloud, &object.generation.to_string(), &object.metageneration.to_string()]),
+                    "id": uuid_shaped(&Sha256::digest(stable_id(&[&self.config.project, &object.bucket, &object.name, cloud, &object.generation.to_string(), &object.metageneration.to_string()]).as_bytes())),
                     "type": cloud,
                     "source": source,
                     "time": timestamp,
@@ -2381,13 +2394,51 @@ fn percent_encode(value: &str) -> String {
 fn next_token(state: &StorageState, bucket: &str, name: &str) -> String {
     let mut data = lock(&state.inner);
     data.next_id = data.next_id.saturating_add(1);
-    stable_id(&[
-        &state.config.project,
+    let mut digest = Sha256::new();
+    for part in [
+        state.config.project.as_str(),
         bucket,
         name,
         "download",
         &data.next_id.to_string(),
-    ])
+    ] {
+        digest.update(part.as_bytes());
+        digest.update([0]);
+    }
+    uuid_shaped(&digest.finalize())
+}
+
+/// A thirteen-digit decimal id derived from `seed`: the official legacy
+/// storage event id is `Date.now()` as a string.
+fn decimal_id(seed: &str) -> String {
+    let digest = Sha256::digest(seed.as_bytes());
+    let mut value = u64::from_le_bytes(digest[..8].try_into().expect("eight bytes"));
+    value %= 9_000_000_000_000;
+    format!("{}", 1_000_000_000_000 + value)
+}
+
+/// Formats sixteen digest bytes as a version-4 UUID, the official emulator's
+/// download-token shape (`uuid.v4()`).
+fn uuid_shaped(bytes: &[u8]) -> String {
+    let mut octets = [0u8; 16];
+    octets.copy_from_slice(&bytes[..16]);
+    octets[6] = (octets[6] & 0x0f) | 0x40;
+    octets[8] = (octets[8] & 0x3f) | 0x80;
+    let hex = octets
+        .iter()
+        .fold(String::with_capacity(32), |mut text, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(text, "{byte:02x}");
+            text
+        });
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 fn generation(data: &mut StorageData) -> u64 {

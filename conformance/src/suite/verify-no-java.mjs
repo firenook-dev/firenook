@@ -15,7 +15,9 @@ import {setTimeout as delay} from 'node:timers/promises';
 assert.equal(process.argv.length,7,'binary toolsRoot sdkRoot emulator-cache fresh-output');
 const [binary,tools,sdk,cache,output]=process.argv.slice(2,7).map(path=>resolve(path));
 assert.equal(JSON.parse(await readFile(join(tools,'package.json'))).version,'15.22.0');
-const project='demo-fireside-no-java';
+// The id must not contain the word the assertion below scans for: the owned
+// Functions runtime prints HTTPS function URLs (with the project id) at startup.
+const project='demo-fireside-without-jvm';
 const bucket=project+'.appspot.com';
 await mkdir(output,{mode:0o700});
 const json=(name,value)=>writeFile(join(output,name),JSON.stringify(value,null,2)+'\n');
@@ -29,7 +31,7 @@ await cp(join(cache,'ui-v1.15.0.zip'),join(assets,'ui-v1.15.0.zip'));
 
 await mkdir(join(output,'functions/node_modules'),{recursive:true});
 await symlink(sdk,join(output,'functions/node_modules/firebase-functions'),'dir');
-await json('functions/package.json',{name:'no-java-fixture',version:'1.0.0',main:'index.js',engines:{node:'24'}});
+await json('functions/package.json',{name:'without-jvm-fixture',version:'1.0.0',main:'index.js',engines:{node:'24'}});
 await writeFile(join(output,'functions/index.js'),"const {onRequest}=require('firebase-functions/v2/https');exports.ping=onRequest((req,res)=>res.json({ok:true}));\n");
 await writeFile(join(output,'firestore.rules'),"rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} { allow read, write: if true; }\n  }\n}\n");
 // A single-file Storage ruleset (the common firebase.json shape) with owner

@@ -8,8 +8,10 @@
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
+use std::future::Future;
 use std::path::{Path as FilePath, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -32,6 +34,32 @@ const LOOKUP_KIND: &str = "identitytoolkit#GetAccountInfoResponse";
 const UPDATE_KIND: &str = "identitytoolkit#SetAccountInfoResponse";
 const DELETE_KIND: &str = "identitytoolkit#DeleteAccountResponse";
 const AUTH_SERVICE: &str = "firebaseauth.googleapis.com";
+const BLOCKING_TIMEOUT_MS: u64 = 60_000;
+const BEFORE_CREATE: &str = "beforeCreate";
+const BEFORE_SIGN_IN: &str = "beforeSignIn";
+
+/// Blocking-function endpoints as the Functions runtime registered them
+/// (`blockingFunctions.triggers` and `forwardInboundCredentials`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockingFunctions {
+    pub before_create: Option<String>,
+    pub before_sign_in: Option<String>,
+    pub forward_access_token: bool,
+    pub forward_id_token: bool,
+    pub forward_refresh_token: bool,
+}
+
+/// Resolves the current blocking-function configuration at sign-in time.
+pub trait BlockingResolver: Send + Sync {
+    fn resolve(&self) -> Pin<Box<dyn Future<Output = BlockingFunctions> + Send + '_>>;
+}
+
+/// What a blocking function asked the emulator to change.
+#[derive(Debug, Default)]
+struct BlockingOutcome {
+    updates: JsonMap<String, JsonValue>,
+    extra_claims: Option<JsonMap<String, JsonValue>>,
+}
 
 mod oauth;
 
@@ -53,6 +81,14 @@ pub struct AuthRuntime {
 }
 
 impl AuthRuntime {
+    /// Installs the resolver consulted for blocking functions on every
+    /// sign-up and password sign-in.
+    pub fn set_blocking_functions(&self, resolver: Arc<dyn BlockingResolver>) {
+        if let Ok(mut slot) = self.state.blocking.write() {
+            *slot = Some(resolver);
+        }
+    }
+
     /// Builds a runtime with optional durable JSON state.
     pub fn new(
         project: &str,
@@ -70,6 +106,7 @@ impl AuthRuntime {
             state_file,
             queue,
             background,
+            blocking: Arc::new(RwLock::new(None)),
         };
         let application = Router::new()
             .route("/", get(readiness))
@@ -84,6 +121,10 @@ impl AuthRuntime {
             .route(
                 "/identitytoolkit.googleapis.com/v1/accounts:update",
                 post(client_update),
+            )
+            .route(
+                "/identitytoolkit.googleapis.com/v1/accounts:delete",
+                post(client_delete),
             )
             .route(
                 "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword",
@@ -260,6 +301,7 @@ struct AuthState {
     state_file: Option<PathBuf>,
     queue: DispatchQueue,
     background: TriggerRegistry,
+    blocking: Arc<RwLock<Option<Arc<dyn BlockingResolver>>>>,
 }
 
 impl AuthState {
@@ -323,6 +365,32 @@ impl AuthState {
                 field
             };
             if let Some(value) = user.get(source) {
+                auth_user[field] = value.clone();
+            }
+        }
+        if let Some(providers) = user.get("providerUserInfo").and_then(JsonValue::as_array) {
+            // `createProviderUserInfoPayload`: absent fields are dropped by JSON.
+            let provider_data: Vec<JsonValue> = providers
+                .iter()
+                .map(|info| {
+                    let mut entry = json!({
+                        "rawId": info.get("rawId"),
+                        "providerId": info.get("providerId"),
+                        "displayName": info.get("displayName"),
+                        "email": info.get("email"),
+                        "federatedId": info.get("federatedId"),
+                        "phoneNumber": info.get("phoneNumber"),
+                        "photoURL": info.get("photoUrl"),
+                        "screenName": info.get("screenName"),
+                    });
+                    strip_nulls(&mut entry);
+                    entry
+                })
+                .collect();
+            auth_user["providerData"] = json!(provider_data);
+        }
+        for field in ["tenantId", "mfaInfo"] {
+            if let Some(value) = user.get(field) {
                 auth_user[field] = value.clone();
             }
         }
@@ -462,19 +530,25 @@ async fn sign_up(
     State(state): State<AuthState>,
     Json(request): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, ApiError> {
-    let email = required(&request, "email")?;
-    let password = required(&request, "password")?;
-    let display_name = request.get("displayName").and_then(JsonValue::as_str);
+    let email = required(&request, "email")?.to_owned();
+    let password = required(&request, "password")?.to_owned();
+    let display_name = request
+        .get("displayName")
+        .and_then(JsonValue::as_str)
+        .map(str::to_owned);
     let now = now_millis();
-    let (user, response, event_id) = {
+    let blocking = state.blocking_functions().await;
+    // Reserve the identity first so the blocking function sees the uid the
+    // user will be created with; the record is stored only after it answers.
+    let (mut user, uid, salt, digest) = {
         let mut data = lock(&state.inner);
         let project = data.projects.entry(state.project.clone()).or_default();
-        if find_by_email(project, email).is_some() {
+        if find_by_email(project, &email).is_some() {
             return Err(ApiError::message(StatusCode::BAD_REQUEST, "EMAIL_EXISTS"));
         }
-        let uid = next_identifier(project, &state.project, email, "user");
+        let uid = next_identifier(project, &state.project, &email, "user");
         let salt = next_identifier(project, &state.project, &uid, "salt");
-        let digest = password_digest(&salt, password);
+        let digest = password_digest(&salt, &password);
         let mut user = json!({
             "localId": uid,
             "lastLoginAt": now.to_string(),
@@ -491,13 +565,50 @@ async fn sign_up(
             }],
             "lastRefreshAt": iso_from_millis(now),
         });
-        if let Some(name) = display_name {
+        if let Some(name) = &display_name {
             user["displayName"] = json!(name);
             user["providerUserInfo"][0]["displayName"] = json!(name);
+        }
+        (user, uid, salt, digest)
+    };
+    // Official `signUp` hands beforeCreate the pending record before provider
+    // info is derived, so the handler sees an empty provider list.
+    let mut before_create = user.clone();
+    before_create["providerUserInfo"] = json!([]);
+    let created =
+        fetch_blocking_function(&state, &blocking, BEFORE_CREATE, &before_create, "password")
+            .await?;
+    apply_blocking_updates(&mut user, &created.updates);
+    // The account exists from here on (official `createUserWithLocalId`,
+    // which also fires the create event), even if beforeSignIn then rejects.
+    let event_id = {
+        let mut data = lock(&state.inner);
+        let project = data.projects.entry(state.project.clone()).or_default();
+        if find_by_email(project, &email).is_some() {
+            return Err(ApiError::message(StatusCode::BAD_REQUEST, "EMAIL_EXISTS"));
         }
         project
             .passwords
             .insert(uid.clone(), PasswordSecret { salt, digest });
+        project.users.insert(uid.clone(), user.clone());
+        let event_id = lifecycle_event_id(project, &state.project, &uid, Lifecycle::Create);
+        state.persist(&data).map_err(internal)?;
+        event_id
+    };
+    state.dispatch_lifecycle(Lifecycle::Create, &user, event_id);
+    let mut extra_claims = None;
+    if user.get("disabled").and_then(JsonValue::as_bool) != Some(true) {
+        let signed_in =
+            fetch_blocking_function(&state, &blocking, BEFORE_SIGN_IN, &user, "password").await?;
+        apply_blocking_updates(&mut user, &signed_in.updates);
+        extra_claims = signed_in.extra_claims;
+    }
+    if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
+        return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
+    }
+    let response = {
+        let mut data = lock(&state.inner);
+        let project = data.projects.entry(state.project.clone()).or_default();
         project.users.insert(uid.clone(), user.clone());
         let grant = RefreshGrant {
             uid: uid.clone(),
@@ -505,7 +616,7 @@ async fn sign_up(
             auth_time: now / 1000,
             identities: json!({ "email": [email] }),
         };
-        let auth = issue_auth(project, &state.project, &user, grant);
+        let auth = issue_auth(project, &state.project, &user, grant, extra_claims.as_ref());
         let mut response = json!({
             "kind": SIGNUP_KIND,
             "localId": uid,
@@ -514,21 +625,26 @@ async fn sign_up(
             "refreshToken": auth.refresh_token,
             "expiresIn": "3600",
         });
-        if let Some(name) = display_name {
-            response["displayName"] = json!(name);
+        if let Some(name) = user.get("displayName") {
+            response["displayName"] = name.clone();
         }
-        let event_id = lifecycle_event_id(project, &state.project, &uid, Lifecycle::Create);
         state.persist(&data).map_err(internal)?;
-        (user, response, event_id)
+        response
     };
-    state.dispatch_lifecycle(Lifecycle::Create, &user, event_id);
     Ok(Json(response))
 }
 
 async fn client_lookup(
     State(state): State<AuthState>,
+    headers: HeaderMap,
     Json(request): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, ApiError> {
+    // The unscoped route accepts the owner bearer token as a privileged
+    // lookup by localId/email/phoneNumber, like the official emulator.
+    if bearer_is_owner(&headers) {
+        let project = state.project.clone();
+        return admin_lookup(State(state), Path(project), Json(request)).await;
+    }
     let uid = token_uid(&request, "idToken", &state.project)?;
     let data = lock(&state.inner);
     let project = data
@@ -537,6 +653,19 @@ async fn client_lookup(
         .ok_or_else(user_not_found)?;
     let user = project.users.get(&uid).ok_or_else(user_not_found)?;
     Ok(Json(json!({ "kind": LOOKUP_KIND, "users": [user] })))
+}
+
+async fn client_delete(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    Json(request): Json<JsonValue>,
+) -> Result<Json<JsonValue>, ApiError> {
+    let project = state.project.clone();
+    if bearer_is_owner(&headers) {
+        return admin_delete(State(state), Path(project), Json(request)).await;
+    }
+    let uid = token_uid(&request, "idToken", &project)?;
+    admin_delete(State(state), Path(project), Json(json!({ "localId": uid }))).await
 }
 
 async fn client_update(
@@ -560,51 +689,72 @@ async fn sign_in_password(
     State(state): State<AuthState>,
     Json(request): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, ApiError> {
-    let email = required(&request, "email")?;
-    let password = required(&request, "password")?;
+    let email = required(&request, "email")?.to_owned();
+    let password = required(&request, "password")?.to_owned();
+    let blocking = state.blocking_functions().await;
+    let now = now_millis();
+    let (uid, mut user) = {
+        let mut data = lock(&state.inner);
+        let project = data
+            .projects
+            .get_mut(&state.project)
+            .ok_or_else(invalid_password)?;
+        let uid = find_by_email(project, &email)
+            .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "EMAIL_NOT_FOUND"))?;
+        let user = project.users.get_mut(&uid).ok_or_else(invalid_password)?;
+        let salt = user
+            .get("salt")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(invalid_password)?;
+        let digest = user
+            .get("passwordHash")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(invalid_password)?;
+        let current = password_digest(salt, &password);
+        if current != digest && legacy_password_digest(salt, &password) != digest {
+            return Err(invalid_password());
+        }
+        if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
+            return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
+        }
+        // Successful login upgrades an old Fireside-only digest into the official
+        // emulator's portable development format for subsequent exports.
+        user["passwordHash"] = json!(current);
+        (uid, user.clone())
+    };
+    let outcome =
+        fetch_blocking_function(&state, &blocking, BEFORE_SIGN_IN, &user, "password").await?;
+    apply_blocking_updates(&mut user, &outcome.updates);
+    user["lastLoginAt"] = json!(now.to_string());
+    user["lastRefreshAt"] = json!(iso_from_millis(now));
+    if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
+        return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
+    }
     let mut data = lock(&state.inner);
     let project = data
         .projects
         .get_mut(&state.project)
         .ok_or_else(invalid_password)?;
-    let uid = find_by_email(project, email).ok_or_else(invalid_password)?;
-    let now = now_millis();
-    let user = project.users.get_mut(&uid).ok_or_else(invalid_password)?;
-    let salt = user
-        .get("salt")
-        .and_then(JsonValue::as_str)
-        .ok_or_else(invalid_password)?;
-    let digest = user
-        .get("passwordHash")
-        .and_then(JsonValue::as_str)
-        .ok_or_else(invalid_password)?;
-    let current = password_digest(salt, password);
-    if current != digest && legacy_password_digest(salt, password) != digest {
-        return Err(invalid_password());
-    }
-    if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
-        return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
-    }
-    // Successful login upgrades an old Fireside-only digest into the official
-    // emulator's portable development format for subsequent exports.
-    user["passwordHash"] = json!(current);
-    user["lastLoginAt"] = json!(now.to_string());
-    user["lastRefreshAt"] = json!(iso_from_millis(now));
-    let user = user.clone();
+    project.users.insert(uid.clone(), user.clone());
     let grant = RefreshGrant {
         uid: uid.clone(),
         provider: "password".to_owned(),
         auth_time: now / 1000,
         identities: json!({ "email": [email] }),
     };
-    let auth = issue_auth(project, &state.project, &user, grant);
+    let auth = issue_auth(
+        project,
+        &state.project,
+        &user,
+        grant,
+        outcome.extra_claims.as_ref(),
+    );
     state.persist(&data).map_err(internal)?;
     Ok(Json(json!({
         "kind": "identitytoolkit#VerifyPasswordResponse",
         "registered": true,
         "localId": uid,
         "email": email,
-        "displayName": user.get("displayName"),
         "idToken": auth.id_token,
         "refreshToken": auth.refresh_token,
         "expiresIn": "3600"
@@ -650,7 +800,7 @@ async fn sign_in_custom_token(
             auth_time: now / 1000,
             identities: json!({}),
         };
-        let auth = issue_auth(project, &state.project, &user, grant);
+        let auth = issue_auth(project, &state.project, &user, grant, None);
         let response = json!({
             "kind": "identitytoolkit#VerifyCustomTokenResponse",
             "isNewUser": is_new,
@@ -737,7 +887,7 @@ async fn sign_in_with_idp(
             auth_time: now / 1000,
             identities: JsonValue::Object(identities),
         };
-        let auth = issue_auth(project, &state.project, &user, grant);
+        let auth = issue_auth(project, &state.project, &user, grant, None);
         let raw_user_info = idp_raw_user_info(subject, &profile);
         let mut response = json!({
             "kind": "identitytoolkit#VerifyAssertionResponse", "context": "",
@@ -832,7 +982,7 @@ async fn refresh_token(
     // The official emulator reuses the grant, including overlapping requests
     // from tabs sharing persisted Auth state. Refresh is not a new sign-in and
     // must neither consume this grant nor grow the durable refresh-token map.
-    let id_token = make_id_token(&state.project, user, grant);
+    let id_token = make_id_token(&state.project, user, grant, None);
     Ok(Json(json!({
         "id_token": id_token, "access_token": id_token,
         "expires_in": "3600", "refresh_token": refresh,
@@ -1097,13 +1247,267 @@ struct IssuedAuth {
     refresh_token: String,
 }
 
+impl AuthState {
+    async fn blocking_functions(&self) -> BlockingFunctions {
+        let resolver = self.blocking.read().ok().and_then(|slot| slot.clone());
+        match resolver {
+            Some(resolver) => resolver.resolve().await,
+            None => BlockingFunctions::default(),
+        }
+    }
+}
+
+fn blocking_error(message: &str) -> ApiError {
+    ApiError::message(StatusCode::BAD_REQUEST, message)
+}
+
+/// `generateBlockingFunctionJwt`: the unsigned JWT the handler decodes.
+fn blocking_jwt(
+    project: &str,
+    event: &str,
+    url: &str,
+    user: &JsonValue,
+    sign_in_method: &str,
+) -> String {
+    let issued_at = now_seconds();
+    let digest = Sha256::digest(
+        format!(
+            "{project}:{event}:{issued_at}:{}",
+            user.get("localId")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("")
+        )
+        .as_bytes(),
+    );
+    // `randomBase64UrlStr(16)` in the official emulator.
+    let event_id = URL_SAFE_NO_PAD.encode(&digest[..12]);
+    let provider_data: Vec<JsonValue> = user
+        .get("providerUserInfo")
+        .and_then(JsonValue::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|info| {
+                    json!({
+                        "provider_id": info.get("providerId"),
+                        "display_name": info.get("displayName"),
+                        "photo_url": info.get("photoUrl"),
+                        "email": info.get("email"),
+                        "uid": info.get("rawId"),
+                        "phone_number": info.get("phoneNumber"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let custom_claims = user
+        .get("customAttributes")
+        .and_then(JsonValue::as_str)
+        .and_then(|value| serde_json::from_str::<JsonValue>(value).ok())
+        .unwrap_or_else(|| json!({}));
+    let mut user_record = json!({
+        "uid": user.get("localId"),
+        "email": user.get("email"),
+        "email_verified": user.get("emailVerified"),
+        "display_name": user.get("displayName"),
+        "photo_url": user.get("photoUrl"),
+        "disabled": user.get("disabled"),
+        "phone_number": user.get("phoneNumber"),
+        "custom_claims": custom_claims,
+        "provider_data": provider_data,
+    });
+    let last_login = user
+        .get("lastLoginAt")
+        .and_then(JsonValue::as_str)
+        .and_then(|value| value.parse::<i64>().ok());
+    let created = user
+        .get("createdAt")
+        .and_then(JsonValue::as_str)
+        .and_then(|value| value.parse::<i64>().ok());
+    if last_login.is_some() || created.is_some() {
+        user_record["metadata"] = json!({
+            "last_sign_in_time": last_login,
+            "creation_time": created,
+        });
+    }
+    let mut payload = json!({
+        "iss": format!("https://securetoken.google.com/{project}"),
+        "aud": url,
+        "iat": issued_at,
+        "exp": issued_at + i64::try_from(BLOCKING_TIMEOUT_MS / 100).unwrap_or(i64::MAX),
+        "event_id": event_id,
+        "event_type": event,
+        "user_agent": "NotYetSupportedInFirebaseAuthEmulator",
+        "ip_address": "127.0.0.1",
+        "locale": "en",
+        "user_record": user_record,
+        "sub": user.get("localId"),
+        "sign_in_method": sign_in_method,
+    });
+    strip_nulls(&mut payload);
+    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
+    let body = URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&payload).expect("JSON serialization cannot fail"));
+    format!("{header}.{body}.")
+}
+
+/// JSON drops `undefined`; the official payload builder leaves absent user
+/// fields undefined, so nulls are removed to match.
+fn strip_nulls(value: &mut JsonValue) {
+    if let Some(map) = value.as_object_mut() {
+        map.retain(|_, child| !child.is_null());
+        for child in map.values_mut() {
+            strip_nulls(child);
+        }
+    } else if let Some(items) = value.as_array_mut() {
+        for item in items {
+            strip_nulls(item);
+        }
+    }
+}
+
+/// `fetchBlockingFunction` + `processBlockingFunctionResponse`.
+async fn fetch_blocking_function(
+    state: &AuthState,
+    config: &BlockingFunctions,
+    event: &str,
+    user: &JsonValue,
+    sign_in_method: &str,
+) -> Result<BlockingOutcome, ApiError> {
+    let url = match event {
+        BEFORE_CREATE => config.before_create.as_deref(),
+        _ => config.before_sign_in.as_deref(),
+    };
+    let Some(url) = url else {
+        return Ok(BlockingOutcome::default());
+    };
+    let jwt = blocking_jwt(&state.project, event, url, user, sign_in_method);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(BLOCKING_TIMEOUT_MS))
+        .build()
+        .map_err(|error| {
+            blocking_error(&format!(
+                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Failed to make request to {url}.)) {error}"
+            ))
+        })?;
+    let response = match client
+        .post(url)
+        .header("content-type", "application/json")
+        .body(json!({ "data": { "jwt": jwt } }).to_string())
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) if error.is_timeout() => {
+            return Err(blocking_error(&format!(
+                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Deadline exceeded making request to {url}.))"
+            )));
+        }
+        Err(_) => {
+            return Err(blocking_error(&format!(
+                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Failed to make request to {url}.))"
+            )));
+        }
+    };
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(blocking_error(&format!(
+            "BLOCKING_FUNCTION_ERROR_RESPONSE : ((HTTP request to {url} returned HTTP error {}: {text}))",
+            status.as_u16()
+        )));
+    }
+    let parsed: JsonValue = serde_json::from_str(&text).map_err(|_| {
+        blocking_error("BLOCKING_FUNCTION_ERROR_RESPONSE : ((Response body is not valid JSON.))")
+    })?;
+    process_blocking_response(&parsed, event)
+}
+
+/// `processBlockingFunctionResponse`: the updates a handler's `userRecord`
+/// requests through its `updateMask`.
+fn process_blocking_response(parsed: &JsonValue, event: &str) -> Result<BlockingOutcome, ApiError> {
+    let mut outcome = BlockingOutcome::default();
+    let Some(record) = parsed.get("userRecord").and_then(JsonValue::as_object) else {
+        return Ok(outcome);
+    };
+    let mask = record
+        .get("updateMask")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| {
+            blocking_error(
+                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Response UserRecord is missing updateMask.))",
+            )
+        })?;
+    for field in mask.split(',') {
+        match field {
+            "displayName" | "photoUrl" => {
+                let value = record.get(field).cloned().unwrap_or(JsonValue::Null);
+                let text = match value {
+                    JsonValue::String(text) => text,
+                    JsonValue::Null => String::new(),
+                    other => other.to_string(),
+                };
+                outcome
+                    .updates
+                    .insert(field.to_owned(), JsonValue::String(text));
+            }
+            "disabled" | "emailVerified" => {
+                let truthy = record.get(field).is_some_and(|value| match value {
+                    JsonValue::Bool(flag) => *flag,
+                    JsonValue::Null => false,
+                    JsonValue::Number(number) => number.as_f64().is_some_and(|n| n != 0.0),
+                    JsonValue::String(text) => !text.is_empty(),
+                    _ => true,
+                });
+                outcome
+                    .updates
+                    .insert(field.to_owned(), JsonValue::Bool(truthy));
+            }
+            "customClaims" => {
+                let claims = record
+                    .get("customClaims")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                outcome.updates.insert(
+                    "customAttributes".to_owned(),
+                    JsonValue::String(claims.to_string()),
+                );
+            }
+            "sessionClaims" if event == BEFORE_SIGN_IN => {
+                outcome.extra_claims = record
+                    .get("sessionClaims")
+                    .and_then(JsonValue::as_object)
+                    .cloned();
+            }
+            _ => {}
+        }
+    }
+    Ok(outcome)
+}
+
+fn apply_blocking_updates(user: &mut JsonValue, updates: &JsonMap<String, JsonValue>) {
+    for (field, value) in updates {
+        user[field] = value.clone();
+        if field == "displayName"
+            && let Some(providers) = user
+                .get_mut("providerUserInfo")
+                .and_then(JsonValue::as_array_mut)
+        {
+            for provider in providers {
+                provider["displayName"] = value.clone();
+            }
+        }
+    }
+}
+
 fn issue_auth(
     project: &mut ProjectData,
     project_id: &str,
     user: &JsonValue,
     grant: RefreshGrant,
+    extra_claims: Option<&JsonMap<String, JsonValue>>,
 ) -> IssuedAuth {
-    let id_token = make_id_token(project_id, user, &grant);
+    let id_token = make_id_token(project_id, user, &grant, extra_claims);
     let refresh_token = next_identifier(project, project_id, &grant.uid, "refresh");
     project.refresh_tokens.insert(refresh_token.clone(), grant);
     IssuedAuth {
@@ -1112,7 +1516,12 @@ fn issue_auth(
     }
 }
 
-fn make_id_token(project: &str, user: &JsonValue, grant: &RefreshGrant) -> String {
+fn make_id_token(
+    project: &str,
+    user: &JsonValue,
+    grant: &RefreshGrant,
+    extra_claims: Option<&JsonMap<String, JsonValue>>,
+) -> String {
     let now = now_seconds();
     let mut claims = JsonMap::new();
     for (source, target) in [
@@ -1142,6 +1551,10 @@ fn make_id_token(project: &str, user: &JsonValue, grant: &RefreshGrant) -> Strin
         .and_then(|value| value.as_object().cloned())
     {
         claims.extend(custom);
+    }
+    if let Some(extra) = extra_claims {
+        // Session claims from beforeSignIn live in the token only.
+        claims.extend(extra.clone());
     }
     claims.insert("auth_time".to_owned(), json!(grant.auth_time));
     claims.insert("user_id".to_owned(), json!(grant.uid));
@@ -1174,6 +1587,19 @@ fn decode_jwt(token: &str) -> Result<JsonValue, ApiError> {
         .map_err(|_| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_ID_TOKEN"))?;
     serde_json::from_slice(&bytes)
         .map_err(|_| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_ID_TOKEN"))
+}
+
+/// Whether the request carries the emulator's privileged owner token.
+fn bearer_is_owner(headers: &HeaderMap) -> bool {
+    headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+        })
+        .is_some_and(|token| token.trim().eq_ignore_ascii_case("owner"))
 }
 
 fn token_uid(request: &JsonValue, field: &str, project: &str) -> Result<String, ApiError> {
@@ -1330,13 +1756,41 @@ fn find_by_email(project: &ProjectData, email: &str) -> Option<String> {
 
 fn next_identifier(project: &mut ProjectData, project_id: &str, seed: &str, kind: &str) -> String {
     project.next_id = project.next_id.saturating_add(1);
-    stable_hash(&[
+    let hash = stable_hash(&[
         project_id,
         seed,
         kind,
         &project.next_id.to_string(),
         &now_millis().to_string(),
-    ])
+    ]);
+    if kind == "user" {
+        // Official emulator localIds are 28 alphanumeric characters
+        // (`randomId(28)`); keep the same shape so consumers that key on it
+        // (document ids, path segments) behave identically.
+        alphanumeric_id(&hash, 28)
+    } else {
+        hash
+    }
+}
+
+fn alphanumeric_id(hash: &str, length: usize) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut digest = Sha256::new();
+    digest.update(hash.as_bytes());
+    let mut output = String::with_capacity(length);
+    let mut counter = 0u32;
+    while output.len() < length {
+        let mut round = digest.clone();
+        round.update(counter.to_le_bytes());
+        for byte in round.finalize() {
+            if output.len() == length {
+                break;
+            }
+            output.push(ALPHABET[usize::from(byte) % ALPHABET.len()] as char);
+        }
+        counter += 1;
+    }
+    output
 }
 
 fn lifecycle_event_id(
@@ -1345,7 +1799,7 @@ fn lifecycle_event_id(
     uid: &str,
     kind: Lifecycle,
 ) -> String {
-    next_identifier(
+    let hash = next_identifier(
         project,
         project_id,
         uid,
@@ -1353,6 +1807,32 @@ fn lifecycle_event_id(
             Lifecycle::Create => "auth-create",
             Lifecycle::Delete => "auth-delete",
         },
+    );
+    // `randomUUID()` in the official emulator's event body.
+    uuid_shaped(&hash)
+}
+
+/// Formats a digest of `seed` as a version-4 UUID.
+fn uuid_shaped(seed: &str) -> String {
+    let digest = Sha256::digest(seed.as_bytes());
+    let mut octets = [0u8; 16];
+    octets.copy_from_slice(&digest[..16]);
+    octets[6] = (octets[6] & 0x0f) | 0x40;
+    octets[8] = (octets[8] & 0x3f) | 0x80;
+    let hex = octets
+        .iter()
+        .fold(String::with_capacity(32), |mut text, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(text, "{byte:02x}");
+            text
+        });
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
     )
 }
 

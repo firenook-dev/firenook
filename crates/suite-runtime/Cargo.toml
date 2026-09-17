@@ -14,6 +14,7 @@ fireside-auth-front = { path = "../auth-front" }
 fireside-core-store = { path = "../core-store" }
 fireside-export-format = { path = "../export-format" }
 fireside-functions-bridge = { path = "../functions-bridge" }
+fireside-functions-runtime = { path = "../functions-runtime" }
 fireside-grpc-front = { path = "../grpc-front" }
 fireside-pubsub-front = { path = "../pubsub-front" }
 fireside-query-engine = { path = "../query-engine" }

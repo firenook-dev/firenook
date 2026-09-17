@@ -30,6 +30,13 @@ const V2_CREATED: &str = "google.cloud.firestore.document.v1.created";
 const V2_UPDATED: &str = "google.cloud.firestore.document.v1.updated";
 const V2_DELETED: &str = "google.cloud.firestore.document.v1.deleted";
 const V2_WRITTEN: &str = "google.cloud.firestore.document.v1.written";
+const AUTH_CONTEXT_SUFFIX: &str = ".withAuthContext";
+/// Response header the owned runtime sets to `handled` once a worker answered.
+pub const DELIVERY_HEADER: &str = "x-fireside-delivery";
+/// `DELIVERY_HEADER` value meaning the handler executed (no retry).
+pub const DELIVERY_HANDLED: &str = "handled";
+/// The emulated Firestore database location every v2 event carries.
+const EMULATED_LOCATION: &str = "us-central1";
 const FIRESTORE_EVENT_DATA_SCHEMA: &str = "https://github.com/googleapis/google-cloudevents/blob/main/proto/google/events/cloud/firestore/v1/data.proto";
 
 /// Shared trigger inventory populated by the Functions workload host.
@@ -150,9 +157,28 @@ pub struct FunctionSchedule {
 pub struct FunctionsInventory {
     /// Discovered codebase backends.
     pub backends: Vec<FunctionBackend>,
+    /// Trigger-key generation of the event definitions (`<id>-<generation>`).
+    pub generation: u32,
 }
 
 impl FunctionsInventory {
+    /// Builds the inventory from an in-process `/backends` document.
+    pub fn from_backends_json(json: &JsonValue, generation: u32) -> Result<Self, BridgeError> {
+        #[derive(serde::Deserialize)]
+        struct Response {
+            #[serde(default)]
+            backends: Vec<FunctionBackend>,
+        }
+        let mut response: Response = serde_json::from_value(json.clone()).map_err(|error| {
+            BridgeError(format!("invalid Functions inventory document: {error}"))
+        })?;
+        normalize_inventory(&mut response.backends)?;
+        Ok(Self {
+            backends: response.backends,
+            generation,
+        })
+    }
+
     /// Fetches the pinned workload host's `/backends` inventory.
     pub async fn discover(endpoint: &str) -> Result<Self, BridgeError> {
         #[derive(serde::Deserialize)]
@@ -186,6 +212,7 @@ impl FunctionsInventory {
         normalize_inventory(&mut response.backends)?;
         Ok(Self {
             backends: response.backends,
+            generation: 0,
         })
     }
 
@@ -276,6 +303,13 @@ impl TriggerRegistry {
             .remove(&(project.to_owned(), key.to_owned()));
     }
 
+    /// Removes a v2 trigger. Deleting an unknown key is idempotent.
+    pub fn remove_v2(&self, project: &str, key: &str) {
+        lock(&self.inner)
+            .v2
+            .remove(&(project.to_owned(), key.to_owned()));
+    }
+
     /// Registers or replaces a v2 Eventarc Firestore trigger.
     pub fn register_v2(
         &self,
@@ -291,8 +325,13 @@ impl TriggerRegistry {
             .and_then(JsonValue::as_object)
             .ok_or_else(|| invalid("document object is required"))?;
         let document_pattern = required_string(document.get("value"), "document.value")?;
-        if document.get("matchType").and_then(JsonValue::as_str) != Some("PATH_PATTERN") {
-            return Err(invalid("document.matchType must be PATH_PATTERN"));
+        // EXACT filters (a document path without wildcards) match the same
+        // way as a pattern without captures.
+        if !matches!(
+            document.get("matchType").and_then(JsonValue::as_str),
+            Some("PATH_PATTERN" | "EXACT")
+        ) {
+            return Err(invalid("document.matchType must be PATH_PATTERN or EXACT"));
         }
         validate_document_pattern(document_pattern)?;
         let trigger = Trigger {
@@ -457,7 +496,7 @@ fn build_v2_dispatch(
         trigger.project, trigger.database
     );
     let document = change.key.path().to_owned();
-    let headers = BTreeMap::from([
+    let mut headers = BTreeMap::from([
         ("ce-specversion".to_owned(), "1.0".to_owned()),
         ("ce-type".to_owned(), trigger.event_type.clone()),
         ("ce-source".to_owned(), source),
@@ -472,29 +511,25 @@ fn build_v2_dispatch(
             "ce-dataschema".to_owned(),
             FIRESTORE_EVENT_DATA_SCHEMA.to_owned(),
         ),
-        (
-            "ce-location".to_owned(),
-            trigger_location(&trigger.key).to_owned(),
-        ),
+        ("ce-location".to_owned(), EMULATED_LOCATION.to_owned()),
         ("ce-project".to_owned(), trigger.project.clone()),
         ("ce-database".to_owned(), trigger.database.clone()),
         ("ce-namespace".to_owned(), "(default)".to_owned()),
         ("ce-document".to_owned(), document),
         ("content-type".to_owned(), "application/protobuf".to_owned()),
     ]);
+    if trigger.event_type.ends_with(AUTH_CONTEXT_SUFFIX) {
+        // The official Firestore emulator reports every writer with these
+        // fixed values (recorded in functions-runtime-v1).
+        headers.insert("ce-authtype".to_owned(), "unknown".to_owned());
+        headers.insert("ce-authid".to_owned(), "fake-auth-id@gmail.com".to_owned());
+    }
     Ok(DispatchRequest {
         path,
         headers,
         body,
         event_id,
     })
-}
-
-fn trigger_location(key: &str) -> &str {
-    let first_separator = key.find('-');
-    let second_separator =
-        first_separator.and_then(|index| key[index + 1..].find('-').map(|next| index + next + 1));
-    second_separator.map_or("us-central1", |index| &key[..index])
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -525,10 +560,32 @@ fn optional_document_json(
 ) -> Result<Option<JsonValue>, RegistrationError> {
     optional_proto_document(key, document)?
         .map(|document| {
-            serde_json::to_value(document)
-                .map_err(|error| invalid(format!("failed to encode document JSON: {error}")))
+            let mut json = serde_json::to_value(document)
+                .map_err(|error| invalid(format!("failed to encode document JSON: {error}")))?;
+            utc_timestamps_as_z(&mut json);
+            Ok(json)
         })
         .transpose()
+}
+
+/// pbjson writes timestamps with a `+00:00` offset; the official emulator
+/// and the firebase-functions v1 decoder expect the `Z` form (its nanosecond
+/// parsing reads the characters after the seconds up to a trailing `Z`).
+fn utc_timestamps_as_z(value: &mut JsonValue) {
+    match value {
+        JsonValue::String(text) => {
+            if let Some(prefix) = text.strip_suffix("+00:00")
+                && prefix.len() >= 19
+                && prefix.as_bytes()[10] == b'T'
+                && prefix.as_bytes()[4] == b'-'
+            {
+                *text = format!("{prefix}Z");
+            }
+        }
+        JsonValue::Array(items) => items.iter_mut().for_each(utc_timestamps_as_z),
+        JsonValue::Object(map) => map.values_mut().for_each(utc_timestamps_as_z),
+        _ => {}
+    }
 }
 
 fn event_timestamp(change: &Change) -> fireside_core_store::Timestamp {
@@ -644,7 +701,10 @@ fn validate_event_type(
     let supported = match generation {
         TriggerGeneration::V1 => [V1_CREATE, V1_UPDATE, V1_DELETE, V1_WRITE].contains(&event_type),
         TriggerGeneration::V2 => {
-            [V2_CREATED, V2_UPDATED, V2_DELETED, V2_WRITTEN].contains(&event_type)
+            let base = event_type
+                .strip_suffix(AUTH_CONTEXT_SUFFIX)
+                .unwrap_or(event_type);
+            [V2_CREATED, V2_UPDATED, V2_DELETED, V2_WRITTEN].contains(&base)
         }
     };
     if supported {
@@ -657,6 +717,9 @@ fn validate_event_type(
 }
 
 fn event_matches(event_type: &str, change: &Change) -> bool {
+    let event_type = event_type
+        .strip_suffix(AUTH_CONTEXT_SUFFIX)
+        .unwrap_or(event_type);
     match (change.before.is_some(), change.after.is_some()) {
         (false, true) => matches!(event_type, V1_CREATE | V1_WRITE | V2_CREATED | V2_WRITTEN),
         (true, true) => matches!(event_type, V1_UPDATE | V1_WRITE | V2_UPDATED | V2_WRITTEN),
@@ -1056,9 +1119,16 @@ async fn deliver(
                     latency_micros: duration_micros(started.elapsed()),
                 };
             }
+            // A handler that ran and failed is final, as on the official
+            // emulator; only a runtime that could not reach a worker retries.
             Ok(response)
-                if response.status().is_server_error()
-                    || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS =>
+                if (response.status().is_server_error()
+                    || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS)
+                    && response
+                        .headers()
+                        .get(DELIVERY_HEADER)
+                        .and_then(|value| value.to_str().ok())
+                        != Some(DELIVERY_HANDLED) =>
             {
                 if attempt == policy.max_attempts {
                     return DeliveryOutcome::Failed {
@@ -1241,6 +1311,7 @@ mod tests {
             serde_json::from_value::<Response>(oracle["observations"][0]["response"].clone())
                 .expect("backends response");
         let inventory = FunctionsInventory {
+            generation: 0,
             backends: response.backends,
         };
         let functions = inventory.functions().collect::<Vec<_>>();
