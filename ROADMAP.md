@@ -249,8 +249,10 @@ replaces firebase-tools as the host.
 
 - [x] H0 — Freeze the gate and the supported trigger matrix (2026-09-17,
   `benchmarks/phase-h-functions-runtime.json`).
-- [ ] H1 — Record the official-emulator Functions and Extensions corpus;
-  commit fixtures before implementation.
+- [x] H1 — Record the official-emulator Functions and Extensions corpus;
+  commit fixtures before implementation (2026-09-17: 5 profiles, 43
+  programs, 281 steps, 250 handler observations in
+  `conformance/fixtures/functions-runtime-v1`).
 - [ ] H2 — Build the Rust supervisor and the Node worker; replay the corpus.
 - [ ] H3 — Build the Extensions loader; vendored offline mode.
 - [ ] H4 — Remove firebase-tools from the product and add the local commands.

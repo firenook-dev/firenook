@@ -73,8 +73,10 @@
     "test:developer-tools-fixtures": "node --test test/developer-tools-fixtures.test.mjs test/developer-tools-coverage-fixtures.test.mjs test/developer-tools-listing-fixtures.test.mjs",
     "probe:storage:rules": "node --import tsx src/storage-rules/probe-rules-api.ts",
     "capture:storage:rules": "node --import tsx src/storage-rules/capture-emulator.ts",
+    "capture:functions:runtime": "node --import tsx src/functions-runtime/capture-emulator.ts",
     "capture:storage:rules:cloud": "node --import tsx src/storage-rules/capture-language.ts",
-    "test:storage-rules-fixtures": "node --test test/storage-rules-fixtures.test.mjs"
+    "test:storage-rules-fixtures": "node --test test/storage-rules-fixtures.test.mjs",
+    "test:functions-runtime-fixtures": "node --test test/functions-runtime-fixtures.test.mjs"
   },
   "devDependencies": {
     "@google-cloud/firestore": "9.0.0",

@@ -113,7 +113,8 @@
       "policy": "extension resources with taskQueueTrigger are admitted without delivery and reported as ignored with reason `firebase-tools 15.22.0 drops taskQueueTrigger from emulated extension definitions`, so the Twodart extensions gate keeps its 2 ignored records"
     },
     "eventarc": {
-      "policy": "registration routes stay; delivery of Extensions custom events to user onCustomEventPublished handlers is added only if H1 shows the official emulator delivers them (measured, recorded under receipts.h1)"
+      "policy": "registration routes stay; H1 measured that the official Eventarc emulator delivers Extensions custom events published through the Admin SDK channel to user onCustomEventPublished handlers (extensions-triggers/publish-listened), so H2 adds delivery for Eventarc channel events",
+      "settled": "delivered by the official emulator; Fireside implements channel event delivery"
     },
     "credentialIsolation": {
       "policy": "workers never receive the developer's ADC or CLI credentials; GOOGLE_APPLICATION_CREDENTIALS is unset in worker environments and the registry token is used by the Rust parent only"
@@ -143,20 +144,95 @@
       "extensions"
     ],
     "handlerObservation": "every handler appends {invocation, env subset, request shape or event envelope, auth context} to a JSONL file the harness reads back; the fixture records the observation next to the HTTP step that caused it",
-    "fixturesFrozen": false,
-    "frozenProgramCount": 0,
-    "frozenStepCount": 0,
-    "frozenFixtureSha256": {}
+    "fixturesFrozen": true,
+    "frozenProgramCount": 43,
+    "frozenStepCount": 281,
+    "frozenFixtureSha256": {
+      "README.md": "0d5d024f9d140008ec98c52dccb9ad8846cd6fefee75c142dad0625783c6811d",
+      "emulator-programs.json": "8c6496843e7806e2af6c8b7d945a29dcb40b80bfaccf734c1736977c795e82cb"
+    },
+    "frozenAt": "2026-09-17T10:47:11.075Z",
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "SHA256SUMS"
+    ],
+    "frozenProfileCount": 5,
+    "frozenObservationCount": 250,
+    "minimumObservations": 200,
+    "profiles": [
+      {
+        "id": "main",
+        "programs": 38,
+        "steps": 260,
+        "skipped": null
+      },
+      {
+        "id": "v1-blocking",
+        "programs": 1,
+        "steps": 5,
+        "skipped": null
+      },
+      {
+        "id": "inspect",
+        "programs": 1,
+        "steps": 5,
+        "skipped": null
+      },
+      {
+        "id": "ext-missing-param",
+        "programs": 1,
+        "steps": 1,
+        "skipped": null
+      },
+      {
+        "id": "twodart-refs",
+        "programs": 2,
+        "steps": 10,
+        "skipped": null
+      }
+    ],
+    "officialFirestoreEmulatorJar": "cloud-firestore-emulator-v1.21.0.jar",
+    "cachedEmulatorSha256": {
+      "cloud-firestore-emulator-v1.21.0.jar": "c3d3680a89d946a90a027365ea14c26c6472a162bcf37f099bbb1ebd66d25e8e",
+      "cloud-storage-rules-runtime-v1.1.3.jar": "0cd52db6f6271d62078f805220706377c849220b73bd68aa27078d977df9c900",
+      "pubsub-emulator-0.8.33.zip": "93768f8763d85c37f7f6e0f64d10195abaa088f4ff559b7d9fb8a2fc5520848d",
+      "ui-v1.15.0.zip": "97d8c4c574e3f20c4d690a2ce8373eef76ab024da73279a062dba8517f88cf9a"
+    }
   },
   "firebaseToolsSurfacesToRemove": [
-    { "where": "support/functions-host.cjs", "what": "the whole file (loads firebase-tools FunctionsEmulator/ExtensionsEmulator)" },
-    { "where": "crates/suite-runtime/src/lib.rs", "what": "FUNCTIONS_HOST_SOURCE include_str!, SuiteConfig.firebase_tools_root, preflight row (\"firebase-tools\", ...), spawn_functions_host --firebase-tools-root" },
-    { "where": "crates/suite-runtime/src/functions_readiness.rs", "what": "Receipt.firebase_tools_version == \"15.22.0\" check" },
-    { "where": "crates/cli/src/main.rs", "what": "--firebase-tools-root suite argument and its absolute_path" },
-    { "where": "crates/functions-bridge/src/lib.rs", "what": "doc comments naming the pinned firebase-tools host (behaviour unchanged)" },
-    { "where": "crates/suite-front/src/lib.rs", "what": "firebase-tools references in comments" },
-    { "where": "packages/cli/src/runtime.mjs", "what": "require.resolve('firebase-tools/package.json') and the 15.22.0 version gate; --firebase-tools-root passthrough" },
-    { "where": "packages/cli/README.md, README.md, COMPATIBILITY.md, DESIGN.md, docs", "what": "every statement that firebase-tools is required by the Fireside path" }
+    {
+      "where": "support/functions-host.cjs",
+      "what": "the whole file (loads firebase-tools FunctionsEmulator/ExtensionsEmulator)"
+    },
+    {
+      "where": "crates/suite-runtime/src/lib.rs",
+      "what": "FUNCTIONS_HOST_SOURCE include_str!, SuiteConfig.firebase_tools_root, preflight row (\"firebase-tools\", ...), spawn_functions_host --firebase-tools-root"
+    },
+    {
+      "where": "crates/suite-runtime/src/functions_readiness.rs",
+      "what": "Receipt.firebase_tools_version == \"15.22.0\" check"
+    },
+    {
+      "where": "crates/cli/src/main.rs",
+      "what": "--firebase-tools-root suite argument and its absolute_path"
+    },
+    {
+      "where": "crates/functions-bridge/src/lib.rs",
+      "what": "doc comments naming the pinned firebase-tools host (behaviour unchanged)"
+    },
+    {
+      "where": "crates/suite-front/src/lib.rs",
+      "what": "firebase-tools references in comments"
+    },
+    {
+      "where": "packages/cli/src/runtime.mjs",
+      "what": "require.resolve('firebase-tools/package.json') and the 15.22.0 version gate; --firebase-tools-root passthrough"
+    },
+    {
+      "where": "packages/cli/README.md, README.md, COMPATIBILITY.md, DESIGN.md, docs",
+      "what": "every statement that firebase-tools is required by the Fireside path"
+    }
   ],
   "gates": {
     "emulatorReplay": {
@@ -215,5 +291,16 @@
     "release": "0.1.0-next.8",
     "receipts": null
   },
-  "receipts": {}
+  "receipts": {
+    "h1": {
+      "fixture": "conformance/fixtures/functions-runtime-v1",
+      "recordedAt": "2026-09-17T10:47:11.075Z",
+      "profiles": 5,
+      "programs": 43,
+      "steps": 281,
+      "handlerObservations": 250,
+      "registryProfileResolvedThroughCliLogin": true,
+      "test": "conformance/test/functions-runtime-fixtures.test.mjs"
+    }
+  }
 }
