@@ -73,7 +73,9 @@ export function prepareLaunch(diagnostic, options) {
   writeFileSync(credentials, JSON.stringify({type:'authorized_user', client_id:'demo', client_secret:'demo', refresh_token:'demo'}), {flag:'wx', mode:0o600});
   const args = ['suite', '--project-dir', p.directory, '--config', p.config, '--firebase-rc', rc,
     '--project-id', p.project, '--host', p.host,
-    '--node', process.execPath, '--ui-archive', diagnostic.files.ui, '--state-dir', state, '--minimum-functions', options['minimum-functions'] || '0'];
+    // The native suite requires a positive minimum; a configured Functions
+    // source has at least one handler, so the default is one.
+    '--node', process.execPath, '--ui-archive', diagnostic.files.ui, '--state-dir', state, '--minimum-functions', options['minimum-functions'] || '1'];
   if (options['inspect-functions'] !== undefined) args.push(options['inspect-functions'] === true ? '--inspect-functions' : `--inspect-functions=${options['inspect-functions']}`);
   if (options.offline) args.push('--offline');
   for (const [name, port] of Object.entries(p.ports)) args.push(`--${name}-port`, String(port));
