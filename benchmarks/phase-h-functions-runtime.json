@@ -148,10 +148,10 @@
     "frozenProgramCount": 43,
     "frozenStepCount": 281,
     "frozenFixtureSha256": {
-      "README.md": "0d5d024f9d140008ec98c52dccb9ad8846cd6fefee75c142dad0625783c6811d",
-      "emulator-programs.json": "8c6496843e7806e2af6c8b7d945a29dcb40b80bfaccf734c1736977c795e82cb"
+      "README.md": "69b47456535755cb129b0751dc0f734c2d816a9db5175b5f19747ba913e35fcd",
+      "emulator-programs.json": "e33c795ff04d4751be49da84840f470cd1136d0c2797b113f784fe8a9b9c09df"
     },
-    "frozenAt": "2026-09-17T10:47:11.075Z",
+    "frozenAt": "2026-09-17T15:43:20.365Z",
     "requiredFixtures": [
       "README.md",
       "emulator-programs.json",
@@ -294,13 +294,30 @@
   "receipts": {
     "h1": {
       "fixture": "conformance/fixtures/functions-runtime-v1",
-      "recordedAt": "2026-09-17T10:47:11.075Z",
+      "recordedAt": "2026-09-17T15:43:20.365Z",
+      "firstRecordedAt": "2026-09-17T10:47:11.075Z",
+      "reRecordedBecause": "the replay harness settled its digest rules (served extension specs are parameter-substituted; registry objects carry volatile install counts) after the first capture; same programs, same counts",
       "profiles": 5,
       "programs": 43,
       "steps": 281,
       "handlerObservations": 250,
       "registryProfileResolvedThroughCliLogin": true,
       "test": "conformance/test/functions-runtime-fixtures.test.mjs"
+    },
+    "h2h3Replay": {
+      "harness": "conformance/src/functions-runtime/replay-fireside.ts (npm run replay:functions:runtime)",
+      "replayedAt": "2026-09-17T16:05:00Z",
+      "engine": "crates/functions-runtime + crates/extensions (this commit)",
+      "node": "24.20.0",
+      "profiles": {
+        "main": "260/260",
+        "v1-blocking": "5/5",
+        "inspect": "5/5",
+        "ext-missing-param": "1/1",
+        "twodart-refs": "10/10 offline from the shared cache with registry sidecars (FIRESIDE_OFFLINE=1)"
+      },
+      "assertedDivergences": 89,
+      "divergenceTable": "conformance/src/functions-runtime/replay-fireside.ts DIVERGENCES + GLOBAL_DIVERGENCES; fixture README lists them"
     }
   }
 }

@@ -6,14 +6,14 @@
     "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
     "crates/cli/src/main.rs",
     "crates/suite-runtime/src/lib.rs",
-    "support/functions-host.cjs"
+    "support/functions-worker.mjs"
   ],
   "observedBlockers": [
     "Windows child_process.kill is not a portable graceful export request",
     "Windows .cmd files cannot be invoked by execFile without a command interpreter",
     "Windows PATH uses a semicolon and Java may live under a directory containing spaces",
     "The native non-Unix allocator bootstrap currently rejects unset defaults",
-    "The Functions host shutdown currently invokes the Unix kill utility"
+    "The former Node Functions host shutdown invoked the Unix kill utility (the owned runtime stops its workers over their control route)"
   ],
   "requiredPlatforms": {
     "darwin-arm64": "macos-15",

@@ -1,7 +1,8 @@
 # Functions runtime and Extensions oracle corpus (Phase H1)
 
-Recorded 2026-09-17 against the official emulator suite of firebase-tools
-15.22.0 (Functions, Extensions, Auth, Storage, Pub/Sub, Eventarc and Tasks in
+Recorded 2026-09-17 (re-recorded the same day after the H2/H3 replay
+harness settled its digest rules) against the official emulator suite of
+firebase-tools 15.22.0 (Functions, Extensions, Auth, Storage, Pub/Sub, Eventarc and Tasks in
 process; the Java Firestore emulator 1.21.0) with firebase-functions 7.2.5 and
 firebase-admin 13.10.0 on Node 24. Everything is synthetic: the project id is
 `demo-fireside-functions-oracle`, tokens are unsigned test JWTs referenced as
@@ -38,7 +39,13 @@ carries both the HTTP-visible contract and the handler-visible contract.
 Each profile records its readiness log, its `/backends` inventory (full
 extension specs), the programs, and the shutdown result. Inside programs every
 `/backends` body carries `{ $digest, name, version }` in place of the extension
-spec objects; the digest is the SHA-256 of the canonical (sorted-key) JSON.
+spec objects; the digest is the SHA-256 of the canonical (sorted-key) JSON of
+the object as served (parameters substituted, POSTINSTALL console links
+rewritten to `unknown` because the UI is disabled in this project). For the
+registry objects (`extension`, `extensionVersion`) the fields that move
+without any change to the extension (`metrics`, `latestVersion`,
+`latestApprovedVersion`, `latestVersionCreateTime`, `iconUri`, `icons`,
+`listing`, `state`, `createTime`) are left out of the digest.
 
 ## Normalization
 
@@ -198,8 +205,9 @@ These are asserted by the replay, not skipped:
   worker per codebase and cannot kill it per failure: it answers the same
   statuses but keeps the worker alive.
 - A function removed by a file-watch reload keeps its record on the official
-  emulator and answers 500 `{"code":"ECONNRESET"}`; Fireside removes stale
-  records on reload and answers the 404 "does not exist" body.
+  emulator (in the inventory and the 404 listing, at its original position)
+  and answers 500 `{"code":"ECONNRESET"}`; Fireside reproduces this with a
+  stale record rather than diverging.
 - `x-powered-by: Express` comes from the worker's Express and is reproduced;
   `vary: Origin` on every v2 HTTPS response is SDK CORS behaviour and is
   reproduced by construction.
@@ -208,6 +216,16 @@ These are asserted by the replay, not skipped:
   restarts it on reload. Handlers observe the same per-invocation environment.
 - `FIREBASE_CLI_PREVIEWS` in the observed environment is the capture harness's
   own variable and is not part of the contract.
+- The official worker is reached over a Unix socket, so Express sees no
+  remote address (`request.ip` undefined); Fireside's worker listens on
+  loopback TCP and reports `127.0.0.1`. The hop-by-hop `connection` header
+  the official proxy adds is likewise not part of the contract.
+- Log lines are compared by presence, not count: the official emulator logs
+  environment loading at every lazy worker start, and Fireside logs the
+  worker exit it recovers from.
+- Registry extensions are replayed from the shared cache with their
+  `fireside-registry.json` sidecars, so the replay needs neither network nor
+  a token (`FIRESIDE_OFFLINE=1`).
 
 ## Freezing
 

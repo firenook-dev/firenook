@@ -109,11 +109,24 @@ fn unescape_double_quoted(value: &str) -> String {
 /// Parses a dotenv document; matches the official `parse`.
 #[must_use]
 pub fn parse(data: &str) -> Parsed {
+    let (entries, errors) = parse_ordered(data);
+    Parsed {
+        envs: entries.into_iter().collect(),
+        errors,
+    }
+}
+
+/// Parses a dotenv document keeping the file's key order (first appearance
+/// wins the position, a later duplicate replaces the value, like assigning
+/// into a JavaScript object).
+#[must_use]
+pub fn parse_ordered(data: &str) -> (Vec<(String, String)>, Vec<String>) {
     // The official implementation replaces only the first CR/CRLF (a
     // non-global regex); later lines keep their carriage returns, which the
     // line pattern tolerates.
     let data = data.replacen("\r\n", "\n", 1).replacen('\r', "\n", 1);
-    let mut parsed = Parsed::default();
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut errors = Vec::new();
     let regex = line_regex();
     for captures in regex.captures_iter(&data) {
         let key = captures[1].to_owned();
@@ -134,7 +147,11 @@ pub fn parse(data: &str) -> Parsed {
                 };
             }
         }
-        parsed.envs.insert(key, value);
+        if let Some(existing) = entries.iter_mut().find(|(existing, _)| *existing == key) {
+            existing.1 = value;
+        } else {
+            entries.push((key, value));
+        }
     }
     let remainder = regex.replace_all(&data, "");
     for line in remainder.split(['\r', '\n']) {
@@ -142,9 +159,9 @@ pub fn parse(data: &str) -> Parsed {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        parsed.errors.push(line.to_owned());
+        errors.push(line.to_owned());
     }
-    parsed
+    (entries, errors)
 }
 
 /// Validates a key the way the official `validateKey` does.

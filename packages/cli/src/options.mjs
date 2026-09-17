@@ -1,11 +1,13 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'durability']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'durability', 'instance', 'data', 'region', 'method']);
 const durabilities = new Set(['write-behind', 'per-commit']);
-const switches = new Set(['resume-state', 'no-diagnostics', 'help']);
+const switches = new Set(['resume-state', 'no-diagnostics', 'help', 'offline']);
+// Optional-value options: a bare flag or --name=value.
+const optionalValues = new Set(['inspect-functions']);
 export function parseOptions(argv) {
-  const options = {'storage-bucket': []};
+  const options = {'storage-bucket': [], instance: []};
   let command;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -17,12 +19,15 @@ export function parseOptions(argv) {
     if (switches.has(name)) {
       if (value !== undefined) throw new Error(`--${name} does not take a value`);
       value = true;
+    } else if (optionalValues.has(name)) {
+      if (value === undefined) value = true;
+      else if (!/^\d+$/.test(value)) throw new Error(`--${name} takes a TCP port when given a value`);
     } else if (values.has(name) || name === 'export-on-exit') {
       if (value === undefined && argv[i + 1] && !argv[i + 1].startsWith('--')) value = argv[++i];
       if (value === undefined && name === 'export-on-exit') value = true;
       if (value === undefined || value === '') throw new Error(`--${name} requires a value`);
     } else throw new Error(`Unsupported option --${name}; no option is silently ignored.`);
-    if (name === 'storage-bucket') options[name].push(value);
+    if (name === 'storage-bucket' || name === 'instance') options[name].push(value);
     else {
       if (Object.hasOwn(options, name)) throw new Error(`Duplicate --${name}`);
       options[name] = value;

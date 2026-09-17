@@ -179,6 +179,9 @@ async function main() {
     } catch (error) {
       log("ERROR", errorMessage(error));
       if (!response.headersSent) {
+        // A background handler failure ends the official worker; the runtime
+        // turns this marker into the same dropped-connection answer.
+        if (signature === "event" || signature === "cloudevent") response.set("x-fireside-handler-error", "1");
         response.status(500).send(error && typeof error === "object" && error.message ? error.message : String(error));
       } else {
         response.end();

@@ -27,6 +27,10 @@ pub struct Record {
     pub codebase: String,
     pub extension_instance: Option<String>,
     pub enabled: bool,
+    /// The source no longer exports this function after a reload. The
+    /// official emulator keeps such records in its trigger map (and answers
+    /// them with a dropped connection), so the inventory keeps them too.
+    pub stale: bool,
     /// Why the definition receives no deliveries, when it does not.
     pub ignored: Option<String>,
     pub url: Option<String>,
@@ -248,18 +252,31 @@ impl Registry {
         project: &str,
         triggers: &TriggerRegistry,
     ) -> Vec<String> {
-        let removed: Vec<Record> = self
-            .records
-            .iter()
-            .filter(|record| record.codebase == codebase)
-            .cloned()
-            .collect();
-        for record in &removed {
+        self.remove_codebase_except(codebase, &[], project, triggers)
+    }
+
+    /// Marks the codebase's records whose keys are not in `keep` as stale:
+    /// their deliveries stop, but they keep their place in the inventory so
+    /// a reload re-registers surviving functions at their existing positions
+    /// and appends only new ones, like the official trigger map.
+    pub fn remove_codebase_except(
+        &mut self,
+        codebase: &str,
+        keep: &[String],
+        project: &str,
+        triggers: &TriggerRegistry,
+    ) -> Vec<String> {
+        let mut removed = Vec::new();
+        for record in &mut self.records {
+            if record.codebase != codebase || keep.contains(&record.key) || record.stale {
+                continue;
+            }
             Self::unregister_side_effects(record, project, triggers);
+            record.stale = true;
+            removed.push(record.key.clone());
         }
-        self.records.retain(|record| record.codebase != codebase);
         self.rebuild_index();
-        removed.into_iter().map(|record| record.key).collect()
+        removed
     }
 
     fn rebuild_index(&mut self) {
@@ -272,7 +289,7 @@ impl Registry {
         let mut multicast: HashMap<String, Vec<String>> = HashMap::new();
         let mut eventarc: HashMap<String, Vec<EventarcSubscription>> = HashMap::new();
         for record in &self.records {
-            if record.ignored.is_some() {
+            if record.ignored.is_some() || record.stale {
                 continue;
             }
             for key in multicast_keys(&record.definition, &self.project) {
@@ -298,7 +315,7 @@ impl Registry {
     fn derive_blocking(&self) -> BlockingConfig {
         let mut config = BlockingConfig::default();
         for record in &self.records {
-            if !record.enabled || record.ignored.is_some() {
+            if !record.enabled || record.ignored.is_some() || record.stale {
                 continue;
             }
             let Some(blocking) = record.definition.blocking_trigger() else {
@@ -361,6 +378,12 @@ impl Registry {
         let mut admissions = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let key = self.key_for(definition);
+            if let Some(index) = self.index.get(&key).copied() {
+                // Re-registering an existing key replaces the record in place;
+                // its earlier side effects are released before admission.
+                let previous = self.records[index].clone();
+                Self::unregister_side_effects(&previous, project, triggers);
+            }
             let (ignored, url) =
                 Self::admit(definition, &key, project, functions_origin, triggers, log);
             let record = Record {
@@ -369,6 +392,7 @@ impl Registry {
                 codebase: codebase.to_owned(),
                 extension_instance: extension_instance.map(str::to_owned),
                 enabled: true,
+                stale: false,
                 ignored: ignored.clone(),
                 url: url.clone(),
             };
@@ -540,8 +564,12 @@ impl Registry {
         self.generation += 1;
         let mut pending = Vec::new();
         for record in &self.records {
+            if record.stale {
+                continue;
+            }
             let has_enabled_match = self.records.iter().any(|candidate| {
                 candidate.enabled
+                    && !candidate.stale
                     && candidate.definition.entry_point() == record.definition.entry_point()
                     && candidate.definition.json().get("eventTrigger")
                         == record.definition.json().get("eventTrigger")

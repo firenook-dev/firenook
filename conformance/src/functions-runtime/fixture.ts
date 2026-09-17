@@ -75,6 +75,13 @@ export function placeholderTokens(value: unknown, projectId = PROJECT_ID): unkno
  * readiness inventory only. Two recordings compare equal when the canonical
  * JSON of the spec is identical.
  */
+/**
+ * Registry object fields that move without any change to the extension
+ * itself (install counts, listing state, newer releases, icons); the digest
+ * covers the rest so a recorded registry extension stays comparable.
+ */
+const REGISTRY_VOLATILE_FIELDS = new Set(["metrics", "latestVersion", "latestApprovedVersion", "latestVersionCreateTime", "iconUri", "icons", "listing", "state", "createTime"]);
+
 export function digestBackends(body: unknown): unknown {
   if (!body || typeof body !== "object" || !Array.isArray((body as { backends?: unknown }).backends)) return body;
   const backends = (body as { backends: Record<string, unknown>[] }).backends.map((backend) => {
@@ -83,7 +90,8 @@ export function digestBackends(body: unknown): unknown {
       const value = backend[key];
       if (value && typeof value === "object") {
         const record = value as { name?: unknown; ref?: unknown; version?: unknown; spec?: { version?: unknown } };
-        out[key] = { $digest: digestOf(value), ...(record.name !== undefined ? { name: record.name } : {}), ...(record.ref !== undefined ? { ref: record.ref } : {}), ...(record.version !== undefined ? { version: record.version } : record.spec?.version !== undefined ? { version: record.spec.version } : {}) };
+        const stable = key === "extensionSpec" ? value : Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([field]) => !REGISTRY_VOLATILE_FIELDS.has(field)));
+        out[key] = { $digest: digestOf(stable), ...(record.name !== undefined ? { name: record.name } : {}), ...(record.ref !== undefined ? { ref: record.ref } : {}), ...(record.version !== undefined ? { version: record.version } : record.spec?.version !== undefined ? { version: record.spec.version } : {}) };
       }
     }
     return out;

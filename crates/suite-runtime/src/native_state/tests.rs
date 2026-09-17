@@ -27,6 +27,7 @@ impl Case {
             project_dir: root.clone(),
             firebase_json: root.join("firebase.json"),
             inspect_functions: None,
+            offline: true,
             node: root.clone(),
             ui_archive: root.clone(),
             state_dir: root.join("state"),

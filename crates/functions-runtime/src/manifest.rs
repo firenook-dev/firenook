@@ -9,6 +9,8 @@ use std::fmt::{self, Display};
 
 use serde_json::{Map, Value, json};
 
+/// The official `backend.of` bucket for endpoints that declare no region.
+const REGION_TBD: &str = "REGION_TBD";
 /// Default region when an endpoint declares none.
 pub const DEFAULT_REGION: &str = "us-central1";
 const EVENTARC_SOURCE_LABEL: &str = "EVENTARC_CLOUD_EVENT_SOURCE";
@@ -431,7 +433,7 @@ pub fn definitions_from_manifest(
             ),
         ]),
     };
-    let mut definitions = Vec::new();
+    let mut grouped: Vec<(String, Definition)> = Vec::new();
     for (id, endpoint) in endpoints {
         let id = id
             .as_str()
@@ -480,8 +482,11 @@ pub fn definitions_from_manifest(
             .get("platform")
             .and_then(Value::as_str)
             .unwrap_or("gcfv2");
-        let regions: Vec<String> = match endpoint.get("region") {
-            None | Some(Value::Null) => vec![DEFAULT_REGION.to_owned()],
+        // `backend.of` groups endpoints by the declared region key (an
+        // undeclared region is the `REGION_TBD` bucket) in first-appearance
+        // order, and the inventory flattens those groups.
+        let region_keys: Vec<String> = match endpoint.get("region") {
+            None | Some(Value::Null) => vec![REGION_TBD.to_owned()],
             Some(Value::Array(values)) => values
                 .iter()
                 .map(|value| {
@@ -498,41 +503,24 @@ pub fn definitions_from_manifest(
                     .to_owned(),
             ],
         };
-        let regions: Vec<String> = regions
+        let regions: Vec<(String, String)> = region_keys
             .into_iter()
-            .map(|region| {
-                if region.is_empty() {
-                    DEFAULT_REGION.to_owned()
+            .map(|key| {
+                if key.is_empty() || key == REGION_TBD {
+                    (key, DEFAULT_REGION.to_owned())
                 } else {
-                    region
+                    (key.clone(), key)
                 }
             })
             .collect();
         // Labels are one shared object across the region copies in the
-        // official conversion, so the source label of the last region wins
-        // for every copy.
-        let mut labels: Map<String, Value> = endpoint
+        // official conversion; the source label is fixed after grouping (the
+        // copy processed last in the flattened inventory wins for every copy).
+        let labels: Map<String, Value> = endpoint
             .get("labels")
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
-        let last_region = regions
-            .last()
-            .cloned()
-            .unwrap_or_else(|| DEFAULT_REGION.to_owned());
-        let source_label = if platform == "gcfv1" {
-            format!(
-                "cloudfunctions-emulated.googleapis.com/projects/{project}/locations/{last_region}/functions/{id}"
-            )
-        } else {
-            format!(
-                "run-emulated.googleapis.com/projects/{project}/locations/{last_region}/services/{id}"
-            )
-        };
-        labels.insert(
-            EVENTARC_SOURCE_LABEL.to_owned(),
-            Value::String(source_label),
-        );
         let secret_environment_variables = match endpoint.get("secretEnvironmentVariables") {
             Some(Value::Array(entries)) => Value::Array(
                 entries
@@ -558,7 +546,7 @@ pub fn definitions_from_manifest(
             None | Some(Value::Null) => 60,
             Some(value) => resolver.resolve_int(value)?.as_u64().unwrap_or(60),
         };
-        for region in regions {
+        for (group_key, region) in regions {
             let mut definition = Map::new();
             definition.insert(
                 "entryPoint".to_owned(),
@@ -594,7 +582,48 @@ pub fn definitions_from_manifest(
                     Value::String("true".to_owned()),
                 );
             }
-            definitions.push(Definition { json: definition });
+            grouped.push((group_key, Definition { json: definition }));
+        }
+    }
+    let mut groups: Vec<(String, Vec<Definition>)> = Vec::new();
+    for (key, definition) in grouped {
+        match groups.iter_mut().find(|(existing, _)| *existing == key) {
+            Some((_, members)) => members.push(definition),
+            None => groups.push((key, vec![definition])),
+        }
+    }
+    let mut definitions: Vec<Definition> = groups
+        .into_iter()
+        .flat_map(|(_, members)| members)
+        .collect();
+    let mut winning_region: BTreeMap<String, String> = BTreeMap::new();
+    for definition in &definitions {
+        winning_region.insert(definition.name().to_owned(), definition.region().to_owned());
+    }
+    for definition in &mut definitions {
+        let region = winning_region
+            .get(definition.name())
+            .cloned()
+            .unwrap_or_else(|| definition.region().to_owned());
+        let name = definition.name().to_owned();
+        let source_label = if definition.platform() == "gcfv1" {
+            format!(
+                "cloudfunctions-emulated.googleapis.com/projects/{project}/locations/{region}/functions/{name}"
+            )
+        } else {
+            format!(
+                "run-emulated.googleapis.com/projects/{project}/locations/{region}/services/{name}"
+            )
+        };
+        if let Some(labels) = definition
+            .json
+            .get_mut("labels")
+            .and_then(Value::as_object_mut)
+        {
+            labels.insert(
+                EVENTARC_SOURCE_LABEL.to_owned(),
+                Value::String(source_label),
+            );
         }
     }
     Ok(definitions)
@@ -639,6 +668,21 @@ fn resolve_ints(
         }
         Some(Value::Null) => Ok(Some(Value::Null)),
         _ => Ok(None),
+    }
+}
+
+/// A JavaScript number as JSON: integral values print without a fraction.
+fn number_value(number: f64) -> Value {
+    if number.is_nan() {
+        return Value::Null;
+    }
+    if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 {
+        // Integral and below 2^53: the cast is exact.
+        #[allow(clippy::cast_possible_truncation)]
+        let integer = number as i64;
+        json!(integer)
+    } else {
+        json!(number)
     }
 }
 
@@ -741,9 +785,51 @@ fn convert_trigger(
                 out.insert("timeZone".to_owned(), resolver.resolve_string(value)?);
             }
         }
+        // The v1alpha1 parser renames the v1 SDK's `*Duration` strings to
+        // `*Seconds` numbers (null stays null) before the build resolves ints.
+        let normalized_retry = schedule.get("retryConfig").map(|retry| match retry {
+            Value::Object(map) => {
+                let mut converted = Map::new();
+                for (seconds, duration) in [
+                    ("maxBackoffSeconds", "maxBackoffDuration"),
+                    ("minBackoffSeconds", "minBackoffDuration"),
+                    ("maxRetrySeconds", "maxRetryDuration"),
+                ] {
+                    match map.get(duration) {
+                        Some(Value::Null) => {
+                            converted.insert(seconds.to_owned(), Value::Null);
+                        }
+                        Some(Value::String(text)) => {
+                            let number = text
+                                .trim_end_matches('s')
+                                .parse::<f64>()
+                                .unwrap_or(f64::NAN);
+                            converted.insert(seconds.to_owned(), number_value(number));
+                        }
+                        Some(other) => {
+                            converted.insert(seconds.to_owned(), other.clone());
+                        }
+                        None => {}
+                    }
+                }
+                for key in [
+                    "retryCount",
+                    "minBackoffSeconds",
+                    "maxBackoffSeconds",
+                    "maxRetrySeconds",
+                    "maxDoublings",
+                ] {
+                    if let Some(value) = map.get(key) {
+                        converted.insert(key.to_owned(), value.clone());
+                    }
+                }
+                Value::Object(converted)
+            }
+            other => other.clone(),
+        });
         if let Some(retry) = resolve_ints(
             resolver,
-            schedule.get("retryConfig"),
+            normalized_retry.as_ref(),
             &[
                 "maxBackoffSeconds",
                 "minBackoffSeconds",

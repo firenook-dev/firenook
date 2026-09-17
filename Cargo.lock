@@ -486,7 +486,9 @@ dependencies = [
  "fireside-capture-proxy",
  "fireside-core-store",
  "fireside-export-format",
+ "fireside-extensions",
  "fireside-functions-bridge",
+ "fireside-functions-runtime",
  "fireside-grpc-front",
  "fireside-query-engine",
  "fireside-rest-front",
@@ -553,6 +555,23 @@ dependencies = [
  "fireside-core-store",
  "prost",
  "serde_json",
+]
+
+[[package]]
+name = "fireside-extensions"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "fireside-functions-runtime",
+ "regex",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "tempfile",
+ "tokio",
+ "zip",
 ]
 
 [[package]]
@@ -740,6 +759,7 @@ dependencies = [
  "fireside-auth-front",
  "fireside-core-store",
  "fireside-export-format",
+ "fireside-extensions",
  "fireside-functions-bridge",
  "fireside-functions-runtime",
  "fireside-grpc-front",
@@ -755,6 +775,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serde_norway",
  "sha2",
  "time",
  "tokio",

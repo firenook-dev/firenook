@@ -234,9 +234,8 @@ divergence. `latest` promotion remains a separate decision.
 ## Phase H — Owned Functions runtime and Extensions (`0.1.0-next.8`)
 
 The plan, current-state audit, oracle precedence and named checks are in the
-[Phase H plan](support/phase-h-functions-runtime.md). Nothing below is
-implemented. User and extension JavaScript keeps running in Node; Fireside
-replaces firebase-tools as the host.
+[Phase H plan](support/phase-h-functions-runtime.md). User and extension
+JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
 
 | Step | Deliverable | Completion check |
 | --- | --- | --- |
@@ -253,9 +252,18 @@ replaces firebase-tools as the host.
   commit fixtures before implementation (2026-09-17: 5 profiles, 43
   programs, 281 steps, 250 handler observations in
   `conformance/fixtures/functions-runtime-v1`).
-- [ ] H2 — Build the Rust supervisor and the Node worker; replay the corpus.
-- [ ] H3 — Build the Extensions loader; vendored offline mode.
-- [ ] H4 — Remove firebase-tools from the product and add the local commands.
+- [x] H2 — Build the Rust supervisor and the Node worker; replay the corpus
+  (2026-09-17: `crates/functions-runtime`, `support/functions-worker.mjs`;
+  main, v1-blocking and inspect profiles replay with every non-extension step
+  identical or a listed divergence).
+- [x] H3 — Build the Extensions loader; vendored offline mode (2026-09-17:
+  `crates/extensions`, `fireside extensions status|vendor`, `--offline`;
+  the synthetic extension and the two registry instances replay from the
+  shared cache with their registry sidecars).
+- [x] H4 — Remove firebase-tools from the product and add the local commands
+  (2026-09-17: `support/functions-host.cjs` deleted, `firebase-tools` left
+  the CLI's dependencies, `--inspect-functions`, `--offline`,
+  `functions:invoke`, `ext:vendor`, `doctor` extension report).
 - [ ] H5 — Qualify the exact candidate (CI, consumer gates incl. the Extensions
   gate, paired acceptance, offline clean setup) and publish `0.1.0-next.8`.
 

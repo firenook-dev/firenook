@@ -41,14 +41,6 @@ interface Divergence {
 const DIVERGENCES: readonly Divergence[] = [
   {
     profile: "main",
-    program: "lifecycle-reload",
-    step: "removed",
-    path: "response",
-    reason: "a function removed by a reload keeps its record on the official emulator (500 ECONNRESET); Fireside drops stale records and answers the 404 body",
-    anyValue: true,
-  },
-  {
-    profile: "main",
     program: "lifecycle-worker-crash",
     step: "crash-logs",
     path: "response.matched",
@@ -79,6 +71,14 @@ const GLOBAL_DIVERGENCES: ReadonlyArray<{ readonly pattern: RegExp; readonly rec
 const OUT_OF_SCOPE_STEPS: ReadonlySet<string> = new Set([
   // The hub's /emulators listing is the suite's contract (firebase-suite-v1/hub-*), not the Functions runtime's.
   "main/discovery-backends-inventory/hub-emulators",
+]);
+
+/** Step-scoped paths whose value is a race the program does not control. */
+const IGNORED_STEP_PATHS: ReadonlyMap<string, readonly RegExp[]> = new Map([
+  // The Stripe extension's checkout handler writes its failure back into the
+  // document; whether that lands before this read depends on how fast the
+  // Auth lookup fails.
+  ["twodart-refs/registry-extensions-delivery/checkout-session-read", [/^response\.body\.fields\.error$/u]],
 ]);
 
 /** Recorded fields that vary between runs or engines without a contract. */
@@ -332,8 +332,10 @@ function compareStep(profile: string, program: string, expected: RecordedProgram
   const expectedView = { response: comparableResponse(kind, expected.response), observations: sortedObservations(expected.observations), observationsTimedOut: expected.observationsTimedOut ?? false };
   const actualView = { response: comparableResponse(kind, actual.response), observations: sortedObservations(actual.observations), observationsTimedOut: actual.observationsTimedOut ?? false };
   const raw = diff(expectedView, actualView, "");
+  const stepIgnored = IGNORED_STEP_PATHS.get(`${profile}/${program}/${expected.id}`) ?? [];
   for (const entry of raw) {
     if (IGNORED_PATHS.some((pattern) => pattern.test(entry.path))) continue;
+    if (stepIgnored.some((pattern) => pattern.test(entry.path))) continue;
     if (typeof entry.expected === "string" && typeof entry.actual === "string" && stripEmbeddedVolatile(entry.actual) === stripEmbeddedVolatile(entry.expected)) {
       asserted.push(`${entry.path} (embedded volatile fragments)`);
       continue;

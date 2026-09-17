@@ -37,6 +37,19 @@ impl LogSink {
         Self::new(|event| eprintln!("fireside {}: {}", event.label, event.message))
     }
 
+    /// A sink that keeps every event in memory (tests and harnesses).
+    #[must_use]
+    pub fn recording() -> (Self, Arc<std::sync::Mutex<Vec<LogEvent>>>) {
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink_events = Arc::clone(&events);
+        let sink = Self::new(move |event| {
+            if let Ok(mut guard) = sink_events.lock() {
+                guard.push(event);
+            }
+        });
+        (sink, events)
+    }
+
     pub fn record(&self, event: LogEvent) {
         (self.0)(event);
     }

@@ -557,8 +557,18 @@ impl RuntimeState {
 
     /// Environment for the worker (`getRuntimeEnvs` + secrets + inherited process env).
     fn worker_environment(&self, backend: &Backend, loaded: &Loaded) -> BTreeMap<String, String> {
+        // Credentials the suite itself may hold (the Extensions registry
+        // login) never reach user code, matching the official emulator's
+        // isolation of the developer's ADC from the Functions process.
         let mut env: BTreeMap<String, String> = std::env::vars()
-            .filter(|(key, _)| key != "GOOGLE_APPLICATION_CREDENTIALS")
+            .filter(|(key, _)| {
+                !matches!(
+                    key.as_str(),
+                    "GOOGLE_APPLICATION_CREDENTIALS"
+                        | "FIREBASE_TOKEN"
+                        | "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"
+                )
+            })
             .collect();
         env.insert("node".to_owned(), self.config.node.display().to_string());
         env.insert("METADATA_SERVER_DETECTION".to_owned(), "none".to_owned());
@@ -617,7 +627,16 @@ impl RuntimeState {
             .map(|extension| extension.instance_id.clone());
         {
             let mut registry = self.registry.write().await;
-            registry.remove_codebase(&backend.id, &self.config.project_id, &self.triggers);
+            let keep: Vec<String> = definitions
+                .iter()
+                .map(|definition| registry.key_for(definition))
+                .collect();
+            registry.remove_codebase_except(
+                &backend.id,
+                &keep,
+                &self.config.project_id,
+                &self.triggers,
+            );
             registry.register(
                 &backend.id,
                 extension_instance.as_deref(),

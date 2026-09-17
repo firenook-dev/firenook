@@ -38,16 +38,19 @@ native resume and rollback.
 
 Disk/WAL is the default. Firestore, Auth and Storage services, including
 Storage Security Rules, are implemented in Rust; no Java runtime is used.
-Functions still run user JavaScript through Node/firebase-tools. Client SDKs
-are unchanged.
+Functions run the user's JavaScript in Node workers supervised by Fireside's
+own runtime, and Extensions are resolved and run by Fireside from local,
+vendored or cached sources (or fetched once from the registry); firebase-tools
+is not installed or loaded. Client SDKs are unchanged.
 
 ## Development and verification
 
 Install the toolchain in `rust-toolchain.toml`, Node 24.20.0 and npm 12.0.2.
-Browser tests require Chrome/Chromium; recording or replaying the official
-oracles requires Java and their exact documented emulator artifacts. The
-product itself does not run Java; CI verifies a suite start with `java` absent
-from `PATH`.
+Browser tests require Chrome/Chromium; recording the official oracles requires
+Java, firebase-tools 15.22.0 and their exact documented emulator artifacts.
+The product itself runs neither Java nor firebase-tools; CI verifies a suite
+start with `java` absent from `PATH` and replays the Functions/Extensions
+corpus against a project whose `node_modules` holds only the Functions SDK.
 
 ```sh
 cargo test --locked --workspace --all-targets --all-features

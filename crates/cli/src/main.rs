@@ -109,6 +109,47 @@ enum Command {
     CaptureProxy(CaptureProxyArgs),
     /// Start the complete Firebase-compatible emulator suite.
     Suite(Box<SuiteArgs>),
+    /// Inspect or vendor the project's Firebase Extensions without starting
+    /// the suite.
+    Extensions(ExtensionsArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct ExtensionsArgs {
+    #[command(subcommand)]
+    action: ExtensionsAction,
+}
+
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+enum ExtensionsAction {
+    /// Report each instance's source state (local, vendored, cached, or
+    /// needing the registry) as JSON. Nothing is downloaded.
+    Status(ExtensionsProjectArgs),
+    /// Copy every registry extension into `<project>/extensions/.sources`
+    /// with its registry metadata, so later starts need no network or token.
+    Vendor(ExtensionsVendorArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct ExtensionsProjectArgs {
+    /// The `firebase.json` to read.
+    #[arg(long, default_value = "firebase.json")]
+    config: PathBuf,
+    /// The project id the instances are configured for.
+    #[arg(long = "project-id")]
+    project_id: String,
+    /// The Node binary whose sibling `npm` builds downloaded sources.
+    #[arg(long, default_value = "node")]
+    node: PathBuf,
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct ExtensionsVendorArgs {
+    #[command(flatten)]
+    project: ExtensionsProjectArgs,
+    /// Vendor only these instance ids (default: every registry instance).
+    #[arg(long = "instance")]
+    instances: Vec<String>,
 }
 
 /// When acknowledged writes reach stable storage in disk mode.
@@ -234,6 +275,8 @@ struct CaptureProxyArgs {
 }
 
 #[derive(Debug, Args, PartialEq, Eq)]
+// One clap switch per independent launch flag.
+#[allow(clippy::struct_excessive_bools)]
 struct SuiteArgs {
     /// Disable Requests/coverage recording; the debug endpoint reports unavailable.
     #[arg(long)]
@@ -264,6 +307,11 @@ struct SuiteArgs {
     /// applies to the single codebase, otherwise ports are assigned from 9229.
     #[arg(long = "inspect-functions", num_args = 0..=1, default_missing_value = "auto", value_name = "PORT")]
     inspect_functions: Option<String>,
+    /// Never contact the Extensions registry: every extension ref must be
+    /// vendored in the project (`fireside ext:vendor`) or present in the
+    /// shared cache with its registry sidecar.
+    #[arg(long)]
+    offline: bool,
     #[arg(long = "ui-archive")]
     ui_archive: PathBuf,
     #[arg(long = "state-dir")]
@@ -322,6 +370,133 @@ fn main() -> ExitCode {
         Command::Firestore(arguments) => run_firestore_runtime(&arguments, allocator_config),
         Command::CaptureProxy(arguments) => run_capture_proxy_runtime(&arguments),
         Command::Suite(arguments) => run_suite_runtime(&arguments),
+        Command::Extensions(arguments) => run_extensions_command(&arguments),
+    }
+}
+
+fn extensions_inputs(
+    arguments: &ExtensionsProjectArgs,
+    offline: bool,
+) -> Result<fireside_suite_runtime::ExtensionsInputs, String> {
+    let firebase_json = absolute_path(&arguments.config)?;
+    let project_dir = firebase_json
+        .parent()
+        .ok_or_else(|| "firebase.json has no parent directory".to_owned())?
+        .to_owned();
+    let node = if arguments.node.components().count() > 1 {
+        absolute_path(&arguments.node)?
+    } else {
+        which_binary(&arguments.node).unwrap_or_else(|| arguments.node.clone())
+    };
+    Ok(fireside_suite_runtime::ExtensionsInputs {
+        project_id: arguments.project_id.clone(),
+        project_dir,
+        firebase_json,
+        default_bucket: format!("{}.appspot.com", arguments.project_id),
+        node,
+        offline,
+        ui_origin: None,
+    })
+}
+
+/// Resolves a bare command name through `PATH`.
+fn which_binary(name: &std::path::Path) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("runtime failed to start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match &arguments.action {
+        ExtensionsAction::Status(project) => {
+            let inputs = match extensions_inputs(project, true) {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    eprintln!("extensions status failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let config = match fireside_suite_runtime::extensions_config_from(&inputs) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("extensions status failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let report = fireside_extensions::status(&config);
+            match serde_json::to_string_pretty(&report) {
+                Ok(text) => {
+                    println!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("extensions status failed to encode: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        ExtensionsAction::Vendor(vendor) => {
+            let inputs = match extensions_inputs(&vendor.project, false) {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    eprintln!("extensions vendor failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let config = match fireside_suite_runtime::extensions_config_from(&inputs) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("extensions vendor failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let log = fireside_functions_runtime::LogSink::stderr();
+            let mut failed = false;
+            for (instance_id, written) in &config.extensions {
+                if !vendor.instances.is_empty() && !vendor.instances.contains(instance_id) {
+                    continue;
+                }
+                if fireside_extensions::refs::is_local_path(written) {
+                    eprintln!(
+                        "fireside extensions: {instance_id} is a local extension ({written}); nothing to vendor"
+                    );
+                    continue;
+                }
+                match runtime.block_on(fireside_extensions::vendor(
+                    &config,
+                    instance_id,
+                    written,
+                    &log,
+                )) {
+                    Ok(target) => {
+                        println!("{instance_id}: vendored {written} at {}", target.display());
+                    }
+                    Err(error) => {
+                        failed = true;
+                        eprintln!(
+                            "fireside extensions: {instance_id} ({written}) could not be vendored: {error}"
+                        );
+                    }
+                }
+            }
+            if failed {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
     }
 }
 
@@ -463,6 +638,9 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
                 })?),
             }),
         },
+        offline: arguments.offline
+            || std::env::var("FIRESIDE_OFFLINE")
+                .is_ok_and(|value| matches!(value.as_str(), "1" | "true")),
         node: absolute_path(&arguments.node)?,
         ui_archive: absolute_path(&arguments.ui_archive)?,
         state_dir: absolute_path(&arguments.state_dir)?,

@@ -25,6 +25,8 @@ const EXPRESS: &str = "Express";
 const CONTROL_TARGET: &str = "x-fireside-target";
 const CONTROL_SIGNATURE: &str = "x-fireside-signature";
 const CONTROL_SERVICE: &str = "x-fireside-service";
+/// Set by the worker on a background invocation whose handler threw.
+const HANDLER_ERROR_HEADER: &str = "x-fireside-handler-error";
 const HOP_BY_HOP: [&str; 8] = [
     "connection",
     "keep-alive",
@@ -211,7 +213,7 @@ async fn trigger_route(
 
 /// `handleHttpsTrigger`: looks the record up and proxies to the codebase's worker.
 async fn dispatch(state: Shared, trigger_id: &str, request: Request, path: String) -> Response {
-    let (backend_id, definition, enabled) = {
+    let (backend_id, definition, enabled, removed_by_reload) = {
         let registry = state.registry.read().await;
         let Some(record) = registry.get(trigger_id) else {
             let keys = registry.keys();
@@ -221,8 +223,20 @@ async fn dispatch(state: Shared, trigger_id: &str, request: Request, path: Strin
             record.codebase.clone(),
             record.definition.clone(),
             record.enabled,
+            record.stale,
         )
     };
+    if removed_by_reload {
+        // The official worker no longer exports the function and dies on the
+        // call; the proxy reports the dropped connection.
+        state.log.record(LogEvent::new(
+            "ERROR",
+            &format!("functions[{trigger_id}]"),
+            "the source no longer exports this function (record kept from an earlier load)"
+                .to_owned(),
+        ));
+        return proxy_failure();
+    }
     if !enabled {
         // Express drops the body and content type of a 204.
         let mut response = Response::new(Body::empty());
@@ -358,6 +372,17 @@ async fn dispatch(state: Shared, trigger_id: &str, request: Request, path: Strin
         }
     };
     let status = upstream.status();
+    if upstream.headers().contains_key(HANDLER_ERROR_HEADER) {
+        // A background handler that threw kills the official worker, and the
+        // proxy reports the dropped connection; Fireside keeps its worker but
+        // answers the same way (a handled failure, not retried).
+        let mut response = proxy_failure();
+        response.headers_mut().insert(
+            fireside_functions_bridge::DELIVERY_HEADER,
+            HeaderValue::from_static(fireside_functions_bridge::DELIVERY_HANDLED),
+        );
+        return response;
+    }
     let mut response = Response::builder().status(status);
     if let Some(response_headers) = response.headers_mut() {
         for (name, value) in upstream.headers() {
@@ -640,8 +665,10 @@ async fn eventarc_publish(state: Shared, channel: String, body: Bytes) -> Respon
         let Some(event_type) = event.get("type").and_then(Value::as_str) else {
             return StatusCode::BAD_REQUEST.into_response();
         };
+        // The official emulator's unlabeled INFO line reaches only its debug
+        // log, never the terminal.
         state.log.record(LogEvent::new(
-            "INFO",
+            "DEBUG",
             "eventarc",
             format!(
                 "Received event at channel {channel}: {}",

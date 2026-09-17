@@ -151,14 +151,16 @@ jobs:
             target/debug/fireside "$RUNNER_TEMP/fireside-devtools" \
             "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/fireside-native-upgrade-evidence" \
             "$RUNNER_TEMP/fireside-previous-engine/node_modules/@fireside-dev/linux-x64/bin/fireside"
-      - name: Verify owned admission against real pinned Functions discovery
+      - name: Replay the Functions runtime and Extensions oracle corpus
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/fireside-devtools/node_modules/firebase-functions
+          NODE24: node
+          FIRESIDE_OFFLINE: "1"
         run: >-
-          node conformance/src/suite/capture-functions-readiness.mjs
-          target/debug/fireside
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools"
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions"
-          "$RUNNER_TEMP/fireside-functions-readiness-evidence"
-          --verify-owned-adapter
+          npm run replay:functions:runtime --prefix conformance --
+          --binary ../target/debug/fireside
+          --profiles main,v1-blocking,inspect,ext-missing-param
+          --output "$RUNNER_TEMP/fireside-functions-runtime-replay.json"
       - name: Verify suite start without Java on PATH
         run: >-
           node conformance/src/suite/verify-no-java.mjs
@@ -185,7 +187,7 @@ jobs:
             ${{ runner.temp }}/fireside-developer-ui-evidence/failure.json
             ${{ runner.temp }}/fireside-developer-ui-evidence/browser-failure.json
             ${{ runner.temp }}/fireside-developer-ui-evidence/*.png
-            ${{ runner.temp }}/fireside-functions-readiness-evidence/fixture.json
+            ${{ runner.temp }}/fireside-functions-runtime-replay.json
             ${{ runner.temp }}/fireside-no-java-evidence/result.json
             ${{ runner.temp }}/fireside-no-java-evidence/suite.log
           if-no-files-found: ignore

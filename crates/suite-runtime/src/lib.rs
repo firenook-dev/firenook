@@ -106,6 +106,8 @@ pub enum StorageRulesConfig {
 
 /// Complete suite startup settings resolved by the CLI.
 #[derive(Debug, Clone)]
+// Independent launch switches, each mapped from one CLI flag.
+#[allow(clippy::struct_excessive_bools)]
 pub struct SuiteConfig {
     pub host: String,
     pub project_id: String,
@@ -114,6 +116,10 @@ pub struct SuiteConfig {
     pub node: PathBuf,
     /// `--inspect-functions`: debug ports for the Node workers.
     pub inspect_functions: Option<InspectConfig>,
+    /// `--offline`: never contact the Extensions registry; refs must be
+    /// vendored in the project or present in the shared cache with their
+    /// registry sidecar.
+    pub offline: bool,
     pub ui_archive: PathBuf,
     pub state_dir: PathBuf,
     pub resume_state: bool,
@@ -615,6 +621,9 @@ async fn finish_suite(
     // services they call remain available. The scheduler is stopped first, and
     // a coordinated suite shutdown has no external clients admitting new work.
     let delivery = suite.delivery.shutdown().await.into();
+    // The same line the former Node host printed: harnesses read it as the
+    // proof that Functions got an orderly stop even when export failed.
+    println!("fireside functions host: stopping after the suite shutdown request");
     suite.functions.shutdown().await;
     let _ = suite.shutdown.send(true);
     for server in suite.servers {
@@ -1129,6 +1138,18 @@ async fn start_functions_runtime(
     )
     .map_err(|error| failure(format!("invalid firebase.json: {error}")))?;
     let codebases: Vec<CodebaseConfig> = codebases_from_config(&firebase_json, &config.project_dir);
+    let sink_logging = logging.clone();
+    let sink = LogSink::new(move |event: LogEvent| {
+        let label = event.label.clone();
+        let line = format!("{label}: {}", event.message);
+        match event.level.as_str() {
+            "ERROR" | "WARN" => eprintln!("fireside {line}"),
+            "DEBUG" => {}
+            _ => println!("fireside {line}"),
+        }
+        sink_logging.record(&event.level, Some("functions"), line);
+    });
+    let extensions = load_extensions(config, &sink).await?;
     let host = |port: u16| format!("{}:{port}", config.host);
     let runtime_config = FunctionsRuntimeConfig {
         project_id: config.project_id.clone(),
@@ -1149,23 +1170,153 @@ async fn start_functions_runtime(
             tasks: host(config.ports.tasks),
         },
         codebases,
-        extensions: Vec::new(),
+        extensions,
         inspect: config.inspect_functions.clone(),
     };
-    let sink_logging = logging.clone();
-    let sink = LogSink::new(move |event: LogEvent| {
-        let label = event.label.clone();
-        let line = format!("{label}: {}", event.message);
-        match event.level.as_str() {
-            "ERROR" | "WARN" => eprintln!("fireside {line}"),
-            "DEBUG" => {}
-            _ => println!("fireside {line}"),
-        }
-        sink_logging.record(&event.level, Some("functions"), line);
-    });
     FunctionsRuntime::start(runtime_config, triggers, sink)
         .await
         .map_err(|error| failure(format!("Functions runtime failed to start: {error}")))
+}
+
+/// The `extensions` instances of `firebase.json` as Functions backends.
+async fn load_extensions(
+    config: &SuiteConfig,
+    sink: &LogSink,
+) -> Result<Vec<fireside_functions_runtime::ExtensionBackend>, SuiteRuntimeError> {
+    let extensions_config = extensions_config(config)?;
+    if extensions_config.extensions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let loaded = fireside_extensions::load(&extensions_config, sink)
+        .await
+        .map_err(|error| failure(format!("Extensions failed to load: {error}")))?;
+    for extension in &loaded {
+        let origin = match extension.origin {
+            fireside_extensions::SourceOrigin::Local => "local".to_owned(),
+            fireside_extensions::SourceOrigin::Vendored => "vendored".to_owned(),
+            fireside_extensions::SourceOrigin::Cache => "shared cache".to_owned(),
+            fireside_extensions::SourceOrigin::Downloaded => "downloaded".to_owned(),
+        };
+        sink.record(LogEvent::new(
+            "INFO",
+            "extensions",
+            format!(
+                "{}: {} source at {}",
+                extension.backend.instance_id,
+                origin,
+                extension.source_dir.display()
+            ),
+        ));
+    }
+    Ok(loaded
+        .into_iter()
+        .map(|extension| extension.backend)
+        .collect())
+}
+
+/// The loader configuration for this suite: `firebase.json` `extensions`
+/// in file order, `.firebaserc` aliases, the project's npm and the
+/// registry credential the Firebase CLI would use.
+pub fn extensions_config(
+    config: &SuiteConfig,
+) -> Result<fireside_extensions::ExtensionsConfig, SuiteRuntimeError> {
+    // The official emulator rewrites POSTINSTALL console links to the UI only
+    // when the UI is enabled in firebase.json (`unknown` otherwise).
+    let ui_enabled = std::fs::read_to_string(&config.firebase_json)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|json| json.get("emulators")?.get("ui")?.get("enabled")?.as_bool())
+        .unwrap_or(true);
+    extensions_config_from(&ExtensionsInputs {
+        project_id: config.project_id.clone(),
+        project_dir: config.project_dir.clone(),
+        firebase_json: config.firebase_json.clone(),
+        default_bucket: config.default_bucket.clone(),
+        node: config.node.clone(),
+        offline: config.offline,
+        ui_origin: ui_enabled.then(|| format!("http://{}:{}/", config.host, config.ports.ui)),
+    })
+}
+
+/// What the extensions loader needs from a project, without a running suite
+/// (`fireside extensions vendor|status`).
+#[derive(Debug, Clone)]
+pub struct ExtensionsInputs {
+    pub project_id: String,
+    pub project_dir: PathBuf,
+    pub firebase_json: PathBuf,
+    pub default_bucket: String,
+    pub node: PathBuf,
+    pub offline: bool,
+    pub ui_origin: Option<String>,
+}
+
+/// Builds the loader configuration from project inputs.
+pub fn extensions_config_from(
+    config: &ExtensionsInputs,
+) -> Result<fireside_extensions::ExtensionsConfig, SuiteRuntimeError> {
+    let text = std::fs::read_to_string(&config.firebase_json)
+        .map_err(|error| failure(format!("failed to read firebase.json: {error}")))?;
+    // YAML parsing keeps the object order the official planner iterates in.
+    let ordered: serde_norway::Value = serde_norway::from_str(&text)
+        .map_err(|error| failure(format!("invalid firebase.json: {error}")))?;
+    let extensions: Vec<(String, String)> = ordered
+        .get("extensions")
+        .and_then(serde_norway::Value::as_mapping)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|(id, value)| {
+                    Some((id.as_str()?.to_owned(), value.as_str()?.to_owned()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let npm = config
+        .node
+        .parent()
+        .map(|directory| directory.join("npm"))
+        .filter(|candidate| candidate.is_file())
+        .unwrap_or_else(|| PathBuf::from("npm"));
+    Ok(fireside_extensions::ExtensionsConfig {
+        project_id: config.project_id.clone(),
+        project_dir: config.project_dir.clone(),
+        extensions,
+        aliases: project_aliases(&config.project_dir, &config.project_id),
+        database_url: format!("https://{}.firebaseio.com", config.project_id),
+        storage_bucket: config.default_bucket.clone(),
+        npm,
+        cache_dir: fireside_extensions::source::cache_directory(),
+        endpoints: fireside_extensions::registry::Endpoints::from_env(),
+        credential: if config.offline {
+            None
+        } else {
+            fireside_extensions::registry::discover_credential()
+        },
+        offline: config.offline,
+        ui_origin: config.ui_origin.clone(),
+    })
+}
+
+/// `.firebaserc` aliases that point at the project id.
+fn project_aliases(project_dir: &Path, project_id: &str) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(project_dir.join(".firebaserc")) else {
+        return Vec::new();
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    parsed
+        .get("projects")
+        .and_then(serde_json::Value::as_object)
+        .map(|projects| {
+            projects
+                .iter()
+                .filter(|(_, value)| value.as_str() == Some(project_id))
+                .map(|(alias, _)| alias.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 async fn shutdown_signal() -> Result<(), SuiteRuntimeError> {
