@@ -1631,10 +1631,9 @@ mod tests {
             StorageRulesConfig::Single(PathBuf::from("/project/storage.rules"))
         );
         assert_eq!(default_bucket, "demo-single.appspot.com");
-        let targets: FirebaseProjectConfig = serde_json::from_str(
-            r#"{ "storage": [{ "target": "default", "rules": "a.rules" }] }"#,
-        )
-        .expect("targets storage config");
+        let targets: FirebaseProjectConfig =
+            serde_json::from_str(r#"{ "storage": [{ "target": "default", "rules": "a.rules" }] }"#)
+                .expect("targets storage config");
         assert!(matches!(
             targets.storage,
             Some(FirebaseStorageSection::Targets(ref entries)) if entries.len() == 1
