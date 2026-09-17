@@ -1322,7 +1322,17 @@ fn normalize_arguments(arguments: impl IntoIterator<Item = OsString>) -> Vec<OsS
     let has_explicit_subcommand = remaining.first().is_some_and(|argument| {
         matches!(
             argument.to_str(),
-            Some("firestore" | "capture-proxy" | "suite")
+            Some(
+                "firestore"
+                    | "capture-proxy"
+                    | "suite"
+                    | "extensions"
+                    | "help"
+                    | "--help"
+                    | "-h"
+                    | "--version"
+                    | "-V"
+            )
         )
     });
 
