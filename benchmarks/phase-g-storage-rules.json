@@ -73,6 +73,28 @@
         "request.resource is passed through as the supplied map for create; request.resource.size reads as the supplied integer",
         "request.path is reported as the plain string /b/probe-bucket/o/probe/object.txt"
       ]
+    },
+    "engineReplay": {
+      "test": "crates/rules-engine/tests/storage_oracle_replay.rs",
+      "cases": 306,
+      "commit": "e3eb0d8"
+    },
+    "emulatorReplay": {
+      "test": "crates/storage-front/src/rules_replay_tests.rs",
+      "steps": 334,
+      "namedDivergences": 8,
+      "commit": "a98ee49"
+    },
+    "performance": {
+      "receipt": "benchmarks/phase-g-storage-profile.json",
+      "driver": "conformance/src/suite/profile-storage-rules.mjs",
+      "regression": false
+    },
+    "noJava": {
+      "driver": "conformance/src/suite/verify-no-java.mjs",
+      "ciStep": "Verify suite start without Java on PATH",
+      "localReadyMilliseconds": 7018,
+      "commit": "4ac8a0d"
     }
   },
   "decisions": {
@@ -224,7 +246,7 @@
       "test": "crates/storage-front replay of emulator-programs.json over HTTP"
     },
     "noJava": {
-      "storageFrontCommandNewAllowed": 0,
+      "storageFrontCommandNewAllowed": "0 outside #[cfg(test)]",
       "suiteStartsWithJavaAbsentFromPath": true,
       "setupDownloadsExactlyOneAsset": true,
       "ciStep": "Verify suite start without Java on PATH"

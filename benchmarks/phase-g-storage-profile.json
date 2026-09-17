@@ -1,0 +1,301 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-g-storage-rules-profile",
+  "syntheticOnly": true,
+  "acceptance": false,
+  "recordedAt": "2026-09-17T15:44:30+08:00",
+  "scope": "Rules-evaluated Firebase (v0) Storage cycles on one Mac: user-token multipart upload (create), metadata GET (get), media GET (get), other-user denied GET, DELETE under /users/{uid}/{allPaths=**}; 10 warmup + 200 measured cycles per run; two interleaved runs per engine; client fetch time included; no owner bypass",
+  "driver": "conformance/src/suite/profile-storage-rules.mjs",
+  "host": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "cpus": 12,
+    "totalMemoryBytes": 34359738368
+  },
+  "node": "v24.11.1",
+  "engines": {
+    "before": {
+      "label": "@fireside-dev/darwin-arm64@0.1.0-next.6 (Java rules runtime jar 1.1.3, Java 25.0.1 on this host)",
+      "runs": [
+        "next6-java-run1",
+        "next6-java-run2"
+      ]
+    },
+    "after": {
+      "label": "candidate release build after G3/G4 (native rules)",
+      "runs": [
+        "candidate-native-run1",
+        "candidate-native-run2"
+      ]
+    }
+  },
+  "runs": {
+    "next6-java-run1": {
+      "engine": "java-rules-runtime",
+      "binarySha256": "0bc3c9191bdce07c0f0046a1026bc2ab0ffb95c313b6ec2b826009776940e882",
+      "readyMilliseconds": 6067.4,
+      "summary": {
+        "uploadMilliseconds": {
+          "p50": 0.944,
+          "p95": 1.58,
+          "p99": 1.847,
+          "mean": 1.031
+        },
+        "metadataMilliseconds": {
+          "p50": 0.446,
+          "p95": 0.905,
+          "p99": 1.252,
+          "mean": 0.515
+        },
+        "downloadMilliseconds": {
+          "p50": 0.545,
+          "p95": 1.029,
+          "p99": 1.251,
+          "mean": 0.617
+        },
+        "deniedReadMilliseconds": {
+          "p50": 0.47,
+          "p95": 0.99,
+          "p99": 1.22,
+          "mean": 0.555
+        },
+        "deleteMilliseconds": {
+          "p50": 0.489,
+          "p95": 0.912,
+          "p99": 1.179,
+          "mean": 0.564
+        }
+      },
+      "receiptSha256": "b244fb915f7841bde900e79109ff0392b43c591c376df41fd5f89a45be4ce101",
+      "shutdown": [
+        0,
+        null
+      ]
+    },
+    "next6-java-run2": {
+      "engine": "java-rules-runtime",
+      "binarySha256": "0bc3c9191bdce07c0f0046a1026bc2ab0ffb95c313b6ec2b826009776940e882",
+      "readyMilliseconds": 5532.7,
+      "summary": {
+        "uploadMilliseconds": {
+          "p50": 0.961,
+          "p95": 1.461,
+          "p99": 1.806,
+          "mean": 1.027
+        },
+        "metadataMilliseconds": {
+          "p50": 0.452,
+          "p95": 0.932,
+          "p99": 1.098,
+          "mean": 0.518
+        },
+        "downloadMilliseconds": {
+          "p50": 0.559,
+          "p95": 1.046,
+          "p99": 1.718,
+          "mean": 0.624
+        },
+        "deniedReadMilliseconds": {
+          "p50": 0.483,
+          "p95": 0.947,
+          "p99": 1.095,
+          "mean": 0.552
+        },
+        "deleteMilliseconds": {
+          "p50": 0.514,
+          "p95": 0.986,
+          "p99": 1.652,
+          "mean": 0.72
+        }
+      },
+      "receiptSha256": "671ab2e873178f3ae25b5e7d62822425f2c43fdf8d775f676cd18a0680f3d3ae",
+      "shutdown": [
+        0,
+        null
+      ]
+    },
+    "candidate-native-run1": {
+      "engine": "native-rules",
+      "binarySha256": "0fd3724515475217ad8e240380bc7a5dfc0ef08d243559702adcf7e0a83ecbcc",
+      "readyMilliseconds": 5470.2,
+      "summary": {
+        "uploadMilliseconds": {
+          "p50": 0.581,
+          "p95": 0.807,
+          "p99": 1.261,
+          "mean": 0.611
+        },
+        "metadataMilliseconds": {
+          "p50": 0.147,
+          "p95": 0.236,
+          "p99": 0.605,
+          "mean": 0.165
+        },
+        "downloadMilliseconds": {
+          "p50": 0.244,
+          "p95": 0.366,
+          "p99": 0.439,
+          "mean": 0.26
+        },
+        "deniedReadMilliseconds": {
+          "p50": 0.143,
+          "p95": 0.207,
+          "p99": 0.239,
+          "mean": 0.148
+        },
+        "deleteMilliseconds": {
+          "p50": 0.224,
+          "p95": 0.329,
+          "p99": 0.595,
+          "mean": 0.333
+        }
+      },
+      "receiptSha256": "0298505ea2ebe66c2daa744a70a9b0ee7e79194d400c4e04a37a50b195d4cb15",
+      "shutdown": [
+        0,
+        null
+      ]
+    },
+    "candidate-native-run2": {
+      "engine": "native-rules",
+      "binarySha256": "0fd3724515475217ad8e240380bc7a5dfc0ef08d243559702adcf7e0a83ecbcc",
+      "readyMilliseconds": 5188.3,
+      "summary": {
+        "uploadMilliseconds": {
+          "p50": 0.584,
+          "p95": 0.813,
+          "p99": 1.592,
+          "mean": 0.621
+        },
+        "metadataMilliseconds": {
+          "p50": 0.146,
+          "p95": 0.225,
+          "p99": 0.459,
+          "mean": 0.156
+        },
+        "downloadMilliseconds": {
+          "p50": 0.248,
+          "p95": 0.366,
+          "p99": 0.575,
+          "mean": 0.261
+        },
+        "deniedReadMilliseconds": {
+          "p50": 0.145,
+          "p95": 0.22,
+          "p99": 0.508,
+          "mean": 0.159
+        },
+        "deleteMilliseconds": {
+          "p50": 0.23,
+          "p95": 0.341,
+          "p99": 0.635,
+          "mean": 0.248
+        }
+      },
+      "receiptSha256": "1cfcf038f38243628d31bfee8bf1dc4f98ddc181f4252eb605554390de87bd8a",
+      "shutdown": [
+        0,
+        null
+      ]
+    }
+  },
+  "meanOfRuns": {
+    "uploadMilliseconds": {
+      "p50": {
+        "java": 0.952,
+        "native": 0.583,
+        "ratio": 1.64
+      },
+      "p95": {
+        "java": 1.521,
+        "native": 0.81,
+        "ratio": 1.88
+      },
+      "p99": {
+        "java": 1.827,
+        "native": 1.426,
+        "ratio": 1.28
+      }
+    },
+    "metadataMilliseconds": {
+      "p50": {
+        "java": 0.449,
+        "native": 0.146,
+        "ratio": 3.06
+      },
+      "p95": {
+        "java": 0.919,
+        "native": 0.23,
+        "ratio": 3.98
+      },
+      "p99": {
+        "java": 1.175,
+        "native": 0.532,
+        "ratio": 2.21
+      }
+    },
+    "downloadMilliseconds": {
+      "p50": {
+        "java": 0.552,
+        "native": 0.246,
+        "ratio": 2.24
+      },
+      "p95": {
+        "java": 1.038,
+        "native": 0.366,
+        "ratio": 2.83
+      },
+      "p99": {
+        "java": 1.484,
+        "native": 0.507,
+        "ratio": 2.93
+      }
+    },
+    "deniedReadMilliseconds": {
+      "p50": {
+        "java": 0.476,
+        "native": 0.144,
+        "ratio": 3.31
+      },
+      "p95": {
+        "java": 0.968,
+        "native": 0.213,
+        "ratio": 4.54
+      },
+      "p99": {
+        "java": 1.157,
+        "native": 0.373,
+        "ratio": 3.1
+      }
+    },
+    "deleteMilliseconds": {
+      "p50": {
+        "java": 0.502,
+        "native": 0.227,
+        "ratio": 2.21
+      },
+      "p95": {
+        "java": 0.949,
+        "native": 0.335,
+        "ratio": 2.83
+      },
+      "p99": {
+        "java": 1.415,
+        "native": 0.615,
+        "ratio": 2.3
+      }
+    }
+  },
+  "readinessMilliseconds": {
+    "java": [
+      6067.4,
+      5532.7
+    ],
+    "native": [
+      5470.2,
+      5188.3
+    ]
+  },
+  "decision": "No regression: every rules-evaluated operation is faster at p50, p95 and p99 with the native engine on this host; the removed per-request JVM round trip is about 0.3 ms at p50. Same-host synthetic observation, not a consumer or endurance qualification."
+}

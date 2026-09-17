@@ -11,6 +11,7 @@ universal-compatibility, publication or performance-win claim is made here.
 | D | Upgrade, real ENOSPC, interrupted export and normal recovery qualified in combined seven-job CI | Repeat applicable lifecycle checks on the final combined candidate |
 | E | Short source/performance qualification complete; reviewed optimization and paired component, overhead, Storage/lifecycle and equivalent-query receipts | Full-data behavior and memory remain Phase F; no blanket efficiency claim |
 | F | Exact-engine seven-job CI and five-platform packages qualified in #24; #25 evidence also merged with green CI | Complete consumer cheap prerequisites, full acceptance and honest final report; publication requires approval |
+| G | G0–G4 on the main line: frozen gate, 306 production + 334 emulator oracle steps, native `service firebase.storage`, Java runtime/gates/asset removed, no-Java CI step, before/after rules profile (`benchmarks/phase-g-storage-profile.json`) | G5: exact-candidate CI, consumer cheap gates on the packed candidate, paired acceptance, named clean setup without Java, `0.1.0-next.7` release approval |
 
 The [B–D audit](phase-bcd-qualification.md) maps each checked requirement to its
 actual executable/browser evidence and states the scope limitations. Checking

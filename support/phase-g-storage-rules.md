@@ -1,9 +1,33 @@
 # Phase G — Native Storage Security Rules (`0.1.0-next.7`)
 
 Written 2026-09-17 against `main` 39ba9a2 (published engine 572d4fb,
-`@fireside-dev/cli@0.1.0-next.6`). This is a plan, not a claim of work done.
-Every "current" statement below was read from that source; every "target"
-statement is unverified until its named check passes.
+`@fireside-dev/cli@0.1.0-next.6`). The plan below is retained as written; the
+status section records what has landed since.
+
+## Status (2026-09-17)
+
+G0–G4 are implemented on branch `plan/phase-g-storage-rules`; G5
+(qualification and release) has not started. Receipts, all on that branch:
+
+| Step | Receipt |
+| --- | --- |
+| G0 | `benchmarks/phase-g-storage-rules.json` (frozen; Rules API probe `projects.test` accepted `service firebase.storage`, 3/3 SUCCESS, 2026-09-17T06:24:54Z, response `6852f9d5…`) — commit 63e9dc2 |
+| G1 | `conformance/fixtures/storage-rules-v1`: 306 production `projects.test` cases in 10 batches (236 allow / 70 deny / 32 with runtime errors) and 26 official-emulator programs / 334 raw HTTP steps with the official Firestore emulator registered; `SHA256SUMS`, README with the divergence table, `npm run test:storage-rules-fixtures` in the `public-contracts` CI job — commits 63e9dc2, 71236d1, refrozen through a98ee49 |
+| G2 | `crates/rules-engine`: `service firebase.storage`, `RulesService`, `StorageObject`, `request.path`, `firestore.get`/`exists`, path indexing/slicing, `int()`/`float()`, `toMillis()`/`dayOfYear()`; shared-language corrections established by the corpus (regex `split`, three-valued `&&`/`||` over errors, lexical function scope, `(default)` path segments); `tests/storage_oracle_replay.rs` replays all 306 cases and the 1024 Phase 3 cases still pass — commit e3eb0d8 |
+| G3 | `crates/storage-front/src/rules.rs` native layer; `rules_replay_tests.rs` replays all 334 recorded steps over HTTP with parity or one of eight named divergences (five `request.method`, two list matching, one JSON-API PATCH); `storage-front` spawns no process; before/after rules-evaluated profile on the same Mac in `benchmarks/phase-g-storage-profile.json` (p50 upload 0.95 → 0.58 ms, metadata get 0.45 → 0.15 ms, denied read 0.48 → 0.14 ms; no regression at any percentile) — commits a98ee49, af93c14 |
+| G4 | `--java` / `--storage-rules-jar` removed from the native CLI and `suite-runtime`; npm wrapper without the `java -version` gate, `--java` option or jar download (`setup` fetches the UI zip only); docs updated (README, CLI guide, COMPATIBILITY, DESIGN "Native Storage rules", ROADMAP); harnesses updated; CI step "Verify suite start without Java on PATH" (`conformance/src/suite/verify-no-java.mjs`: scrubbed PATH, UI-only asset cache, single-file `storage.rules`, owner/admin/list rules, `firestore.get` against live Firestore, `setRules` reload, clean shutdown — passes locally in 7.0 s to readiness) — commit 4ac8a0d |
+| G5 | Not started: exact-candidate CI, Twodart cheap gates on the packed candidate, Hetzner paired acceptance (`candidate-attempt-10.json`), the named clean-setup-without-Java stage, release `0.1.0-next.7` |
+
+Decisions the oracles settled differently from the plan's assumptions
+(details in the fixture README and the gate's `decisions`): the official
+emulator omits `request.method` and matches `list` paths as prefix templates —
+production semantics are implemented and both are asserted as divergences; a
+failed `/internal/setRules` drops the ruleset (parity, not "previous ruleset
+kept"); every upload is `create` with `resource` set for an existing object;
+the official rules runtime crashes on an object name with an empty segment,
+which Fireside evaluates with the empty segment dropped. Two drop-in gaps
+found on the way were closed in G4: the single-file `storage.rules` shape and
+a `.firebaserc` without `targets`.
 
 ## Goal
 
