@@ -115,7 +115,10 @@ try{
   assert.equal(reload.status,200,await reload.text());
   assert.equal((await step('reloaded ruleset denies owner read','GET',`/v0/b/${bucket}/o/${object}`,{auth:alice})).status,403);
   assert(!log.includes('java invoked by the suite'),'the suite must never invoke java');
-  assert(!/\bjava\b/i.test(log),'the suite must not mention Java');
+  // The owned Functions runtime prints project paths (its watch directory and
+  // HTTPS function URLs); the harness's own output directory name is not a
+  // Java mention.
+  assert(!/\bjava\b/i.test(log.replaceAll(output,'<output>')),'the suite must not mention Java');
   record.passed=true;
 }finally{
   if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRESIDE_SHUTDOWN\n');
