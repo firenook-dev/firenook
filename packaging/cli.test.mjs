@@ -111,7 +111,7 @@ test('export default, parent/symlink safety and resume isolation', () => {
 test('state and credential isolation stay outside original config and seed', () => {
   const {dir,options} = project();
   const before = readFileSync(join(dir,'firebase.json'),'utf8');
-  const diagnostic = {project:loadProject(options,dir),binary:'/fake',toolsRoot:'/tools',java:'/java',files:{storageRules:'/rules',ui:'/ui'}};
+  const diagnostic = {project:loadProject(options,dir),binary:'/fake',toolsRoot:'/tools',files:{ui:'/ui'}};
   const launch = prepareLaunch(diagnostic,options);
   assert.equal(readFileSync(join(dir,'firebase.json'),'utf8'),before);
   assert.ok(launch.args.includes('--state-dir'));

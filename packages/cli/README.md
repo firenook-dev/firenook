@@ -29,11 +29,14 @@ platform binary. Lock the version in your project. No automatic upgrades.
   or native Windows x64. Each platform requires passing native packaging CI.
   Windows builds statically link the C runtime; no separate C++ redistributable
   is required by the Fireside executable.
-- Java for Storage rules; Java 26 is the tested baseline. The Functions host is
-  pinned firebase-tools 15.22.0, installed as a regular dependency.
-- `setup` explicitly downloads the pinned public Storage-rules/UI assets and
-  verifies size/SHA-256. Ordinary installation/start does not download them.
-  `doctor` is read-only and names missing dependencies.
+- No Java: Storage Security Rules are compiled and evaluated natively
+  (`rules_version = '2'` and version-1 sources, `firestore.get()` /
+  `firestore.exists()` against the local Firestore, `PUT /internal/setRules`).
+  The Functions host is pinned firebase-tools 15.22.0, installed as a regular
+  dependency.
+- `setup` explicitly downloads the pinned public Emulator UI asset and verifies
+  size/SHA-256. Ordinary installation/start does not download it. `doctor` is
+  read-only and names missing dependencies.
 - Existing `firebase.json` configures all five service emulators; `.firebaserc`
   aliases/Storage targets and existing rules/index paths are reused. Storage is
   currently the native suite's array-of-targets format, not every Firebase CLI
@@ -107,8 +110,8 @@ for one engine revision or consumer does not certify another revision or every
 application. This package makes no universal performance or memory-reduction
 claim; measure your own representative workload before adopting it.
 
-Functions execution still uses Node and firebase-tools; Storage rules still
-use Java. General Pub/Sub subscriber delivery, arbitrary Auth provider/tenant
+Functions execution still uses Node and firebase-tools. General Pub/Sub
+subscriber delivery, arbitrary Auth provider/tenant
 flows, Realtime Database, Hosting, App Hosting and Data Connect are not covered
 by this preview. Supporting UI routes do not imply full Emulator UI parity.
 Windows power-loss durability and network filesystems have not been qualified;

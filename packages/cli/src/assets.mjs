@@ -6,8 +6,9 @@ import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
+// The Emulator UI is the one remaining downloaded asset; Storage rules are
+// evaluated natively since 0.1.0-next.7.
 export const assets = [
-  {name: 'storageRules', file: 'cloud-storage-rules-runtime-v1.1.3.jar', bytes: 52892936, sha256: '0cd52db6f6271d62078f805220706377c849220b73bd68aa27078d977df9c900'},
   {name: 'ui', file: 'ui-v1.15.0.zip', bytes: 3538469, sha256: '97d8c4c574e3f20c4d690a2ce8373eef76ab024da73279a062dba8517f88cf9a'},
 ];
 export const cacheRoot = () => process.env.FIREBASE_EMULATORS_PATH || join(homedir(), '.cache/firebase/emulators');

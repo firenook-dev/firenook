@@ -370,13 +370,16 @@ struct FirebaseStorageConfig {
     rules: PathBuf,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct FirebaseRc {
+    /// Absent in most projects; only Storage targets are consulted.
+    #[serde(default)]
     targets: BTreeMap<String, FirebaseProjectTargets>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct FirebaseProjectTargets {
+    #[serde(default)]
     storage: BTreeMap<String, Vec<String>>,
 }
 
@@ -1615,9 +1618,9 @@ mod tests {
         let config: FirebaseProjectConfig =
             serde_json::from_str(r#"{ "storage": { "rules": "storage.rules" } }"#)
                 .expect("single-file storage config");
-        let firebase_rc = FirebaseRc {
-            targets: BTreeMap::new(),
-        };
+        let firebase_rc: FirebaseRc =
+            serde_json::from_str(r#"{ "projects": { "default": "demo-single" } }"#)
+                .expect(".firebaserc without targets parses");
         let (rules, default_bucket) = resolve_storage_rules(
             std::path::Path::new("/project"),
             config.storage.as_ref(),

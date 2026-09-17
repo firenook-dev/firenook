@@ -158,6 +158,14 @@ jobs:
           "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions"
           "$RUNNER_TEMP/fireside-functions-readiness-evidence"
           --verify-owned-adapter
+      - name: Verify suite start without Java on PATH
+        run: >-
+          node conformance/src/suite/verify-no-java.mjs
+          target/debug/fireside
+          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools"
+          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions"
+          "$HOME/.cache/firebase/emulators"
+          "$RUNNER_TEMP/fireside-no-java-evidence"
       - name: Preserve synthetic developer UI evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -177,6 +185,8 @@ jobs:
             ${{ runner.temp }}/fireside-developer-ui-evidence/browser-failure.json
             ${{ runner.temp }}/fireside-developer-ui-evidence/*.png
             ${{ runner.temp }}/fireside-functions-readiness-evidence/fixture.json
+            ${{ runner.temp }}/fireside-no-java-evidence/result.json
+            ${{ runner.temp }}/fireside-no-java-evidence/suite.log
           if-no-files-found: ignore
       - name: Verify query rules oracle fixtures
         run: npm run test:rules:query-fixtures --prefix conformance

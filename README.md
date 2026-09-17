@@ -36,15 +36,18 @@ not every Firebase service or every CLI option. See the
 [CLI guide](packages/cli/README.md) for setup, configuration, state retention,
 native resume and rollback.
 
-Disk/WAL is the default. Firestore, Auth and Storage services are implemented in
-Rust. Functions still run user JavaScript through Node/firebase-tools; Storage
-rules still use the pinned Java rules runtime. Client SDKs are unchanged.
+Disk/WAL is the default. Firestore, Auth and Storage services, including
+Storage Security Rules, are implemented in Rust; no Java runtime is used.
+Functions still run user JavaScript through Node/firebase-tools. Client SDKs
+are unchanged.
 
 ## Development and verification
 
 Install the toolchain in `rust-toolchain.toml`, Node 24.20.0 and npm 12.0.2.
-Browser tests require Chrome/Chromium; official-oracle tests require Java and
-their exact documented emulator artifacts. Release CI uses Java 26.
+Browser tests require Chrome/Chromium; recording or replaying the official
+oracles requires Java and their exact documented emulator artifacts. The
+product itself does not run Java; CI verifies a suite start with `java` absent
+from `PATH`.
 
 ```sh
 cargo test --locked --workspace --all-targets --all-features

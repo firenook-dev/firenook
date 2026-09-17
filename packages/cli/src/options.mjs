@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'java', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'durability']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'durability']);
 const durabilities = new Set(['write-behind', 'per-commit']);
 const switches = new Set(['resume-state', 'no-diagnostics', 'help']);
 export function parseOptions(argv) {

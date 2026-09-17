@@ -55,7 +55,7 @@ const {Firestore} = require('@google-cloud/firestore');
     assert.equal(upload.status,200,'Storage upload through open rules');
   }
   const download = await fetch(storage+'/package.json?alt=media');
-  assert.equal(download.status,200,'Storage read/re-import through Java rules runtime');
+  assert.equal(download.status,200,'Storage read/re-import through native rules');
   assert.deepEqual(await download.json(),{text:'中文 😀 storage'});
   const topic = 'http://127.0.0.1:${ports.pubsub}/v1/projects/${project}/topics/package-smoke';
   assert.equal((await fetch(topic,{method:'PUT',headers:{'content-type':'application/json'},body:'{}'})).status,200);

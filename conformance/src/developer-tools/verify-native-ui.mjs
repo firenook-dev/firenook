@@ -49,8 +49,7 @@ const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH','JAVA_H
 Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRESIDE_CONTROL_STDIN:'1'});
 const args=['suite','--host','127.0.0.1','--project-id',project,'--project-dir',output,'--state-dir',join(output,'state'),
   '--storage-bucket','default='+project+'.appspot.com','--firebase-tools-root',tools,'--node',process.execPath,
-  '--java',process.env.JAVA_HOME?join(process.env.JAVA_HOME,'bin/java'):'/usr/bin/java',
-  '--storage-rules-jar',join(cache,'cloud-storage-rules-runtime-v1.1.3.jar'),'--ui-archive',join(cache,'ui-v1.15.0.zip')];
+  '--ui-archive',join(cache,'ui-v1.15.0.zip')];
 for(const [service,port] of Object.entries(ports))args.push('--'+service+'-port',String(port));
 await Promise.all(reservations.map(listener=>new Promise(resolve=>listener.close(resolve))));
 const child=spawn(binary,args,{cwd:output,env,stdio:['pipe','pipe','pipe']});

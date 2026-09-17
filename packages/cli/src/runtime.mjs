@@ -1,11 +1,11 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { assetPaths } from './assets.mjs';
 import { binaryPath, manifest, release } from './binary.mjs';
 import { loadProject } from './options.mjs';
-import { nativeEnvironment, requestNativeStop, resolveExecutable } from './processes.mjs';
+import { nativeEnvironment, requestNativeStop } from './processes.mjs';
 
 const require = createRequire(import.meta.url);
 export async function diagnose(options, cwd = process.cwd()) {
@@ -14,13 +14,9 @@ export async function diagnose(options, cwd = process.cwd()) {
   const project = loadProject(options, cwd);
   const toolsRoot = dirname(require.resolve('firebase-tools/package.json'));
   if (JSON.parse(readFileSync(join(toolsRoot, 'package.json'))).version !== '15.22.0') throw new Error('Expected firebase-tools 15.22.0');
-  const java = resolveExecutable(options.java || 'java');
-  const javaResult = spawnSync(java, ['-version'], {encoding:'utf8', timeout:10000});
-  if (javaResult.status !== 0) throw new Error('Java runtime missing; install Java 26 for the tested Storage-rules compatibility runtime. Fireside does not install system runtimes.');
-  // Rust canonicalizes runtime executable paths, so resolve PATH explicitly.
-  const javaPath = java;
-  const files = await assetPaths().catch(error => { throw new Error(`${error.message}. Run fireside setup to provision pinned public compatibility assets.`); });
-  return {binary, toolsRoot, java:javaPath, files, project, version:manifest.version, engineRevision:release.engineRevision};
+  // Storage rules are evaluated natively; no Java runtime is consulted.
+  const files = await assetPaths().catch(error => { throw new Error(`${error.message}. Run fireside setup to provision the pinned public Emulator UI asset.`); });
+  return {binary, toolsRoot, files, project, version:manifest.version, engineRevision:release.engineRevision};
 }
 
 export function prepareLaunch(diagnostic, options) {
@@ -35,8 +31,7 @@ export function prepareLaunch(diagnostic, options) {
   writeFileSync(credentials, JSON.stringify({type:'authorized_user', client_id:'demo', client_secret:'demo', refresh_token:'demo'}), {flag:'wx', mode:0o600});
   const args = ['suite', '--project-dir', p.directory, '--config', p.config, '--firebase-rc', rc,
     '--project-id', p.project, '--host', p.host, '--firebase-tools-root', diagnostic.toolsRoot,
-    '--node', process.execPath, '--java', diagnostic.java, '--storage-rules-jar', diagnostic.files.storageRules,
-    '--ui-archive', diagnostic.files.ui, '--state-dir', state, '--minimum-functions', options['minimum-functions'] || '0'];
+    '--node', process.execPath, '--ui-archive', diagnostic.files.ui, '--state-dir', state, '--minimum-functions', options['minimum-functions'] || '0'];
   for (const [name, port] of Object.entries(p.ports)) args.push(`--${name}-port`, String(port));
   for (const bucket of options['storage-bucket']) args.push('--storage-bucket', bucket);
   if (p.imported) args.push('--import', p.imported);

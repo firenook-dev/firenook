@@ -487,13 +487,46 @@ accepted by the official importer**, not an observed multi-shard export. It
 reframes four existing official synthetic entity records and verifies all four
 documents through the official emulator.
 
+## Native Storage rules
+
+`storage-front` compiles every configured ruleset with `fireside-rules-engine`
+(`service firebase.storage`) at startup and evaluates requests in process; no
+rules runtime child exists. The request model is the one recorded from the
+official emulator in `conformance/fixtures/storage-rules-v1`, with production
+`projects.test` precedence for expression semantics:
+
+- `request.auth.uid` is the `user_id` claim only; the token map is the raw,
+  unverified payload; anything undecodable is anonymous.
+- `resource` / `request.resource` are fourteen-key maps (`cacheControl` and
+  `contentLanguage` are never exposed); every upload is `create` with the
+  stored object as `resource`; a metadata PATCH sees the merged object with
+  the next metageneration; `get`/`list`/`delete` carry a null
+  `request.resource`.
+- Rules run before existence checks (403 on deny or error, then 404), once at
+  finalize for resumable uploads under the `start` request's authorization,
+  and never for the JSON API, owner credentials, valid download-token reads,
+  copy or the admin-only token routes.
+- `firestore.get` / `firestore.exists` read the suite's core store through an
+  injected accessor at request time (latest committed state), returning
+  `{data, id, __name__}` with the project-qualified name and no access budget.
+- `PUT /internal/setRules` swaps every ruleset; a compile failure leaves no
+  ruleset installed and every Firebase-API request answers 403 "Storage
+  Emulator has no loaded ruleset." until a valid reload, as the official
+  emulator does. A ruleset that does not compile at startup is a startup
+  failure. A `firebase.json` `storage.rules` file governs every bucket;
+  targets give one ruleset per bucket, and an untargeted bucket has none.
+- Where the official runtime diverges from production (`request.method`
+  missing, prefix-template `list` matching, a crash on empty path segments),
+  production semantics are implemented and the divergence is asserted by the
+  replay tests rather than reproduced.
+
 ## Distribution and trust boundaries
 
 ### Failed export still drains the owned suite
 
 Export-on-exit errors remain nonzero failures, but are collected rather than
 returned before teardown. The scheduler and admitted deliveries stop before the
-Functions host, listeners and Java Storage rules runtime. A Functions-stop or
+Functions host and listeners. A Functions-stop or
 locator-removal error likewise does not skip remaining teardown. The final error
 retains all observed failures, the working-directory recovery path and an explicit
 warning when Firestore was volatile. Failed export does not imply a portable

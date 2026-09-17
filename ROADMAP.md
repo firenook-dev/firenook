@@ -189,16 +189,17 @@ npm publication require separate release approval; after publication, verify the
 registry-installed artifacts and update consumer exact pins. Do not infer a stable
 or universal-compatibility claim from completing this scoped release.
 
-Java for Storage rules is scheduled for removal in Phase G below and
-firebase-tools as the Functions/Extensions host in Phase H; Node stays as the
-user's Functions runtime. Adding Realtime Database, Hosting, App Hosting, Data
+Phase G removed Java: Storage rules are evaluated natively. Phase H replaces
+firebase-tools as the Functions/Extensions host; Node stays as the user's
+Functions runtime. Adding Realtime Database, Hosting, App Hosting, Data
 Connect or general Pub/Sub subscribers is separate work. Publication, tagging
 and release approval remain governed by the release contract.
 
 ## Phase G — Native Storage Security Rules (`0.1.0-next.7`)
 
 The plan, current-state audit, oracle precedence and named checks are in the
-[Phase G plan](support/phase-g-storage-rules.md). Nothing below is implemented.
+[Phase G plan](support/phase-g-storage-rules.md). G0–G4 are implemented on the
+main line; G5 (qualification and release) is pending.
 
 | Step | Deliverable | Completion check |
 | --- | --- | --- |
@@ -209,14 +210,18 @@ The plan, current-state audit, oracle precedence and named checks are in the
 | G4 | Java gates, `--java`, jar download and docs removed | Suite starts with `java` absent from PATH; `setup` fetches one asset |
 | G5 | Exact-candidate CI, consumer gates, paired acceptance, no-Java clean setup, release | `0.1.0-next.7` published through the release workflow; receipts recorded |
 
-- [ ] G0 — Freeze the gate before any fixture or product change.
-- [ ] G1 — Record the production and official-emulator Storage rules corpus;
-  commit fixtures before implementation.
-- [ ] G2 — Generalize the parser, request model and evaluator; add the
-  `firestore` namespace; replay the corpus in unit tests.
-- [ ] G3 — Replace the Java child with the native engine in `storage-front`;
-  implement ruleset reload; measure the Storage cycle before and after.
-- [ ] G4 — Remove the runtime, the CLI gate, the asset and the documentation
+- [x] G0 — Freeze the gate before any fixture or product change
+  (`benchmarks/phase-g-storage-rules.json`, Rules API probe receipt).
+- [x] G1 — Record the production and official-emulator Storage rules corpus;
+  commit fixtures before implementation (306 production cases, 26 programs /
+  334 steps, checksummed, CI integrity step).
+- [x] G2 — Generalize the parser, request model and evaluator; add the
+  `firestore` namespace; replay the corpus in unit tests
+  (`crates/rules-engine/tests/storage_oracle_replay.rs`).
+- [x] G3 — Replace the Java child with the native engine in `storage-front`;
+  implement ruleset reload; replay every recorded step over HTTP
+  (`crates/storage-front/src/rules_replay_tests.rs`).
+- [x] G4 — Remove the runtime, the CLI gate, the asset and the documentation
   of the Java requirement; add the no-Java CI step.
 - [ ] G5 — Qualify the exact candidate (CI, consumer gates, paired acceptance,
   clean setup without Java) and publish `0.1.0-next.7` as a prerelease.

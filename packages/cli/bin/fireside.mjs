@@ -8,7 +8,7 @@ import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
 
 const help = `Fireside ${manifest.version} — Firebase-compatible local emulator preview
 
-  fireside setup                    Download verified Storage-rules/UI assets
+  fireside setup                    Download the verified Emulator UI asset
   fireside doctor [options]         Read-only package/runtime/config checks
   fireside emulators:start [options]
   fireside emulators:exec [options] -- command [args...]
@@ -18,12 +18,12 @@ const help = `Fireside ${manifest.version} — Firebase-compatible local emulato
 Options: --project demo-ID, --config firebase.json, --import DIR,
   --export-on-exit[=DIR], --only firestore,auth,storage,functions,pubsub,
   --state-dir DIR, --resume-state, --storage-bucket target=bucket (repeatable),
-  --java PATH, --host 127.0.0.1, --minimum-functions N,
+  --host 127.0.0.1, --minimum-functions N,
   --firestore-websocket-port N, --logging-port N, --eventarc-port N, --tasks-port N.
 
 Uses existing Firebase SDKs/config; disk/WAL by default. Complete suite profile
 only in this preview. Unsupported services/subsets fail before launch. Requires
-Node 24 and Java for Storage rules. No deployment command or cloud login.
+Node 24; Storage rules are evaluated natively. No deployment command or cloud login.
 Test commands are argv after -- (use sh -c explicitly if shell syntax is needed).
 `;
 
