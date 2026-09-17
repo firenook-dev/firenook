@@ -1,6 +1,7 @@
 // Phase G4 gate: the complete native suite starts, enforces Storage rules
 // (including firestore.get against the local Firestore) and shuts down with
-// no Java on PATH and no rules runtime jar in the emulator cache.
+// `java` shadowed by a failing shim, JAVA_HOME unset and no rules runtime jar
+// in the emulator cache.
 // node verify-no-java.mjs binary firebase-tools-root firebase-functions-root emulator-cache output
 import assert from 'node:assert/strict';
 import {spawn,spawnSync} from 'node:child_process';
@@ -51,16 +52,18 @@ await json('.firebaserc',{projects:{default:project}});
 await mkdir(join(output,'gcloud'));
 await json('demo-adc.json',{type:'authorized_user',client_id:'demo',client_secret:'demo',refresh_token:'demo'});
 
-// PATH without any directory that resolves `java`; JAVA_HOME unset.
-const scrubbed=(process.env.PATH||'').split(delimiter).filter(directory=>{
-  const probe=spawnSync(join(directory,'java'),['-version'],{stdio:'ignore'});
-  return probe.error!==undefined;
-});
-const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
-Object.assign(env,{PATH:[dirname(process.execPath),...scrubbed].join(delimiter),GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),
+// `java` on PATH is a shim that fails loudly and JAVA_HOME is unset, so any
+// invocation by the product surfaces in the suite log instead of silently
+// using a system runtime. System directories stay on PATH: the coordinator
+// spawns `kill` and the Functions host spawns `npm`.
+const shims=join(output,'shims');
+await mkdir(shims);
+await writeFile(join(shims,'java'),'#!/bin/sh\necho "java invoked by the suite: $*" >&2\nexit 127\n',{mode:0o755});
+const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
+Object.assign(env,{PATH:[shims,dirname(process.execPath),env.PATH].join(delimiter),GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),
   CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRESIDE_CONTROL_STDIN:'1'});
-const javaLookup=spawnSync('sh',['-c','command -v java'],{env,encoding:'utf8'});
-assert.notEqual(javaLookup.status,0,`java must not resolve on the scrubbed PATH: ${javaLookup.stdout}`);
+const javaProbe=spawnSync('java',['-version'],{env,encoding:'utf8'});
+assert.equal(javaProbe.status,127,`java on the suite PATH must be the failing shim: ${javaProbe.stderr}`);
 
 const reservations=[],ports={};
 for(const service of ['firestore','auth','storage','functions','pubsub','hub','ui','firestore-websocket','logging','eventarc','tasks']){
@@ -77,7 +80,7 @@ for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{log+=ch
 const origin=service=>`http://127.0.0.1:${ports[service]}`;
 const jwt=claims=>{const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');return `${encode({alg:'none',typ:'JWT'})}.${encode({...claims,iat:1700000000,exp:4102444800,aud:project,iss:`https://securetoken.google.com/${project}`})}.`;};
 const alice=jwt({sub:'alice',user_id:'alice'}),bob=jwt({sub:'bob',user_id:'bob'}),admin=jwt({sub:'root',user_id:'root',admin:true});
-const record={passed:false,acceptance:false,syntheticOnly:true,node:process.version,javaOnPath:false,cacheAssets:['ui-v1.15.0.zip'],
+const record={passed:false,acceptance:false,syntheticOnly:true,node:process.version,javaShimmed:true,javaHomeUnset:true,cacheAssets:['ui-v1.15.0.zip'],
   binarySha256:hash(await readFile(binary)),driverSha256:hash(await readFile(new URL(import.meta.url))),storageConfigShape:'single-file',steps:[]};
 const step=async(name,method,path,{auth,body,type='text/plain'}={})=>{
   const response=await fetch(origin('storage')+path,{method,headers:{...(auth?{authorization:`Bearer ${auth}`}:{}),...(body===undefined?{}:{'content-type':type})},body});
@@ -109,7 +112,8 @@ try{
   const reload=await fetch(origin('storage')+'/internal/setRules',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({rules:{files:[{name:'storage.rules',content:"rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} { allow read: if false; }\n  }\n}\n"}]}})});
   assert.equal(reload.status,200,await reload.text());
   assert.equal((await step('reloaded ruleset denies owner read','GET',`/v0/b/${bucket}/o/${object}`,{auth:alice})).status,403);
-  assert(!log.includes('java'),'the suite must not mention java');
+  assert(!log.includes('java invoked by the suite'),'the suite must never invoke java');
+  assert(!/\bjava\b/i.test(log),'the suite must not mention Java');
   record.passed=true;
 }finally{
   if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRESIDE_SHUTDOWN\n');
