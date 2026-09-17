@@ -95,6 +95,28 @@
       "ciStep": "Verify suite start without Java on PATH",
       "localReadyMilliseconds": 7018,
       "commit": "4ac8a0d"
+    },
+    "exactCandidateCi": {
+      "pullRequest": 43,
+      "candidateCommit": "cdabf62",
+      "runs": [
+        "https://github.com/sanjevirau/fireside/actions/runs/35196947926",
+        "https://github.com/sanjevirau/fireside/actions/runs/35196250599"
+      ],
+      "jobs": [
+        "Rust quality gate",
+        "Public fixture and package checks",
+        "Differential harness (incl. Verify suite start without Java on PATH)",
+        "Firebase JS SDK browser integration x4",
+        "Packed install x5"
+      ],
+      "allPassed": true
+    },
+    "consumerCheapGates": {
+      "candidate": "0.1.0-local.ga472db6e3dce",
+      "integration": "bun test:fireside-integration 24/24",
+      "extensions": "bun test:fireside-extensions: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (matches next.6)",
+      "journeys": "not run"
     }
   },
   "decisions": {
