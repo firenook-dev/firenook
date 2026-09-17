@@ -336,9 +336,11 @@
         "candidate": "linux-x64 artifact of Installable packages run 35250492904 (0.1.0-local.g1f056eb1785f; engine identical to a054d81)",
         "noJava": "conformance/src/suite/verify-no-java.mjs PASS, 12 steps, ready 6522 ms",
         "corpusReplay": "281/281 steps across all five profiles offline (FIRESIDE_OFFLINE=1), registry extensions from ~/.cache/firebase/extensions with fireside-registry.json sidecars and Linux npm installs; publish-listened skipped (no gcloud ADC on the host); suite ready ~25.4 s per profile for the six-codebase oracle project (official 33-51 s)",
+        "offlineVendoredStart": "fireside ext:vendor copied both registry instances into <project>/extensions/.sources (481 MB with their Linux node_modules) and recorded the resolution; then `fireside emulators:exec --offline` with FIREBASE_EXTENSIONS_CACHE_PATH pointed at an empty directory, HOME at a directory holding only the UI asset, no FIREBASE_TOKEN and no firebase-tools started the suite (8 backends, 71 functions, 2 upstream-ignored), served both instances from the vendored copies and answered ext-stripe-createPortalLink with the extension's own 401; clean stop",
         "scope": "about ten minutes; not the paired 2 h acceptance"
       },
-      "pending": ["exact-candidate CI green on a054d81", "Hetzner paired acceptance attempt 10 (user preference so far: short smoke)", "named clean-setup-without-Java-or-firebase-tools stage", "release 0.1.0-next.8 (separate release approval)", "Twodart pin bump + CLAUDE.md sentences"]
+      "cleanSetupWithoutJavaOrFirebaseTools": "the Linux smoke is that stage: a fresh consumer directory with the packed CLI + platform package, firebase-functions 7.2.5 and firebase-admin 13.10.0 only; java absent from PATH; suite start, corpus replay and the offline vendored start all pass",
+      "pending": ["exact-candidate CI green (4ed8d80)", "Hetzner paired acceptance attempt 10 (user preference so far: short smoke)", "release 0.1.0-next.8 (separate release approval)", "Twodart pin bump + CLAUDE.md sentences"]
     }
   }
 }
