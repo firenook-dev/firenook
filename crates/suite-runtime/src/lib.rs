@@ -30,10 +30,12 @@ use fireside_grpc_front::FirestoreService;
 use fireside_pubsub_front::{SchedulerRuntime, router as pubsub_router};
 use fireside_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
 use fireside_rest_front::router_with_shared_service as rest_router;
-use fireside_rules_runtime::RulesRuntime;
+use fireside_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
 use fireside_rules_runtime::request_history::RequestHistory;
+use fireside_rules_runtime::{RulesRuntime, SnapshotAccess};
 use fireside_storage_front::{
-    BucketRules, RulesRuntimeConfig, StorageConfig, StorageDurability, StorageRuntime,
+    BucketRules, FirestoreDocuments, NativeRulesConfig, RulesFile, RulesSource, StorageConfig,
+    StorageDurability, StorageRuntime,
 };
 use fireside_suite_front::{
     ExportCommand, HubConfig, HubRuntime, LoggingRuntime, ServiceInfo, SuiteDirectory, UiConfig,
@@ -97,6 +99,15 @@ pub struct StorageBucketConfig {
     pub rules: PathBuf,
 }
 
+/// The Storage rules shape of `firebase.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageRulesConfig {
+    /// `storage: { rules }`: one file governs every bucket.
+    Single(PathBuf),
+    /// `storage: [{ target, rules }]`: one file per targeted bucket.
+    PerBucket(Vec<StorageBucketConfig>),
+}
+
 /// Complete suite startup settings resolved by the CLI.
 #[derive(Debug, Clone)]
 pub struct SuiteConfig {
@@ -106,8 +117,6 @@ pub struct SuiteConfig {
     pub firebase_json: PathBuf,
     pub firebase_tools_root: PathBuf,
     pub node: PathBuf,
-    pub java: PathBuf,
-    pub storage_rules_jar: PathBuf,
     pub ui_archive: PathBuf,
     pub state_dir: PathBuf,
     pub resume_state: bool,
@@ -118,7 +127,7 @@ pub struct SuiteConfig {
     pub diagnostics: bool,
     pub firestore_rules: Option<PathBuf>,
     pub firestore_indexes: Option<PathBuf>,
-    pub storage_buckets: Vec<StorageBucketConfig>,
+    pub storage_rules: StorageRulesConfig,
     pub default_bucket: String,
     pub import: Option<PathBuf>,
     pub export_on_exit: Option<PathBuf>,
@@ -457,7 +466,7 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         )
         .map_err(|error| failure(format!("Auth failed to start: {error}")))?,
     );
-    let storage = Arc::new(start_storage(config, &delivery, &triggers).await?);
+    let storage = Arc::new(start_storage(config, &delivery, &triggers, &store).await?);
     import_suite(config, &store, &auth, &storage).await?;
 
     let query_policy = query_policy(config)?;
@@ -624,8 +633,6 @@ fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {
         ("firebase.json", &config.firebase_json),
         ("firebase-tools", &config.firebase_tools_root),
         ("Node", &config.node),
-        ("Java", &config.java),
-        ("Storage rules jar", &config.storage_rules_jar),
         ("UI archive", &config.ui_archive),
     ] {
         if !path.exists() {
@@ -700,38 +707,65 @@ fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeErr
     Ok(runtime)
 }
 
+/// Latest committed Cloud Firestore state for `firestore.get` /
+/// `firestore.exists` in Storage rules: every lookup reads a fresh snapshot,
+/// as the official emulator queries its Firestore emulator per call.
+struct StoreDocuments {
+    store: Store,
+    project: String,
+}
+
+impl FirestoreDocuments for StoreDocuments {
+    fn document(&self, path: &str) -> Result<Option<Resource>, DocumentAccessError> {
+        SnapshotAccess::current(self.store.snapshot(), self.project.clone()).get(path)
+    }
+}
+
+fn read_rules(path: &Path) -> Result<String, SuiteRuntimeError> {
+    std::fs::read_to_string(path).map_err(|error| {
+        failure(format!(
+            "failed to read Storage rules {}: {error}",
+            path.display()
+        ))
+    })
+}
+
 async fn start_storage(
     config: &SuiteConfig,
     delivery: &DeliveryRuntime,
     triggers: &TriggerRegistry,
+    store: &Store,
 ) -> Result<StorageRuntime, SuiteRuntimeError> {
-    let buckets = config
-        .storage_buckets
-        .iter()
-        .map(|bucket| {
-            let content = std::fs::read_to_string(&bucket.rules).map_err(|error| {
-                failure(format!(
-                    "failed to read Storage rules {}: {error}",
-                    bucket.rules.display()
-                ))
-            })?;
-            Ok(BucketRules {
-                bucket: bucket.bucket.clone(),
-                name: bucket.rules.display().to_string(),
-                content,
-            })
-        })
-        .collect::<Result<Vec<_>, SuiteRuntimeError>>()?;
+    let source = match &config.storage_rules {
+        StorageRulesConfig::Single(path) => RulesSource::Single(RulesFile {
+            name: path.display().to_string(),
+            content: read_rules(path)?,
+        }),
+        StorageRulesConfig::PerBucket(buckets) => RulesSource::PerBucket(
+            buckets
+                .iter()
+                .map(|bucket| {
+                    Ok(BucketRules {
+                        bucket: bucket.bucket.clone(),
+                        name: bucket.rules.display().to_string(),
+                        content: read_rules(&bucket.rules)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, SuiteRuntimeError>>()?,
+        ),
+    };
     StorageRuntime::start(
         StorageConfig {
             project: config.project_id.clone(),
             origin: format!("http://{}:{}", config.host, config.ports.storage),
             data_dir: config.state_dir.join("storage"),
             durability: storage_durability(config.durability),
-            rules: Some(RulesRuntimeConfig {
-                java: config.java.clone(),
-                jar: config.storage_rules_jar.clone(),
-                buckets,
+            rules: Some(NativeRulesConfig {
+                source,
+                documents: Arc::new(StoreDocuments {
+                    store: store.clone(),
+                    project: config.project_id.clone(),
+                }),
             }),
         },
         delivery.queue(),

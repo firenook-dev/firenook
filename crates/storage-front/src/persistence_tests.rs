@@ -7,7 +7,7 @@ fn object(index: usize) -> StoredObject {
         bucket: "demo-bucket".to_owned(),
         generation: 1,
         metageneration: 1,
-        content_type: "application/json".to_owned(),
+        content_type: Some("application/json".to_owned()),
         storage_class: "STANDARD".to_owned(),
         content_disposition: Some("inline".to_owned()),
         content_encoding: Some("gzip".to_owned()),
@@ -63,6 +63,9 @@ fn incremental_metadata_roundtrips_changes_without_resurrecting_legacy_objects()
             object_metadata: json!({"contentEncoding":"gzip"}),
             received: 19,
             staging_file: "uploads/staging".to_owned(),
+            authorization: None,
+            denied: false,
+            cancelled: false,
         },
     );
     store

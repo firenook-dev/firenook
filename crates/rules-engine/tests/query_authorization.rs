@@ -91,7 +91,7 @@ fn request(case: &Json) -> EvaluationRequest {
         Timestamp::new(1, 0),
     );
     request.auth = Some(Auth {
-        uid: "query-owner".to_owned(),
+        uid: Some("query-owner".to_owned()),
         token: BTreeMap::from([(
             "email_verified".to_owned(),
             Value::Bool(case["unverified"] != true),

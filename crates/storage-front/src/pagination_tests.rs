@@ -160,7 +160,7 @@ fn insert(data: &mut StorageData, name: &str) {
         bucket: BUCKET.to_owned(),
         generation: 1,
         metageneration: 1,
-        content_type: "application/json".to_owned(),
+        content_type: Some("application/json".to_owned()),
         storage_class: "STANDARD".to_owned(),
         content_disposition: None,
         content_encoding: None,

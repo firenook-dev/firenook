@@ -12,6 +12,7 @@ use super::{
     BASE64, StorageApiError, StorageState, StoredObject, file_name, io_error, percent_encode,
 };
 
+#[allow(clippy::too_many_lines)]
 pub(super) async fn file_response(
     state: &StorageState,
     object: &StoredObject,
@@ -50,7 +51,14 @@ pub(super) async fn file_response(
     };
     let headers = response.headers_mut();
     insert(headers, "accept-ranges", "bytes");
-    insert(headers, "content-type", &object.content_type);
+    insert(
+        headers,
+        "content-type",
+        object
+            .content_type
+            .as_deref()
+            .unwrap_or("application/octet-stream"),
+    );
     insert(
         headers,
         "content-disposition",

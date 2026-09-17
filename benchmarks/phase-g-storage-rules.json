@@ -170,11 +170,11 @@
     "fixturesFrozen": true,
     "frozenFixtureSha256": {
       "README.md": "8b04bb91dd014ce4c87c51176e5e246cf78d72ce8affc447ddc5b89535594507",
-      "emulator-programs.json": "71c3b177be9cb0ff123bc68aa5a1fa49be9ea3fabfbb5ed851a4bffb32c3dd11",
+      "emulator-programs.json": "ac30bf85897939b6c2052d02d00acfc36a68ee9408d4d803932a528ef2dc8af3",
       "production-expression-corpus.json": "6603c8c7db661c423839994c5ff9c22ef99747fabacf361b9ede3ea7f2505f60",
-      "SHA256SUMS": "e4ec293345945bdc97e111b1f24540fecef0b372fbf61b063cfff4cbe2618a29"
+      "SHA256SUMS": "586f6d4f6a63c3eceb641fd177995954e92da11d5f996fa601209ff65b8db67e"
     },
-    "fixturesFrozenAt": "2026-09-17T15:15:41+08:00"
+    "fixturesFrozenAt": "2026-09-17T15:30:54+08:00"
   },
   "javaSurfacesToRemove": [
     {

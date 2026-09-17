@@ -63,7 +63,11 @@ interface Observation {
   readonly id: string;
   readonly note?: string;
   readonly rulesInstall?: { readonly files: readonly RulesFile[]; readonly response: RecordedResponse; readonly logs: readonly LogLine[] };
-  readonly firestoreWrite?: { readonly path: string; readonly status: number };
+  readonly firestoreWrite?: {
+    readonly path: string;
+    readonly fields: Readonly<Record<string, unknown>>;
+    readonly status: number;
+  };
   readonly request: RecordedRequest;
   readonly response: RecordedResponse;
   readonly logs: readonly LogLine[];
@@ -263,7 +267,11 @@ async function runProgram(program: Program): Promise<{
   const rulesInstall = await installRules(program.rules);
   const firestoreSeed = [];
   for (const document of program.firestoreSeed ?? []) {
-    firestoreSeed.push({ path: document.path, status: await writeFirestore(document.path, document.fields) });
+    firestoreSeed.push({
+      path: document.path,
+      fields: document.fields,
+      status: await writeFirestore(document.path, document.fields),
+    });
   }
   const observations: Observation[] = [];
   for (const step of program.steps) {
@@ -310,7 +318,11 @@ async function runStep(origin: string, step: Step, previous: readonly Observatio
   }
   let firestoreWrite: Observation["firestoreWrite"];
   if (step.firestoreWrite) {
-    firestoreWrite = { path: step.firestoreWrite.path, status: await writeFirestore(step.firestoreWrite.path, step.firestoreWrite.fields) };
+    firestoreWrite = {
+      path: step.firestoreWrite.path,
+      fields: step.firestoreWrite.fields,
+      status: await writeFirestore(step.firestoreWrite.path, step.firestoreWrite.fields),
+    };
   }
   const resolvedPath = resolveTemplates(step.path, previous);
   const headers: Record<string, string> = { ...(step.headers ?? {}) };
@@ -432,7 +444,12 @@ function normalize(value: unknown): unknown {
   }
   const output: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if ((key === "downloadTokens" || key === "firebaseStorageDownloadTokens") && typeof child === "string") {
+    if (key === "request" && child !== null && typeof child === "object") {
+      // The request path is an input a replay sends verbatim (templates
+      // included); only the resolved copy is normalized.
+      const { path, ...rest } = child as Record<string, unknown>;
+      output[key] = { path, ...(normalize(rest) as Record<string, unknown>) };
+    } else if ((key === "downloadTokens" || key === "firebaseStorageDownloadTokens") && typeof child === "string") {
       const count = child.length > 0 ? child.split(",").length : 0;
       output[key] = `<${String(count)}-download-token${count === 1 ? "" : "s"}>`;
     } else if (key === "generation" && (typeof child === "string" || typeof child === "number")) {
@@ -451,6 +468,9 @@ function normalize(value: unknown): unknown {
 }
 
 function normalizeString(value: string): string {
+  // Request templates (`{{token:step}}`, `{{uploadUrl:step}}`) are resolved
+  // by a replay from its own responses and must survive normalization.
+  if (value.includes("{{")) return value;
   return value
     .replaceAll(storageOrigin, "<storage-origin>")
     .replaceAll(firestoreOrigin, "<firestore-origin>")

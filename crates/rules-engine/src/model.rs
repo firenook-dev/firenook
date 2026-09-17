@@ -298,8 +298,9 @@ impl StorageObject {
 /// Emulator authentication exposed as `request.auth`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Auth {
-    /// Firebase user identifier.
-    pub uid: String,
+    /// Firebase user identifier; `None` when the token carries no `user_id`
+    /// claim (Storage exposes `request.auth.uid == null` then).
+    pub uid: Option<String>,
     /// Token claims, excluding the synthesized `uid` field.
     pub token: BTreeMap<String, Value>,
 }

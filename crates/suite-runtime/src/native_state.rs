@@ -85,11 +85,13 @@ impl NativeState {
         }
 
         let seed = seed_path(config)?;
-        let mut buckets = config
-            .storage_buckets
-            .iter()
-            .map(|bucket| bucket.bucket.clone())
-            .collect::<Vec<_>>();
+        let mut buckets = match &config.storage_rules {
+            crate::StorageRulesConfig::Single(_) => vec![config.default_bucket.clone()],
+            crate::StorageRulesConfig::PerBucket(buckets) => buckets
+                .iter()
+                .map(|bucket| bucket.bucket.clone())
+                .collect::<Vec<_>>(),
+        };
         buckets.sort();
         buckets.dedup();
         let identity = Identity {

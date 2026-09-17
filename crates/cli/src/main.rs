@@ -24,7 +24,9 @@ use fireside_rest_front::{
     AllocatorMemoryReporter, AllocatorMemoryUsage, router_with_shared_service as rest_router,
 };
 use fireside_rules_runtime::RulesRuntime;
-use fireside_suite_runtime::{StorageBucketConfig, SuiteConfig, SuitePorts, run as run_suite};
+use fireside_suite_runtime::{
+    StorageBucketConfig, StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
+};
 use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use serde::Deserialize;
 
@@ -257,10 +259,6 @@ struct SuiteArgs {
     firebase_tools_root: PathBuf,
     #[arg(long)]
     node: PathBuf,
-    #[arg(long)]
-    java: PathBuf,
-    #[arg(long = "storage-rules-jar")]
-    storage_rules_jar: PathBuf,
     #[arg(long = "ui-archive")]
     ui_archive: PathBuf,
     #[arg(long = "state-dir")]
@@ -328,7 +326,20 @@ struct FirebaseProjectConfig {
     emulators: FirebaseEmulators,
     firestore: Option<FirebaseFirestoreConfig>,
     #[serde(default)]
-    storage: Vec<FirebaseStorageConfig>,
+    storage: Option<FirebaseStorageSection>,
+}
+
+/// `storage` is either one rules file for every bucket or a list of targets.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FirebaseStorageSection {
+    Single(FirebaseStorageRules),
+    Targets(Vec<FirebaseStorageConfig>),
+}
+
+#[derive(Debug, Deserialize)]
+struct FirebaseStorageRules {
+    rules: PathBuf,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -421,9 +432,9 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         .parent()
         .ok_or_else(|| "firebase.json has no parent directory".to_owned())?
         .to_owned();
-    let (storage_buckets, default_bucket) = resolve_storage_buckets(
+    let (storage_rules, default_bucket) = resolve_storage_rules(
         &config_dir,
-        &raw_config.storage,
+        raw_config.storage.as_ref(),
         &targets,
         &arguments.project_id,
         &storage_overrides,
@@ -437,8 +448,6 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         firebase_json,
         firebase_tools_root: absolute_path(&arguments.firebase_tools_root)?,
         node: absolute_path(&arguments.node)?,
-        java: absolute_path(&arguments.java)?,
-        storage_rules_jar: absolute_path(&arguments.storage_rules_jar)?,
         ui_archive: absolute_path(&arguments.ui_archive)?,
         state_dir: absolute_path(&arguments.state_dir)?,
         resume_state: arguments.resume_state,
@@ -451,7 +460,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         firestore_indexes: firestore
             .and_then(|config| config.indexes.as_ref())
             .map(|path| project_path(&config_dir, path)),
-        storage_buckets,
+        storage_rules,
         default_bucket,
         import: arguments.import.as_deref().map(absolute_path).transpose()?,
         export_on_exit: arguments
@@ -464,13 +473,25 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
     })
 }
 
-fn resolve_storage_buckets(
+fn resolve_storage_rules(
     config_dir: &std::path::Path,
-    storage: &[FirebaseStorageConfig],
+    storage: Option<&FirebaseStorageSection>,
     firebase_rc: &FirebaseRc,
     project: &str,
     overrides: &BTreeMap<String, String>,
-) -> Result<(Vec<StorageBucketConfig>, String), String> {
+) -> Result<(StorageRulesConfig, String), String> {
+    let storage = match storage {
+        // The official emulator governs every bucket with the one file and
+        // names the default bucket after the project.
+        Some(FirebaseStorageSection::Single(single)) => {
+            return Ok((
+                StorageRulesConfig::Single(project_path(config_dir, &single.rules)),
+                format!("{project}.appspot.com"),
+            ));
+        }
+        Some(FirebaseStorageSection::Targets(targets)) => targets.as_slice(),
+        None => &[],
+    };
     let project_targets = firebase_rc.targets.get(project);
     let mut buckets = Vec::with_capacity(storage.len());
     for entry in storage {
@@ -497,7 +518,7 @@ fn resolve_storage_buckets(
         .or_else(|| buckets.first())
         .map(|bucket| bucket.bucket.clone())
         .ok_or_else(|| "firebase.json configures no Storage buckets".to_owned())?;
-    Ok((buckets, default_bucket))
+    Ok((StorageRulesConfig::PerBucket(buckets), default_bucket))
 }
 
 fn parse_storage_overrides(values: &[String]) -> Result<BTreeMap<String, String>, String> {
@@ -1288,10 +1309,6 @@ mod tests {
             "node_modules/firebase-tools",
             "--node",
             "node",
-            "--java",
-            "java",
-            "--storage-rules-jar",
-            "storage-rules.jar",
             "--ui-archive",
             "ui.zip",
             "--state-dir",
@@ -1591,6 +1608,37 @@ mod tests {
 
         assert!(directory.path().join("fireside.redb").is_file());
         assert!(!directory.path().join("fireside.wal").exists());
+    }
+
+    #[test]
+    fn single_file_storage_rules_govern_the_project_default_bucket() {
+        let config: FirebaseProjectConfig =
+            serde_json::from_str(r#"{ "storage": { "rules": "storage.rules" } }"#)
+                .expect("single-file storage config");
+        let firebase_rc = FirebaseRc {
+            targets: BTreeMap::new(),
+        };
+        let (rules, default_bucket) = resolve_storage_rules(
+            std::path::Path::new("/project"),
+            config.storage.as_ref(),
+            &firebase_rc,
+            "demo-single",
+            &BTreeMap::new(),
+        )
+        .expect("single file resolves without targets");
+        assert_eq!(
+            rules,
+            StorageRulesConfig::Single(PathBuf::from("/project/storage.rules"))
+        );
+        assert_eq!(default_bucket, "demo-single.appspot.com");
+        let targets: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "storage": [{ "target": "default", "rules": "a.rules" }] }"#,
+        )
+        .expect("targets storage config");
+        assert!(matches!(
+            targets.storage,
+            Some(FirebaseStorageSection::Targets(ref entries)) if entries.len() == 1
+        ));
     }
 
     #[test]

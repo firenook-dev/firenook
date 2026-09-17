@@ -8,7 +8,7 @@
     "jarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c"
   },
   "targetProject": "demo-fireside-phase-g-storage-rules",
-  "capturedAt": "2026-09-17T07:02:31.064Z",
+  "capturedAt": "2026-09-17T07:30:54.031Z",
   "syntheticOnly": true,
   "credentialsStored": false,
   "accessTokensStored": false,
@@ -159,8 +159,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=m%2Fget.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=m%2Fget.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -206,8 +206,8 @@
         {
           "id": "get-metadata",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt",
             "headers": {
               "authorization": "@alice"
@@ -243,8 +243,8 @@
         {
           "id": "get-media",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt?alt=media",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt?alt=media",
             "headers": {
               "authorization": "@alice"
@@ -269,8 +269,8 @@
         {
           "id": "list-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=m%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=m%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -294,8 +294,8 @@
         {
           "id": "patch-denied",
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt",
             "headers": {
               "authorization": "@alice",
@@ -330,8 +330,8 @@
         {
           "id": "delete-denied",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/m%2Fget.txt",
             "headers": {
               "authorization": "@alice"
@@ -355,8 +355,8 @@
         {
           "id": "create-denied",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=m%2Fnew.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=m%2Fnew.txt",
             "headers": {
               "authorization": "@alice",
@@ -419,8 +419,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=l%2Fone.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=l%2Fone.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -466,8 +466,8 @@
         {
           "id": "list-root",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -491,8 +491,8 @@
         {
           "id": "list-prefix",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=l%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=l%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -519,8 +519,8 @@
         {
           "id": "list-prefix-no-delimiter",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=l%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=l%2F",
             "headers": {
               "authorization": "@alice"
@@ -548,8 +548,8 @@
           "id": "list-bad-prefix",
           "note": "prefix without trailing slash",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=l",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=l",
             "headers": {
               "authorization": "@alice"
@@ -573,8 +573,8 @@
         {
           "id": "get-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/l%2Fone.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/l%2Fone.txt",
             "headers": {
               "authorization": "@alice"
@@ -625,8 +625,8 @@
         {
           "id": "create-new",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=c%2Fnew.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=c%2Fnew.txt",
             "headers": {
               "authorization": "@alice",
@@ -672,8 +672,8 @@
         {
           "id": "create-over-existing",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=c%2Fnew.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=c%2Fnew.txt",
             "headers": {
               "authorization": "@alice",
@@ -719,8 +719,8 @@
         {
           "id": "patch-denied",
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/c%2Fnew.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/c%2Fnew.txt",
             "headers": {
               "authorization": "@alice",
@@ -755,8 +755,8 @@
         {
           "id": "delete-denied",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/c%2Fnew.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/c%2Fnew.txt",
             "headers": {
               "authorization": "@alice"
@@ -780,8 +780,8 @@
         {
           "id": "get-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/c%2Fnew.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/c%2Fnew.txt",
             "headers": {
               "authorization": "@alice"
@@ -833,8 +833,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=u%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=u%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -880,8 +880,8 @@
         {
           "id": "patch-allowed",
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/u%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/u%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -934,8 +934,8 @@
         {
           "id": "upload-over-existing-denied",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=u%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=u%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -970,8 +970,8 @@
         {
           "id": "delete-denied",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/u%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/u%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -995,8 +995,8 @@
         {
           "id": "patch-missing-object",
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/u%2Fmissing.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/u%2Fmissing.txt",
             "headers": {
               "authorization": "@alice",
@@ -1054,8 +1054,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=d%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=d%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -1101,8 +1101,8 @@
         {
           "id": "get-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/d%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/d%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -1126,8 +1126,8 @@
         {
           "id": "delete-allowed",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/d%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/d%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -1143,8 +1143,8 @@
         {
           "id": "delete-missing",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/d%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/d%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -1190,8 +1190,8 @@
         {
           "id": "create",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rw%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rw%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -1237,8 +1237,8 @@
         {
           "id": "get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -1274,8 +1274,8 @@
         {
           "id": "list",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=rw%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=rw%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -1302,8 +1302,8 @@
         {
           "id": "patch",
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -1355,8 +1355,8 @@
         {
           "id": "delete",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -1372,8 +1372,8 @@
         {
           "id": "anonymous-get-missing",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/rw%2Fobj.txt",
             "headers": {}
           },
@@ -1418,8 +1418,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=v1%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=v1%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -1465,8 +1465,8 @@
         {
           "id": "get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/v1%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/v1%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -1502,8 +1502,8 @@
         {
           "id": "list-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=v1%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=v1%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -1532,8 +1532,8 @@
         {
           "id": "create",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=v1%2Fnew.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=v1%2Fnew.txt",
             "headers": {
               "authorization": "@alice",
@@ -1625,8 +1625,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fsize.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fsize.txt",
             "headers": {
               "authorization": "@alice",
@@ -1691,8 +1691,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fsize-int.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fsize-int.txt",
             "headers": {
               "authorization": "@alice",
@@ -1757,8 +1757,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fct.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fct.txt",
             "headers": {
               "authorization": "@alice",
@@ -1823,8 +1823,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fct2.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fct2.txt",
             "headers": {
               "authorization": "@alice",
@@ -1878,8 +1878,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fname.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fname.txt",
             "headers": {
               "authorization": "@alice",
@@ -1944,8 +1944,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fbucket.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fbucket.txt",
             "headers": {
               "authorization": "@alice",
@@ -2010,8 +2010,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fgen.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fgen.txt",
             "headers": {
               "authorization": "@alice",
@@ -2076,8 +2076,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmetagen.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmetagen.txt",
             "headers": {
               "authorization": "@alice",
@@ -2142,8 +2142,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Ftc.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Ftc.txt",
             "headers": {
               "authorization": "@alice",
@@ -2208,8 +2208,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fupd.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fupd.txt",
             "headers": {
               "authorization": "@alice",
@@ -2274,8 +2274,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmd5.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmd5.txt",
             "headers": {
               "authorization": "@alice",
@@ -2340,8 +2340,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcrc.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcrc.txt",
             "headers": {
               "authorization": "@alice",
@@ -2406,8 +2406,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fetag.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fetag.txt",
             "headers": {
               "authorization": "@alice",
@@ -2472,8 +2472,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmeta.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmeta.txt",
             "headers": {
               "authorization": "@alice",
@@ -2538,8 +2538,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Ftoken.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Ftoken.txt",
             "headers": {
               "authorization": "@alice",
@@ -2604,8 +2604,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcd.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcd.txt",
             "headers": {
               "authorization": "@alice",
@@ -2670,8 +2670,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcd2.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcd2.txt",
             "headers": {
               "authorization": "@alice",
@@ -2736,8 +2736,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fce.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fce.txt",
             "headers": {
               "authorization": "@alice",
@@ -2802,8 +2802,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcc.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcc.txt",
             "headers": {
               "authorization": "@alice",
@@ -2868,8 +2868,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcc2.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcc2.txt",
             "headers": {
               "authorization": "@alice",
@@ -2928,8 +2928,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcl.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fcl.txt",
             "headers": {
               "authorization": "@alice",
@@ -3021,8 +3021,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fkeys.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fkeys.txt",
             "headers": {
               "authorization": "@alice",
@@ -3087,8 +3087,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fresnull.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fresnull.txt",
             "headers": {
               "authorization": "@alice",
@@ -3153,8 +3153,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmethod.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fmethod.txt",
             "headers": {
               "authorization": "@alice",
@@ -3213,8 +3213,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fpath.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fpath.txt",
             "headers": {
               "authorization": "@alice",
@@ -3279,8 +3279,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fempty.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=rr%2Fempty.txt",
             "headers": {
               "authorization": "@alice",
@@ -3372,8 +3372,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fct.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fct.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3443,8 +3443,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fmeta.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fmeta.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3521,8 +3521,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fmeta-types.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fmeta-types.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3599,8 +3599,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fcd.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fcd.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3671,8 +3671,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fce.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fce.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3743,8 +3743,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fcc.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fcc.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3816,8 +3816,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fcl.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fcl.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3889,8 +3889,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fnamed.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fnamed.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -3960,8 +3960,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fsize.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Fsize.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -4031,8 +4031,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Ftok.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=mp%2Ftok.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -4114,8 +4114,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=up%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=up%2Fobj.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -4190,8 +4190,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4252,8 +4252,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4322,8 +4322,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4392,8 +4392,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4465,8 +4465,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4537,8 +4537,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4610,8 +4610,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4683,8 +4683,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4756,8 +4756,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4826,8 +4826,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4898,8 +4898,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -4973,8 +4973,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -5011,8 +5011,8 @@
         {
           "id": "final-metadata",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/up%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner"
@@ -5080,8 +5080,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=gl%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=gl%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -5146,8 +5146,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5202,8 +5202,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5251,8 +5251,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5307,8 +5307,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5363,8 +5363,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5419,8 +5419,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt?alt=media",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt?alt=media",
             "headers": {
               "authorization": "@alice"
@@ -5468,8 +5468,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -5515,8 +5515,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -5564,8 +5564,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -5613,8 +5613,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -5660,8 +5660,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -5704,8 +5704,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2Fdeeper%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=gl%2Fdeeper%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -5746,8 +5746,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -5790,8 +5790,8 @@
             "logs": []
           },
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5826,8 +5826,8 @@
             "logs": []
           },
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5865,8 +5865,8 @@
             "logs": []
           },
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5914,8 +5914,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -5953,8 +5953,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -6002,8 +6002,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/gl%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -6049,8 +6049,8 @@
         {
           "id": "media-denied-octet-stream",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fmedia.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fmedia.txt",
             "headers": {
               "authorization": "@alice",
@@ -6085,8 +6085,8 @@
         {
           "id": "multipart-allowed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fmp.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fmp.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -6137,8 +6137,8 @@
         {
           "id": "multipart-denied-too-large",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fmp-large.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fmp-large.txt",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -6178,8 +6178,8 @@
         {
           "id": "resumable-start",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fresumable.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fresumable.txt",
             "headers": {
               "x-goog-upload-protocol": "resumable",
@@ -6216,8 +6216,8 @@
         {
           "id": "resumable-upload-chunk",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fresumable.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "upload",
@@ -6250,8 +6250,8 @@
         {
           "id": "resumable-query",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fresumable.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "query",
@@ -6273,8 +6273,8 @@
         {
           "id": "resumable-finalize-allowed",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fresumable.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "upload, finalize",
@@ -6323,8 +6323,8 @@
         {
           "id": "resumable-large-start",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Flarge.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Flarge.txt",
             "headers": {
               "x-goog-upload-protocol": "resumable",
@@ -6361,8 +6361,8 @@
         {
           "id": "resumable-large-upload",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-large-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Flarge.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "upload",
@@ -6395,8 +6395,8 @@
         {
           "id": "resumable-large-finalize-denied",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-large-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Flarge.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "finalize",
@@ -6422,8 +6422,8 @@
         {
           "id": "resumable-large-query-after-denial",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-large-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Flarge.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "query",
@@ -6445,8 +6445,8 @@
         {
           "id": "resumable-large-finalize-again",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-large-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Flarge.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "finalize",
@@ -6467,8 +6467,8 @@
         {
           "id": "resumable-large-object-absent",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/res%2Flarge.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/res%2Flarge.txt",
             "headers": {
               "authorization": "Bearer owner"
@@ -6506,8 +6506,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fanon.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fanon.txt",
             "headers": {
               "x-goog-upload-protocol": "resumable",
@@ -6543,8 +6543,8 @@
         {
           "id": "resumable-anonymous-finalize-denied",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-anonymous-start-not-checked}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fanon.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "upload, finalize",
@@ -6599,8 +6599,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fauth-start.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fauth-start.txt",
             "headers": {
               "x-goog-upload-protocol": "resumable",
@@ -6638,8 +6638,8 @@
           "id": "resumable-auth-captured-finalize-as-bob",
           "note": "the emulator stores the start authorization on the upload",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-auth-captured-at-start}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fauth-start.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "upload, finalize",
@@ -6688,8 +6688,8 @@
         {
           "id": "resumable-cancel",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fcancel.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fcancel.txt",
             "headers": {
               "x-goog-upload-protocol": "resumable",
@@ -6726,8 +6726,8 @@
         {
           "id": "resumable-cancel-command",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-cancel}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fcancel.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "cancel",
@@ -6747,8 +6747,8 @@
         {
           "id": "resumable-cancelled-finalize",
           "request": {
-            "method": "POST",
             "path": "{{uploadUrl:resumable-cancel}}",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=res%2Fcancel.txt&upload_id=<upload-id>&upload_protocol=resumable",
             "headers": {
               "x-goog-upload-command": "finalize",
@@ -6768,8 +6768,8 @@
         {
           "id": "gcs-resumable-not-checked",
           "request": {
-            "method": "POST",
             "path": "/upload/storage/v1/b/demo-synthetic-app.appspot.com/o?uploadType=resumable&name=res%2Fgcs.txt",
+            "method": "POST",
             "resolvedPath": "/upload/storage/v1/b/demo-synthetic-app.appspot.com/o?uploadType=resumable&name=res%2Fgcs.txt",
             "headers": {
               "x-upload-content-type": "video/mp4",
@@ -6801,8 +6801,8 @@
         {
           "id": "gcs-resumable-finalize-bypasses-rules",
           "request": {
-            "method": "PUT",
             "path": "{{uploadUrl:gcs-resumable-not-checked}}",
+            "method": "PUT",
             "resolvedPath": "/upload/storage/v1/b/demo-synthetic-app.appspot.com/o?name=res%2Fgcs.txt&uploadType=resumable&upload_id=<upload-id>",
             "headers": {
               "content-type": "video/mp4"
@@ -6838,9 +6838,9 @@
               "etag": "<generated-etag>",
               "crc32c": "1kWlJw==",
               "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-              "id": "demo-synthetic-app.appspot.com/res/gcs.txt/1789628544783",
+              "id": "demo-synthetic-app.appspot.com/res/gcs.txt/1789630247686",
               "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/res%2Fgcs.txt",
-              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/res%2Fgcs.txt?generation=1789628544783&alt=media"
+              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/res%2Fgcs.txt?generation=1789630247686&alt=media"
             }
           },
           "logs": []
@@ -6875,8 +6875,8 @@
         {
           "id": "first-upload",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -6922,8 +6922,8 @@
         {
           "id": "overwrite-denied-resource-present",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -6977,8 +6977,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -7032,8 +7032,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -7092,8 +7092,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -7158,8 +7158,8 @@
             "logs": []
           },
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/ov%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/ov%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -7230,8 +7230,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=ov%2Fobj.txt",
             "headers": {
               "authorization": "@alice",
@@ -7277,8 +7277,8 @@
         {
           "id": "final-object",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/ov%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/ov%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner"
@@ -7342,8 +7342,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=auth%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=auth%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -7389,8 +7389,8 @@
         {
           "id": "anonymous-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {}
           },
@@ -7417,8 +7417,8 @@
         {
           "id": "bearer-alice",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -7454,8 +7454,8 @@
         {
           "id": "firebase-scheme-alice",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "firebase:@alice"
@@ -7491,8 +7491,8 @@
         {
           "id": "bearer-bob-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@bob"
@@ -7516,8 +7516,8 @@
         {
           "id": "sub-only-uid-null-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@subonly"
@@ -7560,8 +7560,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@subonly"
@@ -7625,8 +7625,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=auth%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=auth%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -7691,8 +7691,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -7747,8 +7747,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -7803,8 +7803,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -7859,8 +7859,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@admin"
@@ -7915,8 +7915,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -7964,8 +7964,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {}
           },
@@ -8018,8 +8018,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {}
           },
@@ -8065,8 +8065,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "Bearer not-a-jwt"
@@ -8121,8 +8121,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "Basic YWxpY2U6c2VjcmV0"
@@ -8177,8 +8177,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "Bearer"
@@ -8233,8 +8233,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@expired"
@@ -8289,8 +8289,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -8345,8 +8345,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/auth%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -8409,8 +8409,8 @@
         {
           "id": "owner-upload",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=by%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=by%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -8456,8 +8456,8 @@
         {
           "id": "firebase-owner-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt",
             "headers": {
               "authorization": "Firebase owner"
@@ -8493,8 +8493,8 @@
         {
           "id": "alice-get-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -8518,8 +8518,8 @@
         {
           "id": "token-download",
           "request": {
+            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?alt=media&token={{token:owner-upload}}",
             "method": "GET",
-            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?alt=media&token=<download-token>",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?alt=media&token=<download-token>",
             "headers": {}
           },
@@ -8542,8 +8542,8 @@
         {
           "id": "token-metadata",
           "request": {
+            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token={{token:owner-upload}}",
             "method": "GET",
-            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token=<download-token>",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token=<download-token>",
             "headers": {}
           },
@@ -8577,8 +8577,8 @@
         {
           "id": "wrong-token-denied",
           "request": {
+            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?alt=media&token=not-a-token",
             "method": "GET",
-            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?alt=media&token=<download-token>",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?alt=media&token=<download-token>",
             "headers": {}
           },
@@ -8600,8 +8600,8 @@
         {
           "id": "token-does-not-cover-patch",
           "request": {
+            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token={{token:owner-upload}}",
             "method": "PATCH",
-            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token=<download-token>",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token=<download-token>",
             "headers": {
               "content-type": "application/json"
@@ -8637,8 +8637,8 @@
         {
           "id": "token-does-not-cover-delete",
           "request": {
+            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token={{token:owner-upload}}",
             "method": "DELETE",
-            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token=<download-token>",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?token=<download-token>",
             "headers": {}
           },
@@ -8660,8 +8660,8 @@
         {
           "id": "create-token-alice-denied",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?create_token=true",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?create_token=true",
             "headers": {
               "authorization": "@alice",
@@ -8713,8 +8713,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?create_token=true",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?create_token=true",
             "headers": {
               "authorization": "@alice",
@@ -8747,8 +8747,8 @@
         {
           "id": "create-token-owner",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?create_token=true",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?create_token=true",
             "headers": {
               "authorization": "Bearer owner",
@@ -8794,8 +8794,8 @@
         {
           "id": "delete-token-alice-denied",
           "request": {
+            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?delete_token={{token:owner-upload}}",
             "method": "POST",
-            "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?delete_token=<download-token>",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt?delete_token=<download-token>",
             "headers": {
               "authorization": "@alice",
@@ -8828,8 +8828,8 @@
         {
           "id": "copy-alice-denied",
           "request": {
-            "method": "POST",
             "path": "/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt/copyTo/b/demo-synthetic-app.appspot.com/o/by%2Fcopy.txt",
+            "method": "POST",
             "resolvedPath": "/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt/copyTo/b/demo-synthetic-app.appspot.com/o/by%2Fcopy.txt",
             "headers": {
               "authorization": "@alice",
@@ -8869,9 +8869,9 @@
               },
               "crc32c": "8ir0eA==",
               "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-              "id": "demo-synthetic-app.appspot.com/by/copy.txt/1789628545627",
+              "id": "demo-synthetic-app.appspot.com/by/copy.txt/1789630248526",
               "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/by%2Fcopy.txt",
-              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/by%2Fcopy.txt?generation=1789628545627&alt=media"
+              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/by%2Fcopy.txt?generation=1789630248526&alt=media"
             }
           },
           "logs": []
@@ -8879,8 +8879,8 @@
         {
           "id": "owner-delete",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/by%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner"
@@ -8923,8 +8923,8 @@
         {
           "id": "json-media-upload-anonymous",
           "request": {
-            "method": "POST",
             "path": "/upload/storage/v1/b/demo-synthetic-app.appspot.com/o?uploadType=media&name=js%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/upload/storage/v1/b/demo-synthetic-app.appspot.com/o?uploadType=media&name=js%2Fobj.txt",
             "headers": {
               "content-type": "text/plain"
@@ -8960,9 +8960,9 @@
               "etag": "<generated-etag>",
               "crc32c": "8ir0eA==",
               "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-              "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789628545640",
+              "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789630248538",
               "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
-              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789628545640&alt=media"
+              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789630248538&alt=media"
             }
           },
           "logs": []
@@ -8970,8 +8970,8 @@
         {
           "id": "json-get-metadata-anonymous",
           "request": {
-            "method": "GET",
             "path": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
             "headers": {}
           },
@@ -8996,9 +8996,9 @@
               "etag": "<generated-etag>",
               "crc32c": "8ir0eA==",
               "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-              "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789628545640",
+              "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789630248538",
               "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
-              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789628545640&alt=media"
+              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789630248538&alt=media"
             }
           },
           "logs": []
@@ -9006,8 +9006,8 @@
         {
           "id": "json-download-anonymous",
           "request": {
-            "method": "GET",
             "path": "/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?alt=media",
+            "method": "GET",
             "resolvedPath": "/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?alt=media",
             "headers": {}
           },
@@ -9030,8 +9030,8 @@
         {
           "id": "json-list-anonymous",
           "request": {
-            "method": "GET",
             "path": "/storage/v1/b/demo-synthetic-app.appspot.com/o?prefix=js%2F",
+            "method": "GET",
             "resolvedPath": "/storage/v1/b/demo-synthetic-app.appspot.com/o?prefix=js%2F",
             "headers": {}
           },
@@ -9059,9 +9059,9 @@
                   "etag": "<generated-etag>",
                   "crc32c": "8ir0eA==",
                   "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-                  "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789628545640",
+                  "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789630248538",
                   "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
-                  "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789628545640&alt=media"
+                  "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789630248538&alt=media"
                 }
               ]
             }
@@ -9071,8 +9071,8 @@
         {
           "id": "json-patch-anonymous",
           "request": {
-            "method": "PATCH",
             "path": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
+            "method": "PATCH",
             "resolvedPath": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
             "headers": {
               "content-type": "application/json"
@@ -9103,8 +9103,8 @@
         {
           "id": "json-get-with-user-token",
           "request": {
-            "method": "GET",
             "path": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9131,9 +9131,9 @@
               "etag": "<generated-etag>",
               "crc32c": "8ir0eA==",
               "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-              "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789628545640",
+              "id": "demo-synthetic-app.appspot.com/js/obj.txt/1789630248538",
               "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
-              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789628545640&alt=media"
+              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt?generation=1789630248538&alt=media"
             }
           },
           "logs": []
@@ -9141,8 +9141,8 @@
         {
           "id": "json-upload-with-user-token",
           "request": {
-            "method": "POST",
             "path": "/upload/storage/v1/b/demo-synthetic-app.appspot.com/o?uploadType=media&name=js%2Falice.txt",
+            "method": "POST",
             "resolvedPath": "/upload/storage/v1/b/demo-synthetic-app.appspot.com/o?uploadType=media&name=js%2Falice.txt",
             "headers": {
               "authorization": "@alice",
@@ -9179,9 +9179,9 @@
               "etag": "<generated-etag>",
               "crc32c": "8ir0eA==",
               "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-              "id": "demo-synthetic-app.appspot.com/js/alice.txt/1789628545644",
+              "id": "demo-synthetic-app.appspot.com/js/alice.txt/1789630248542",
               "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Falice.txt",
-              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Falice.txt?generation=1789628545644&alt=media"
+              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Falice.txt?generation=1789630248542&alt=media"
             }
           },
           "logs": []
@@ -9189,8 +9189,8 @@
         {
           "id": "json-delete-anonymous",
           "request": {
-            "method": "DELETE",
             "path": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
+            "method": "DELETE",
             "resolvedPath": "/storage/v1/b/demo-synthetic-app.appspot.com/o/js%2Fobj.txt",
             "headers": {}
           },
@@ -9204,8 +9204,8 @@
         {
           "id": "v0-get-of-json-object-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/js%2Falice.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/js%2Falice.txt",
             "headers": {
               "authorization": "@alice"
@@ -9254,6 +9254,38 @@
       "firestoreSeed": [
         {
           "path": "users/alice",
+          "fields": {
+            "admin": {
+              "booleanValue": true
+            },
+            "quota": {
+              "integerValue": "3"
+            },
+            "name": {
+              "stringValue": "Alice"
+            },
+            "tags": {
+              "arrayValue": {
+                "values": [
+                  {
+                    "stringValue": "a"
+                  },
+                  {
+                    "stringValue": "b"
+                  }
+                ]
+              }
+            },
+            "profile": {
+              "mapValue": {
+                "fields": {
+                  "role": {
+                    "stringValue": "editor"
+                  }
+                }
+              }
+            }
+          },
           "status": 200
         }
       ],
@@ -9262,8 +9294,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -9309,8 +9341,8 @@
         {
           "id": "get-admin-true",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9346,8 +9378,8 @@
         {
           "id": "get-missing-doc-bob",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@bob"
@@ -9395,8 +9427,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9451,8 +9483,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@bob"
@@ -9495,8 +9527,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@bob"
@@ -9551,8 +9583,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9607,8 +9639,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9663,8 +9695,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9712,8 +9744,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9774,6 +9806,17 @@
       "firestoreSeed": [
         {
           "path": "users/alice",
+          "fields": {
+            "admin": {
+              "booleanValue": true
+            },
+            "quota": {
+              "integerValue": "3"
+            },
+            "name": {
+              "stringValue": "Alice"
+            }
+          },
           "status": 200
         }
       ],
@@ -9782,8 +9825,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -9848,8 +9891,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9904,8 +9947,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -9948,8 +9991,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10004,8 +10047,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10060,8 +10103,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10104,8 +10147,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10160,8 +10203,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10216,8 +10259,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10272,8 +10315,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10321,8 +10364,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10370,8 +10413,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10419,8 +10462,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10481,90 +10524,203 @@
       "firestoreSeed": [
         {
           "path": "users/alice",
+          "fields": {
+            "admin": {
+              "booleanValue": true
+            },
+            "quota": {
+              "integerValue": "3"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d1",
+          "fields": {
+            "n": {
+              "integerValue": "1"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d2",
+          "fields": {
+            "n": {
+              "integerValue": "2"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d3",
+          "fields": {
+            "n": {
+              "integerValue": "3"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d4",
+          "fields": {
+            "n": {
+              "integerValue": "4"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d5",
+          "fields": {
+            "n": {
+              "integerValue": "5"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d6",
+          "fields": {
+            "n": {
+              "integerValue": "6"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d7",
+          "fields": {
+            "n": {
+              "integerValue": "7"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d8",
+          "fields": {
+            "n": {
+              "integerValue": "8"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d9",
+          "fields": {
+            "n": {
+              "integerValue": "9"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d10",
+          "fields": {
+            "n": {
+              "integerValue": "10"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d11",
+          "fields": {
+            "n": {
+              "integerValue": "11"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d12",
+          "fields": {
+            "n": {
+              "integerValue": "12"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d13",
+          "fields": {
+            "n": {
+              "integerValue": "13"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d14",
+          "fields": {
+            "n": {
+              "integerValue": "14"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d15",
+          "fields": {
+            "n": {
+              "integerValue": "15"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d16",
+          "fields": {
+            "n": {
+              "integerValue": "16"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d17",
+          "fields": {
+            "n": {
+              "integerValue": "17"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d18",
+          "fields": {
+            "n": {
+              "integerValue": "18"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d19",
+          "fields": {
+            "n": {
+              "integerValue": "19"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d20",
+          "fields": {
+            "n": {
+              "integerValue": "20"
+            }
+          },
           "status": 200
         },
         {
           "path": "limits/d21",
+          "fields": {
+            "n": {
+              "integerValue": "21"
+            }
+          },
           "status": 200
         }
       ],
@@ -10573,8 +10729,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -10639,8 +10795,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10678,11 +10834,19 @@
           "note": "same ruleset; the document changed after the ruleset loaded",
           "firestoreWrite": {
             "path": "users/alice",
+            "fields": {
+              "admin": {
+                "booleanValue": true
+              },
+              "quota": {
+                "integerValue": "1"
+              }
+            },
             "status": 200
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10725,8 +10889,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10781,8 +10945,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10837,8 +11001,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10893,8 +11057,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -10949,8 +11113,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -11005,8 +11169,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -11061,8 +11225,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -11117,8 +11281,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -11173,8 +11337,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -11229,8 +11393,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -11278,8 +11442,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -11327,8 +11491,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fnew.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=fs%2Fnew.txt",
             "headers": {
               "authorization": "@alice",
@@ -11393,8 +11557,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=fs%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=fs%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -11444,8 +11608,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/fs%2Fobj.txt",
             "headers": {}
           },
@@ -11499,8 +11663,8 @@
         {
           "id": "alice-upload-own",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Fa.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Fa.txt",
             "headers": {
               "authorization": "@alice",
@@ -11546,8 +11710,8 @@
         {
           "id": "alice-upload-nested",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Fdeep%2Fer%2Fb.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Fdeep%2Fer%2Fb.txt",
             "headers": {
               "authorization": "@alice",
@@ -11593,8 +11757,8 @@
         {
           "id": "bob-get-alice-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Fa.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Fa.txt",
             "headers": {
               "authorization": "@bob"
@@ -11618,8 +11782,8 @@
         {
           "id": "alice-get-own",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Fa.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Fa.txt",
             "headers": {
               "authorization": "@alice"
@@ -11656,8 +11820,8 @@
           "id": "alice-list-own-prefix",
           "note": "list path /users/alice binds allPaths to zero segments",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -11686,8 +11850,8 @@
         {
           "id": "alice-list-nested-prefix",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2Fdeep%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2Fdeep%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -11711,8 +11875,8 @@
         {
           "id": "bob-list-alice-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
             "headers": {
               "authorization": "@bob"
@@ -11737,8 +11901,8 @@
           "id": "alice-list-users-root-denied",
           "note": "/users has no uid segment",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -11767,8 +11931,8 @@
         {
           "id": "alice-list-bucket-root-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -11792,8 +11956,8 @@
         {
           "id": "alice-upload-bob-denied",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Fbob%2Fx.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Fbob%2Fx.txt",
             "headers": {
               "authorization": "@alice",
@@ -11829,8 +11993,8 @@
           "id": "seed-public",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=public%2Fp.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=public%2Fp.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -11877,8 +12041,8 @@
           "id": "seed-public-nested",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=public%2Fnested%2Fq.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=public%2Fnested%2Fq.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -11925,8 +12089,8 @@
           "id": "seed-unicode",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=uni%2F%E7%81%AB%F0%9F%94%A5%20space.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=uni%2F%E7%81%AB%F0%9F%94%A5%20space.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -11973,8 +12137,8 @@
           "id": "seed-tail",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=tail%2Fa%2Fb.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=tail%2Fa%2Fb.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -12020,8 +12184,8 @@
         {
           "id": "public-single-segment",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/public%2Fp.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/public%2Fp.txt",
             "headers": {}
           },
@@ -12055,8 +12219,8 @@
         {
           "id": "public-nested-not-matched",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/public%2Fnested%2Fq.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/public%2Fnested%2Fq.txt",
             "headers": {}
           },
@@ -12078,8 +12242,8 @@
         {
           "id": "unicode-percent-encoded",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/uni%2F%E7%81%AB%F0%9F%94%A5%20space.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/uni%2F%E7%81%AB%F0%9F%94%A5%20space.txt",
             "headers": {}
           },
@@ -12114,8 +12278,8 @@
           "id": "unicode-raw-utf8-path",
           "note": "unencoded unicode in the request target",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/uni%2F火🔥%20space.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/uni%2F火🔥%20space.txt",
             "headers": {}
           },
@@ -12149,8 +12313,8 @@
         {
           "id": "tail-binding-excludes-prefix",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/tail%2Fa%2Fb.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/tail%2Fa%2Fb.txt",
             "headers": {}
           },
@@ -12203,8 +12367,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12250,8 +12414,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12294,8 +12458,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12341,8 +12505,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12391,8 +12555,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12440,8 +12604,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12485,8 +12649,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2Fc%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2Fc%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12529,8 +12693,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12573,8 +12737,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12617,8 +12781,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2Fextra%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=a%2Fq%2Fextra%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -12662,8 +12826,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice",
             "headers": {
               "authorization": "@alice"
@@ -12683,8 +12847,8 @@
           "id": "seed-object-named-users-alice",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice",
             "headers": {
               "authorization": "Bearer owner",
@@ -12749,8 +12913,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice",
             "headers": {
               "authorization": "@alice"
@@ -12793,8 +12957,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice",
             "headers": {
               "authorization": "@alice"
@@ -12849,8 +13013,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/public%2Fp.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/public%2Fp.txt",
             "headers": {}
           },
@@ -12903,8 +13067,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=enc%2Fx.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=enc%2Fx.txt",
             "headers": {
               "authorization": "@alice",
@@ -12969,8 +13133,8 @@
             "logs": []
           },
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=trail%2Fx.txt%2F",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=trail%2Fx.txt%2F",
             "headers": {
               "authorization": "@alice",
@@ -13044,8 +13208,8 @@
           "id": "seed",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=err%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=err%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -13110,8 +13274,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13159,8 +13323,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13208,8 +13372,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13257,8 +13421,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {}
           },
@@ -13304,8 +13468,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13353,8 +13517,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13402,8 +13566,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13451,8 +13615,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13500,8 +13664,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13549,8 +13713,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13605,8 +13769,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13661,8 +13825,8 @@
             "logs": []
           },
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/err%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13726,8 +13890,8 @@
           "id": "seed-default",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=life%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=life%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -13774,8 +13938,8 @@
           "id": "seed-assets",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/synthetic-objects.example.test/o?name=life%2Fasset.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?name=life%2Fasset.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -13821,8 +13985,8 @@
         {
           "id": "single-file-governs-every-bucket-default",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13858,8 +14022,8 @@
         {
           "id": "single-file-governs-every-bucket-assets",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o/life%2Fasset.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/life%2Fasset.txt",
             "headers": {
               "authorization": "@alice"
@@ -13895,8 +14059,8 @@
         {
           "id": "single-file-governs-unconfigured-bucket",
           "request": {
-            "method": "GET",
             "path": "/v0/b/unconfigured.example.test/o/life%2Fnone.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/unconfigured.example.test/o/life%2Fnone.txt",
             "headers": {
               "authorization": "@alice"
@@ -13916,8 +14080,8 @@
           "id": "set-rules-missing-semicolon-accepted",
           "note": "a trailing semicolon is optional; the allow sits on /b/{bucket}/o and matches no object",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -13955,8 +14119,8 @@
         {
           "id": "after-missing-semicolon-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -13980,8 +14144,8 @@
         {
           "id": "set-rules-syntax-error",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14033,8 +14197,8 @@
           "id": "after-syntax-error-get",
           "note": "does the previous ruleset survive a failed reload?",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -14063,8 +14227,8 @@
         {
           "id": "after-syntax-error-owner-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner"
@@ -14093,8 +14257,8 @@
         {
           "id": "after-syntax-error-json-api",
           "request": {
-            "method": "GET",
             "path": "/storage/v1/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/storage/v1/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {}
           },
@@ -14123,9 +14287,9 @@
               },
               "crc32c": "8ir0eA==",
               "timeStorageClassUpdated": "<generated-timeStorageClassUpdated>",
-              "id": "demo-synthetic-app.appspot.com/life/obj.txt/1789628549528",
+              "id": "demo-synthetic-app.appspot.com/life/obj.txt/1789630252452",
               "selfLink": "<storage-origin>/storage/v1/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
-              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt?generation=1789628549528&alt=media"
+              "mediaLink": "<storage-origin>/download/storage/v1/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt?generation=1789630252452&alt=media"
             }
           },
           "logs": []
@@ -14133,8 +14297,8 @@
         {
           "id": "after-syntax-error-list",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=life%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=life%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -14163,8 +14327,8 @@
         {
           "id": "after-syntax-error-upload",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=life%2Fnew.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=life%2Fnew.txt",
             "headers": {
               "authorization": "@alice",
@@ -14203,8 +14367,8 @@
         {
           "id": "set-rules-semantic-error",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14247,8 +14411,8 @@
         {
           "id": "after-semantic-error-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -14277,8 +14441,8 @@
         {
           "id": "set-rules-firestore-service",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14316,8 +14480,8 @@
         {
           "id": "after-firestore-service-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -14341,8 +14505,8 @@
         {
           "id": "set-rules-missing-files",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14373,8 +14537,8 @@
         {
           "id": "set-rules-empty-files",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14407,8 +14571,8 @@
         {
           "id": "set-rules-file-without-content",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14445,8 +14609,8 @@
         {
           "id": "set-rules-multi-without-resource",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14488,8 +14652,8 @@
         {
           "id": "set-rules-valid-single",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14527,8 +14691,8 @@
         {
           "id": "after-valid-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -14592,8 +14756,8 @@
           "id": "seed-default",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=life%2Fobj.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=life%2Fobj.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -14640,8 +14804,8 @@
           "id": "seed-assets",
           "note": "owner bypass seed",
           "request": {
-            "method": "POST",
             "path": "/v0/b/synthetic-objects.example.test/o?name=life%2Fasset.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?name=life%2Fasset.txt",
             "headers": {
               "authorization": "Bearer owner",
@@ -14687,8 +14851,8 @@
         {
           "id": "set-rules-multi-bucket",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14732,8 +14896,8 @@
         {
           "id": "multi-default-alice",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -14769,8 +14933,8 @@
         {
           "id": "multi-default-anonymous-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {}
           },
@@ -14797,8 +14961,8 @@
         {
           "id": "multi-assets-anonymous-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o/life%2Fasset.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/life%2Fasset.txt",
             "headers": {}
           },
@@ -14832,8 +14996,8 @@
         {
           "id": "multi-assets-list-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o?prefix=life%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?prefix=life%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -14857,8 +15021,8 @@
         {
           "id": "multi-unconfigured-bucket",
           "request": {
-            "method": "GET",
             "path": "/v0/b/unconfigured.example.test/o/life%2Fnone.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/unconfigured.example.test/o/life%2Fnone.txt",
             "headers": {
               "authorization": "@alice"
@@ -14887,8 +15051,8 @@
         {
           "id": "multi-unconfigured-bucket-owner",
           "request": {
-            "method": "GET",
             "path": "/v0/b/unconfigured.example.test/o/life%2Fnone.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/unconfigured.example.test/o/life%2Fnone.txt",
             "headers": {
               "authorization": "Bearer owner"
@@ -14917,8 +15081,8 @@
         {
           "id": "multi-unconfigured-bucket-json-api",
           "request": {
-            "method": "GET",
             "path": "/storage/v1/b/unconfigured.example.test/o/life%2Fnone.txt",
+            "method": "GET",
             "resolvedPath": "/storage/v1/b/unconfigured.example.test/o/life%2Fnone.txt",
             "headers": {}
           },
@@ -14947,8 +15111,8 @@
         {
           "id": "set-rules-multi-one-invalid",
           "request": {
-            "method": "PUT",
             "path": "/internal/setRules",
+            "method": "PUT",
             "resolvedPath": "/internal/setRules",
             "headers": {
               "content-type": "application/json"
@@ -14992,8 +15156,8 @@
         {
           "id": "multi-one-invalid-default-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/life%2Fobj.txt",
             "headers": {
               "authorization": "@alice"
@@ -15029,8 +15193,8 @@
         {
           "id": "multi-one-invalid-assets-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o/life%2Fasset.txt",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/life%2Fasset.txt",
             "headers": {
               "authorization": "@alice"
@@ -15087,8 +15251,8 @@
         {
           "id": "default-alice-upload",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Forders%2Fdeck.png",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Forders%2Fdeck.png",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -15139,8 +15303,8 @@
         {
           "id": "default-alice-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
             "headers": {
               "authorization": "@alice"
@@ -15176,8 +15340,8 @@
         {
           "id": "default-alice-media",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png?alt=media",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png?alt=media",
             "headers": {
               "authorization": "@alice"
@@ -15202,8 +15366,8 @@
         {
           "id": "default-bob-get-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
             "headers": {
               "authorization": "@bob"
@@ -15232,8 +15396,8 @@
         {
           "id": "default-admin-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
             "headers": {
               "authorization": "@admin"
@@ -15269,8 +15433,8 @@
         {
           "id": "default-anonymous-get-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
             "headers": {}
           },
@@ -15297,8 +15461,8 @@
         {
           "id": "default-alice-list",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2Forders%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2Forders%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -15325,8 +15489,8 @@
         {
           "id": "default-alice-list-user-root",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -15350,8 +15514,8 @@
         {
           "id": "default-bob-list-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?prefix=users%2Falice%2F&delimiter=%2F",
             "headers": {
               "authorization": "@bob"
@@ -15380,8 +15544,8 @@
         {
           "id": "default-alice-patch",
           "request": {
-            "method": "PATCH",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
+            "method": "PATCH",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
             "headers": {
               "authorization": "@alice",
@@ -15433,8 +15597,8 @@
         {
           "id": "default-alice-delete",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fdeck.png",
             "headers": {
               "authorization": "@alice"
@@ -15450,8 +15614,8 @@
         {
           "id": "default-alice-outside-users-denied",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=shared%2Fx.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=shared%2Fx.txt",
             "headers": {
               "authorization": "@alice",
@@ -15486,8 +15650,8 @@
         {
           "id": "default-admin-outside-users-denied",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=shared%2Fx.txt",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=shared%2Fx.txt",
             "headers": {
               "authorization": "@admin",
@@ -15522,8 +15686,8 @@
         {
           "id": "default-token-read-bypass",
           "request": {
-            "method": "POST",
             "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Forders%2Fshared.png",
+            "method": "POST",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=users%2Falice%2Forders%2Fshared.png",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -15574,8 +15738,8 @@
         {
           "id": "default-token-read-anonymous",
           "request": {
+            "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fshared.png?alt=media&token={{token:default-token-read-bypass}}",
             "method": "GET",
-            "path": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fshared.png?alt=media&token=<download-token>",
             "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/users%2Falice%2Forders%2Fshared.png?alt=media&token=<download-token>",
             "headers": {}
           },
@@ -15598,8 +15762,8 @@
         {
           "id": "assets-admin-upload",
           "request": {
-            "method": "POST",
             "path": "/v0/b/synthetic-objects.example.test/o?name=users%2Falice%2Fimages%2Flogo.png",
+            "method": "POST",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?name=users%2Falice%2Fimages%2Flogo.png",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -15650,8 +15814,8 @@
         {
           "id": "assets-admin-upload-catalog",
           "request": {
-            "method": "POST",
             "path": "/v0/b/synthetic-objects.example.test/o?name=catalog%2Fcache.json",
+            "method": "POST",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?name=catalog%2Fcache.json",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -15702,8 +15866,8 @@
         {
           "id": "assets-anonymous-get",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o/catalog%2Fcache.json",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/catalog%2Fcache.json",
             "headers": {}
           },
@@ -15737,8 +15901,8 @@
         {
           "id": "assets-anonymous-media",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o/catalog%2Fcache.json?alt=media",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/catalog%2Fcache.json?alt=media",
             "headers": {}
           },
@@ -15757,8 +15921,8 @@
         {
           "id": "assets-anonymous-list-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o?prefix=users%2Falice%2Fimages%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?prefix=users%2Falice%2Fimages%2F&delimiter=%2F",
             "headers": {}
           },
@@ -15785,8 +15949,8 @@
         {
           "id": "assets-anonymous-root-list-denied",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o?delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?delimiter=%2F",
             "headers": {}
           },
@@ -15808,8 +15972,8 @@
         {
           "id": "assets-alice-list-own",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o?prefix=users%2Falice%2Fimages%2F&delimiter=%2F",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?prefix=users%2Falice%2Fimages%2F&delimiter=%2F",
             "headers": {
               "authorization": "@alice"
@@ -15836,8 +16000,8 @@
         {
           "id": "assets-alice-upload-own",
           "request": {
-            "method": "POST",
             "path": "/v0/b/synthetic-objects.example.test/o?name=users%2Falice%2Ffonts%2Ff.ttf",
+            "method": "POST",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?name=users%2Falice%2Ffonts%2Ff.ttf",
             "headers": {
               "x-goog-upload-protocol": "multipart",
@@ -15888,8 +16052,8 @@
         {
           "id": "assets-alice-upload-catalog-denied",
           "request": {
-            "method": "POST",
             "path": "/v0/b/synthetic-objects.example.test/o?name=catalog%2Fother.json",
+            "method": "POST",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o?name=catalog%2Fother.json",
             "headers": {
               "authorization": "@alice",
@@ -15929,8 +16093,8 @@
         {
           "id": "assets-bob-get-alice-asset",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o/users%2Falice%2Fimages%2Flogo.png",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/users%2Falice%2Fimages%2Flogo.png",
             "headers": {
               "authorization": "@bob"
@@ -15966,8 +16130,8 @@
         {
           "id": "assets-bob-delete-alice-asset-denied",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/synthetic-objects.example.test/o/users%2Falice%2Fimages%2Flogo.png",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/users%2Falice%2Fimages%2Flogo.png",
             "headers": {
               "authorization": "@bob"
@@ -15996,8 +16160,8 @@
         {
           "id": "assets-admin-delete-catalog",
           "request": {
-            "method": "DELETE",
             "path": "/v0/b/synthetic-objects.example.test/o/catalog%2Fcache.json",
+            "method": "DELETE",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/catalog%2Fcache.json",
             "headers": {
               "authorization": "@admin"
@@ -16013,8 +16177,8 @@
         {
           "id": "assets-alice-get-missing",
           "request": {
-            "method": "GET",
             "path": "/v0/b/synthetic-objects.example.test/o/catalog%2Fmissing.json",
+            "method": "GET",
             "resolvedPath": "/v0/b/synthetic-objects.example.test/o/catalog%2Fmissing.json",
             "headers": {
               "authorization": "@alice"
@@ -16036,8 +16200,8 @@
   "oracleCrashNotRecordedLive": {
     "id": "object-name-with-empty-segment",
     "request": {
-      "method": "POST",
-      "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=dbl%2F%2Fx.txt"
+      "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=dbl%2F%2Fx.txt",
+      "method": "POST"
     },
     "observed": "no HTTP response (client timeout); the rules runtime child exits",
     "runtimeStderr": [
@@ -16074,8 +16238,8 @@
       {
         "id": "owner-upload",
         "request": {
-          "method": "POST",
           "path": "/v0/b/demo-synthetic-app.appspot.com/o?name=broken.txt",
+          "method": "POST",
           "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o?name=broken.txt",
           "headers": {
             "authorization": "Bearer owner",
@@ -16114,8 +16278,8 @@
       {
         "id": "alice-get",
         "request": {
-          "method": "GET",
           "path": "/v0/b/demo-synthetic-app.appspot.com/o/broken.txt",
+          "method": "GET",
           "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/broken.txt",
           "headers": {
             "authorization": "@alice"
@@ -16144,8 +16308,8 @@
       {
         "id": "owner-get",
         "request": {
-          "method": "GET",
           "path": "/v0/b/demo-synthetic-app.appspot.com/o/broken.txt",
+          "method": "GET",
           "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/broken.txt",
           "headers": {
             "authorization": "Bearer owner"
@@ -16174,8 +16338,8 @@
       {
         "id": "json-api-get",
         "request": {
-          "method": "GET",
           "path": "/storage/v1/b/demo-synthetic-app.appspot.com/o/broken.txt",
+          "method": "GET",
           "resolvedPath": "/storage/v1/b/demo-synthetic-app.appspot.com/o/broken.txt",
           "headers": {}
         },
@@ -16204,8 +16368,8 @@
       {
         "id": "set-rules-recovers",
         "request": {
-          "method": "PUT",
           "path": "/internal/setRules",
+          "method": "PUT",
           "resolvedPath": "/internal/setRules",
           "headers": {
             "content-type": "application/json"
@@ -16243,8 +16407,8 @@
       {
         "id": "alice-get-after-recovery",
         "request": {
-          "method": "GET",
           "path": "/v0/b/demo-synthetic-app.appspot.com/o/broken.txt",
+          "method": "GET",
           "resolvedPath": "/v0/b/demo-synthetic-app.appspot.com/o/broken.txt",
           "headers": {
             "authorization": "@alice"

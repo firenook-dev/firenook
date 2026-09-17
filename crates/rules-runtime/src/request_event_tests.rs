@@ -237,7 +237,7 @@ async fn parsed_auth_is_reported_without_the_original_bearer_and_reload_is_snaps
     runtime.install_default(ALLOW).unwrap();
     let req = request(RequestOperation::Get);
     let auth = Authorization::Client(Some(Auth {
-        uid: "synthetic-reader".into(),
+        uid: Some("synthetic-reader".into()),
         token: BTreeMap::from([("role".into(), Value::String("reader".into()))]),
     }));
     assert!(runtime.evaluate(PROJECT, &auth, &req, &access()).allowed);

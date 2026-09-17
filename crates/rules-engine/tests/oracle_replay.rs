@@ -124,7 +124,7 @@ fn denies_at_the_frozen_evaluated_expression_limit() {
             Timestamp::new(0, 0),
         );
         request.auth = Some(Auth {
-            uid: "limit-probe".to_owned(),
+            uid: Some("limit-probe".to_owned()),
             token: BTreeMap::from([("n".to_owned(), Value::Integer(100_000))]),
         });
         let actual = rules.evaluate(&request, &EmptyDocumentAccess);
@@ -305,7 +305,7 @@ fn evaluation_request(request: &JsonValue, existing: Option<&JsonValue>) -> Eval
         .get("auth")
         .filter(|auth| !auth.is_null())
         .map(|auth| Auth {
-            uid: auth["uid"].as_str().expect("auth uid").to_owned(),
+            uid: Some(auth["uid"].as_str().expect("auth uid").to_owned()),
             token: json_map(&auth["token"]),
         });
     evaluation.resource = existing.filter(|value| !value.is_null()).map(resource);

@@ -351,7 +351,7 @@ fn user(uid: &str, claims: &[(&str, Value)]) -> Auth {
         token.insert((*key).to_owned(), value.clone());
     }
     Auth {
-        uid: uid.to_owned(),
+        uid: Some(uid.to_owned()),
         token,
     }
 }
@@ -448,7 +448,7 @@ fn storage_request(test_case: &JsonValue) -> EvaluationRequest {
     );
     if let Some(auth) = request["auth"].as_object() {
         evaluation.auth = Some(Auth {
-            uid: auth["uid"].as_str().expect("uid").to_owned(),
+            uid: Some(auth["uid"].as_str().expect("uid").to_owned()),
             token: auth["token"]
                 .as_object()
                 .expect("token")

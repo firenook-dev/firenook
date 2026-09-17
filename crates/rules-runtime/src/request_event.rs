@@ -333,7 +333,7 @@ impl Serialize for AuthValue<'_> {
                 "mapValue",
                 &WithFields {
                     fields: AuthFields {
-                        uid: TypedString(&auth.uid),
+                        uid: TypedString(auth.uid.as_deref().unwrap_or_default()),
                         token: TypedMap(&auth.token),
                     },
                 },

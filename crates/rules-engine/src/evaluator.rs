@@ -655,7 +655,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 ))),
             },
             EvalValue::Auth(auth) => match name {
-                "uid" => Ok(EvalValue::data(auth.uid)),
+                "uid" => Ok(EvalValue::Data(auth.uid.map_or(Value::Null, Value::String))),
                 "token" => Ok(EvalValue::Data(Value::Map(auth.token))),
                 _ => Err(RuntimeError::new(format!(
                     "auth field {name:?} does not exist"
@@ -1604,6 +1604,19 @@ fn call_method(
         EvalValue::Data(Value::String(value)) => string_method(value, name, arguments),
         EvalValue::Data(Value::List(value)) => list_method(value, name, arguments),
         EvalValue::Data(Value::Map(value)) => map_method(value, name, arguments),
+        // `request.auth` is a map with `uid` and `token` for method calls
+        // (storage-rules-v1 auth-token-claims/auth-keys).
+        EvalValue::Auth(auth) => map_method(
+            BTreeMap::from([
+                (
+                    "uid".to_owned(),
+                    auth.uid.map_or(Value::Null, Value::String),
+                ),
+                ("token".to_owned(), Value::Map(auth.token)),
+            ]),
+            name,
+            arguments,
+        ),
         EvalValue::Set(value) => set_method(value, name, arguments),
         EvalValue::MapDiff(value) => map_diff_method(value, name, arguments),
         EvalValue::Bytes {

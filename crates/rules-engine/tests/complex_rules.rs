@@ -606,7 +606,7 @@ fn request_time() -> Timestamp {
 
 fn auth(uid: &str, role: &str, tenant: &str) -> Auth {
     Auth {
-        uid: uid.to_owned(),
+        uid: Some(uid.to_owned()),
         token: map(&[("role", role.into()), ("tenant_id", tenant.into())]),
     }
 }
