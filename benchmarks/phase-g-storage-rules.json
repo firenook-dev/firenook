@@ -152,13 +152,13 @@
         "match-patterns",
         "functions-and-let"
       ],
-      "frozenCaseCount": 275,
-      "frozenBatchCount": 9,
-      "frozenRulesApiRequests": 9,
+      "frozenCaseCount": 306,
+      "frozenBatchCount": 10,
+      "frozenRulesApiRequests": 10,
       "frozenVerdicts": {
-        "allow": 215,
-        "deny": 60,
-        "denyWithRuntimeError": 28
+        "allow": 236,
+        "deny": 70,
+        "denyWithRuntimeError": 32
       }
     },
     "requiredFixtures": [
@@ -169,12 +169,12 @@
     ],
     "fixturesFrozen": true,
     "frozenFixtureSha256": {
-      "README.md": "9f86df2089fe1ad743714770dee5e787ea98e86b89ed354f3a96d86ceba22063",
+      "README.md": "8b04bb91dd014ce4c87c51176e5e246cf78d72ce8affc447ddc5b89535594507",
       "emulator-programs.json": "71c3b177be9cb0ff123bc68aa5a1fa49be9ea3fabfbb5ed851a4bffb32c3dd11",
-      "production-expression-corpus.json": "bdb89b70d1f9ce09ef91ffc114f503a505456be9ab5404c243105b80a54a3ca8",
-      "SHA256SUMS": "af2622d27affd6911eb270813c2ac4834b46fe19309f67f13aaec8414832b5d3"
+      "production-expression-corpus.json": "6603c8c7db661c423839994c5ff9c22ef99747fabacf361b9ede3ea7f2505f60",
+      "SHA256SUMS": "e4ec293345945bdc97e111b1f24540fecef0b372fbf61b063cfff4cbe2618a29"
     },
-    "fixturesFrozenAt": "2026-09-17T15:02:31+08:00"
+    "fixturesFrozenAt": "2026-09-17T15:15:41+08:00"
   },
   "javaSurfacesToRemove": [
     {
@@ -212,7 +212,7 @@
   ],
   "gates": {
     "engineReplay": {
-      "productionCasesMinimum": 275,
+      "productionCasesMinimum": 306,
       "allowedUnexplainedVerdictDivergences": 0,
       "allowedUnexplainedExpressionValueDivergences": 0,
       "test": "crates/rules-engine/tests/storage_oracle_replay.rs"

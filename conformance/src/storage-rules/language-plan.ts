@@ -261,6 +261,27 @@ export const STORAGE_LANGUAGE_CASES: readonly StorageLanguageCase[] = [
   resourceCase("res-equality-self", "resource == resource"),
   resourceCase("res-size-string-coercion", "string(resource.size) == '2048'"),
   resourceCase("res-name-hash", "hashing.sha256(resource.name).toHexString().size() == 64"),
+  resourceCase("res-name-split-dot-size", "'photo.png'.split('.').size() == 1"),
+  resourceCase("res-name-split-dot-first", "'photo.png'.split('.')[0] == 'photo.png'"),
+  resourceCase("res-name-split-escaped-dot", "'photo.png'.split('[.]') == ['photo', 'png']"),
+  resourceCase("res-name-split-literal-o", "'photo.png'.split('o') == ['ph', 't', '.png']"),
+  resourceCase("res-name-split-leading", "'photo.png'.split('p') == ['', 'hoto.', 'ng']"),
+  resourceCase("res-name-split-trailing", "'photo.png'.split('g') == ['photo.pn', '']"),
+  resourceCase("res-name-split-class", "'a1b22c'.split('[0-9]+') == ['a', 'b', 'c']"),
+  resourceCase("res-name-split-no-match", "'photo'.split('x') == ['photo']"),
+  resourceCase("res-name-split-empty-pattern-size", "'ab'.split('').size() == 1"),
+  resourceCase("res-name-split-star-size", "'ab'.split('b*').size() == 1"),
+  resourceCase("res-name-split-slash", "resource.name.split('/') == ['lang', 'res-name-split-slash']"),
+  resourceCase("res-name-split-dotstar-size", "'photo.png'.split('.*').size() == 1"),
+  resourceCase("res-name-split-alternation", "'a-b_c'.split('-|_') == ['a', 'b', 'c']"),
+  resourceCase("res-name-split-dot-value", "'photo.png'.split('.') == ['']"),
+  resourceCase("res-name-split-empty-pattern-value", "'ab'.split('') == ['', 'a', 'b']"),
+  resourceCase("res-name-split-star-value", "'ab'.split('b*') == ['', 'a']"),
+  resourceCase("res-name-split-zero-width-everywhere", "'abc'.split('x*') == ['', 'a', 'b', 'c']"),
+  resourceCase("res-name-split-inner-empties-kept", "'a,b,,c,,'.split(',') == ['a', 'b', '', 'c']"),
+  resourceCase("res-name-split-only-delimiters", "',,,'.split(',') == ['']"),
+  resourceCase("res-name-split-empty-string", "''.split(',') == ['']"),
+  resourceCase("res-name-split-anchored", "'photo.png'.split('^photo') == ['', '.png']"),
   resourceCase("res-delete-resource", "resource.size == 2048 && resource.metadata.owner == request.auth.uid", { method: "delete" }),
 
   // --- request-resource-fields-and-types --------------------------------
@@ -1020,6 +1041,24 @@ export const STORAGE_LANGUAGE_CASES: readonly StorageLanguageCase[] = [
     return bucket == expected;
   }`,
   }),
+  functionCase("fn-error-left-or-true-inline", "resource.metadata.missing == 'x' || true"),
+  functionCase("fn-error-left-or-false-inline", "resource.metadata.missing == 'x' || false"),
+  functionCase("fn-error-left-and-false-inline", "resource.metadata.missing == 'x' && false"),
+  functionCase("fn-error-left-and-true-inline", "resource.metadata.missing == 'x' && true"),
+  functionCase("fn-error-right-or-true-inline", "false || resource.metadata.missing == 'x'"),
+  functionCase("fn-error-both-or", "resource.metadata.missing == 'x' || resource.metadata.other == 'y'"),
+  functionCase("fn-error-left-and-false-function", "true", {
+    customMatch: `    match /fn/fn-error-left-and-false-function {
+      function broken() {
+        return resource.metadata.missing == 'x';
+      }
+      allow get: if broken() && false;
+    }`,
+    path: "/b/corpus/o/fn/fn-error-left-and-false-function",
+  }),
+  functionCase("fn-error-not", "!(resource.metadata.missing == 'x') || true"),
+  functionCase("fn-error-in-ternary-like-or", "(resource.metadata.missing == 'x' || true) && resource.size == 2048"),
+  functionCase("fn-error-nested-and-or", "(resource.metadata.missing == 'x' && true) || resource.size == 2048"),
   functionCase("fn-service-level-unknown-binding-null", "bucketIsNull()", {
     serviceFunctions: `  function bucketIsNull() {
     return bucket == null;

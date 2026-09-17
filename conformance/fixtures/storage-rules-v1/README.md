@@ -7,7 +7,7 @@ the contract:
 
 | File | Oracle | Owns |
 | --- | --- | --- |
-| `production-expression-corpus.json` | Production Rules API `projects.test` for project `fireside-conformance` (`capture:storage:rules:cloud`, `src/storage-rules/language-plan.ts`) | Expression semantics over the Storage value surface: 275 cases in 9 batches, FULL expression reports, no persistent reads or writes, no credentials stored |
+| `production-expression-corpus.json` | Production Rules API `projects.test` for project `fireside-conformance` (`capture:storage:rules:cloud`, `src/storage-rules/language-plan.ts`) | Expression semantics over the Storage value surface: 306 cases in 10 batches, FULL expression reports, no persistent reads or writes, no credentials stored |
 | `emulator-programs.json` | Official Storage emulator, firebase-tools 15.22.0 in process with `cloud-storage-rules-runtime-v1.1.3.jar` (`0cd52db6…`) and the official Firestore emulator 1.22.0 registered for `firestore.*` callbacks (`capture:storage:rules`, `src/storage-rules/emulator-plan.ts`) | The request model: 26 programs, 334 raw HTTP steps, each step optionally installing its own one-line ruleset through `PUT /internal/setRules` so a verdict localizes to one field |
 
 Precedence (recorded in the gate file): production for expression semantics;
@@ -49,7 +49,20 @@ The unsigned JWTs in `tokens` are synthetic test identities, not credentials.
   only through `functionMocks`; the real callback behaviour is in the emulator
   corpus.
 - `string(timestamp)` and `string(path)` are `Unsupported operation` errors;
-  `split` takes a regular expression; `int('3') == 3`.
+  `int('3') == 3`; `hashing.sha256('text')` hashes the UTF-8 bytes;
+  `toMillis()` and `dayOfYear()` exist on timestamps.
+- `split(re)` splits on every regular-expression match, zero-width matches
+  included at any position (`'ab'.split('b*') == ['', 'a']`), drops trailing
+  empty pieces (`'photo.png'.split('g') == ['photo.pn']`) and collapses an
+  all-empty result to `['']` (`'photo.png'.split('.') == ['']`); no match
+  returns the input (`''.split(',') == ['']`).
+- Boolean operators are three-valued over runtime errors: a false operand
+  decides `&&` and a true operand decides `||` even when the other operand
+  errors (`broken() || true` allows, `error && false` denies without an
+  error); otherwise the error stands (`error || false`, `false || error`).
+- Functions are lexically scoped: a service-level function referencing a
+  match wildcard sees an unbound name (`Null value error`), not the caller's
+  binding.
 - An unknown identifier compiles with a warning and is a `Null value error` at
   runtime even against `== null`; a service-level function does not see match
   bindings (same error). A non-boolean allow condition is a `Type error`.
