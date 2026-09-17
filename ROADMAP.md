@@ -3,6 +3,10 @@
 This is a product backlog, not a claim that the work below is implemented or
 verified. [COMPATIBILITY.md](COMPATIBILITY.md) describes the current preview.
 Existing release evidence continues to apply only to its recorded candidate.
+[support/roadmap.html](support/roadmap.html) is a self-contained tracker of the
+same information — phases, services, CLI surface, configuration shapes and the
+remaining drop-in backlog — for reading in a browser; its data block is updated
+alongside this file.
 
 ## Scope and verification
 
@@ -185,7 +189,69 @@ npm publication require separate release approval; after publication, verify the
 registry-installed artifacts and update consumer exact pins. Do not infer a stable
 or universal-compatibility claim from completing this scoped release.
 
-Node/firebase-tools for user Functions and Java for Storage rules remain explicit
-compatibility dependencies. Replacing those runtimes, or adding Realtime Database,
-Hosting, App Hosting, Data Connect or general Pub/Sub subscribers, is separate work.
-Publication, tagging and release approval remain governed by the release contract.
+Java for Storage rules is scheduled for removal in Phase G below and
+firebase-tools as the Functions/Extensions host in Phase H; Node stays as the
+user's Functions runtime. Adding Realtime Database, Hosting, App Hosting, Data
+Connect or general Pub/Sub subscribers is separate work. Publication, tagging
+and release approval remain governed by the release contract.
+
+## Phase G — Native Storage Security Rules (`0.1.0-next.7`)
+
+The plan, current-state audit, oracle precedence and named checks are in the
+[Phase G plan](support/phase-g-storage-rules.md). Nothing below is implemented.
+
+| Step | Deliverable | Completion check |
+| --- | --- | --- |
+| G0 | Frozen gate `benchmarks/phase-g-storage-rules.json` | Oracles, budgets, Java-surface inventory and v1-ruleset decision recorded before fixtures |
+| G1 | `conformance/fixtures/storage-rules-v1` | ≥25 emulator programs / ≥150 steps and ≥200 production expression cases, checksummed, CI integrity green |
+| G2 | `rules-engine` accepts `service firebase.storage` | Every G1 expression case replays; divergences asserted, not skipped |
+| G3 | `storage-front` evaluates natively, `firestore.*` and `/internal/setRules` work | Every G1 emulator step is parity or a listed divergence; no `Command::new` in `storage-front` |
+| G4 | Java gates, `--java`, jar download and docs removed | Suite starts with `java` absent from PATH; `setup` fetches one asset |
+| G5 | Exact-candidate CI, consumer gates, paired acceptance, no-Java clean setup, release | `0.1.0-next.7` published through the release workflow; receipts recorded |
+
+- [ ] G0 — Freeze the gate before any fixture or product change.
+- [ ] G1 — Record the production and official-emulator Storage rules corpus;
+  commit fixtures before implementation.
+- [ ] G2 — Generalize the parser, request model and evaluator; add the
+  `firestore` namespace; replay the corpus in unit tests.
+- [ ] G3 — Replace the Java child with the native engine in `storage-front`;
+  implement ruleset reload; measure the Storage cycle before and after.
+- [ ] G4 — Remove the runtime, the CLI gate, the asset and the documentation
+  of the Java requirement; add the no-Java CI step.
+- [ ] G5 — Qualify the exact candidate (CI, consumer gates, paired acceptance,
+  clean setup without Java) and publish `0.1.0-next.7` as a prerelease.
+
+Done when a machine without Java can install, set up, start, enforce Storage
+rules including `firestore.get()`, resume and export, and the recorded corpus
+shows parity with the official emulator or a documented production-precedence
+divergence. `latest` promotion remains a separate decision.
+
+## Phase H — Owned Functions runtime and Extensions (`0.1.0-next.8`)
+
+The plan, current-state audit, oracle precedence and named checks are in the
+[Phase H plan](support/phase-h-functions-runtime.md). Nothing below is
+implemented. User and extension JavaScript keeps running in Node; Fireside
+replaces firebase-tools as the host.
+
+| Step | Deliverable | Completion check |
+| --- | --- | --- |
+| H0 | Frozen gate `benchmarks/phase-h-functions-runtime.json` | Trigger matrix, oracles, firebase-tools-surface inventory and the Extensions registry decision recorded before fixtures |
+| H1 | `conformance/fixtures/functions-runtime-v1` | ≥40 programs / ≥250 steps against firebase-tools 15.22.0 covering discovery, HTTP/callable, events, environment, lifecycle and Extensions |
+| H2 | `functions-runtime` crate + `support/functions-worker.mjs` | Every H1 runtime step is parity or a listed divergence; readiness/reload fixtures unchanged |
+| H3 | `extensions` crate with registry, cache, build, params and vendored offline mode | Synthetic extension and Twodart's three instances resolve and run from cache without network |
+| H4 | firebase-tools removed; `--inspect-functions`, `functions:invoke`, `ext:vendor` added | Suite starts with `firebase-tools` absent from `node_modules`; docs updated |
+| H5 | Exact-candidate CI, consumer gates, paired acceptance, offline clean setup, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
+
+- [ ] H0 — Freeze the gate and the supported trigger matrix.
+- [ ] H1 — Record the official-emulator Functions and Extensions corpus;
+  commit fixtures before implementation.
+- [ ] H2 — Build the Rust supervisor and the Node worker; replay the corpus.
+- [ ] H3 — Build the Extensions loader; vendored offline mode.
+- [ ] H4 — Remove firebase-tools from the product and add the local commands.
+- [ ] H5 — Qualify the exact candidate (CI, consumer gates incl. the Extensions
+  gate, paired acceptance, offline clean setup) and publish `0.1.0-next.8`.
+
+Done when a project with user Functions and Extensions starts on a machine
+with Node only, every supported trigger delivers with the recorded envelope,
+the Twodart Extensions gate passes on the owned runtime, and vendored
+extensions start with no network. Python/Dart functions stay unsupported.
