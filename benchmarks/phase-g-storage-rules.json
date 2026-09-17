@@ -1,0 +1,320 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-g-storage-rules",
+  "frozen": true,
+  "frozenAt": "2026-09-17T14:30:00+08:00",
+  "plan": "support/phase-g-storage-rules.md",
+  "baseline": {
+    "engineRevision": "39ba9a241ce7bd8719249bb0983df39d2eac3a23",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.6",
+    "publishedEngineRevision": "572d4fb"
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "node": "24.20.0",
+    "npm": "12.0.2",
+    "firebaseToolsStorageOracle": "15.22.0",
+    "storageRulesRuntimeJar": "cloud-storage-rules-runtime-v1.1.3.jar",
+    "storageRulesRuntimeJarSha256": "0cd52db6f6271d62078f805220706377c849220b73bd68aa27078d977df9c900",
+    "officialFirestoreEmulator": "1.22.0",
+    "officialFirestoreEmulatorJarSha256": "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c"
+  },
+  "oracles": {
+    "precedence": [
+      "production-firebase-rules-projects-test",
+      "official-firebase-tools-storage-emulator-15.22.0-with-rules-runtime-1.1.3",
+      "official-language-reference"
+    ],
+    "ownership": {
+      "expressionSemantics": "production-firebase-rules-projects-test",
+      "requestModel": "official-firebase-tools-storage-emulator-15.22.0-with-rules-runtime-1.1.3",
+      "naming": "official-language-reference"
+    },
+    "classificationRule": "match production for expression semantics; where the official emulator and production disagree on the request model, follow production and record the emulator divergence in the fixture invariants; no divergence is adopted silently and no fixture is edited after freezing",
+    "cloud": {
+      "projectId": "fireside-conformance",
+      "allowlistEnvironmentVariable": "CONFORMANCE_CLOUD_ALLOWLIST",
+      "rulesEndpoint": "https://firebaserules.googleapis.com/v1/projects/fireside-conformance:test",
+      "syntheticDataOnly": true,
+      "persistentReadsAllowed": 0,
+      "persistentWritesAllowed": 0,
+      "maximumRulesApiRequestsPerCapture": 128,
+      "credentialsStored": false
+    },
+    "emulator": {
+      "firebaseTools": "15.22.0",
+      "rulesRuntimeJarSha256": "0cd52db6f6271d62078f805220706377c849220b73bd68aa27078d977df9c900",
+      "firestoreEmulatorForCallbacks": "1.22.0",
+      "projectIdPrefix": "demo-fireside-phase-g-",
+      "transport": "raw HTTP against StorageEmulator in process"
+    }
+  },
+  "receipts": {
+    "rulesApiAcceptsFirebaseStorage": {
+      "probe": "conformance/src/storage-rules/probe-rules-api.ts",
+      "probedAt": "2026-09-17T06:24:54.128Z",
+      "httpStatus": 200,
+      "elapsedMs": 528,
+      "issues": [],
+      "states": [
+        "SUCCESS",
+        "SUCCESS",
+        "SUCCESS"
+      ],
+      "expressionReportsPerCase": [
+        2,
+        2,
+        2
+      ],
+      "sourceSha256": "ca0a2c47907695010c29e46ed78948a023813f06c08c8887823b81e1a6333756",
+      "responseSha256": "6852f9d5e0ede9e54fe883b19567ffcf5157ea2ba8f500be257277446ca8698c",
+      "observed": [
+        "request.auth null for an unauthenticated case; request.auth.uid on null reports ||invalid_argument|| and the allow denies",
+        "request.resource is passed through as the supplied map for create; request.resource.size reads as the supplied integer",
+        "request.path is reported as the plain string /b/probe-bucket/o/probe/object.txt"
+      ]
+    }
+  },
+  "decisions": {
+    "rulesVersion1": {
+      "policy": "measured in G1; the official emulator loads v1 sources and denies list with the warning \"Permission denied. List operations are only allowed for rules_version='2'.\"; Fireside accepts v1 sources for firebase.storage only if G1 shows the emulator accepting them, and then reproduces the list denial; otherwise v1 sources are rejected with a diagnostic naming the line",
+      "source": "firebase-tools 15.22.0 lib/emulator/storage/rules/runtime.js StorageRulesetInstance.verify",
+      "settled": "emulator loads v1 sources, admits get/create and denies list with the warning; Fireside accepts v1 for firebase.storage and reproduces the list denial (emulator-programs.json method-rules-version-1)"
+    },
+    "uidDerivation": {
+      "policy": "measured in G1; the official emulator derives request.auth.uid from the user_id claim only (uid is null when only sub is present); the current Fireside jar bridge uses user_id ?? sub; Fireside follows the recording",
+      "source": "firebase-tools 15.22.0 lib/emulator/storage/rules/runtime.js createAuthExpressionValue",
+      "settled": "uid is the user_id claim only; a sub-only token has uid == null (auth-shapes/sub-only-uid-is-null)"
+    },
+    "adminOnlyRoutes": {
+      "policy": "measured in G1; the official emulator evaluates no rules for download-token creation/deletion, object copy, or any JSON API route (adminStorageLayer); Fireside follows the recording",
+      "source": "firebase-tools 15.22.0 lib/emulator/storage/files.js and apis/gcloud.js",
+      "settled": "create_token/delete_token are admin-only with 'Missing admin credentials.'; copy hard-codes owner; every JSON API route bypasses rules (bypass-owner-and-download-tokens, bypass-json-api)"
+    },
+    "uploadOverExistingObject": {
+      "policy": "the official emulator sends method create with resource set to the existing object; production treats an overwrite as update; production wins for method naming only if G1 production cases show a verdict difference for the consumer-shaped rulesets, otherwise the emulator's create-with-resource model is reproduced and the divergence recorded",
+      "source": "firebase-tools 15.22.0 lib/emulator/storage/files.js uploadObject",
+      "settled": "the emulator's create-with-resource model is adopted: an upload over an existing object is create with resource set, allow update alone never admits it (upload-over-existing); projects.test has no upload path"
+    },
+    "requestMethod": {
+      "policy": "production defines request.method for every operation; the emulator omits it (Property method is undefined on object)",
+      "settled": "production wins: Fireside defines request.method (divergence request-method-undefined)"
+    },
+    "listMatching": {
+      "policy": "the emulator matches list paths as prefix templates; production applies standard match semantics to list",
+      "settled": "production wins: standard matching, recursive wildcards may bind zero segments as an empty path (divergence list-prefix-template-matching)"
+    },
+    "setRulesFailure": {
+      "policy": "the plan assumed a failed reload keeps the previous ruleset",
+      "settled": "the emulator drops the ruleset and serves 403 'Storage Emulator has no loaded ruleset.' for every v0 request including owner until a valid reload; Fireside reproduces this on setRules and keeps failing at startup for a bad ruleset"
+    }
+  },
+  "capture": {
+    "requiredBeforeProductImplementation": true,
+    "root": "conformance/fixtures/storage-rules-v1",
+    "fixtureSchemaVersion": 1,
+    "emulatorPrograms": {
+      "tool": "conformance/src/storage-rules/capture-emulator.ts",
+      "script": "capture:storage:rules",
+      "minimumPrograms": 25,
+      "minimumSteps": 150,
+      "requiredCategories": [
+        "method-model",
+        "request-resource-per-method",
+        "resource-on-update-and-delete",
+        "upload-paths",
+        "auth-shapes",
+        "bypasses",
+        "firestore-access",
+        "path-matching",
+        "runtime-errors",
+        "ruleset-lifecycle",
+        "consumer-shaped"
+      ],
+      "frozenProgramCount": 26,
+      "frozenStepCount": 334
+    },
+    "productionExpressionCorpus": {
+      "tool": "conformance/src/storage-rules/capture-language.ts",
+      "script": "capture:storage:rules:cloud",
+      "minimumCases": 200,
+      "expressionReportLevel": "FULL",
+      "pathEncoding": "PLAIN",
+      "requiredCategories": [
+        "resource-fields-and-types",
+        "request-resource-fields-and-types",
+        "null-resource-per-method",
+        "request-method-strings",
+        "request-path-segments-and-bindings",
+        "request-time",
+        "request-auth-shapes",
+        "firestore-get-and-exists",
+        "match-patterns",
+        "functions-and-let"
+      ],
+      "frozenCaseCount": 275,
+      "frozenBatchCount": 9,
+      "frozenRulesApiRequests": 9,
+      "frozenVerdicts": {
+        "allow": 215,
+        "deny": 60,
+        "denyWithRuntimeError": 28
+      }
+    },
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "production-expression-corpus.json",
+      "SHA256SUMS"
+    ],
+    "fixturesFrozen": true,
+    "frozenFixtureSha256": {
+      "README.md": "9f86df2089fe1ad743714770dee5e787ea98e86b89ed354f3a96d86ceba22063",
+      "emulator-programs.json": "71c3b177be9cb0ff123bc68aa5a1fa49be9ea3fabfbb5ed851a4bffb32c3dd11",
+      "production-expression-corpus.json": "bdb89b70d1f9ce09ef91ffc114f503a505456be9ab5404c243105b80a54a3ca8",
+      "SHA256SUMS": "af2622d27affd6911eb270813c2ac4834b46fe19309f67f13aaec8414832b5d3"
+    },
+    "fixturesFrozenAt": "2026-09-17T15:02:31+08:00"
+  },
+  "javaSurfacesToRemove": [
+    {
+      "where": "crates/storage-front/src/lib.rs",
+      "what": "RulesRuntime::start spawns java -jar ... serve"
+    },
+    {
+      "where": "crates/storage-front/src/lib.rs",
+      "what": "RulesRuntimeConfig { java, jar, buckets }"
+    },
+    {
+      "where": "crates/suite-runtime/src/lib.rs",
+      "what": "preflight requires java and the jar; SuiteConfig.java / storage_rules_jar"
+    },
+    {
+      "where": "crates/cli/src/main.rs",
+      "what": "--java and --storage-rules-jar suite arguments"
+    },
+    {
+      "where": "packages/cli/src/runtime.mjs",
+      "what": "java -version gate; --java / --storage-rules-jar passthrough"
+    },
+    {
+      "where": "packages/cli/src/assets.mjs",
+      "what": "cloud-storage-rules-runtime-v1.1.3.jar download"
+    },
+    {
+      "where": "packages/cli/bin/fireside.mjs",
+      "what": "--java option; 'Requires Node 24 and Java' help text"
+    },
+    {
+      "where": "README.md, packages/cli/README.md, COMPATIBILITY.md, DESIGN.md",
+      "what": "Java as a runtime requirement"
+    }
+  ],
+  "gates": {
+    "engineReplay": {
+      "productionCasesMinimum": 275,
+      "allowedUnexplainedVerdictDivergences": 0,
+      "allowedUnexplainedExpressionValueDivergences": 0,
+      "test": "crates/rules-engine/tests/storage_oracle_replay.rs"
+    },
+    "emulatorReplay": {
+      "stepsMinimum": 334,
+      "allowedUnexplainedStatusDivergences": 0,
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "test": "crates/storage-front replay of emulator-programs.json over HTTP"
+    },
+    "noJava": {
+      "storageFrontCommandNewAllowed": 0,
+      "suiteStartsWithJavaAbsentFromPath": true,
+      "setupDownloadsExactlyOneAsset": true,
+      "ciStep": "Verify suite start without Java on PATH"
+    },
+    "performance": {
+      "profile": "conformance/src/suite/profile-storage.mjs",
+      "beforeAfterOnSameHostRequired": true,
+      "storageCycleP99RegressionPercentAllowed": 0
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "rustTestsRequired": true,
+      "typescriptCheckRequired": true,
+      "packagingTestsRequired": true,
+      "existingStorageRulesTestsRequired": true
+    }
+  },
+  "acceptance": {
+    "twodartCheapGates": [
+      "bun test:fireside-integration",
+      "bun test:fireside-extensions",
+      "journeys 1-6",
+      "cache-invalidation 403 on assets bucket"
+    ],
+    "hetznerPairedAttempt": "candidate-attempt-10.json",
+    "cleanSetupWithoutJava": {
+      "namedStage": true,
+      "steps": [
+        "bun install",
+        "fireside setup",
+        "first start",
+        "upload denied by rules",
+        "upload allowed by rules",
+        "restart with resume",
+        "export"
+      ],
+      "javaAbsentFromPath": true
+    },
+    "release": "0.1.0-next.7",
+    "receipts": null
+  },
+  "oracleClassifications": [
+    {
+      "id": "request-method-undefined",
+      "behavior": "the official emulator never populates request.method",
+      "policy": "production precedence: request.method is defined",
+      "fixture": "conformance/fixtures/storage-rules-v1/emulator-programs.json"
+    },
+    {
+      "id": "list-prefix-template-matching",
+      "behavior": "the official rules runtime matches list paths as prefix templates with unbound wildcards and template-valued recursive bindings",
+      "policy": "production precedence: standard path matching for list",
+      "fixture": "conformance/fixtures/storage-rules-v1/production-expression-corpus.json"
+    },
+    {
+      "id": "firestore-document-name-form",
+      "behavior": "firestore.get(...).__name__ is /projects/{p}/databases/(default)/documents/... in the emulator; projects.test cannot observe it",
+      "policy": "emulator form adopted as the only runtime evidence",
+      "fixture": "conformance/fixtures/storage-rules-v1/emulator-programs.json"
+    },
+    {
+      "id": "no-firestore-access-limit",
+      "behavior": "21 distinct firestore.* accesses succeed in one request",
+      "policy": "no limit below 21; replay asserts 21",
+      "fixture": "conformance/fixtures/storage-rules-v1/emulator-programs.json"
+    },
+    {
+      "id": "set-rules-failure-drops-ruleset",
+      "behavior": "a failed /internal/setRules leaves no ruleset installed",
+      "policy": "parity on setRules; startup failure stays a startup failure",
+      "fixture": "conformance/fixtures/storage-rules-v1/emulator-programs.json"
+    },
+    {
+      "id": "empty-path-segment-crashes-runtime",
+      "behavior": "an object name with an empty segment crashes the rules runtime jar and the request never answers",
+      "policy": "Fireside drops empty segments from the rules path and always answers",
+      "fixture": "conformance/fixtures/storage-rules-v1/emulator-programs.json"
+    },
+    {
+      "id": "projects-test-omitted-resource-undefined",
+      "behavior": "projects.test treats an omitted resource as undefined rather than null",
+      "policy": "corpus passes resources explicitly; runtime model is null when absent",
+      "fixture": "conformance/fixtures/storage-rules-v1/production-expression-corpus.json"
+    },
+    {
+      "id": "projects-test-rfc3339-strings-become-timestamps",
+      "behavior": "projects.test converts RFC 3339 strings anywhere in the resource to timestamps",
+      "policy": "corpus avoids timestamp-shaped metadata; metadata values are strings at runtime",
+      "fixture": "conformance/fixtures/storage-rules-v1/production-expression-corpus.json"
+    }
+  ]
+}
