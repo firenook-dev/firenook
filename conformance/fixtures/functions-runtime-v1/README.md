@@ -230,6 +230,12 @@ These are asserted by the replay, not skipped:
 - Registry extensions are replayed from the shared cache with their
   `fireside-registry.json` sidecars, so the replay needs neither network nor
   a token (`FIRESIDE_OFFLINE=1`).
+- `extensions-triggers/publish-listened` was recorded on a machine with
+  gcloud application-default credentials: the Admin SDK's Eventarc `publish`
+  fetches a Google access token from `~/.config/gcloud/` before calling the
+  local emulator host (the official emulator behaves the same, and the
+  handler answers 500 without them). The replay skips the step on hosts
+  without that file and says so in its report.
 
 ## Freezing
 

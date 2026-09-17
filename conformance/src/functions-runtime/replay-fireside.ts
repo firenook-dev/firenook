@@ -10,8 +10,9 @@
 // under ~/.cache/firebase/emulators. Deliberate differences are listed in
 // DIVERGENCES and asserted, never skipped.
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -72,6 +73,16 @@ const OUT_OF_SCOPE_STEPS: ReadonlySet<string> = new Set([
   // The hub's /emulators listing is the suite's contract (firebase-suite-v1/hub-*), not the Functions runtime's.
   "main/discovery-backends-inventory/hub-emulators",
 ]);
+
+/**
+ * Steps whose recorded outcome depends on the capturing machine rather than
+ * the emulator: the Admin SDK's Eventarc `publish` fetches a Google access
+ * token from the developer's gcloud application-default credentials before
+ * calling the local emulator host (the official emulator behaves the same),
+ * so the step only reproduces where such credentials exist.
+ */
+const ADC_DEPENDENT_STEPS: ReadonlySet<string> = new Set(["main/extensions-triggers/publish-listened"]);
+const hasApplicationDefaultCredentials = existsSync(join(homedir(), ".config", "gcloud", "application_default_credentials.json"));
 
 /** Step-scoped paths whose value is a race the program does not control. */
 const IGNORED_STEP_PATHS: ReadonlyMap<string, readonly RegExp[]> = new Map([
@@ -326,6 +337,9 @@ function compareStep(profile: string, program: string, expected: RecordedProgram
   }
   if (OUT_OF_SCOPE_STEPS.has(`${profile}/${program}/${expected.id}`)) {
     return { profile, program, step: expected.id, mismatches: [], assertedDivergences: [] };
+  }
+  if (!hasApplicationDefaultCredentials && ADC_DEPENDENT_STEPS.has(`${profile}/${program}/${expected.id}`)) {
+    return { profile, program, step: expected.id, mismatches: [], assertedDivergences: ["skipped: needs gcloud application-default credentials on this host"] };
   }
   const divergences = DIVERGENCES.filter((entry) => entry.profile === profile && entry.program === program && entry.step === expected.id);
   const kind = (expected.action as { kind?: string } | undefined)?.kind ?? "";
