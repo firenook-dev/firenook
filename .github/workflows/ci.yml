@@ -154,13 +154,12 @@ jobs:
       - name: Replay the Functions runtime and Extensions oracle corpus
         env:
           FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/fireside-devtools/node_modules/firebase-functions
-          NODE24: node
           FIRESIDE_OFFLINE: "1"
-        run: >-
-          npm run replay:functions:runtime --prefix conformance --
-          --binary ../target/debug/fireside
-          --profiles main,v1-blocking,inspect,ext-missing-param
-          --output "$RUNNER_TEMP/fireside-functions-runtime-replay.json"
+        run: |
+          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
+            --binary ../target/debug/fireside \
+            --profiles main,v1-blocking,inspect,ext-missing-param \
+            --output "$RUNNER_TEMP/fireside-functions-runtime-replay.json"
       - name: Verify suite start without Java on PATH
         run: >-
           node conformance/src/suite/verify-no-java.mjs
