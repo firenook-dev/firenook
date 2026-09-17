@@ -25,6 +25,8 @@ struct Parser {
     tokens: Vec<Token>,
     index: usize,
     line_starts: Vec<usize>,
+    /// Wildcard names bound by the match blocks currently being parsed.
+    scope: Vec<String>,
 }
 
 impl Parser {
@@ -41,22 +43,53 @@ impl Parser {
             tokens,
             index: 0,
             line_starts,
+            scope: Vec::new(),
         }
     }
 
     fn program(mut self) -> Result<Program, ParseError> {
-        self.expect_identifier("rules_version")?;
-        self.expect(&TokenKind::Assign, "'=' after rules_version")?;
-        let version = self.take_string("rules version string")?;
-        if version != "2" {
-            return Err(self.error_at_previous("only rules_version = '2' is supported"));
-        }
-        self.expect(&TokenKind::Semicolon, "';' after rules_version")?;
+        // `rules_version = '2'` is required for Cloud Firestore. A Storage
+        // ruleset may omit it: the official emulator loads such a source and
+        // denies `list` with a warning (storage-rules-v1
+        // method-rules-version-1), so the version is recorded for the caller.
+        let declared_version = if self.check_identifier("rules_version") {
+            self.advance();
+            self.expect(&TokenKind::Assign, "'=' after rules_version")?;
+            let version = self.take_string("rules version string")?;
+            if version != "2" {
+                return Err(self.error_at_previous("only rules_version = '2' is supported"));
+            }
+            self.expect(&TokenKind::Semicolon, "';' after rules_version")?;
+            Some(2_u8)
+        } else {
+            None
+        };
         self.expect_identifier("service")?;
-        self.expect_identifier("cloud")?;
-        self.expect(&TokenKind::Dot, "'.' in cloud.firestore")?;
-        self.expect_identifier("firestore")?;
-        self.expect(&TokenKind::LeftBrace, "'{' after service cloud.firestore")?;
+        let service = match self.take_identifier("service name")?.as_str() {
+            "cloud" => {
+                self.expect(&TokenKind::Dot, "'.' in cloud.firestore")?;
+                self.expect_identifier("firestore")?;
+                crate::RulesService::CloudFirestore
+            }
+            "firebase" => {
+                self.expect(&TokenKind::Dot, "'.' in firebase.storage")?;
+                self.expect_identifier("storage")?;
+                crate::RulesService::FirebaseStorage
+            }
+            other => {
+                return Err(self.error_at_previous(format!(
+                    "unsupported service {other:?}; expected cloud.firestore or firebase.storage"
+                )));
+            }
+        };
+        let rules_version = match (service, declared_version) {
+            (_, Some(version)) => version,
+            (crate::RulesService::FirebaseStorage, None) => 1,
+            (crate::RulesService::CloudFirestore, None) => {
+                return Err(self.error_at_previous("expected rules_version = '2' before service"));
+            }
+        };
+        self.expect(&TokenKind::LeftBrace, "'{' after the service declaration")?;
         let mut functions = BTreeMap::new();
         let mut matches = Vec::new();
         while !self.check(&TokenKind::RightBrace) {
@@ -78,13 +111,26 @@ impl Parser {
         if matches.is_empty() {
             return Err(self.error_at_previous("service must contain at least one match"));
         }
-        Ok(Program { functions, matches })
+        Ok(Program {
+            service,
+            rules_version,
+            functions,
+            matches,
+        })
     }
 
     fn match_block(&mut self) -> Result<MatchBlock, ParseError> {
         self.expect_identifier("match")?;
         let raw = self.take_path("match path")?;
         let pattern = parse_pattern(&raw, self.previous_offset())?;
+        let scope_depth = self.scope.len();
+        for segment in &pattern {
+            if let PatternSegment::Wildcard(name) | PatternSegment::RecursiveWildcard(name) =
+                segment
+            {
+                self.scope.push(name.clone());
+            }
+        }
         self.expect(&TokenKind::LeftBrace, "'{' after match path")?;
         let mut functions = BTreeMap::new();
         let mut allows = Vec::new();
@@ -106,6 +152,7 @@ impl Parser {
             }
         }
         self.advance();
+        self.scope.truncate(scope_depth);
         Ok(MatchBlock {
             pattern,
             functions,
@@ -164,6 +211,7 @@ impl Parser {
             name,
             Function {
                 body_start,
+                scope: self.scope.clone(),
                 parameters,
                 lets,
                 result,
@@ -209,7 +257,12 @@ impl Parser {
         self.expect(&TokenKind::Colon, "':' after allow methods")?;
         self.expect_identifier("if")?;
         let condition = self.expression(0)?;
-        self.expect(&TokenKind::Semicolon, "';' after allow condition")?;
+        // The official rules runtime accepts an allow without a trailing
+        // semicolon when it is the last declaration of its block
+        // (storage-rules-v1 set-rules-missing-semicolon-accepted).
+        if !self.check(&TokenKind::RightBrace) {
+            self.expect(&TokenKind::Semicolon, "';' after allow condition")?;
+        }
         Ok(Allow {
             location,
             operations,

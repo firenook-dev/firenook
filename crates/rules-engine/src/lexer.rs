@@ -278,8 +278,11 @@ impl<'a> Lexer<'a> {
         let start = self.offset;
         let mut interpolation_depth = 0_usize;
         let mut braces = 0_usize;
+        // A parenthesized literal segment such as `(default)` in
+        // `/databases/(default)/documents` is part of the path.
+        let mut literal_parentheses = 0_usize;
         while let Some(character) = self.current() {
-            if interpolation_depth == 0 && braces == 0 {
+            if interpolation_depth == 0 && braces == 0 && literal_parentheses == 0 {
                 if character.is_whitespace()
                     || matches!(character, ';' | ',' | ')' | ']' | ':' | '&' | '|')
                 {
@@ -297,13 +300,15 @@ impl<'a> Lexer<'a> {
             match character {
                 '(' if interpolation_depth > 0 => interpolation_depth += 1,
                 ')' if interpolation_depth > 0 => interpolation_depth -= 1,
+                '(' if self.previous_character() == Some('/') => literal_parentheses += 1,
+                ')' if literal_parentheses > 0 => literal_parentheses -= 1,
                 '{' if interpolation_depth == 0 => braces += 1,
                 '}' if interpolation_depth == 0 && braces > 0 => braces -= 1,
                 _ => {}
             }
             self.advance();
         }
-        if interpolation_depth != 0 || braces != 0 {
+        if interpolation_depth != 0 || braces != 0 || literal_parentheses != 0 {
             return Err(LexError {
                 message: "unterminated path interpolation or wildcard".to_owned(),
                 offset: start,
@@ -328,6 +333,10 @@ impl<'a> Lexer<'a> {
 
     fn current(&self) -> Option<char> {
         self.remaining().chars().next()
+    }
+
+    fn previous_character(&self) -> Option<char> {
+        self.source[..self.offset].chars().next_back()
     }
 
     fn peek_after_current(&self) -> Option<char> {

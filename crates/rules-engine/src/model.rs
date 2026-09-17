@@ -188,6 +188,113 @@ impl Resource {
     }
 }
 
+/// The Firebase service a ruleset is written for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RulesService {
+    /// `service cloud.firestore`: document paths under `/databases/…/documents`.
+    CloudFirestore,
+    /// `service firebase.storage`: object paths under `/b/{bucket}/o`.
+    FirebaseStorage,
+}
+
+impl RulesService {
+    /// Source spelling of the service head.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::CloudFirestore => "cloud.firestore",
+            Self::FirebaseStorage => "firebase.storage",
+        }
+    }
+}
+
+/// The Cloud Storage object exposed as `resource` and `request.resource`
+/// under `service firebase.storage`.
+///
+/// The field set is the fourteen keys the official emulator hands to the
+/// rules runtime (`conformance/fixtures/storage-rules-v1`): `cacheControl`
+/// and `contentLanguage` are never exposed; absent content fields are present
+/// with a null value; custom metadata values are always strings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageObject {
+    /// Object name within the bucket, slashes included.
+    pub name: String,
+    /// Bucket name.
+    pub bucket: String,
+    /// Content generation.
+    pub generation: i64,
+    /// Metadata generation, starting at 1.
+    pub metageneration: i64,
+    /// Content length in bytes.
+    pub size: i64,
+    /// Creation time.
+    pub time_created: Timestamp,
+    /// Last metadata or content update.
+    pub updated: Timestamp,
+    /// Base64 MD5 digest of the content.
+    pub md5_hash: String,
+    /// Base64 CRC32C of the content.
+    pub crc32c: String,
+    /// Entity tag.
+    pub etag: String,
+    /// `Content-Disposition`, when set.
+    pub content_disposition: Option<String>,
+    /// `Content-Encoding`, when set.
+    pub content_encoding: Option<String>,
+    /// `Content-Type`, when set.
+    pub content_type: Option<String>,
+    /// Custom metadata, never including `firebaseStorageDownloadTokens`.
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl StorageObject {
+    /// The rules value: a fourteen-key map with typed fields.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        let optional = |value: &Option<String>| {
+            value
+                .as_ref()
+                .map_or(Value::Null, |value| Value::String(value.clone()))
+        };
+        let mut map = BTreeMap::new();
+        map.insert("name".to_owned(), Value::String(self.name.clone()));
+        map.insert("bucket".to_owned(), Value::String(self.bucket.clone()));
+        map.insert("generation".to_owned(), Value::Integer(self.generation));
+        map.insert(
+            "metageneration".to_owned(),
+            Value::Integer(self.metageneration),
+        );
+        map.insert("size".to_owned(), Value::Integer(self.size));
+        map.insert(
+            "timeCreated".to_owned(),
+            Value::Timestamp(self.time_created),
+        );
+        map.insert("updated".to_owned(), Value::Timestamp(self.updated));
+        map.insert("md5Hash".to_owned(), Value::String(self.md5_hash.clone()));
+        map.insert("crc32c".to_owned(), Value::String(self.crc32c.clone()));
+        map.insert("etag".to_owned(), Value::String(self.etag.clone()));
+        map.insert(
+            "contentDisposition".to_owned(),
+            optional(&self.content_disposition),
+        );
+        map.insert(
+            "contentEncoding".to_owned(),
+            optional(&self.content_encoding),
+        );
+        map.insert("contentType".to_owned(), optional(&self.content_type));
+        map.insert(
+            "metadata".to_owned(),
+            Value::Map(
+                self.metadata
+                    .iter()
+                    .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                    .collect(),
+            ),
+        );
+        Value::Map(map)
+    }
+}
+
 /// Emulator authentication exposed as `request.auth`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Auth {
@@ -291,27 +398,35 @@ pub enum RequestOperation {
 /// One request evaluated against an installed ruleset.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EvaluationRequest {
+    /// Service whose value surface the request exposes.
+    pub service: RulesService,
     /// Concrete operation.
     pub operation: RequestOperation,
-    /// Canonical `/databases/.../documents/...` path.
+    /// Canonical `/databases/.../documents/...` or `/b/{bucket}/o/...` path.
     pub path: String,
     /// Authenticated user, or `None` for an unauthenticated request.
     pub auth: Option<Auth>,
     /// Server request time.
     pub time: Timestamp,
-    /// Existing document exposed as `resource`.
+    /// Existing document exposed as `resource` under Cloud Firestore.
     pub resource: Option<Resource>,
-    /// Proposed document exposed as `request.resource`.
+    /// Proposed document exposed as `request.resource` under Cloud Firestore.
     pub request_resource: Option<Resource>,
-    /// Query shape exposed as `request.query`.
+    /// Query shape exposed as `request.query` under Cloud Firestore.
     pub query: Query,
+    /// Stored object exposed as `resource` under Firebase Storage.
+    pub storage_resource: Option<StorageObject>,
+    /// Proposed object exposed as `request.resource` under Firebase Storage.
+    pub storage_request_resource: Option<StorageObject>,
 }
 
 impl EvaluationRequest {
-    /// Creates a request with no authentication, resources, or query options.
+    /// Creates a Cloud Firestore request with no authentication, resources,
+    /// or query options.
     #[must_use]
     pub fn new(operation: RequestOperation, path: impl Into<String>, time: Timestamp) -> Self {
         Self {
+            service: RulesService::CloudFirestore,
             operation,
             path: path.into(),
             auth: None,
@@ -319,6 +434,19 @@ impl EvaluationRequest {
             resource: None,
             request_resource: None,
             query: Query::default(),
+            storage_resource: None,
+            storage_request_resource: None,
+        }
+    }
+
+    /// Creates a Firebase Storage request with no authentication or objects.
+    /// `path` is `/b/{bucket}/o/{name}` (or `/b/{bucket}/o[/{prefix}]` for a
+    /// list); empty segments must already be dropped by the caller.
+    #[must_use]
+    pub fn storage(operation: RequestOperation, path: impl Into<String>, time: Timestamp) -> Self {
+        Self {
+            service: RulesService::FirebaseStorage,
+            ..Self::new(operation, path, time)
         }
     }
 }

@@ -26,8 +26,8 @@ pub use trace::{
 pub use model::{
     AtomicEvaluationResult, Auth, ConstraintOperator, DocumentAccess, DocumentAccessError,
     EmptyDocumentAccess, EvaluationRequest, EvaluationResult, FieldConstraint, LatLng, Query,
-    QueryFilter, QueryScope, RequestOperation, Resource, RulesDuration, RuntimeError, Timestamp,
-    TimestampParseError, Value,
+    QueryFilter, QueryScope, RequestOperation, Resource, RulesDuration, RulesService, RuntimeError,
+    StorageObject, Timestamp, TimestampParseError, Value,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -100,6 +100,19 @@ impl Ruleset {
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// Service named by the `service` head.
+    #[must_use]
+    pub fn service(&self) -> RulesService {
+        self.program.service
+    }
+
+    /// Declared `rules_version`; `1` when the declaration is absent, which
+    /// only `service firebase.storage` sources may omit.
+    #[must_use]
+    pub fn rules_version(&self) -> u8 {
+        self.program.rules_version
     }
 
     /// Evaluates once, with bounded allow-decision diagnostics. This follows the
