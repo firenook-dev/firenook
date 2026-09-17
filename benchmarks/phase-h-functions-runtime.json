@@ -148,8 +148,8 @@
     "frozenProgramCount": 43,
     "frozenStepCount": 281,
     "frozenFixtureSha256": {
-      "README.md": "69b47456535755cb129b0751dc0f734c2d816a9db5175b5f19747ba913e35fcd",
-      "emulator-programs.json": "e33c795ff04d4751be49da84840f470cd1136d0c2797b113f784fe8a9b9c09df"
+      "README.md": "d9d596b6fc23f14adde2e11e266eb992365af0195ef47845df1e0d9a1019adf9",
+      "emulator-programs.json": "f22fad935afd7f34bd8fa8fa7f5da25e15f15239a8c22decedea003bac6d251f"
     },
     "frozenAt": "2026-09-17T15:43:20.365Z",
     "requiredFixtures": [
@@ -296,7 +296,7 @@
       "fixture": "conformance/fixtures/functions-runtime-v1",
       "recordedAt": "2026-09-17T15:43:20.365Z",
       "firstRecordedAt": "2026-09-17T10:47:11.075Z",
-      "reRecordedBecause": "the replay harness settled its digest rules (served extension specs are parameter-substituted; registry objects carry volatile install counts) after the first capture; same programs, same counts",
+      "reRecordedBecause": "the replay harness settled its digest rules (served extension specs are parameter-substituted; registry objects carry volatile install counts) after the first capture; same programs, same counts. Frozen text then normalized for portability without a recapture: macOS /private real-path prefix folded into {{projectDir}}, the SDK's node_modules directory as {{nodeModules}}, Express error-page stack frames as {{stack}}",
       "profiles": 5,
       "programs": 43,
       "steps": 281,

@@ -49,7 +49,7 @@
           "WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release",
           "",
           "emulators: The Emulator UI is not starting because none of the running emulators have a UI component.",
-          "functions: Watching \"/private{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
+          "functions: Watching \"{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
           "functions: Loaded functions definitions from source: httpFn, firestoreFn, storageFn, authFn, scheduledFn, queueFn, v2Fn.",
           "functions[us-central1-ext-synthetic-httpFn]: http function initialized ({{origin:functions}}/demo-fireside-functions-oracle/us-central1/ext-synthetic-httpFn).",
           "functions[us-central1-ext-synthetic-firestoreFn]: firestore function initialized.",
@@ -158,7 +158,7 @@
           "Serving at port 8035",
           "",
           "Error: synthetic load failure: this codebase refuses to load",
-          "    at Object.<anonymous> (/private{{projectDir}}/functions/broken-load/index.js:3:7)",
+          "    at Object.<anonymous> ({{projectDir}}/functions/broken-load/index.js:3:7)",
           "    at Module._compile (node:internal/modules/cjs/loader:1929:14)",
           "    at Object..js (node:internal/modules/cjs/loader:2060:10)",
           "    at Module.load (node:internal/modules/cjs/loader:1651:32)",
@@ -219,7 +219,7 @@
         "body": {
           "backends": [
             {
-              "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+              "directory": "{{projectDir}}/extensions-local/synthetic/functions",
               "env": {
                 "PROJECT_ID": "demo-fireside-functions-oracle",
                 "EXT_INSTANCE_ID": "synthetic",
@@ -1844,7 +1844,7 @@
                 "body": {
                   "backends": [
                     {
-                      "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                      "directory": "{{projectDir}}/extensions-local/synthetic/functions",
                       "env": {
                         "PROJECT_ID": "demo-fireside-functions-oracle",
                         "EXT_INSTANCE_ID": "synthetic",
@@ -3585,7 +3585,7 @@
                 {
                   "handler": "httpRegion",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -3695,7 +3695,7 @@
                 {
                   "handler": "httpMultiRegion",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -3786,7 +3786,7 @@
                 {
                   "handler": "httpMultiRegion",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -3876,7 +3876,7 @@
                 {
                   "handler": "v1Region",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -3963,7 +3963,7 @@
                 {
                   "handler": "callableRegion",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -4063,7 +4063,7 @@
                 {
                   "handler": "secondaryHttp",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -4152,7 +4152,7 @@
                 {
                   "handler": "secondaryCallable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -4236,7 +4236,7 @@
                 {
                   "handler": "esmHttp",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/esm",
+                  "cwd": "{{projectDir}}/functions/esm",
                   "env": {
                     "FUNCTION_TARGET": "esmHttp",
                     "FUNCTION_SIGNATURE_TYPE": "http",
@@ -4285,7 +4285,7 @@
                 {
                   "handler": "esmCallable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/esm",
+                  "cwd": "{{projectDir}}/functions/esm",
                   "env": {
                     "FUNCTION_TARGET": "esmCallable",
                     "FUNCTION_SIGNATURE_TYPE": "http",
@@ -4322,7 +4322,7 @@
                 {
                   "handler": "yamlHttp",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/static-manifest",
+                  "cwd": "{{projectDir}}/functions/static-manifest",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -4410,7 +4410,7 @@
                 {
                   "handler": "yamlEvent",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/static-manifest",
+                  "cwd": "{{projectDir}}/functions/static-manifest",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -4573,7 +4573,7 @@
                 {
                   "handler": "dbIgnored",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -5190,7 +5190,7 @@
                 {
                   "handler": "taskQueue",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -5291,7 +5291,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -5433,7 +5433,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -5572,7 +5572,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -5707,7 +5707,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -5832,7 +5832,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -5923,7 +5923,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -6070,7 +6070,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -6165,7 +6165,7 @@
                   "x-content-type-options": "nosniff",
                   "x-powered-by": "Express"
                 },
-                "body": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>SyntaxError: Expected property name or &#39;}&#39; in JSON at position 1 (line 1 column 2)<br> &nbsp; &nbsp;at JSON.parse (&lt;anonymous&gt;)<br> &nbsp; &nbsp;at parse ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/lib/types/json.js:92:19)<br> &nbsp; &nbsp;at {{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/lib/read.js:128:18<br> &nbsp; &nbsp;at AsyncResource.runInAsyncScope (node:async_hooks:227:14)<br> &nbsp; &nbsp;at invokeCallback ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/node_modules/raw-body/index.js:238:16)<br> &nbsp; &nbsp;at done ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/node_modules/raw-body/index.js:227:7)<br> &nbsp; &nbsp;at IncomingMessage.onEnd ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/node_modules/raw-body/index.js:287:7)<br> &nbsp; &nbsp;at IncomingMessage.emit (node:events:514:28)<br> &nbsp; &nbsp;at endReadableNT (node:internal/streams/readable:1757:12)<br> &nbsp; &nbsp;at process.processTicksAndRejections (node:internal/process/task_queues:90:21)</pre>\n</body>\n</html>\n",
+                "body": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>SyntaxError: Expected property name or &#39;}&#39; in JSON at position 1 (line 1 column 2)<br> &nbsp; &nbsp;at {{stack}}</pre>\n</body>\n</html>\n",
                 "elapsedMs": "{{number}}"
               },
               "observations": []
@@ -6228,7 +6228,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -6360,7 +6360,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -6499,7 +6499,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -6634,7 +6634,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -6759,7 +6759,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -6882,7 +6882,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7005,7 +7005,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7120,7 +7120,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7237,7 +7237,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7354,7 +7354,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7471,7 +7471,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7591,7 +7591,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7686,7 +7686,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7781,7 +7781,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7874,7 +7874,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -7963,7 +7963,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8054,7 +8054,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8145,7 +8145,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8242,7 +8242,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8339,7 +8339,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8430,7 +8430,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8518,7 +8518,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8608,7 +8608,7 @@
                 {
                   "handler": "httpTimeout",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8723,7 +8723,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -8866,7 +8866,7 @@
                 {
                   "handler": "httpCorsAll",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9012,7 +9012,7 @@
                 {
                   "handler": "httpCorsOrigin",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9108,7 +9108,7 @@
                 {
                   "handler": "httpCorsOrigin",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9200,7 +9200,7 @@
                 {
                   "handler": "httpCorsOrigin",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9348,7 +9348,7 @@
                 {
                   "handler": "v1Http",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9465,7 +9465,7 @@
                 {
                   "handler": "v1Http",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9550,7 +9550,7 @@
                 {
                   "handler": "v1Options",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9658,7 +9658,7 @@
                 {
                   "handler": "v1Http",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9750,7 +9750,7 @@
                 {
                   "handler": "adminRoundTrip",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -9963,7 +9963,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -10104,7 +10104,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -10231,7 +10231,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -10358,7 +10358,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -10501,7 +10501,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -10639,7 +10639,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -10789,7 +10789,7 @@
                   "x-content-type-options": "nosniff",
                   "x-powered-by": "Express"
                 },
-                "body": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>SyntaxError: Expected property name or &#39;}&#39; in JSON at position 1 (line 1 column 2)<br> &nbsp; &nbsp;at JSON.parse (&lt;anonymous&gt;)<br> &nbsp; &nbsp;at parse ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/lib/types/json.js:92:19)<br> &nbsp; &nbsp;at {{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/lib/read.js:128:18<br> &nbsp; &nbsp;at AsyncResource.runInAsyncScope (node:async_hooks:227:14)<br> &nbsp; &nbsp;at invokeCallback ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/node_modules/raw-body/index.js:238:16)<br> &nbsp; &nbsp;at done ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/node_modules/raw-body/index.js:227:7)<br> &nbsp; &nbsp;at IncomingMessage.onEnd ({{home}}/Desktop/Twodart/worktrees/fireside-emulator/node_modules/body-parser/node_modules/raw-body/index.js:287:7)<br> &nbsp; &nbsp;at IncomingMessage.emit (node:events:514:28)<br> &nbsp; &nbsp;at endReadableNT (node:internal/streams/readable:1757:12)<br> &nbsp; &nbsp;at process.processTicksAndRejections (node:internal/process/task_queues:90:21)</pre>\n</body>\n</html>\n",
+                "body": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>SyntaxError: Expected property name or &#39;}&#39; in JSON at position 1 (line 1 column 2)<br> &nbsp; &nbsp;at {{stack}}</pre>\n</body>\n</html>\n",
                 "elapsedMs": "{{number}}"
               },
               "observations": []
@@ -10912,7 +10912,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11065,7 +11065,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11183,7 +11183,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11301,7 +11301,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11419,7 +11419,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11537,7 +11537,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11655,7 +11655,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11773,7 +11773,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -11891,7 +11891,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12009,7 +12009,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12127,7 +12127,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12245,7 +12245,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12363,7 +12363,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12481,7 +12481,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12599,7 +12599,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12717,7 +12717,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12835,7 +12835,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -12953,7 +12953,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -13063,7 +13063,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -13169,7 +13169,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -13275,7 +13275,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -13382,7 +13382,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -13543,7 +13543,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -13711,7 +13711,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -13871,7 +13871,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -14030,7 +14030,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -14180,7 +14180,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -14404,7 +14404,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -14529,7 +14529,7 @@
                 {
                   "handler": "callableAuthRequired",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -14631,7 +14631,7 @@
                 {
                   "handler": "callableAuthRequired",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -14783,7 +14783,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -14933,7 +14933,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15111,7 +15111,7 @@
                 {
                   "handler": "callableAppCheck",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15247,7 +15247,7 @@
                 {
                   "handler": "v1Callable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15329,7 +15329,7 @@
                 {
                   "handler": "v1Callable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15439,7 +15439,7 @@
                 {
                   "handler": "v1Callable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15583,7 +15583,7 @@
                 {
                   "handler": "callableStream",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15686,7 +15686,7 @@
                 {
                   "handler": "callableStream",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15790,7 +15790,7 @@
                 {
                   "handler": "callableStream",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -15895,7 +15895,7 @@
                 {
                   "handler": "callableStream",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16002,7 +16002,7 @@
                 {
                   "handler": "callableStream",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16111,7 +16111,7 @@
                 {
                   "handler": "callableStream",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16215,7 +16215,7 @@
                 {
                   "handler": "callableStream",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16339,7 +16339,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16532,7 +16532,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16666,7 +16666,7 @@
                 {
                   "handler": "v1Callable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16806,7 +16806,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -16907,7 +16907,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17085,7 +17085,7 @@
                 {
                   "handler": "docUpdated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17215,7 +17215,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17364,7 +17364,7 @@
                 {
                   "handler": "docDeleted",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17466,7 +17466,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17617,7 +17617,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17710,7 +17710,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17852,7 +17852,7 @@
                 {
                   "handler": "docUpdated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -17965,7 +17965,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18116,7 +18116,7 @@
                 {
                   "handler": "docCreatedAuth",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18207,7 +18207,7 @@
                 {
                   "handler": "docWrittenAuth",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18348,7 +18348,7 @@
                 {
                   "handler": "docCreatedAuth",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18439,7 +18439,7 @@
                 {
                   "handler": "docWrittenAuth",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18580,7 +18580,7 @@
                 {
                   "handler": "docWrittenAuth",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18711,7 +18711,7 @@
                 {
                   "handler": "docWrittenAuth",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18892,7 +18892,7 @@
                 {
                   "handler": "v1DocCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -18969,7 +18969,7 @@
                 {
                   "handler": "v1DocWrite",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -19109,7 +19109,7 @@
                 {
                   "handler": "v1DocUpdate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -19211,7 +19211,7 @@
                 {
                   "handler": "v1DocWrite",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -19332,7 +19332,7 @@
                 {
                   "handler": "v1DocDelete",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -19411,7 +19411,7 @@
                 {
                   "handler": "v1DocWrite",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -19540,7 +19540,7 @@
                 {
                   "handler": "docNested",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -19716,7 +19716,7 @@
                 {
                   "handler": "docDeep",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -19858,7 +19858,7 @@
                 {
                   "handler": "docDeep",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20000,7 +20000,7 @@
                 {
                   "handler": "docDeep",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20142,7 +20142,7 @@
                 {
                   "handler": "docExact",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20310,7 +20310,7 @@
                 {
                   "handler": "docRegion",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20488,7 +20488,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20581,7 +20581,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20674,7 +20674,7 @@
                 {
                   "handler": "docDeleted",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20767,7 +20767,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20878,7 +20878,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -20989,7 +20989,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -21131,7 +21131,7 @@
                 {
                   "handler": "docThrows",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -21255,7 +21255,7 @@
                 {
                   "handler": "docThrows",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -21379,7 +21379,7 @@
                 {
                   "handler": "docSlow",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -21541,7 +21541,7 @@
                 {
                   "handler": "ext-storageFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -21621,7 +21621,7 @@
                 {
                   "handler": "objFinalized",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -21728,7 +21728,7 @@
                 {
                   "handler": "v1ObjFinalize",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -21854,7 +21854,7 @@
                 {
                   "handler": "objMetadata",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -21965,7 +21965,7 @@
                 {
                   "handler": "v1ObjMetadata",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -22087,7 +22087,7 @@
                 {
                   "handler": "ext-storageFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -22166,7 +22166,7 @@
                 {
                   "handler": "objFinalized",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -22271,7 +22271,7 @@
                 {
                   "handler": "v1ObjFinalize",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -22369,7 +22369,7 @@
                 {
                   "handler": "objDeleted",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -22476,7 +22476,7 @@
                 {
                   "handler": "v1ObjDelete",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -22603,7 +22603,7 @@
                 {
                   "handler": "objSecondBucket",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -22770,7 +22770,7 @@
                 {
                   "handler": "ext-storageFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -22849,7 +22849,7 @@
                 {
                   "handler": "objFinalized",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -22954,7 +22954,7 @@
                 {
                   "handler": "v1ObjFinalize",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23069,7 +23069,7 @@
                 {
                   "handler": "topicEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23163,7 +23163,7 @@
                 {
                   "handler": "topicSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23285,7 +23285,7 @@
                 {
                   "handler": "topicEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23372,7 +23372,7 @@
                 {
                   "handler": "topicSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23488,7 +23488,7 @@
                 {
                   "handler": "topicEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23578,7 +23578,7 @@
                 {
                   "handler": "topicSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23699,7 +23699,7 @@
                 {
                   "handler": "topicEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23785,7 +23785,7 @@
                 {
                   "handler": "topicEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23871,7 +23871,7 @@
                 {
                   "handler": "topicSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -23957,7 +23957,7 @@
                 {
                   "handler": "topicSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24108,7 +24108,7 @@
                 {
                   "handler": "v1TopicPublish",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24239,7 +24239,7 @@
                 {
                   "handler": "v1TopicPublish",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24468,7 +24468,7 @@
                 {
                   "handler": "scheduledTick",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24546,7 +24546,7 @@
                 {
                   "handler": "scheduledCron",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24638,7 +24638,7 @@
                 {
                   "handler": "v1Scheduled",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24708,7 +24708,7 @@
                 {
                   "handler": "scheduledTick",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24819,7 +24819,7 @@
                 {
                   "handler": "blockCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -24933,7 +24933,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -25060,7 +25060,7 @@
                 {
                   "handler": "ext-authFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -25145,7 +25145,7 @@
                 {
                   "handler": "v1AuthCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -25228,7 +25228,7 @@
                 {
                   "handler": "v1AuthCreateSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -25380,7 +25380,7 @@
                 {
                   "handler": "v1AuthDelete",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -25500,7 +25500,7 @@
                 {
                   "handler": "blockCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -25616,7 +25616,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -25746,7 +25746,7 @@
                 {
                   "handler": "ext-authFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -25834,7 +25834,7 @@
                 {
                   "handler": "v1AuthCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -25920,7 +25920,7 @@
                 {
                   "handler": "v1AuthCreateSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -26083,7 +26083,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -26247,7 +26247,7 @@
                 {
                   "handler": "blockCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -26425,7 +26425,7 @@
                 {
                   "handler": "blockCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -26541,7 +26541,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -26672,7 +26672,7 @@
                 {
                   "handler": "ext-authFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -26756,7 +26756,7 @@
                 {
                   "handler": "v1AuthCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -26838,7 +26838,7 @@
                 {
                   "handler": "v1AuthCreateSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -26973,7 +26973,7 @@
                 {
                   "handler": "blockCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -27089,7 +27089,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -27220,7 +27220,7 @@
                 {
                   "handler": "ext-authFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -27304,7 +27304,7 @@
                 {
                   "handler": "v1AuthCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -27386,7 +27386,7 @@
                 {
                   "handler": "v1AuthCreateSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -27502,7 +27502,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -27696,7 +27696,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -27852,7 +27852,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -27946,7 +27946,7 @@
                 {
                   "handler": "httpSecrets",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28038,7 +28038,7 @@
                 {
                   "handler": "secondaryHttp",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28140,7 +28140,7 @@
                 {
                   "handler": "v1Http",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28227,7 +28227,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28320,7 +28320,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28488,7 +28488,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28582,7 +28582,7 @@
                 {
                   "handler": "ext-httpFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -28697,7 +28697,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28786,7 +28786,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -28913,7 +28913,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29014,7 +29014,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29107,7 +29107,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29306,7 +29306,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29377,7 +29377,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29448,7 +29448,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29624,7 +29624,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29694,7 +29694,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29765,7 +29765,7 @@
                 {
                   "handler": "secondaryHttp",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29851,7 +29851,7 @@
                 {
                   "handler": "removable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -29926,7 +29926,7 @@
                 {
                   "handler": "changeMe",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -30076,7 +30076,7 @@
                 "body": {
                   "backends": [
                     {
-                      "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                      "directory": "{{projectDir}}/extensions-local/synthetic/functions",
                       "env": {
                         "PROJECT_ID": "demo-fireside-functions-oracle",
                         "EXT_INSTANCE_ID": "synthetic",
@@ -31505,7 +31505,7 @@
                 {
                   "handler": "addedLater",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -31652,7 +31652,7 @@
                 {
                   "handler": "changeMe",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -31776,7 +31776,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -31869,7 +31869,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -32006,7 +32006,7 @@
                 {
                   "handler": "scheduledTick",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -32131,7 +32131,7 @@
                 {
                   "handler": "removable",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -32199,7 +32199,7 @@
                 "body": {
                   "backends": [
                     {
-                      "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                      "directory": "{{projectDir}}/extensions-local/synthetic/functions",
                       "env": {
                         "PROJECT_ID": "demo-fireside-functions-oracle",
                         "EXT_INSTANCE_ID": "synthetic",
@@ -33678,7 +33678,7 @@
                 {
                   "handler": "ext-httpFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -33781,7 +33781,7 @@
                 {
                   "handler": "ext-firestoreFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -33926,7 +33926,7 @@
                 {
                   "handler": "ext-v2Fn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -34081,7 +34081,7 @@
                 {
                   "handler": "ext-scheduledFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -34156,7 +34156,7 @@
                 {
                   "handler": "customEvent",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -34213,7 +34213,7 @@
                 {
                   "handler": "ext-httpFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -34307,7 +34307,7 @@
                 {
                   "handler": "ext-httpFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -34401,7 +34401,7 @@
                 {
                   "handler": "ext-httpFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -34563,7 +34563,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -34721,7 +34721,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -34814,7 +34814,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -34951,7 +34951,7 @@
                 {
                   "handler": "scheduledTick",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -35018,7 +35018,7 @@
                 "body": {
                   "backends": [
                     {
-                      "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                      "directory": "{{projectDir}}/extensions-local/synthetic/functions",
                       "env": {
                         "PROJECT_ID": "demo-fireside-functions-oracle",
                         "EXT_INSTANCE_ID": "synthetic",
@@ -37250,7 +37250,7 @@
           "WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release",
           "",
           "emulators: The Emulator UI is not starting because none of the running emulators have a UI component.",
-          "functions: Watching \"/private{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
+          "functions: Watching \"{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
           "functions: Loaded functions definitions from source: httpFn, firestoreFn, storageFn, authFn, scheduledFn, queueFn, v2Fn.",
           "functions[us-central1-ext-synthetic-httpFn]: http function initialized ({{origin:functions}}/demo-fireside-functions-oracle/us-central1/ext-synthetic-httpFn).",
           "functions[us-central1-ext-synthetic-firestoreFn]: firestore function initialized.",
@@ -37306,7 +37306,7 @@
           "Serving at port 8827",
           "",
           "Error: synthetic load failure: this codebase refuses to load",
-          "    at Object.<anonymous> (/private{{projectDir}}/functions/broken-load/index.js:3:7)",
+          "    at Object.<anonymous> ({{projectDir}}/functions/broken-load/index.js:3:7)",
           "    at Module._compile (node:internal/modules/cjs/loader:1929:14)",
           "    at Object..js (node:internal/modules/cjs/loader:2060:10)",
           "    at Module.load (node:internal/modules/cjs/loader:1651:32)",
@@ -37367,7 +37367,7 @@
         "body": {
           "backends": [
             {
-              "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+              "directory": "{{projectDir}}/extensions-local/synthetic/functions",
               "env": {
                 "PROJECT_ID": "demo-fireside-functions-oracle",
                 "EXT_INSTANCE_ID": "synthetic",
@@ -37969,7 +37969,7 @@
                 "body": {
                   "backends": [
                     {
-                      "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                      "directory": "{{projectDir}}/extensions-local/synthetic/functions",
                       "env": {
                         "PROJECT_ID": "demo-fireside-functions-oracle",
                         "EXT_INSTANCE_ID": "synthetic",
@@ -38367,7 +38367,7 @@
                 {
                   "handler": "ext-authFn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/extensions-local/synthetic/functions",
+                  "cwd": "{{projectDir}}/extensions-local/synthetic/functions",
                   "env": {
                     "ALLOWED_EVENT_TYPES": "test-publisher.synthetic.v1.complete",
                     "API_KEY": "synthetic-api-key-value",
@@ -38454,7 +38454,7 @@
                 {
                   "handler": "v1BeforeCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -38570,7 +38570,7 @@
                 {
                   "handler": "v1BeforeSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -38776,7 +38776,7 @@
                 {
                   "handler": "v1BeforeSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -38939,7 +38939,7 @@
                 {
                   "handler": "v1BeforeCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -39099,7 +39099,7 @@
           "WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release",
           "",
           "emulators: The Emulator UI is not starting because none of the running emulators have a UI component.",
-          "functions: Watching \"/private{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
+          "functions: Watching \"{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
           "functions: Loaded functions definitions from source: httpFn, firestoreFn, storageFn, authFn, scheduledFn, queueFn, v2Fn.",
           "functions[us-central1-ext-synthetic-httpFn]: http function initialized ({{origin:functions}}/demo-fireside-functions-oracle/us-central1/ext-synthetic-httpFn).",
           "functions[us-central1-ext-synthetic-firestoreFn]: firestore function initialized.",
@@ -39225,7 +39225,7 @@
           "Serving at port 8136",
           "",
           "Error: synthetic load failure: this codebase refuses to load",
-          "    at Object.<anonymous> (/private{{projectDir}}/functions/broken-load/index.js:3:7)",
+          "    at Object.<anonymous> ({{projectDir}}/functions/broken-load/index.js:3:7)",
           "    at Module._compile (node:internal/modules/cjs/loader:1929:14)",
           "    at Object..js (node:internal/modules/cjs/loader:2060:10)",
           "    at Module.load (node:internal/modules/cjs/loader:1651:32)",
@@ -39286,7 +39286,7 @@
         "body": {
           "backends": [
             {
-              "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+              "directory": "{{projectDir}}/extensions-local/synthetic/functions",
               "env": {
                 "PROJECT_ID": "demo-fireside-functions-oracle",
                 "EXT_INSTANCE_ID": "synthetic",
@@ -40927,7 +40927,7 @@
                 {
                   "handler": "httpEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -41052,7 +41052,7 @@
                 {
                   "handler": "callableEcho",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -41151,7 +41151,7 @@
                 {
                   "handler": "docCreated",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -41242,7 +41242,7 @@
                 {
                   "handler": "docWritten",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -41374,7 +41374,7 @@
                 {
                   "handler": "secondaryHttp",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/secondary",
+                  "cwd": "{{projectDir}}/functions/secondary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -41471,7 +41471,7 @@
           "WARNING: sun.misc.Unsafe::arrayBaseOffset will be removed in a future release",
           "",
           "emulators: The Emulator UI is not starting because none of the running emulators have a UI component.",
-          "functions: Watching \"/private{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
+          "functions: Watching \"{{projectDir}}/extensions-local/synthetic/functions\" for Cloud Functions...",
           "functions: Loaded functions definitions from source: httpFn, firestoreFn, storageFn, authFn, scheduledFn, queueFn, v2Fn.",
           "functions[us-central1-ext-synthetic-httpFn]: http function initialized ({{origin:functions}}/demo-fireside-functions-oracle/us-central1/ext-synthetic-httpFn).",
           "functions[us-central1-ext-synthetic-firestoreFn]: firestore function initialized.",
@@ -41580,7 +41580,7 @@
           "Serving at port 8767",
           "",
           "Error: synthetic load failure: this codebase refuses to load",
-          "    at Object.<anonymous> (/private{{projectDir}}/functions/broken-load/index.js:3:7)",
+          "    at Object.<anonymous> ({{projectDir}}/functions/broken-load/index.js:3:7)",
           "    at Module._compile (node:internal/modules/cjs/loader:1929:14)",
           "    at Object..js (node:internal/modules/cjs/loader:2060:10)",
           "    at Module.load (node:internal/modules/cjs/loader:1651:32)",
@@ -41641,7 +41641,7 @@
         "body": {
           "backends": [
             {
-              "directory": "/private{{projectDir}}/extensions-local/synthetic/functions",
+              "directory": "{{projectDir}}/extensions-local/synthetic/functions",
               "env": {
                 "PROJECT_ID": "demo-fireside-functions-oracle",
                 "EXT_INSTANCE_ID": "synthetic",
@@ -43420,7 +43420,7 @@
           "Serving at port 8123",
           "",
           "Error: synthetic load failure: this codebase refuses to load",
-          "    at Object.<anonymous> (/private{{projectDir}}/functions/broken-load/index.js:3:7)",
+          "    at Object.<anonymous> ({{projectDir}}/functions/broken-load/index.js:3:7)",
           "    at Module._compile (node:internal/modules/cjs/loader:1929:14)",
           "    at Object..js (node:internal/modules/cjs/loader:2060:10)",
           "    at Module.load (node:internal/modules/cjs/loader:1651:32)",
@@ -47557,7 +47557,7 @@
                 {
                   "handler": "blockCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -47673,7 +47673,7 @@
                 {
                   "handler": "blockSignIn",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -47804,7 +47804,7 @@
                 {
                   "handler": "v1AuthCreate",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",
@@ -47886,7 +47886,7 @@
                 {
                   "handler": "v1AuthCreateSecond",
                   "pid": "{{number}}",
-                  "cwd": "/private{{projectDir}}/functions/primary",
+                  "cwd": "{{projectDir}}/functions/primary",
                   "env": {
                     "CLOUD_EVENTARC_EMULATOR_HOST": "{{origin:eventarc}}",
                     "CLOUD_TASKS_EMULATOR_HOST": "{{host:tasks}}",

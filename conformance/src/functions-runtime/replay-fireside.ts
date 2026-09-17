@@ -205,7 +205,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
     codebaseDirs,
     observationsPath,
     logs: () => logs,
-    pathPlaceholders: { "{{sdkRoot}}": functionsRoot, "{{adminRoot}}": adminRoot, "{{tmp}}": shortTmp, "{{home}}": process.env.HOME ?? "~" },
+    pathPlaceholders: { "{{sdkRoot}}": functionsRoot, "{{adminRoot}}": adminRoot, "{{nodeModules}}": dirname(functionsRoot), "{{tmp}}": shortTmp, "{{home}}": process.env.HOME ?? "~" },
   };
   const environment: Record<string, string> = {};
   for (const key of ["HOME", "USER", "LOGNAME", "LANG", "TZ", "PATH"]) {

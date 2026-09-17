@@ -535,6 +535,12 @@ function normalizeString(target: Target, value: string, dynamicIds: ReadonlyMap<
   }
   for (const [placeholder, prefix] of Object.entries(target.pathPlaceholders ?? {})) text = text.replaceAll(prefix, placeholder);
   text = text.replaceAll(target.projectDir, "{{projectDir}}");
+  // macOS reports the real path of a symlinked temporary directory with a
+  // `/private` prefix; the placeholder stands for either spelling.
+  text = text.replaceAll("/private{{projectDir}}", "{{projectDir}}").replaceAll("/private{{tmp}}", "{{tmp}}");
+  // Express error pages embed a stack trace whose frames name installed
+  // package versions and Node internals; the message line is the contract.
+  text = text.replace(/(<br> &nbsp; &nbsp;at [^<]*)+/g, "<br> &nbsp; &nbsp;at {{stack}}");
   for (const [id, placeholder] of dynamicIds) text = text.replaceAll(id, placeholder);
   text = text.replace(SOCKET_PATH, "{{workerSocket}}");
   text = text.replace(/\[worker-([^\]]*?)-[0-9a-f-]{36}\]/g, "[worker-$1-{{uuid}}]");

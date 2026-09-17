@@ -74,6 +74,12 @@ pub use metadata::StorageDurability;
 pub struct StorageRuntime {
     application: Router,
     state: StorageState,
+    /// The write-behind flusher and its stop switch; shutdown waits for an
+    /// in-flight flush so the metadata database is closed when it returns.
+    flusher: Option<(
+        tokio::sync::watch::Sender<bool>,
+        tokio::task::JoinHandle<()>,
+    )>,
 }
 
 impl StorageRuntime {
@@ -104,15 +110,20 @@ impl StorageRuntime {
             queue,
             background,
         };
+        let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
             // A weak handle: the flusher never keeps the metadata database
             // open after the runtime's last owner drops it.
             let metadata = Arc::downgrade(&state.metadata);
-            tokio::spawn(async move {
+            let (stop, mut stop_signal) = tokio::sync::watch::channel(false);
+            let task = tokio::spawn(async move {
                 let mut ticker = tokio::time::interval(interval);
                 ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 loop {
-                    ticker.tick().await;
+                    tokio::select! {
+                        _ = ticker.tick() => {}
+                        _ = stop_signal.changed() => return,
+                    }
                     let Some(store) = metadata.upgrade() else {
                         return;
                     };
@@ -122,9 +133,14 @@ impl StorageRuntime {
                     }
                 }
             });
+            write_behind = Some((stop, task));
         }
         let application = routes(state.clone());
-        Ok(Self { application, state })
+        Ok(Self {
+            application,
+            state,
+            flusher: write_behind,
+        })
     }
 
     /// Makes every acknowledged mutation durable now; see
@@ -190,8 +206,15 @@ impl StorageRuntime {
         export_directory(&self.state, root).await
     }
 
-    /// Stops the child rules runtime.
-    pub async fn shutdown(self) -> Result<(), StorageError> {
+    /// Stops the write-behind flusher (waiting for an in-flight flush) and
+    /// makes every acknowledged mutation durable.
+    pub async fn shutdown(mut self) -> Result<(), StorageError> {
+        if let Some((stop, task)) = self.flusher.take() {
+            let _ = stop.send(true);
+            // The task exits at its next select; an in-flight blocking flush
+            // completes first, so the database lock is released on return.
+            let _ = task.await;
+        }
         self.flush().await
     }
 }

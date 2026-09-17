@@ -50,8 +50,12 @@ without any change to the extension (`metrics`, `latestVersion`,
 ## Normalization
 
 Placeholders replace values that change per run: `{{origin:<service>}}` and
-`{{host:<service>}}` for emulator addresses, `{{projectDir}}`, `{{tmp}}`,
-`{{home}}`, `{{sdkRoot}}`, `{{uuid}}`, `{{time}}` (RFC 3339 and RFC 1123),
+`{{host:<service>}}` for emulator addresses, `{{projectDir}}` (also for the
+`/private`-prefixed real path macOS reports), `{{tmp}}`, `{{home}}`,
+`{{sdkRoot}}`, `{{adminRoot}}`, `{{nodeModules}}` (the directory holding the
+SDK), `{{stack}}` (the frames of an Express error page, whose file paths and
+line numbers name installed package versions and Node internals),
+`{{uuid}}`, `{{time}}` (RFC 3339 and RFC 1123),
 `{{number}}` (generations, sizes, epoch millis, elapsed times), `{{id}}` (Auth
 local ids, Pub/Sub message ids, short blocking-function event ids), `{{hash}}`,
 `{{token}}`, `{{jwt:<name>}}`, `{{port}}` (the worker's `PORT`),
