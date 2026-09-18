@@ -153,10 +153,11 @@
       "freshEmulatorPerProgram": true,
       "normalizedFields": [
         "messageId",
-        "publishTime",
         "ackId",
-        "deadlines as relative seconds",
-        "snapshot expireTime"
+        "revisionId (schema settings, googclient_schemarevisionid, name@revision)",
+        "publishTime/expireTime/revisionCreateTime/dead-letter publish-time attribute",
+        "time-based nextPageToken",
+        "push endpoint origin"
       ]
     },
     "requiredFixtures": [
@@ -164,11 +165,16 @@
       "emulator-programs.json",
       "SHA256SUMS"
     ],
-    "fixturesFrozen": false
+    "fixturesFrozen": true,
+    "frozenFixtureSha256": {
+      "README.md": "77d4bc7127a21877e9469448985141b31307e2130b320a9c2fbde317d45af13f",
+      "emulator-programs.json": "b2d6511e4d17a4e2b3ae94e858bbb144077696dd504ed069d98a2cf08fce0576"
+    },
+    "fixturesFrozenAt": "2026-09-18T23:35:00+08:00"
   },
   "gates": {
     "emulatorReplay": {
-      "test": "crates/pubsub-front/src/replay_tests.rs",
+      "test": "conformance/src/pubsub/replay-fireside.ts (npm run replay:pubsub -- --binary <fireside>); the replay shares client.ts/runner.ts/normalize.ts with the capture and drives the binary's standalone `fireside pubsub` service over gRPC and HTTP/JSON with the same push endpoint",
       "stepsMinimum": 400,
       "transports": [
         "grpc",
@@ -176,8 +182,9 @@
       ],
       "allowedUnexplainedStatusDivergences": 0,
       "allowedUnexplainedBodyDivergences": 0,
-      "timingStepsUseInjectableClock": true,
-      "recordedDivergencesMustBeAssertedNotSkipped": true
+      "timingStepsUseInjectableClock": false,
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "timingSteps": "recorded with real waits (ack deadline 10 s, push retries every second) and replayed against the same wall clock; the corpus keeps only the timing outcomes the official emulator answers consistently"
     },
     "clientLibrary": {
       "job": "conformance",
@@ -188,7 +195,8 @@
         "ordering",
         "push",
         "schema"
-      ]
+      ],
+      "test": "conformance/src/pubsub/verify-client-library.ts (npm run verify:pubsub:client -- --binary <fireside>)"
     },
     "functionsDelivery": {
       "existingFixturesUnchanged": [
@@ -227,6 +235,24 @@
     },
     "schedules": {
       "policy": "the Fireside-only scheduler keeps ticking onSchedule topics; non-UTC zones are finished in J2"
+    }
+  },
+  "receipts": {
+    "j1": {
+      "date": "2026-09-18",
+      "fixture": "conformance/fixtures/pubsub-v1/emulator-programs.json",
+      "programs": 42,
+      "steps": 916,
+      "transports": {
+        "grpc": 654,
+        "http": 216,
+        "stream": 12,
+        "pushes": 18
+      },
+      "rpcCoverage": "37/37 over gRPC, 36/37 over HTTP/JSON (StreamingPull has no HTTP form)",
+      "determinism": "two consecutive full recordings identical except capturedAt/completedAt after the ordered-subscription programs were limited to the single-key contract (the official emulator's multi-key interleaving differs between its own runs)",
+      "oracle": "cloud-pubsub-emulator-0.8.33 jar (sha256 4b2892ba...) on Java 25, one fresh process per program; grpc-js 1.14.4 with @google-cloud/pubsub 5.3.1 protos; recording push endpoint",
+      "notInCorpus": "three requests the official adapter never answers (body name differing from the path, numeric schema type, non-numeric pageSize)"
     }
   }
 }

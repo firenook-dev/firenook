@@ -107,6 +107,9 @@ enum Command {
     Firestore(FirestoreArgs),
     /// Start the Auth-compatible service on its own.
     Auth(AuthArgs),
+    /// Start the Pub/Sub-compatible service on its own (gRPC and HTTP/JSON
+    /// on one port).
+    Pubsub(PubsubArgs),
     /// Capture redacted browser-SDK traffic through a streaming reverse proxy.
     CaptureProxy(CaptureProxyArgs),
     /// Start the complete Firebase-compatible emulator suite.
@@ -114,6 +117,21 @@ enum Command {
     /// Inspect or vendor the project's Firebase Extensions without starting
     /// the suite.
     Extensions(ExtensionsArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct PubsubArgs {
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    #[arg(long, default_value_t = 8085)]
+    port: u16,
+    /// The project the service reports itself under.
+    #[arg(
+        long = "project-id",
+        alias = "project_id",
+        default_value = "demo-fireside"
+    )]
+    project_id: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Args)]
@@ -393,6 +411,7 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Firestore(arguments) => run_firestore_runtime(&arguments, allocator_config),
         Command::Auth(arguments) => run_auth_runtime(&arguments),
+        Command::Pubsub(arguments) => run_pubsub_runtime(&arguments),
         Command::CaptureProxy(arguments) => run_capture_proxy_runtime(&arguments),
         Command::Suite(arguments) => run_suite_runtime(&arguments),
         Command::Extensions(arguments) => run_extensions_command(&arguments),
@@ -941,6 +960,69 @@ async fn run_auth(arguments: &AuthArgs) -> ExitCode {
     }
 }
 
+fn run_pubsub_runtime(arguments: &PubsubArgs) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("Pub/Sub runtime failed to start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(run_pubsub(arguments))
+}
+
+async fn run_pubsub(arguments: &PubsubArgs) -> ExitCode {
+    let address = match resolve_address(&arguments.host, arguments.port) {
+        Ok(address) => address,
+        Err(error) => {
+            eprintln!("invalid Pub/Sub listen address: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let registry = fireside_functions_bridge::TriggerRegistry::default();
+    let (observer, _receiver) =
+        fireside_functions_bridge::TriggerObserver::channel(registry.clone());
+    let inventory = fireside_functions_bridge::FunctionsInventory {
+        generation: 0,
+        backends: Vec::new(),
+    };
+    let pubsub = fireside_pubsub_front::PubsubRuntime::new(
+        &arguments.project_id,
+        &inventory,
+        observer.queue(),
+        registry,
+    );
+    let listener = match tokio::net::TcpListener::bind(address).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Pub/Sub listener failed to bind {address}: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "Pub/Sub emulator ready at {}:{} (project {})",
+        arguments.host, arguments.port, arguments.project_id
+    );
+    let incoming = tonic::transport::server::TcpIncoming::from(listener).with_nodelay(Some(true));
+    let served = tonic::transport::Server::builder()
+        .accept_http1(true)
+        .add_routes(pubsub.routes())
+        .serve_with_incoming_shutdown(incoming, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await;
+    match served {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Pub/Sub listener failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn run_firestore_runtime(
     arguments: &FirestoreArgs,
     allocator_config: MimallocRuntimeConfig,
@@ -1439,6 +1521,7 @@ fn normalize_arguments(arguments: impl IntoIterator<Item = OsString>) -> Vec<OsS
             Some(
                 "firestore"
                     | "auth"
+                    | "pubsub"
                     | "capture-proxy"
                     | "suite"
                     | "extensions"

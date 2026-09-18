@@ -378,10 +378,12 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let mut scheduler = pubsub
         .start_scheduler()
         .map_err(|error| failure(format!("scheduler failed to start: {error}")))?;
-    servers.push(spawn_axum(
+    // gRPC (the client libraries with `PUBSUB_EMULATOR_HOST`) and HTTP/JSON
+    // share the Pub/Sub port, as on the official emulator.
+    servers.push(spawn_firestore(
         "pubsub",
         listeners.take("pubsub")?,
-        pubsub.application(),
+        pubsub.routes(),
         shutdown.subscribe(),
         server_failure,
     ));

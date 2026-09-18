@@ -71,6 +71,7 @@ jobs:
           npm run test:storage-rules-fixtures --prefix conformance
           npm run test:functions-runtime-fixtures --prefix conformance
           npm run test:auth-fixtures --prefix conformance
+          npm run test:pubsub-fixtures --prefix conformance
           npm run test:rules:query-fixtures --prefix conformance
           npm run test:serialization:fixtures --prefix conformance
           npm run test:developer-tools-fixtures --prefix conformance
@@ -181,6 +182,16 @@ jobs:
           npm run replay:auth --prefix conformance -- \
             --binary ../target/debug/fireside \
             --output "$RUNNER_TEMP/fireside-auth-replay.json"
+      - name: Replay the Pub/Sub oracle corpus over gRPC and HTTP/JSON
+        run: |
+          npm run replay:pubsub --prefix conformance -- \
+            --binary ../target/debug/fireside \
+            --output "$RUNNER_TEMP/fireside-pubsub-replay.json"
+      - name: Verify the pinned Pub/Sub client library against Fireside
+        run: |
+          npm run verify:pubsub:client --prefix conformance -- \
+            --binary ../target/debug/fireside \
+            --output "$RUNNER_TEMP/fireside-pubsub-client.json"
       - name: Verify suite start without Java on PATH
         run: >-
           node conformance/src/suite/verify-no-java.mjs
@@ -209,6 +220,8 @@ jobs:
             ${{ runner.temp }}/fireside-developer-ui-evidence/*.png
             ${{ runner.temp }}/fireside-functions-runtime-replay.json
             ${{ runner.temp }}/fireside-auth-replay.json
+            ${{ runner.temp }}/fireside-pubsub-replay.json
+            ${{ runner.temp }}/fireside-pubsub-client.json
             ${{ runner.temp }}/fireside-no-java-evidence/result.json
             ${{ runner.temp }}/fireside-no-java-evidence/suite.log
           if-no-files-found: ignore

@@ -85,9 +85,14 @@ export class Registry {
     this.constants = new Set(constants);
   }
 
-  /** Registers `raw` under `{{kind:step}}` (or `{{kind:step#n}}` for later distinct values). */
-  register(kind: string, step: string, raw: string): string {
-    if (this.constants.has(raw)) return raw;
+  /**
+   * Registers `raw` under `{{kind:step}}` (or `{{kind:step#n}}` for later
+   * distinct values). Program constants are left alone unless `force` says
+   * the key alone identifies the value as generated (message ids are small
+   * integers that may equal a literal elsewhere in the plan).
+   */
+  register(kind: string, step: string, raw: string, force = false): string {
+    if (!force && this.constants.has(raw)) return raw;
     const counterKey = `${kind}:${step}`;
     const count = (this.counters.get(counterKey) ?? 0) + 1;
     this.counters.set(counterKey, count);

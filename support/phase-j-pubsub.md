@@ -3,6 +3,33 @@
 Written 2026-09-18 against `main` 10f3087 (published engine 0720434). It ships
 with [Phase I](phase-i-auth.md) (complete Authentication) as `0.1.0-next.8`.
 
+## Status (2026-09-18)
+
+J0–J4 are done. Gate `benchmarks/phase-j-pubsub.json` (frozen); corpus
+`conformance/fixtures/pubsub-v1` — 42 programs / 916 steps against
+`cloud-pubsub-emulator-0.8.33` over gRPC (654 calls, 12 streaming-pull
+sessions) and HTTP/JSON (216 requests) with a recording push endpoint, every
+RPC of the four services covered, two recordings identical (`receipts.j1`).
+`crates/pubsub-front` is rewritten as a broker (leases, ack deadlines,
+redelivery behind later messages, dead-lettering, ordering keys, filters,
+topic retention, seek/snapshots, push loop, Avro schema revisions) behind
+tonic services and the HTTP/JSON transcoder on one port; `fireside pubsub`
+runs it standalone for the replay. The replay compares 3,755 values with
+0 mismatches and no named divergence, three runs identical; the pinned
+`@google-cloud/pubsub` 5.3.1 client passes publish, streaming `on('message')`,
+ordering, push, schema and admin flows with `PUBSUB_EMULATOR_HOST`; the
+Phase H Functions/Extensions corpus replays unchanged. J5 (qualification and
+release with I5) remains.
+
+Two changes to the plan as delivered: the replay is the TypeScript harness
+driving the standalone service (as in Phase I) rather than Rust replay
+tests, so both sides share one transport and normalization; and timing steps
+replay against the real clock (the corpus records only the timing outcomes
+the official emulator answers consistently) instead of an injectable clock.
+The official emulator's multi-key ordered delivery differs between its own
+runs, so the corpus holds Fireside to the single-key contract only
+(`conformance/fixtures/pubsub-v1/README.md`, Divergences).
+
 ## Goal
 
 Replace the function-oriented Pub/Sub adapter with a Pub/Sub emulator that

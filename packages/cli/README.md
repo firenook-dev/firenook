@@ -130,6 +130,19 @@ Roll back by cleanly stopping Fireside, retaining its completed official-format
 export, then starting the official CLI on separate working state. Never run
 both on the same ports or let both own a working directory.
 
+## Pub/Sub on its own
+
+```sh
+fireside native pubsub --project-id demo-my-app --port 8085
+PUBSUB_EMULATOR_HOST=127.0.0.1:8085 node ./publisher.mjs
+```
+
+`fireside native pubsub` serves the same Pub/Sub implementation the suite
+runs — the `google.pubsub.v1` services and `google.iam.v1` policy over gRPC
+and HTTP/JSON on one port, so the Google client libraries connect with
+`PUBSUB_EMULATOR_HOST` — without Firestore, Storage or Functions. The
+conformance replay drives this command.
+
 ## Auth on its own
 
 ```sh

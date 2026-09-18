@@ -31,6 +31,7 @@ repository = "https://github.com/sanjevirau/fireside"
 homepage = "https://github.com/sanjevirau/fireside"
 
 [workspace.dependencies]
+apache-avro = { version = "0.22.0", default-features = false }
 axum = "0.8.9"
 base64 = "0.23.1"
 bincode = { version = "2.0.1", features = ["serde"] }

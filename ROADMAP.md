@@ -335,10 +335,23 @@ has a nine-route HTTP adapter with no message backlog before this phase.
 
 - [x] J0 — Freeze the gate and the RPC inventory (2026-09-18,
   `benchmarks/phase-j-pubsub.json`).
-- [ ] J1 — Record the official Pub/Sub emulator corpus over gRPC and HTTP.
-- [ ] J2 — Broker core.
-- [ ] J3 — gRPC and HTTP/JSON transports on one port.
-- [ ] J4 — Replay; Functions delivery as an internal subscriber.
+- [x] J1 — Corpus recorded and frozen (2026-09-18: 42 programs / 916 steps
+  in `conformance/fixtures/pubsub-v1` against `cloud-pubsub-emulator-0.8.33`,
+  all 37 RPCs over gRPC and 36 over HTTP/JSON, push endpoint and streaming
+  pull sessions recorded; two recordings identical).
+- [x] J2 — Broker core (2026-09-18: `crates/pubsub-front` rewritten — backlog
+  with leases, ack deadlines, redelivery, dead-lettering, ordering keys,
+  filters, topic retention, seek to time and snapshot, push loop with the
+  official retry cadence, Avro schemas with revisions; function delivery
+  keeps `emulator-sub-<topic>` and the unchanged envelopes).
+- [x] J3 — `google.pubsub.v1` Publisher/Subscriber/SchemaService and
+  `google.iam.v1` IAMPolicy over tonic plus the full HTTP/JSON transcoding on
+  the one Pub/Sub port (2026-09-18; `fireside pubsub` runs it standalone).
+- [x] J4 — Replay green (2026-09-18: 42 programs / 916 steps / 3,755 values,
+  0 mismatches, no named divergences, three consecutive runs identical);
+  `@google-cloud/pubsub` 5.3.1 with `PUBSUB_EMULATOR_HOST` publishes,
+  streams, orders, pushes and validates schemas against Fireside; the Phase H
+  Functions/Extensions corpus replays unchanged (271/271).
 - [ ] J5 — Qualify the exact candidate and publish `0.1.0-next.8` (with I5).
 
 Done when a client library with `PUBSUB_EMULATOR_HOST` set publishes,

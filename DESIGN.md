@@ -17,7 +17,8 @@ this repository. A passing fixture is evidence for its recorded scope only.
 | auth-front / storage-front | Local Auth APIs/browser helpers and Storage metadata/byte APIs |
 | functions-bridge / suite-runtime | Trigger dispatch, owned child lifecycle and complete-suite startup/shutdown |
 | functions-runtime / extensions | Owned Functions runtime (discovery, Node workers, routing, delivery, reload, blocking Auth functions) and the Extensions loader (parameters, specs, registry, source cache, vendoring) |
-| pubsub-front / suite-front | Limited function-oriented Pub/Sub and hub/UI/control adapters |
+| pubsub-front | Pub/Sub broker (leases, redelivery, dead-lettering, ordering keys, filters, seek/snapshots, push, Avro schemas) behind the `google.pubsub.v1` gRPC services and the HTTP/JSON transcoder on one port; function delivery and `onSchedule` ticks |
+| suite-front | Hub/UI/control adapters |
 | capture-proxy | Synthetic oracle traffic capture with credential redaction; not an application gateway |
 | npm CLI | Platform selection, dependency/asset checks, configuration validation and state ownership |
 

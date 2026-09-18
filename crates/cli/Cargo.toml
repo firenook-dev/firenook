@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "development-tools::testing"]
 axum.workspace = true
 clap.workspace = true
 fireside-auth-front = { path = "../auth-front" }
+fireside-pubsub-front = { path = "../pubsub-front" }
 fireside-capture-proxy = { path = "../capture-proxy" }
 fireside-core-store = { path = "../core-store" }
 fireside-export-format = { path = "../export-format" }
