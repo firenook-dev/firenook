@@ -422,9 +422,18 @@
       "authEvidence": "otp-auth-login and sign-out-and-sign-in drive the real application's e-mail one-time-code login through the candidate's Auth emulator; the installed smoke signs up and signs in with a password across a native reopen",
       "pairedAcceptance": "waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line",
       "pending": [
-        "release 0.1.0-next.8 (approved by the owner 2026-09-19)",
         "consumer pin bump with the extensions gate on the installed package"
-      ]
+      ],
+      "publication": {
+        "version": "0.1.0-next.8",
+        "tag": "npm-v0.1.0-next.8",
+        "taggedCommit": "316a46419ef1f33e81d4dfeab64c25d43f23c496",
+        "engineRevision": "03000f0cc082c1b69f06c67b6a99a5417c840243",
+        "releaseRun": 35372788758,
+        "publishedAt": "2026-09-18T17:42:57Z",
+        "registry": "registry integrity (sha512 and sha1) equal to the release assets for all six packages; npm audit signatures: 2 packages with verified attestations on a fresh install; GitHub prerelease with latest=false",
+        "distTags": "next -> 0.1.0-next.8; latest untouched (stable promotion is a separate decision)"
+      }
     }
   }
 }
