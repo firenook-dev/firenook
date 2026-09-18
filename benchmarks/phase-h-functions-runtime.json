@@ -289,7 +289,7 @@
     "hetznerPairedAttempt": "candidate-attempt-11.json",
     "cleanSetup": "without firebase-tools and without Java; fully offline start with vendored extensions",
     "release": "0.1.0-next.8",
-    "receipts": null
+    "receipts": "receipts.h5"
   },
   "receipts": {
     "h1": {
@@ -340,7 +340,120 @@
         "scope": "about ten minutes; not the paired 2 h acceptance"
       },
       "cleanSetupWithoutJavaOrFirebaseTools": "the Linux smoke is that stage: a fresh consumer directory with the packed CLI + platform package, firebase-functions 7.2.5 and firebase-admin 13.10.0 only; java absent from PATH; suite start, corpus replay and the offline vendored start all pass",
-      "pending": ["exact-candidate CI green (4ed8d80)", "Hetzner paired acceptance attempt 10 (user preference so far: short smoke)", "release 0.1.0-next.8 (separate release approval)", "Twodart pin bump + CLAUDE.md sentences"]
+      "pending": [
+        "release 0.1.0-next.8 (separate release approval)",
+        "consumer pin bump and its setup documentation"
+      ],
+      "pairedAcceptance": {
+        "attempt": 13,
+        "completedAt": "2026-09-18T08:05:19.287Z",
+        "result": "PASS (result.passed, controller/smoke/full exit 0; 95 evidence checksums re-verified by an independent audit that re-derives every percentile and memory peak from the raw samples)",
+        "engine": "0720434e3de7e0886f129f52a39d5ef2972ce45f",
+        "candidate": "0.1.0-local.g0720434e3de7 (installed-package launcher), binary sha256 48f0f427bff54e375b3891c56a1194910079ab34da95cb869c4deb9238c961bf, artifact sha256 25472a108918c9091540cfac1ba1521829ec608d9cc5c9ccc46a24390a7f67ed",
+        "harness": "aa8b52816d6886c71dd4940f40eed93dd3fac730 (unchanged since the next.6 qualification)",
+        "host": "the private acceptance host (AMD Ryzen 5 3600, 12 cpu, 64 GiB, NVMe RAID1, Linux 6.8); official emulator on untuned HotSpot defaults with Java 26 and firebase-tools 15.22.0; the Fireside stack ran without Java and without firebase-tools",
+        "workload": "sequential official then Fireside: cheap smoke, 7,200 s app-shaped soak (two busy sessions plus an idle observer), export/restart, nine browser journeys before and after restart, then a fresh checkout on the default backend and on the documented official fallback",
+        "stableStateParity": "1 Auth user, 211,205 Firestore documents, 33,352 stable Storage objects (6,688,940,031 bytes) and the same normalized generated-cache digest on both stacks after every soak, journey set and restart",
+        "soakP50P99Milliseconds": {
+          "writeCommit": {
+            "official": "198.0 / 255.7",
+            "fireside": "3.3 / 22.3",
+            "samples": 5280
+          },
+          "listenerDelivery": {
+            "official": "198 / 248",
+            "fireside": "9 / 51",
+            "samples": 60000,
+            "gaps": 0
+          },
+          "functionDelivery": {
+            "official": "3.8 / 8.5",
+            "fireside": "2.6 / 4.4",
+            "samples": 240,
+            "note": "the Phase H lane: the consumer's Firestore-triggered function dispatched and executed by the owned runtime; next.6 measured 3.2 / 5.9 with the firebase-tools Functions emulator"
+          },
+          "catalogRead": {
+            "official": "31.1 / 41.1",
+            "fireside": "6.4 / 22.2",
+            "samples": 480
+          },
+          "storageCycle": {
+            "official": "11.6 / 21.6",
+            "fireside": "8.0 / 38.4",
+            "samples": 240,
+            "note": "the Phase G lanes (native rules on every stage); next.6 measured 8.1 / 27.7"
+          },
+          "observerCatalogRead": {
+            "official": "30.8 / 39.8",
+            "fireside": "7.0 / 22.4",
+            "samples": 240
+          },
+          "observerStorageCycle": {
+            "official": "13.7 / 23.8",
+            "fireside": "7.4 / 46.8",
+            "samples": 120
+          }
+        },
+        "memory": {
+          "peakEmulatorPssGiB": {
+            "official": 19.35,
+            "fireside": 1.77,
+            "reductionPercent": 90.8
+          },
+          "peakStackPssGiB": {
+            "official": 23.24,
+            "fireside": 4.21,
+            "reductionPercent": 81.9
+          },
+          "largestFunctionsWorkerPssGiB": {
+            "official": 0.59,
+            "fireside": 0.13
+          },
+          "stackGrowthGiBPerHour": {
+            "official": 3.39,
+            "fireside": 0.05
+          },
+          "swap": "none on either stack"
+        },
+        "lifecycleSeconds": {
+          "initialReadiness": {
+            "official": 49.25,
+            "fireside": 51.25,
+            "note": "application readiness including the consumer's own builds and probes; Fireside binds its listeners only after the full-data import (all ports at 38.7 s) and the /backends inventory answered 7 s after the bind because discovery runs before that route is served — both recorded as follow-ups, neither a gate"
+          },
+          "restartReadiness": {
+            "official": 46.72,
+            "fireside": 46.75
+          },
+          "exportAndShutdownAfterSoak": {
+            "official": 60.02,
+            "fireside": 27.03
+          },
+          "exportAndShutdownAfterRestart": {
+            "official": 58.0,
+            "fireside": 28.03
+          },
+          "freshCheckoutReadiness": {
+            "officialFallback": 57.17,
+            "firesideDefault": 51.51
+          }
+        },
+        "browserJourneys": "36/36 passes (nine journeys, both stacks, before and after restart), 0 page errors, 0 request failures; the catalogue journey still ends on the watcher's two-minute heartbeat on Fireside because the frozen runner's synthetic stimulus lacks the observer's filter field (recorded since the next.4 qualification; not an emulator latency)",
+        "regressions": "11/11 harness, engine, Rust and consumer build commands exit 0",
+        "stability": "attempts 11, 12 and 13 with identical inputs agree within noise on every lane (Fireside p50: catalogue 6.3-6.4, write 3.2-3.3, listener 9-13, function 2.6-2.7, Storage 8.0-8.1 ms; emulator peak 1.59-1.77 GiB)",
+        "retainedFailures": {
+          "attempt10": "failed in the Fireside cheap smoke before any measurement: the browser raised ERR_CERT_VERIFIER_CHANGED on the first page's script requests about 200 ms after its own start (browser-internal verifier swap; certificates unchanged); Fireside readiness had passed",
+          "attempt11": "measured cleanly (both soaks, both restarts, 36/36 journeys) and failed only the fresh-checkout disk preflight: 75,435,433,984 bytes available against the frozen 80,000,000,000 minimum after the exports of the run itself",
+          "attempt12": "measured cleanly and failed only the cross-stack stable-state comparison: the consumer's own daily 03:00 UTC scheduled function fired inside the Fireside soak window only and wrote one 529-byte Storage object (33,353 vs 33,352). Fireside runs schedules; the official emulator never does. A harness pair-state timing hazard, not an emulator defect; attempt 13 was timed so neither window crossed a schedule"
+        },
+        "harnessFollowUps": [
+          "make the cross-stack stable-state comparison schedule-aware (or refuse launch windows that cross a consumer schedule)",
+          "compute the disk every stage needs at launch",
+          "retry a transient browser verifier swap once",
+          "seed the catalogue journey's stimulus with the observer's filter field"
+        ],
+        "evidence": "private acceptance report, attempt 13 (audit summary, per-lane timelines, 95 checksummed evidence files)"
+      }
     }
   }
 }
