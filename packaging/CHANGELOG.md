@@ -1,3 +1,76 @@
+# 0.1.0-next.8 — complete Authentication and a full Pub/Sub emulator
+
+- Pin the engine to `03000f0cc082c1b69f06c67b6a99a5417c840243`, the qualified
+  head of [PR #50](https://github.com/sanjevirau/fireside/pull/50) (Phases I
+  and J) on the next.7 engine. This exact revision passed CI
+  ([run 35364256374](https://github.com/sanjevirau/fireside/actions/runs/35364256374))
+  and the five-platform packed-install matrix
+  ([run 35364256373](https://github.com/sanjevirau/fireside/actions/runs/35364256373)),
+  and a local candidate built from it passed a representative private
+  consumer's extensions, integration and installed-launcher gates and its
+  nine browser journeys (one-time-code login and sign-out/sign-in included)
+  on the full-data stack, reopening the working state written by next.7; see
+  `support/phase-i-auth.md`, `support/phase-j-pubsub.md` and the `receipts`
+  blocks of `benchmarks/phase-i-auth.json` and `benchmarks/phase-j-pubsub.json`.
+  The paired two-hour soak is a per-release-line gate and was waived for this
+  release: the change set is confined to Auth and Pub/Sub, and both are proven
+  by oracle replay against the official emulators.
+- Authentication is complete (Phase I). `crates/auth-front` is rebuilt around
+  the Identity Toolkit OpenAPI document that the official emulator itself
+  routes and validates with (bundled under `crates/auth-front/spec` with its
+  provenance), so routing, security, validation, coercion and error prose
+  match operation by operation. Every one of the 61 operations the official
+  Auth emulator implements is ported: password, anonymous, custom-token,
+  email-link, phone and fake-IdP sign-in (Google, Apple, SAML and OIDC-shaped
+  credentials), account update and delete, OOB and phone codes, session
+  cookies, tenants, SMS multi-factor, passkeys, Admin batch create/get/delete/
+  query, project and tenant configuration, the emulator inspection routes, the
+  legacy `relyingparty` routes, blocking functions on every sign-in path,
+  `user.create`/`user.delete` multicasts, official-format export/import and
+  the popup/redirect helper pages. The corpus recorded from firebase-tools
+  15.22.0 (61 programs, 1,068 steps in `conformance/fixtures/auth-v1`)
+  replays with 17,303 compared values, 0 mismatches and four named
+  divergences (V8-versus-serde parse prose in two error messages, the Node
+  stack trace the official emulator appends to a 500 log line, and
+  Fireside's own account-picker page whose offered accounts are compared
+  exactly), three runs identical; the real-SDK popup/redirect browser gate
+  and the Emulator UI Auth tab were checked against the candidate. Accounts
+  exported by next.7 import unchanged, and passwords stored with the earlier
+  digest still sign in and are upgraded on that sign-in. `fireside native
+  auth` runs the service alone (`--state-file` persists it) and 500-class
+  failures are logged with the official emulator's first line.
+- Pub/Sub is a full emulator (Phase J). `crates/pubsub-front` is a broker
+  behind tonic gRPC services and an HTTP/JSON transcoder on one port: every
+  RPC of `google.pubsub.v1` Publisher, Subscriber and SchemaService and of
+  `google.iam.v1` IAMPolicy, with leases and ack deadlines, redelivery behind
+  later messages, dead-letter and retry policies, ordering keys, filters,
+  message retention, seek to time or snapshot, snapshots, pull, streaming
+  pull, push delivery with the official one-second retry, and Avro schemas
+  with revisions, topic binding and message validation. The corpus recorded
+  from the official Pub/Sub emulator 0.8.33 (42 programs, 916 steps over gRPC,
+  HTTP/JSON, streaming pull and a recording push endpoint in
+  `conformance/fixtures/pubsub-v1`) replays with 3,755 compared values, 0
+  mismatches and no divergence, three runs identical; the pinned
+  `@google-cloud/pubsub` 5.3.1 client publishes, streams, orders, pushes and
+  validates schemas against it with `PUBSUB_EMULATOR_HOST`. Function targets
+  consume through a real `emulator-sub-<topic>` subscription, the scheduler
+  keeps ticking `onSchedule` topics, and the Functions runtime corpus
+  replays unchanged (271/271). `fireside native pubsub` runs the service
+  alone.
+- Limitations recorded with this release: Protocol Buffer schemas, IAM,
+  `detachSubscription` and `updateSnapshot` answer `UNIMPLEMENTED` exactly as
+  the official emulator does; BigQuery, Cloud Storage and Bigtable export
+  subscriptions do not exist; Pub/Sub state is in memory like the official
+  emulator (topics and subscriptions from function discovery are recreated
+  on start); ordered delivery across several ordering keys is nondeterministic
+  between the official emulator's own runs, so the corpus holds Fireside to
+  the single-key contract and Fireside delivers per key in order with
+  redelivery queued behind later messages. Auth operations the official
+  emulator answers with 501 (provider configuration, `initializeAuth`, IAM on
+  tenants, Game Center, reCAPTCHA enforcement, TOTP MFA) keep answering 501
+  with the recorded body. Prerelease on `next`; no stable or
+  universal-compatibility claim.
+
 # 0.1.0-next.7 — native Storage rules and the owned Functions/Extensions runtime
 
 - Pin the engine to `0720434e3de7e0886f129f52a39d5ef2972ce45f`, the qualified
