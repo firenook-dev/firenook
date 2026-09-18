@@ -311,12 +311,10 @@ The plan, current-state audit, oracle precedence and named checks are in the
   consecutive runs identical; the real-SDK popup/redirect browser gate and
   the five earlier `firebase-suite-v1` Auth fixtures stay green). Emulator UI
   Auth-tab check recorded at I5 with the candidate.
-- [ ] I5 — Qualify the exact candidate and publish `0.1.0-next.8` (with J5).
-  Qualification recorded 2026-09-19 in `receipts.i5`: CI green on the exact
-  head, consumer extensions/integration/installed gates and the nine browser
-  journeys pass on the candidate; the paired 2 h soak was waived by the owner
-  for this release (per-release-line gate; the next.6 and next.7 records
-  stand). Publication pending.
+- [x] I5 — Qualified and published as `0.1.0-next.8` on 2026-09-19 (tag `npm-v0.1.0-next.8` on 316a464, release run 35372788758, registry integrity equal to the release assets, `next` → next.8, `latest` untouched): CI green on the exact head, consumer
+  extensions/integration/installed gates and the nine browser journeys pass
+  on the candidate; the paired 2 h soak was waived by the owner for this
+  release (per-release-line gate; the next.6 and next.7 records stand).
 
 Done when an application using any sign-in method, tenants, MFA, email or
 phone verification, session cookies or the Admin SDK's account management runs
@@ -357,10 +355,9 @@ has a nine-route HTTP adapter with no message backlog before this phase.
   `@google-cloud/pubsub` 5.3.1 with `PUBSUB_EMULATOR_HOST` publishes,
   streams, orders, pushes and validates schemas against Fireside; the Phase H
   Functions/Extensions corpus replays unchanged (271/271).
-- [ ] J5 — Qualify the exact candidate and publish `0.1.0-next.8` (with I5).
-  Qualification recorded 2026-09-19 in `receipts.j5` (same candidate, gates
-  and waiver as I5; the scheduled functions and function targets ran on the
-  rewritten broker during the journeys). Publication pending.
+- [x] J5 — Qualified and published as `0.1.0-next.8` on 2026-09-19 (tag `npm-v0.1.0-next.8` on 316a464, release run 35372788758, registry integrity equal to the release assets, `next` → next.8, `latest` untouched) (same candidate, gates and waiver as
+  I5; the scheduled functions and function targets ran on the rewritten
+  broker during the journeys).
 
 Done when a client library with `PUBSUB_EMULATOR_HOST` set publishes,
 subscribes (pull, streaming, push), orders, filters, seeks and validates

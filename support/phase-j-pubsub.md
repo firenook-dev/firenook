@@ -23,7 +23,8 @@ recorded in `receipts.j5` (2026-09-19): CI green on the exact head, the
 consumer gates and the nine browser journeys pass on the candidate with the
 discovered schedules and function targets installed on the rewritten broker;
 the paired 2 h soak was waived by the owner for this release (see the I5
-status). Publication of `0.1.0-next.8` follows.
+status). Published as `0.1.0-next.8` on 2026-09-19 (release run 35372788758,
+`next` → next.8, `latest` untouched).
 
 Two changes to the plan as delivered: the replay is the TypeScript harness
 driving the standalone service (as in Phase I) rather than Rust replay

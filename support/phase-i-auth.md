@@ -26,7 +26,8 @@ integration and installed-launcher gates and the nine browser journeys
 (including the one-time-code login and sign-out/sign-in) pass on the
 candidate; the paired 2 h soak was waived by the owner for this release
 because the change set is confined to Auth and Pub/Sub and both are proven
-by oracle replay. Publication of `0.1.0-next.8` follows.
+by oracle replay. Published as `0.1.0-next.8` on 2026-09-19 (release run 35372788758,
+`next` → next.8, `latest` untouched).
 
 Implementation note: I2 as delivered keeps the account as a JSON record with
 rebuilt indexes rather than the typed `Account` struct sketched below — the
