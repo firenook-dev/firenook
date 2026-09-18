@@ -1,10 +1,16 @@
 //! Firebase Auth-compatible local emulator surface.
 //!
-//! The protocol is implemented from frozen official-emulator and browser-SDK
-//! captures. User state and tokens are owned by Fireside; the Node Functions
-//! host receives only lifecycle events.
+//! A port of the official Auth emulator (firebase-tools 15.22.0
+//! `lib/emulator/auth`): the same OpenAPI-driven routing, security and body
+//! validation, the same operations with the same validation order and error
+//! strings, the same tokens, codes, tenants, second factors and lifecycle
+//! events. Behaviour is measured by the frozen corpus in
+//! `conformance/fixtures/auth-v1`.
 
 #![forbid(unsafe_code)]
+// The operations mirror the official emulator's functions one to one so that
+// each can be read against its source; splitting them would hide that.
+#![allow(clippy::too_many_lines)]
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
@@ -13,30 +19,34 @@ use std::path::{Path as FilePath, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
-use axum::body::Bytes;
-use axum::extract::{Path, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
-use axum::middleware::{self, Next};
+use axum::Router;
+use axum::body::{Body, to_bytes};
+use axum::extract::{Request, State};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
-use axum::{Json, Router};
-use base64::Engine as _;
-use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use fireside_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
-use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
-use sha2::{Digest as _, Sha256};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
-const SIGNUP_KIND: &str = "identitytoolkit#SignupNewUserResponse";
-const LOOKUP_KIND: &str = "identitytoolkit#GetAccountInfoResponse";
-const UPDATE_KIND: &str = "identitytoolkit#SetAccountInfoResponse";
-const DELETE_KIND: &str = "identitytoolkit#DeleteAccountResponse";
+pub mod blocking;
+pub mod error;
+pub mod legacy;
+pub mod ops;
+pub mod pages;
+pub mod spec;
+pub mod state;
+pub mod token;
+pub mod util;
+
+use blocking::{BlockingContext, BlockingOutcome, BlockingTarget, OauthTokens};
+use error::ApiError;
+use ops::Ctx;
+use state::{AuthData, BlockingEvent, Lifecycle, Scope, UpdateOptions, UserRecord};
+use util::{decode_jwt, now_iso, random_uuid, str_field};
+
 const AUTH_SERVICE: &str = "firebaseauth.googleapis.com";
-const BLOCKING_TIMEOUT_MS: u64 = 60_000;
-const BEFORE_CREATE: &str = "beforeCreate";
-const BEFORE_SIGN_IN: &str = "beforeSignIn";
+const AUTH_HEADER_PREFIX: &str = "bearer ";
+const SERVICE_ACCOUNT_TOKEN_PREFIX: &str = "ya29.";
+const MAX_BODY_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Blocking-function endpoints as the Functions runtime registered them
 /// (`blockingFunctions.triggers` and `forwardInboundCredentials`).
@@ -54,14 +64,8 @@ pub trait BlockingResolver: Send + Sync {
     fn resolve(&self) -> Pin<Box<dyn Future<Output = BlockingFunctions> + Send + '_>>;
 }
 
-/// What a blocking function asked the emulator to change.
-#[derive(Debug, Default)]
-struct BlockingOutcome {
-    updates: JsonMap<String, JsonValue>,
-    extra_claims: Option<JsonMap<String, JsonValue>>,
-}
-
-mod oauth;
+/// Receives the emulator's log lines (`BULLET`, `WARN`, ...).
+pub type LogSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// Builds a Firebase Auth router backed by in-memory state.
 ///
@@ -77,18 +81,40 @@ pub fn router(project: &str, queue: DispatchQueue, background: TriggerRegistry) 
 /// Shared Auth state and HTTP router.
 pub struct AuthRuntime {
     application: Router,
-    state: AuthState,
+    runtime: Runtime,
+}
+
+/// Runtime construction or persistence failure.
+#[derive(Debug)]
+pub struct AuthError(String);
+
+impl Display for AuthError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for AuthError {}
+
+struct Inner {
+    default_project: String,
+    data: Mutex<AuthData>,
+    state_file: Option<PathBuf>,
+    queue: DispatchQueue,
+    background: TriggerRegistry,
+    blocking: RwLock<Option<Arc<dyn BlockingResolver>>>,
+    log: RwLock<Option<LogSink>>,
+    origin: RwLock<Option<String>>,
+    client: reqwest::Client,
+}
+
+/// Cloneable handle to the shared state, used by every operation.
+#[derive(Clone)]
+pub struct Runtime {
+    inner: Arc<Inner>,
 }
 
 impl AuthRuntime {
-    /// Installs the resolver consulted for blocking functions on every
-    /// sign-up and password sign-in.
-    pub fn set_blocking_functions(&self, resolver: Arc<dyn BlockingResolver>) {
-        if let Ok(mut slot) = self.state.blocking.write() {
-            *slot = Some(resolver);
-        }
-    }
-
     /// Builds a runtime with optional durable JSON state.
     pub fn new(
         project: &str,
@@ -97,102 +123,55 @@ impl AuthRuntime {
         state_file: Option<PathBuf>,
     ) -> Result<Self, AuthError> {
         validate_project(project)?;
-        let data = state_file
+        let mut data = state_file
             .as_deref()
             .map_or_else(|| Ok(AuthData::default()), load_state)?;
-        let state = AuthState {
-            project: project.to_owned(),
-            inner: Arc::new(Mutex::new(data)),
-            state_file,
-            queue,
-            background,
-            blocking: Arc::new(RwLock::new(None)),
+        data.rebuild_indexes();
+        let runtime = Runtime {
+            inner: Arc::new(Inner {
+                default_project: project.to_owned(),
+                data: Mutex::new(data),
+                state_file,
+                queue,
+                background,
+                blocking: RwLock::new(None),
+                log: RwLock::new(None),
+                origin: RwLock::new(None),
+                client: reqwest::Client::builder().build().map_err(|error| {
+                    AuthError(format!(
+                        "failed to build the blocking-function client: {error}"
+                    ))
+                })?,
+            }),
         };
-        let application = Router::new()
-            .route("/", get(readiness))
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:signUp",
-                post(sign_up),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:lookup",
-                post(client_lookup),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:update",
-                post(client_update),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:delete",
-                post(client_delete),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword",
-                post(sign_in_password),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken",
-                post(sign_in_custom_token),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:signInWithIdp",
-                post(sign_in_with_idp),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/accounts:createAuthUri",
-                post(create_auth_uri),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/recaptchaParams",
-                get(recaptcha_parameters),
-            )
-            .route("/securetoken.googleapis.com/v1/token", post(refresh_token))
-            .route(
-                "/identitytoolkit.googleapis.com/v1/projects/{project}/accounts",
-                post(admin_create),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/projects/{project}/accounts:update",
-                post(admin_update),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/projects/{project}/accounts:lookup",
-                post(admin_lookup),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/projects/{project}/accounts:query",
-                post(admin_query),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/projects/{project}/accounts:delete",
-                post(admin_delete),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/projects/{project}/accounts:batchCreate",
-                post(batch_create),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v1/projects/{project}/accounts:batchGet",
-                get(batch_get),
-            )
-            .route(
-                "/identitytoolkit.googleapis.com/v2/projects/{project}/tenants",
-                get(list_tenants),
-            )
-            .route(
-                "/emulator/v1/projects/{project}/config",
-                get(get_config).patch(update_config),
-            )
-            .route(
-                "/emulator/v1/projects/{project}/accounts",
-                delete(delete_all),
-            )
-            .route("/emulator/auth/handler", get(oauth::handler))
-            .route("/emulator/auth/iframe", get(oauth::iframe))
-            .fallback(not_found)
-            .layer(middleware::from_fn(cors))
-            .with_state(state.clone());
-        Ok(Self { application, state })
+        let application = Router::new().fallback(handle).with_state(runtime.clone());
+        Ok(Self {
+            application,
+            runtime,
+        })
+    }
+
+    /// Installs the resolver consulted for blocking functions when the
+    /// project configuration names none.
+    pub fn set_blocking_functions(&self, resolver: Arc<dyn BlockingResolver>) {
+        if let Ok(mut slot) = self.runtime.inner.blocking.write() {
+            *slot = Some(resolver);
+        }
+    }
+
+    /// Receives log lines the official emulator prints (action links, codes).
+    pub fn set_log_sink(&self, sink: LogSink) {
+        if let Ok(mut slot) = self.runtime.inner.log.write() {
+            *slot = Some(sink);
+        }
+    }
+
+    /// The origin this service is reachable at (`http://host:port`), used
+    /// for the action links the way the registered official emulator does.
+    pub fn set_origin(&self, origin: &str) {
+        if let Ok(mut slot) = self.runtime.inner.origin.write() {
+            *slot = Some(origin.trim_end_matches('/').to_owned());
+        }
     }
 
     /// Cloneable Axum application.
@@ -200,25 +179,34 @@ impl AuthRuntime {
         self.application.clone()
     }
 
+    /// The shared runtime handle.
+    #[must_use]
+    pub fn runtime(&self) -> Runtime {
+        self.runtime.clone()
+    }
+
     /// Publishes native state, including an intentionally empty Auth database.
     pub fn checkpoint_native_state(&self) -> Result<(), AuthError> {
-        self.state.persist(&lock(&self.state.inner))
+        self.runtime.persist(&lock(&self.runtime.inner.data))
     }
 
     /// Number of users in the configured project.
     #[must_use]
     pub fn user_count(&self) -> usize {
-        lock(&self.state.inner)
-            .projects
-            .get(&self.state.project)
-            .map_or(0, |project| project.users.len())
+        let mut data = lock(&self.runtime.inner.data);
+        data.agent(&self.runtime.inner.default_project)
+            .project
+            .user_count()
     }
 
     /// Writes the current project state to a Firebase-compatible export file.
     pub fn export_users(&self, path: &FilePath) -> Result<(), AuthError> {
-        let data = lock(&self.state.inner);
-        let project = data.projects.get(&self.state.project);
-        let users = project.map_or_else(Vec::new, |value| value.users.values().cloned().collect());
+        let users = {
+            let mut data = lock(&self.runtime.inner.data);
+            data.agent(&self.runtime.inner.default_project)
+                .project
+                .query_users(state::QueryOrder::Asc, None)
+        };
         write_atomic(
             path,
             &json!({ "kind": "identitytoolkit#DownloadAccountResponse", "users": users }),
@@ -235,17 +223,40 @@ impl AuthRuntime {
             .get("users")
             .and_then(JsonValue::as_array)
             .ok_or_else(|| AuthError("Auth import requires a users array".to_owned()))?;
-        let mut data = lock(&self.state.inner);
-        let project = data.projects.entry(self.state.project.clone()).or_default();
+        let mut data = lock(&self.runtime.inner.data);
+        let project = &mut data.agent(&self.runtime.inner.default_project).project;
         let mut imported = 0;
         for user in users {
-            let uid = string_field(user, "localId")?;
+            let record = user
+                .as_object()
+                .ok_or_else(|| AuthError("Auth user must be an object".to_owned()))?;
+            let local_id = str_field(record, "localId")
+                .ok_or_else(|| AuthError("Auth user requires localId".to_owned()))?
+                .to_owned();
+            let mut props = record.clone();
+            props
+                .entry("emailVerified".to_owned())
+                .or_insert(JsonValue::Bool(false));
+            props
+                .entry("disabled".to_owned())
+                .or_insert(JsonValue::Bool(false));
+            // `overwriteUserWithLocalId` keeps createdAt and refreshes lastLoginAt;
+            // an export round trip must keep both as recorded.
+            let last_login = props.get("lastLoginAt").cloned();
             project
-                .users
-                .insert(uid.to_owned(), normalized_import_user(user)?);
+                .overwrite_user_with_local_id(&local_id, &props)
+                .map_err(|error| AuthError(error.message))?;
+            if let Some(last_login) = last_login {
+                let mut fields = UserRecord::new();
+                fields.insert("lastLoginAt".to_owned(), last_login);
+                project
+                    .update_user_by_local_id(&local_id, &fields, UpdateOptions::default())
+                    .map_err(|error| AuthError(error.message))?;
+            }
             imported += 1;
         }
-        self.state.persist(&data)?;
+        project.events.clear();
+        self.runtime.persist(&data)?;
         Ok(imported)
     }
 
@@ -254,11 +265,14 @@ impl AuthRuntime {
         std::fs::create_dir_all(root)
             .map_err(|error| AuthError(format!("failed to create Auth export: {error}")))?;
         self.export_users(&root.join("accounts.json"))?;
-        let data = lock(&self.state.inner);
-        let config = data
-            .projects
-            .get(&self.state.project)
-            .map_or_else(default_config, |project| project.config.clone());
+        let config = {
+            let mut data = lock(&self.runtime.inner.data);
+            let agent = data.agent(&self.runtime.inner.default_project);
+            json!({
+                "signIn": { "allowDuplicateEmails": !agent.one_account_per_email() },
+                "emailPrivacyConfig": { "enableImprovedEmailPrivacy": agent.improved_email_privacy() },
+            })
+        };
         write_atomic(&root.join("config.json"), &config)
     }
 
@@ -271,139 +285,170 @@ impl AuthRuntime {
                 .map_err(|error| AuthError(format!("failed to read Auth config: {error}")))?;
             let config = serde_json::from_slice::<JsonValue>(&config)
                 .map_err(|error| AuthError(format!("invalid Auth config JSON: {error}")))?;
-            let mut data = lock(&self.state.inner);
-            data.projects
-                .entry(self.state.project.clone())
-                .or_default()
-                .config = config;
-            self.state.persist(&data)?;
+            let mut data = lock(&self.runtime.inner.data);
+            let agent = data.agent(&self.runtime.inner.default_project);
+            if let Some(object) = config.as_object() {
+                let mut mask = Vec::new();
+                if object
+                    .get("signIn")
+                    .and_then(|sign_in| sign_in.get("allowDuplicateEmails"))
+                    .is_some()
+                {
+                    mask.push("signIn.allowDuplicateEmails");
+                }
+                if object
+                    .get("emailPrivacyConfig")
+                    .and_then(|privacy| privacy.get("enableImprovedEmailPrivacy"))
+                    .is_some()
+                {
+                    mask.push("emailPrivacyConfig.enableImprovedEmailPrivacy");
+                }
+                let joined = mask.join(",");
+                agent.update_config(
+                    object,
+                    if joined.is_empty() {
+                        None
+                    } else {
+                        Some(&joined)
+                    },
+                );
+            }
+            self.runtime.persist(&data)?;
         }
         Ok(imported)
     }
 }
 
-/// Runtime construction or persistence failure.
-#[derive(Debug)]
-pub struct AuthError(String);
-
-impl Display for AuthError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for AuthError {}
-
-#[derive(Clone)]
-struct AuthState {
-    project: String,
-    inner: Arc<Mutex<AuthData>>,
-    state_file: Option<PathBuf>,
-    queue: DispatchQueue,
-    background: TriggerRegistry,
-    blocking: Arc<RwLock<Option<Arc<dyn BlockingResolver>>>>,
-}
-
-impl AuthState {
-    fn persist(&self, data: &AuthData) -> Result<(), AuthError> {
-        self.state_file
-            .as_deref()
-            .map_or(Ok(()), |path| write_atomic(path, data))
+impl Runtime {
+    /// The project requests without an explicit target project address.
+    #[must_use]
+    pub fn default_project(&self) -> &str {
+        &self.inner.default_project
     }
 
-    fn require_project(&self, project: &str) -> Result<(), ApiError> {
-        if project == self.project {
-            Ok(())
-        } else {
-            Err(ApiError::message(
-                StatusCode::NOT_FOUND,
-                "PROJECT_NOT_FOUND",
-            ))
+    /// `authEmulatorUrl(req)`: the configured origin, else the request host.
+    #[must_use]
+    pub fn emulator_url(&self, host_header: Option<&str>) -> String {
+        if let Ok(slot) = self.inner.origin.read()
+            && let Some(origin) = slot.as_ref()
+        {
+            return origin.clone();
+        }
+        host_header.map_or_else(
+            || "http://unknown".to_owned(),
+            |host| format!("http://{host}"),
+        )
+    }
+
+    /// Emits a log line the way the official emulator's logger would.
+    pub fn log(&self, kind: &str, text: &str) {
+        if let Ok(slot) = self.inner.log.read()
+            && let Some(sink) = slot.as_ref()
+        {
+            sink(kind, text);
         }
     }
 
-    fn dispatch_lifecycle(&self, kind: Lifecycle, user: &JsonValue, event_id: String) {
-        if !self.background.background_enabled() {
+    /// Runs `body` against the request's project or tenant under the state
+    /// lock, persists the result and dispatches the lifecycle events it queued.
+    pub fn scope<T>(
+        &self,
+        ctx: &Ctx,
+        body: impl FnOnce(&mut Scope<'_>) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        let (result, events) = {
+            let mut data = lock(&self.inner.data);
+            let mut scope = Scope::new(&mut data, &ctx.project_id, ctx.tenant_id.as_deref());
+            let result = body(&mut scope);
+            let events = data.take_events();
+            if let Err(error) = self.persist(&data) {
+                return Err(ApiError::unknown(error.0, "persist"));
+            }
+            (result, events)
+        };
+        for (project_id, kind, user) in events {
+            self.dispatch_lifecycle(&project_id, kind, &user);
+        }
+        result
+    }
+
+    /// `fetchBlockingFunction` for `event`, resolved from the project
+    /// configuration first and the installed resolver second.
+    pub async fn blocking(
+        &self,
+        ctx: &Ctx,
+        event: BlockingEvent,
+        user: &UserRecord,
+        context: &BlockingContext,
+        oauth: &OauthTokens,
+    ) -> Result<BlockingOutcome, ApiError> {
+        let configured = {
+            let mut data = lock(&self.inner.data);
+            let scope = Scope::new(&mut data, &ctx.project_id, ctx.tenant_id.as_deref());
+            scope.blocking_uri(event).map(|uri| BlockingTarget {
+                uri,
+                forward_access_token: scope.forward_credential("accessToken"),
+                forward_id_token: scope.forward_credential("idToken"),
+                forward_refresh_token: scope.forward_credential("refreshToken"),
+                project_id: ctx.project_id.clone(),
+                tenant_id: ctx.tenant_id.clone(),
+            })
+        };
+        let target = if configured.is_some() {
+            configured
+        } else if let Some(resolver) = self
+            .inner
+            .blocking
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone())
+        {
+            let functions = resolver.resolve().await;
+            let uri = match event {
+                BlockingEvent::BeforeCreate => functions.before_create.clone(),
+                BlockingEvent::BeforeSignIn => functions.before_sign_in.clone(),
+            };
+            uri.map(|uri| BlockingTarget {
+                uri,
+                forward_access_token: functions.forward_access_token,
+                forward_id_token: functions.forward_id_token,
+                forward_refresh_token: functions.forward_refresh_token,
+                project_id: ctx.project_id.clone(),
+                tenant_id: ctx.tenant_id.clone(),
+            })
+        } else {
+            None
+        };
+        blocking::fetch_blocking_function(&self.inner.client, target, event, user, context, oauth)
+            .await
+    }
+
+    fn persist(&self, data: &AuthData) -> Result<(), AuthError> {
+        match &self.inner.state_file {
+            Some(path) => write_atomic(path, data),
+            None => Ok(()),
+        }
+    }
+
+    fn dispatch_lifecycle(&self, project_id: &str, kind: Lifecycle, user: &UserRecord) {
+        if !self.inner.background.background_enabled() {
             return;
         }
         let event_type = match kind {
             Lifecycle::Create => "providers/firebase.auth/eventTypes/user.create",
             Lifecycle::Delete => "providers/firebase.auth/eventTypes/user.delete",
         };
-        let timestamp = now_rfc3339();
-        let created = user
-            .get("createdAt")
-            .and_then(JsonValue::as_str)
-            .and_then(|value| value.parse::<i128>().ok())
-            .map_or_else(|| timestamp.clone(), milliseconds_rfc3339);
-        let last_sign_in = user
-            .get("lastLoginAt")
-            .and_then(JsonValue::as_str)
-            .and_then(|value| value.parse::<i128>().ok())
-            .map_or_else(|| created.clone(), milliseconds_rfc3339);
-        let custom_claims = user
-            .get("customAttributes")
-            .and_then(JsonValue::as_str)
-            .and_then(|value| serde_json::from_str::<JsonValue>(value).ok())
-            .unwrap_or_else(|| json!({}));
-        let mut auth_user = json!({
-            "uid": user.get("localId").cloned().unwrap_or(JsonValue::Null),
-            "emailVerified": user.get("emailVerified").and_then(JsonValue::as_bool).unwrap_or(false),
-            "metadata": { "creationTime": created, "lastSignInTime": last_sign_in },
-            "customClaims": custom_claims,
-        });
-        for field in [
-            "email",
-            "displayName",
-            "photoURL",
-            "phoneNumber",
-            "disabled",
-        ] {
-            let source = if field == "photoURL" {
-                "photoUrl"
-            } else {
-                field
-            };
-            if let Some(value) = user.get(source) {
-                auth_user[field] = value.clone();
-            }
-        }
-        if let Some(providers) = user.get("providerUserInfo").and_then(JsonValue::as_array) {
-            // `createProviderUserInfoPayload`: absent fields are dropped by JSON.
-            let provider_data: Vec<JsonValue> = providers
-                .iter()
-                .map(|info| {
-                    let mut entry = json!({
-                        "rawId": info.get("rawId"),
-                        "providerId": info.get("providerId"),
-                        "displayName": info.get("displayName"),
-                        "email": info.get("email"),
-                        "federatedId": info.get("federatedId"),
-                        "phoneNumber": info.get("phoneNumber"),
-                        "photoURL": info.get("photoUrl"),
-                        "screenName": info.get("screenName"),
-                    });
-                    strip_nulls(&mut entry);
-                    entry
-                })
-                .collect();
-            auth_user["providerData"] = json!(provider_data);
-        }
-        for field in ["tenantId", "mfaInfo"] {
-            if let Some(value) = user.get(field) {
-                auth_user[field] = value.clone();
-            }
-        }
+        let event_id = random_uuid();
         let body = json!({
             "eventId": event_id,
             "eventType": event_type,
-            "resource": { "name": format!("projects/{}", self.project), "service": AUTH_SERVICE },
+            "resource": { "name": format!("projects/{project_id}"), "service": AUTH_SERVICE },
             "params": {},
-            "timestamp": timestamp,
-            "data": auth_user,
+            "timestamp": now_iso(),
+            "data": user_info_payload(user),
         });
-        let _ = self.queue.enqueue(DispatchRequest {
-            path: format!("/functions/projects/{}/trigger_multicast", self.project),
+        let _ = self.inner.queue.enqueue(DispatchRequest {
+            path: format!("/functions/projects/{project_id}/trigger_multicast"),
             headers: BTreeMap::from([("content-type".to_owned(), "application/json".to_owned())]),
             body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
             event_id,
@@ -411,1582 +456,719 @@ impl AuthState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Lifecycle {
-    Create,
-    Delete,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct AuthData {
-    #[serde(default)]
-    projects: BTreeMap<String, ProjectData>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ProjectData {
-    #[serde(default)]
-    users: BTreeMap<String, JsonValue>,
-    #[serde(default)]
-    passwords: BTreeMap<String, PasswordSecret>,
-    #[serde(default)]
-    refresh_tokens: BTreeMap<String, RefreshGrant>,
-    #[serde(default = "default_config")]
-    config: JsonValue,
-    #[serde(default)]
-    next_id: u64,
-}
-
-impl Default for ProjectData {
-    fn default() -> Self {
-        Self {
-            users: BTreeMap::new(),
-            passwords: BTreeMap::new(),
-            refresh_tokens: BTreeMap::new(),
-            config: default_config(),
-            next_id: 0,
+/// `createUserInfoPayload`: the multicast body's `data`.
+fn user_info_payload(user: &UserRecord) -> JsonValue {
+    let mut payload = JsonMap::new();
+    let mut set = |key: &str, value: Option<JsonValue>| {
+        if let Some(value) = value.filter(|value| !value.is_null()) {
+            payload.insert(key.to_owned(), value);
         }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PasswordSecret {
-    salt: String,
-    digest: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RefreshGrant {
-    uid: String,
-    provider: String,
-    auth_time: i64,
-    identities: JsonValue,
-}
-
-#[derive(Debug)]
-struct ApiError {
-    status: StatusCode,
-    message: String,
-}
-
-impl ApiError {
-    fn message(status: StatusCode, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            message: message.into(),
-        }
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let body = json!({
-            "error": {
-                "code": self.status.as_u16(),
-                "message": self.message,
-                "errors": [{ "message": self.message, "reason": "invalid", "domain": "global" }]
-            }
-        });
-        (self.status, Json(body)).into_response()
-    }
-}
-
-async fn cors(request: axum::extract::Request, next: Next) -> Response {
-    let mut response = if request.method() == Method::OPTIONS {
-        StatusCode::NO_CONTENT.into_response()
-    } else {
-        next.run(request).await
     };
-    let headers = response.headers_mut();
-    headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
-    headers.insert(
-        "access-control-allow-methods",
-        HeaderValue::from_static("GET,POST,PATCH,DELETE,OPTIONS"),
-    );
-    headers.insert(
-        "access-control-allow-headers",
-        HeaderValue::from_static(
-            "Authorization,Content-Type,X-Client-Version,X-Firebase-Client,X-Firebase-GMPID",
+    set("uid", user.get("localId").cloned());
+    set("email", user.get("email").cloned());
+    set("emailVerified", user.get("emailVerified").cloned());
+    set("displayName", user.get("displayName").cloned());
+    set("photoURL", user.get("photoUrl").cloned());
+    set("phoneNumber", user.get("phoneNumber").cloned());
+    set("disabled", user.get("disabled").cloned());
+    let mut metadata = JsonMap::new();
+    if let Some(created) = str_field(user, "createdAt").and_then(|value| value.parse::<i64>().ok())
+    {
+        metadata.insert(
+            "creationTime".to_owned(),
+            json!(util::iso_from_millis(created)),
+        );
+    }
+    if let Some(last) = str_field(user, "lastLoginAt").and_then(|value| value.parse::<i64>().ok()) {
+        metadata.insert(
+            "lastSignInTime".to_owned(),
+            json!(util::iso_from_millis(last)),
+        );
+    }
+    set("metadata", Some(JsonValue::Object(metadata)));
+    set(
+        "customClaims",
+        Some(
+            str_field(user, "customAttributes")
+                .and_then(|value| serde_json::from_str::<JsonValue>(value).ok())
+                .unwrap_or_else(|| json!({})),
         ),
     );
+    if user
+        .get("providerUserInfo")
+        .is_some_and(JsonValue::is_array)
+    {
+        let providers: Vec<JsonValue> = state::provider_infos(user)
+            .iter()
+            .map(|info| {
+                let mut entry = JsonMap::new();
+                for (source, target) in [
+                    ("rawId", "rawId"),
+                    ("providerId", "providerId"),
+                    ("displayName", "displayName"),
+                    ("email", "email"),
+                    ("federatedId", "federatedId"),
+                    ("phoneNumber", "phoneNumber"),
+                    ("photoUrl", "photoURL"),
+                    ("screenName", "screenName"),
+                ] {
+                    if let Some(value) = info.get(source).filter(|value| !value.is_null()) {
+                        entry.insert(target.to_owned(), value.clone());
+                    }
+                }
+                JsonValue::Object(entry)
+            })
+            .collect();
+        set("providerData", Some(JsonValue::Array(providers)));
+    }
+    set("tenantId", user.get("tenantId").cloned());
+    set("mfaInfo", user.get("mfaInfo").cloned());
+    JsonValue::Object(payload)
+}
+
+// ---------------------------------------------------------------- HTTP pipeline
+
+/// Express-style JSON (`json spaces: 2`, `application/json; charset=utf-8`).
+pub(crate) fn pretty_json(status: StatusCode, value: &JsonValue) -> Response {
+    let text = serde_json::to_string_pretty(value).unwrap_or_default();
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        text,
+    )
+        .into_response()
+}
+
+/// Exegesis-style JSON (`application/json`).
+fn api_json(status: StatusCode, value: &JsonValue) -> Response {
+    let text = serde_json::to_string(value).unwrap_or_default();
+    (status, [(header::CONTENT_TYPE, "application/json")], text).into_response()
+}
+
+async fn handle(State(runtime): State<Runtime>, request: Request) -> Response {
+    let origin = request.headers().get(header::ORIGIN).cloned();
+    let private_network = request
+        .headers()
+        .contains_key("access-control-request-private-network");
+    if request.method() == Method::OPTIONS {
+        return preflight(&request, origin.as_ref(), private_network);
+    }
+    let mut response = route(&runtime, request).await;
+    if let Some(origin) = origin {
+        response
+            .headers_mut()
+            .insert("access-control-allow-origin", origin);
+        response
+            .headers_mut()
+            .insert(header::VARY, HeaderValue::from_static("Origin"));
+    }
+    if private_network {
+        response.headers_mut().insert(
+            "access-control-allow-private-network",
+            HeaderValue::from_static("true"),
+        );
+    }
     response
 }
 
-async fn readiness() -> Json<JsonValue> {
-    Json(json!({
-        "authEmulator": {
-            "ready": true,
-            "docs": "https://firebase.google.com/docs/emulator-suite",
-            "apiSpec": "/emulator/openapi.json"
-        }
-    }))
-}
-
-async fn not_found() -> ApiError {
-    ApiError::message(StatusCode::NOT_FOUND, "NOT_FOUND")
-}
-
-async fn sign_up(
-    State(state): State<AuthState>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    let email = required(&request, "email")?.to_owned();
-    let password = required(&request, "password")?.to_owned();
-    let display_name = request
-        .get("displayName")
-        .and_then(JsonValue::as_str)
-        .map(str::to_owned);
-    let now = now_millis();
-    let blocking = state.blocking_functions().await;
-    // Reserve the identity first so the blocking function sees the uid the
-    // user will be created with; the record is stored only after it answers.
-    let (mut user, uid, salt, digest) = {
-        let mut data = lock(&state.inner);
-        let project = data.projects.entry(state.project.clone()).or_default();
-        if find_by_email(project, &email).is_some() {
-            return Err(ApiError::message(StatusCode::BAD_REQUEST, "EMAIL_EXISTS"));
-        }
-        let uid = next_identifier(project, &state.project, &email, "user");
-        let salt = next_identifier(project, &state.project, &uid, "salt");
-        let digest = password_digest(&salt, &password);
-        let mut user = json!({
-            "localId": uid,
-            "lastLoginAt": now.to_string(),
-            "emailVerified": false,
-            "email": email,
-            "salt": salt,
-            "passwordHash": digest,
-            "passwordUpdatedAt": now,
-            "validSince": (now / 1000).to_string(),
-            "createdAt": now.to_string(),
-            "providerUserInfo": [{
-                "providerId": "password", "email": email,
-                "federatedId": email, "rawId": email
-            }],
-            "lastRefreshAt": iso_from_millis(now),
-        });
-        if let Some(name) = &display_name {
-            user["displayName"] = json!(name);
-            user["providerUserInfo"][0]["displayName"] = json!(name);
-        }
-        (user, uid, salt, digest)
-    };
-    // Official `signUp` hands beforeCreate the pending record before provider
-    // info is derived, so the handler sees an empty provider list.
-    let mut before_create = user.clone();
-    before_create["providerUserInfo"] = json!([]);
-    let created =
-        fetch_blocking_function(&state, &blocking, BEFORE_CREATE, &before_create, "password")
-            .await?;
-    apply_blocking_updates(&mut user, &created.updates);
-    // The account exists from here on (official `createUserWithLocalId`,
-    // which also fires the create event), even if beforeSignIn then rejects.
-    let event_id = {
-        let mut data = lock(&state.inner);
-        let project = data.projects.entry(state.project.clone()).or_default();
-        if find_by_email(project, &email).is_some() {
-            return Err(ApiError::message(StatusCode::BAD_REQUEST, "EMAIL_EXISTS"));
-        }
-        project
-            .passwords
-            .insert(uid.clone(), PasswordSecret { salt, digest });
-        project.users.insert(uid.clone(), user.clone());
-        let event_id = lifecycle_event_id(project, &state.project, &uid, Lifecycle::Create);
-        state.persist(&data).map_err(internal)?;
-        event_id
-    };
-    state.dispatch_lifecycle(Lifecycle::Create, &user, event_id);
-    let mut extra_claims = None;
-    if user.get("disabled").and_then(JsonValue::as_bool) != Some(true) {
-        let signed_in =
-            fetch_blocking_function(&state, &blocking, BEFORE_SIGN_IN, &user, "password").await?;
-        apply_blocking_updates(&mut user, &signed_in.updates);
-        extra_claims = signed_in.extra_claims;
+fn preflight(request: &Request, origin: Option<&HeaderValue>, private_network: bool) -> Response {
+    let mut response = Response::builder().status(StatusCode::NO_CONTENT);
+    if let Some(origin) = origin {
+        response = response
+            .header("access-control-allow-origin", origin)
+            .header(header::VARY, "Origin, Access-Control-Request-Headers");
     }
-    if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
-        return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
-    }
-    let response = {
-        let mut data = lock(&state.inner);
-        let project = data.projects.entry(state.project.clone()).or_default();
-        project.users.insert(uid.clone(), user.clone());
-        let grant = RefreshGrant {
-            uid: uid.clone(),
-            provider: "password".to_owned(),
-            auth_time: now / 1000,
-            identities: json!({ "email": [email] }),
-        };
-        let auth = issue_auth(project, &state.project, &user, grant, extra_claims.as_ref());
-        let mut response = json!({
-            "kind": SIGNUP_KIND,
-            "localId": uid,
-            "email": email,
-            "idToken": auth.id_token,
-            "refreshToken": auth.refresh_token,
-            "expiresIn": "3600",
-        });
-        if let Some(name) = user.get("displayName") {
-            response["displayName"] = name.clone();
-        }
-        state.persist(&data).map_err(internal)?;
-        response
-    };
-    Ok(Json(response))
-}
-
-async fn client_lookup(
-    State(state): State<AuthState>,
-    headers: HeaderMap,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    // The unscoped route accepts the owner bearer token as a privileged
-    // lookup by localId/email/phoneNumber, like the official emulator.
-    if bearer_is_owner(&headers) {
-        let project = state.project.clone();
-        return admin_lookup(State(state), Path(project), Json(request)).await;
-    }
-    let uid = token_uid(&request, "idToken", &state.project)?;
-    let data = lock(&state.inner);
-    let project = data
-        .projects
-        .get(&state.project)
-        .ok_or_else(user_not_found)?;
-    let user = project.users.get(&uid).ok_or_else(user_not_found)?;
-    Ok(Json(json!({ "kind": LOOKUP_KIND, "users": [user] })))
-}
-
-async fn client_delete(
-    State(state): State<AuthState>,
-    headers: HeaderMap,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    let project = state.project.clone();
-    if bearer_is_owner(&headers) {
-        return admin_delete(State(state), Path(project), Json(request)).await;
-    }
-    let uid = token_uid(&request, "idToken", &project)?;
-    admin_delete(State(state), Path(project), Json(json!({ "localId": uid }))).await
-}
-
-async fn client_update(
-    State(state): State<AuthState>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    let uid = token_uid(&request, "idToken", &state.project)?;
-    let mut data = lock(&state.inner);
-    let project = data
-        .projects
-        .get_mut(&state.project)
-        .ok_or_else(user_not_found)?;
-    let user = project.users.get_mut(&uid).ok_or_else(user_not_found)?;
-    apply_user_update(user, &request);
-    let response = update_response(user);
-    state.persist(&data).map_err(internal)?;
-    Ok(Json(response))
-}
-
-async fn sign_in_password(
-    State(state): State<AuthState>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    let email = required(&request, "email")?.to_owned();
-    let password = required(&request, "password")?.to_owned();
-    let blocking = state.blocking_functions().await;
-    let now = now_millis();
-    let (uid, mut user) = {
-        let mut data = lock(&state.inner);
-        let project = data
-            .projects
-            .get_mut(&state.project)
-            .ok_or_else(invalid_password)?;
-        let uid = find_by_email(project, &email)
-            .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "EMAIL_NOT_FOUND"))?;
-        let user = project.users.get_mut(&uid).ok_or_else(invalid_password)?;
-        let salt = user
-            .get("salt")
-            .and_then(JsonValue::as_str)
-            .ok_or_else(invalid_password)?;
-        let digest = user
-            .get("passwordHash")
-            .and_then(JsonValue::as_str)
-            .ok_or_else(invalid_password)?;
-        let current = password_digest(salt, &password);
-        if current != digest && legacy_password_digest(salt, &password) != digest {
-            return Err(invalid_password());
-        }
-        if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
-            return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
-        }
-        // Successful login upgrades an old Fireside-only digest into the official
-        // emulator's portable development format for subsequent exports.
-        user["passwordHash"] = json!(current);
-        (uid, user.clone())
-    };
-    let outcome =
-        fetch_blocking_function(&state, &blocking, BEFORE_SIGN_IN, &user, "password").await?;
-    apply_blocking_updates(&mut user, &outcome.updates);
-    user["lastLoginAt"] = json!(now.to_string());
-    user["lastRefreshAt"] = json!(iso_from_millis(now));
-    if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
-        return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
-    }
-    let mut data = lock(&state.inner);
-    let project = data
-        .projects
-        .get_mut(&state.project)
-        .ok_or_else(invalid_password)?;
-    project.users.insert(uid.clone(), user.clone());
-    let grant = RefreshGrant {
-        uid: uid.clone(),
-        provider: "password".to_owned(),
-        auth_time: now / 1000,
-        identities: json!({ "email": [email] }),
-    };
-    let auth = issue_auth(
-        project,
-        &state.project,
-        &user,
-        grant,
-        outcome.extra_claims.as_ref(),
+    response = response.header(
+        "access-control-allow-methods",
+        "GET,HEAD,PUT,PATCH,POST,DELETE",
     );
-    state.persist(&data).map_err(internal)?;
-    Ok(Json(json!({
-        "kind": "identitytoolkit#VerifyPasswordResponse",
-        "registered": true,
-        "localId": uid,
-        "email": email,
-        "idToken": auth.id_token,
-        "refreshToken": auth.refresh_token,
-        "expiresIn": "3600"
-    })))
-}
-
-async fn sign_in_custom_token(
-    State(state): State<AuthState>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    let token = required(&request, "token")?;
-    let payload = decode_jwt(token)?;
-    let uid = payload
-        .get("uid")
-        .or_else(|| payload.get("sub"))
-        .and_then(JsonValue::as_str)
-        .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_CUSTOM_TOKEN"))?;
-    let custom_claims = payload.get("claims").cloned().unwrap_or_else(|| json!({}));
-    let now = now_millis();
-    let (user, is_new, response, event_id) = {
-        let mut data = lock(&state.inner);
-        let project = data.projects.entry(state.project.clone()).or_default();
-        let is_new = !project.users.contains_key(uid);
-        let user = project.users.entry(uid.to_owned()).or_insert_with(|| {
-            json!({
-                "localId": uid, "customAuth": true,
-                "createdAt": now.to_string(), "lastLoginAt": now.to_string(),
-                "lastRefreshAt": iso_from_millis(now)
-            })
-        });
-        user["lastLoginAt"] = json!(now.to_string());
-        user["lastRefreshAt"] = json!(iso_from_millis(now));
-        if custom_claims
-            .as_object()
-            .is_some_and(|value| !value.is_empty())
-        {
-            user["customAttributes"] = json!(serde_json::to_string(&custom_claims).expect("JSON"));
-        }
-        let user = user.clone();
-        let grant = RefreshGrant {
-            uid: uid.to_owned(),
-            provider: "custom".to_owned(),
-            auth_time: now / 1000,
-            identities: json!({}),
-        };
-        let auth = issue_auth(project, &state.project, &user, grant, None);
-        let response = json!({
-            "kind": "identitytoolkit#VerifyCustomTokenResponse",
-            "isNewUser": is_new,
-            "idToken": auth.id_token,
-            "refreshToken": auth.refresh_token,
-            "expiresIn": "3600"
-        });
-        let event_id =
-            is_new.then(|| lifecycle_event_id(project, &state.project, uid, Lifecycle::Create));
-        state.persist(&data).map_err(internal)?;
-        (user, is_new, response, event_id)
-    };
-    if is_new {
-        state.dispatch_lifecycle(
-            Lifecycle::Create,
-            &user,
-            event_id.expect("new users have event ids"),
-        );
+    if let Some(headers) = request.headers().get("access-control-request-headers") {
+        response = response.header("access-control-allow-headers", headers);
     }
-    Ok(Json(response))
-}
-
-async fn sign_in_with_idp(
-    State(state): State<AuthState>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    let fields = oauth::credential_fields(&request)?;
-    let provider = fields
-        .get("providerId")
-        .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "MISSING_OR_INVALID_NONCE"))?;
-    let raw_id_token = fields
-        .get("id_token")
-        .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_IDP_RESPONSE"))?;
-    let profile: JsonValue = serde_json::from_str(raw_id_token)
-        .map_err(|_| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_IDP_RESPONSE"))?;
-    let subject = required(&profile, "sub")?;
-    let email = profile.get("email").and_then(JsonValue::as_str);
-    let now = now_millis();
-    let (user, is_new, response, event_id) = {
-        let mut data = lock(&state.inner);
-        let project = data.projects.entry(state.project.clone()).or_default();
-        let existing = project
-            .users
-            .iter()
-            .find_map(|(uid, user)| provider_matches(user, provider, subject).then(|| uid.clone()));
-        let is_new = existing.is_none();
-        let uid =
-            existing.unwrap_or_else(|| next_identifier(project, &state.project, subject, "idp"));
-        let mut user = project.users.get(&uid).cloned().unwrap_or_else(|| {
-            json!({
-                "localId": uid, "createdAt": now.to_string(),
-                "emailVerified": profile.get("email_verified").and_then(JsonValue::as_bool).unwrap_or(false)
-            })
-        });
-        if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
-            return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
-        }
-        copy_profile(&mut user, &profile);
-        user["lastLoginAt"] = json!(now.to_string());
-        user["lastRefreshAt"] = json!(iso_from_millis(now));
-        let provider_info = json!({
-            "providerId": provider, "rawId": subject, "federatedId": subject,
-            "displayName": profile.get("name"), "photoUrl": profile.get("picture"),
-            "email": email
-        });
-        let mut providers = user
-            .get("providerUserInfo")
-            .and_then(JsonValue::as_array)
-            .cloned()
-            .unwrap_or_default();
-        providers
-            .retain(|info| info.get("providerId").and_then(JsonValue::as_str) != Some(provider));
-        providers.push(provider_info);
-        user["providerUserInfo"] = json!(providers);
-        project.users.insert(uid.clone(), user.clone());
-        let mut identities = JsonMap::new();
-        identities.insert(provider.clone(), json!([subject]));
-        if let Some(email) = email {
-            identities.insert("email".to_owned(), json!([email]));
-        }
-        let grant = RefreshGrant {
-            uid: uid.clone(),
-            provider: provider.clone(),
-            auth_time: now / 1000,
-            identities: JsonValue::Object(identities),
-        };
-        let auth = issue_auth(project, &state.project, &user, grant, None);
-        let raw_user_info = idp_raw_user_info(subject, &profile);
-        let mut response = json!({
-            "kind": "identitytoolkit#VerifyAssertionResponse", "context": "",
-            "providerId": provider, "isNewUser": is_new, "localId": uid,
-            "federatedId": format!("https://accounts.google.com/{subject}"),
-            "oauthAccessToken": format!("FirebaseAuthEmulatorFakeAccessToken_{provider}"),
-            "oauthIdToken": raw_id_token, "rawUserInfo": raw_user_info,
-            "idToken": auth.id_token, "refreshToken": auth.refresh_token, "expiresIn": "3600"
-        });
-        for (source, target) in [
-            ("name", "displayName"),
-            ("name", "fullName"),
-            ("email", "email"),
-            ("email_verified", "emailVerified"),
-            ("picture", "photoUrl"),
-            ("given_name", "firstName"),
-            ("family_name", "lastName"),
-        ] {
-            if let Some(value) = profile.get(source) {
-                response[target] = value.clone();
-            }
-        }
-        let event_id =
-            is_new.then(|| lifecycle_event_id(project, &state.project, &uid, Lifecycle::Create));
-        state.persist(&data).map_err(internal)?;
-        (user, is_new, response, event_id)
-    };
-    if is_new {
-        state.dispatch_lifecycle(
-            Lifecycle::Create,
-            &user,
-            event_id.expect("new users have event ids"),
-        );
+    if private_network {
+        response = response.header("access-control-allow-private-network", "true");
     }
-    Ok(Json(response))
+    response
+        .header(header::CONTENT_LENGTH, "0")
+        .body(Body::empty())
+        .unwrap_or_else(|_| StatusCode::NO_CONTENT.into_response())
 }
 
-async fn create_auth_uri(
-    State(state): State<AuthState>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    let identifier = required(&request, "identifier")?;
-    let data = lock(&state.inner);
-    let registered = data
-        .projects
-        .get(&state.project)
-        .and_then(|project| find_by_email(project, identifier))
-        .is_some();
-    Ok(Json(json!({
-        "kind": "identitytoolkit#CreateAuthUriResponse",
-        "registered": registered,
-        "allProviders": if registered { json!(["password"]) } else { json!([]) },
-        "sessionId": stable_hash(&[&state.project, identifier, "session"]),
-        "signinMethods": if registered { json!(["password"]) } else { json!([]) }
-    })))
-}
-
-async fn recaptcha_parameters() -> Json<JsonValue> {
-    Json(json!({
-        "kind": "identitytoolkit#GetRecaptchaParamResponse",
-        "recaptchaStoken": "This-is-a-fake-token__Dont-send-this-to-the-Recaptcha-service__The-Auth-Emulator-does-not-support-Recaptcha",
-        "recaptchaSiteKey": "Fake-key__Do-not-send-this-to-Recaptcha_"
-    }))
-}
-
-async fn refresh_token(
-    State(state): State<AuthState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Json<JsonValue>, ApiError> {
-    let request = parse_body(&headers, &body)?;
-    if request.get("grant_type").and_then(JsonValue::as_str) != Some("refresh_token") {
-        return Err(ApiError::message(
-            StatusCode::BAD_REQUEST,
-            "INVALID_GRANT_TYPE",
-        ));
-    }
-    let refresh = required(&request, "refresh_token")?;
-    let data = lock(&state.inner);
-    let project = data
-        .projects
-        .get(&state.project)
-        .ok_or_else(invalid_refresh)?;
-    let grant = project
-        .refresh_tokens
-        .get(refresh)
-        .ok_or_else(invalid_refresh)?;
-    let user = project.users.get(&grant.uid).ok_or_else(invalid_refresh)?;
-    if user.get("disabled").and_then(JsonValue::as_bool) == Some(true) {
-        return Err(ApiError::message(StatusCode::BAD_REQUEST, "USER_DISABLED"));
-    }
-    // The official emulator reuses the grant, including overlapping requests
-    // from tabs sharing persisted Auth state. Refresh is not a new sign-in and
-    // must neither consume this grant nor grow the durable refresh-token map.
-    let id_token = make_id_token(&state.project, user, grant, None);
-    Ok(Json(json!({
-        "id_token": id_token, "access_token": id_token,
-        "expires_in": "3600", "refresh_token": refresh,
-        "token_type": "Bearer", "user_id": grant.uid, "project_id": "12345"
-    })))
-}
-
-// Default-project discovery is required by the official UI even without tenants.
-// Tenant creation and tenant-scoped operations remain unsupported.
-async fn list_tenants(
-    State(state): State<AuthState>,
-    Path(project): Path<String>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project)?;
-    Ok(Json(json!({ "tenants": [] })))
-}
-
-async fn admin_create(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let now = now_millis();
-    let (user, response, event_id) = {
-        let mut data = lock(&state.inner);
-        let project = data.projects.entry(project_name.clone()).or_default();
-        let uid = request
-            .get("localId")
-            .and_then(JsonValue::as_str)
-            .map_or_else(
-                || next_identifier(project, &project_name, "admin", "user"),
-                ToOwned::to_owned,
-            );
-        if project.users.contains_key(&uid) {
-            return Err(ApiError::message(
-                StatusCode::BAD_REQUEST,
-                "DUPLICATE_LOCAL_ID",
-            ));
-        }
-        if let Some(email) = request.get("email").and_then(JsonValue::as_str)
-            && find_by_email(project, email).is_some()
-        {
-            return Err(ApiError::message(StatusCode::BAD_REQUEST, "EMAIL_EXISTS"));
-        }
-        let mut user = normalized_import_user(&request).map_err(internal)?;
-        user["localId"] = json!(uid);
-        user["createdAt"] = user
-            .get("createdAt")
-            .cloned()
-            .unwrap_or_else(|| json!(now.to_string()));
-        user["lastLoginAt"] = user
-            .get("lastLoginAt")
-            .cloned()
-            .unwrap_or_else(|| json!(now.to_string()));
-        user["lastRefreshAt"] = json!(iso_from_millis(now));
-        if let Some(password) = request.get("password").and_then(JsonValue::as_str) {
-            configure_password(project, &project_name, &uid, &mut user, password, now);
-        }
-        project.users.insert(uid.clone(), user.clone());
-        let mut response = json!({ "kind": SIGNUP_KIND, "localId": uid });
-        for field in ["displayName", "email", "photoUrl"] {
-            if let Some(value) = user.get(field) {
-                response[field] = value.clone();
-            }
-        }
-        let event_id = lifecycle_event_id(project, &project_name, &uid, Lifecycle::Create);
-        state.persist(&data).map_err(internal)?;
-        (user, response, event_id)
-    };
-    state.dispatch_lifecycle(Lifecycle::Create, &user, event_id);
-    Ok(Json(response))
-}
-
-async fn admin_update(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let uid = required(&request, "localId")?.to_owned();
-    let mut data = lock(&state.inner);
-    let project = data
-        .projects
-        .get_mut(&project_name)
-        .ok_or_else(user_not_found)?;
-    let user = project.users.get_mut(&uid).ok_or_else(user_not_found)?;
-    apply_user_update(user, &request);
-    // Admin SDK updateUser({ disabled }) sends the wire field disableUser.
-    if let Some(disabled) = request.get("disableUser").and_then(JsonValue::as_bool) {
-        user["disabled"] = json!(disabled);
-    }
-    let response = update_response(user);
-    state.persist(&data).map_err(internal)?;
-    Ok(Json(response))
-}
-
-async fn admin_lookup(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let data = lock(&state.inner);
-    let project = data
-        .projects
-        .get(&project_name)
-        .ok_or_else(user_not_found)?;
-    let mut matches = Vec::new();
-    for (request_field, user_field) in [
-        ("localId", "localId"),
-        ("email", "email"),
-        ("phoneNumber", "phoneNumber"),
-    ] {
-        if let Some(values) = request.get(request_field).and_then(JsonValue::as_array) {
-            for value in values {
-                if let Some(value) = value.as_str()
-                    && let Some(user) = project.users.values().find(|user| {
-                        user.get(user_field).and_then(JsonValue::as_str) == Some(value)
-                    })
-                    && !matches.contains(user)
-                {
-                    matches.push(user.clone());
-                }
-            }
-        }
-    }
-    if matches.is_empty() {
-        return Err(user_not_found());
-    }
-    Ok(Json(json!({ "kind": LOOKUP_KIND, "users": matches })))
-}
-
-async fn admin_query(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let data = lock(&state.inner);
-    let users = data
-        .projects
-        .get(&project_name)
-        .map_or_else(Vec::new, |project| {
-            project.users.values().cloned().collect::<Vec<_>>()
-        });
-    Ok(Json(
-        json!({ "recordsCount": users.len().to_string(), "userInfo": users }),
-    ))
-}
-
-async fn admin_delete(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let uid = required(&request, "localId")?.to_owned();
-    let (user, event_id) = {
-        let mut data = lock(&state.inner);
-        let project = data
-            .projects
-            .get_mut(&project_name)
-            .ok_or_else(user_not_found)?;
-        let user = project.users.remove(&uid).ok_or_else(user_not_found)?;
-        project.passwords.remove(&uid);
-        project.refresh_tokens.retain(|_, grant| grant.uid != uid);
-        let event_id = lifecycle_event_id(project, &project_name, &uid, Lifecycle::Delete);
-        state.persist(&data).map_err(internal)?;
-        (user, event_id)
-    };
-    state.dispatch_lifecycle(Lifecycle::Delete, &user, event_id);
-    Ok(Json(json!({ "kind": DELETE_KIND })))
-}
-
-async fn batch_create(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let users = request
-        .get("users")
-        .and_then(JsonValue::as_array)
-        .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "MISSING_USERS"))?;
-    let mut data = lock(&state.inner);
-    let project = data.projects.entry(project_name).or_default();
-    let mut errors = Vec::new();
-    for (index, user) in users.iter().enumerate() {
-        match string_field(user, "localId").and_then(|uid| {
-            normalized_import_user(user).map(|normalized| (uid.to_owned(), normalized))
-        }) {
-            Ok((uid, normalized)) if !project.users.contains_key(&uid) => {
-                project.users.insert(uid, normalized);
-            }
-            Ok(_) => errors.push(json!({ "index": index, "message": "DUPLICATE_LOCAL_ID" })),
-            Err(error) => errors.push(json!({ "index": index, "message": error.to_string() })),
-        }
-    }
-    state.persist(&data).map_err(internal)?;
-    Ok(Json(
-        json!({ "kind": "identitytoolkit#UploadAccountResponse", "error": errors }),
-    ))
-}
-
-async fn batch_get(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let data = lock(&state.inner);
-    let users = data
-        .projects
-        .get(&project_name)
-        .map_or_else(Vec::new, |project| {
-            project.users.values().cloned().collect::<Vec<_>>()
-        });
-    Ok(Json(
-        json!({ "kind": "identitytoolkit#DownloadAccountResponse", "users": users }),
-    ))
-}
-
-async fn get_config(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let data = lock(&state.inner);
-    let config = data
-        .projects
-        .get(&project_name)
-        .map_or_else(default_config, |project| project.config.clone());
-    Ok(Json(config))
-}
-
-async fn update_config(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-    Json(request): Json<JsonValue>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let mut data = lock(&state.inner);
-    let project = data.projects.entry(project_name).or_default();
-    merge_json(&mut project.config, &request);
-    let response = project.config.clone();
-    state.persist(&data).map_err(internal)?;
-    Ok(Json(response))
-}
-
-async fn delete_all(
-    State(state): State<AuthState>,
-    Path(project_name): Path<String>,
-) -> Result<Json<JsonValue>, ApiError> {
-    state.require_project(&project_name)?;
-    let mut data = lock(&state.inner);
-    data.projects.insert(project_name, ProjectData::default());
-    state.persist(&data).map_err(internal)?;
-    Ok(Json(json!({})))
-}
-
-struct IssuedAuth {
-    id_token: String,
-    refresh_token: String,
-}
-
-impl AuthState {
-    async fn blocking_functions(&self) -> BlockingFunctions {
-        let resolver = self.blocking.read().ok().and_then(|slot| slot.clone());
-        match resolver {
-            Some(resolver) => resolver.resolve().await,
-            None => BlockingFunctions::default(),
-        }
-    }
-}
-
-fn blocking_error(message: &str) -> ApiError {
-    ApiError::message(StatusCode::BAD_REQUEST, message)
-}
-
-/// `generateBlockingFunctionJwt`: the unsigned JWT the handler decodes.
-fn blocking_jwt(
-    project: &str,
-    event: &str,
-    url: &str,
-    user: &JsonValue,
-    sign_in_method: &str,
-) -> String {
-    let issued_at = now_seconds();
-    let digest = Sha256::digest(
-        format!(
-            "{project}:{event}:{issued_at}:{}",
-            user.get("localId")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("")
-        )
-        .as_bytes(),
-    );
-    // `randomBase64UrlStr(16)` in the official emulator.
-    let event_id = URL_SAFE_NO_PAD.encode(&digest[..12]);
-    let provider_data: Vec<JsonValue> = user
-        .get("providerUserInfo")
-        .and_then(JsonValue::as_array)
-        .map(|entries| {
-            entries
-                .iter()
-                .map(|info| {
-                    json!({
-                        "provider_id": info.get("providerId"),
-                        "display_name": info.get("displayName"),
-                        "photo_url": info.get("photoUrl"),
-                        "email": info.get("email"),
-                        "uid": info.get("rawId"),
-                        "phone_number": info.get("phoneNumber"),
-                    })
-                })
+fn query_pairs(query: Option<&str>) -> Vec<(String, String)> {
+    query
+        .map(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .map(|(key, value)| (key.into_owned(), value.into_owned()))
                 .collect()
         })
-        .unwrap_or_default();
-    let custom_claims = user
-        .get("customAttributes")
-        .and_then(JsonValue::as_str)
-        .and_then(|value| serde_json::from_str::<JsonValue>(value).ok())
-        .unwrap_or_else(|| json!({}));
-    let mut user_record = json!({
-        "uid": user.get("localId"),
-        "email": user.get("email"),
-        "email_verified": user.get("emailVerified"),
-        "display_name": user.get("displayName"),
-        "photo_url": user.get("photoUrl"),
-        "disabled": user.get("disabled"),
-        "phone_number": user.get("phoneNumber"),
-        "custom_claims": custom_claims,
-        "provider_data": provider_data,
-    });
-    let last_login = user
-        .get("lastLoginAt")
-        .and_then(JsonValue::as_str)
-        .and_then(|value| value.parse::<i64>().ok());
-    let created = user
-        .get("createdAt")
-        .and_then(JsonValue::as_str)
-        .and_then(|value| value.parse::<i64>().ok());
-    if last_login.is_some() || created.is_some() {
-        user_record["metadata"] = json!({
-            "last_sign_in_time": last_login,
-            "creation_time": created,
-        });
-    }
-    let mut payload = json!({
-        "iss": format!("https://securetoken.google.com/{project}"),
-        "aud": url,
-        "iat": issued_at,
-        "exp": issued_at + i64::try_from(BLOCKING_TIMEOUT_MS / 100).unwrap_or(i64::MAX),
-        "event_id": event_id,
-        "event_type": event,
-        "user_agent": "NotYetSupportedInFirebaseAuthEmulator",
-        "ip_address": "127.0.0.1",
-        "locale": "en",
-        "user_record": user_record,
-        "sub": user.get("localId"),
-        "sign_in_method": sign_in_method,
-    });
-    strip_nulls(&mut payload);
-    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
-    let body = URL_SAFE_NO_PAD
-        .encode(serde_json::to_vec(&payload).expect("JSON serialization cannot fail"));
-    format!("{header}.{body}.")
+        .unwrap_or_default()
 }
 
-/// JSON drops `undefined`; the official payload builder leaves absent user
-/// fields undefined, so nulls are removed to match.
-fn strip_nulls(value: &mut JsonValue) {
-    if let Some(map) = value.as_object_mut() {
-        map.retain(|_, child| !child.is_null());
-        for child in map.values_mut() {
-            strip_nulls(child);
-        }
-    } else if let Some(items) = value.as_array_mut() {
-        for item in items {
-            strip_nulls(item);
-        }
-    }
-}
-
-/// `fetchBlockingFunction` + `processBlockingFunctionResponse`.
-async fn fetch_blocking_function(
-    state: &AuthState,
-    config: &BlockingFunctions,
-    event: &str,
-    user: &JsonValue,
-    sign_in_method: &str,
-) -> Result<BlockingOutcome, ApiError> {
-    let url = match event {
-        BEFORE_CREATE => config.before_create.as_deref(),
-        _ => config.before_sign_in.as_deref(),
-    };
-    let Some(url) = url else {
-        return Ok(BlockingOutcome::default());
-    };
-    let jwt = blocking_jwt(&state.project, event, url, user, sign_in_method);
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(BLOCKING_TIMEOUT_MS))
-        .build()
-        .map_err(|error| {
-            blocking_error(&format!(
-                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Failed to make request to {url}.)) {error}"
-            ))
-        })?;
-    let response = match client
-        .post(url)
-        .header("content-type", "application/json")
-        .body(json!({ "data": { "jwt": jwt } }).to_string())
-        .send()
-        .await
-    {
-        Ok(response) => response,
-        Err(error) if error.is_timeout() => {
-            return Err(blocking_error(&format!(
-                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Deadline exceeded making request to {url}.))"
-            )));
-        }
-        Err(_) => {
-            return Err(blocking_error(&format!(
-                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Failed to make request to {url}.))"
-            )));
-        }
-    };
-    let status = response.status();
-    let text = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(blocking_error(&format!(
-            "BLOCKING_FUNCTION_ERROR_RESPONSE : ((HTTP request to {url} returned HTTP error {}: {text}))",
-            status.as_u16()
-        )));
-    }
-    let parsed: JsonValue = serde_json::from_str(&text).map_err(|_| {
-        blocking_error("BLOCKING_FUNCTION_ERROR_RESPONSE : ((Response body is not valid JSON.))")
-    })?;
-    process_blocking_response(&parsed, event)
-}
-
-/// `processBlockingFunctionResponse`: the updates a handler's `userRecord`
-/// requests through its `updateMask`.
-fn process_blocking_response(parsed: &JsonValue, event: &str) -> Result<BlockingOutcome, ApiError> {
-    let mut outcome = BlockingOutcome::default();
-    let Some(record) = parsed.get("userRecord").and_then(JsonValue::as_object) else {
-        return Ok(outcome);
-    };
-    let mask = record
-        .get("updateMask")
-        .and_then(JsonValue::as_str)
-        .ok_or_else(|| {
-            blocking_error(
-                "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Response UserRecord is missing updateMask.))",
-            )
-        })?;
-    for field in mask.split(',') {
-        match field {
-            "displayName" | "photoUrl" => {
-                let value = record.get(field).cloned().unwrap_or(JsonValue::Null);
-                let text = match value {
-                    JsonValue::String(text) => text,
-                    JsonValue::Null => String::new(),
-                    other => other.to_string(),
-                };
-                outcome
-                    .updates
-                    .insert(field.to_owned(), JsonValue::String(text));
-            }
-            "disabled" | "emailVerified" => {
-                let truthy = record.get(field).is_some_and(|value| match value {
-                    JsonValue::Bool(flag) => *flag,
-                    JsonValue::Null => false,
-                    JsonValue::Number(number) => number.as_f64().is_some_and(|n| n != 0.0),
-                    JsonValue::String(text) => !text.is_empty(),
-                    _ => true,
-                });
-                outcome
-                    .updates
-                    .insert(field.to_owned(), JsonValue::Bool(truthy));
-            }
-            "customClaims" => {
-                let claims = record
-                    .get("customClaims")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
-                outcome.updates.insert(
-                    "customAttributes".to_owned(),
-                    JsonValue::String(claims.to_string()),
-                );
-            }
-            "sessionClaims" if event == BEFORE_SIGN_IN => {
-                outcome.extra_claims = record
-                    .get("sessionClaims")
-                    .and_then(JsonValue::as_object)
-                    .cloned();
-            }
-            _ => {}
-        }
-    }
-    Ok(outcome)
-}
-
-fn apply_blocking_updates(user: &mut JsonValue, updates: &JsonMap<String, JsonValue>) {
-    for (field, value) in updates {
-        user[field] = value.clone();
-        if field == "displayName"
-            && let Some(providers) = user
-                .get_mut("providerUserInfo")
-                .and_then(JsonValue::as_array_mut)
-        {
-            for provider in providers {
-                provider["displayName"] = value.clone();
-            }
-        }
-    }
-}
-
-fn issue_auth(
-    project: &mut ProjectData,
-    project_id: &str,
-    user: &JsonValue,
-    grant: RefreshGrant,
-    extra_claims: Option<&JsonMap<String, JsonValue>>,
-) -> IssuedAuth {
-    let id_token = make_id_token(project_id, user, &grant, extra_claims);
-    let refresh_token = next_identifier(project, project_id, &grant.uid, "refresh");
-    project.refresh_tokens.insert(refresh_token.clone(), grant);
-    IssuedAuth {
-        id_token,
-        refresh_token,
-    }
-}
-
-fn make_id_token(
-    project: &str,
-    user: &JsonValue,
-    grant: &RefreshGrant,
-    extra_claims: Option<&JsonMap<String, JsonValue>>,
-) -> String {
-    let now = now_seconds();
-    let mut claims = JsonMap::new();
-    for (source, target) in [
-        ("displayName", "name"),
-        ("photoUrl", "picture"),
-        ("email", "email"),
-        ("phoneNumber", "phone_number"),
-    ] {
-        if let Some(value) = user.get(source) {
-            claims.insert(target.to_owned(), value.clone());
-        }
-    }
-    if user.get("email").is_some() {
-        claims.insert(
-            "email_verified".to_owned(),
-            json!(
-                user.get("emailVerified")
-                    .and_then(JsonValue::as_bool)
-                    .unwrap_or(false)
-            ),
-        );
-    }
-    if let Some(custom) = user
-        .get("customAttributes")
-        .and_then(JsonValue::as_str)
-        .and_then(|value| serde_json::from_str::<JsonValue>(value).ok())
-        .and_then(|value| value.as_object().cloned())
-    {
-        claims.extend(custom);
-    }
-    if let Some(extra) = extra_claims {
-        // Session claims from beforeSignIn live in the token only.
-        claims.extend(extra.clone());
-    }
-    claims.insert("auth_time".to_owned(), json!(grant.auth_time));
-    claims.insert("user_id".to_owned(), json!(grant.uid));
-    claims.insert(
-        "firebase".to_owned(),
-        json!({ "identities": grant.identities, "sign_in_provider": grant.provider }),
-    );
-    claims.insert("iat".to_owned(), json!(now));
-    claims.insert("exp".to_owned(), json!(now + 3600));
-    claims.insert("aud".to_owned(), json!(project));
-    claims.insert(
-        "iss".to_owned(),
-        json!(format!("https://securetoken.google.com/{project}")),
-    );
-    claims.insert("sub".to_owned(), json!(grant.uid));
-    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
-    let payload = URL_SAFE_NO_PAD.encode(
-        serde_json::to_vec(&JsonValue::Object(claims)).expect("JSON serialization cannot fail"),
-    );
-    format!("{header}.{payload}.")
-}
-
-fn decode_jwt(token: &str) -> Result<JsonValue, ApiError> {
-    let payload = token
-        .split('.')
-        .nth(1)
-        .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_ID_TOKEN"))?;
-    let bytes = URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|_| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_ID_TOKEN"))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|_| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_ID_TOKEN"))
-}
-
-/// Whether the request carries the emulator's privileged owner token.
-fn bearer_is_owner(headers: &HeaderMap) -> bool {
-    headers
-        .get("authorization")
+async fn route(runtime: &Runtime, request: Request) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let path = uri.path().to_owned();
+    let query = uri.query().map(str::to_owned);
+    let pairs = query_pairs(query.as_deref());
+    let query_map: BTreeMap<String, String> = pairs.iter().cloned().collect();
+    let headers = request.headers().clone();
+    let host = headers
+        .get(header::HOST)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
+        .map(str::to_owned);
+
+    // Routes registered before the API: readiness, the document, the pages.
+    match (method.clone(), path.as_str()) {
+        (Method::GET, "/") => return pages::readiness(),
+        (Method::GET, "/emulator/openapi.json") => return pages::openapi("http", host.as_deref()),
+        (Method::GET, "/emulator/action") => return pages::action(runtime, &pairs),
+        (Method::GET, "/emulator/auth/handler") => return pages::handler(runtime, &query_map),
+        (Method::GET, "/emulator/auth/iframe") => return pages::iframe(),
+        _ => {}
+    }
+
+    // Express strips the content type of DELETE requests before parsing.
+    let mut content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
             value
-                .strip_prefix("Bearer ")
-                .or_else(|| value.strip_prefix("bearer "))
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase()
         })
-        .is_some_and(|token| token.trim().eq_ignore_ascii_case("owner"))
+        .filter(|value| !value.is_empty());
+    if method == Method::DELETE {
+        content_type = None;
+    }
+    let Ok(body_bytes) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
+        return ApiError::bad_request("request body too large").into_response();
+    };
+
+    // Legacy relyingparty rewrites.
+    let mut method = method;
+    let mut path = path;
+    let mut query = query;
+    let mut body_override: Option<JsonValue> = None;
+    if path.starts_with(legacy::PREFIX) {
+        let parsed_body =
+            if content_type.as_deref() == Some("application/json") && !body_bytes.is_empty() {
+                serde_json::from_slice::<JsonValue>(&body_bytes)
+                    .ok()
+                    .map(spec::camel_case_keys)
+                    .and_then(|value| value.as_object().cloned())
+            } else {
+                None
+            };
+        match legacy::rewrite(
+            method.as_str(),
+            &path,
+            query.as_deref().unwrap_or_default(),
+            parsed_body.as_ref(),
+        ) {
+            Ok(legacy::Rewrite::Path(rewritten)) => path = rewritten,
+            Ok(legacy::Rewrite::Download {
+                path: rewritten,
+                query: rewritten_query,
+            }) => {
+                method = Method::GET;
+                path = rewritten;
+                query = Some(rewritten_query);
+                content_type = None;
+                body_override = Some(JsonValue::Null);
+            }
+            Ok(legacy::Rewrite::Upload {
+                path: rewritten,
+                body,
+            }) => {
+                path = rewritten;
+                body_override = Some(body);
+            }
+            Ok(legacy::Rewrite::NotImplemented) => {
+                return ApiError::not_implemented(
+                    "signOutUser is not implemented in the Auth Emulator.",
+                )
+                .into_response();
+            }
+            Ok(legacy::Rewrite::None) => {}
+            Err(error) => return error.into_response(),
+        }
+    }
+    let pairs = query_pairs(query.as_deref());
+
+    let Some(matched) = spec::SPEC.match_route(method.as_str(), &path) else {
+        return ApiError::not_found().into_response();
+    };
+    let Some(operation) = matched.operation else {
+        let original = match &query {
+            Some(query) => format!("{path}?{query}"),
+            None => path.clone(),
+        };
+        return api_json(
+            StatusCode::METHOD_NOT_ALLOWED,
+            &json!({ "message": format!("Method {} not allowed for {original}", method.as_str()) }),
+        );
+    };
+
+    // Security.
+    let privileged = match authenticate(runtime, operation, &headers, &pairs) {
+        Ok(privileged) => privileged,
+        Err(error) => return error.into_response(),
+    };
+
+    // Query parameters.
+    let mut query_values: BTreeMap<String, JsonValue> = BTreeMap::new();
+    for parameter in &operation.query_parameters {
+        if let Some((_, raw)) = pairs.iter().find(|(name, _)| *name == parameter.name) {
+            match spec::validate_query_parameter(&parameter.schema, raw) {
+                Ok(value) => {
+                    query_values.insert(parameter.name.clone(), value);
+                }
+                Err(error) => return error.into_response(),
+            }
+        }
+    }
+
+    // Body.
+    let body = match parse_body(
+        operation,
+        content_type.as_deref(),
+        &body_bytes,
+        body_override,
+    ) {
+        Ok(body) => body,
+        Err(error) => return error.into_response(),
+    };
+
+    // Target project and tenant (`toExegesisOperation`).
+    // Path parameters may be empty (`tenants//accounts:batchCreate` is how
+    // the CLI imports project-level users); empty is falsy, so it falls through.
+    let target_project = matched
+        .path_parameters
+        .get("targetProjectId")
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .or_else(|| {
+            str_field(&body, "targetProjectId")
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        });
+    let project_id = match target_project {
+        Some(project) => {
+            if operation.security.iter().any(|scheme| scheme == "Oauth2") && !privileged {
+                return ApiError::bad_request("INSUFFICIENT_PERMISSION : Only authenticated requests can specify target_project_id.").into_response();
+            }
+            project
+        }
+        None => runtime.default_project().to_owned(),
+    };
+    let path_tenant = matched
+        .path_parameters
+        .get("tenantId")
+        .filter(|value| !value.is_empty())
+        .cloned();
+    let body_tenant = str_field(&body, "tenantId")
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    if let (Some(from_path), Some(from_body)) = (&path_tenant, &body_tenant)
+        && from_path != from_body
+    {
+        return ApiError::bad_request("TENANT_ID_MISMATCH").into_response();
+    }
+    let mut tenant_id = path_tenant.or(body_tenant);
+    if let Some(id_token) = str_field(&body, "idToken").filter(|value| !value.is_empty())
+        && let Some((_, payload)) = decode_jwt(id_token)
+    {
+        let Some(firebase) = payload.get("firebase") else {
+            let error = ApiError::unknown(
+                "Cannot read properties of undefined (reading 'tenant')",
+                "TypeError",
+            );
+            log_server_error(runtime, &error);
+            return error.into_response();
+        };
+        let token_tenant = firebase
+            .get("tenant")
+            .and_then(JsonValue::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        if let (Some(from_token), Some(target)) = (&token_tenant, &tenant_id)
+            && from_token != target
+        {
+            return ApiError::bad_request("TENANT_ID_MISMATCH").into_response();
+        }
+        tenant_id = tenant_id.or(token_tenant);
+    }
+    if let Some(refresh) = str_field(&body, "refreshToken").filter(|value| !value.is_empty()) {
+        match token::decode_refresh_token(refresh) {
+            Ok(record) => {
+                if let (Some(from_record), Some(target)) = (&record.tenant_id, &tenant_id)
+                    && from_record != target
+                {
+                    return ApiError::bad_request("TENANT_ID_MISMATCH: ((Refresh token tenant ID does not match target tenant ID.))").into_response();
+                }
+                tenant_id = tenant_id.or(record.tenant_id);
+            }
+            Err(error) => return error.into_response(),
+        }
+    }
+
+    let ctx = Ctx {
+        project_id,
+        tenant_id,
+        privileged,
+        body,
+        query: query_values,
+        emulator_url: runtime.emulator_url(host.as_deref()),
+    };
+    match dispatch(runtime, &operation.operation_id, &ctx).await {
+        Ok(value) => api_json(StatusCode::OK, &value),
+        Err(error) => {
+            log_server_error(runtime, &error);
+            error.into_response()
+        }
+    }
 }
 
-fn token_uid(request: &JsonValue, field: &str, project: &str) -> Result<String, ApiError> {
-    let payload = decode_jwt(required(request, field)?)?;
-    if payload.get("aud").and_then(JsonValue::as_str) != Some(project) {
-        return Err(ApiError::message(
-            StatusCode::BAD_REQUEST,
-            "INVALID_ID_TOKEN",
+/// `logError(err)`: the official server logs every 500 as a `WARN` line
+/// starting `<ErrorName>: <message>` (followed by a Node stack trace).
+fn log_server_error(runtime: &Runtime, error: &ApiError) {
+    if error.code != 500 {
+        return;
+    }
+    let name = match error.status {
+        Some("INTERNAL") => "InternalError".to_owned(),
+        _ => error.errors[0]["reason"]
+            .as_str()
+            .filter(|reason| reason.ends_with("Error"))
+            .unwrap_or("UnknownError")
+            .to_owned(),
+    };
+    runtime.log("WARN", &format!("{name}: {}", error.message));
+}
+
+/// The security schemes of the operation against the request's credentials.
+fn authenticate(
+    runtime: &Runtime,
+    operation: &spec::Operation,
+    headers: &HeaderMap,
+    pairs: &[(String, String)],
+) -> Result<bool, ApiError> {
+    if operation.security.is_empty() {
+        return Ok(false);
+    }
+    let accepts = |scheme: &str| operation.security.iter().any(|name| name == scheme);
+    if accepts("Oauth2")
+        && let Some(authorization) = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+        && authorization.to_lowercase().starts_with(AUTH_HEADER_PREFIX)
+    {
+        let token = &authorization[AUTH_HEADER_PREFIX.len()..];
+        if token.eq_ignore_ascii_case("owner") {
+            return Ok(true);
+        }
+        if token.starts_with(SERVICE_ACCOUNT_TOKEN_PREFIX) {
+            runtime.log(
+                "WARN",
+                &format!(
+                    "Received service account token {token}. Assuming that it owns project \"{}\".",
+                    runtime.default_project()
+                ),
+            );
+            return Ok(true);
+        }
+        return Err(ApiError::unauthenticated(
+            "Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+            "Invalid Credentials",
+            "authError",
         ));
     }
-    payload
-        .get("user_id")
-        .or_else(|| payload.get("sub"))
-        .and_then(JsonValue::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_ID_TOKEN"))
-}
-
-fn configure_password(
-    project: &mut ProjectData,
-    project_id: &str,
-    uid: &str,
-    user: &mut JsonValue,
-    password: &str,
-    now: i64,
-) {
-    let salt = next_identifier(project, project_id, uid, "salt");
-    let digest = password_digest(&salt, password);
-    project.passwords.insert(
-        uid.to_owned(),
-        PasswordSecret {
-            salt: salt.clone(),
-            digest: digest.clone(),
-        },
-    );
-    user["salt"] = json!(salt);
-    user["passwordHash"] = json!(digest);
-    user["passwordUpdatedAt"] = json!(now);
-    user["validSince"] = json!((now / 1000).to_string());
-}
-
-fn apply_user_update(user: &mut JsonValue, request: &JsonValue) {
-    for field in [
-        "displayName",
-        "photoUrl",
-        "email",
-        "emailVerified",
-        "disabled",
-        "phoneNumber",
-        "customAttributes",
-    ] {
-        if let Some(value) = request.get(field) {
-            user[field] = value.clone();
-        }
-    }
-    if let Some(provider) = user
-        .get_mut("providerUserInfo")
-        .and_then(JsonValue::as_array_mut)
-        .and_then(|values| values.first_mut())
-    {
-        for field in ["displayName", "photoUrl", "email"] {
-            if let Some(value) = request.get(field) {
-                provider[field] = value.clone();
-            }
-        }
-    }
-}
-
-fn update_response(user: &JsonValue) -> JsonValue {
-    let mut response = json!({
-        "kind": UPDATE_KIND,
-        "localId": user.get("localId"),
-        "emailVerified": user.get("emailVerified").and_then(JsonValue::as_bool).unwrap_or(false),
-        "providerUserInfo": user.get("providerUserInfo").cloned().unwrap_or_else(|| json!([]))
-    });
-    for field in ["email", "displayName", "photoUrl", "passwordHash"] {
-        if let Some(value) = user.get(field) {
-            response[field] = value.clone();
-        }
-    }
-    response
-}
-
-fn normalized_import_user(user: &JsonValue) -> Result<JsonValue, AuthError> {
-    let object = user
-        .as_object()
-        .ok_or_else(|| AuthError("Auth user must be an object".to_owned()))?;
-    let mut normalized = object.clone();
-    normalized
-        .entry("emailVerified".to_owned())
-        .or_insert(JsonValue::Bool(false));
-    normalized
-        .entry("disabled".to_owned())
-        .or_insert(JsonValue::Bool(false));
-    if !normalized.contains_key("validSince") {
-        normalized.insert("validSince".to_owned(), json!(now_seconds().to_string()));
-    }
-    Ok(JsonValue::Object(normalized))
-}
-
-fn provider_matches(user: &JsonValue, provider: &str, subject: &str) -> bool {
-    user.get("providerUserInfo")
-        .and_then(JsonValue::as_array)
-        .is_some_and(|providers| {
-            providers.iter().any(|value| {
-                value.get("providerId").and_then(JsonValue::as_str) == Some(provider)
-                    && value.get("rawId").and_then(JsonValue::as_str) == Some(subject)
-            })
-        })
-}
-
-fn copy_profile(user: &mut JsonValue, profile: &JsonValue) {
-    for (source, target) in [
-        ("name", "displayName"),
-        ("picture", "photoUrl"),
-        ("email", "email"),
-        ("email_verified", "emailVerified"),
-    ] {
-        if let Some(value) = profile.get(source) {
-            user[target] = value.clone();
-        }
-    }
-}
-
-fn idp_raw_user_info(subject: &str, profile: &JsonValue) -> String {
-    let mut value = json!({
-        "granted_scopes": "openid https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
-        "id": subject,
-        "locale": "en"
-    });
-    for (source, target) in [
-        ("name", "name"),
-        ("given_name", "given_name"),
-        ("family_name", "family_name"),
-        ("email_verified", "verified_email"),
-        ("email", "email"),
-        ("picture", "picture"),
-    ] {
-        if let Some(field) = profile.get(source) {
-            value[target] = field.clone();
-        }
-    }
-    serde_json::to_string(&value).expect("JSON serialization cannot fail")
-}
-
-fn find_by_email(project: &ProjectData, email: &str) -> Option<String> {
-    project.users.iter().find_map(|(uid, user)| {
-        user.get("email")
-            .and_then(JsonValue::as_str)
-            .is_some_and(|value| value.eq_ignore_ascii_case(email))
-            .then(|| uid.clone())
-    })
-}
-
-fn next_identifier(project: &mut ProjectData, project_id: &str, seed: &str, kind: &str) -> String {
-    project.next_id = project.next_id.saturating_add(1);
-    let hash = stable_hash(&[
-        project_id,
-        seed,
-        kind,
-        &project.next_id.to_string(),
-        &now_millis().to_string(),
-    ]);
-    if kind == "user" {
-        // Official emulator localIds are 28 alphanumeric characters
-        // (`randomId(28)`); keep the same shape so consumers that key on it
-        // (document ids, path segments) behave identically.
-        alphanumeric_id(&hash, 28)
-    } else {
-        hash
-    }
-}
-
-fn alphanumeric_id(hash: &str, length: usize) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut digest = Sha256::new();
-    digest.update(hash.as_bytes());
-    let mut output = String::with_capacity(length);
-    let mut counter = 0u32;
-    while output.len() < length {
-        let mut round = digest.clone();
-        round.update(counter.to_le_bytes());
-        for byte in round.finalize() {
-            if output.len() == length {
-                break;
-            }
-            output.push(ALPHABET[usize::from(byte) % ALPHABET.len()] as char);
-        }
-        counter += 1;
-    }
-    output
-}
-
-fn lifecycle_event_id(
-    project: &mut ProjectData,
-    project_id: &str,
-    uid: &str,
-    kind: Lifecycle,
-) -> String {
-    let hash = next_identifier(
-        project,
-        project_id,
-        uid,
-        match kind {
-            Lifecycle::Create => "auth-create",
-            Lifecycle::Delete => "auth-delete",
-        },
-    );
-    // `randomUUID()` in the official emulator's event body.
-    uuid_shaped(&hash)
-}
-
-/// Formats a digest of `seed` as a version-4 UUID.
-fn uuid_shaped(seed: &str) -> String {
-    let digest = Sha256::digest(seed.as_bytes());
-    let mut octets = [0u8; 16];
-    octets.copy_from_slice(&digest[..16]);
-    octets[6] = (octets[6] & 0x0f) | 0x40;
-    octets[8] = (octets[8] & 0x3f) | 0x80;
-    let hex = octets
+    let key_query = pairs
         .iter()
-        .fold(String::with_capacity(32), |mut text, byte| {
-            use std::fmt::Write as _;
-            let _ = write!(text, "{byte:02x}");
-            text
-        });
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    )
-}
-
-fn stable_hash(parts: &[&str]) -> String {
-    let mut digest = Sha256::new();
-    for part in parts {
-        digest.update(part.as_bytes());
-        digest.update([0]);
-    }
-    URL_SAFE_NO_PAD.encode(digest.finalize())
-}
-
-fn password_digest(salt: &str, password: &str) -> String {
-    // Official Auth emulator format, deliberately NOT a production password
-    // hash. Local emulator exports contain recoverable development passwords.
-    format!("fakeHash:salt={salt}:password={password}")
-}
-
-fn legacy_password_digest(salt: &str, password: &str) -> String {
-    let mut digest = Sha256::new();
-    digest.update(salt.as_bytes());
-    digest.update([0]);
-    digest.update(password.as_bytes());
-    BASE64.encode(digest.finalize())
-}
-
-fn parse_body(headers: &HeaderMap, body: &[u8]) -> Result<JsonValue, ApiError> {
-    let is_json = headers
-        .get("content-type")
+        .find(|(name, _)| name == "key")
+        .map(|(_, value)| value.as_str())
+        .filter(|value| !value.is_empty());
+    let key_header = headers
+        .get("x-goog-api-key")
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.starts_with("application/json"));
-    if is_json {
-        serde_json::from_slice(body)
-            .map_err(|_| ApiError::message(StatusCode::BAD_REQUEST, "INVALID_JSON_PAYLOAD"))
-    } else {
-        let fields: JsonMap<String, JsonValue> = url::form_urlencoded::parse(body)
-            .into_owned()
-            .map(|(key, value)| (key, JsonValue::String(value)))
-            .collect();
-        Ok(JsonValue::Object(fields))
+        .filter(|value| !value.is_empty());
+    if (accepts("apiKeyQuery") && key_query.is_some())
+        || (accepts("apiKeyHeader") && key_header.is_some())
+    {
+        return Ok(false);
     }
+    if accepts("apiKeyQuery") || accepts("apiKeyHeader") {
+        return Err(ApiError::permission_denied(
+            "The request is missing a valid API key.",
+        ));
+    }
+    Err(ApiError::unauthenticated(
+        "Request is missing required authentication credential. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+        "Login Required.",
+        "required",
+    ))
 }
 
-fn required<'a>(value: &'a JsonValue, field: &str) -> Result<&'a str, ApiError> {
-    value
-        .get(field)
-        .and_then(JsonValue::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| ApiError::message(StatusCode::BAD_REQUEST, format!("MISSING_{field}")))
-}
-
-fn string_field<'a>(value: &'a JsonValue, field: &str) -> Result<&'a str, AuthError> {
-    value
-        .get(field)
-        .and_then(JsonValue::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AuthError(format!("Auth user requires {field}")))
-}
-
-fn user_not_found() -> ApiError {
-    ApiError::message(StatusCode::BAD_REQUEST, "USER_NOT_FOUND")
-}
-
-fn invalid_password() -> ApiError {
-    ApiError::message(StatusCode::BAD_REQUEST, "INVALID_PASSWORD")
-}
-
-fn invalid_refresh() -> ApiError {
-    ApiError::message(StatusCode::BAD_REQUEST, "INVALID_REFRESH_TOKEN")
-}
-
-fn internal(error: AuthError) -> ApiError {
-    ApiError::message(StatusCode::INTERNAL_SERVER_ERROR, error.0)
-}
-
-fn default_config() -> JsonValue {
-    json!({
-        "signIn": { "allowDuplicateEmails": false },
-        "emailPrivacyConfig": { "enableImprovedEmailPrivacy": false }
-    })
-}
-
-fn merge_json(target: &mut JsonValue, source: &JsonValue) {
-    if let (Some(target), Some(source)) = (target.as_object_mut(), source.as_object()) {
-        for (key, value) in source {
-            if let Some(existing) = target.get_mut(key) {
-                merge_json(existing, value);
-            } else {
-                target.insert(key.clone(), value.clone());
+/// Body parsing as express + exegesis do it: JSON (or form data for the
+/// grant route), camel-cased keys, REST-mapping coercions, schema validation.
+fn parse_body(
+    operation: &spec::Operation,
+    content_type: Option<&str>,
+    bytes: &[u8],
+    body_override: Option<JsonValue>,
+) -> Result<JsonMap<String, JsonValue>, ApiError> {
+    let Some(schema) = &operation.body_schema else {
+        return Ok(JsonMap::new());
+    };
+    let mut value = match body_override {
+        Some(JsonValue::Null) => JsonValue::Object(JsonMap::new()),
+        Some(value) => value,
+        None => match content_type {
+            None => JsonValue::Object(JsonMap::new()),
+            Some("application/json") => {
+                if bytes.is_empty() {
+                    JsonValue::Object(JsonMap::new())
+                } else {
+                    let text = String::from_utf8_lossy(bytes);
+                    let trimmed = text.trim_start();
+                    // body-parser strict mode: only objects and arrays.
+                    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+                        return Err(ApiError::parse_error(format!(
+                            "Invalid JSON payload received. Unexpected token '{}', \"{}\" is not valid JSON",
+                            trimmed.chars().next().unwrap_or(' '),
+                            truncate_for_error(&text)
+                        )));
+                    }
+                    serde_json::from_str::<JsonValue>(&text).map_err(|error| {
+                        ApiError::parse_error(format!("Invalid JSON payload received. {error}"))
+                    })?
+                }
             }
-        }
+            Some("application/x-www-form-urlencoded")
+                if operation
+                    .body_content_types
+                    .iter()
+                    .any(|kind| kind == "application/x-www-form-urlencoded") =>
+            {
+                let mut object = JsonMap::new();
+                for (key, value) in url::form_urlencoded::parse(bytes) {
+                    object.insert(key.into_owned(), JsonValue::String(value.into_owned()));
+                }
+                JsonValue::Object(object)
+            }
+            Some(other) => {
+                return Err(ApiError::bad_request_reason(
+                    format!("Invalid content-type: {other}"),
+                    "unknown",
+                ));
+            }
+        },
+    };
+    value = spec::camel_case_keys(value);
+    spec::validate_body(schema, &mut value)?;
+    Ok(value.as_object().cloned().unwrap_or_default())
+}
+
+fn truncate_for_error(text: &str) -> String {
+    let compact: String = text.chars().take(10).collect();
+    if text.chars().count() > 10 {
+        format!("{compact}\"...")
     } else {
-        *target = source.clone();
+        compact
     }
 }
+
+async fn dispatch(runtime: &Runtime, operation_id: &str, ctx: &Ctx) -> Result<JsonValue, ApiError> {
+    use ops::{admin, config, mfa, oob, signin, signup, tenants, update};
+    match operation_id {
+        "identitytoolkit.getProjects" => admin::get_projects(runtime, ctx),
+        "identitytoolkit.getRecaptchaParams" => admin::get_recaptcha_params(runtime, ctx),
+        "identitytoolkit.accounts.createAuthUri" => signin::create_auth_uri(runtime, ctx),
+        "identitytoolkit.accounts.delete"
+        | "identitytoolkit.projects.accounts.delete"
+        | "identitytoolkit.projects.tenants.accounts.delete" => admin::delete_account(runtime, ctx),
+        "identitytoolkit.accounts.lookup"
+        | "identitytoolkit.projects.accounts.lookup"
+        | "identitytoolkit.projects.tenants.accounts.lookup" => admin::lookup(runtime, ctx),
+        "identitytoolkit.accounts.resetPassword" => oob::reset_password_op(runtime, ctx),
+        "identitytoolkit.accounts.sendOobCode"
+        | "identitytoolkit.projects.accounts.sendOobCode"
+        | "identitytoolkit.projects.tenants.accounts.sendOobCode" => {
+            oob::send_oob_code(runtime, ctx)
+        }
+        "identitytoolkit.accounts.sendVerificationCode" => {
+            signin::send_verification_code(runtime, ctx)
+        }
+        "identitytoolkit.accounts.signInWithCustomToken" => {
+            signin::sign_in_with_custom_token(runtime, ctx)
+        }
+        "identitytoolkit.accounts.signInWithEmailLink" => {
+            signin::sign_in_with_email_link(runtime, ctx).await
+        }
+        "identitytoolkit.accounts.signInWithIdp" => signin::sign_in_with_idp(runtime, ctx).await,
+        "identitytoolkit.accounts.signInWithPassword" => {
+            signin::sign_in_with_password(runtime, ctx).await
+        }
+        "identitytoolkit.accounts.signInWithPhoneNumber" => {
+            signin::sign_in_with_phone_number(runtime, ctx).await
+        }
+        "identitytoolkit.accounts.signUp"
+        | "identitytoolkit.projects.accounts"
+        | "identitytoolkit.projects.tenants.accounts" => signup::sign_up(runtime, ctx).await,
+        "identitytoolkit.accounts.update"
+        | "identitytoolkit.projects.accounts.update"
+        | "identitytoolkit.projects.tenants.accounts.update" => {
+            update::set_account_info(runtime, ctx)
+        }
+        "identitytoolkit.accounts.mfaEnrollment.finalize" => {
+            mfa::mfa_enrollment_finalize(runtime, ctx)
+        }
+        "identitytoolkit.accounts.mfaEnrollment.start" => mfa::mfa_enrollment_start(runtime, ctx),
+        "identitytoolkit.accounts.mfaEnrollment.withdraw" => {
+            mfa::mfa_enrollment_withdraw(runtime, ctx)
+        }
+        "identitytoolkit.accounts.mfaSignIn.start" => mfa::mfa_sign_in_start(runtime, ctx),
+        "identitytoolkit.accounts.mfaSignIn.finalize" => {
+            mfa::mfa_sign_in_finalize(runtime, ctx).await
+        }
+        "identitytoolkit.accounts.passkeyEnrollment.start" => {
+            mfa::passkey_enrollment_start(runtime, ctx)
+        }
+        "identitytoolkit.accounts.passkeyEnrollment.finalize" => {
+            mfa::passkey_enrollment_finalize(runtime, ctx)
+        }
+        "identitytoolkit.accounts.passkeySignIn.start" => mfa::passkey_sign_in_start(runtime, ctx),
+        "identitytoolkit.accounts.passkeySignIn.finalize" => {
+            mfa::passkey_sign_in_finalize(runtime, ctx)
+        }
+        "identitytoolkit.projects.createSessionCookie"
+        | "identitytoolkit.projects.tenants.createSessionCookie" => {
+            admin::create_session_cookie(runtime, ctx)
+        }
+        "identitytoolkit.projects.queryAccounts"
+        | "identitytoolkit.projects.accounts.query"
+        | "identitytoolkit.projects.tenants.accounts.query" => admin::query_accounts(runtime, ctx),
+        "identitytoolkit.projects.getConfig" => config::get_config(runtime, ctx),
+        "identitytoolkit.projects.updateConfig" => config::update_config(runtime, ctx),
+        "identitytoolkit.projects.accounts.batchCreate"
+        | "identitytoolkit.projects.tenants.accounts.batchCreate" => {
+            admin::batch_create(runtime, ctx)
+        }
+        "identitytoolkit.projects.accounts.batchDelete"
+        | "identitytoolkit.projects.tenants.accounts.batchDelete" => {
+            admin::batch_delete(runtime, ctx)
+        }
+        "identitytoolkit.projects.accounts.batchGet"
+        | "identitytoolkit.projects.tenants.accounts.batchGet" => admin::batch_get(runtime, ctx),
+        "identitytoolkit.projects.tenants.create" => tenants::create_tenant(runtime, ctx),
+        "identitytoolkit.projects.tenants.delete" => tenants::delete_tenant(runtime, ctx),
+        "identitytoolkit.projects.tenants.get" => tenants::get_tenant(runtime, ctx),
+        "identitytoolkit.projects.tenants.list" => tenants::list_tenants(runtime, ctx),
+        "identitytoolkit.projects.tenants.patch" => tenants::update_tenant(runtime, ctx),
+        "securetoken.token" => signin::grant_token(runtime, ctx),
+        "emulator.projects.accounts.delete" => config::delete_all_accounts(runtime, ctx),
+        "emulator.projects.config.get" => config::get_emulator_config(runtime, ctx),
+        "emulator.projects.config.update" => config::update_emulator_config(runtime, ctx),
+        "emulator.projects.oobCodes.list" => config::list_oob_codes(runtime, ctx),
+        "emulator.projects.verificationCodes.list" => config::list_verification_codes(runtime, ctx),
+        other => Err(ApiError::not_implemented(format!(
+            "{other} is not implemented in the Auth Emulator."
+        ))),
+    }
+}
+
+// ---------------------------------------------------------------- persistence
 
 fn validate_project(project: &str) -> Result<(), AuthError> {
-    if project.is_empty() || project.bytes().any(|byte| byte.is_ascii_whitespace()) {
-        Err(AuthError(
-            "Auth project id must be non-empty and contain no whitespace".to_owned(),
-        ))
-    } else {
-        Ok(())
+    if project.is_empty() || project.chars().any(char::is_whitespace) {
+        return Err(AuthError(
+            "Auth project id must be a non-empty string without whitespace".to_owned(),
+        ));
     }
+    Ok(())
 }
 
 fn load_state(path: &FilePath) -> Result<AuthData, AuthError> {
-    match std::fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map_err(|error| AuthError(format!("invalid Auth state: {error}"))),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(AuthData::default()),
-        Err(error) => Err(AuthError(format!("failed to read Auth state: {error}"))),
+    if !path.is_file() {
+        return Ok(AuthData::default());
     }
+    let bytes = std::fs::read(path)
+        .map_err(|error| AuthError(format!("failed to read Auth state: {error}")))?;
+    let value: JsonValue = serde_json::from_slice(&bytes)
+        .map_err(|error| AuthError(format!("invalid Auth state JSON: {error}")))?;
+    if value.get("version").and_then(JsonValue::as_u64) == Some(2) {
+        return serde_json::from_value(value)
+            .map_err(|error| AuthError(format!("invalid Auth state: {error}")));
+    }
+    // The next.7 layout: `projects.<id>.{users, config}` with a flat config.
+    let mut data = AuthData {
+        version: 2,
+        projects: BTreeMap::new(),
+    };
+    for (project_id, project) in value
+        .get("projects")
+        .and_then(JsonValue::as_object)
+        .into_iter()
+        .flatten()
+    {
+        let agent = data.agent(project_id);
+        for (local_id, user) in project
+            .get("users")
+            .and_then(JsonValue::as_object)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(record) = user.as_object() {
+                agent.project.users.insert(local_id.clone(), record.clone());
+            }
+        }
+        if let Some(config) = project.get("config").and_then(JsonValue::as_object) {
+            let mut mask = Vec::new();
+            if config
+                .get("signIn")
+                .and_then(|sign_in| sign_in.get("allowDuplicateEmails"))
+                .is_some()
+            {
+                mask.push("signIn.allowDuplicateEmails");
+            }
+            if config
+                .get("emailPrivacyConfig")
+                .and_then(|privacy| privacy.get("enableImprovedEmailPrivacy"))
+                .is_some()
+            {
+                mask.push("emailPrivacyConfig.enableImprovedEmailPrivacy");
+            }
+            let joined = mask.join(",");
+            agent.update_config(
+                config,
+                if joined.is_empty() {
+                    None
+                } else {
+                    Some(&joined)
+                },
+            );
+        }
+    }
+    Ok(data)
 }
 
-fn write_atomic(path: &FilePath, value: &impl Serialize) -> Result<(), AuthError> {
+fn write_atomic(path: &FilePath, value: &impl serde::Serialize) -> Result<(), AuthError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
             AuthError(format!("failed to create Auth state directory: {error}"))
         })?;
     }
-    let temporary = path.with_extension("tmp");
     let bytes = serde_json::to_vec_pretty(value)
         .map_err(|error| AuthError(format!("failed to serialize Auth state: {error}")))?;
+    let temporary = path.with_extension("tmp");
     std::fs::write(&temporary, bytes)
         .map_err(|error| AuthError(format!("failed to write Auth state: {error}")))?;
     std::fs::rename(&temporary, path)
-        .map_err(|error| AuthError(format!("failed to publish Auth state: {error}")))
-}
-
-fn now_seconds() -> i64 {
-    OffsetDateTime::now_utc().unix_timestamp()
-}
-
-fn now_millis() -> i64 {
-    let value = OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000;
-    i64::try_from(value).unwrap_or(i64::MAX)
-}
-
-fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .expect("current time is RFC3339 representable")
-}
-
-fn iso_from_millis(value: i64) -> String {
-    milliseconds_rfc3339(i128::from(value))
-}
-
-fn milliseconds_rfc3339(value: i128) -> String {
-    OffsetDateTime::from_unix_timestamp_nanos(value.saturating_mul(1_000_000))
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-        .format(&Rfc3339)
-        .expect("timestamp is RFC3339 representable")
+        .map_err(|error| AuthError(format!("failed to publish Auth state: {error}")))?;
+    Ok(())
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -1996,395 +1178,4 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
-mod password_tests;
-
-#[cfg(test)]
-mod tests {
-    mod developer_tools;
-    mod oauth;
-    mod refresh_reuse;
-
-    use axum::body::{Body, to_bytes};
-    use axum::http::{Request, header};
-    use fireside_functions_bridge::TriggerObserver;
-    use tower::ServiceExt as _;
-
-    use super::*;
-
-    const PROJECT: &str = "demo-fireside-phase4-auth-oracle";
-
-    fn test_runtime() -> (
-        AuthRuntime,
-        tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
-    ) {
-        let registry = TriggerRegistry::default();
-        let (observer, receiver) = TriggerObserver::channel(registry.clone());
-        (router(PROJECT, observer.queue(), registry), receiver)
-    }
-
-    fn json_request(method: Method, uri: &str, body: &JsonValue) -> Request<Body> {
-        Request::builder()
-            .method(method)
-            .uri(uri)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::to_vec(body).expect("JSON")))
-            .expect("request")
-    }
-
-    async fn response_json(response: Response) -> JsonValue {
-        let bytes = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("response body");
-        serde_json::from_slice(&bytes).expect("response JSON")
-    }
-
-    async fn call_json(
-        runtime: &AuthRuntime,
-        method: Method,
-        uri: &str,
-        body: JsonValue,
-    ) -> (StatusCode, JsonValue) {
-        let response = runtime
-            .application()
-            .oneshot(json_request(method, uri, &body))
-            .await
-            .expect("Auth request");
-        let status = response.status();
-        (status, response_json(response).await)
-    }
-
-    #[tokio::test]
-    async fn browser_sdk_preflight_accepts_the_firebase_client_header() {
-        let (runtime, _dispatches) = test_runtime();
-        let response = runtime
-            .application()
-            .oneshot(
-                Request::builder()
-                    .method(Method::OPTIONS)
-                    .uri("/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake")
-                    .header(header::ORIGIN, "http://127.0.0.1:5000")
-                    .header(
-                        header::ACCESS_CONTROL_REQUEST_HEADERS,
-                        "content-type,x-firebase-client",
-                    )
-                    .body(Body::empty())
-                    .expect("preflight"),
-            )
-            .await
-            .expect("Auth preflight");
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        assert!(
-            response
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
-                .and_then(|value| value.to_str().ok())
-                .is_some_and(|value| value.contains("X-Firebase-Client"))
-        );
-    }
-
-    #[tokio::test]
-    async fn password_admin_and_refresh_contract() {
-        let (runtime, mut dispatches) = test_runtime();
-        let (status, signup) = call_json(
-            &runtime,
-            Method::POST,
-            "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
-            json!({
-                "email": "phase4-auth-oracle@example.com",
-                "password": "correct horse battery staple",
-                "displayName": "火🔥 Auth Oracle",
-                "returnSecureToken": true
-            }),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(signup["kind"], SIGNUP_KIND);
-        let uid = signup["localId"].as_str().expect("uid").to_owned();
-        let id_token = signup["idToken"].as_str().expect("id token").to_owned();
-        let claims = decode_jwt(&id_token).expect("JWT");
-        assert_eq!(claims["aud"], PROJECT);
-        assert_eq!(claims["firebase"]["sign_in_provider"], "password");
-        let create = dispatches.try_recv().expect("create dispatch");
-        assert_eq!(
-            create.path,
-            format!("/functions/projects/{PROJECT}/trigger_multicast")
-        );
-        assert_eq!(
-            serde_json::from_slice::<JsonValue>(&create.body).expect("event")["eventType"],
-            "providers/firebase.auth/eventTypes/user.create"
-        );
-
-        let (_, lookup) = call_json(
-            &runtime,
-            Method::POST,
-            "/identitytoolkit.googleapis.com/v1/accounts:lookup?key=fake",
-            json!({ "idToken": id_token }),
-        )
-        .await;
-        assert_eq!(
-            lookup["users"][0]["email"],
-            "phase4-auth-oracle@example.com"
-        );
-        assert!(lookup["users"][0]["passwordHash"].is_string());
-
-        let (_, _) = call_json(
-            &runtime,
-            Method::POST,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts:update"),
-            json!({ "localId": uid, "customAttributes": "{\"role\":\"owner\",\"unicode\":\"火🔥\"}" }),
-        )
-        .await;
-        let (_, signed_in) = call_json(
-            &runtime,
-            Method::POST,
-            "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake",
-            json!({ "email": "phase4-auth-oracle@example.com", "password": "correct horse battery staple", "returnSecureToken": true }),
-        )
-        .await;
-        let claims = decode_jwt(signed_in["idToken"].as_str().expect("id token")).expect("JWT");
-        assert_eq!(claims["role"], "owner");
-        assert_eq!(claims["unicode"], "火🔥");
-
-        let refresh = signed_in["refreshToken"].as_str().expect("refresh");
-        let form = format!("grant_type=refresh_token&refresh_token={refresh}");
-        let response = runtime
-            .application()
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/securetoken.googleapis.com/v1/token?key=fake")
-                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .body(Body::from(form))
-                    .expect("request"),
-            )
-            .await
-            .expect("refresh");
-        let refreshed = response_json(response).await;
-        assert_eq!(refreshed["token_type"], "Bearer");
-        assert_eq!(refreshed["user_id"], uid);
-
-        let (status, error) = call_json(
-            &runtime,
-            Method::POST,
-            "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake",
-            json!({ "email": "phase4-auth-oracle@example.com", "password": "wrong" }),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(error["error"]["message"], "INVALID_PASSWORD");
-    }
-
-    #[tokio::test]
-    async fn import_is_quiet_but_admin_lifecycle_dispatches() {
-        let (runtime, mut dispatches) = test_runtime();
-        let (_, imported) = call_json(
-            &runtime,
-            Method::POST,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts:batchCreate"),
-            json!({ "users": [
-                { "localId": "a", "email": "a@example.com", "displayName": "Imported 火" },
-                { "localId": "b", "email": "b@example.com", "disabled": true }
-            ] }),
-        )
-        .await;
-        assert_eq!(imported["error"], json!([]));
-        assert!(dispatches.try_recv().is_err());
-
-        let (_, exported) = call_json(
-            &runtime,
-            Method::GET,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts:batchGet?maxResults=1000"),
-            json!({}),
-        )
-        .await;
-        assert_eq!(exported["users"].as_array().map(Vec::len), Some(2));
-
-        let (_, created) = call_json(
-            &runtime,
-            Method::POST,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts"),
-            json!({ "localId": "lifecycle", "email": "life@example.com", "displayName": "Lifecycle 🔥" }),
-        )
-        .await;
-        assert_eq!(created["kind"], SIGNUP_KIND);
-        let create = dispatches.try_recv().expect("create event");
-        assert!(
-            String::from_utf8(create.body)
-                .expect("UTF-8")
-                .contains("Lifecycle 🔥")
-        );
-
-        let (_, deleted) = call_json(
-            &runtime,
-            Method::POST,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts:delete"),
-            json!({ "localId": "lifecycle" }),
-        )
-        .await;
-        assert_eq!(deleted["kind"], DELETE_KIND);
-        let delete = dispatches.try_recv().expect("delete event");
-        assert_eq!(
-            serde_json::from_slice::<JsonValue>(&delete.body).expect("event")["eventType"],
-            "providers/firebase.auth/eventTypes/user.delete"
-        );
-    }
-
-    #[tokio::test]
-    async fn fake_google_idp_and_browser_helpers_follow_capture() {
-        let (runtime, _dispatches) = test_runtime();
-        let idp = json!({
-            "sub": "phase4-google-subject", "email": "phase4-google@example.com",
-            "email_verified": true, "name": "Google 火🔥", "given_name": "Google",
-            "family_name": "Oracle", "picture": "https://example.invalid/avatar.png"
-        });
-        let post_body = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("providerId", "google.com")
-            .append_pair("id_token", &serde_json::to_string(&idp).expect("JSON"))
-            .finish();
-        let (_, response) = call_json(
-            &runtime,
-            Method::POST,
-            "/identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=fake",
-            json!({ "requestUri": "http://localhost/callback", "postBody": post_body, "returnSecureToken": true }),
-        )
-        .await;
-        assert_eq!(response["kind"], "identitytoolkit#VerifyAssertionResponse");
-        assert_eq!(response["displayName"], "Google 火🔥");
-        assert_eq!(response["providerId"], "google.com");
-        assert_eq!(response["isNewUser"], true);
-
-        let helper = runtime
-            .application()
-            .oneshot(
-                Request::builder()
-                    .uri("/emulator/auth/iframe?apiKey=fake&appName=phase4")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("helper");
-        let bytes = to_bytes(helper.into_body(), usize::MAX)
-            .await
-            .expect("HTML");
-        let html = String::from_utf8(bytes.to_vec()).expect("UTF-8");
-        assert!(html.contains("sendAuthEvent"));
-        assert!(html.contains("gapi"));
-    }
-
-    #[tokio::test]
-    async fn custom_token_claims_and_background_toggle_are_preserved() {
-        let registry = TriggerRegistry::default();
-        registry.set_background_enabled(false);
-        let (observer, mut dispatches) = TriggerObserver::channel(registry.clone());
-        let runtime = router(PROJECT, observer.queue(), registry.clone());
-        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
-        let payload = URL_SAFE_NO_PAD.encode(
-            serde_json::to_vec(&json!({
-                "uid": "phase4-custom-user",
-                "claims": { "tier": "oracle", "emoji": "🔥" }
-            }))
-            .expect("JSON"),
-        );
-        let (_, response) = call_json(
-            &runtime,
-            Method::POST,
-            "/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake",
-            json!({ "token": format!("{header}.{payload}."), "returnSecureToken": true }),
-        )
-        .await;
-        assert_eq!(response["isNewUser"], true);
-        let claims = decode_jwt(response["idToken"].as_str().expect("token")).expect("JWT");
-        assert_eq!(claims["tier"], "oracle");
-        assert_eq!(claims["emoji"], "🔥");
-        assert!(dispatches.try_recv().is_err());
-
-        registry.set_background_enabled(true);
-        let (_, _) = call_json(
-            &runtime,
-            Method::POST,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts"),
-            json!({ "localId": "enabled-user", "email": "enabled@example.com" }),
-        )
-        .await;
-        assert!(dispatches.try_recv().is_ok());
-    }
-
-    #[tokio::test]
-    async fn durable_state_survives_runtime_restart() {
-        let file = std::env::temp_dir().join(format!(
-            "fireside-auth-test-{}-{}.json",
-            std::process::id(),
-            now_millis()
-        ));
-        let registry = TriggerRegistry::default();
-        let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
-        let runtime = AuthRuntime::new(
-            PROJECT,
-            observer.queue(),
-            registry.clone(),
-            Some(file.clone()),
-        )
-        .expect("runtime");
-        let (_, _) = call_json(
-            &runtime,
-            Method::POST,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts"),
-            json!({ "localId": "durable-user", "email": "durable@example.com" }),
-        )
-        .await;
-        drop(runtime);
-
-        let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
-        let restarted = AuthRuntime::new(PROJECT, observer.queue(), registry, Some(file.clone()))
-            .expect("restarted runtime");
-        assert_eq!(restarted.user_count(), 1);
-        std::fs::remove_file(file).expect("remove test state");
-    }
-
-    #[tokio::test]
-    async fn suite_directory_round_trip_preserves_users_and_config() {
-        let root = std::env::temp_dir().join(format!(
-            "fireside-auth-export-test-{}-{}",
-            std::process::id(),
-            now_millis()
-        ));
-        let registry = TriggerRegistry::default();
-        let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
-        let runtime = router(PROJECT, observer.queue(), registry.clone());
-        let (_, _) = call_json(
-            &runtime,
-            Method::POST,
-            &format!("/identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts"),
-            json!({ "localId": "export-user", "email": "export@example.com" }),
-        )
-        .await;
-        runtime.export_directory(&root).expect("export");
-        let accounts: JsonValue =
-            serde_json::from_slice(&std::fs::read(root.join("accounts.json")).expect("accounts"))
-                .expect("accounts JSON");
-        assert_eq!(accounts["kind"], "identitytoolkit#DownloadAccountResponse");
-        assert!(root.join("config.json").is_file());
-
-        let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
-        let imported = router(PROJECT, observer.queue(), registry);
-        assert_eq!(imported.import_directory(&root).expect("import"), 1);
-        assert_eq!(imported.user_count(), 1);
-        std::fs::remove_dir_all(root).expect("remove export");
-    }
-
-    #[test]
-    fn frozen_fixture_contains_every_required_operation() {
-        let identity: JsonValue = serde_json::from_str(include_str!(
-            "../../../conformance/fixtures/firebase-suite-v1/auth-identity-toolkit-and-admin/fixture.json"
-        ))
-        .expect("identity fixture");
-        let lifecycle: JsonValue = serde_json::from_str(include_str!(
-            "../../../conformance/fixtures/firebase-suite-v1/auth-import-export-and-trigger-dispatch/fixture.json"
-        ))
-        .expect("lifecycle fixture");
-        assert_eq!(identity["targetVersion"], "15.22.0");
-        assert_eq!(identity["observations"].as_array().map(Vec::len), Some(11));
-        assert_eq!(lifecycle["dispatches"].as_array().map(Vec::len), Some(2));
-        assert_eq!(lifecycle["invariants"]["batchImportDispatchCount"], 0);
-    }
-}
+mod tests;

@@ -1,0 +1,430 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-i-auth",
+  "frozen": true,
+  "frozenAt": "2026-09-18T20:30:00+08:00",
+  "plan": "support/phase-i-auth.md",
+  "baseline": {
+    "engineRevision": "10f3087",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.7",
+    "publishedEngineRevision": "0720434e3de7e0886f129f52a39d5ef2972ce45f",
+    "authFrontLines": 2390,
+    "authFrontRoutes": 24
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "node": "24.20.0",
+    "npm": "12.0.2",
+    "firebaseToolsAuthOracle": "15.22.0",
+    "firebaseToolsAuthSourceSha256": {
+      "lib/emulator/auth/apiSpec.js": "9014b6512f2adf4cc72ed244946bb942857a09d12dd77cd6c65bb7ce27ba76c8",
+      "lib/emulator/auth/cloudFunctions.js": "2647a6af6ee6a9915f256f499df9b6136161645d73482fec063441f52dea1368",
+      "lib/emulator/auth/errors.js": "b69b6c6d85f8d709337ba2c111070e39f55f141af0cf75b770ec03f927ef2586",
+      "lib/emulator/auth/handlers.js": "b228707e1a8dcab02ef8acb261a3b5f8b670589c3887d5a4fba02cba78e07853",
+      "lib/emulator/auth/index.js": "6f46a45892a0c6fc2da4066409deddd0b2c844b70a4839f6f8d83b9b4140f84e",
+      "lib/emulator/auth/operations.js": "dbc71e2a7919458709528c4a20ea051143032eded7ef1a39f75221be7c46b322",
+      "lib/emulator/auth/server.js": "40f4d7c16aca84829ee502f4bfebc84fb50ad2893650011f268c0b6e1f27c1a7",
+      "lib/emulator/auth/state.js": "79b3d0333f69448ec32217c513503bbb6dfe6e16fe1f5a274af3ac5a917b7fb5",
+      "lib/emulator/auth/utils.js": "c2885f813a44486e34cbb61334bc555ca4f1cceeca49bd40a2f09f4d47a67035",
+      "lib/emulator/auth/widget_ui.js": "188cb9d4379d412561ab35df0ab68f1ace2447e6c8ec13622c0897b076893b64"
+    },
+    "firebaseJsSdk": "12.18.0"
+  },
+  "oracles": {
+    "precedence": [
+      "official-firebase-tools-auth-emulator-15.22.0",
+      "firebase-js-sdk-12.18.0-wire-shapes",
+      "identity-toolkit-reference-naming-only"
+    ],
+    "ownership": {
+      "validationErrorsResponses": "official-firebase-tools-auth-emulator-15.22.0",
+      "tokenClaims": "official-firebase-tools-auth-emulator-15.22.0",
+      "logLines": "official-firebase-tools-auth-emulator-15.22.0",
+      "exportLayout": "official-firebase-tools-auth-emulator-15.22.0",
+      "requestShapes": "firebase-js-sdk-12.18.0 and firebase-admin as recorded by the browser profile"
+    },
+    "classificationRule": "the official emulator wins on everything it implements; a divergence is allowed only where the emulator's behaviour is an acknowledged defect, and then it is named in the fixture README and asserted in the replay",
+    "emulator": {
+      "firebaseTools": "15.22.0",
+      "bootstrap": "AuthEmulator in process with a recording HTTP server registered as the Functions emulator (trigger_multicast and blocking-function calls observed)",
+      "javaRequired": false
+    }
+  },
+  "inventory": {
+    "openApiOperations": 103,
+    "officialImplemented": 61,
+    "officialNotImplemented": 42,
+    "firesideBefore": 23,
+    "toAdd": 38,
+    "officialImplementedOperations": [
+      "emulator.projects.accounts.delete",
+      "emulator.projects.config.get",
+      "emulator.projects.config.update",
+      "emulator.projects.oobCodes.list",
+      "emulator.projects.verificationCodes.list",
+      "emulator.projects.tenants.accounts.delete",
+      "emulator.projects.tenants.oobCodes.list",
+      "emulator.projects.tenants.verificationCodes.list",
+      "identitytoolkit.accounts.createAuthUri",
+      "identitytoolkit.accounts.delete",
+      "identitytoolkit.accounts.lookup",
+      "identitytoolkit.accounts.resetPassword",
+      "identitytoolkit.accounts.sendOobCode",
+      "identitytoolkit.accounts.sendVerificationCode",
+      "identitytoolkit.accounts.signInWithCustomToken",
+      "identitytoolkit.accounts.signInWithEmailLink",
+      "identitytoolkit.accounts.signInWithIdp",
+      "identitytoolkit.accounts.signInWithPassword",
+      "identitytoolkit.accounts.signInWithPhoneNumber",
+      "identitytoolkit.accounts.signUp",
+      "identitytoolkit.accounts.update",
+      "identitytoolkit.getProjects",
+      "identitytoolkit.projects.createSessionCookie",
+      "identitytoolkit.projects.queryAccounts",
+      "identitytoolkit.projects.accounts (create)",
+      "identitytoolkit.projects.accounts.batchCreate",
+      "identitytoolkit.projects.accounts.batchDelete",
+      "identitytoolkit.projects.accounts.batchGet",
+      "identitytoolkit.projects.accounts.delete",
+      "identitytoolkit.projects.accounts.lookup",
+      "identitytoolkit.projects.accounts.query",
+      "identitytoolkit.projects.accounts.sendOobCode",
+      "identitytoolkit.projects.accounts.update",
+      "identitytoolkit.projects.tenants.createSessionCookie",
+      "identitytoolkit.projects.tenants.accounts (create)",
+      "identitytoolkit.projects.tenants.accounts.batchCreate",
+      "identitytoolkit.projects.tenants.accounts.batchDelete",
+      "identitytoolkit.projects.tenants.accounts.batchGet",
+      "identitytoolkit.projects.tenants.accounts.delete",
+      "identitytoolkit.projects.tenants.accounts.lookup",
+      "identitytoolkit.projects.tenants.accounts.query",
+      "identitytoolkit.projects.tenants.accounts.sendOobCode",
+      "identitytoolkit.projects.tenants.accounts.update",
+      "identitytoolkit.getRecaptchaParams",
+      "securetoken.token",
+      "identitytoolkit.accounts.mfaEnrollment.finalize",
+      "identitytoolkit.accounts.mfaEnrollment.start",
+      "identitytoolkit.accounts.mfaEnrollment.withdraw",
+      "identitytoolkit.accounts.mfaSignIn.finalize",
+      "identitytoolkit.accounts.mfaSignIn.start",
+      "identitytoolkit.accounts.passkeyEnrollment.finalize",
+      "identitytoolkit.accounts.passkeyEnrollment.start",
+      "identitytoolkit.accounts.passkeySignIn.finalize",
+      "identitytoolkit.accounts.passkeySignIn.start",
+      "identitytoolkit.projects.getConfig",
+      "identitytoolkit.projects.updateConfig",
+      "identitytoolkit.projects.tenants.create",
+      "identitytoolkit.projects.tenants.list",
+      "identitytoolkit.projects.tenants.delete",
+      "identitytoolkit.projects.tenants.get",
+      "identitytoolkit.projects.tenants.patch"
+    ],
+    "firesideBeforeOperations": [
+      "emulator.projects.accounts.delete",
+      "emulator.projects.config.get",
+      "emulator.projects.config.update",
+      "identitytoolkit.accounts.createAuthUri",
+      "identitytoolkit.accounts.delete",
+      "identitytoolkit.accounts.lookup",
+      "identitytoolkit.accounts.signInWithCustomToken",
+      "identitytoolkit.accounts.signInWithIdp",
+      "identitytoolkit.accounts.signInWithPassword",
+      "identitytoolkit.accounts.signUp",
+      "identitytoolkit.accounts.update",
+      "identitytoolkit.projects.accounts (create)",
+      "identitytoolkit.projects.accounts.batchCreate",
+      "identitytoolkit.projects.accounts.batchGet",
+      "identitytoolkit.projects.accounts.delete",
+      "identitytoolkit.projects.accounts.lookup",
+      "identitytoolkit.projects.accounts.query",
+      "identitytoolkit.projects.accounts.update",
+      "identitytoolkit.getRecaptchaParams",
+      "securetoken.token",
+      "identitytoolkit.projects.tenants.list",
+      "emulator/auth/handler (page)",
+      "emulator/auth/iframe (page)"
+    ],
+    "nonSpecRoutes": [
+      "/",
+      "/emulator/openapi.json",
+      "/emulator/auth/handler",
+      "/emulator/auth/iframe",
+      "/emulator/action",
+      "/www.googleapis.com/identitytoolkit/v3/relyingparty/* (legacy rewrites)"
+    ],
+    "partialInOfficial": {
+      "identitytoolkit.projects.accounts.query": "expression, limit, offset and sort keys other than USER_ID answer 501",
+      "identitytoolkit.accounts.signInWithIdp": "access_token-only credentials, pendingIdToken and returnRefreshToken answer 501",
+      "identitytoolkit.accounts.update": "some deleteAttribute values and unsupported fields answer 501",
+      "identitytoolkit.accounts.lookup": "lookup by initialEmail answers 501",
+      "identitytoolkit.accounts.signInWithPhoneNumber": "androidVerificationProof answers 501"
+    },
+    "officialSurfaceNotes": {
+      "mfa": "PHONE_SMS only; TOTP absent in 15.22.0",
+      "blockingEvents": [
+        "beforeCreate",
+        "beforeSignIn"
+      ],
+      "blockedSignInMethods": [
+        "password",
+        "emailLink",
+        "idp",
+        "phone",
+        "mfa finalize"
+      ],
+      "unblockedSignInMethods": [
+        "custom token",
+        "anonymous",
+        "passkey",
+        "refresh"
+      ],
+      "tenantAutoCreate": "any tenantId referenced by a path, body, id token or refresh token creates the tenant with the default config",
+      "requestLayer": [
+        "OpenAPI body validation → 400 Invalid JSON payload received",
+        "apiKey required on client routes → 403",
+        "Bearer owner or ya29.* → owner",
+        "snake_case keys camelCased",
+        "numbers coerced to strings, enum indexes to names"
+      ]
+    },
+    "countingNote": "counts are (path, method) pairs of the OpenAPI document; three operation ids (emulator accounts delete, oobCodes list, verificationCodes list) serve a root and a tenant path and are listed once per path",
+    "officialNotImplementedOperations": [
+      "identitytoolkit.accounts.issueSamlResponse",
+      "identitytoolkit.accounts.revokeToken",
+      "identitytoolkit.accounts.signInWithGameCenter",
+      "identitytoolkit.accounts.verifyIosClient",
+      "identitytoolkit.defaultSupportedIdps.list",
+      "identitytoolkit.getPasswordPolicy",
+      "identitytoolkit.getRecaptchaConfig",
+      "identitytoolkit.getSessionCookiePublicKeys",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.create",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.delete",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.get",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.list",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.patch",
+      "identitytoolkit.projects.identityPlatform.initializeAuth",
+      "identitytoolkit.projects.inboundSamlConfigs.create",
+      "identitytoolkit.projects.inboundSamlConfigs.delete",
+      "identitytoolkit.projects.inboundSamlConfigs.get",
+      "identitytoolkit.projects.inboundSamlConfigs.list",
+      "identitytoolkit.projects.inboundSamlConfigs.patch",
+      "identitytoolkit.projects.oauthIdpConfigs.create",
+      "identitytoolkit.projects.oauthIdpConfigs.delete",
+      "identitytoolkit.projects.oauthIdpConfigs.get",
+      "identitytoolkit.projects.oauthIdpConfigs.list",
+      "identitytoolkit.projects.oauthIdpConfigs.patch",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.create",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.delete",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.get",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.list",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.patch",
+      "identitytoolkit.projects.tenants.getIamPolicy",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.create",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.delete",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.get",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.list",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.patch",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.create",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.delete",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.get",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.list",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.patch",
+      "identitytoolkit.projects.tenants.setIamPolicy",
+      "identitytoolkit.projects.tenants.testIamPermissions"
+    ]
+  },
+  "capture": {
+    "requiredBeforeProductImplementation": true,
+    "root": "conformance/fixtures/auth-v1",
+    "fixtureSchemaVersion": 1,
+    "emulatorPrograms": {
+      "tool": "conformance/src/auth/capture-emulator.ts",
+      "plan": "conformance/src/auth/emulator-plan.ts",
+      "script": "capture:auth:emulator",
+      "minimumPrograms": 60,
+      "minimumSteps": 500,
+      "freshStatePerProgram": true,
+      "normalizedTemplates": [
+        "{{token:step}}",
+        "{{refresh:step}}",
+        "{{oob:step}}",
+        "{{code:step}}",
+        "{{localId:step}}",
+        "{{sessionInfo:step}}",
+        "{{cookie:step}}",
+        "{{time}}"
+      ]
+    },
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "SHA256SUMS"
+    ],
+    "fixturesFrozen": true,
+    "frozenFixtureSha256": {
+      "README.md": "42c8597c481a81b4957f32aa431a647d67ff20573d492e33384ad65bf5533bcd",
+      "emulator-programs.json": "c9cce2ad17262a8672c5a5dcb6678a4f2f24a28c41bdc5ec73bfbcb8bc878c93"
+    },
+    "fixturesFrozenAt": "2026-09-18T22:02:00+08:00"
+  },
+  "gates": {
+    "emulatorReplay": {
+      "test": "conformance/src/auth/replay-fireside.ts (npm run replay:auth -- --binary <fireside>); the replay shares normalize.ts with the capture so both sides normalize identically, and drives the binary's standalone `fireside auth` service over HTTP with the same functions stub",
+      "stepsMinimum": 500,
+      "allowedUnexplainedStatusDivergences": 0,
+      "allowedUnexplainedBodyDivergences": 0,
+      "functionsCallsMustMatch": true,
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "rustTests": "crates/auth-front unit tests keep the existing fixture checks; the corpus replay runs in the differential harness CI job"
+    },
+    "exportImport": {
+      "next7ExportImportsUnchanged": true,
+      "roundTripEveryField": true
+    },
+    "browserProfile": {
+      "job": "Firebase JS SDK browser integration",
+      "cells": 4,
+      "flows": [
+        "anonymous",
+        "password",
+        "email link",
+        "phone",
+        "popup/redirect for each provider",
+        "link/unlink",
+        "reauthenticate",
+        "MFA SMS",
+        "tenant sign-in"
+      ]
+    },
+    "emulatorUi": {
+      "manualCheck": [
+        "list",
+        "add user",
+        "edit user incl. MFA rows",
+        "delete",
+        "duplicate-emails toggle",
+        "tenant switch"
+      ],
+      "recordedIn": "receipts.i4.emulatorUi"
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "rustTestsRequired": true,
+      "typescriptCheckRequired": true,
+      "existingAuthFixturesUnchanged": [
+        "firebase-suite-v1/auth-identity-toolkit-and-admin",
+        "firebase-suite-v1/auth-browser-oauth-and-token-refresh",
+        "firebase-suite-v1/auth-import-export-and-trigger-dispatch",
+        "firebase-suite-v1/auth-popup",
+        "firebase-suite-v1/auth-refresh-reuse"
+      ]
+    }
+  },
+  "acceptance": {
+    "consumerGates": [
+      "consumer integration gate",
+      "consumer extensions gate",
+      "browser journeys"
+    ],
+    "privateAcceptance": "paired acceptance waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line",
+    "release": "0.1.0-next.8",
+    "receipts": {}
+  },
+  "decisions": {
+    "unimplementedInOfficial": {
+      "policy": "the 41 operations the official emulator answers with 501 keep answering 501 with the recorded body; they are recorded in I1, not implemented"
+    },
+    "existingState": {
+      "policy": "a next.7 auth_export imports unchanged; new fields are written only when present"
+    },
+    "blockingFunctions": {
+      "policy": "one blocking runner on every sign-in path; the JWT payload sent to the function follows the recording per method"
+    },
+    "pairedAcceptanceWaiver": {
+      "policy": "the paired 2 h soak is a per-release-line gate; the owner waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line"
+    }
+  },
+  "receipts": {
+    "i1": {
+      "fixture": "conformance/fixtures/auth-v1/emulator-programs.json",
+      "programs": 61,
+      "steps": 1068,
+      "officialImplementedCovered": "61/61",
+      "officialNotImplementedCovered": "42/42",
+      "capturedAt": "2026-09-18T13:54:55.020Z",
+      "determinism": "re-recorded after the sorted-key normalization and the legacy validSince sleep; two consecutive recordings identical except capturedAt/completedAt (three were identical under the previous normalization)",
+      "oracle": "firebase-tools 15.22.0 AuthEmulator in process; recording functions stub"
+    },
+    "i2": {
+      "date": "2026-09-18",
+      "crate": "crates/auth-front",
+      "operationsImplemented": "61/61 (every official implemented operation; the 42 official 501 answers keep their recorded body)",
+      "contract": "bundled OpenAPI document crates/auth-front/spec/openapi.json (firebase-tools 15.22.0 apiSpec, MIT, provenance in spec/UPSTREAM.md) drives routing, credential checks, body/query validation and coercions, and is served at /emulator/openapi.json",
+      "standalone": "fireside auth --host --port --project-id [--state-file] [--functions-origin]"
+    },
+    "i3": {
+      "date": "2026-09-18",
+      "blocking": "beforeCreate/beforeSignIn on password, email link, IdP, phone, custom token and MFA finalize; recorded JWT payloads and error mapping match per method",
+      "lifecycle": "user.create/user.delete multicasts on every create and delete path; silent for batchCreate and delete-all"
+    },
+    "i4": {
+      "date": "2026-09-18",
+      "replay": "npm run replay:auth -- --binary target/debug/fireside",
+      "programs": 61,
+      "steps": 1068,
+      "valuesCompared": 17303,
+      "mismatches": 0,
+      "namedDivergences": [
+        "malformed-json/body-string error message prose: V8 vs serde (same status and shape)",
+        "signin-function-text errors[0].reason: V8 vs serde parse error for a blocking function's non-JSON body",
+        "WARN log line of a 500: the official emulator appends a Node stack trace; Fireside logs the same first line",
+        "/emulator/auth/handler page bytes: Fireside's own picker; the accounts offered are compared exactly"
+      ],
+      "runsIdentical": 3,
+      "browserGate": "conformance/test/auth-popup.test.mjs (real SDK popup and redirect against the official fixture) green",
+      "existingAuthFixturesUnchanged": "crates/auth-front tests replay auth-identity-toolkit-and-admin, auth-browser-oauth-and-token-refresh and auth-import-export-and-trigger-dispatch in their recorded session order with the dispatch invariants, auth-refresh-reuse for anonymous/password/custom, and the developer-tools tenant discovery; auth-popup through the browser gate",
+      "emulatorUi": "verify-native-ui.mjs (real Emulator UI v1.15.0 in a browser against the suite): auth-create-and-list, auth-list-refresh, auth-clear-control passed on 2026-09-18 with the rewritten Auth service (binary cc170f92…)"
+    },
+    "i5": {
+      "date": "2026-09-19",
+      "exactCandidateCi": {
+        "headSha": "03000f0cc082c1b69f06c67b6a99a5417c840243",
+        "conclusion": "success",
+        "runs": {
+          "CI": 35364256374,
+          "Installable packages": 35364256373
+        },
+        "jobs": [
+          "Rust quality gate",
+          "Public fixture and package checks",
+          "Differential harness",
+          "Firebase JS SDK browser integration (memory, client memory)",
+          "Firebase JS SDK browser integration (memory, client persistence)",
+          "Firebase JS SDK browser integration (disk-wal, client memory)",
+          "Firebase JS SDK browser integration (disk-wal, client persistence)",
+          "Packed install (linux-x64)",
+          "Packed install (linux-arm64)",
+          "Packed install (darwin-arm64)",
+          "Packed install (darwin-x64)",
+          "Packed install (win32-x64)",
+          "verify"
+        ],
+        "note": "the Auth and Pub/Sub oracle replays, the Pub/Sub client-library check and the Functions runtime corpus run inside the Differential harness job"
+      },
+      "candidate": "0.1.0-local.g03000f0cc082 (packaging/build-local.mjs on the qualified head 03000f0, installed as the consumer's local candidate; binary sha256 8dc5aaf14195033f4352499d2e7f3aebb7e907ab3b7b4ca22572e4fd27f18574)",
+      "consumerGates": {
+        "extensionsGate": "PASS: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (same as the official oracle capture), ready 8.2 s",
+        "integration": "consumer integration gate 24/24",
+        "installedSmoke": "consumer installed-launcher smoke PASS (default launcher; 21 Functions; two listeners; Unicode; Auth sign-up then sign-in after a native reopen; gzip Storage both buckets; Pub/Sub topic over HTTP; UI; export/shutdown; official-format import; dataset isolation; immutable seed protected)",
+        "browserJourneys": "the consumer's nine browser journeys PASS on the macOS full-data stack with external providers disabled: otp-auth-login 7639 ms, dashboard-and-deck-list 1799, existing-deck-and-listener-edit 13471, catalog-slide-add 24674, deck-image-upload 15562, duplicate-and-delete-deck 5856, dotnet-deck-export 8916, dev-admin-pages 16808, sign-out-and-sign-in 5067; 0 page errors, 0 failures among 6091 required first-party requests; the persistent full-data working state written by next.7 reopened on the candidate and the suite stopped cleanly (16 functions, 2 schedules, 211,255 documents, 1 Auth user, 33,354 objects)"
+      },
+      "authEvidence": "otp-auth-login and sign-out-and-sign-in drive the real application's e-mail one-time-code login through the candidate's Auth emulator; the installed smoke signs up and signs in with a password across a native reopen",
+      "pairedAcceptance": "waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line",
+      "pending": [
+        "release 0.1.0-next.8 (approved by the owner 2026-09-19)",
+        "consumer pin bump with the extensions gate on the installed package"
+      ]
+    }
+  }
+}

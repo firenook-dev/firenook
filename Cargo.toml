@@ -31,6 +31,7 @@ repository = "https://github.com/sanjevirau/fireside"
 homepage = "https://github.com/sanjevirau/fireside"
 
 [workspace.dependencies]
+apache-avro = { version = "0.22.0", default-features = false }
 axum = "0.8.9"
 base64 = "0.23.1"
 bincode = { version = "2.0.1", features = ["serde"] }
@@ -52,6 +53,7 @@ sha2 = "0.11.0"
 smol_str = { version = "0.3.6", features = ["serde"] }
 prost = "0.14.4"
 prost-types = "0.14.4"
+indexmap = { version = "2.14.0", features = ["serde"] }
 protox = "0.9.1"
 reqwest = { version = "0.12.28", default-features = false, features = ["http2", "rustls-tls-webpki-roots", "stream"] }
 tonic = "0.14.6"

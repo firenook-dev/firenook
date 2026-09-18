@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-j-pubsub",
+  "frozen": true,
+  "frozenAt": "2026-09-18T20:30:00+08:00",
+  "plan": "support/phase-j-pubsub.md",
+  "baseline": {
+    "engineRevision": "10f3087",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.7",
+    "publishedEngineRevision": "0720434e3de7e0886f129f52a39d5ef2972ce45f",
+    "pubsubFrontLines": 1246,
+    "pubsubFrontRoutes": 9,
+    "transportsBefore": [
+      "http-json"
+    ]
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "tonic": "0.14.6",
+    "prost": "0.14.4",
+    "protox": "0.9.1",
+    "node": "24.20.0",
+    "npm": "12.0.2",
+    "googleCloudPubsubClient": "5.3.1",
+    "firebaseToolsFunctionsOracle": "15.22.0",
+    "firebaseToolsPubsubEmulatorSourceSha256": {
+      "lib/emulator/pubsubEmulator.js": "edaa1585b0a3c71ea46d782bf715c9aae9afb6d6b82a8873371a120dd088d564"
+    },
+    "officialPubsubEmulator": "0.8.33",
+    "officialPubsubEmulatorZipSha256": "93768f8763d85c37f7f6e0f64d10195abaa088f4ff559b7d9fb8a2fc5520848d",
+    "officialPubsubEmulatorJarSha256": "4b2892ba1559028a959a8522f114147949b3d6e0cd90dd3c46f40e148410e56d",
+    "javaForOracleOnly": true
+  },
+  "oracles": {
+    "precedence": [
+      "official-cloud-pubsub-emulator-0.8.33",
+      "firebase-tools-15.22.0-pubsub-functions-integration",
+      "cloud-pubsub-api-reference-naming-only"
+    ],
+    "ownership": {
+      "validationStatusCodesMessages": "official-cloud-pubsub-emulator-0.8.33",
+      "httpJsonMapping": "official-cloud-pubsub-emulator-0.8.33",
+      "orderingRedeliveryPushTiming": "official-cloud-pubsub-emulator-0.8.33",
+      "schemaValidation": "official-cloud-pubsub-emulator-0.8.33",
+      "functionsEnvelopeAndSubscriptionNaming": "firebase-tools-15.22.0"
+    },
+    "classificationRule": "the official emulator wins; a divergence is allowed only for a documented emulator limitation where production behaviour is followed instead, named in the fixture README and asserted in the replay",
+    "emulator": {
+      "start": "cloud-pubsub-emulator from the cached zip with exact hashes, --host 127.0.0.1 --port <free>",
+      "clients": [
+        "@google-cloud/pubsub 5.3.1 v1.PublisherClient / v1.SubscriberClient / v1.SchemaServiceClient over gRPC",
+        "raw HTTP/JSON"
+      ],
+      "pushEndpoint": "recording HTTP server"
+    }
+  },
+  "inventory": {
+    "services": {
+      "google.pubsub.v1.Publisher": [
+        "CreateTopic",
+        "GetTopic",
+        "ListTopics",
+        "UpdateTopic",
+        "DeleteTopic",
+        "Publish",
+        "ListTopicSubscriptions",
+        "ListTopicSnapshots",
+        "DetachSubscription"
+      ],
+      "google.pubsub.v1.Subscriber": [
+        "CreateSubscription",
+        "GetSubscription",
+        "UpdateSubscription",
+        "ListSubscriptions",
+        "DeleteSubscription",
+        "ModifyAckDeadline",
+        "Acknowledge",
+        "Pull",
+        "StreamingPull",
+        "ModifyPushConfig",
+        "Seek",
+        "CreateSnapshot",
+        "GetSnapshot",
+        "ListSnapshots",
+        "DeleteSnapshot"
+      ],
+      "google.pubsub.v1.SchemaService": [
+        "CreateSchema",
+        "GetSchema",
+        "ListSchemas",
+        "ListSchemaRevisions",
+        "CommitSchema",
+        "RollbackSchema",
+        "DeleteSchemaRevision",
+        "DeleteSchema",
+        "ValidateSchema",
+        "ValidateMessage"
+      ],
+      "google.iam.v1.IAMPolicy": [
+        "GetIamPolicy",
+        "SetIamPolicy",
+        "TestIamPermissions"
+      ]
+    },
+    "rpcTotal": 37,
+    "transports": [
+      "grpc",
+      "http-json"
+    ],
+    "firesideBefore": {
+      "httpRoutes": [
+        "topics.list",
+        "topics.create",
+        "topics.get",
+        "topics.delete",
+        "topics.publish",
+        "subscriptions.list",
+        "subscriptions.create",
+        "subscriptions.get",
+        "subscriptions.delete",
+        "subscriptions.pull (empty)",
+        "subscriptions.acknowledge (no-op)"
+      ],
+      "grpc": []
+    },
+    "features": [
+      "backlog with ack deadlines and redelivery",
+      "deliveryAttempt",
+      "ordering keys",
+      "filters",
+      "retention and retainAckedMessages",
+      "push delivery with retry",
+      "seek to time and snapshot",
+      "snapshots",
+      "dead-letter policy",
+      "retry policy",
+      "expiration policy",
+      "exactly-once delivery flags",
+      "Avro and Protocol Buffer schemas with revisions",
+      "IAM fakes"
+    ]
+  },
+  "capture": {
+    "requiredBeforeProductImplementation": true,
+    "root": "conformance/fixtures/pubsub-v1",
+    "fixtureSchemaVersion": 1,
+    "emulatorPrograms": {
+      "tool": "conformance/src/pubsub/capture-emulator.ts",
+      "plan": "conformance/src/pubsub/emulator-plan.ts",
+      "script": "capture:pubsub:emulator",
+      "minimumPrograms": 40,
+      "minimumSteps": 400,
+      "freshEmulatorPerProgram": true,
+      "normalizedFields": [
+        "messageId",
+        "ackId",
+        "revisionId (schema settings, googclient_schemarevisionid, name@revision)",
+        "publishTime/expireTime/revisionCreateTime/dead-letter publish-time attribute",
+        "time-based nextPageToken",
+        "push endpoint origin"
+      ]
+    },
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "SHA256SUMS"
+    ],
+    "fixturesFrozen": true,
+    "frozenFixtureSha256": {
+      "README.md": "77d4bc7127a21877e9469448985141b31307e2130b320a9c2fbde317d45af13f",
+      "emulator-programs.json": "b2d6511e4d17a4e2b3ae94e858bbb144077696dd504ed069d98a2cf08fce0576"
+    },
+    "fixturesFrozenAt": "2026-09-18T23:35:00+08:00"
+  },
+  "gates": {
+    "emulatorReplay": {
+      "test": "conformance/src/pubsub/replay-fireside.ts (npm run replay:pubsub -- --binary <fireside>); the replay shares client.ts/runner.ts/normalize.ts with the capture and drives the binary's standalone `fireside pubsub` service over gRPC and HTTP/JSON with the same push endpoint",
+      "stepsMinimum": 400,
+      "transports": [
+        "grpc",
+        "http-json"
+      ],
+      "allowedUnexplainedStatusDivergences": 0,
+      "allowedUnexplainedBodyDivergences": 0,
+      "timingStepsUseInjectableClock": false,
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "timingSteps": "recorded with real waits (ack deadline 10 s, push retries every second) and replayed against the same wall clock; the corpus keeps only the timing outcomes the official emulator answers consistently"
+    },
+    "clientLibrary": {
+      "job": "conformance",
+      "client": "@google-cloud/pubsub 5.3.1",
+      "flows": [
+        "publish",
+        "subscription.on('message')",
+        "ordering",
+        "push",
+        "schema"
+      ],
+      "test": "conformance/src/pubsub/verify-client-library.ts (npm run verify:pubsub:client -- --binary <fireside>)"
+    },
+    "functionsDelivery": {
+      "existingFixturesUnchanged": [
+        "firebase-suite-v1/pubsub-schedule-and-function-dispatch",
+        "functions-topic-reload-v1",
+        "functions-runtime-v1"
+      ],
+      "internalSubscriberName": "emulator-sub-<topic>"
+    },
+    "noJavaAtRuntime": {
+      "suiteStartsWithJavaAbsentFromPath": true
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "rustTestsRequired": true,
+      "typescriptCheckRequired": true
+    }
+  },
+  "acceptance": {
+    "consumerGates": [
+      "consumer integration gate",
+      "consumer extensions gate",
+      "scheduled-function lane"
+    ],
+    "privateAcceptance": "paired acceptance waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line",
+    "release": "0.1.0-next.8",
+    "receipts": {}
+  },
+  "decisions": {
+    "persistence": {
+      "policy": "in-memory like the official emulator; topics and subscriptions from discovery are recreated on start; no export"
+    },
+    "functionsSubscriber": {
+      "policy": "function targets consume through a real emulator-sub-<topic> subscription so user pulls and functions compete as they do officially"
+    },
+    "schedules": {
+      "policy": "the Fireside-only scheduler keeps ticking onSchedule topics; non-UTC zones are finished in J2"
+    },
+    "pairedAcceptanceWaiver": {
+      "policy": "the paired 2 h soak is a per-release-line gate; the owner waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line"
+    }
+  },
+  "receipts": {
+    "j1": {
+      "date": "2026-09-18",
+      "fixture": "conformance/fixtures/pubsub-v1/emulator-programs.json",
+      "programs": 42,
+      "steps": 916,
+      "transports": {
+        "grpc": 654,
+        "http": 216,
+        "stream": 12,
+        "pushes": 18
+      },
+      "rpcCoverage": "37/37 over gRPC, 36/37 over HTTP/JSON (StreamingPull has no HTTP form)",
+      "determinism": "two consecutive full recordings identical except capturedAt/completedAt after the ordered-subscription programs were limited to the single-key contract (the official emulator's multi-key interleaving differs between its own runs)",
+      "oracle": "cloud-pubsub-emulator-0.8.33 jar (sha256 4b2892ba...) on Java 25, one fresh process per program; grpc-js 1.14.4 with @google-cloud/pubsub 5.3.1 protos; recording push endpoint",
+      "notInCorpus": "three requests the official adapter never answers (body name differing from the path, numeric schema type, non-numeric pageSize)"
+    },
+    "j4": {
+      "date": "2026-09-18",
+      "replay": "npm run replay:pubsub -- --binary target/debug/fireside",
+      "programs": 42,
+      "steps": 916,
+      "valuesCompared": 3755,
+      "mismatches": 0,
+      "namedDivergences": [],
+      "runsIdentical": 3,
+      "clientLibrary": "npm run verify:pubsub:client: @google-cloud/pubsub 5.3.1 with PUBSUB_EMULATOR_HOST — createTopic/createSubscription, publishMessage + on('message'), ordering keys over streaming pull, push envelope, Avro schema on a topic, getTopics/getSubscriptions, delete: 7/7",
+      "functionsDelivery": "functions-runtime corpus replay 271/271 (profiles main, v1-blocking, inspect, ext-missing-param); verify-native-ui.mjs --topic-reload (Pub/Sub-triggered functions across a source reload) passed",
+      "suite": "gRPC and HTTP/JSON share the Pub/Sub port through tonic Routes with accept_http1"
+    },
+    "j5": {
+      "date": "2026-09-19",
+      "exactCandidateCi": {
+        "headSha": "03000f0cc082c1b69f06c67b6a99a5417c840243",
+        "conclusion": "success",
+        "runs": {
+          "CI": 35364256374,
+          "Installable packages": 35364256373
+        },
+        "jobs": [
+          "Rust quality gate",
+          "Public fixture and package checks",
+          "Differential harness",
+          "Firebase JS SDK browser integration (memory, client memory)",
+          "Firebase JS SDK browser integration (memory, client persistence)",
+          "Firebase JS SDK browser integration (disk-wal, client memory)",
+          "Firebase JS SDK browser integration (disk-wal, client persistence)",
+          "Packed install (linux-x64)",
+          "Packed install (linux-arm64)",
+          "Packed install (darwin-arm64)",
+          "Packed install (darwin-x64)",
+          "Packed install (win32-x64)",
+          "verify"
+        ],
+        "note": "the Auth and Pub/Sub oracle replays, the Pub/Sub client-library check and the Functions runtime corpus run inside the Differential harness job"
+      },
+      "candidate": "0.1.0-local.g03000f0cc082 (packaging/build-local.mjs on the qualified head 03000f0, installed as the consumer's local candidate; binary sha256 8dc5aaf14195033f4352499d2e7f3aebb7e907ab3b7b4ca22572e4fd27f18574)",
+      "consumerGates": {
+        "extensionsGate": "PASS: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (same as the official oracle capture), ready 8.2 s",
+        "integration": "consumer integration gate 24/24",
+        "installedSmoke": "consumer installed-launcher smoke PASS (default launcher; 21 Functions; two listeners; Unicode; Auth sign-up then sign-in after a native reopen; gzip Storage both buckets; Pub/Sub topic over HTTP; UI; export/shutdown; official-format import; dataset isolation; immutable seed protected)",
+        "browserJourneys": "the consumer's nine browser journeys PASS on the macOS full-data stack with external providers disabled: otp-auth-login 7639 ms, dashboard-and-deck-list 1799, existing-deck-and-listener-edit 13471, catalog-slide-add 24674, deck-image-upload 15562, duplicate-and-delete-deck 5856, dotnet-deck-export 8916, dev-admin-pages 16808, sign-out-and-sign-in 5067; 0 page errors, 0 failures among 6091 required first-party requests; the persistent full-data working state written by next.7 reopened on the candidate and the suite stopped cleanly (16 functions, 2 schedules, 211,255 documents, 1 Auth user, 33,354 objects)"
+      },
+      "pubsubEvidence": "the two discovered schedules and the 16 function targets were installed on the rewritten broker for the journeys run; the installed smoke creates a topic over the HTTP/JSON front; the Functions runtime corpus (271 steps) replays unchanged in CI",
+      "pairedAcceptance": "waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line",
+      "pending": [
+        "release 0.1.0-next.8 (approved by the owner 2026-09-19)",
+        "consumer pin bump with the extensions gate on the installed package"
+      ]
+    }
+  }
+}
