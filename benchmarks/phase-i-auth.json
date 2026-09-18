@@ -262,10 +262,10 @@
     ],
     "fixturesFrozen": true,
     "frozenFixtureSha256": {
-      "README.md": "0a39d6d4bf675ec38cb1d0afaa272d23c2c21d7e750f9d01f422a29f2acbd8fe",
-      "emulator-programs.json": "9d6057c68af3aa23a6b0dae9a234c8d1e7588f40d4cd63d2262d097f32a6d193"
+      "README.md": "42c8597c481a81b4957f32aa431a647d67ff20573d492e33384ad65bf5533bcd",
+      "emulator-programs.json": "c9cce2ad17262a8672c5a5dcb6678a4f2f24a28c41bdc5ec73bfbcb8bc878c93"
     },
-    "fixturesFrozenAt": "2026-09-18T20:33:24+08:00"
+    "fixturesFrozenAt": "2026-09-18T22:02:00+08:00"
   },
   "gates": {
     "emulatorReplay": {
@@ -349,9 +349,39 @@
       "steps": 1068,
       "officialImplementedCovered": "61/61",
       "officialNotImplementedCovered": "42/42",
-      "capturedAt": "2026-09-18T12:35:00.635Z",
-      "determinism": "three consecutive recordings identical except capturedAt/completedAt",
+      "capturedAt": "2026-09-18T13:54:55.020Z",
+      "determinism": "re-recorded after the sorted-key normalization and the legacy validSince sleep; two consecutive recordings identical except capturedAt/completedAt (three were identical under the previous normalization)",
       "oracle": "firebase-tools 15.22.0 AuthEmulator in process; recording functions stub"
+    },
+    "i2": {
+      "date": "2026-09-18",
+      "crate": "crates/auth-front",
+      "operationsImplemented": "61/61 (every official implemented operation; the 42 official 501 answers keep their recorded body)",
+      "contract": "bundled OpenAPI document crates/auth-front/spec/openapi.json (firebase-tools 15.22.0 apiSpec, MIT, provenance in spec/UPSTREAM.md) drives routing, credential checks, body/query validation and coercions, and is served at /emulator/openapi.json",
+      "standalone": "fireside auth --host --port --project-id [--state-file] [--functions-origin]"
+    },
+    "i3": {
+      "date": "2026-09-18",
+      "blocking": "beforeCreate/beforeSignIn on password, email link, IdP, phone, custom token and MFA finalize; recorded JWT payloads and error mapping match per method",
+      "lifecycle": "user.create/user.delete multicasts on every create and delete path; silent for batchCreate and delete-all"
+    },
+    "i4": {
+      "date": "2026-09-18",
+      "replay": "npm run replay:auth -- --binary target/debug/fireside",
+      "programs": 61,
+      "steps": 1068,
+      "valuesCompared": 17303,
+      "mismatches": 0,
+      "namedDivergences": [
+        "malformed-json/body-string error message prose: V8 vs serde (same status and shape)",
+        "signin-function-text errors[0].reason: V8 vs serde parse error for a blocking function's non-JSON body",
+        "WARN log line of a 500: the official emulator appends a Node stack trace; Fireside logs the same first line",
+        "/emulator/auth/handler page bytes: Fireside's own picker; the accounts offered are compared exactly"
+      ],
+      "runsIdentical": 3,
+      "browserGate": "conformance/test/auth-popup.test.mjs (real SDK popup and redirect against the official fixture) green",
+      "existingAuthFixturesUnchanged": "crates/auth-front tests replay auth-identity-toolkit-and-admin, auth-browser-oauth-and-token-refresh and auth-import-export-and-trigger-dispatch in their recorded session order with the dispatch invariants, auth-refresh-reuse for anonymous/password/custom, and the developer-tools tenant discovery; auth-popup through the browser gate",
+      "emulatorUi": "recorded at I5 with the exact candidate"
     }
   }
 }

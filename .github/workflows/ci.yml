@@ -176,6 +176,11 @@ jobs:
             --binary ../target/debug/fireside \
             --profiles main,v1-blocking,inspect,ext-missing-param \
             --output "$RUNNER_TEMP/fireside-functions-runtime-replay.json"
+      - name: Replay the Auth oracle corpus against the standalone Auth service
+        run: |
+          npm run replay:auth --prefix conformance -- \
+            --binary ../target/debug/fireside \
+            --output "$RUNNER_TEMP/fireside-auth-replay.json"
       - name: Verify suite start without Java on PATH
         run: >-
           node conformance/src/suite/verify-no-java.mjs
@@ -203,6 +208,7 @@ jobs:
             ${{ runner.temp }}/fireside-developer-ui-evidence/browser-failure.json
             ${{ runner.temp }}/fireside-developer-ui-evidence/*.png
             ${{ runner.temp }}/fireside-functions-runtime-replay.json
+            ${{ runner.temp }}/fireside-auth-replay.json
             ${{ runner.temp }}/fireside-no-java-evidence/result.json
             ${{ runner.temp }}/fireside-no-java-evidence/suite.log
           if-no-files-found: ignore

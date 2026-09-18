@@ -19,7 +19,7 @@
   <p>Sign in with <strong id="provider"></strong></p>
   <div id="accounts-list">
     <p id="account-help">Choose an existing local account or add one.</p>
-    <ul id="accounts"></ul>
+    <ul id="accounts">__FIRESIDE_ACCOUNT_ITEMS__</ul>
     <button class="js-new-account" type="button">Add new account</button>
   </div>
   <form id="main-form" hidden>
@@ -33,7 +33,6 @@
   <p id="error" role="alert"></p>
   <small>Local test accounts only. No Google password is requested or sent.</small>
 </main>
-<script id="accounts-data" type="application/json">__FIRESIDE_ACCOUNTS__</script>
 <script>
 (() => {
   'use strict';
@@ -78,17 +77,13 @@
     error('Unsupported browser authType. Start sign-in from the Firebase JS SDK.');
   }
 
-  const accounts = JSON.parse(document.getElementById('accounts-data').textContent);
-  if (!accounts.length) document.getElementById('account-help').textContent = 'No ' + provider + ' accounts exist in the Auth Emulator.';
-  for (const claims of accounts) {
-    const item = document.createElement('li');
-    const button = document.createElement('button');
-    button.type = 'button'; button.className = 'js-reuse-account';
-    const name = document.createElement('span'), email = document.createElement('span');
-    name.textContent = claims.name || '(No display name)';
-    email.textContent = claims.email || ''; email.className = 'email';
-    button.append(name,email); button.onclick = () => complete(claims);
-    item.append(button); document.getElementById('accounts').append(item);
+  // The accounts are rendered by the server in the official picker's shape:
+  // one `.js-reuse-account` per account with its fake IdP claims in
+  // `data-id-token`, URL-encoded.
+  const buttons = document.querySelectorAll('.js-reuse-account');
+  if (!buttons.length) document.getElementById('account-help').textContent = 'No ' + provider + ' accounts exist in the Auth Emulator.';
+  for (const button of buttons) {
+    button.onclick = () => complete(JSON.parse(decodeURIComponent(button.dataset.idToken)));
   }
   const showForm = visible => {
     document.getElementById('main-form').hidden = !visible;

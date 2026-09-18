@@ -554,6 +554,22 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     for message in startup_log_messages(config) {
         logging.record("INFO", Some("hub"), message);
     }
+    // Auth's operational lines (OOB links, verification codes, server
+    // errors) reach the console and the Emulator UI log like the official
+    // CLI's `i  auth: ...` output.
+    let auth_logging = logging.clone();
+    auth.set_log_sink(Arc::new(move |kind: &str, text: &str| {
+        let level = match kind {
+            "BULLET" | "SUCCESS" => "INFO",
+            other => other,
+        };
+        if level == "WARN" || level == "ERROR" {
+            eprintln!("fireside auth: {text}");
+        } else {
+            println!("fireside auth: {text}");
+        }
+        auth_logging.record(level, Some("auth"), text.to_owned());
+    }));
     let directory = suite_directory(config)?;
     let (export_sender, export_receiver) = mpsc::channel(4);
     let (background_sender, background_receiver) = mpsc::unbounded_channel();

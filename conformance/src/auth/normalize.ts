@@ -227,9 +227,11 @@ export function normalizeValue(value: Json, step: string, registry: Registry, ke
         if (embedded?.[1] !== undefined && !registry.isConstant(embedded[1])) registry.register("salt", owner, embedded[1]);
       }
     }
+    // Keys are visited in sorted order so that the numbering of values first
+    // seen in this step does not depend on the emulator's key order.
     const output: { [key: string]: Json } = {};
-    for (const [childKey, child] of Object.entries(value)) {
-      output[childKey] = normalizeValue(child, step, registry, childKey);
+    for (const childKey of Object.keys(value).sort()) {
+      output[childKey] = normalizeValue(value[childKey] as Json, step, registry, childKey);
     }
     return output;
   }

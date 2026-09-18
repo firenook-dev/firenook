@@ -130,6 +130,20 @@ Roll back by cleanly stopping Fireside, retaining its completed official-format
 export, then starting the official CLI on separate working state. Never run
 both on the same ports or let both own a working directory.
 
+## Auth on its own
+
+```sh
+fireside native auth --project-id demo-my-app --port 9099                 # the Auth service alone, in memory
+fireside native auth --project-id demo-my-app --state-file ./auth.json    # persisted accounts, codes and config
+```
+
+`fireside native auth` serves the same Auth implementation the suite runs
+(every operation of the official Auth emulator, the popup/redirect helper
+pages, `/emulator/openapi.json`) without Firestore, Storage or Functions. Add
+`--functions-origin http://host:port` to deliver `user.create`/`user.delete`
+multicasts to a Functions host; blocking functions come from the project's
+configuration. The conformance replay drives this command.
+
 ## Evidence and versioning
 
 Package version is separate from native engine version. `fireside --version`

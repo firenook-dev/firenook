@@ -297,9 +297,20 @@ The plan, current-state audit, oracle precedence and named checks are in the
   implementation (2026-09-18: 61 programs / 1068 steps in
   `conformance/fixtures/auth-v1`, every one of the 61 implemented and 42
   unimplemented official routes exercised; three recordings identical).
-- [ ] I2 — Typed account model and every operation.
-- [ ] I3 — Blocking functions and lifecycle triggers on every sign-in path.
-- [ ] I4 — Replay the corpus; SDK and UI checks.
+- [x] I2 — Every operation ported (2026-09-18: `crates/auth-front` rewritten
+  on the official `OpenAPI` contract — routing, credentials, validation and
+  coercions from the bundled document; all 61 implemented operations, the 42
+  `501` answers, pages, legacy `relyingparty` routes, tenants, SMS MFA,
+  passkeys, session cookies, export/import; standalone `fireside auth`).
+- [x] I3 — Blocking functions on every blocked sign-in method and lifecycle
+  multicasts on every create/delete path (2026-09-18; the recorded calls
+  match per method).
+- [x] I4 — Replay green (2026-09-18: 61 programs / 1068 steps / 17,303
+  values, 0 mismatches, four named divergences — parse-error prose, the
+  Node stack trace on a 500 log line, Fireside's own picker page — three
+  consecutive runs identical; the real-SDK popup/redirect browser gate and
+  the five earlier `firebase-suite-v1` Auth fixtures stay green). Emulator UI
+  Auth-tab check recorded at I5 with the candidate.
 - [ ] I5 — Qualify the exact candidate and publish `0.1.0-next.8` (with J5).
 
 Done when an application using any sign-in method, tenants, MFA, email or

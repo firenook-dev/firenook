@@ -483,6 +483,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "clap",
+ "fireside-auth-front",
  "fireside-capture-proxy",
  "fireside-core-store",
  "fireside-export-format",
@@ -511,6 +512,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "fireside-functions-bridge",
+ "indexmap",
  "reqwest",
  "serde",
  "serde_json",
@@ -1268,6 +1270,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

@@ -9,7 +9,9 @@ or mechanically derived from them.
 Licensed reference material studied or designated for study:
 
 - skunkteam/rust-firestore-emulator (MIT)
-- firebase/firebase-tools (Apache-2.0)
+- firebase/firebase-tools (MIT; the Identity Toolkit OpenAPI document its
+  Auth emulator routes with is vendored with exact provenance under
+  `crates/auth-front/spec`)
 - firebase/firebase-js-sdk (Apache-2.0)
 - google/closure-net (Apache-2.0)
 - google/closure-library (Apache-2.0)

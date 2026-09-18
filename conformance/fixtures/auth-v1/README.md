@@ -15,7 +15,9 @@ Re-record with `FIREBASE_TOOLS_15_22_ROOT=<firebase-tools 15.22.0> npm run
 capture:auth:emulator` (about three minutes; `--programs=a,b` records a subset,
 `--debug` prints raw responses). Two recordings differ only in `capturedAt` /
 `completedAt`: the normalization below removes every run-dependent value, which
-three consecutive recordings confirmed byte for byte.
+consecutive recordings confirmed byte for byte (three under the first
+normalization, two after the sorted-key walk that made `#n` numbering
+independent of response key order).
 
 ## Programs
 
@@ -201,6 +203,16 @@ recorded with its decoded JWT.
 
 ## Divergences
 
-None recorded: the fixture is the official emulator's behaviour. Differences
-Fireside keeps are named in the replay (`conformance/src/auth/replay-fireside.ts`)
-and listed here when they appear.
+The fixture is the official emulator's behaviour. Replaying it against
+Fireside (`npm run replay:auth -- --binary <fireside>`) compares every step's
+status, recorded headers, normalized body, log lines, ordered blocking calls
+and the set of lifecycle multicasts; 17,303 values are compared and every one
+is parity except the four named divergences below, which the replay accepts
+only at the listed paths (`DIVERGENCES` in `src/auth/replay-fireside.ts`).
+
+| Where | Official | Fireside | Why it stays |
+| --- | --- | --- | --- |
+| `malformed-json` / `body-string` steps, `error.message` and `errors[0].message` | V8's `JSON.parse` wording (`Unexpected token ...`) | serde's wording | same `400`, same error shape; the parser's prose is not a contract |
+| `signin-function-text`, `error.errors[0].reason` | V8's parse error for a blocking function's non-JSON body | serde's | same `500 INTERNAL`, same `BLOCKING_FUNCTION_ERROR_RESPONSE : ((Response body is not valid JSON.))` message |
+| the `WARN` log line of any `500` | `InternalError: ...` followed by a Node stack trace | the same first line only | the stack is the reference implementation's source layout |
+| `$html.sha256` / `$html.bytes` of `/emulator/auth/handler` | the official widget page | Fireside's own page | the accounts the page offers (`data-id-token` entries: subject, name, email, picture) are compared exactly; the SDK popup and redirect flows run against the official browser fixture in `test/auth-popup.test.mjs` |

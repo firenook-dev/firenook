@@ -74,6 +74,7 @@
     "probe:storage:rules": "node --import tsx src/storage-rules/probe-rules-api.ts",
     "capture:storage:rules": "node --import tsx src/storage-rules/capture-emulator.ts",
     "capture:auth:emulator": "node --import tsx src/auth/capture-emulator.ts",
+    "replay:auth": "node --import tsx src/auth/replay-fireside.ts",
     "capture:functions:runtime": "node --import tsx src/functions-runtime/capture-emulator.ts",
     "replay:functions:runtime": "node --import tsx src/functions-runtime/replay-fireside.ts",
     "capture:storage:rules:cloud": "node --import tsx src/storage-rules/capture-language.ts",

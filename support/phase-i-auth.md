@@ -7,11 +7,26 @@ Written 2026-09-18 against `main` 10f3087 (published engine 0720434,
 
 ## Status (2026-09-18)
 
-I0 and I1 are done: gate `benchmarks/phase-i-auth.json` (frozen), corpus
+I0–I4 are done. Gate `benchmarks/phase-i-auth.json` (frozen); corpus
 `conformance/fixtures/auth-v1` — 61 programs / 1068 steps against
 firebase-tools 15.22.0 covering all 61 implemented and all 42 unimplemented
-official routes plus the pages and legacy routes; three consecutive
-recordings are identical after normalization (`receipts.i1`). I2 starts next.
+official routes plus the pages and legacy routes, consecutive recordings
+identical after normalization (`receipts.i1`). `crates/auth-front` is
+rewritten around the official `OpenAPI` document (routing, security,
+validation, coercions) with every operation ported one to one, blocking
+functions on every blocked method and multicasts on every lifecycle path;
+`fireside auth` runs it standalone for the replay. The replay
+(`npm run replay:auth`) compares 17,303 values with 0 mismatches and four
+named divergences (`receipts.i4`), three runs identical; the real-SDK
+popup/redirect browser gate and the five earlier `firebase-suite-v1` Auth
+fixtures stay green as crate tests. I5 (qualification and release with J5)
+remains; the Emulator UI Auth-tab check is recorded with the candidate.
+
+Implementation note: I2 as delivered keeps the account as a JSON record with
+rebuilt indexes rather than the typed `Account` struct sketched below — the
+official emulator's own model is untyped `UserInfo` JSON and the corpus
+compares serialized records, so the JSON model is the faithful one; the
+indexes, scopes, tenants and codes are as listed.
 
 ## Goal
 

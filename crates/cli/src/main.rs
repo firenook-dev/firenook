@@ -105,6 +105,8 @@ struct Cli {
 enum Command {
     /// Start the Firestore-compatible service.
     Firestore(FirestoreArgs),
+    /// Start the Auth-compatible service on its own.
+    Auth(AuthArgs),
     /// Capture redacted browser-SDK traffic through a streaming reverse proxy.
     CaptureProxy(CaptureProxyArgs),
     /// Start the complete Firebase-compatible emulator suite.
@@ -112,6 +114,28 @@ enum Command {
     /// Inspect or vendor the project's Firebase Extensions without starting
     /// the suite.
     Extensions(ExtensionsArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct AuthArgs {
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    #[arg(long, default_value_t = 9099)]
+    port: u16,
+    /// The project requests without a target project address.
+    #[arg(
+        long = "project-id",
+        alias = "project_id",
+        default_value = "demo-fireside"
+    )]
+    project_id: String,
+    /// Persist accounts, codes and configuration in this JSON file.
+    #[arg(long = "state-file")]
+    state_file: Option<PathBuf>,
+    /// A Functions host origin (`http://host:port`) that receives the
+    /// `trigger_multicast` lifecycle events; without it no events are sent.
+    #[arg(long = "functions-origin")]
+    functions_origin: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Args)]
@@ -368,6 +392,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse_from(normalize_arguments(std::env::args_os()));
     match cli.command {
         Command::Firestore(arguments) => run_firestore_runtime(&arguments, allocator_config),
+        Command::Auth(arguments) => run_auth_runtime(&arguments),
         Command::CaptureProxy(arguments) => run_capture_proxy_runtime(&arguments),
         Command::Suite(arguments) => run_suite_runtime(&arguments),
         Command::Extensions(arguments) => run_extensions_command(&arguments),
@@ -822,6 +847,95 @@ fn run_capture_proxy_runtime(arguments: &CaptureProxyArgs) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("capture proxy failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_auth_runtime(arguments: &AuthArgs) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("Auth runtime failed to start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(run_auth(arguments))
+}
+
+async fn run_auth(arguments: &AuthArgs) -> ExitCode {
+    let address = match resolve_address(&arguments.host, arguments.port) {
+        Ok(address) => address,
+        Err(error) => {
+            eprintln!("invalid Auth listen address: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let registry = fireside_functions_bridge::TriggerRegistry::default();
+    registry.set_background_enabled(arguments.functions_origin.is_some());
+    let delivery = match arguments.functions_origin.as_deref() {
+        Some(origin) => match fireside_functions_bridge::DeliveryRuntime::start(
+            registry.clone(),
+            origin,
+            fireside_functions_bridge::DeliveryPolicy::default(),
+        ) {
+            Ok(delivery) => Some(delivery),
+            Err(error) => {
+                eprintln!("Auth lifecycle delivery failed to start: {error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    let queue = if let Some(delivery) = &delivery {
+        delivery.queue()
+    } else {
+        let (observer, _receiver) =
+            fireside_functions_bridge::TriggerObserver::channel(registry.clone());
+        observer.queue()
+    };
+    let auth = match fireside_auth_front::AuthRuntime::new(
+        &arguments.project_id,
+        queue,
+        registry,
+        arguments.state_file.clone(),
+    ) {
+        Ok(auth) => auth,
+        Err(error) => {
+            eprintln!("Auth runtime failed to start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    auth.set_origin(&format!("http://{}:{}", arguments.host, arguments.port));
+    auth.set_log_sink(std::sync::Arc::new(|kind: &str, text: &str| {
+        println!("{kind}: {text}");
+    }));
+    let listener = match tokio::net::TcpListener::bind(address).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Auth listener failed to bind {address}: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "Auth emulator ready at http://{}:{} (project {})",
+        arguments.host, arguments.port, arguments.project_id
+    );
+    let served = axum::serve(listener, auth.application())
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await;
+    if let Some(delivery) = delivery {
+        let _ = delivery.shutdown().await;
+    }
+    match served {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Auth listener failed: {error}");
             ExitCode::FAILURE
         }
     }
@@ -1324,6 +1438,7 @@ fn normalize_arguments(arguments: impl IntoIterator<Item = OsString>) -> Vec<OsS
             argument.to_str(),
             Some(
                 "firestore"
+                    | "auth"
                     | "capture-proxy"
                     | "suite"
                     | "extensions"
