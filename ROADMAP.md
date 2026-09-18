@@ -231,7 +231,7 @@ rules including `firestore.get()`, resume and export, and the recorded corpus
 shows parity with the official emulator or a documented production-precedence
 divergence. `latest` promotion remains a separate decision.
 
-## Phase H — Owned Functions runtime and Extensions (`0.1.0-next.8`)
+## Phase H — Owned Functions runtime and Extensions (`0.1.0-next.7`, together with Phase G)
 
 The plan, current-state audit, oracle precedence and named checks are in the
 [Phase H plan](support/phase-h-functions-runtime.md). User and extension
@@ -244,7 +244,7 @@ JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
 | H2 | `functions-runtime` crate + `support/functions-worker.mjs` | Every H1 runtime step is parity or a listed divergence; readiness/reload fixtures unchanged |
 | H3 | `extensions` crate with registry, cache, build, params and vendored offline mode | Synthetic extension and Twodart's three instances resolve and run from cache without network |
 | H4 | firebase-tools removed; `--inspect-functions`, `functions:invoke`, `ext:vendor` added | Suite starts with `firebase-tools` absent from `node_modules`; docs updated |
-| H5 | Exact-candidate CI, consumer gates, paired acceptance, offline clean setup, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
+| H5 | Exact-candidate CI, consumer gates, paired acceptance, offline clean setup, release | `0.1.0-next.7` published through the release workflow; receipts recorded |
 
 - [x] H0 — Freeze the gate and the supported trigger matrix (2026-09-17,
   `benchmarks/phase-h-functions-runtime.json`).
@@ -265,7 +265,7 @@ JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
   the CLI's dependencies, `--inspect-functions`, `--offline`,
   `functions:invoke`, `ext:vendor`, `doctor` extension report).
 - [ ] H5 — Qualify the exact candidate (CI, consumer gates incl. the Extensions
-  gate, paired acceptance, offline clean setup) and publish `0.1.0-next.8`.
+  gate, paired acceptance, offline clean setup) and publish `0.1.0-next.7`.
 
 Done when a project with user Functions and Extensions starts on a machine
 with Node only, every supported trigger delivers with the recorded envelope,

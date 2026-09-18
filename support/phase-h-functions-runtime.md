@@ -1,4 +1,4 @@
-# Phase H — Owned Functions runtime and Extensions (`0.1.0-next.8`)
+# Phase H — Owned Functions runtime and Extensions (`0.1.0-next.7`, together with Phase G)
 
 Written 2026-09-17 against `main` 39ba9a2. This is a plan, not a claim of
 work done. It follows [Phase G](phase-g-storage-rules.md) (native Storage
@@ -250,7 +250,7 @@ smoke recorded as a checklist only.
 - Package: `firebase-tools` leaves the consumer's required dependency set for
   the Fireside path; the wrapper never resolves it.
 
-### H5 — Qualification and release as `0.1.0-next.8` (4–6 days)
+### H5 — Qualification and release as `0.1.0-next.7` (4–6 days)
 
 1. Exact-candidate CI on all jobs, including a new "start the suite with
    `firebase-tools` absent from `node_modules`" step.

@@ -17,9 +17,12 @@ Since `0.1.0-next.4` the published engine includes the Firestore
 Requests/rule-evaluation tracing and rules-coverage tooling whose
 [scoped source qualification](support/phase-bcd-qualification.md) preceded it;
 `fireside emulators:start` records bounded diagnostics by default and
-`--no-diagnostics` disables them. Auxiliary Eventarc/Tasks ports
-support host startup registration only. Unsupported task/event delivery routes
-return HTTP 501 `UNIMPLEMENTED`; registration is not a promise of delivery.
+`--no-diagnostics` disables them. Since `0.1.0-next.7` the Eventarc port
+serves trigger registration, `getTriggers` and `publishEvents` on the `google`
+and named channels and delivers to `onCustomEventPublished` handlers. The
+auxiliary Cloud Tasks port supports host startup registration only: dispatch
+routes return HTTP 501 `UNIMPLEMENTED`, and registration is not a promise of
+delivery.
 
 The package supports only its enumerated native targets after their exact
 candidate checks pass. Linux musl, Windows ARM64/32-bit, network-filesystem
