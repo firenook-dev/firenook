@@ -1,3 +1,76 @@
+# 0.1.0-next.7 — native Storage rules and the owned Functions/Extensions runtime
+
+- Pin the engine to `0720434e3de7e0886f129f52a39d5ef2972ce45f`, the qualified
+  head of [PR #43](https://github.com/sanjevirau/fireside/pull/43) (Phases G
+  and H) on the next.6 engine. This exact revision passed the seven-job CI
+  ([run 35254102986](https://github.com/sanjevirau/fireside/actions/runs/35254102986)),
+  the five-platform packed-install matrix without Java, and a representative
+  private consumer's fresh, sequential official-then-Fireside full-data
+  acceptance (two two-hour soaks, browser journeys before and after
+  export/restart, exact stable-state parity, fresh setup on both backends and
+  the regression commands, all with zero errors); see
+  `support/phase-g-storage-rules.md`, `support/phase-h-functions-runtime.md`
+  and the `receipts` blocks of `benchmarks/phase-g-storage-rules.json` and
+  `benchmarks/phase-h-functions-runtime.json`. next.7 carries both phases;
+  no next.7 was published before this one.
+- Storage Security Rules are evaluated natively (Phase G). `service
+  firebase.storage` runs in the Rust rules engine with `firestore.get()` and
+  `firestore.exists()`, `/internal/setRules` reloads rules on the running
+  suite, and 306 production plus 334 official-emulator oracle steps replay
+  identically. Java and the Storage rules jar left the product: no `--java`
+  or `--storage-rules-jar` arguments, no Java check in `doctor`, and
+  `fireside setup` fetches only the Emulator UI asset. `firebase.json` may
+  use the `"storage": {"rules": …}` object form (one file governs every
+  bucket) and `.firebaserc` targets are optional. On the consumer's Linux
+  host each rules-evaluated Storage operation is about 1 ms cheaper at p50
+  than through the Java runtime.
+- Cloud Functions run in Fireside's own runtime (Phase H): a Rust supervisor
+  with one Node worker per codebase (`support/functions-worker.mjs`) covering
+  discovery through the pinned SDK control API or `functions.yaml`,
+  HTTP/callable/streaming requests, Firestore, Storage, Auth, Pub/Sub,
+  Eventarc and schedule triggers, blocking Auth functions, dotenv and secret
+  files, reload and the background controls. The corpus recorded from
+  firebase-tools 15.22.0 (5 profiles, 43 programs, 281 steps, 250 handler
+  observations in `conformance/fixtures/functions-runtime-v1`) replays with
+  every step identical or a listed divergence (89 asserted, each with its
+  reason, in the replay's divergence table). `firebase-tools` left the CLI's
+  dependencies; the suite starts with it absent from `node_modules`.
+- Extensions are resolved and run by Fireside: instances from local paths,
+  vendored `extensions/.sources`, the shared firebase-tools cache or the
+  registry, with parameters resolved in the official precedence, `${param:X}`
+  substitution and the registry's spec/trigger semantics. The registry is
+  contacted with the Firebase CLI's stored login or `FIREBASE_TOKEN` and its
+  objects are cached beside the source, so later starts are offline. The
+  Eventarc port now serves trigger registration, `getTriggers` and
+  `publishEvents` on the `google` and named channels and delivers to
+  `onCustomEventPublished` handlers, Extensions custom events included.
+- New local commands and options: `--inspect-functions[=port]` (one debugger
+  port per codebase), `functions:invoke NAME [--data JSON] [--region]
+  [--method]`, `ext:vendor` (copy every resolved extension source into the
+  project and record how unpinned refs resolved), `--offline` or
+  `FIRESIDE_OFFLINE=1` (any remaining registry access is a startup error)
+  and a `doctor` report of every extension instance with its source and
+  offline readiness. `--minimum-functions` now defaults to 1, so a plain
+  `emulators:start` no longer fails the positive-minimum check.
+- Measured in the consumer's Linux acceptance on the same host, seed and
+  workload as next.6, against the official emulator on untuned HotSpot
+  defaults (p50 milliseconds): function delivery 2.6 (next.6 3.2; official
+  3.8), Storage cycle 8.0 (official 11.6), write commit 3.3 (official 198),
+  listener delivery 9 (official 198), catalogue query 6.4 (official 31.1);
+  emulator peak PSS 1.77 GiB against 19.35 GiB, no swap on either stack.
+  Application readiness was 51.2 s against 49.2 s official because Fireside
+  binds its listeners only after the full-data import and `/backends` is
+  answered after codebase discovery; both are recorded follow-ups.
+- Limitations recorded with this release: Python and Dart runtimes are
+  ignored with a reason; dynamic (in-code) extensions and Secret Manager
+  access are unsupported (`extensions/<instance>.secret.local` instead);
+  the Cloud Tasks port still accepts queue registration only and answers
+  dispatch with HTTP 501; there is no `functions:shell` REPL; the
+  Emulator UI remains Google's 1.15.0 bundle fetched by `fireside setup`.
+  State written by earlier versions upgrades on first start (CI verifies the
+  upgrade from next.3 native state and the portable rollback). Prerelease on
+  `next`; no stable or universal-compatibility claim.
+
 # 0.1.0-next.6 — write-behind durability, scan and import performance
 
 - Pin the engine to `572d4fb5f9d986accf2473858930c1e9bc3e5d57`, the merge of

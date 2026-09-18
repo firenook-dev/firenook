@@ -288,7 +288,7 @@
     ],
     "hetznerPairedAttempt": "candidate-attempt-11.json",
     "cleanSetup": "without firebase-tools and without Java; fully offline start with vendored extensions",
-    "release": "0.1.0-next.8",
+    "release": "0.1.0-next.7",
     "receipts": "receipts.h5"
   },
   "receipts": {
@@ -341,7 +341,7 @@
       },
       "cleanSetupWithoutJavaOrFirebaseTools": "the Linux smoke is that stage: a fresh consumer directory with the packed CLI + platform package, firebase-functions 7.2.5 and firebase-admin 13.10.0 only; java absent from PATH; suite start, corpus replay and the offline vendored start all pass",
       "pending": [
-        "release 0.1.0-next.8 (separate release approval)",
+        "release 0.1.0-next.7 (separate release approval)",
         "consumer pin bump and its setup documentation"
       ],
       "pairedAcceptance": {
