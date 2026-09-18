@@ -166,10 +166,14 @@ its native executable. Receipts are integrity checks, not a substitute for npm
 registry provenance and your lockfile.
 
 The package pins its engine in `release.json`, including native Windows lifecycle,
-disk startup, Auth export/import password-login corrections and the captured
-Google popup/redirect account-picker repair. Imported accounts can be selected
-without real Google credentials; disabled accounts remain rejected. These are
-the fixture-tested browser flows, not arbitrary OAuth/provider or tenant support.
+disk startup and the Auth export/import and popup/redirect flows. Since
+`0.1.0-next.8` Auth carries every operation of the official Auth emulator,
+replayed from a recorded corpus: every sign-in method with the fake IdP
+credentials the official emulator accepts, tenants, SMS MFA, passkeys, OOB and
+phone codes, blocking functions and export/import. Imported accounts can be
+selected without real Google credentials; disabled accounts remain rejected.
+Real provider round trips, real email/SMS delivery and the routes the official
+emulator itself answers with 501 are not provided.
 Release checks cover SDK conformance and packed installation, plus synthetic
 read/write, listener, disk-reopen and export/import scenarios. A check passing
 for one engine revision or consumer does not certify another revision or every
@@ -177,8 +181,10 @@ application. This package makes no universal performance or memory-reduction
 claim; measure your own representative workload before adopting it.
 
 Functions execution uses the user's Node with Fireside's runtime; user code
-can still reach external services. General Pub/Sub subscriber delivery,
-arbitrary Auth provider/tenant flows, Realtime Database, Hosting, App Hosting
-and Data Connect are not covered by this preview. Supporting UI routes do not imply full Emulator UI parity.
+can still reach external services. Pub/Sub is a full emulator since
+`0.1.0-next.8` (pull, streaming pull, push, ordering, filters, dead-letter,
+seek, snapshots, Avro schemas); Protocol Buffer schemas, IAM and export
+subscriptions are not, and neither are Realtime Database, Hosting, App Hosting
+and Data Connect. Supporting UI routes do not imply full Emulator UI parity.
 Windows power-loss durability and network filesystems have not been qualified;
 the native Windows checks cover local-disk writes, reopen, export and import.

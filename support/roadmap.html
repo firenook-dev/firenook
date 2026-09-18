@@ -360,8 +360,8 @@ const DATA = {
     "title": "Complete Authentication",
     "status": "done",
     "release": "next.8",
-    "desc": "Every operation the official Auth emulator implements (61; Fireside has 23 before the phase): anonymous sign-in, every federated provider with linking and collision handling, email OOB flows (verify, reset, email link, change, recover), phone auth, account update semantics (password, unlink, revoke), Admin SDK surface (batchDelete, session cookies, paging, v2 config), tenants, MFA (SMS) and passkeys, blocking functions on every sign-in path the official emulator blocks, the action, openapi and legacy relyingparty routes; official-emulator corpus first, Rust replay after.",
-    "receipt": "support/phase-i-auth.md · benchmarks/phase-i-auth.json (I0 frozen, I1–I4 receipts) · conformance/fixtures/auth-v1 (61 programs / 1068 steps, 61/61 implemented + 42/42 unimplemented official routes) · replay 17,303 values, 0 mismatches, 4 named divergences · crates/auth-front on the bundled official OpenAPI document · release run 35372788758 · next.8 2026-09-19",
+    "desc": "Every operation the official Auth emulator implements (61; Fireside had 23 before the phase): anonymous sign-in, every federated provider with linking and collision handling, email OOB flows (verify, reset, email link, change, recover), phone auth, account update semantics (password, unlink, revoke), Admin SDK surface (batchDelete, session cookies, paging, v2 config), tenants, MFA (SMS) and passkeys, blocking functions on every sign-in path the official emulator blocks, the action, openapi and legacy relyingparty routes; official-emulator corpus first, Rust replay after.",
+    "receipt": "support/phase-i-auth.md · benchmarks/phase-i-auth.json (I0 frozen, I1–I5 receipts incl. publication) · conformance/fixtures/auth-v1 (61 programs / 1068 steps, 61/61 implemented + 42/42 unimplemented official routes) · replay 17,303 values, 0 mismatches, 4 named divergences · crates/auth-front on the bundled official OpenAPI document · release run 35372788758 · next.8 2026-09-19",
     "steps": [
       [
         "I0",
@@ -394,8 +394,8 @@ const DATA = {
     "title": "Pub/Sub emulator",
     "status": "done",
     "release": "next.8",
-    "desc": "The google.pubsub.v1 Publisher, Subscriber and Schema services over gRPC and HTTP/JSON on the Pub/Sub port (37 RPCs as cloud-pubsub-emulator 0.8.33 serves them): real subscriptions with pull, streaming pull, push delivery, ack deadlines and redelivery, ordering keys, filters, retention, seek and snapshots, dead-letter and retry policies, Avro/Protobuf schemas; function delivery becomes the internal emulator-sub-<topic> subscriber; corpus recorded over both transports first.",
-    "receipt": "support/phase-j-pubsub.md · benchmarks/phase-j-pubsub.json (J0 frozen, J1 receipt) · conformance/fixtures/pubsub-v1 (42 programs / 916 steps, 37/37 RPCs over gRPC, 36/37 over HTTP/JSON) · replay 3,755 values, 0 mismatches, no divergences · @google-cloud/pubsub 5.3.1 end to end · crates/pubsub-front broker + tonic + HTTP/JSON · release run 35372788758 · next.8 2026-09-19",
+    "desc": "The google.pubsub.v1 Publisher, Subscriber and Schema services over gRPC and HTTP/JSON on the Pub/Sub port (37 RPCs as cloud-pubsub-emulator 0.8.33 serves them): real subscriptions with pull, streaming pull, push delivery, ack deadlines and redelivery, ordering keys, filters, retention, seek and snapshots, dead-letter and retry policies, Avro schema revisions (Protocol Buffer schemas answer 501 as on the official emulator); function delivery becomes the internal emulator-sub-<topic> subscriber; corpus recorded over both transports first.",
+    "receipt": "support/phase-j-pubsub.md · benchmarks/phase-j-pubsub.json (J0 frozen, J1/J4/J5 receipts incl. publication) · conformance/fixtures/pubsub-v1 (42 programs / 916 steps, 37/37 RPCs over gRPC, 36/37 over HTTP/JSON) · replay 3,755 values, 0 mismatches, no divergences · @google-cloud/pubsub 5.3.1 end to end · crates/pubsub-front broker + tonic + HTTP/JSON · release run 35372788758 · next.8 2026-09-19",
     "steps": [
       [
         "J0",
@@ -733,9 +733,9 @@ const DATA = {
     "size": "1–2 weeks"
   },
   {
-    "item": "Auth breadth (providers, MFA, tenants) + App Check",
-    "why": "Most common remaining parity requests for app teams",
-    "size": "3–5 weeks"
+    "item": "App Check",
+    "why": "Debug-token exchange and enforcement on Functions, Firestore and Storage; with Auth complete in next.8 this is the last common parity request from app teams",
+    "size": "1–2 weeks"
   },
   {
     "item": "Hosting emulator",
@@ -744,7 +744,7 @@ const DATA = {
   },
   {
     "item": "Multiple Firestore databases",
-    "why": "Needed by a minority; moderate engine work (general Pub/Sub moved to Phase J)",
+    "why": "Needed by a minority; moderate engine work",
     "size": "2–3 weeks"
   },
   {
