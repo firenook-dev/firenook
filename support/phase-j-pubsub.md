@@ -3,7 +3,7 @@
 Written 2026-09-18 against `main` 10f3087 (published engine 0720434). It ships
 with [Phase I](phase-i-auth.md) (complete Authentication) as `0.1.0-next.8`.
 
-## Status (2026-09-18)
+## Status (2026-09-19)
 
 J0–J4 are done. Gate `benchmarks/phase-j-pubsub.json` (frozen); corpus
 `conformance/fixtures/pubsub-v1` — 42 programs / 916 steps against
@@ -18,8 +18,12 @@ runs it standalone for the replay. The replay compares 3,755 values with
 0 mismatches and no named divergence, three runs identical; the pinned
 `@google-cloud/pubsub` 5.3.1 client passes publish, streaming `on('message')`,
 ordering, push, schema and admin flows with `PUBSUB_EMULATOR_HOST`; the
-Phase H Functions/Extensions corpus replays unchanged. J5 (qualification and
-release with I5) remains.
+Phase H Functions/Extensions corpus replays unchanged. J5 qualification is
+recorded in `receipts.j5` (2026-09-19): CI green on the exact head, the
+consumer gates and the nine browser journeys pass on the candidate with the
+discovered schedules and function targets installed on the rewritten broker;
+the paired 2 h soak was waived by the owner for this release (see the I5
+status). Publication of `0.1.0-next.8` follows.
 
 Two changes to the plan as delivered: the replay is the TypeScript harness
 driving the standalone service (as in Phase I) rather than Rust replay

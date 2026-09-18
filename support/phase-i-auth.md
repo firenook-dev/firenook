@@ -5,7 +5,7 @@ Written 2026-09-18 against `main` 10f3087 (published engine 0720434,
 [Phase H](phase-h-functions-runtime.md) and ships with
 [Phase J](phase-j-pubsub.md) (Pub/Sub emulator) as `0.1.0-next.8`.
 
-## Status (2026-09-18)
+## Status (2026-09-19)
 
 I0–I4 are done. Gate `benchmarks/phase-i-auth.json` (frozen); corpus
 `conformance/fixtures/auth-v1` — 61 programs / 1068 steps against
@@ -19,8 +19,14 @@ functions on every blocked method and multicasts on every lifecycle path;
 (`npm run replay:auth`) compares 17,303 values with 0 mismatches and four
 named divergences (`receipts.i4`), three runs identical; the real-SDK
 popup/redirect browser gate and the five earlier `firebase-suite-v1` Auth
-fixtures stay green as crate tests. I5 (qualification and release with J5)
-remains; the Emulator UI Auth-tab check is recorded with the candidate.
+fixtures stay green as crate tests; the Emulator UI Auth-tab check is
+recorded with the candidate. I5 qualification is recorded in `receipts.i5`
+(2026-09-19): CI green on the exact head, the consumer extensions,
+integration and installed-launcher gates and the nine browser journeys
+(including the one-time-code login and sign-out/sign-in) pass on the
+candidate; the paired 2 h soak was waived by the owner for this release
+because the change set is confined to Auth and Pub/Sub and both are proven
+by oracle replay. Publication of `0.1.0-next.8` follows.
 
 Implementation note: I2 as delivered keeps the account as a JSON record with
 rebuilt indexes rather than the typed `Account` struct sketched below — the

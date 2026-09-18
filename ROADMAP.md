@@ -289,7 +289,7 @@ The plan, current-state audit, oracle precedence and named checks are in the
 | I2 | `auth-front` rewritten on a typed account model with every operation | Every I1 step is parity or a named divergence in a Rust replay |
 | I3 | Blocking functions and triggers on every path | Recorded functions calls match for each sign-in method |
 | I4 | Replay, SDK browser profile, Emulator UI check | Replay green; browser cells green; UI Auth tab manual check recorded |
-| I5 | Exact-candidate CI, consumer gates, paired acceptance, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
+| I5 | Exact-candidate CI, consumer gates, release (paired acceptance waived for this release) | `0.1.0-next.8` published through the release workflow; receipts recorded |
 
 - [x] I0 — Freeze the gate and the operation inventory (2026-09-18,
   `benchmarks/phase-i-auth.json`).
@@ -312,6 +312,11 @@ The plan, current-state audit, oracle precedence and named checks are in the
   the five earlier `firebase-suite-v1` Auth fixtures stay green). Emulator UI
   Auth-tab check recorded at I5 with the candidate.
 - [ ] I5 — Qualify the exact candidate and publish `0.1.0-next.8` (with J5).
+  Qualification recorded 2026-09-19 in `receipts.i5`: CI green on the exact
+  head, consumer extensions/integration/installed gates and the nine browser
+  journeys pass on the candidate; the paired 2 h soak was waived by the owner
+  for this release (per-release-line gate; the next.6 and next.7 records
+  stand). Publication pending.
 
 Done when an application using any sign-in method, tenants, MFA, email or
 phone verification, session cookies or the Admin SDK's account management runs
@@ -331,7 +336,7 @@ has a nine-route HTTP adapter with no message backlog before this phase.
 | J2 | Broker core: backlog, ack deadlines, ordering, filters, push, seek/snapshots, schemas | Unit replay of every J1 program's semantics |
 | J3 | gRPC services on the Pub/Sub port + full HTTP/JSON transcoding | `@google-cloud/pubsub` connects and every J1 step is parity or a named divergence |
 | J4 | Replay over both transports; Functions delivery through the broker | Replay green; existing schedule/dispatch fixtures unchanged |
-| J5 | Exact-candidate CI, consumer gates, paired acceptance, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
+| J5 | Exact-candidate CI, consumer gates, release (paired acceptance waived for this release) | `0.1.0-next.8` published through the release workflow; receipts recorded |
 
 - [x] J0 — Freeze the gate and the RPC inventory (2026-09-18,
   `benchmarks/phase-j-pubsub.json`).
@@ -353,6 +358,9 @@ has a nine-route HTTP adapter with no message backlog before this phase.
   streams, orders, pushes and validates schemas against Fireside; the Phase H
   Functions/Extensions corpus replays unchanged (271/271).
 - [ ] J5 — Qualify the exact candidate and publish `0.1.0-next.8` (with I5).
+  Qualification recorded 2026-09-19 in `receipts.j5` (same candidate, gates
+  and waiver as I5; the scheduled functions and function targets ran on the
+  rewritten broker during the journeys). Publication pending.
 
 Done when a client library with `PUBSUB_EMULATOR_HOST` set publishes,
 subscribes (pull, streaming, push), orders, filters, seeks and validates

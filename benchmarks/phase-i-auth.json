@@ -180,9 +180,9 @@
       ],
       "tenantAutoCreate": "any tenantId referenced by a path, body, id token or refresh token creates the tenant with the default config",
       "requestLayer": [
-        "OpenAPI body validation \u2192 400 Invalid JSON payload received",
-        "apiKey required on client routes \u2192 403",
-        "Bearer owner or ya29.* \u2192 owner",
+        "OpenAPI body validation → 400 Invalid JSON payload received",
+        "apiKey required on client routes → 403",
+        "Bearer owner or ya29.* → owner",
         "snake_case keys camelCased",
         "numbers coerced to strings, enum indexes to names"
       ]
@@ -327,7 +327,7 @@
       "consumer extensions gate",
       "browser journeys"
     ],
-    "privateAcceptance": "paired acceptance with the Auth lane extended by the new flows",
+    "privateAcceptance": "paired acceptance waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line",
     "release": "0.1.0-next.8",
     "receipts": {}
   },
@@ -340,6 +340,9 @@
     },
     "blockingFunctions": {
       "policy": "one blocking runner on every sign-in path; the JWT payload sent to the function follows the recording per method"
+    },
+    "pairedAcceptanceWaiver": {
+      "policy": "the paired 2 h soak is a per-release-line gate; the owner waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line"
     }
   },
   "receipts": {
@@ -381,7 +384,47 @@
       "runsIdentical": 3,
       "browserGate": "conformance/test/auth-popup.test.mjs (real SDK popup and redirect against the official fixture) green",
       "existingAuthFixturesUnchanged": "crates/auth-front tests replay auth-identity-toolkit-and-admin, auth-browser-oauth-and-token-refresh and auth-import-export-and-trigger-dispatch in their recorded session order with the dispatch invariants, auth-refresh-reuse for anonymous/password/custom, and the developer-tools tenant discovery; auth-popup through the browser gate",
-      "emulatorUi": "verify-native-ui.mjs (real Emulator UI v1.15.0 in a browser against the suite): auth-create-and-list, auth-list-refresh, auth-clear-control passed on 2026-09-18 with the rewritten Auth service (binary cc170f92\u2026)"
+      "emulatorUi": "verify-native-ui.mjs (real Emulator UI v1.15.0 in a browser against the suite): auth-create-and-list, auth-list-refresh, auth-clear-control passed on 2026-09-18 with the rewritten Auth service (binary cc170f92…)"
+    },
+    "i5": {
+      "date": "2026-09-19",
+      "exactCandidateCi": {
+        "headSha": "03000f0cc082c1b69f06c67b6a99a5417c840243",
+        "conclusion": "success",
+        "runs": {
+          "CI": 35364256374,
+          "Installable packages": 35364256373
+        },
+        "jobs": [
+          "Rust quality gate",
+          "Public fixture and package checks",
+          "Differential harness",
+          "Firebase JS SDK browser integration (memory, client memory)",
+          "Firebase JS SDK browser integration (memory, client persistence)",
+          "Firebase JS SDK browser integration (disk-wal, client memory)",
+          "Firebase JS SDK browser integration (disk-wal, client persistence)",
+          "Packed install (linux-x64)",
+          "Packed install (linux-arm64)",
+          "Packed install (darwin-arm64)",
+          "Packed install (darwin-x64)",
+          "Packed install (win32-x64)",
+          "verify"
+        ],
+        "note": "the Auth and Pub/Sub oracle replays, the Pub/Sub client-library check and the Functions runtime corpus run inside the Differential harness job"
+      },
+      "candidate": "0.1.0-local.g03000f0cc082 (packaging/build-local.mjs on the qualified head 03000f0, installed as the consumer's local candidate; binary sha256 8dc5aaf14195033f4352499d2e7f3aebb7e907ab3b7b4ca22572e4fd27f18574)",
+      "consumerGates": {
+        "extensionsGate": "PASS: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (same as the official oracle capture), ready 8.2 s",
+        "integration": "consumer integration gate 24/24",
+        "installedSmoke": "consumer installed-launcher smoke PASS (default launcher; 21 Functions; two listeners; Unicode; Auth sign-up then sign-in after a native reopen; gzip Storage both buckets; Pub/Sub topic over HTTP; UI; export/shutdown; official-format import; dataset isolation; immutable seed protected)",
+        "browserJourneys": "the consumer's nine browser journeys PASS on the macOS full-data stack with external providers disabled: otp-auth-login 7639 ms, dashboard-and-deck-list 1799, existing-deck-and-listener-edit 13471, catalog-slide-add 24674, deck-image-upload 15562, duplicate-and-delete-deck 5856, dotnet-deck-export 8916, dev-admin-pages 16808, sign-out-and-sign-in 5067; 0 page errors, 0 failures among 6091 required first-party requests; the persistent full-data working state written by next.7 reopened on the candidate and the suite stopped cleanly (16 functions, 2 schedules, 211,255 documents, 1 Auth user, 33,354 objects)"
+      },
+      "authEvidence": "otp-auth-login and sign-out-and-sign-in drive the real application's e-mail one-time-code login through the candidate's Auth emulator; the installed smoke signs up and signs in with a password across a native reopen",
+      "pairedAcceptance": "waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line",
+      "pending": [
+        "release 0.1.0-next.8 (approved by the owner 2026-09-19)",
+        "consumer pin bump with the extensions gate on the installed package"
+      ]
     }
   }
 }
