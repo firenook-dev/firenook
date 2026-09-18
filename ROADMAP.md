@@ -285,7 +285,7 @@ The plan, current-state audit, oracle precedence and named checks are in the
 | Step | Deliverable | Completion check |
 | --- | --- | --- |
 | I0 | Frozen gate `benchmarks/phase-i-auth.json` | Operation inventory, oracles and named checks recorded before fixtures |
-| I1 | `conformance/fixtures/auth-v1` | ≥60 programs / ≥500 steps against firebase-tools 15.22.0 covering every implemented operation, blocking functions on every sign-in method, tenants, MFA, passkeys, OOB and phone codes, export/import |
+| I1 | `conformance/fixtures/auth-v1` | ≥60 programs / ≥500 steps against firebase-tools 15.22.0 covering every implemented operation, blocking functions on every blocked sign-in method, tenants, SMS MFA, passkeys, OOB and phone codes, export/import |
 | I2 | `auth-front` rewritten on a typed account model with every operation | Every I1 step is parity or a named divergence in a Rust replay |
 | I3 | Blocking functions and triggers on every path | Recorded functions calls match for each sign-in method |
 | I4 | Replay, SDK browser profile, Emulator UI check | Replay green; browser cells green; UI Auth tab manual check recorded |

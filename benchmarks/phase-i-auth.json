@@ -149,7 +149,8 @@
       "/emulator/openapi.json",
       "/emulator/auth/handler",
       "/emulator/auth/iframe",
-      "/emulator/action"
+      "/emulator/action",
+      "/www.googleapis.com/identitytoolkit/v3/relyingparty/* (legacy rewrites)"
     ],
     "partialInOfficial": {
       "identitytoolkit.projects.accounts.query": "expression, limit, offset and sort keys other than USER_ID answer 501",
@@ -157,6 +158,34 @@
       "identitytoolkit.accounts.update": "some deleteAttribute values and unsupported fields answer 501",
       "identitytoolkit.accounts.lookup": "lookup by initialEmail answers 501",
       "identitytoolkit.accounts.signInWithPhoneNumber": "androidVerificationProof answers 501"
+    },
+    "officialSurfaceNotes": {
+      "mfa": "PHONE_SMS only; TOTP absent in 15.22.0",
+      "blockingEvents": [
+        "beforeCreate",
+        "beforeSignIn"
+      ],
+      "blockedSignInMethods": [
+        "password",
+        "emailLink",
+        "idp",
+        "phone",
+        "mfa finalize"
+      ],
+      "unblockedSignInMethods": [
+        "custom token",
+        "anonymous",
+        "passkey",
+        "refresh"
+      ],
+      "tenantAutoCreate": "any tenantId referenced by a path, body, id token or refresh token creates the tenant with the default config",
+      "requestLayer": [
+        "OpenAPI body validation \u2192 400 Invalid JSON payload received",
+        "apiKey required on client routes \u2192 403",
+        "Bearer owner or ya29.* \u2192 owner",
+        "snake_case keys camelCased",
+        "numbers coerced to strings, enum indexes to names"
+      ]
     }
   },
   "capture": {
@@ -212,7 +241,7 @@
         "popup/redirect for each provider",
         "link/unlink",
         "reauthenticate",
-        "MFA SMS/TOTP",
+        "MFA SMS",
         "tenant sign-in"
       ]
     },
