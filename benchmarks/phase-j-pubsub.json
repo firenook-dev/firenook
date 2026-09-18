@@ -253,6 +253,19 @@
       "determinism": "two consecutive full recordings identical except capturedAt/completedAt after the ordered-subscription programs were limited to the single-key contract (the official emulator's multi-key interleaving differs between its own runs)",
       "oracle": "cloud-pubsub-emulator-0.8.33 jar (sha256 4b2892ba...) on Java 25, one fresh process per program; grpc-js 1.14.4 with @google-cloud/pubsub 5.3.1 protos; recording push endpoint",
       "notInCorpus": "three requests the official adapter never answers (body name differing from the path, numeric schema type, non-numeric pageSize)"
+    },
+    "j4": {
+      "date": "2026-09-18",
+      "replay": "npm run replay:pubsub -- --binary target/debug/fireside",
+      "programs": 42,
+      "steps": 916,
+      "valuesCompared": 3755,
+      "mismatches": 0,
+      "namedDivergences": [],
+      "runsIdentical": 3,
+      "clientLibrary": "npm run verify:pubsub:client: @google-cloud/pubsub 5.3.1 with PUBSUB_EMULATOR_HOST \u2014 createTopic/createSubscription, publishMessage + on('message'), ordering keys over streaming pull, push envelope, Avro schema on a topic, getTopics/getSubscriptions, delete: 7/7",
+      "functionsDelivery": "functions-runtime corpus replay 271/271 (profiles main, v1-blocking, inspect, ext-missing-param); verify-native-ui.mjs --topic-reload (Pub/Sub-triggered functions across a source reload) passed",
+      "suite": "gRPC and HTTP/JSON share the Pub/Sub port through tonic Routes with accept_http1"
     }
   }
 }

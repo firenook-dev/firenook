@@ -381,7 +381,7 @@
       "runsIdentical": 3,
       "browserGate": "conformance/test/auth-popup.test.mjs (real SDK popup and redirect against the official fixture) green",
       "existingAuthFixturesUnchanged": "crates/auth-front tests replay auth-identity-toolkit-and-admin, auth-browser-oauth-and-token-refresh and auth-import-export-and-trigger-dispatch in their recorded session order with the dispatch invariants, auth-refresh-reuse for anonymous/password/custom, and the developer-tools tenant discovery; auth-popup through the browser gate",
-      "emulatorUi": "recorded at I5 with the exact candidate"
+      "emulatorUi": "verify-native-ui.mjs (real Emulator UI v1.15.0 in a browser against the suite): auth-create-and-list, auth-list-refresh, auth-clear-control passed on 2026-09-18 with the rewritten Auth service (binary cc170f92\u2026)"
     }
   }
 }
