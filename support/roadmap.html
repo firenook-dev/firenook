@@ -360,16 +360,16 @@ const DATA = {
     "title": "Complete Authentication",
     "status": "planned",
     "release": "next.8",
-    "desc": "Every operation the official Auth emulator implements (62; Fireside has 23 before the phase): anonymous sign-in, every federated provider with linking and collision handling, email OOB flows (verify, reset, email link, change, recover), phone auth, account update semantics (password, unlink, revoke), Admin SDK surface (batchDelete, session cookies, paging, v2 config), tenants, MFA (SMS) and passkeys, blocking functions on every sign-in path the official emulator blocks, the action, openapi and legacy relyingparty routes; official-emulator corpus first, Rust replay after.",
-    "receipt": "support/phase-i-auth.md · benchmarks/phase-i-auth.json (I0) · conformance/fixtures/auth-v1 (I1)",
+    "desc": "Every operation the official Auth emulator implements (61; Fireside has 23 before the phase): anonymous sign-in, every federated provider with linking and collision handling, email OOB flows (verify, reset, email link, change, recover), phone auth, account update semantics (password, unlink, revoke), Admin SDK surface (batchDelete, session cookies, paging, v2 config), tenants, MFA (SMS) and passkeys, blocking functions on every sign-in path the official emulator blocks, the action, openapi and legacy relyingparty routes; official-emulator corpus first, Rust replay after.",
+    "receipt": "support/phase-i-auth.md · benchmarks/phase-i-auth.json (I0 frozen, I1 receipt) · conformance/fixtures/auth-v1 (61 programs / 1068 steps, 61/61 implemented + 42/42 unimplemented official routes)",
     "steps": [
       [
         "I0",
-        false
+        true
       ],
       [
         "I1",
-        false
+        true
       ],
       [
         "I2",
@@ -399,7 +399,7 @@ const DATA = {
     "steps": [
       [
         "J0",
-        false
+        true
       ],
       [
         "J1",
@@ -444,7 +444,7 @@ const DATA = {
     "name": "Authentication",
     "status": "partial",
     "note": "Password, custom token, refresh, admin, captured Google popup/redirect; blocking functions (beforeCreate/beforeSignIn) delivered by the owned runtime",
-    "remaining": "Phase I (next.8): anonymous, OOB/email link, phone, linking/unlink/revoke, Admin batchDelete/session cookies/paging, tenants, MFA/passkeys, blocking on every path — 39 of the official 62 operations",
+    "remaining": "Phase I (next.8): anonymous, OOB/email link, phone, linking/unlink/revoke, Admin batchDelete/session cookies/paging, tenants, MFA/passkeys, blocking on every path — 38 of the official 61 operations",
     "size": "weeks"
   },
   {

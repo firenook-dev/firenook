@@ -5,6 +5,14 @@ Written 2026-09-18 against `main` 10f3087 (published engine 0720434,
 [Phase H](phase-h-functions-runtime.md) and ships with
 [Phase J](phase-j-pubsub.md) (Pub/Sub emulator) as `0.1.0-next.8`.
 
+## Status (2026-09-18)
+
+I0 and I1 are done: gate `benchmarks/phase-i-auth.json` (frozen), corpus
+`conformance/fixtures/auth-v1` — 61 programs / 1068 steps against
+firebase-tools 15.22.0 covering all 61 implemented and all 42 unimplemented
+official routes plus the pages and legacy routes; three consecutive
+recordings are identical after normalization (`receipts.i1`). I2 starts next.
+
 ## Goal
 
 Make the Auth port a drop-in for the official Auth emulator: every operation
@@ -31,8 +39,8 @@ Emulator UI is unchanged.
 
 `crates/auth-front` (2,390 lines) implements 24 routes. Measured against
 firebase-tools 15.22.0 (`lib/emulator/auth/apiSpec.js` + `operations.js`),
-the official emulator implements 62 of the 103 operations in its OpenAPI
-document (the other 41 answer `501`); Fireside implements 23 of those 62 plus
+the official emulator implements 61 of the 103 operations in its OpenAPI
+document (the other 42 answer `501`); Fireside implements 23 of those 61 plus
 the popup handler and iframe pages.
 
 | Area | Fireside today | Official emulator | Gap |
@@ -83,8 +91,8 @@ README and asserted in the replay.
 
 - `benchmarks/phase-i-auth.json`: toolchain pins (Rust, Node 24, firebase-tools
   15.22.0 with the `lib/emulator/auth/*` source hashes, firebase 12.18.0),
-  the operation inventory above (62 official operations, the 23 Fireside has,
-  the 39 to add, the 41 that stay `501`), the named checks below with pass
+  the operation inventory above (61 official operations, the 23 Fireside has,
+  the 38 to add, the 42 that stay `501`), the named checks below with pass
   criteria, and the acceptance identities I5 fills in.
 
 ### I1 — Oracle corpus (4–5 days)
@@ -140,7 +148,7 @@ programs / ≥500 steps, each program with a fresh emulator state (`DELETE
   import silent, delete-all silent.
 - Export/import: the whole record set through `accounts:batchGet` / `batchCreate`
   and the `auth_export/` layout with tenants, MFA, phone, `passwordHash`.
-- Errors: the 41 unimplemented operations (`501` shape), unknown routes, bad
+- Errors: the 42 unimplemented operations (`501` shape), unknown routes, bad
   JSON and schema-invalid bodies, missing `apiKey`, missing or invalid
   `Authorization` on admin routes, `targetProjectId` without owner, wrong
   project id, tenant id mismatches; the legacy `relyingparty` route rewrites.
@@ -192,10 +200,12 @@ users:
 
 ### I4 — Replay (2–3 days)
 
-- `crates/auth-front/src/replay_tests.rs` replays every I1 program over the
-  router with a recording functions stub; parity on status, error message,
-  response shape (normalized fields) and functions calls, or a named
-  divergence — `DIVERGENCES` empty is the target.
+- `conformance/src/auth/replay-fireside.ts` replays every I1 program against
+  the binary's standalone `fireside auth` service (one fresh process per
+  program, the same functions stub) using the capture's own `normalize.ts`,
+  so both sides normalize identically; parity on status, headers, normalized
+  body, log lines and functions calls, or a named divergence — an empty
+  divergence list is the target. Rust unit tests keep the crate-level checks.
 - The SDK browser profile of I1 runs against Fireside in the existing browser
   integration job (four cells) for the flows the JS SDK drives.
 - The Emulator UI Auth tab against Fireside: list/edit/add/delete users,

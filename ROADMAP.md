@@ -280,7 +280,7 @@ extensions start with no network. Python/Dart functions stay unsupported.
 
 The plan, current-state audit, oracle precedence and named checks are in the
 [Phase I plan](support/phase-i-auth.md). The official Auth emulator implements
-62 operations; Fireside implements 23 of them before this phase.
+61 operations; Fireside implements 23 of them before this phase.
 
 | Step | Deliverable | Completion check |
 | --- | --- | --- |
@@ -291,9 +291,12 @@ The plan, current-state audit, oracle precedence and named checks are in the
 | I4 | Replay, SDK browser profile, Emulator UI check | Replay green; browser cells green; UI Auth tab manual check recorded |
 | I5 | Exact-candidate CI, consumer gates, paired acceptance, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
 
-- [ ] I0 — Freeze the gate and the operation inventory.
-- [ ] I1 — Record the official Auth emulator corpus; commit fixtures before
-  implementation.
+- [x] I0 — Freeze the gate and the operation inventory (2026-09-18,
+  `benchmarks/phase-i-auth.json`).
+- [x] I1 — Record the official Auth emulator corpus; commit fixtures before
+  implementation (2026-09-18: 61 programs / 1068 steps in
+  `conformance/fixtures/auth-v1`, every one of the 61 implemented and 42
+  unimplemented official routes exercised; three recordings identical).
 - [ ] I2 — Typed account model and every operation.
 - [ ] I3 — Blocking functions and lifecycle triggers on every sign-in path.
 - [ ] I4 — Replay the corpus; SDK and UI checks.
@@ -319,7 +322,8 @@ has a nine-route HTTP adapter with no message backlog before this phase.
 | J4 | Replay over both transports; Functions delivery through the broker | Replay green; existing schedule/dispatch fixtures unchanged |
 | J5 | Exact-candidate CI, consumer gates, paired acceptance, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
 
-- [ ] J0 — Freeze the gate and the RPC inventory.
+- [x] J0 — Freeze the gate and the RPC inventory (2026-09-18,
+  `benchmarks/phase-j-pubsub.json`).
 - [ ] J1 — Record the official Pub/Sub emulator corpus over gRPC and HTTP.
 - [ ] J2 — Broker core.
 - [ ] J3 — gRPC and HTTP/JSON transports on one port.

@@ -52,10 +52,10 @@
   },
   "inventory": {
     "openApiOperations": 103,
-    "officialImplemented": 62,
-    "officialNotImplemented": 41,
+    "officialImplemented": 61,
+    "officialNotImplemented": 42,
     "firesideBefore": 23,
-    "toAdd": 39,
+    "toAdd": 38,
     "officialImplementedOperations": [
       "emulator.projects.accounts.delete",
       "emulator.projects.config.get",
@@ -186,7 +186,52 @@
         "snake_case keys camelCased",
         "numbers coerced to strings, enum indexes to names"
       ]
-    }
+    },
+    "countingNote": "counts are (path, method) pairs of the OpenAPI document; three operation ids (emulator accounts delete, oobCodes list, verificationCodes list) serve a root and a tenant path and are listed once per path",
+    "officialNotImplementedOperations": [
+      "identitytoolkit.accounts.issueSamlResponse",
+      "identitytoolkit.accounts.revokeToken",
+      "identitytoolkit.accounts.signInWithGameCenter",
+      "identitytoolkit.accounts.verifyIosClient",
+      "identitytoolkit.defaultSupportedIdps.list",
+      "identitytoolkit.getPasswordPolicy",
+      "identitytoolkit.getRecaptchaConfig",
+      "identitytoolkit.getSessionCookiePublicKeys",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.create",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.delete",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.get",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.list",
+      "identitytoolkit.projects.defaultSupportedIdpConfigs.patch",
+      "identitytoolkit.projects.identityPlatform.initializeAuth",
+      "identitytoolkit.projects.inboundSamlConfigs.create",
+      "identitytoolkit.projects.inboundSamlConfigs.delete",
+      "identitytoolkit.projects.inboundSamlConfigs.get",
+      "identitytoolkit.projects.inboundSamlConfigs.list",
+      "identitytoolkit.projects.inboundSamlConfigs.patch",
+      "identitytoolkit.projects.oauthIdpConfigs.create",
+      "identitytoolkit.projects.oauthIdpConfigs.delete",
+      "identitytoolkit.projects.oauthIdpConfigs.get",
+      "identitytoolkit.projects.oauthIdpConfigs.list",
+      "identitytoolkit.projects.oauthIdpConfigs.patch",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.create",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.delete",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.get",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.list",
+      "identitytoolkit.projects.tenants.defaultSupportedIdpConfigs.patch",
+      "identitytoolkit.projects.tenants.getIamPolicy",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.create",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.delete",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.get",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.list",
+      "identitytoolkit.projects.tenants.inboundSamlConfigs.patch",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.create",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.delete",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.get",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.list",
+      "identitytoolkit.projects.tenants.oauthIdpConfigs.patch",
+      "identitytoolkit.projects.tenants.setIamPolicy",
+      "identitytoolkit.projects.tenants.testIamPermissions"
+    ]
   },
   "capture": {
     "requiredBeforeProductImplementation": true,
@@ -215,16 +260,22 @@
       "emulator-programs.json",
       "SHA256SUMS"
     ],
-    "fixturesFrozen": false
+    "fixturesFrozen": true,
+    "frozenFixtureSha256": {
+      "README.md": "0a39d6d4bf675ec38cb1d0afaa272d23c2c21d7e750f9d01f422a29f2acbd8fe",
+      "emulator-programs.json": "9d6057c68af3aa23a6b0dae9a234c8d1e7588f40d4cd63d2262d097f32a6d193"
+    },
+    "fixturesFrozenAt": "2026-09-18T20:33:24+08:00"
   },
   "gates": {
     "emulatorReplay": {
-      "test": "crates/auth-front/src/replay_tests.rs",
+      "test": "conformance/src/auth/replay-fireside.ts (npm run replay:auth -- --binary <fireside>); the replay shares normalize.ts with the capture so both sides normalize identically, and drives the binary's standalone `fireside auth` service over HTTP with the same functions stub",
       "stepsMinimum": 500,
       "allowedUnexplainedStatusDivergences": 0,
       "allowedUnexplainedBodyDivergences": 0,
       "functionsCallsMustMatch": true,
-      "recordedDivergencesMustBeAssertedNotSkipped": true
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "rustTests": "crates/auth-front unit tests keep the existing fixture checks; the corpus replay runs in the differential harness CI job"
     },
     "exportImport": {
       "next7ExportImportsUnchanged": true,
@@ -289,6 +340,18 @@
     },
     "blockingFunctions": {
       "policy": "one blocking runner on every sign-in path; the JWT payload sent to the function follows the recording per method"
+    }
+  },
+  "receipts": {
+    "i1": {
+      "fixture": "conformance/fixtures/auth-v1/emulator-programs.json",
+      "programs": 61,
+      "steps": 1068,
+      "officialImplementedCovered": "61/61",
+      "officialNotImplementedCovered": "42/42",
+      "capturedAt": "2026-09-18T12:35:00.635Z",
+      "determinism": "three consecutive recordings identical except capturedAt/completedAt",
+      "oracle": "firebase-tools 15.22.0 AuthEmulator in process; recording functions stub"
     }
   }
 }
