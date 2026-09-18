@@ -72,9 +72,11 @@ default; `fireside emulators:start --no-diagnostics` (or native `suite
 --no-diagnostics`) disables recording and returns an explicit unavailable response
 from the debug endpoint. Reports can contain document data and decoded auth
 claims, so keep them local. The published `next` packages since
-`0.1.0-next.4` carry these features, and since `0.1.0-next.7` Storage rules
+`0.1.0-next.4` carry these features, since `0.1.0-next.7` Storage rules
 are evaluated natively and Functions and Extensions run in Fireside's own
-runtime (Node is the only runtime dependency); a source build ahead of the
+runtime (Node is the only runtime dependency), and since `0.1.0-next.8` Auth
+carries every operation of the official emulator and Pub/Sub is a full
+emulator over gRPC and HTTP/JSON; a source build ahead of the
 published engine may carry more, and this README does not qualify the full
 suite's developer tools for every application.
 
