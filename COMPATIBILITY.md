@@ -6,8 +6,8 @@ Fireside is not yet a universal Firebase Emulator Suite replacement.
 | --- | --- | --- |
 | Firestore | Native/Admin and browser SDK paths, rules, realtime targets, disk/WAL, official-format import/export | Every production feature, edition or arbitrary client version |
 | Auth | Captured password/custom-token/refresh/admin and local Google popup/redirect flows | Every provider, tenant or production authentication flow |
-| Storage | Captured Firebase/GCS paths, metadata, gzip, pagination, multi-bucket and export/import | All GCS features or every Firebase CLI config shape |
-| Functions | Node/firebase-tools compatibility host and captured dispatch/control paths | Pure Rust JavaScript execution or a network sandbox |
+| Storage | Captured Firebase/GCS paths, metadata, gzip, pagination, single-file and multi-bucket rules, export/import; Security Rules evaluated natively (no Java) with the recorded official request model and production expression semantics, including `firestore.get`/`exists` and `/internal/setRules` | All GCS features; the official emulator's prefix-template `list` matching and missing `request.method` (production semantics are followed and recorded as divergences) |
+| Functions | Fireside runtime with one Node worker per codebase: discovery through the pinned SDK control API or `functions.yaml`, HTTP/callable/streaming, Firestore/Storage/Auth/Pub/Sub/Eventarc/schedule triggers, blocking Auth functions, dotenv/secret files, reload, background controls, `--inspect-functions`; Extensions resolved and run by Fireside with the recorded parameter, spec and trigger semantics from local, vendored, cached or registry sources | Pure Rust JavaScript execution, a network sandbox, Python/Dart runtimes, dynamic (in-code) extensions, Secret Manager access |
 | Pub/Sub | Limited function-oriented publication/dispatch adapter | General subscriber, push/pull and ordering parity |
 | Hub/UI | Captured discovery/control/static/logging paths | Complete Emulator UI parity |
 | Other services | None claimed | Realtime Database, Hosting, App Hosting, Data Connect and universal extensions |

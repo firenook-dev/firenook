@@ -418,14 +418,38 @@ fn parse_smaps_rollup(contents: &str) -> Result<ProcessResidentMemoryUsage, Stri
     })
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default)]
 struct WriteParameters {
-    #[serde(rename = "currentDocument.exists")]
     exists: Option<bool>,
-    #[serde(rename = "currentDocument.updateTime")]
     update_time: Option<String>,
-    #[serde(rename = "updateMask.fieldPaths", default)]
     update_mask: Vec<String>,
+}
+
+impl WriteParameters {
+    /// Parses the repeated `updateMask.fieldPaths` and the `currentDocument`
+    /// preconditions from the raw query pairs (a repeated key is a list).
+    fn from_pairs(pairs: &[(String, String)]) -> Result<Self, RestError> {
+        let mut parameters = Self::default();
+        for (key, value) in pairs {
+            match key.as_str() {
+                "currentDocument.exists" => {
+                    parameters.exists = Some(match value.as_str() {
+                        "true" => true,
+                        "false" => false,
+                        _ => {
+                            return Err(RestError::invalid(
+                                "currentDocument.exists must be true or false",
+                            ));
+                        }
+                    });
+                }
+                "currentDocument.updateTime" => parameters.update_time = Some(value.clone()),
+                "updateMask.fieldPaths" => parameters.update_mask.push(value.clone()),
+                _ => {}
+            }
+        }
+        Ok(parameters)
+    }
 }
 
 async fn get_document(
@@ -443,10 +467,11 @@ async fn get_document(
 async fn patch_document(
     State(state): State<RestState>,
     Path(path): Path<DocumentPath>,
-    Query(parameters): Query<WriteParameters>,
+    Query(pairs): Query<Vec<(String, String)>>,
     headers: HeaderMap,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
+    let parameters = WriteParameters::from_pairs(&pairs)?;
     let project = path.project.clone();
     let key = document_key(path)?;
     let fields = decode_document_fields(&body)?;
@@ -508,9 +533,10 @@ async fn patch_document(
 async fn delete_document(
     State(state): State<RestState>,
     Path(path): Path<DocumentPath>,
-    Query(parameters): Query<WriteParameters>,
+    Query(pairs): Query<Vec<(String, String)>>,
     headers: HeaderMap,
 ) -> Result<Json<JsonValue>, RestError> {
+    let parameters = WriteParameters::from_pairs(&pairs)?;
     let project = path.project.clone();
     let key = document_key(path)?;
     let authorization = request_authorization(&headers, &project)?;

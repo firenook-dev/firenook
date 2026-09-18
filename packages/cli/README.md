@@ -29,11 +29,18 @@ platform binary. Lock the version in your project. No automatic upgrades.
   or native Windows x64. Each platform requires passing native packaging CI.
   Windows builds statically link the C runtime; no separate C++ redistributable
   is required by the Fireside executable.
-- Java for Storage rules; Java 26 is the tested baseline. The Functions host is
-  pinned firebase-tools 15.22.0, installed as a regular dependency.
-- `setup` explicitly downloads the pinned public Storage-rules/UI assets and
-  verifies size/SHA-256. Ordinary installation/start does not download them.
-  `doctor` is read-only and names missing dependencies.
+- No Java: Storage Security Rules are compiled and evaluated natively
+  (`rules_version = '2'` and version-1 sources, `firestore.get()` /
+  `firestore.exists()` against the local Firestore, `PUT /internal/setRules`).
+- No firebase-tools: Functions run on Fireside's own runtime, one Node worker
+  per codebase, discovered through the `firebase-functions` SDK already in the
+  codebase's `node_modules` (tested with 7.2.5). The recorded contract is the
+  official emulator's behaviour for HTTP/callable/streaming, Firestore, Storage,
+  Auth (including blocking functions), Pub/Sub, schedules, Eventarc custom
+  events, dotenv/secret files, reload and background controls.
+- `setup` explicitly downloads the pinned public Emulator UI asset and verifies
+  size/SHA-256. Ordinary installation/start does not download it. `doctor` is
+  read-only and names missing dependencies.
 - Existing `firebase.json` configures all five service emulators; `.firebaserc`
   aliases/Storage targets and existing rules/index paths are reused. Storage is
   currently the native suite's array-of-targets format, not every Firebase CLI
@@ -48,6 +55,41 @@ platform binary. Lock the version in your project. No automatic upgrades.
   Linux musl/Alpine and arbitrary partial suites are not claimed supported.
 - `fireside native ...` exposes the existing advanced native CLI explicitly.
   It does not receive the adapter's project, state or credential safeguards.
+
+## Functions and Extensions
+
+```sh
+fireside emulators:start --project demo-my-app --inspect-functions        # debugger on 9229, 9230, ...
+fireside emulators:start --project demo-my-app --inspect-functions=9333   # one codebase, explicit port
+fireside functions:invoke helloWorld --project demo-my-app                # GET-less POST to the HTTPS route
+fireside functions:invoke addMessage --project demo-my-app --data '{"text":"hi"}'   # callable body {"data": ...}
+fireside ext:vendor --project demo-my-app                                 # copy registry Extensions into the project
+fireside emulators:start --project demo-my-app --offline                  # never contact the Extensions registry
+```
+
+`firebase.json` `extensions` instances run like the official emulator: a
+local path is read from disk; a registry ref (`publisher/name@version`) is
+taken from `extensions/.sources/<publisher>/<name>@<version>` in the project
+(vendored), then from the shared firebase-tools cache
+(`~/.cache/firebase/extensions`, or `FIREBASE_EXTENSIONS_CACHE_PATH`), and
+otherwise downloaded from the registry and built with `npm install` /
+`npm run gcp-build`. Parameters come from `extensions/<instance>.env`,
+`.env.<alias>`, `.env.<projectId>`, `.env.local` and `.secret.local` with the
+official precedence, defaults and `${param:X}` substitution.
+
+The registry (metadata and, on first use, the source archive) is contacted
+with the Firebase CLI's stored login or a `FIREBASE_TOKEN` refresh token, the
+same credential the official emulator uses; Fireside stores the registry
+objects next to the source (`fireside-registry.json`) so every later start is
+offline. Secret Manager is never contacted: provide secret parameters in
+`extensions/<instance>.secret.local`. `fireside ext:vendor` copies each
+resolved source into the project and records how unpinned refs resolved, which
+is the recommended path for CI and for teammates without a Firebase login;
+`--offline` (or `FIRESIDE_OFFLINE=1`) turns any remaining registry access into
+a startup error. `fireside doctor` lists every instance with its source and
+whether it starts offline. Dynamic (in-code) extensions, Python/Dart runtimes
+and the registry's `latest-approved` listing rules beyond version resolution
+are not supported.
 
 ## State and tests
 
@@ -107,9 +149,9 @@ for one engine revision or consumer does not certify another revision or every
 application. This package makes no universal performance or memory-reduction
 claim; measure your own representative workload before adopting it.
 
-Functions execution still uses Node and firebase-tools; Storage rules still
-use Java. General Pub/Sub subscriber delivery, arbitrary Auth provider/tenant
-flows, Realtime Database, Hosting, App Hosting and Data Connect are not covered
-by this preview. Supporting UI routes do not imply full Emulator UI parity.
+Functions execution uses the user's Node with Fireside's runtime; user code
+can still reach external services. General Pub/Sub subscriber delivery,
+arbitrary Auth provider/tenant flows, Realtime Database, Hosting, App Hosting
+and Data Connect are not covered by this preview. Supporting UI routes do not imply full Emulator UI parity.
 Windows power-loss durability and network filesystems have not been qualified;
 the native Windows checks cover local-disk writes, reopen, export and import.

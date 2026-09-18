@@ -187,6 +187,17 @@ pub struct HubConfig {
     pub exporter: mpsc::Sender<ExportCommand>,
     /// Shared trigger controls.
     pub triggers: TriggerRegistry,
+    /// Where `disableBackgroundTriggers` / `enableBackgroundTriggers` are
+    /// forwarded so the Functions runtime can disable, reload and re-register
+    /// its records; the hub waits for the acknowledgement.
+    pub background: Option<mpsc::UnboundedSender<BackgroundRequest>>,
+}
+
+/// A background-trigger switch forwarded to the Functions runtime.
+#[derive(Debug)]
+pub struct BackgroundRequest {
+    pub enabled: bool,
+    pub done: tokio::sync::oneshot::Sender<()>,
 }
 
 /// Active Hub router and owned locator file.
@@ -210,6 +221,7 @@ impl HubRuntime {
             locator: locator_value,
             exporter: config.exporter,
             triggers: config.triggers,
+            background: config.background,
         };
         let application = Router::new()
             .route("/", get(hub_root))
@@ -247,6 +259,17 @@ struct HubState {
     locator: JsonValue,
     exporter: mpsc::Sender<ExportCommand>,
     triggers: TriggerRegistry,
+    background: Option<mpsc::UnboundedSender<BackgroundRequest>>,
+}
+
+async fn forward_background(state: &HubState, enabled: bool) {
+    let Some(sender) = &state.background else {
+        return;
+    };
+    let (done, acknowledged) = tokio::sync::oneshot::channel();
+    if sender.send(BackgroundRequest { enabled, done }).is_ok() {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(30), acknowledged).await;
+    }
 }
 
 async fn hub_root(State(state): State<HubState>) -> Json<JsonValue> {
@@ -298,11 +321,13 @@ async fn export(
 
 async fn disable_background(State(state): State<HubState>) -> Json<JsonValue> {
     state.triggers.set_background_enabled(false);
+    forward_background(&state, false).await;
     Json(json!({ "enabled": false }))
 }
 
 async fn enable_background(State(state): State<HubState>) -> Json<JsonValue> {
     state.triggers.set_background_enabled(true);
+    forward_background(&state, true).await;
     Json(json!({ "enabled": true }))
 }
 
@@ -556,6 +581,7 @@ mod tests {
         let (exports, mut commands) = mpsc::channel(1);
         let triggers = TriggerRegistry::default();
         let mut runtime = HubRuntime::start(HubConfig {
+            background: None,
             directory: directory(),
             locator_file: locator.clone(),
             pid: 42,

@@ -2,6 +2,7 @@
 use super::*;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 #[tokio::test]
 async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_clients() {

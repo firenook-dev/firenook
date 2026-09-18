@@ -488,7 +488,10 @@ impl Authorization {
             .iter()
             .map(|(name, value)| Ok((name.clone(), json_to_rules_value(value)?)))
             .collect::<Result<BTreeMap<_, _>, AuthorizationError>>()?;
-        Ok(Self::Client(Some(Auth { uid, token })))
+        Ok(Self::Client(Some(Auth {
+            uid: Some(uid),
+            token,
+        })))
     }
 
     /// Whether this request bypasses Security Rules.
@@ -812,7 +815,7 @@ mod tests {
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).expect("json"))
         );
         let auth = Authorization::parse(Some(&token), PROJECT, now).expect("valid token");
-        assert_eq!(auth.auth().expect("auth").uid, "alice");
+        assert_eq!(auth.auth().expect("auth").uid.as_deref(), Some("alice"));
         assert!(Authorization::parse(Some(&token), "wrong-project", now).is_err());
         assert_eq!(
             Authorization::parse(Some(OWNER_BEARER_TOKEN), PROJECT, now),

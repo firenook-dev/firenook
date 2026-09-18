@@ -1,0 +1,28 @@
+[package]
+name = "fireside-extensions"
+description = "Firebase Extensions loader for the fireside emulator suite: manifest, parameters, registry resolution, source cache and trigger conversion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+fireside-functions-runtime = { path = "../functions-runtime" }
+regex.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+semver = "1.0.28"
+serde.workspace = true
+serde_json.workspace = true
+serde_norway = "0.9.42"
+tokio = { workspace = true, features = ["fs", "process"] }
+zip.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

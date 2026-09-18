@@ -1,8 +1,10 @@
 //! Firebase Storage and GCS JSON-compatible local object service.
 //!
 //! Object bytes are streamed to disk and metadata is committed atomically.
-//! Policy decisions use the pinned official Storage Rules runtime protocol;
-//! Functions lifecycle delivery shares Fireside's bounded dispatch queue.
+//! Security Rules are compiled and evaluated in process by
+//! `fireside-rules-engine` with the request model recorded from the official
+//! emulator; Functions lifecycle delivery shares Fireside's bounded dispatch
+//! queue.
 
 #![forbid(unsafe_code)]
 
@@ -10,7 +12,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 use std::io::Read as _;
 use std::path::{Path as FilePath, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use axum::body::{Body, Bytes};
@@ -18,7 +19,7 @@ use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
@@ -30,12 +31,17 @@ use serde_json::{Map as JsonMap, Value as JsonValue, json};
 use sha2::Sha256;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncWriteExt as _, BufReader};
 
 mod download;
 mod metadata;
+mod rules;
 use download::file_response;
+pub use rules::{
+    BucketRules, FirestoreDocuments, NativeRulesConfig, NoFirestoreDocuments, RulesFile,
+    RulesSource,
+};
+use rules::{NativeRules, Operation, Verdict};
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]
@@ -44,28 +50,8 @@ mod missing_object_tests;
 mod pagination_tests;
 #[cfg(test)]
 mod persistence_tests;
-
-/// One rules source bound to a Storage bucket.
-#[derive(Debug, Clone)]
-pub struct BucketRules {
-    /// Bucket id.
-    pub bucket: String,
-    /// Source filename for diagnostics.
-    pub name: String,
-    /// Firebase Storage rules source.
-    pub content: String,
-}
-
-/// Pinned official Storage Rules runtime configuration.
-#[derive(Debug, Clone)]
-pub struct RulesRuntimeConfig {
-    /// Java executable, normally `java`.
-    pub java: PathBuf,
-    /// `cloud-storage-rules-runtime-v*.jar` path.
-    pub jar: PathBuf,
-    /// Independently targeted bucket rules.
-    pub buckets: Vec<BucketRules>,
-}
+#[cfg(test)]
+mod rules_replay_tests;
 
 /// Storage service construction settings.
 #[derive(Debug, Clone)]
@@ -76,8 +62,8 @@ pub struct StorageConfig {
     pub origin: String,
     /// Durable Storage root.
     pub data_dir: PathBuf,
-    /// Optional rules runtime. Absence is explicit open emulator mode.
-    pub rules: Option<RulesRuntimeConfig>,
+    /// Optional native rules. Absence is explicit open emulator mode.
+    pub rules: Option<NativeRulesConfig>,
     /// When object writes and metadata commits reach stable storage.
     pub durability: StorageDurability,
 }
@@ -88,12 +74,18 @@ pub use metadata::StorageDurability;
 pub struct StorageRuntime {
     application: Router,
     state: StorageState,
-    rules: Option<RulesRuntime>,
+    /// The write-behind flusher and its stop switch; shutdown waits for an
+    /// in-flight flush so the metadata database is closed when it returns.
+    flusher: Option<(
+        tokio::sync::watch::Sender<bool>,
+        tokio::task::JoinHandle<()>,
+    )>,
 }
 
 impl StorageRuntime {
-    /// Opens durable state, starts the pinned rules runtime, and loads every
-    /// configured bucket ruleset before returning readiness.
+    /// Opens durable state and compiles every configured ruleset before
+    /// returning readiness. A ruleset that does not compile is a startup
+    /// failure.
     pub async fn start(
         config: StorageConfig,
         queue: DispatchQueue,
@@ -107,29 +99,31 @@ impl StorageRuntime {
             .await
             .map_err(|error| StorageError(format!("failed to create upload root: {error}")))?;
         let (metadata, data) = metadata::MetadataStore::open(&config.data_dir, config.durability)?;
-        let rules = match config.rules.as_ref() {
-            Some(rules) => Some(RulesRuntime::start(rules).await?),
-            None => None,
-        };
+        let rules = config.rules.as_ref().map(NativeRules::start).transpose()?;
         let state = StorageState {
             started_at: now_rfc3339(),
             metadata: Arc::new(metadata),
             config: Arc::new(config),
             inner: Arc::new(Mutex::new(data)),
             mutation: Arc::new(tokio::sync::Mutex::new(())),
-            rules: rules.clone(),
+            rules,
             queue,
             background,
         };
+        let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
             // A weak handle: the flusher never keeps the metadata database
             // open after the runtime's last owner drops it.
             let metadata = Arc::downgrade(&state.metadata);
-            tokio::spawn(async move {
+            let (stop, mut stop_signal) = tokio::sync::watch::channel(false);
+            let task = tokio::spawn(async move {
                 let mut ticker = tokio::time::interval(interval);
                 ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 loop {
-                    ticker.tick().await;
+                    tokio::select! {
+                        _ = ticker.tick() => {}
+                        _ = stop_signal.changed() => return,
+                    }
                     let Some(store) = metadata.upgrade() else {
                         return;
                     };
@@ -139,12 +133,13 @@ impl StorageRuntime {
                     }
                 }
             });
+            write_behind = Some((stop, task));
         }
         let application = routes(state.clone());
         Ok(Self {
             application,
             state,
-            rules,
+            flusher: write_behind,
         })
     }
 
@@ -211,13 +206,16 @@ impl StorageRuntime {
         export_directory(&self.state, root).await
     }
 
-    /// Stops the child rules runtime.
+    /// Stops the write-behind flusher (waiting for an in-flight flush) and
+    /// makes every acknowledged mutation durable.
     pub async fn shutdown(mut self) -> Result<(), StorageError> {
-        self.flush().await?;
-        if let Some(rules) = self.rules.take() {
-            rules.shutdown().await?;
+        if let Some((stop, task)) = self.flusher.take() {
+            let _ = stop.send(true);
+            // The task exits at its next select; an in-flight blocking flush
+            // completes first, so the database lock is released on return.
+            let _ = task.await;
         }
-        Ok(())
+        self.flush().await
     }
 }
 
@@ -263,7 +261,7 @@ struct StorageState {
     config: Arc<StorageConfig>,
     inner: Arc<Mutex<StorageData>>,
     mutation: Arc<tokio::sync::Mutex<()>>,
-    rules: Option<RulesRuntime>,
+    rules: Option<NativeRules>,
     queue: DispatchQueue,
     background: TriggerRegistry,
 }
@@ -285,7 +283,9 @@ struct StoredObject {
     bucket: String,
     generation: u64,
     metageneration: u64,
-    content_type: String,
+    /// Absent after a metadata update that set `contentType` to null.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_type: Option<String>,
     storage_class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     content_disposition: Option<String>,
@@ -320,6 +320,18 @@ struct UploadSession {
     object_metadata: JsonValue,
     received: u64,
     staging_file: String,
+    /// Authorization header of the `start` request; rules evaluate this
+    /// value at finalize, whoever sends the finalize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    authorization: Option<String>,
+    /// Rules denied the finalize: later queries report `final`, a later
+    /// finalize is 403 and the staged bytes are gone.
+    #[serde(default)]
+    denied: bool,
+    /// The client cancelled the upload: the session stays known and every
+    /// later command is a bad request, as in the official emulator.
+    #[serde(default)]
+    cancelled: bool,
 }
 
 fn routes(state: StorageState) -> Router {
@@ -360,6 +372,7 @@ fn routes(state: StorageState) -> Router {
         )
         .route("/internal/export", post(internal_export))
         .route("/internal/reset", post(internal_reset))
+        .route("/internal/setRules", put(internal_set_rules))
         .fallback(not_found)
         .layer(middleware::from_fn(cors))
         .with_state(state)
@@ -373,8 +386,12 @@ async fn readiness() -> Json<JsonValue> {
 // This does not implement the cloud bucket-management/lifecycle API.
 async fn list_buckets(State(state): State<StorageState>) -> Json<JsonValue> {
     let mut names = BTreeSet::new();
-    if let Some(rules) = &state.config.rules {
-        names.extend(rules.buckets.iter().map(|rules| rules.bucket.clone()));
+    if let Some(NativeRulesConfig {
+        source: RulesSource::PerBucket(buckets),
+        ..
+    }) = &state.config.rules
+    {
+        names.extend(buckets.iter().map(|rules| rules.bucket.clone()));
     }
     names.extend(
         lock(&state.inner)
@@ -430,6 +447,7 @@ struct StorageApiError {
     status: StatusCode,
     message: String,
     plain: bool,
+    upload_final: bool,
 }
 
 impl StorageApiError {
@@ -438,6 +456,7 @@ impl StorageApiError {
             status,
             message: message.into(),
             plain: false,
+            upload_final: false,
         }
     }
 
@@ -446,13 +465,28 @@ impl StorageApiError {
             status,
             message: message.into(),
             plain: true,
+            upload_final: false,
         }
+    }
+
+    /// A plain-text error that also reports the resumable upload as final.
+    fn plain_final(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            upload_final: true,
+            ..Self::plain(status, message)
+        }
+    }
+
+    /// Also reports the upload as final, as every denied Firebase upload does.
+    const fn upload_final(mut self) -> Self {
+        self.upload_final = true;
+        self
     }
 }
 
 impl IntoResponse for StorageApiError {
     fn into_response(self) -> Response {
-        if self.plain {
+        let mut response = if self.plain {
             (self.status, self.message).into_response()
         } else {
             (
@@ -460,7 +494,13 @@ impl IntoResponse for StorageApiError {
                 Json(json!({ "error": { "code": self.status.as_u16(), "message": self.message } })),
             )
                 .into_response()
+        };
+        if self.upload_final {
+            response
+                .headers_mut()
+                .insert("x-goog-upload-status", HeaderValue::from_static("final"));
         }
+        response
     }
 }
 
@@ -511,6 +551,7 @@ async fn v0_upload(
     body: Body,
 ) -> Result<Response, StorageApiError> {
     let query = query_fields(query.as_deref());
+    ensure_ruleset(&state, &bucket)?;
     if headers.contains_key("x-goog-upload-command") {
         return firebase_resumable(&state, &bucket, &query, &headers, body).await;
     }
@@ -528,7 +569,7 @@ async fn v0_upload(
             content_type: &upload.content_type,
             metadata: upload.metadata,
             object_metadata: &upload.object_metadata,
-            headers: &headers,
+            authorization: authorization_header(&headers),
             firebase: true,
         },
         upload.uploaded,
@@ -545,23 +586,37 @@ async fn v0_object(
 ) -> Result<Response, StorageApiError> {
     let object = decoded_object(&object);
     let query = query_fields(query.as_deref());
-    let stored = match get_object(&state, &bucket, &object) {
-        Ok(stored) => stored,
-        Err(error) if error.status == StatusCode::NOT_FOUND => {
-            return Ok(firebase_object_not_found());
-        }
-        Err(error) => return Err(error),
+    ensure_ruleset(&state, &bucket)?;
+    // Rules run before the existence check: a missing object is 403 when the
+    // rules deny or error and 404 when they allow.
+    let stored = get_object(&state, &bucket, &object).ok();
+    let token = query.get("token").map(String::as_str);
+    let token_matches = stored
+        .as_ref()
+        .zip(token)
+        .is_some_and(|(stored, token)| stored.download_tokens.iter().any(|value| value == token));
+    if !token_matches {
+        authorize(
+            &state,
+            &bucket,
+            &object,
+            Operation::Get,
+            stored.as_ref(),
+            None,
+            authorization_header(&headers),
+        )?;
+    }
+    let Some(stored) = stored else {
+        return Ok(firebase_object_not_found());
     };
     if query.get("alt").map(String::as_str) == Some("media") {
-        let token = query.get("token").map(String::as_str);
-        authorize_read(&state, &stored, &headers, token).await?;
         file_response(&state, &stored, &headers).await
     } else {
-        authorize_read(&state, &stored, &headers, None).await?;
         Ok(Json(firebase_metadata(&stored)).into_response())
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn firebase_resumable(
     state: &StorageState,
     bucket: &str,
@@ -590,21 +645,45 @@ async fn firebase_resumable(
         return Ok((
             [
                 ("x-goog-upload-size-received", session.received.to_string()),
-                ("x-goog-upload-status", "active".to_owned()),
+                (
+                    "x-goog-upload-status",
+                    if session.denied {
+                        "final"
+                    } else if session.cancelled {
+                        "cancelled"
+                    } else {
+                        "active"
+                    }
+                    .to_owned(),
+                ),
             ],
             "OK",
         )
             .into_response());
     }
+    if session.cancelled {
+        return Err(StorageApiError::plain(
+            StatusCode::BAD_REQUEST,
+            "Bad Request",
+        ));
+    }
+    if session.denied {
+        // The official emulator remembers the denied finalize: another
+        // finalize is 403, any other command is a bad request.
+        return Err(if command.contains("finalize") {
+            StorageApiError::plain_final(StatusCode::FORBIDDEN, "Forbidden")
+        } else {
+            StorageApiError::plain(StatusCode::BAD_REQUEST, "Bad Request")
+        });
+    }
     if command == "cancel" {
         {
+            session.cancelled = true;
             let mut data = lock(&state.inner);
-            data.uploads.remove(id);
+            data.uploads.insert(id.clone(), session.clone());
             persist_change(state, &data, metadata::Change::Upload(id))?;
         }
-        tokio::fs::remove_file(state.config.data_dir.join(&session.staging_file))
-            .await
-            .map_err(io_error)?;
+        let _ = tokio::fs::remove_file(state.config.data_dir.join(&session.staging_file)).await;
         return Ok("OK".into_response());
     }
     if command.contains("upload") {
@@ -630,20 +709,31 @@ async fn firebase_resumable(
         )
             .into_response());
     }
-    let object = commit_staging(
+    let object = match commit_staging(
         state,
         CommitSpec {
             bucket,
             name: &session.name,
             content_type: &session.content_type,
-            metadata: session.metadata,
+            metadata: session.metadata.clone(),
             object_metadata: &session.object_metadata,
-            headers,
+            authorization: session.authorization.as_deref(),
             firebase: true,
         },
         summarize_file(state.config.data_dir.join(&session.staging_file)).await?,
     )
-    .await?;
+    .await
+    {
+        Ok(object) => object,
+        Err(error) if error.status == StatusCode::FORBIDDEN => {
+            session.denied = true;
+            let mut data = lock(&state.inner);
+            data.uploads.insert(id.clone(), session);
+            persist_change(state, &data, metadata::Change::Upload(id))?;
+            return Err(error);
+        }
+        Err(error) => return Err(error),
+    };
     {
         let mut data = lock(&state.inner);
         data.uploads.remove(id);
@@ -696,8 +786,22 @@ async fn v0_list(
     headers: HeaderMap,
 ) -> Result<Json<JsonValue>, StorageApiError> {
     let query = query_fields(query.as_deref());
+    ensure_ruleset(&state, &bucket)?;
     let prefix = query.get("prefix").map_or("", String::as_str);
-    authorize_list(&state, &bucket, prefix, &headers).await?;
+    if !prefix.is_empty() && !prefix.ends_with('/') {
+        return Err(bad_request(
+            "The prefix parameter is required to be empty or ends with a single / character.",
+        ));
+    }
+    authorize(
+        &state,
+        &bucket,
+        prefix,
+        Operation::List,
+        None,
+        None,
+        authorization_header(&headers),
+    )?;
     let delimiter = query.get("delimiter").map(String::as_str);
     let page_token = query.get("pageToken").map(String::as_str);
     let maximum = query
@@ -730,6 +834,7 @@ async fn v0_patch(
     headers: HeaderMap,
     Json(request): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, StorageApiError> {
+    ensure_ruleset(&state, &bucket)?;
     let object = update_metadata(
         &state,
         &bucket,
@@ -750,9 +855,18 @@ async fn v0_token_action(
 ) -> Result<Json<JsonValue>, StorageApiError> {
     let object_name = decoded_object(&object);
     let query = query_fields(query.as_deref());
+    ensure_ruleset(&state, &bucket)?;
+    // Download-token routes are admin-only in the official emulator, whatever
+    // the rules say (storage-rules-v1 bypass-owner-and-download-tokens).
+    if !is_owner(&headers) {
+        return Err(StorageApiError::json(
+            StatusCode::FORBIDDEN,
+            "Missing admin credentials.",
+        ));
+    }
     let _guard = state.mutation.lock().await;
-    let mut object = get_object(&state, &bucket, &object_name)?;
-    authorize(&state, "update", Some(&object), Some(&object), &headers).await?;
+    let mut object = get_object(&state, &bucket, &object_name)
+        .map_err(|_| StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found"))?;
     if query.get("create_token").map(String::as_str) == Some("true") {
         let token = next_token(&state, &bucket, &object_name);
         object.download_tokens.push(token);
@@ -783,6 +897,7 @@ async fn v0_delete(
     Path((bucket, object)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, StorageApiError> {
+    ensure_ruleset(&state, &bucket)?;
     delete_object(&state, &bucket, &decoded_object(&object), &headers, true).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -838,7 +953,7 @@ async fn gcs_multipart_upload(
                 .unwrap_or("application/octet-stream"),
             metadata: string_metadata(multipart.metadata.get("metadata")),
             object_metadata: &multipart.metadata,
-            headers,
+            authorization: authorization_header(headers),
             firebase: false,
         },
         summarize_file(path).await?,
@@ -902,6 +1017,9 @@ async fn gcs_resumable_start(
                 object_metadata: request.clone(),
                 received: 0,
                 staging_file: staging_file.clone(),
+                authorization: authorization_header(headers).map(str::to_owned),
+                denied: false,
+                cancelled: false,
             },
         );
         persist_change(state, &data, metadata::Change::Upload(&id))?;
@@ -940,7 +1058,7 @@ async fn gcs_media_upload(
             content_type: content_type(headers),
             metadata: BTreeMap::new(),
             object_metadata: &JsonValue::Null,
-            headers,
+            authorization: authorization_header(headers),
             firebase: false,
         },
         uploaded,
@@ -1012,7 +1130,7 @@ async fn gcs_resumable_chunk(
             content_type: &session.content_type,
             metadata: session.metadata,
             object_metadata: &session.object_metadata,
-            headers: &headers,
+            authorization: session.authorization.as_deref(),
             firebase: false,
         },
         uploaded,
@@ -1249,10 +1367,13 @@ async fn gcs_alias_copy(
         CommitSpec {
             bucket: &destination_bucket,
             name: &destination_name,
-            content_type: &source.content_type,
+            content_type: source
+                .content_type
+                .as_deref()
+                .unwrap_or("application/octet-stream"),
             metadata,
             object_metadata: &copy_metadata,
-            headers: &headers,
+            authorization: authorization_header(&headers),
             firebase: false,
         },
         uploaded,
@@ -1310,12 +1431,36 @@ async fn update_metadata(
     enforce_rules: bool,
 ) -> Result<StoredObject, StorageApiError> {
     let _guard = state.mutation.lock().await;
-    let mut object = get_object(state, bucket, name)?;
-    let before = object.clone();
-    apply_metadata(&mut object, request);
+    let stored = get_object(state, bucket, name);
     if enforce_rules {
-        authorize(state, "update", Some(&before), Some(&object), headers).await?;
+        // `request.resource` is the merged object with the metageneration
+        // and update time it would have; a missing object is checked with
+        // both resources null and is 404 only when the rules allow.
+        let proposed = stored.as_ref().ok().map(|before| {
+            let mut proposed = before.clone();
+            apply_metadata(&mut proposed, request);
+            proposed.metageneration = proposed.metageneration.saturating_add(1);
+            proposed.updated = now_rfc3339();
+            proposed
+        });
+        authorize(
+            state,
+            bucket,
+            name,
+            Operation::Update,
+            stored.as_ref().ok(),
+            proposed.as_ref(),
+            authorization_header(headers),
+        )?;
     }
+    let mut object = stored.map_err(|error| {
+        if enforce_rules {
+            StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found")
+        } else {
+            error
+        }
+    })?;
+    apply_metadata(&mut object, request);
     object.metageneration = object.metageneration.saturating_add(1);
     object.updated = now_rfc3339();
     object.etag = etag(object.generation, object.metageneration);
@@ -1341,10 +1486,25 @@ async fn delete_object(
     enforce_rules: bool,
 ) -> Result<(), StorageApiError> {
     let _guard = state.mutation.lock().await;
-    let object = get_object(state, bucket, name)?;
+    let stored = get_object(state, bucket, name);
     if enforce_rules {
-        authorize(state, "delete", Some(&object), None, headers).await?;
+        authorize(
+            state,
+            bucket,
+            name,
+            Operation::Delete,
+            stored.as_ref().ok(),
+            None,
+            authorization_header(headers),
+        )?;
     }
+    let object = stored.map_err(|error| {
+        if enforce_rules {
+            StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found")
+        } else {
+            error
+        }
+    })?;
     {
         let mut data = lock(&state.inner);
         data.objects.remove(&object_key(bucket, name));
@@ -1382,9 +1542,12 @@ async fn firebase_upload(
 ) -> Result<FirebaseUpload, StorageApiError> {
     let request_content_type = content_type(headers);
     let Some(boundary) = multipart_boundary(request_content_type) else {
+        // A v0 media upload carries no metadata part; the official emulator
+        // ignores the request Content-Type (storage-rules-v1
+        // request-resource-create-media content-type-defaulted).
         return Ok(FirebaseUpload {
             uploaded: stream_to_staging(state, body).await?,
-            content_type: request_content_type.to_owned(),
+            content_type: "application/octet-stream".to_owned(),
             metadata: BTreeMap::new(),
             object_metadata: JsonValue::Null,
         });
@@ -1596,7 +1759,8 @@ struct CommitSpec<'a> {
     content_type: &'a str,
     metadata: BTreeMap<String, String>,
     object_metadata: &'a JsonValue,
-    headers: &'a HeaderMap,
+    /// Authorization header value evaluated by the rules.
+    authorization: Option<&'a str>,
     firebase: bool,
 }
 
@@ -1616,13 +1780,16 @@ async fn commit_staging(
         data.next_id = data.next_id.saturating_add(1);
         let generation = generation(&mut data);
         let token = spec.firebase.then(|| {
-            stable_id(&[
-                &state.config.project,
-                spec.bucket,
-                spec.name,
-                "download",
-                &data.next_id.to_string(),
-            ])
+            uuid_shaped(&Sha256::digest(
+                stable_id(&[
+                    &state.config.project,
+                    spec.bucket,
+                    spec.name,
+                    "download",
+                    &data.next_id.to_string(),
+                ])
+                .as_bytes(),
+            ))
         });
         (generation, token)
     };
@@ -1632,10 +1799,10 @@ async fn commit_staging(
         bucket: spec.bucket.to_owned(),
         generation,
         metageneration: 1,
-        content_type: spec.content_type.to_owned(),
+        content_type: Some(spec.content_type.to_owned()),
         storage_class: "STANDARD".to_owned(),
-        content_disposition: spec.firebase.then(|| "inline".to_owned()),
-        content_encoding: spec.firebase.then(|| "identity".to_owned()),
+        content_disposition: None,
+        content_encoding: None,
         content_language: None,
         cache_control: None,
         download_tokens: token.into_iter().collect(),
@@ -1652,19 +1819,29 @@ async fn commit_staging(
     if let Some(previous) = &before {
         object.time_created.clone_from(&previous.time_created);
     }
-    let operation = if before.is_some() { "update" } else { "create" };
+    // Every upload is `create`, with `resource` set when the object exists
+    // (storage-rules-v1 upload-over-existing). The rules see the object
+    // before the Firebase presentation defaults are applied.
     if spec.firebase
         && let Err(error) = authorize(
             state,
-            operation,
+            spec.bucket,
+            spec.name,
+            Operation::Create,
             before.as_ref(),
             Some(&object),
-            spec.headers,
+            spec.authorization,
         )
-        .await
     {
         let _ = tokio::fs::remove_file(uploaded.path).await;
-        return Err(error);
+        return Err(error.upload_final());
+    }
+    // The official emulator dispatches finalize before defaulting the
+    // disposition on the (shared) stored record, so the finalize event lacks
+    // it while later events and responses carry "inline".
+    let disposition_defaulted = spec.firebase && object.content_disposition.is_none();
+    if disposition_defaulted {
+        object.content_disposition = Some("inline".to_owned());
     }
     let final_path = state.config.data_dir.join(&data_file);
     tokio::fs::rename(&uploaded.path, &final_path)
@@ -1682,7 +1859,13 @@ async fn commit_staging(
             metadata::Change::Object(&object_key(spec.bucket, spec.name)),
         )?;
     }
-    state.dispatch(StorageEvent::Finalize, &object);
+    if disposition_defaulted {
+        let mut event_object = object.clone();
+        event_object.content_disposition = None;
+        state.dispatch(StorageEvent::Finalize, &event_object);
+    } else {
+        state.dispatch(StorageEvent::Finalize, &object);
+    }
     Ok(object)
 }
 
@@ -1698,101 +1881,60 @@ fn get_object(
         .ok_or_else(|| StorageApiError::json(StatusCode::NOT_FOUND, "Object not found"))
 }
 
-async fn authorize_read(
-    state: &StorageState,
-    object: &StoredObject,
-    headers: &HeaderMap,
-    token: Option<&str>,
-) -> Result<(), StorageApiError> {
-    if token.is_some_and(|token| object.download_tokens.iter().any(|value| value == token)) {
-        return Ok(());
+/// Refuses every request on a bucket without a loaded ruleset, owner
+/// included, exactly as the official emulator does before any other check.
+fn ensure_ruleset(state: &StorageState, bucket: &str) -> Result<(), StorageApiError> {
+    match &state.rules {
+        Some(rules) if !rules.has_ruleset(bucket) => Err(StorageApiError::json(
+            StatusCode::FORBIDDEN,
+            "Permission denied. Storage Emulator has no loaded ruleset.",
+        )),
+        _ => Ok(()),
     }
-    authorize(state, "get", Some(object), Some(object), headers).await
 }
 
-async fn authorize_list(
+/// Evaluates one Firebase (v0) operation. Owner credentials and open mode
+/// skip the rules; a denial or runtime error is 403 with the official
+/// message for the operation's permission class.
+fn authorize(
     state: &StorageState,
     bucket: &str,
-    prefix: &str,
-    headers: &HeaderMap,
-) -> Result<(), StorageApiError> {
-    if is_owner(headers) || state.rules.is_none() {
-        return Ok(());
-    }
-    let Some(rules) = &state.rules else {
-        return Ok(());
-    };
-    let token = authorization_token(headers);
-    let prefix = prefix.trim_matches('/');
-    let path = if prefix.is_empty() {
-        format!("/b/{bucket}/o")
-    } else {
-        format!("/b/{bucket}/o/{prefix}")
-    };
-    let permitted = rules
-        .verify(bucket, &path, "list", None, None, token)
-        .await
-        .map_err(storage_error)?;
-    if permitted {
-        Ok(())
-    } else {
-        Err(permission_denied("LIST"))
-    }
-}
-
-async fn authorize(
-    state: &StorageState,
-    method: &str,
+    name: &str,
+    operation: Operation,
     before: Option<&StoredObject>,
     after: Option<&StoredObject>,
-    headers: &HeaderMap,
+    authorization: Option<&str>,
 ) -> Result<(), StorageApiError> {
-    if is_owner(headers) || state.rules.is_none() {
-        return Ok(());
-    }
     let Some(rules) = &state.rules else {
         return Ok(());
     };
-    let object = after
-        .or(before)
-        .ok_or_else(|| bad_request("Storage authorization requires object context"))?;
-    let permitted = rules
-        .verify(
-            &object.bucket,
-            &format!("/b/{}/o/{}", object.bucket, object.name),
-            method,
-            before,
-            after,
-            authorization_token(headers),
-        )
-        .await
-        .map_err(storage_error)?;
-    if permitted {
-        Ok(())
-    } else {
-        Err(permission_denied(match method {
-            "get" | "list" => "READ",
-            _ => "WRITE",
-        }))
+    if authorization.is_some_and(|value| value == "Bearer owner" || value == "Firebase owner") {
+        return Ok(());
+    }
+    match rules.verify(bucket, name, operation, before, after, authorization) {
+        Verdict::Allowed => Ok(()),
+        Verdict::Denied(error) => {
+            if let Some(error) = error {
+                eprintln!("fireside Storage rules: {error}");
+            }
+            Err(permission_denied(operation.permission()))
+        }
+        Verdict::NoRuleset => Err(StorageApiError::json(
+            StatusCode::FORBIDDEN,
+            "Permission denied. Storage Emulator has no loaded ruleset.",
+        )),
     }
 }
 
 fn is_owner(headers: &HeaderMap) -> bool {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
+    authorization_header(headers)
         .is_some_and(|value| value == "Bearer owner" || value == "Firebase owner")
 }
 
-fn authorization_token(headers: &HeaderMap) -> Option<&str> {
+fn authorization_header(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
-            value
-                .strip_prefix("Bearer ")
-                .or_else(|| value.strip_prefix("Firebase "))
-        })
 }
 
 fn permission_denied(operation: &str) -> StorageApiError {
@@ -1802,281 +1944,54 @@ fn permission_denied(operation: &str) -> StorageApiError {
     )
 }
 
-#[derive(Clone)]
-struct RulesRuntime {
-    child: Arc<tokio::sync::Mutex<RulesChild>>,
-    rulesets: Arc<BTreeMap<String, String>>,
-}
-
-struct RulesChild {
-    process: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-    next_id: u64,
-}
-
-impl RulesRuntime {
-    async fn start(config: &RulesRuntimeConfig) -> Result<Self, StorageError> {
-        if !config.jar.is_file() {
-            return Err(StorageError(format!(
-                "Storage rules runtime jar is missing: {}",
-                config.jar.display()
-            )));
-        }
-        let mut process = Command::new(&config.java)
-            .arg("-Duser.language=en")
-            .arg("-jar")
-            .arg(&config.jar)
-            .arg("serve")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|error| {
-                StorageError(format!("failed to start Storage rules runtime: {error}"))
-            })?;
-        let stdin = process
-            .stdin
-            .take()
-            .ok_or_else(|| StorageError("Storage rules runtime did not expose stdin".to_owned()))?;
-        let stdout = process.stdout.take().ok_or_else(|| {
-            StorageError("Storage rules runtime did not expose stdout".to_owned())
-        })?;
-        if let Some(stderr) = process.stderr.take() {
-            tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(_line)) = lines.next_line().await {}
-            });
-        }
-        let mut child = RulesChild {
-            process,
-            stdin,
-            stdout: BufReader::new(stdout),
-            next_id: 0,
-        };
-        let startup = child.read_response().await?;
-        if startup.get("status").and_then(JsonValue::as_str) != Some("ok") {
-            return Err(StorageError(format!(
-                "Storage rules runtime failed readiness: {startup}"
-            )));
-        }
-        let mut rulesets = BTreeMap::new();
-        for (index, bucket) in config.buckets.iter().enumerate() {
-            let name = index.to_string();
-            let response = child
-                .request(json!({
-                    "action": "load_ruleset",
-                    "context": {
-                        "rulesetName": name,
-                        "source": { "files": [{ "name": bucket.name, "content": bucket.content }] }
-                    }
-                }))
-                .await?;
-            if response.get("status").and_then(JsonValue::as_str) != Some("ok")
-                || response
-                    .get("errors")
-                    .and_then(JsonValue::as_array)
-                    .is_some_and(|errors| !errors.is_empty())
-            {
-                return Err(StorageError(format!(
-                    "Storage rules failed to compile for {}: {response}",
-                    bucket.bucket
-                )));
-            }
-            rulesets.insert(bucket.bucket.clone(), name);
-        }
-        Ok(Self {
-            child: Arc::new(tokio::sync::Mutex::new(child)),
-            rulesets: Arc::new(rulesets),
-        })
-    }
-
-    async fn verify(
-        &self,
-        bucket: &str,
-        path: &str,
-        method: &str,
-        before: Option<&StoredObject>,
-        after: Option<&StoredObject>,
-        token: Option<&str>,
-    ) -> Result<bool, StorageError> {
-        let Some(ruleset) = self.rulesets.get(bucket) else {
-            return Ok(false);
-        };
-        let response = self
-            .child
-            .lock()
-            .await
-            .request(json!({
-                "action": "verify",
-                "context": {
-                    "rulesetName": ruleset,
-                    "service": "firebase.storage",
-                    "path": path,
-                    "method": method,
-                    "variables": {
-                        "resource": expression(before.map(rules_metadata)),
-                        "request": request_expression(path, after, token)
-                    }
-                }
-            }))
-            .await?;
-        if response.get("context").is_some() {
-            return Err(StorageError(
-                "Storage rules requested a Firestore callback that is not available".to_owned(),
-            ));
-        }
-        if response.get("status").and_then(JsonValue::as_str) != Some("ok") {
-            return Err(StorageError(format!(
-                "Storage rules verification failed: {response}"
-            )));
-        }
-        Ok(response
-            .pointer("/result/permit")
-            .and_then(JsonValue::as_bool)
-            .unwrap_or(false))
-    }
-
-    async fn shutdown(self) -> Result<(), StorageError> {
-        let mut child = self.child.lock().await;
-        child
-            .process
-            .kill()
-            .await
-            .map_err(|error| StorageError(format!("failed to stop rules runtime: {error}")))?;
-        child
-            .process
-            .wait()
-            .await
-            .map_err(|error| StorageError(format!("failed to wait for rules runtime: {error}")))?;
-        Ok(())
-    }
-}
-
-impl RulesChild {
-    async fn request(&mut self, mut request: JsonValue) -> Result<JsonValue, StorageError> {
-        let id = self.next_id;
-        self.next_id = self.next_id.saturating_add(1);
-        request["id"] = json!(id);
-        let mut encoded = serde_json::to_vec(&request)
-            .map_err(|error| StorageError(format!("failed to encode rules request: {error}")))?;
-        encoded.push(b'\n');
-        self.stdin
-            .write_all(&encoded)
-            .await
-            .map_err(|error| StorageError(format!("failed to write rules request: {error}")))?;
-        self.stdin
-            .flush()
-            .await
-            .map_err(|error| StorageError(format!("failed to flush rules request: {error}")))?;
-        loop {
-            let response = self.read_response().await?;
-            if response
-                .get("id")
-                .or_else(|| response.get("server_request_id"))
-                .and_then(JsonValue::as_u64)
-                == Some(id)
-            {
-                return Ok(response);
-            }
-        }
-    }
-
-    async fn read_response(&mut self) -> Result<JsonValue, StorageError> {
-        loop {
-            let mut line = String::new();
-            let read =
-                self.stdout.read_line(&mut line).await.map_err(|error| {
-                    StorageError(format!("failed to read rules response: {error}"))
-                })?;
-            if read == 0 {
-                return Err(StorageError(
-                    "Storage rules runtime stopped unexpectedly".to_owned(),
-                ));
-            }
-            if let Ok(value) = serde_json::from_str(&line) {
-                return Ok(value);
-            }
-        }
-    }
-}
-
-fn request_expression(path: &str, after: Option<&StoredObject>, token: Option<&str>) -> JsonValue {
-    let path_segments = path
-        .split('/')
-        .filter(|value| !value.is_empty())
-        .map(|simple| json!({ "simple": simple }))
-        .collect::<Vec<_>>();
-    json!({
-        "map_value": { "fields": {
-            "path": { "path_value": { "segments": path_segments } },
-            "time": { "timestamp_value": now_rfc3339() },
-            "resource": expression(after.map(rules_metadata)),
-            "auth": auth_expression(token)
-        }}
-    })
-}
-
-fn auth_expression(token: Option<&str>) -> JsonValue {
-    let Some(token) = token else {
-        return json!({ "null_value": null });
+/// `PUT /internal/setRules`: replaces every ruleset with the official
+/// emulator's request and response shapes. A compile failure answers 400 and
+/// leaves no ruleset installed until the next valid reload.
+async fn internal_set_rules(
+    State(state): State<StorageState>,
+    body: Bytes,
+) -> Result<Response, StorageApiError> {
+    let Some(rules) = &state.rules else {
+        return Err(StorageApiError::json(
+            StatusCode::BAD_REQUEST,
+            "Storage rules are not enabled for this emulator",
+        ));
     };
-    let payload = token
-        .split('.')
-        .nth(1)
-        .and_then(|value| URL_SAFE_NO_PAD.decode(value).ok())
-        .and_then(|value| serde_json::from_slice::<JsonValue>(&value).ok());
-    let Some(payload) = payload else {
-        return json!({ "null_value": null });
+    let body: JsonValue = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            StorageApiError::json(
+                StatusCode::BAD_REQUEST,
+                "Request body must include 'rules.files' array",
+            )
+        })?
     };
-    let uid = payload
-        .get("user_id")
-        .or_else(|| payload.get("sub"))
-        .cloned()
-        .unwrap_or(JsonValue::Null);
-    expression(Some(json!({ "uid": uid, "token": payload })))
-}
-
-fn expression(value: Option<JsonValue>) -> JsonValue {
-    match value {
-        None | Some(JsonValue::Null) => json!({ "null_value": null }),
-        Some(JsonValue::Bool(value)) => json!({ "bool_value": value }),
-        Some(JsonValue::Number(value)) if value.is_i64() || value.is_u64() => {
-            json!({ "int_value": value })
+    let source = match rules::parse_set_rules(&body) {
+        Ok(source) => source,
+        Err(message) => {
+            return Ok(
+                (StatusCode::BAD_REQUEST, Json(json!({ "message": message }))).into_response(),
+            );
         }
-        Some(JsonValue::Number(value)) => json!({ "float_value": value }),
-        Some(JsonValue::String(value)) => json!({ "string_value": value }),
-        Some(JsonValue::Array(values)) => json!({
-            "list_value": { "values": values.into_iter().map(|value| expression(Some(value))).collect::<Vec<_>>() }
-        }),
-        Some(JsonValue::Object(values)) => {
-            let fields = values
-                .into_iter()
-                .map(|(key, value)| (key, expression(Some(value))))
-                .collect::<JsonMap<_, _>>();
-            json!({ "map_value": { "fields": fields } })
+    };
+    match rules.replace(&source) {
+        Ok(()) => Ok((
+            StatusCode::OK,
+            Json(json!({ "message": "Rules updated successfully" })),
+        )
+            .into_response()),
+        Err(error) => {
+            eprintln!("fireside Storage rules: {error}");
+            Ok((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "message": "There was an error updating rules, see logs for more details"
+                })),
+            )
+                .into_response())
         }
     }
-}
-
-fn rules_metadata(object: &StoredObject) -> JsonValue {
-    json!({
-        "name": object.name,
-        "bucket": object.bucket,
-        "generation": object.generation,
-        "metageneration": object.metageneration,
-        "size": object.size,
-        "timeCreated": object.time_created,
-        "updated": object.updated,
-        "md5Hash": object.md5_hash,
-        "crc32c": object.crc32c,
-        "etag": object.etag,
-        "contentDisposition": object.content_disposition,
-        "contentEncoding": object.content_encoding,
-        "contentType": object.content_type,
-        "metadata": object.custom_metadata
-    })
 }
 
 #[derive(Clone, Copy)]
@@ -2115,7 +2030,7 @@ impl StorageState {
             (
                 "v1",
                 json!({
-                    "eventId": stable_id(&[&self.config.project, &object.bucket, &object.name, legacy, &object.generation.to_string(), &object.metageneration.to_string()]),
+                    "eventId": decimal_id(&stable_id(&[&self.config.project, &object.bucket, &object.name, legacy, &object.generation.to_string(), &object.metageneration.to_string()])),
                     "timestamp": timestamp,
                     "eventType": legacy,
                     "resource": {
@@ -2131,7 +2046,7 @@ impl StorageState {
                 "v2",
                 json!({
                     "specversion": "1.0",
-                    "id": stable_id(&[&self.config.project, &object.bucket, &object.name, cloud, &object.generation.to_string(), &object.metageneration.to_string()]),
+                    "id": uuid_shaped(&Sha256::digest(stable_id(&[&self.config.project, &object.bucket, &object.name, cloud, &object.generation.to_string(), &object.metageneration.to_string()]).as_bytes())),
                     "type": cloud,
                     "source": source,
                     "time": timestamp,
@@ -2218,7 +2133,6 @@ fn base_metadata(object: &StoredObject, gcs: bool) -> JsonValue {
         "bucket": object.bucket,
         "generation": object.generation.to_string(),
         "metageneration": object.metageneration.to_string(),
-        "contentType": object.content_type,
         "timeCreated": object.time_created,
         "updated": object.updated,
         "storageClass": object.storage_class,
@@ -2230,6 +2144,7 @@ fn base_metadata(object: &StoredObject, gcs: bool) -> JsonValue {
         value["kind"] = json!("storage#object");
     }
     for (field, value_ref) in [
+        ("contentType", object.content_type.as_ref()),
         ("contentDisposition", object.content_disposition.as_ref()),
         ("contentEncoding", object.content_encoding.as_ref()),
         ("contentLanguage", object.content_language.as_ref()),
@@ -2243,15 +2158,11 @@ fn base_metadata(object: &StoredObject, gcs: bool) -> JsonValue {
 }
 
 fn apply_metadata(object: &mut StoredObject, request: &JsonValue) {
-    for (field, target) in [
-        ("contentType", &mut object.content_type),
-        ("storageClass", &mut object.storage_class),
-    ] {
-        if let Some(value) = request.get(field).and_then(JsonValue::as_str) {
-            value.clone_into(target);
-        }
+    if let Some(value) = request.get("storageClass").and_then(JsonValue::as_str) {
+        value.clone_into(&mut object.storage_class);
     }
     for (field, target) in [
+        ("contentType", &mut object.content_type),
         ("contentDisposition", &mut object.content_disposition),
         ("contentEncoding", &mut object.content_encoding),
         ("contentLanguage", &mut object.content_language),
@@ -2506,13 +2417,51 @@ fn percent_encode(value: &str) -> String {
 fn next_token(state: &StorageState, bucket: &str, name: &str) -> String {
     let mut data = lock(&state.inner);
     data.next_id = data.next_id.saturating_add(1);
-    stable_id(&[
-        &state.config.project,
+    let mut digest = Sha256::new();
+    for part in [
+        state.config.project.as_str(),
         bucket,
         name,
         "download",
         &data.next_id.to_string(),
-    ])
+    ] {
+        digest.update(part.as_bytes());
+        digest.update([0]);
+    }
+    uuid_shaped(&digest.finalize())
+}
+
+/// A thirteen-digit decimal id derived from `seed`: the official legacy
+/// storage event id is `Date.now()` as a string.
+fn decimal_id(seed: &str) -> String {
+    let digest = Sha256::digest(seed.as_bytes());
+    let mut value = u64::from_le_bytes(digest[..8].try_into().expect("eight bytes"));
+    value %= 9_000_000_000_000;
+    format!("{}", 1_000_000_000_000 + value)
+}
+
+/// Formats sixteen digest bytes as a version-4 UUID, the official emulator's
+/// download-token shape (`uuid.v4()`).
+fn uuid_shaped(bytes: &[u8]) -> String {
+    let mut octets = [0u8; 16];
+    octets.copy_from_slice(&bytes[..16]);
+    octets[6] = (octets[6] & 0x0f) | 0x40;
+    octets[8] = (octets[8] & 0x3f) | 0x80;
+    let hex = octets
+        .iter()
+        .fold(String::with_capacity(32), |mut text, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(text, "{byte:02x}");
+            text
+        });
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 fn generation(data: &mut StorageData) -> u64 {
@@ -2686,7 +2635,7 @@ mod tests {
 
     async fn runtime(
         label: &str,
-        rules: Option<RulesRuntimeConfig>,
+        rules: Option<NativeRulesConfig>,
     ) -> (
         StorageRuntime,
         tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
@@ -3224,16 +3173,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn official_rules_runtime_enforces_both_synthetic_buckets_when_available() {
-        let Some(jar) = std::env::var_os("FIRESIDE_STORAGE_RULES_JAR") else {
-            return;
-        };
+    async fn native_rules_enforce_both_synthetic_buckets() {
         let default_rules = include_str!("../testdata/synthetic-storage.default.rules");
         let assets_rules = include_str!("../testdata/synthetic-storage.assets.rules");
-        let rules = RulesRuntimeConfig {
-            java: PathBuf::from("java"),
-            jar: PathBuf::from(jar),
-            buckets: vec![
+        let rules = NativeRulesConfig {
+            source: RulesSource::PerBucket(vec![
                 BucketRules {
                     bucket: DEFAULT_BUCKET.to_owned(),
                     name: "storage.default.rules".to_owned(),
@@ -3244,7 +3188,8 @@ mod tests {
                     name: "storage.assets.rules".to_owned(),
                     content: assets_rules.to_owned(),
                 },
-            ],
+            ]),
+            documents: Arc::new(NoFirestoreDocuments),
         };
         let (runtime, _dispatches, root) = runtime("rules", Some(rules)).await;
         let owner = unsigned_jwt("alice", false);

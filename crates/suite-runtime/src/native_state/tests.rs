@@ -1,5 +1,5 @@
 use super::*;
-use crate::{StorageBucketConfig, SuitePorts};
+use crate::{StorageBucketConfig, StorageRulesConfig, SuitePorts};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -26,10 +26,9 @@ impl Case {
             project_id: "demo-native-resume".into(),
             project_dir: root.clone(),
             firebase_json: root.join("firebase.json"),
-            firebase_tools_root: root.clone(),
+            inspect_functions: None,
+            offline: true,
             node: root.clone(),
-            java: root.clone(),
-            storage_rules_jar: root.clone(),
             ui_archive: root.clone(),
             state_dir: root.join("state"),
             resume_state: true,
@@ -37,10 +36,10 @@ impl Case {
             firestore_rules: None,
             diagnostics: false,
             firestore_indexes: None,
-            storage_buckets: vec![StorageBucketConfig {
+            storage_rules: StorageRulesConfig::PerBucket(vec![StorageBucketConfig {
                 bucket: "demo-bucket".into(),
                 rules: root.clone(),
-            }],
+            }]),
             default_bucket: "demo-bucket".into(),
             import: Some(seed),
             export_on_exit: Some(root.join("export")),

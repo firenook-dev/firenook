@@ -1,0 +1,459 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-h-functions-runtime",
+  "frozen": true,
+  "frozenAt": "2026-09-17T18:10:00+08:00",
+  "plan": "support/phase-h-functions-runtime.md",
+  "baseline": {
+    "engineRevision": "ef0f04cd84b27bfcb7020a3f78f6b83caa04c2bf",
+    "branch": "plan/phase-g-storage-rules",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.6",
+    "functionsExecutionToday": "support/functions-host.cjs loads the consumer's firebase-tools 15.22.0 FunctionsEmulator and ExtensionsEmulator; Rust owns registration, event envelopes, delivery, Pub/Sub, scheduling and readiness"
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "node": "24.20.0",
+    "firebaseToolsOracle": "15.22.0",
+    "firebaseFunctionsSdk": "7.2.5",
+    "firebaseAdminSdk": "13.10.0",
+    "oracleModuleSha256Prefixes": {
+      "lib/emulator/functionsEmulator.js": "0c16fe813bc5a034",
+      "lib/emulator/functionsEmulatorRuntime.js": "5bef9577eaa8e6ed",
+      "lib/emulator/functionsEmulatorShared.js": "ede6357feb23a126",
+      "lib/emulator/functionsRuntimeWorker.js": "9e6963e55e9b4f9d",
+      "lib/emulator/extensionsEmulator.js": "e8be125cee4d2809",
+      "lib/extensions/emulator/triggerHelper.js": "f7c389aa791cd726",
+      "lib/extensions/emulator/specHelper.js": "61255a9e3ef5934e",
+      "lib/extensions/emulator/optionsHelper.js": "c445874e2263e4ae",
+      "lib/deploy/extensions/planner.js": "ba616b140d0663a0",
+      "lib/deploy/functions/runtimes/discovery/v1alpha1.js": "02503adc2d1f5ed4",
+      "lib/deploy/functions/build.js": "397208379661e08d",
+      "lib/functions/env.js": "8d6a5e640f827300",
+      "lib/emulator/events/types.js": "45bff5e257fb5642"
+    }
+  },
+  "oracles": {
+    "precedence": [
+      "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "production-cloud-functions-only-where-the-emulator-is-known-to-diverge",
+      "firebase-functions-sdk-7.2.5-source"
+    ],
+    "ownership": {
+      "httpRoutesStatusesBodies": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "callableEnvelopesAndErrors": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "eventEnvelopesAsReceivedByHandlers": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "handlerEnvironment": "official-firebase-tools-functions-and-extensions-emulator-15.22.0",
+      "discoveryWireManifest": "firebase-functions-sdk-7.2.5-source (lib/runtime/manifest.js stackToWire, served as JSON at /__/functions.yaml when FUNCTIONS_CONTROL_API=true)",
+      "extensionsResolutionAndParameters": "official-firebase-tools-functions-and-extensions-emulator-15.22.0"
+    },
+    "classificationRule": "match the official emulator; where Fireside deliberately differs (it must not fail startup on an upstream-ignored export, one worker per codebase instead of one per trigger, no Google Analytics call per invocation) the difference is recorded in the fixture invariants and asserted by the replay; no divergence is adopted silently and no fixture is edited after freezing",
+    "production": {
+      "usedFor": "nothing unless H1 finds an emulator behaviour the SDK documents as different in production; every such case is listed here before implementation",
+      "cases": []
+    }
+  },
+  "supportedTriggerMatrix": {
+    "policy": "every row is captured in H1 and replayed in H2; anything outside the matrix is an ignored export with a recorded reason, never a silent drop and never a startup failure",
+    "v2": [
+      "onRequest",
+      "onCall",
+      "onCall streaming (Accept: text/event-stream, response.sendChunk)",
+      "onDocumentCreated",
+      "onDocumentUpdated",
+      "onDocumentDeleted",
+      "onDocumentWritten",
+      "onDocument*WithAuthContext",
+      "onObjectFinalized",
+      "onObjectDeleted",
+      "onObjectMetadataUpdated",
+      "onMessagePublished",
+      "onSchedule",
+      "beforeUserCreated",
+      "beforeUserSignedIn",
+      "onCustomEventPublished (only if H1 shows the official emulator delivers Extensions events)"
+    ],
+    "v1": [
+      "https.onRequest",
+      "https.onCall",
+      "firestore.document().onCreate/onUpdate/onDelete/onWrite",
+      "storage.object().onFinalize/onDelete/onMetadataUpdate",
+      "pubsub.topic().onPublish",
+      "pubsub.schedule().onRun",
+      "auth.user().onCreate/onDelete",
+      "auth.user().beforeCreate/beforeSignIn"
+    ],
+    "extensions": [
+      "firebaseextensions.v1beta.function httpsTrigger",
+      "firebaseextensions.v1beta.function eventTrigger (Firestore, Storage, Pub/Sub, Auth)",
+      "firebaseextensions.v1beta.function scheduleTrigger",
+      "firebaseextensions.v1beta.v2function eventTrigger"
+    ],
+    "ignoredWithReason": [
+      "taskQueueTrigger (extension resources: dropped by firebase-tools 15.22.0 triggerHelper; user functions: Tasks emulator delivery stays unimplemented)",
+      "Realtime Database, Remote Config, Test Lab, Crashlytics, Analytics, Firebase Alerts and Eventarc channel events outside the Extensions case",
+      "Python and Dart runtimes",
+      "onCall genkitAction and Data Connect GraphQL triggers",
+      "functions.config() (removed from firebase-functions 7)"
+    ]
+  },
+  "decisions": {
+    "workerModel": {
+      "policy": "one Node worker per codebase (user codebase or extension instance), started at readiness, restarted on crash and on source reload; FUNCTION_TARGET, FUNCTION_SIGNATURE_TYPE and K_SERVICE are set synchronously before each invocation; the official emulator starts one worker per trigger lazily",
+      "recordedIn": "fixture invariants: handlers observe the same per-invocation environment on both engines; process identity is not part of the contract"
+    },
+    "discovery": {
+      "policy": "spawn the codebase's own node_modules/.bin/firebase-functions with FUNCTIONS_CONTROL_API=true and read /__/functions.yaml (JSON body), then /__/quitquitquit; a static functions.yaml in the source directory takes precedence as in firebase-tools; the manifest is the SDK's stackToWire v1alpha1 contract"
+    },
+    "extensionsRegistry": {
+      "policy": "reuse the Firebase CLI's stored account (configstore) refresh token when present, accept FIREBASE_TOKEN, and add `fireside ext:vendor` offline mode; an own OAuth login flow is not in this phase",
+      "cacheDirectory": "FIREBASE_EXTENSIONS_CACHE_PATH or ~/.cache/firebase/extensions/<publisher>/<name>@<version>, shared with firebase-tools so nothing is downloaded twice",
+      "vendoredSources": "<project>/extensions/.sources/<publisher>/<name>@<version> (or the configured directory) preferred over the cache; a fully vendored project starts with no network and no token"
+    },
+    "taskQueueTrigger": {
+      "policy": "extension resources with taskQueueTrigger are admitted without delivery and reported as ignored with reason `firebase-tools 15.22.0 drops taskQueueTrigger from emulated extension definitions`, so the Twodart extensions gate keeps its 2 ignored records"
+    },
+    "eventarc": {
+      "policy": "registration routes stay; H1 measured that the official Eventarc emulator delivers Extensions custom events published through the Admin SDK channel to user onCustomEventPublished handlers (extensions-triggers/publish-listened), so H2 adds delivery for Eventarc channel events",
+      "settled": "delivered by the official emulator; Fireside implements channel event delivery"
+    },
+    "credentialIsolation": {
+      "policy": "workers never receive the developer's ADC or CLI credentials; GOOGLE_APPLICATION_CREDENTIALS is unset in worker environments and the registry token is used by the Rust parent only"
+    }
+  },
+  "capture": {
+    "requiredBeforeProductImplementation": true,
+    "root": "conformance/fixtures/functions-runtime-v1",
+    "fixtureSchemaVersion": 1,
+    "tool": "conformance/src/functions-runtime/capture-emulator.ts",
+    "script": "capture:functions:runtime",
+    "minimumPrograms": 40,
+    "minimumSteps": 250,
+    "requiredCategories": [
+      "discovery-and-inventory",
+      "http",
+      "callable",
+      "callable-streaming",
+      "cors",
+      "firestore-events",
+      "storage-events",
+      "pubsub-and-schedules",
+      "auth-events",
+      "blocking-functions",
+      "environment",
+      "lifecycle",
+      "extensions"
+    ],
+    "handlerObservation": "every handler appends {invocation, env subset, request shape or event envelope, auth context} to a JSONL file the harness reads back; the fixture records the observation next to the HTTP step that caused it",
+    "fixturesFrozen": true,
+    "frozenProgramCount": 43,
+    "frozenStepCount": 281,
+    "frozenFixtureSha256": {
+      "README.md": "c4a82d0f29c51b884200acb4c55bc545d8c2507c8801321b9ed53aa1ad210fd5",
+      "emulator-programs.json": "f22fad935afd7f34bd8fa8fa7f5da25e15f15239a8c22decedea003bac6d251f"
+    },
+    "frozenAt": "2026-09-17T15:43:20.365Z",
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "SHA256SUMS"
+    ],
+    "frozenProfileCount": 5,
+    "frozenObservationCount": 250,
+    "minimumObservations": 200,
+    "profiles": [
+      {
+        "id": "main",
+        "programs": 38,
+        "steps": 260,
+        "skipped": null
+      },
+      {
+        "id": "v1-blocking",
+        "programs": 1,
+        "steps": 5,
+        "skipped": null
+      },
+      {
+        "id": "inspect",
+        "programs": 1,
+        "steps": 5,
+        "skipped": null
+      },
+      {
+        "id": "ext-missing-param",
+        "programs": 1,
+        "steps": 1,
+        "skipped": null
+      },
+      {
+        "id": "twodart-refs",
+        "programs": 2,
+        "steps": 10,
+        "skipped": null
+      }
+    ],
+    "officialFirestoreEmulatorJar": "cloud-firestore-emulator-v1.21.0.jar",
+    "cachedEmulatorSha256": {
+      "cloud-firestore-emulator-v1.21.0.jar": "c3d3680a89d946a90a027365ea14c26c6472a162bcf37f099bbb1ebd66d25e8e",
+      "cloud-storage-rules-runtime-v1.1.3.jar": "0cd52db6f6271d62078f805220706377c849220b73bd68aa27078d977df9c900",
+      "pubsub-emulator-0.8.33.zip": "93768f8763d85c37f7f6e0f64d10195abaa088f4ff559b7d9fb8a2fc5520848d",
+      "ui-v1.15.0.zip": "97d8c4c574e3f20c4d690a2ce8373eef76ab024da73279a062dba8517f88cf9a"
+    }
+  },
+  "firebaseToolsSurfacesToRemove": [
+    {
+      "where": "support/functions-host.cjs",
+      "what": "the whole file (loads firebase-tools FunctionsEmulator/ExtensionsEmulator)"
+    },
+    {
+      "where": "crates/suite-runtime/src/lib.rs",
+      "what": "FUNCTIONS_HOST_SOURCE include_str!, SuiteConfig.firebase_tools_root, preflight row (\"firebase-tools\", ...), spawn_functions_host --firebase-tools-root"
+    },
+    {
+      "where": "crates/suite-runtime/src/functions_readiness.rs",
+      "what": "Receipt.firebase_tools_version == \"15.22.0\" check"
+    },
+    {
+      "where": "crates/cli/src/main.rs",
+      "what": "--firebase-tools-root suite argument and its absolute_path"
+    },
+    {
+      "where": "crates/functions-bridge/src/lib.rs",
+      "what": "doc comments naming the pinned firebase-tools host (behaviour unchanged)"
+    },
+    {
+      "where": "crates/suite-front/src/lib.rs",
+      "what": "firebase-tools references in comments"
+    },
+    {
+      "where": "packages/cli/src/runtime.mjs",
+      "what": "require.resolve('firebase-tools/package.json') and the 15.22.0 version gate; --firebase-tools-root passthrough"
+    },
+    {
+      "where": "packages/cli/README.md, README.md, COMPATIBILITY.md, DESIGN.md, docs",
+      "what": "every statement that firebase-tools is required by the Fireside path"
+    }
+  ],
+  "gates": {
+    "emulatorReplay": {
+      "programsMinimum": 40,
+      "stepsMinimum": 250,
+      "allowedUnexplainedStatusDivergences": 0,
+      "allowedUnexplainedHandlerObservationDivergences": 0,
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "test": "crates/functions-runtime replay of conformance/fixtures/functions-runtime-v1 over HTTP against a started runtime"
+    },
+    "existingFixturesUnchanged": {
+      "fixtures": [
+        "functions-readiness-v1",
+        "functions-topic-reload-v1",
+        "developer-tools-functions-lifecycle-v1",
+        "firebase-suite-v1/functions-callable-http-and-error-contract",
+        "firebase-suite-v1/functions-startup-discovery",
+        "firebase-suite-v1/pubsub-schedule-and-function-dispatch",
+        "firebase-suite-v1/firestore-trigger-registration-and-v1-v2-dispatch",
+        "firebase-suite-v1/auth-import-export-and-trigger-dispatch"
+      ],
+      "policy": "their contracts are the suite's, not the host's; they keep passing without edits"
+    },
+    "noFirebaseTools": {
+      "productNeverResolvesFirebaseTools": true,
+      "suiteStartsWithFirebaseToolsAbsentFromNodeModules": true,
+      "ciStep": "Verify suite start without firebase-tools in node_modules"
+    },
+    "extensions": {
+      "twodartExtensionsGate": "bun test:fireside-extensions passes on the packed candidate with 26 definitions, 24 admitted, 2 ignored with reasons",
+      "offlineStart": "a project with every extension vendored starts with the network blocked and no CLI token"
+    },
+    "performance": {
+      "profile": "Hetzner paired acceptance function lane and suite readiness",
+      "functionLaneP99RegressionPercentAllowed": 0,
+      "readinessRegressionAllowed": false
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "workerSourceMaximumLines": 1500
+    }
+  },
+  "acceptance": {
+    "exactCandidateCi": "all jobs including the new no-firebase-tools step",
+    "twodartCheapGates": [
+      "bun test:fireside-integration",
+      "bun test:fireside-extensions",
+      "journeys 1-9",
+      "Stripe webhook round trip reaches the handler in the credential-free profile",
+      "Algolia index trigger reaches the handler in the credential-free profile",
+      "--inspect-functions attach"
+    ],
+    "hetznerPairedAttempt": "candidate-attempt-11.json",
+    "cleanSetup": "without firebase-tools and without Java; fully offline start with vendored extensions",
+    "release": "0.1.0-next.8",
+    "receipts": "receipts.h5"
+  },
+  "receipts": {
+    "h1": {
+      "fixture": "conformance/fixtures/functions-runtime-v1",
+      "recordedAt": "2026-09-17T15:43:20.365Z",
+      "firstRecordedAt": "2026-09-17T10:47:11.075Z",
+      "reRecordedBecause": "the replay harness settled its digest rules (served extension specs are parameter-substituted; registry objects carry volatile install counts) after the first capture; same programs, same counts. Frozen text then normalized for portability without a recapture: macOS /private real-path prefix folded into {{projectDir}}, the SDK's node_modules directory as {{nodeModules}}, Express error-page stack frames as {{stack}}",
+      "profiles": 5,
+      "programs": 43,
+      "steps": 281,
+      "handlerObservations": 250,
+      "registryProfileResolvedThroughCliLogin": true,
+      "test": "conformance/test/functions-runtime-fixtures.test.mjs"
+    },
+    "h2h3Replay": {
+      "harness": "conformance/src/functions-runtime/replay-fireside.ts (npm run replay:functions:runtime)",
+      "replayedAt": "2026-09-17T16:05:00Z",
+      "engine": "crates/functions-runtime + crates/extensions (this commit)",
+      "node": "24.20.0",
+      "profiles": {
+        "main": "260/260",
+        "v1-blocking": "5/5",
+        "inspect": "5/5",
+        "ext-missing-param": "1/1",
+        "twodart-refs": "10/10 offline from the shared cache with registry sidecars (FIRESIDE_OFFLINE=1)"
+      },
+      "assertedDivergences": 89,
+      "divergenceTable": "conformance/src/functions-runtime/replay-fireside.ts DIVERGENCES + GLOBAL_DIVERGENCES; fixture README lists them"
+    },
+    "h5": {
+      "twodartGates": {
+        "candidate": "0.1.0-local.g8caaeba6b9b2 (packaging/build-local.mjs, installed with bun fireside:local)",
+        "extensionsGate": "PASS: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (same as the official oracle capture), ready 8.1 s (next.6 Node host: ~30 s); gate updated for the owned receipt in Twodart commit b2f974fc4",
+        "integration": "test:fireside-integration 24/24",
+        "installedSmoke": "test:fireside-installed PASS (default launcher; 21 Functions; listeners; Auth; gzip Storage both buckets; Pub/Sub; UI; export/shutdown; native reopen; dataset isolation)",
+        "browserJourneys": "Phase 5 journeys 1-9 PASS on the Mac full-data stack (TWODART_DISABLE_EXTERNALS=1 bun dev:mprocs --data full-data): otp-auth-login 3994 ms, dashboard-and-deck-list 1156, existing-deck-and-listener-edit 12851, catalog-slide-add 24856, deck-image-upload 15081, duplicate-and-delete-deck 11400, dotnet-deck-export 13647, dev-admin-pages 18026, sign-out-and-sign-in 5652"
+      },
+      "packedInstall": {
+        "local": "packaging/smoke-packed.mjs + smoke-suite.mjs on the darwin-arm64 local candidate: consumer node_modules holds firebase-functions only (no firebase-tools), full suite start, Functions call, export and shutdown PASS",
+        "ci": "packages.yml packed installs on five platforms without setup-java"
+      },
+      "linuxSmoke": {
+        "host": "fireside-hetzner (Linux, 12 cpu), java absent from PATH, no gcloud credentials, no firebase-tools in the consumer",
+        "candidate": "linux-x64 artifact of Installable packages run 35250492904 (0.1.0-local.g1f056eb1785f; engine identical to a054d81)",
+        "noJava": "conformance/src/suite/verify-no-java.mjs PASS, 12 steps, ready 6522 ms",
+        "corpusReplay": "281/281 steps across all five profiles offline (FIRESIDE_OFFLINE=1), registry extensions from ~/.cache/firebase/extensions with fireside-registry.json sidecars and Linux npm installs; publish-listened skipped (no gcloud ADC on the host); suite ready ~25.4 s per profile for the six-codebase oracle project (official 33-51 s)",
+        "offlineVendoredStart": "fireside ext:vendor copied both registry instances into <project>/extensions/.sources (481 MB with their Linux node_modules) and recorded the resolution; then `fireside emulators:exec --offline` with FIREBASE_EXTENSIONS_CACHE_PATH pointed at an empty directory, HOME at a directory holding only the UI asset, no FIREBASE_TOKEN and no firebase-tools started the suite (8 backends, 71 functions, 2 upstream-ignored), served both instances from the vendored copies and answered ext-stripe-createPortalLink with the extension's own 401; clean stop",
+        "scope": "about ten minutes; not the paired 2 h acceptance"
+      },
+      "cleanSetupWithoutJavaOrFirebaseTools": "the Linux smoke is that stage: a fresh consumer directory with the packed CLI + platform package, firebase-functions 7.2.5 and firebase-admin 13.10.0 only; java absent from PATH; suite start, corpus replay and the offline vendored start all pass",
+      "pending": [
+        "release 0.1.0-next.8 (separate release approval)",
+        "consumer pin bump and its setup documentation"
+      ],
+      "pairedAcceptance": {
+        "attempt": 13,
+        "completedAt": "2026-09-18T08:05:19.287Z",
+        "result": "PASS (result.passed, controller/smoke/full exit 0; 95 evidence checksums re-verified by an independent audit that re-derives every percentile and memory peak from the raw samples)",
+        "engine": "0720434e3de7e0886f129f52a39d5ef2972ce45f",
+        "candidate": "0.1.0-local.g0720434e3de7 (installed-package launcher), binary sha256 48f0f427bff54e375b3891c56a1194910079ab34da95cb869c4deb9238c961bf, artifact sha256 25472a108918c9091540cfac1ba1521829ec608d9cc5c9ccc46a24390a7f67ed",
+        "harness": "aa8b52816d6886c71dd4940f40eed93dd3fac730 (unchanged since the next.6 qualification)",
+        "host": "the private acceptance host (AMD Ryzen 5 3600, 12 cpu, 64 GiB, NVMe RAID1, Linux 6.8); official emulator on untuned HotSpot defaults with Java 26 and firebase-tools 15.22.0; the Fireside stack ran without Java and without firebase-tools",
+        "workload": "sequential official then Fireside: cheap smoke, 7,200 s app-shaped soak (two busy sessions plus an idle observer), export/restart, nine browser journeys before and after restart, then a fresh checkout on the default backend and on the documented official fallback",
+        "stableStateParity": "1 Auth user, 211,205 Firestore documents, 33,352 stable Storage objects (6,688,940,031 bytes) and the same normalized generated-cache digest on both stacks after every soak, journey set and restart",
+        "soakP50P99Milliseconds": {
+          "writeCommit": {
+            "official": "198.0 / 255.7",
+            "fireside": "3.3 / 22.3",
+            "samples": 5280
+          },
+          "listenerDelivery": {
+            "official": "198 / 248",
+            "fireside": "9 / 51",
+            "samples": 60000,
+            "gaps": 0
+          },
+          "functionDelivery": {
+            "official": "3.8 / 8.5",
+            "fireside": "2.6 / 4.4",
+            "samples": 240,
+            "note": "the Phase H lane: the consumer's Firestore-triggered function dispatched and executed by the owned runtime; next.6 measured 3.2 / 5.9 with the firebase-tools Functions emulator"
+          },
+          "catalogRead": {
+            "official": "31.1 / 41.1",
+            "fireside": "6.4 / 22.2",
+            "samples": 480
+          },
+          "storageCycle": {
+            "official": "11.6 / 21.6",
+            "fireside": "8.0 / 38.4",
+            "samples": 240,
+            "note": "the Phase G lanes (native rules on every stage); next.6 measured 8.1 / 27.7"
+          },
+          "observerCatalogRead": {
+            "official": "30.8 / 39.8",
+            "fireside": "7.0 / 22.4",
+            "samples": 240
+          },
+          "observerStorageCycle": {
+            "official": "13.7 / 23.8",
+            "fireside": "7.4 / 46.8",
+            "samples": 120
+          }
+        },
+        "memory": {
+          "peakEmulatorPssGiB": {
+            "official": 19.35,
+            "fireside": 1.77,
+            "reductionPercent": 90.8
+          },
+          "peakStackPssGiB": {
+            "official": 23.24,
+            "fireside": 4.21,
+            "reductionPercent": 81.9
+          },
+          "largestFunctionsWorkerPssGiB": {
+            "official": 0.59,
+            "fireside": 0.13
+          },
+          "stackGrowthGiBPerHour": {
+            "official": 3.39,
+            "fireside": 0.05
+          },
+          "swap": "none on either stack"
+        },
+        "lifecycleSeconds": {
+          "initialReadiness": {
+            "official": 49.25,
+            "fireside": 51.25,
+            "note": "application readiness including the consumer's own builds and probes; Fireside binds its listeners only after the full-data import (all ports at 38.7 s) and the /backends inventory answered 7 s after the bind because discovery runs before that route is served — both recorded as follow-ups, neither a gate"
+          },
+          "restartReadiness": {
+            "official": 46.72,
+            "fireside": 46.75
+          },
+          "exportAndShutdownAfterSoak": {
+            "official": 60.02,
+            "fireside": 27.03
+          },
+          "exportAndShutdownAfterRestart": {
+            "official": 58.0,
+            "fireside": 28.03
+          },
+          "freshCheckoutReadiness": {
+            "officialFallback": 57.17,
+            "firesideDefault": 51.51
+          }
+        },
+        "browserJourneys": "36/36 passes (nine journeys, both stacks, before and after restart), 0 page errors, 0 request failures; the catalogue journey still ends on the watcher's two-minute heartbeat on Fireside because the frozen runner's synthetic stimulus lacks the observer's filter field (recorded since the next.4 qualification; not an emulator latency)",
+        "regressions": "11/11 harness, engine, Rust and consumer build commands exit 0",
+        "stability": "attempts 11, 12 and 13 with identical inputs agree within noise on every lane (Fireside p50: catalogue 6.3-6.4, write 3.2-3.3, listener 9-13, function 2.6-2.7, Storage 8.0-8.1 ms; emulator peak 1.59-1.77 GiB)",
+        "retainedFailures": {
+          "attempt10": "failed in the Fireside cheap smoke before any measurement: the browser raised ERR_CERT_VERIFIER_CHANGED on the first page's script requests about 200 ms after its own start (browser-internal verifier swap; certificates unchanged); Fireside readiness had passed",
+          "attempt11": "measured cleanly (both soaks, both restarts, 36/36 journeys) and failed only the fresh-checkout disk preflight: 75,435,433,984 bytes available against the frozen 80,000,000,000 minimum after the exports of the run itself",
+          "attempt12": "measured cleanly and failed only the cross-stack stable-state comparison: the consumer's own daily 03:00 UTC scheduled function fired inside the Fireside soak window only and wrote one 529-byte Storage object (33,353 vs 33,352). Fireside runs schedules; the official emulator never does. A harness pair-state timing hazard, not an emulator defect; attempt 13 was timed so neither window crossed a schedule"
+        },
+        "harnessFollowUps": [
+          "make the cross-stack stable-state comparison schedule-aware (or refuse launch windows that cross a consumer schedule)",
+          "compute the disk every stage needs at launch",
+          "retry a transient browser verifier swap once",
+          "seed the catalogue journey's stimulus with the observer's filter field"
+        ],
+        "evidence": "private acceptance report, attempt 13 (audit summary, per-lane timelines, 95 checksummed evidence files)"
+      }
+    }
+  }
+}

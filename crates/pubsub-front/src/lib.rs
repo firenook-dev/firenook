@@ -28,6 +28,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, Time};
 
 const PUBSUB_EVENT_TYPE: &str = "google.cloud.pubsub.topic.v1.messagePublished";
+const LEGACY_PUBSUB_EVENT_TYPE: &str = "google.pubsub.topic.publish";
 
 /// Builds the Firebase-compatible topic and subscription router.
 #[must_use]
@@ -63,7 +64,7 @@ impl PubsubRuntime {
                     .entry((project.to_owned(), topic.clone()))
                     .or_insert_with(Topic::default)
                     .targets
-                    .push(Target::Schedule(function.clone()));
+                    .push(Target::Schedule(function.clone(), inventory.generation));
                 schedules.push(ScheduleDefinition {
                     project: project.to_owned(),
                     topic,
@@ -78,7 +79,17 @@ impl PubsubRuntime {
                     .entry((topic_project, topic))
                     .or_insert_with(Topic::default)
                     .targets
-                    .push(Target::Pubsub(function.clone()));
+                    .push(Target::Pubsub(function.clone(), inventory.generation));
+            } else if let Some(trigger) = &function.event_trigger
+                && trigger.event_type == LEGACY_PUBSUB_EVENT_TYPE
+                && function.schedule.is_none()
+                && let Some((topic_project, topic)) = parse_topic_resource(&trigger.resource)
+            {
+                topics
+                    .entry((topic_project, topic))
+                    .or_insert_with(Topic::default)
+                    .targets
+                    .push(Target::Legacy(function.clone(), inventory.generation));
             }
         }
         let state = PubsubState {
@@ -132,7 +143,7 @@ impl PubsubRuntime {
     /// Starts wall-clock schedule delivery. Manual topic publishing remains
     /// available to deterministic test harnesses.
     pub fn start_scheduler(&self) -> Result<SchedulerRuntime, PubsubError> {
-        SchedulerRuntime::start(&self.state, &self.schedules)
+        Ok(SchedulerRuntime::start(&self.state, &self.schedules))
     }
 
     /// Reconciles function targets after completed source registration. Explicit
@@ -149,10 +160,6 @@ impl PubsubRuntime {
             self.state.queue.clone(),
             self.state.background.clone(),
         );
-        // Validate the entire replacement before stopping any current schedule.
-        for schedule in &candidate.schedules {
-            Cadence::parse(schedule)?;
-        }
         scheduler.stop().await;
         let topics = std::mem::take(&mut lock(&candidate.state.inner).topics);
         {
@@ -190,8 +197,10 @@ struct Topic {
 
 #[derive(Clone)]
 enum Target {
-    Schedule(FunctionDefinition),
-    Pubsub(FunctionDefinition),
+    Schedule(FunctionDefinition, u32),
+    Pubsub(FunctionDefinition, u32),
+    /// First-generation `pubsub.topic().onPublish` (legacy event envelope).
+    Legacy(FunctionDefinition, u32),
 }
 
 /// One discovered schedule and its synthetic Pub/Sub topic.
@@ -271,7 +280,7 @@ async fn get_topic(
     {
         Ok(Json(json!({"name": topic_resource(&project, &topic)})))
     } else {
-        Err(PubsubHttpError::not_found("topic not found"))
+        Err(PubsubHttpError::not_found("Topic not found"))
     }
 }
 
@@ -305,7 +314,7 @@ async fn publish(
         let targets = data
             .topics
             .get(&(project.clone(), topic.clone()))
-            .ok_or_else(|| PubsubHttpError::not_found("topic not found"))?
+            .ok_or_else(|| PubsubHttpError::not_found("Topic not found"))?
             .targets
             .clone();
         let mut ids = Vec::with_capacity(body.messages.len());
@@ -334,12 +343,29 @@ async fn list_subscriptions(
     State(state): State<PubsubState>,
     Path(project): Path<String>,
 ) -> Json<JsonValue> {
-    let subscriptions = lock(&state.inner)
-        .subscriptions
+    let data = lock(&state.inner);
+    // Every function topic carries the official emulator's implicit
+    // `emulator-sub-<topic>` pull subscription.
+    let mut subscriptions = data
+        .topics
         .iter()
-        .filter(|((candidate, _), _)| candidate == &project)
-        .map(|(_, value)| value.clone())
+        .filter(|((candidate, _), topic)| candidate == &project && !topic.targets.is_empty())
+        .map(|((_, topic), _)| {
+            json!({
+                "name": format!("projects/{project}/subscriptions/emulator-sub-{topic}"),
+                "topic": topic_resource(&project, topic),
+                "pushConfig": {},
+                "ackDeadlineSeconds": 10,
+                "messageRetentionDuration": "604800s",
+            })
+        })
         .collect::<Vec<_>>();
+    subscriptions.extend(
+        data.subscriptions
+            .iter()
+            .filter(|((candidate, _), _)| candidate == &project)
+            .map(|(_, value)| value.clone()),
+    );
     Json(json!({"subscriptions": subscriptions}))
 }
 
@@ -397,23 +423,58 @@ fn build_dispatch(
     message: &PublishMessage,
     message_id: &str,
 ) -> DispatchRequest {
-    let function = match target {
-        Target::Schedule(function) | Target::Pubsub(function) => function,
+    let (function, generation) = match target {
+        Target::Schedule(function, generation)
+        | Target::Pubsub(function, generation)
+        | Target::Legacy(function, generation) => (function, *generation),
     };
     let event_id = stable_event_id(project, topic, &function.id, message_id);
     let time = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .expect("current UTC time formats");
-    let data = match target {
-        Target::Schedule(_) => json!({}),
-        Target::Pubsub(_) => json!({
-            "message": {
-                "data": message.data,
+    if let Target::Legacy(..) = target {
+        // `createLegacyEventRequestBody`: the message bytes serialize as a
+        // Node Buffer.
+        let bytes = BASE64.decode(&message.data).unwrap_or_default();
+        let body = serde_json::to_vec(&json!({
+            "context": {
+                "eventId": event_id,
+                "resource": {
+                    "service": "pubsub.googleapis.com",
+                    "name": topic_resource(project, topic),
+                },
+                "eventType": LEGACY_PUBSUB_EVENT_TYPE,
+                "timestamp": time,
+            },
+            "data": {
+                "data": { "type": "Buffer", "data": bytes },
                 "attributes": message.attributes,
+            },
+        }))
+        .expect("legacy event JSON encoding cannot fail");
+        return DispatchRequest {
+            path: format!(
+                "/functions/projects/{project}/triggers/{}-{generation}",
+                function.id
+            ),
+            headers: BTreeMap::from([("content-type".to_owned(), "application/json".to_owned())]),
+            body,
+            event_id,
+        };
+    }
+    let data = match target {
+        Target::Schedule(..) | Target::Legacy(..) => json!({}),
+        Target::Pubsub(..) => json!({
+            "message": {
                 "messageId": message_id,
                 "publishTime": time,
+                "attributes": message.attributes,
                 "orderingKey": message.ordering_key,
-            }
+                "data": message.data,
+                "message_id": message_id,
+                "publish_time": time,
+            },
+            "subscription": format!("projects/{project}/subscriptions/emulator-sub-{topic}"),
         }),
     };
     let body = serde_json::to_vec(&json!({
@@ -426,7 +487,10 @@ fn build_dispatch(
     }))
     .expect("CloudEvent JSON encoding cannot fail");
     DispatchRequest {
-        path: format!("/functions/projects/{project}/triggers/{}-0", function.id),
+        path: format!(
+            "/functions/projects/{project}/triggers/{}-{generation}",
+            function.id
+        ),
         headers: BTreeMap::from([(
             "content-type".to_owned(),
             "application/cloudevents+json; charset=UTF-8".to_owned(),
@@ -481,11 +545,23 @@ pub struct SchedulerRuntime {
 }
 
 impl SchedulerRuntime {
-    fn start(state: &PubsubState, schedules: &[ScheduleDefinition]) -> Result<Self, PubsubError> {
+    fn start(state: &PubsubState, schedules: &[ScheduleDefinition]) -> Self {
         let (shutdown, _) = tokio::sync::watch::channel(false);
         let mut tasks = Vec::with_capacity(schedules.len());
         for schedule in schedules {
-            let cadence = Cadence::parse(schedule)?;
+            let cadence = match Cadence::parse(schedule) {
+                Ok(cadence) => cadence,
+                Err(error) => {
+                    // The official emulator never runs schedules on a clock;
+                    // an expression Fireside cannot evaluate keeps the manual
+                    // trigger route and loses only the automatic ticks.
+                    eprintln!(
+                        "fireside pubsub: schedule for {} not run automatically ({error}); fire it through the Functions trigger route",
+                        schedule.topic
+                    );
+                    continue;
+                }
+            };
             let state = state.clone();
             let schedule = schedule.clone();
             let mut stopped = shutdown.subscribe();
@@ -505,7 +581,7 @@ impl SchedulerRuntime {
                 }
             }));
         }
-        Ok(Self { shutdown, tasks })
+        Self { shutdown, tasks }
     }
 
     /// Stops every schedule without firing an extra tick.
@@ -564,6 +640,85 @@ fn publish_scheduled(
 enum Cadence {
     Interval(Duration),
     DailyUtc(Time),
+    Cron(CronSpec),
+}
+
+/// A five-field cron expression evaluated in UTC (minute, hour, day of
+/// month, month, day of week; `*`, lists, ranges and `/step`).
+#[derive(Debug, Clone, Copy)]
+struct CronSpec {
+    minutes: u64,
+    hours: u32,
+    days: u32,
+    months: u16,
+    weekdays: u8,
+}
+
+impl CronSpec {
+    fn parse(expression: &str) -> Option<Self> {
+        let fields: Vec<&str> = expression.split_ascii_whitespace().collect();
+        if fields.len() != 5 {
+            return None;
+        }
+        Some(Self {
+            minutes: Self::field(fields[0], 0, 59)?,
+            hours: u32::try_from(Self::field(fields[1], 0, 23)?).ok()?,
+            days: u32::try_from(Self::field(fields[2], 1, 31)?).ok()?,
+            months: u16::try_from(Self::field(fields[3], 1, 12)?).ok()?,
+            weekdays: u8::try_from(Self::field(fields[4], 0, 6)? & 0x7f).ok()?,
+        })
+    }
+
+    /// Bit set of the allowed values of one field.
+    fn field(text: &str, minimum: u64, maximum: u64) -> Option<u64> {
+        let mut bits = 0_u64;
+        for part in text.split(',') {
+            let (range, step) = match part.split_once('/') {
+                Some((range, step)) => (range, step.parse::<u64>().ok().filter(|step| *step > 0)?),
+                None => (part, 1),
+            };
+            let (start, end) = if range == "*" {
+                (minimum, maximum)
+            } else if let Some((start, end)) = range.split_once('-') {
+                (start.parse::<u64>().ok()?, end.parse::<u64>().ok()?)
+            } else {
+                let value = range.parse::<u64>().ok()?;
+                (value, if step == 1 { value } else { maximum })
+            };
+            if start < minimum || end > maximum || start > end {
+                return None;
+            }
+            let mut value = start;
+            while value <= end {
+                bits |= 1 << value;
+                value += step;
+            }
+        }
+        Some(bits)
+    }
+
+    fn matches(self, moment: OffsetDateTime) -> bool {
+        let weekday = moment.weekday().number_days_from_sunday();
+        self.minutes & (1 << u64::from(moment.minute())) != 0
+            && self.hours & (1 << u32::from(moment.hour())) != 0
+            && self.days & (1 << u32::from(moment.day())) != 0
+            && self.months & (1 << u16::from(u8::from(moment.month()))) != 0
+            && self.weekdays & (1 << weekday) != 0
+    }
+
+    /// The next matching minute strictly after `now`, within a year.
+    fn next_after(self, now: OffsetDateTime) -> Option<OffsetDateTime> {
+        let mut candidate =
+            now.replace_second(0).ok()?.replace_nanosecond(0).ok()? + time::Duration::minutes(1);
+        let limit = now + time::Duration::days(366);
+        while candidate <= limit {
+            if self.matches(candidate) {
+                return Some(candidate);
+            }
+            candidate += time::Duration::minutes(1);
+        }
+        None
+    }
 }
 
 impl Cadence {
@@ -589,7 +744,7 @@ impl Cadence {
             if schedule
                 .time_zone
                 .as_deref()
-                .is_some_and(|zone| zone != "UTC")
+                .is_some_and(|zone| zone != "UTC" && zone != "Etc/UTC")
             {
                 return Err(PubsubError(format!(
                     "unsupported non-UTC schedule zone: {}",
@@ -609,6 +764,20 @@ impl Cadence {
                 .map(Self::DailyUtc)
                 .map_err(|error| PubsubError(error.to_string()));
         }
+        if let Some(cron) = CronSpec::parse(&schedule.expression) {
+            if schedule
+                .time_zone
+                .as_deref()
+                .is_some_and(|zone| zone != "UTC" && zone != "Etc/UTC")
+            {
+                eprintln!(
+                    "fireside pubsub: cron schedule {} declares time zone {}; Fireside evaluates it in UTC",
+                    schedule.expression,
+                    schedule.time_zone.as_deref().unwrap_or_default()
+                );
+            }
+            return Ok(Self::Cron(cron));
+        }
         Err(PubsubError(format!(
             "unsupported Firebase schedule expression: {}",
             schedule.expression
@@ -618,6 +787,10 @@ impl Cadence {
     fn delay_from(self, now: OffsetDateTime) -> Duration {
         match self {
             Self::Interval(duration) => duration,
+            Self::Cron(cron) => cron
+                .next_after(now)
+                .and_then(|next| Duration::try_from(next - now).ok())
+                .unwrap_or(Duration::from_hours(8784)),
             Self::DailyUtc(time) => {
                 let today = now.replace_time(time);
                 let next = if today > now {
@@ -667,11 +840,27 @@ impl IntoResponse for PubsubHttpError {
                 "error": {
                     "code": self.status.as_u16(),
                     "message": self.message,
-                    "status": self.status.canonical_reason().unwrap_or("ERROR")
+                    "status": grpc_status_name(self.status)
                 }
             })),
         )
             .into_response()
+    }
+}
+
+/// The gRPC status name the official Pub/Sub emulator reports for an HTTP status.
+fn grpc_status_name(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::BAD_REQUEST => "INVALID_ARGUMENT",
+        StatusCode::UNAUTHORIZED => "UNAUTHENTICATED",
+        StatusCode::FORBIDDEN => "PERMISSION_DENIED",
+        StatusCode::NOT_FOUND => "NOT_FOUND",
+        StatusCode::CONFLICT => "ALREADY_EXISTS",
+        StatusCode::TOO_MANY_REQUESTS => "RESOURCE_EXHAUSTED",
+        StatusCode::NOT_IMPLEMENTED => "UNIMPLEMENTED",
+        StatusCode::SERVICE_UNAVAILABLE => "UNAVAILABLE",
+        StatusCode::GATEWAY_TIMEOUT => "DEADLINE_EXCEEDED",
+        _ => "INTERNAL",
     }
 }
 
@@ -707,6 +896,7 @@ mod tests {
             serde_json::from_value::<Response>(oracle["observations"][0]["response"].clone())
                 .expect("backends response");
         FunctionsInventory {
+            generation: 0,
             backends: response.backends,
         }
     }
@@ -904,6 +1094,7 @@ mod tests {
         assert!(deliveries.try_recv().is_err());
 
         let empty = FunctionsInventory {
+            generation: 0,
             backends: Vec::new(),
         };
         runtime
@@ -922,26 +1113,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_reloaded_schedule_preserves_the_previous_inventory() {
+    async fn unsupported_reloaded_schedule_keeps_its_topic_without_automatic_ticks() {
         let project = "demo-fireside-phase4-suite-oracle";
         let background = TriggerRegistry::default();
         let (observer, _) = TriggerObserver::channel(background.clone());
         let mut runtime = router(project, &inventory(), observer.queue(), background);
         let mut scheduler = runtime.start_scheduler().unwrap();
-        let before = runtime.schedules().to_vec();
         let mut invalid = inventory();
         for function in &mut invalid.backends[0].function_triggers {
             if let Some(schedule) = &mut function.schedule {
                 schedule.schedule = "not a schedule".to_owned();
             }
         }
-        assert!(
-            runtime
-                .refresh_inventory(project, &invalid, &mut scheduler)
-                .await
-                .is_err()
-        );
-        assert_eq!(runtime.schedules(), before);
+        // An expression Fireside cannot evaluate no longer rejects the reload
+        // (the official emulator never runs schedules on a clock); the topic
+        // and its manual trigger route survive, only the ticks are skipped.
+        runtime
+            .refresh_inventory(project, &invalid, &mut scheduler)
+            .await
+            .unwrap();
+        assert_eq!(runtime.schedules().len(), 1);
+        assert_eq!(runtime.schedules()[0].expression, "not a schedule");
         scheduler.shutdown().await;
     }
 
@@ -1018,5 +1210,37 @@ mod tests {
             json_response(response).await,
             json!({"receivedMessages": []})
         );
+    }
+    #[test]
+    fn cron_expressions_evaluate_in_utc() {
+        let spec = CronSpec::parse("0 3 * * *").unwrap();
+        let now = OffsetDateTime::parse("2026-01-01T02:59:30Z", &Rfc3339).unwrap();
+        let next = spec.next_after(now).unwrap();
+        assert_eq!(next.format(&Rfc3339).unwrap(), "2026-01-01T03:00:00Z");
+        let later = OffsetDateTime::parse("2026-01-01T03:00:00Z", &Rfc3339).unwrap();
+        assert_eq!(
+            spec.next_after(later).unwrap().format(&Rfc3339).unwrap(),
+            "2026-01-02T03:00:00Z"
+        );
+        let weekly = CronSpec::parse("*/15 9-17 * * 1-5").unwrap();
+        let saturday = OffsetDateTime::parse("2026-01-03T10:00:00Z", &Rfc3339).unwrap();
+        assert_eq!(
+            weekly
+                .next_after(saturday)
+                .unwrap()
+                .format(&Rfc3339)
+                .unwrap(),
+            "2026-01-05T09:00:00Z"
+        );
+        assert!(CronSpec::parse("every 5 minutes").is_none());
+        assert!(CronSpec::parse("61 * * * *").is_none());
+        let cadence = Cadence::parse(&ScheduleDefinition {
+            project: "p".to_owned(),
+            topic: "t".to_owned(),
+            expression: "0 3 * * *".to_owned(),
+            time_zone: Some("Europe/Berlin".to_owned()),
+        })
+        .unwrap();
+        assert!(matches!(cadence, Cadence::Cron(_)));
     }
 }

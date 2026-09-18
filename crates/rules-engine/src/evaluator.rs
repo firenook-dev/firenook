@@ -14,7 +14,7 @@ use crate::ast::{
 };
 use crate::model::{
     AtomicEvaluationResult, Auth, DocumentAccess, EvaluationRequest, EvaluationResult, LatLng,
-    Query, RequestOperation, Resource, RulesDuration, RuntimeError, Timestamp, Value,
+    Query, RequestOperation, Resource, RulesDuration, RulesService, RuntimeError, Timestamp, Value,
 };
 use crate::{AllowDecision, CoverageObserver, EvaluationTrace, ExpressionKey, ExpressionValue};
 
@@ -228,6 +228,7 @@ impl AccessState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Namespace {
     Duration,
+    Firestore,
     Hashing,
     LatLng,
     Math,
@@ -356,6 +357,13 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 "resource".to_owned(),
                 if self.query_branch.is_some() {
                     EvalValue::QueryResource
+                } else if self.request.service == RulesService::FirebaseStorage {
+                    self.request
+                        .storage_resource
+                        .as_ref()
+                        .map_or(EvalValue::Data(Value::Null), |object| {
+                            EvalValue::Data(object.to_value())
+                        })
                 } else {
                     self.request
                         .resource
@@ -499,7 +507,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 .collect::<Result<BTreeMap<_, _>, RuntimeError>>()
                 .map(|map| EvalValue::Data(Value::Map(map))),
             ExprKind::Path(parts) => self.eval_path(parts, environment, functions),
-            ExprKind::Variable(name) => Self::variable(name, environment),
+            ExprKind::Variable(name) => self.variable(name, environment),
             ExprKind::Field { base, name } => {
                 let base = self.eval_expr(base, environment, functions)?;
                 self.field(base, name)
@@ -550,6 +558,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
     }
 
     fn variable(
+        &self,
         name: &str,
         environment: &BTreeMap<String, EvalValue>,
     ) -> Result<EvalValue, RuntimeError> {
@@ -558,6 +567,9 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         }
         let namespace = match name {
             "duration" => Namespace::Duration,
+            "firestore" if self.request.service == RulesService::FirebaseStorage => {
+                Namespace::Firestore
+            }
             "hashing" => Namespace::Hashing,
             "latlng" => Namespace::LatLng,
             "math" => Namespace::Math,
@@ -622,18 +634,28 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                     .map_or(EvalValue::Data(Value::Null), EvalValue::Auth)),
                 "method" => Ok(EvalValue::data(operation_name(self.request.operation))),
                 "time" => Ok(EvalValue::Data(Value::Timestamp(self.request.time))),
+                "path" => Ok(EvalValue::Data(Value::Path(self.request.path.clone()))),
+                "resource" if self.request.service == RulesService::FirebaseStorage => Ok(self
+                    .request
+                    .storage_request_resource
+                    .as_ref()
+                    .map_or(EvalValue::Data(Value::Null), |object| {
+                        EvalValue::Data(object.to_value())
+                    })),
                 "resource" => Ok(self
                     .request
                     .request_resource
                     .clone()
                     .map_or(EvalValue::Data(Value::Null), EvalValue::Resource)),
-                "query" => Ok(EvalValue::Query(self.request.query.clone())),
+                "query" if self.request.service == RulesService::CloudFirestore => {
+                    Ok(EvalValue::Query(self.request.query.clone()))
+                }
                 _ => Err(RuntimeError::new(format!(
                     "request field {name:?} does not exist"
                 ))),
             },
             EvalValue::Auth(auth) => match name {
-                "uid" => Ok(EvalValue::data(auth.uid)),
+                "uid" => Ok(EvalValue::Data(auth.uid.map_or(Value::Null, Value::String))),
                 "token" => Ok(EvalValue::Data(Value::Map(auth.token))),
                 _ => Err(RuntimeError::new(format!(
                     "auth field {name:?} does not exist"
@@ -709,6 +731,9 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 .iter()
                 .map(|argument| self.eval_expr(argument, environment, functions))
                 .collect::<Result<Vec<_>, _>>()?;
+            if matches!(receiver, EvalValue::Namespace(Namespace::Firestore)) {
+                return self.firestore_namespace(name, values);
+            }
             return call_method(receiver, name, values);
         }
         Err(RuntimeError::new("rules call target is not callable"))
@@ -734,7 +759,16 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             ));
         }
         self.call_depth += 1;
-        let mut environment = caller_environment.clone();
+        // Lexical scope: the function sees `request`, `resource` and the
+        // wildcards of its enclosing match blocks, never the caller's other
+        // bindings (storage-rules-v1 fn-service-level-inherits-binding).
+        let mut environment = caller_environment
+            .iter()
+            .filter(|(name, _)| {
+                *name == "request" || *name == "resource" || function.scope.contains(name)
+            })
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<BTreeMap<_, _>>();
         for (name, value) in function.parameters.iter().zip(arguments) {
             environment.insert(name.clone(), value);
         }
@@ -769,6 +803,47 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 let value = one_argument(name, arguments)?;
                 Ok(EvalValue::data(string_coercion(value)?))
             }
+            "int" => match one_argument(name, arguments)? {
+                EvalValue::Data(Value::Integer(value)) => {
+                    Ok(EvalValue::Data(Value::Integer(value)))
+                }
+                EvalValue::Data(Value::Float(value)) => {
+                    if value.is_finite() && value.trunc().abs() < 9.2e18 {
+                        #[allow(clippy::cast_possible_truncation)]
+                        Ok(EvalValue::Data(Value::Integer(value.trunc() as i64)))
+                    } else {
+                        Err(RuntimeError::new("float cannot be converted to an int"))
+                    }
+                }
+                EvalValue::Data(Value::String(value)) => value
+                    .trim()
+                    .parse::<i64>()
+                    .map(|value| EvalValue::Data(Value::Integer(value)))
+                    .map_err(|_| RuntimeError::new(format!("string {value:?} is not an int"))),
+                _ => Err(RuntimeError::new("value cannot be converted to an int")),
+            },
+            "float" => match one_argument(name, arguments)? {
+                #[allow(clippy::cast_precision_loss)]
+                EvalValue::Data(Value::Integer(value)) => {
+                    Ok(EvalValue::Data(Value::Float(value as f64)))
+                }
+                EvalValue::Data(Value::Float(value)) => Ok(EvalValue::Data(Value::Float(value))),
+                EvalValue::Data(Value::String(value)) => value
+                    .trim()
+                    .parse::<f64>()
+                    .map(|value| EvalValue::Data(Value::Float(value)))
+                    .map_err(|_| RuntimeError::new(format!("string {value:?} is not a float"))),
+                _ => Err(RuntimeError::new("value cannot be converted to a float")),
+            },
+            "get" | "exists" | "getAfter"
+                if self.request.service == RulesService::FirebaseStorage =>
+            {
+                // Storage rules reach Cloud Firestore only through the
+                // `firestore` namespace (storage-rules-v1 fs-bare-get-unavailable).
+                Err(RuntimeError::new(format!(
+                    "Function not found error: Name: [{name}]"
+                )))
+            }
             "get" | "exists" | "getAfter" => {
                 let argument = one_argument(name, arguments)?;
                 if argument.is_symbolic() {
@@ -776,7 +851,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                 }
                 let path = data_path(argument)?;
                 let after = name == "getAfter";
-                let resource = self.document(path, after)?;
+                let resource = self.document(path, after, true)?;
                 if name == "exists" {
                     Ok(EvalValue::Data(Value::Bool(resource.is_some())))
                 } else {
@@ -791,7 +866,39 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         }
     }
 
-    fn document(&mut self, path: String, after: bool) -> Result<Option<Resource>, RuntimeError> {
+    /// `firestore.get` / `firestore.exists` under `service firebase.storage`.
+    /// The official runtime answers at least 21 distinct accesses in one
+    /// request (storage-rules-v1 firestore-access-limits), so no Firestore
+    /// access budget applies; the per-request cache still does.
+    fn firestore_namespace(
+        &mut self,
+        name: &str,
+        arguments: Vec<EvalValue>,
+    ) -> Result<EvalValue, RuntimeError> {
+        match name {
+            "get" | "exists" => {
+                let path = data_path(one_argument(name, arguments)?)?;
+                let resource = self.document(path, false, false)?;
+                if name == "exists" {
+                    return Ok(EvalValue::Data(Value::Bool(resource.is_some())));
+                }
+                resource.map_or_else(
+                    || Err(RuntimeError::new("Null value error")),
+                    |resource| Ok(EvalValue::Data(storage_document_value(resource))),
+                )
+            }
+            _ => Err(RuntimeError::new(format!(
+                "Function not found error: Name: [firestore.{name}]"
+            ))),
+        }
+    }
+
+    fn document(
+        &mut self,
+        path: String,
+        after: bool,
+        limited: bool,
+    ) -> Result<Option<Resource>, RuntimeError> {
         let cache = if after {
             &mut self.state.after_cache
         } else {
@@ -801,12 +908,12 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             self.state.document_cache_hits += 1;
             return Ok(resource.clone());
         }
-        if self.operation_document_accesses >= SINGLE_REQUEST_ACCESS_LIMIT {
+        if limited && self.operation_document_accesses >= SINGLE_REQUEST_ACCESS_LIMIT {
             return Err(RuntimeError::new(format!(
                 "maximum of {SINGLE_REQUEST_ACCESS_LIMIT} document access calls for one operation is exceeded"
             )));
         }
-        if self.state.document_accesses >= self.state.maximum_accesses {
+        if limited && self.state.document_accesses >= self.state.maximum_accesses {
             return Err(RuntimeError::new(format!(
                 "maximum of {} document access calls is exceeded",
                 self.state.maximum_accesses
@@ -858,27 +965,27 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             right?;
             return Ok(EvalValue::Unknown);
         }
-        if operator == BinaryOperator::And {
-            let left = self.eval_expr(left, environment, functions)?;
-            let left = data_bool(left)?;
-            if !left {
-                return Ok(EvalValue::Data(Value::Bool(false)));
+        if matches!(operator, BinaryOperator::And | BinaryOperator::Or) {
+            // Production is three-valued over runtime errors: a false operand
+            // decides `&&` and a true operand decides `||` even when the other
+            // operand errors; otherwise the first error stands
+            // (storage-rules-v1 fn-error-*). The left operand short-circuits
+            // when it decides, so the right side is not evaluated then.
+            let terminal = operator == BinaryOperator::Or;
+            let left = self
+                .eval_expr(left, environment, functions)
+                .and_then(data_bool);
+            if left == Ok(terminal) {
+                return Ok(EvalValue::Data(Value::Bool(terminal)));
             }
-            return self
+            let right = self
                 .eval_expr(right, environment, functions)
-                .and_then(data_bool)
-                .map(|value| EvalValue::Data(Value::Bool(value)));
-        }
-        if operator == BinaryOperator::Or {
-            let left = self.eval_expr(left, environment, functions)?;
-            let left = data_bool(left)?;
-            if left {
-                return Ok(EvalValue::Data(Value::Bool(true)));
-            }
-            return self
-                .eval_expr(right, environment, functions)
-                .and_then(data_bool)
-                .map(|value| EvalValue::Data(Value::Bool(value)));
+                .and_then(data_bool);
+            return match (left, right) {
+                (_, Ok(value)) if value == terminal => Ok(EvalValue::Data(Value::Bool(terminal))),
+                (Ok(_), Ok(value)) => Ok(EvalValue::Data(Value::Bool(value))),
+                (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+            };
         }
         let left = self.eval_expr(left, environment, functions)?;
         let right = self.eval_expr(right, environment, functions)?;
@@ -913,6 +1020,23 @@ fn operation_name(operation: RequestOperation) -> &'static str {
         RequestOperation::Update => "update",
         RequestOperation::Delete => "delete",
     }
+}
+
+/// The map returned by `firestore.get` under `service firebase.storage`:
+/// `data`, `id` and the accessor-supplied `__name__`
+/// (storage-rules-v1 firestore-document-shape).
+fn storage_document_value(resource: Resource) -> Value {
+    let id = resource
+        .name
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    let mut map = BTreeMap::new();
+    map.insert("data".to_owned(), Value::Map(resource.data));
+    map.insert("id".to_owned(), Value::String(id));
+    map.insert("__name__".to_owned(), Value::Path(resource.name));
+    Value::Map(map)
 }
 
 fn match_pattern(pattern: &[PatternSegment], path: &str) -> Option<BTreeMap<String, Value>> {
@@ -1382,8 +1506,32 @@ fn is_type(value: &EvalValue, expected: TypeName) -> bool {
     }
 }
 
+fn path_segments(path: &str) -> Vec<&str> {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
 fn index_value(base: EvalValue, index: EvalValue) -> Result<EvalValue, RuntimeError> {
     match base {
+        EvalValue::Data(Value::Path(path)) => {
+            // A path indexes like a list of its segments; a string index is
+            // a property access, which paths do not have.
+            let EvalValue::Data(Value::Integer(position)) = index else {
+                return Err(RuntimeError::new("path segments are indexed by position"));
+            };
+            let segments = path_segments(&path);
+            usize::try_from(position)
+                .ok()
+                .and_then(|position| segments.get(position))
+                .map(|segment| EvalValue::data((*segment).to_owned()))
+                .ok_or_else(|| {
+                    RuntimeError::new(format!(
+                        "Index out of bound error. Index: [{position}] , size: [{}].",
+                        segments.len()
+                    ))
+                })
+        }
         EvalValue::Data(Value::List(values)) => {
             let index = usize::try_from(data_integer(index)?)
                 .map_err(|_| RuntimeError::new("list index is negative"))?;
@@ -1410,8 +1558,28 @@ fn slice_value(
     start: Option<EvalValue>,
     end: Option<EvalValue>,
 ) -> Result<EvalValue, RuntimeError> {
-    let EvalValue::Data(Value::List(values)) = base else {
-        return Err(RuntimeError::new("only lists can be sliced"));
+    let values = match base {
+        EvalValue::Data(Value::List(values)) => values,
+        EvalValue::Data(Value::Path(path)) => {
+            let segments = path_segments(&path);
+            let start = start.map(data_integer).transpose()?.unwrap_or(0);
+            let end = end
+                .map(data_integer)
+                .transpose()?
+                .unwrap_or(i64::try_from(segments.len()).unwrap_or(i64::MAX));
+            let start =
+                usize::try_from(start).map_err(|_| RuntimeError::new("slice start is negative"))?;
+            let end =
+                usize::try_from(end).map_err(|_| RuntimeError::new("slice end is negative"))?;
+            if start > end || end > segments.len() {
+                return Err(RuntimeError::new("slice is outside the available range"));
+            }
+            return Ok(EvalValue::Data(Value::Path(format!(
+                "/{}",
+                segments[start..end].join("/")
+            ))));
+        }
+        _ => return Err(RuntimeError::new("only lists and paths can be sliced")),
     };
     let start = start.map(data_integer).transpose()?.unwrap_or(0);
     let end = end
@@ -1436,6 +1604,19 @@ fn call_method(
         EvalValue::Data(Value::String(value)) => string_method(value, name, arguments),
         EvalValue::Data(Value::List(value)) => list_method(value, name, arguments),
         EvalValue::Data(Value::Map(value)) => map_method(value, name, arguments),
+        // `request.auth` is a map with `uid` and `token` for method calls
+        // (storage-rules-v1 auth-token-claims/auth-keys).
+        EvalValue::Auth(auth) => map_method(
+            BTreeMap::from([
+                (
+                    "uid".to_owned(),
+                    auth.uid.map_or(Value::Null, Value::String),
+                ),
+                ("token".to_owned(), Value::Map(auth.token)),
+            ]),
+            name,
+            arguments,
+        ),
         EvalValue::Set(value) => set_method(value, name, arguments),
         EvalValue::MapDiff(value) => map_diff_method(value, name, arguments),
         EvalValue::Bytes {
@@ -1501,12 +1682,33 @@ fn string_method(
             ))
         }
         "split" => {
-            let delimiter = data_string(one_argument(name, arguments)?)?;
+            // Production splits on a regular expression: every match, zero
+            // width included and at any position, is a delimiter; trailing
+            // empty pieces are dropped; an all-empty result is `['']`
+            // (storage-rules-v1 res-name-split-*).
+            let pattern = data_string(one_argument(name, arguments)?)?;
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|error| RuntimeError::new(format!("invalid split pattern: {error}")))?;
+            let mut pieces = Vec::new();
+            let mut index = 0_usize;
+            let mut matched = false;
+            for found in regex.find_iter(&value) {
+                matched = true;
+                pieces.push(value[index..found.start()].to_owned());
+                index = found.end();
+            }
+            if !matched {
+                return Ok(EvalValue::Data(Value::List(vec![Value::String(value)])));
+            }
+            pieces.push(value[index..].to_owned());
+            while pieces.last().is_some_and(String::is_empty) {
+                pieces.pop();
+            }
+            if pieces.is_empty() {
+                pieces.push(String::new());
+            }
             Ok(EvalValue::Data(Value::List(
-                value
-                    .split(&delimiter)
-                    .map(|part| Value::String(part.to_owned()))
-                    .collect(),
+                pieces.into_iter().map(Value::String).collect(),
             )))
         }
         "toUtf8" => {
@@ -1798,6 +2000,9 @@ fn call_namespace(
 ) -> Result<EvalValue, RuntimeError> {
     match namespace {
         Namespace::Duration => duration_namespace(name, arguments),
+        Namespace::Firestore => Err(RuntimeError::new(format!(
+            "Function not found error: Name: [firestore.{name}]"
+        ))),
         Namespace::Hashing => hashing_namespace(name, arguments),
         Namespace::LatLng => latlng_namespace(name, arguments),
         Namespace::Math => math_namespace(name, arguments),
@@ -1838,7 +2043,12 @@ fn duration_namespace(name: &str, arguments: Vec<EvalValue>) -> Result<EvalValue
 }
 
 fn hashing_namespace(name: &str, arguments: Vec<EvalValue>) -> Result<EvalValue, RuntimeError> {
-    let bytes = data_bytes(one_argument(name, arguments)?)?;
+    // Production hashes a string argument as its UTF-8 bytes
+    // (storage-rules-v1 res-name-hash).
+    let bytes = match one_argument(name, arguments)? {
+        EvalValue::Data(Value::String(value)) => value.into_bytes(),
+        other => data_bytes(other)?,
+    };
     let value = match name {
         "md5" => Md5::digest(bytes).to_vec(),
         "sha256" => Sha256::digest(bytes).to_vec(),
@@ -1972,10 +2182,16 @@ fn timestamp_method(
         "month" => i64::from(u8::from(value.month())),
         "day" => i64::from(value.day()),
         "dayOfWeek" => i64::from(value.weekday().number_from_monday()),
+        "dayOfYear" => i64::from(value.ordinal()),
         "hours" => i64::from(value.hour()),
         "minutes" => i64::from(value.minute()),
         "seconds" => i64::from(value.second()),
         "nanos" => i64::from(value.nanosecond()),
+        "toMillis" => {
+            let millis = value.unix_timestamp_nanos() / 1_000_000;
+            i64::try_from(millis)
+                .map_err(|_| RuntimeError::new("timestamp milliseconds overflow"))?
+        }
         "date" => {
             let midnight = value.date().midnight().assume_utc();
             return Ok(EvalValue::Data(Value::Timestamp(

@@ -24,7 +24,9 @@ use fireside_rest_front::{
     AllocatorMemoryReporter, AllocatorMemoryUsage, router_with_shared_service as rest_router,
 };
 use fireside_rules_runtime::RulesRuntime;
-use fireside_suite_runtime::{StorageBucketConfig, SuiteConfig, SuitePorts, run as run_suite};
+use fireside_suite_runtime::{
+    StorageBucketConfig, StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
+};
 use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use serde::Deserialize;
 
@@ -107,6 +109,47 @@ enum Command {
     CaptureProxy(CaptureProxyArgs),
     /// Start the complete Firebase-compatible emulator suite.
     Suite(Box<SuiteArgs>),
+    /// Inspect or vendor the project's Firebase Extensions without starting
+    /// the suite.
+    Extensions(ExtensionsArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct ExtensionsArgs {
+    #[command(subcommand)]
+    action: ExtensionsAction,
+}
+
+#[derive(Debug, PartialEq, Eq, Subcommand)]
+enum ExtensionsAction {
+    /// Report each instance's source state (local, vendored, cached, or
+    /// needing the registry) as JSON. Nothing is downloaded.
+    Status(ExtensionsProjectArgs),
+    /// Copy every registry extension into `<project>/extensions/.sources`
+    /// with its registry metadata, so later starts need no network or token.
+    Vendor(ExtensionsVendorArgs),
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct ExtensionsProjectArgs {
+    /// The `firebase.json` to read.
+    #[arg(long, default_value = "firebase.json")]
+    config: PathBuf,
+    /// The project id the instances are configured for.
+    #[arg(long = "project-id")]
+    project_id: String,
+    /// The Node binary whose sibling `npm` builds downloaded sources.
+    #[arg(long, default_value = "node")]
+    node: PathBuf,
+}
+
+#[derive(Debug, PartialEq, Eq, Args)]
+struct ExtensionsVendorArgs {
+    #[command(flatten)]
+    project: ExtensionsProjectArgs,
+    /// Vendor only these instance ids (default: every registry instance).
+    #[arg(long = "instance")]
+    instances: Vec<String>,
 }
 
 /// When acknowledged writes reach stable storage in disk mode.
@@ -232,6 +275,8 @@ struct CaptureProxyArgs {
 }
 
 #[derive(Debug, Args, PartialEq, Eq)]
+// One clap switch per independent launch flag.
+#[allow(clippy::struct_excessive_bools)]
 struct SuiteArgs {
     /// Disable Requests/coverage recording; the debug endpoint reports unavailable.
     #[arg(long)]
@@ -252,15 +297,21 @@ struct SuiteArgs {
     storage_buckets: Vec<String>,
     #[arg(long = "project-id")]
     project_id: String,
-    /// Exact installed firebase-tools package root retained for Functions only.
-    #[arg(long = "firebase-tools-root")]
-    firebase_tools_root: PathBuf,
+    /// Accepted for compatibility with earlier launchers; the owned Functions
+    /// runtime no longer loads firebase-tools.
+    #[arg(long = "firebase-tools-root", hide = true)]
+    firebase_tools_root: Option<PathBuf>,
     #[arg(long)]
     node: PathBuf,
+    /// Start the Node Functions workers with `--inspect`; an explicit port
+    /// applies to the single codebase, otherwise ports are assigned from 9229.
+    #[arg(long = "inspect-functions", num_args = 0..=1, default_missing_value = "auto", value_name = "PORT")]
+    inspect_functions: Option<String>,
+    /// Never contact the Extensions registry: every extension ref must be
+    /// vendored in the project (`fireside ext:vendor`) or present in the
+    /// shared cache with its registry sidecar.
     #[arg(long)]
-    java: PathBuf,
-    #[arg(long = "storage-rules-jar")]
-    storage_rules_jar: PathBuf,
+    offline: bool,
     #[arg(long = "ui-archive")]
     ui_archive: PathBuf,
     #[arg(long = "state-dir")]
@@ -319,6 +370,133 @@ fn main() -> ExitCode {
         Command::Firestore(arguments) => run_firestore_runtime(&arguments, allocator_config),
         Command::CaptureProxy(arguments) => run_capture_proxy_runtime(&arguments),
         Command::Suite(arguments) => run_suite_runtime(&arguments),
+        Command::Extensions(arguments) => run_extensions_command(&arguments),
+    }
+}
+
+fn extensions_inputs(
+    arguments: &ExtensionsProjectArgs,
+    offline: bool,
+) -> Result<fireside_suite_runtime::ExtensionsInputs, String> {
+    let firebase_json = absolute_path(&arguments.config)?;
+    let project_dir = firebase_json
+        .parent()
+        .ok_or_else(|| "firebase.json has no parent directory".to_owned())?
+        .to_owned();
+    let node = if arguments.node.components().count() > 1 {
+        absolute_path(&arguments.node)?
+    } else {
+        which_binary(&arguments.node).unwrap_or_else(|| arguments.node.clone())
+    };
+    Ok(fireside_suite_runtime::ExtensionsInputs {
+        project_id: arguments.project_id.clone(),
+        project_dir,
+        firebase_json,
+        default_bucket: format!("{}.appspot.com", arguments.project_id),
+        node,
+        offline,
+        ui_origin: None,
+    })
+}
+
+/// Resolves a bare command name through `PATH`.
+fn which_binary(name: &std::path::Path) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("runtime failed to start: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match &arguments.action {
+        ExtensionsAction::Status(project) => {
+            let inputs = match extensions_inputs(project, true) {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    eprintln!("extensions status failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let config = match fireside_suite_runtime::extensions_config_from(&inputs) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("extensions status failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let report = fireside_extensions::status(&config);
+            match serde_json::to_string_pretty(&report) {
+                Ok(text) => {
+                    println!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("extensions status failed to encode: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        ExtensionsAction::Vendor(vendor) => {
+            let inputs = match extensions_inputs(&vendor.project, false) {
+                Ok(inputs) => inputs,
+                Err(error) => {
+                    eprintln!("extensions vendor failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let config = match fireside_suite_runtime::extensions_config_from(&inputs) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("extensions vendor failed: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let log = fireside_functions_runtime::LogSink::stderr();
+            let mut failed = false;
+            for (instance_id, written) in &config.extensions {
+                if !vendor.instances.is_empty() && !vendor.instances.contains(instance_id) {
+                    continue;
+                }
+                if fireside_extensions::refs::is_local_path(written) {
+                    eprintln!(
+                        "fireside extensions: {instance_id} is a local extension ({written}); nothing to vendor"
+                    );
+                    continue;
+                }
+                match runtime.block_on(fireside_extensions::vendor(
+                    &config,
+                    instance_id,
+                    written,
+                    &log,
+                )) {
+                    Ok(target) => {
+                        println!("{instance_id}: vendored {written} at {}", target.display());
+                    }
+                    Err(error) => {
+                        failed = true;
+                        eprintln!(
+                            "fireside extensions: {instance_id} ({written}) could not be vendored: {error}"
+                        );
+                    }
+                }
+            }
+            if failed {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
     }
 }
 
@@ -328,7 +506,20 @@ struct FirebaseProjectConfig {
     emulators: FirebaseEmulators,
     firestore: Option<FirebaseFirestoreConfig>,
     #[serde(default)]
-    storage: Vec<FirebaseStorageConfig>,
+    storage: Option<FirebaseStorageSection>,
+}
+
+/// `storage` is either one rules file for every bucket or a list of targets.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FirebaseStorageSection {
+    Single(FirebaseStorageRules),
+    Targets(Vec<FirebaseStorageConfig>),
+}
+
+#[derive(Debug, Deserialize)]
+struct FirebaseStorageRules {
+    rules: PathBuf,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -359,13 +550,16 @@ struct FirebaseStorageConfig {
     rules: PathBuf,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct FirebaseRc {
+    /// Absent in most projects; only Storage targets are consulted.
+    #[serde(default)]
     targets: BTreeMap<String, FirebaseProjectTargets>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct FirebaseProjectTargets {
+    #[serde(default)]
     storage: BTreeMap<String, Vec<String>>,
 }
 
@@ -421,9 +615,9 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         .parent()
         .ok_or_else(|| "firebase.json has no parent directory".to_owned())?
         .to_owned();
-    let (storage_buckets, default_bucket) = resolve_storage_buckets(
+    let (storage_rules, default_bucket) = resolve_storage_rules(
         &config_dir,
-        &raw_config.storage,
+        raw_config.storage.as_ref(),
         &targets,
         &arguments.project_id,
         &storage_overrides,
@@ -435,10 +629,19 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         project_id: arguments.project_id.clone(),
         project_dir,
         firebase_json,
-        firebase_tools_root: absolute_path(&arguments.firebase_tools_root)?,
+        inspect_functions: match arguments.inspect_functions.as_deref() {
+            None => None,
+            Some("auto" | "true") => Some(fireside_suite_runtime::InspectConfig { port: None }),
+            Some(port) => Some(fireside_suite_runtime::InspectConfig {
+                port: Some(port.parse().map_err(|_| {
+                    format!("--inspect-functions expects a TCP port, found {port}")
+                })?),
+            }),
+        },
+        offline: arguments.offline
+            || std::env::var("FIRESIDE_OFFLINE")
+                .is_ok_and(|value| matches!(value.as_str(), "1" | "true")),
         node: absolute_path(&arguments.node)?,
-        java: absolute_path(&arguments.java)?,
-        storage_rules_jar: absolute_path(&arguments.storage_rules_jar)?,
         ui_archive: absolute_path(&arguments.ui_archive)?,
         state_dir: absolute_path(&arguments.state_dir)?,
         resume_state: arguments.resume_state,
@@ -451,7 +654,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         firestore_indexes: firestore
             .and_then(|config| config.indexes.as_ref())
             .map(|path| project_path(&config_dir, path)),
-        storage_buckets,
+        storage_rules,
         default_bucket,
         import: arguments.import.as_deref().map(absolute_path).transpose()?,
         export_on_exit: arguments
@@ -464,13 +667,25 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
     })
 }
 
-fn resolve_storage_buckets(
+fn resolve_storage_rules(
     config_dir: &std::path::Path,
-    storage: &[FirebaseStorageConfig],
+    storage: Option<&FirebaseStorageSection>,
     firebase_rc: &FirebaseRc,
     project: &str,
     overrides: &BTreeMap<String, String>,
-) -> Result<(Vec<StorageBucketConfig>, String), String> {
+) -> Result<(StorageRulesConfig, String), String> {
+    let storage = match storage {
+        // The official emulator governs every bucket with the one file and
+        // names the default bucket after the project.
+        Some(FirebaseStorageSection::Single(single)) => {
+            return Ok((
+                StorageRulesConfig::Single(project_path(config_dir, &single.rules)),
+                format!("{project}.appspot.com"),
+            ));
+        }
+        Some(FirebaseStorageSection::Targets(targets)) => targets.as_slice(),
+        None => &[],
+    };
     let project_targets = firebase_rc.targets.get(project);
     let mut buckets = Vec::with_capacity(storage.len());
     for entry in storage {
@@ -497,7 +712,7 @@ fn resolve_storage_buckets(
         .or_else(|| buckets.first())
         .map(|bucket| bucket.bucket.clone())
         .ok_or_else(|| "firebase.json configures no Storage buckets".to_owned())?;
-    Ok((buckets, default_bucket))
+    Ok((StorageRulesConfig::PerBucket(buckets), default_bucket))
 }
 
 fn parse_storage_overrides(values: &[String]) -> Result<BTreeMap<String, String>, String> {
@@ -1107,7 +1322,17 @@ fn normalize_arguments(arguments: impl IntoIterator<Item = OsString>) -> Vec<OsS
     let has_explicit_subcommand = remaining.first().is_some_and(|argument| {
         matches!(
             argument.to_str(),
-            Some("firestore" | "capture-proxy" | "suite")
+            Some(
+                "firestore"
+                    | "capture-proxy"
+                    | "suite"
+                    | "extensions"
+                    | "help"
+                    | "--help"
+                    | "-h"
+                    | "--version"
+                    | "-V"
+            )
         )
     });
 
@@ -1288,10 +1513,6 @@ mod tests {
             "node_modules/firebase-tools",
             "--node",
             "node",
-            "--java",
-            "java",
-            "--storage-rules-jar",
-            "storage-rules.jar",
             "--ui-archive",
             "ui.zip",
             "--state-dir",
@@ -1591,6 +1812,36 @@ mod tests {
 
         assert!(directory.path().join("fireside.redb").is_file());
         assert!(!directory.path().join("fireside.wal").exists());
+    }
+
+    #[test]
+    fn single_file_storage_rules_govern_the_project_default_bucket() {
+        let config: FirebaseProjectConfig =
+            serde_json::from_str(r#"{ "storage": { "rules": "storage.rules" } }"#)
+                .expect("single-file storage config");
+        let firebase_rc: FirebaseRc =
+            serde_json::from_str(r#"{ "projects": { "default": "demo-single" } }"#)
+                .expect(".firebaserc without targets parses");
+        let (rules, default_bucket) = resolve_storage_rules(
+            std::path::Path::new("/project"),
+            config.storage.as_ref(),
+            &firebase_rc,
+            "demo-single",
+            &BTreeMap::new(),
+        )
+        .expect("single file resolves without targets");
+        assert_eq!(
+            rules,
+            StorageRulesConfig::Single(PathBuf::from("/project/storage.rules"))
+        );
+        assert_eq!(default_bucket, "demo-single.appspot.com");
+        let targets: FirebaseProjectConfig =
+            serde_json::from_str(r#"{ "storage": [{ "target": "default", "rules": "a.rules" }] }"#)
+                .expect("targets storage config");
+        assert!(matches!(
+            targets.storage,
+            Some(FirebaseStorageSection::Targets(ref entries)) if entries.len() == 1
+        ));
     }
 
     #[test]

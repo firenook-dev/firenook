@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
+    pub(crate) service: crate::RulesService,
+    pub(crate) rules_version: u8,
     pub(crate) functions: BTreeMap<String, Function>,
     pub(crate) matches: Vec<MatchBlock>,
 }
@@ -161,6 +163,9 @@ pub(crate) enum PatternSegment {
 #[derive(Clone, Debug)]
 pub(crate) struct Function {
     pub(crate) body_start: usize,
+    /// Wildcard bindings of the match blocks enclosing the definition; a
+    /// function never sees the caller's bindings (lexical scope).
+    pub(crate) scope: Vec<String>,
     pub(crate) parameters: Vec<String>,
     pub(crate) lets: Vec<(String, Expr)>,
     pub(crate) result: Expr,

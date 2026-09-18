@@ -16,6 +16,7 @@ this repository. A passing fixture is evidence for its recorded scope only.
 | export-format | Official-format metadata, entity records and streaming LevelDB log framing |
 | auth-front / storage-front | Local Auth APIs/browser helpers and Storage metadata/byte APIs |
 | functions-bridge / suite-runtime | Trigger dispatch, owned child lifecycle and complete-suite startup/shutdown |
+| functions-runtime / extensions | Owned Functions runtime (discovery, Node workers, routing, delivery, reload, blocking Auth functions) and the Extensions loader (parameters, specs, registry, source cache, vendoring) |
 | pubsub-front / suite-front | Limited function-oriented Pub/Sub and hub/UI/control adapters |
 | capture-proxy | Synthetic oracle traffic capture with credential redaction; not an application gateway |
 | npm CLI | Platform selection, dependency/asset checks, configuration validation and state ownership |
@@ -487,13 +488,124 @@ accepted by the official importer**, not an observed multi-shard export. It
 reframes four existing official synthetic entity records and verifies all four
 documents through the official emulator.
 
+## Native Storage rules
+
+`storage-front` compiles every configured ruleset with `fireside-rules-engine`
+(`service firebase.storage`) at startup and evaluates requests in process; no
+rules runtime child exists. The request model is the one recorded from the
+official emulator in `conformance/fixtures/storage-rules-v1`, with production
+`projects.test` precedence for expression semantics:
+
+- `request.auth.uid` is the `user_id` claim only; the token map is the raw,
+  unverified payload; anything undecodable is anonymous.
+- `resource` / `request.resource` are fourteen-key maps (`cacheControl` and
+  `contentLanguage` are never exposed); every upload is `create` with the
+  stored object as `resource`; a metadata PATCH sees the merged object with
+  the next metageneration; `get`/`list`/`delete` carry a null
+  `request.resource`.
+- Rules run before existence checks (403 on deny or error, then 404), once at
+  finalize for resumable uploads under the `start` request's authorization,
+  and never for the JSON API, owner credentials, valid download-token reads,
+  copy or the admin-only token routes.
+- `firestore.get` / `firestore.exists` read the suite's core store through an
+  injected accessor at request time (latest committed state), returning
+  `{data, id, __name__}` with the project-qualified name and no access budget.
+- `PUT /internal/setRules` swaps every ruleset; a compile failure leaves no
+  ruleset installed and every Firebase-API request answers 403 "Storage
+  Emulator has no loaded ruleset." until a valid reload, as the official
+  emulator does. A ruleset that does not compile at startup is a startup
+  failure. A `firebase.json` `storage.rules` file governs every bucket;
+  targets give one ruleset per bucket, and an untargeted bucket has none.
+- Where the official runtime diverges from production (`request.method`
+  missing, prefix-template `list` matching, a crash on empty path segments),
+  production semantics are implemented and the divergence is asserted by the
+  replay tests rather than reproduced.
+
+## Functions runtime
+
+`functions-runtime` owns everything firebase-tools' `FunctionsEmulator` did,
+with the pinned `firebase-functions` SDK as the only Node dependency of a
+codebase. The contract is the recorded corpus in
+`conformance/fixtures/functions-runtime-v1` (43 programs over the official
+emulator), replayed by `npm run replay:functions:runtime`:
+
+- **Discovery** runs the SDK's own control binary
+  (`node_modules/firebase-functions/lib/bin/firebase-functions.js` with
+  `FUNCTIONS_CONTROL_API=true`) or reads a static `functions.yaml`; the
+  manifest is converted with the official parameter interpolation, region
+  grouping (`REGION_TBD` bucket first, then regions in first-appearance
+  order), `secretEnvironmentVariables` and the shared-label rule for
+  multi-region endpoints. dotenv files follow the official chain
+  (`.env`, `.env.<projectId>`, `.env.local`, every `.secret.local` key).
+- **Workers**: one Node process per backend (`support/functions-worker.mjs`,
+  loopback TCP, Express stack identical to the official runtime) serves every
+  function of its codebase; the target, signature and service reach it as
+  control headers and become `FUNCTION_TARGET` / `FUNCTION_SIGNATURE_TYPE` /
+  `K_SERVICE` per invocation (left unset in `--inspect-functions` debug mode,
+  as the official single-process runtime does).
+- **Routing** reproduces the official Express surface: `/backends`,
+  `/functions/projects/{p}/triggers/{key}`, `trigger_multicast`, the
+  `/{project}/{region}/{name}` HTTPS routes, the Eventarc router, the 404
+  "does not exist, valid functions are" listing in registration order, 204
+  for disabled records, and 500 `{"code":"ECONNRESET"}` where the official
+  worker dies (timeouts, background handler failures, functions a reload
+  removed). Records of removed functions stay in the inventory as stale
+  entries, as the official trigger map keeps them.
+- **Delivery** registers Firestore triggers with `functions-bridge` (exact
+  and path-pattern v2 filters, `withAuthContext` variants, `us-central1`
+  location), fans Auth and Storage multicasts out to matching records,
+  serves Pub/Sub and schedules through `pubsub-front` (generation-keyed
+  topics, implicit `emulator-sub-*` subscriptions, UTC cron), and answers
+  blocking Auth functions from `auth-front` with the official JWT payload
+  and `BLOCKING_FUNCTION_ERROR_RESPONSE` wording.
+- **Lifecycle**: a debounced source watcher reloads the codebase in place
+  (existing keys keep their positions, new functions append), hub background
+  controls bump the generation, and the readiness receipt
+  (`FIRESIDE_FUNCTIONS_HOST_READY`) carries the inventory fingerprint the
+  suite verifies before announcing readiness.
+
+Deliberate divergences are asserted by the replay: the worker survives
+handler failures and timeouts (the official one is killed and lazily
+restarted, which also changes when "Loaded environment variables" is
+logged), `req.ip` is `127.0.0.1` over TCP where the Unix-socket official
+worker sees none, and Secret Manager is never contacted.
+
+## Extensions
+
+`extensions` turns `firebase.json` instances into extra Functions backends
+with the official `planner.want` / `toEmulatableBackend` semantics:
+parameter files (`extensions/<id>.env`, `.env.<alias>`, `.env.<projectId>`,
+`.env.local`, `.secret.local`) in the official dotenv dialect, `${X}` and
+`${param:X}` textual substitution in parameter order, project auto-parameters,
+system parameters, defaults left literal, `extension.yaml` read like the
+`yaml` package, registry `propertiesYaml` parsing, trigger conversion with the
+`ext-<instance>-` prefix (HTTPS resources still log the official "missing a
+trigger" warning; `taskQueueTrigger`-only resources become triggerless
+definitions), the `/backends` view with parameters substituted and console
+links rewritten, and whole-instance exclusion when a trigger needs an
+emulator the suite lacks.
+
+Sources resolve in this order: a local path, `<project>/extensions/.sources/
+<publisher>/<name>@<version>` (vendored), the firebase-tools cache
+(`~/.cache/firebase/extensions`, `FIREBASE_EXTENSIONS_CACHE_PATH`), then a
+download from the registry's `sourceDownloadUri` followed by `npm install`
+and `npm run gcp-build`. The registry objects (`extension`,
+`extensionVersion`) are stored next to the source in
+`fireside-registry.json`, so a source that was fetched or vendored once
+starts with no network and no token; `--offline` (or `FIRESIDE_OFFLINE=1`)
+makes any registry access a startup error. Registry calls use the Firebase
+CLI's own OAuth client with `FIREBASE_TOKEN` or the CLI's stored login;
+that credential never reaches a worker's environment. `fireside ext:vendor`
+copies resolved sources into the project and records how unpinned refs
+resolved, which is the recommended path for CI.
+
 ## Distribution and trust boundaries
 
 ### Failed export still drains the owned suite
 
 Export-on-exit errors remain nonzero failures, but are collected rather than
 returned before teardown. The scheduler and admitted deliveries stop before the
-Functions host, listeners and Java Storage rules runtime. A Functions-stop or
+Functions host and listeners. A Functions-stop or
 locator-removal error likewise does not skip remaining teardown. The final error
 retains all observed failures, the working-directory recovery path and an explicit
 warning when Firestore was volatile. Failed export does not imply a portable
@@ -553,6 +665,10 @@ unknown transactions return a finite INVALID_ARGUMENT response; the official
 gRPC observation uses ABORTED. Tests compare projected payloads/status codes
 where directly observable, not exact human-readable error strings or dynamic
 timestamps. Replay covers both memory and disk/WAL, including anonymous denial.
+
+*(History: the paragraphs below describe the Node host that wrapped
+firebase-tools before the owned runtime replaced it; the admission rules they
+motivated live in `functions-runtime`'s registry now.)*
 
 The pinned Functions host's successful discovery and `/backends` response do
 not prove registration. The independent `functions-readiness-v1` capture shows

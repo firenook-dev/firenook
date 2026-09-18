@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fireside Drop-in Tracker</title>
+<meta name="description" content="What Fireside has completed, what is planned, and what remains before it is a full drop-in replacement for the official Firebase Emulator Suite. Data lives in the DATA block at the bottom of this file.">
+<style>
+  :root {
+    --bg: #f7f5f1;
+    --surface: #ffffff;
+    --surface-2: #efece6;
+    --ink: #1d1b17;
+    --ink-2: #5b5750;
+    --ink-3: #8a857c;
+    --line: #dcd7cd;
+    --accent: #c2410c;
+    --accent-ink: #ffffff;
+    --done: #2f7d4f;
+    --done-bg: #e2f2e8;
+    --planned: #1f5f9e;
+    --planned-bg: #e0ecf8;
+    --partial: #a36a00;
+    --partial-bg: #f7ecd2;
+    --missing: #9b2c2c;
+    --missing-bg: #f8e1e1;
+    --absent: #6b6660;
+    --absent-bg: #ebe8e2;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17161a; --surface: #201f24; --surface-2: #2a292f; --ink: #ece9e2; --ink-2: #b6b1a7;
+      --ink-3: #85807a; --line: #3a383f; --accent: #f0803c; --accent-ink: #1d1b17;
+      --done: #7fd39b; --done-bg: #1d3327; --planned: #8cbcf2; --planned-bg: #1c2d42;
+      --partial: #f2c46b; --partial-bg: #3d2f12; --missing: #f19a9a; --missing-bg: #3f1f1f;
+      --absent: #a8a39b; --absent-bg: #2a292f; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17161a; --surface: #201f24; --surface-2: #2a292f; --ink: #ece9e2; --ink-2: #b6b1a7;
+    --ink-3: #85807a; --line: #3a383f; --accent: #f0803c; --accent-ink: #1d1b17;
+    --done: #7fd39b; --done-bg: #1d3327; --planned: #8cbcf2; --planned-bg: #1c2d42;
+    --partial: #f2c46b; --partial-bg: #3d2f12; --missing: #f19a9a; --missing-bg: #3f1f1f;
+    --absent: #a8a39b; --absent-bg: #2a292f; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans);
+    padding-block: 32px 64px; padding-inline: 16px;
+  }
+  /* minmax(0,1fr) keeps the single track at the container width; the wide
+     tables scroll inside .tablewrap instead of stretching the page. */
+  .wrap { max-width: 1100px; margin-inline: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+  .wrap > * { min-width: 0; }
+  header h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance; }
+  header .sub { color: var(--ink-2); margin: 0; max-width: 70ch; }
+  header .meta { color: var(--ink-3); font-size: 13px; margin-top: 8px; font-family: var(--mono); }
+  .topbar { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  button.theme {
+    background: var(--surface); color: var(--ink-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  button.theme:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .meter { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .meter .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+  .meter .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 2px 0 8px; }
+  .meter .value small { font-size: 14px; color: var(--ink-2); font-weight: 400; }
+  .bar { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; display: flex; }
+  .bar span { display: block; height: 100%; }
+  .bar .b-done { background: var(--done); } .bar .b-planned { background: var(--planned); }
+  .bar .b-partial { background: var(--partial); } .bar .b-missing { background: var(--missing); }
+  .bar .b-absent { background: var(--absent); }
+
+  h2 { font-size: 19px; margin: 0 0 4px; }
+  .section-note { color: var(--ink-2); margin: 0 0 14px; max-width: 80ch; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .chip {
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px;
+    background: var(--surface); color: var(--ink-2); cursor: pointer; font-family: inherit;
+  }
+  .chip[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); }
+  .tag { display: inline-block; border-radius: 4px; padding: 1px 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .t-done { color: var(--done); background: var(--done-bg); }
+  .t-planned { color: var(--planned); background: var(--planned-bg); }
+  .t-partial { color: var(--partial); background: var(--partial-bg); }
+  .t-missing { color: var(--missing); background: var(--missing-bg); }
+  .t-absent { color: var(--absent); background: var(--absent-bg); }
+  .t-qualified { color: var(--accent); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--accent); }
+  .bar .b-qualified { background: var(--accent); }
+
+  .phases { display: grid; gap: 10px; }
+  .phase {
+    display: grid; grid-template-columns: 56px 1fr auto; gap: 14px; align-items: start;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  }
+  .phase .letter { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--accent); line-height: 1.2; }
+  .phase .letter small { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; }
+  .phase .title { font-weight: 600; }
+  .phase .desc { color: var(--ink-2); font-size: 14px; }
+  .phase .receipt { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-top: 4px; word-break: break-word; }
+  .phase .steps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .step { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; color: var(--ink-2); }
+  .step.done { border-color: var(--done); color: var(--done); }
+  .step.qualified { border-color: var(--accent); color: var(--accent); }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); background: var(--surface-2); position: sticky; top: 0; }
+  tr:last-child td { border-bottom: 0; }
+  td.name { font-weight: 600; white-space: nowrap; }
+  td .why { color: var(--ink-2); font-size: 13px; display: block; }
+  td.size { white-space: nowrap; font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+  tr[hidden] { display: none; }
+
+  .deps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .dep { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .dep .name { font-weight: 600; }
+  .dep .path { display: grid; gap: 4px; margin-top: 8px; font-size: 13px; }
+  .dep .path div { display: flex; gap: 8px; align-items: baseline; }
+  .dep .path b { font-family: var(--mono); font-weight: 600; color: var(--ink-3); min-width: 64px; font-size: 12px; }
+
+  footer { color: var(--ink-3); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
+  footer code { font-family: var(--mono); }
+  @media (max-width: 640px) {
+    .phase { grid-template-columns: 44px 1fr; }
+    .phase .status { grid-column: 1 / -1; }
+    header h1 { font-size: 24px; }
+  }
+  @media (prefers-reduced-motion: no-preference) { .bar span { transition: width 300ms ease; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>Fireside drop-in tracker</h1>
+        <p class="sub">Where Fireside stands against the official Firebase Emulator Suite: completed phases, planned phases, and everything that still separates it from a full drop-in replacement.</p>
+        <p class="meta" id="meta"></p>
+      </div>
+      <button class="theme" id="theme" type="button">Theme: system</button>
+    </div>
+  </header>
+
+  <section>
+    <div class="meters" id="meters"></div>
+  </section>
+
+  <section>
+    <h2>Runtime dependencies</h2>
+    <p class="section-note">What a developer must have installed to run Fireside, and when each requirement goes away.</p>
+    <div class="deps" id="deps"></div>
+  </section>
+
+  <section>
+    <h2>Phases</h2>
+    <p class="section-note">A–F are the completed first-release phases with their receipts. G and H are implemented and qualified by the paired acceptance (attempt 13, 2026-09-18); both ship together as <code>0.1.0-next.7</code>, whose publication is the one step still open. Steps flip as receipts land.</p>
+    <div class="phases" id="phases"></div>
+  </section>
+
+  <section>
+    <h2>Services of the official suite</h2>
+    <p class="section-note">One row per emulator the official CLI can start. "Today" is the published <code>next.6</code>; "Candidate" is the verified state of the qualified <code>next.7</code> candidate (engine <code>0720434</code>); "Remaining" is the work after next.7.</p>
+    <div class="legend" id="legend-services"></div>
+    <div class="tablewrap"><table id="services">
+      <thead><tr><th>Service</th><th>Today (next.6)</th><th>Candidate (next.7)</th><th>Remaining for drop-in</th><th>Size</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Local CLI surface</h2>
+    <p class="section-note">Commands and options the official CLI provides <em>without</em> the cloud. Cloud commands (login, deploy, projects, secrets) are out of scope by design and are not listed.</p>
+    <div class="legend" id="legend-cli"></div>
+    <div class="tablewrap"><table id="cli">
+      <thead><tr><th>Command / option</th><th>Today (next.6)</th><th>Candidate (next.7)</th><th>Remaining</th><th>Size</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Configuration shapes</h2>
+    <p class="section-note">What a stranger's <code>firebase.json</code> may contain and whether Fireside starts it. These are the first-run failures a public user would hit.</p>
+    <div class="legend" id="legend-config"></div>
+    <div class="tablewrap"><table id="config">
+      <thead><tr><th>Shape</th><th>Today (next.6)</th><th>Candidate (next.7)</th><th>Remaining</th><th>Size</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Suggested order after next.7</h2>
+    <p class="section-note">Not phases yet — a backlog ordered by how many public first-runs each item unblocks per week of work.</p>
+    <div class="tablewrap"><table id="backlog">
+      <thead><tr><th>#</th><th>Item</th><th>Why this position</th><th>Size</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <footer>
+    Source of truth for phase text is <code>ROADMAP.md</code>; the phase plans are <code>support/phase-*.md</code>.
+    To update this page, edit the <code>DATA</code> block at the bottom of <code>support/roadmap.html</code> and change the <code>updated</code> date. Statuses: done = verified with a receipt; qualified = implemented and verified with a receipt, publication pending; partial = works with a documented limitation; planned = in a written phase, not started; missing = no implementation and no plan yet; absent = whole service not present.
+  </footer>
+</div>
+
+<script>
+// ---------------------------------------------------------------- DATA -----
+// Edit this block to update the tracker. Keep statuses honest: "done" only
+// with a receipt, "planned" only when a support/phase-*.md exists.
+const DATA = {
+  updated: "2026-09-18",
+  engine: "candidate 0720434 (G0–G5 and H0–H5 qualified, paired acceptance attempt 13 PASS 2026-09-18, publication as 0.1.0-next.7 pending) · published 0.1.0-next.6 (engine 572d4fb)",
+  dependencies: [
+    { name: "Node 24", status: "keep", now: "Required: Functions host and the npm wrapper",
+      path: [["now", "Required"], ["after G", "Required"], ["after H", "Required — it is the user's Functions runtime; production runs Node too"]] },
+    { name: "Java 26 + Storage rules jar", status: "g", now: "Gone on the qualified candidate (G4): rules evaluated in process, no java gate, setup downloads the UI zip only; the Fireside stack of attempt 13 ran with no Java process. Still required by the published next.6",
+      path: [["now", "Required by next.6; gone on the candidate"], ["after G", "Gone: rules evaluated by the Rust rules-engine; jar download removed from setup"], ["after H", "Gone"]] },
+    { name: "firebase-tools 15.22.0 (npm)", status: "h", now: "Required by the published next.6 (FunctionsEmulator + ExtensionsEmulator loaded as a library). Gone on the qualified candidate (H4): removed from the CLI's dependencies; the suite starts with it absent from node_modules",
+      path: [["now", "Required by next.6, exact version; gone on the candidate"], ["after G", "Required"], ["after H", "Gone: Fireside runtime + one Node worker per codebase; Extensions resolved by Fireside"]] },
+    { name: "Google Emulator UI 1.15.0 zip", status: "later", now: "Downloaded by fireside setup and served by Fireside; the only asset setup still fetches on the candidate",
+      path: [["now", "Required for the UI"], ["after G", "Only asset left in setup"], ["after H", "Still required until an own UI ships (backlog #3)"]] },
+    { name: "Extensions registry (Google)", status: "keep", now: "Needed once to resolve registry extension sources. next.6: login token via firebase-tools. Candidate: the Firebase CLI's stored login or FIREBASE_TOKEN, registry objects cached beside the source, ext:vendor for offline projects, --offline turns any registry access into a startup error",
+      path: [["now", "Firebase CLI login required (next.6)"], ["after G", "Same"], ["after H", "Stored CLI token, FIREBASE_TOKEN, or offline vendored sources (ext:vendor) — the only Google call left, and optional"]] },
+  ],
+  phases: [
+    { letter: "A", title: "Baseline and oracle fixtures", status: "done", desc: "Pinned versions, supported profile, developer-tool contracts captured with synthetic data.", receipt: "PR #3 · CI 34499162765 · candidate 85ef3e7" },
+    { letter: "B", title: "Functional developer tools", status: "done", desc: "UI data controls, Firestore Requests feed, rules coverage, bounded diagnostics.", receipt: "support/phase-bcd-qualification.md" },
+    { letter: "C", title: "Service contracts and readiness", status: "done", desc: "Functions inventory readiness, auxiliary Eventarc/Tasks registration, oracle-backed regressions.", receipt: "merged-ci-receipts.json (#15–17)" },
+    { letter: "D", title: "State lifecycle and failure recovery", status: "done", desc: "Native upgrades, interrupted export, ENOSPC, rollback through portable exports.", receipt: "support/phase-d-recovery.md" },
+    { letter: "E", title: "Measured efficiency", status: "done", desc: "Profiled reads, Storage, lifecycle; write-behind durability; lazy scan decode; TCP_NODELAY.", receipt: "support/phase-e-efficiency.md · benchmarks/results/phase-e" },
+    { letter: "F", title: "Combined release qualification", status: "done", desc: "Exact-candidate CI, five platforms, paired consumer acceptance (attempt 9), next.4 → next.6 published.", receipt: "support/phase-f-qualification.md · release run 35132738094 · next.6 2026-09-17" },
+    { letter: "G", title: "Native Storage Security Rules", status: "qualified", release: "next.7", desc: "service firebase.storage in the Rust rules-engine, firestore.get()/exists(), /internal/setRules, Java removed. G0–G4 implemented; G5: exact-candidate CI, consumer cheap gates, browser journeys 1–9, Linux no-Java smoke and the paired acceptance (attempt 13: native rules on every Storage stage, Storage cycle 8.0 ms p50 vs 11.6 official, stable-state parity) all passed. Publication as next.7 together with H is the open step.", receipt: "support/phase-g-storage-rules.md · benchmarks/phase-g-storage-rules.json · benchmarks/phase-g-storage-profile-linux.json · benchmarks/phase-h-functions-runtime.json receipts.h5.pairedAcceptance",
+      steps: [["G0", true], ["G1", true], ["G2", true], ["G3", true], ["G4", true], ["G5", "qualified"]] },
+    { letter: "H", title: "Owned Functions runtime and Extensions", status: "qualified", release: "next.7", desc: "Rust functions-runtime with one Node worker per codebase, Rust Extensions loader (registry, cache, vendored, local; params with official precedence), Eventarc custom events, firebase-tools removed, --inspect-functions, functions:invoke, ext:vendor, --offline. H0–H4 implemented (corpus 5 profiles / 43 programs / 281 steps replays with every step identical or a listed divergence); H5: exact-candidate CI (run 35254102986), five-platform packed installs, consumer integration and Extensions gates, Linux smoke with an offline vendored start, and the paired acceptance (attempt 13: function delivery 2.6 ms p50 vs 3.8 official, emulator peak 1.77 GiB vs 19.35, no Java and no firebase-tools in the stack) all passed. Publication as next.7 is the open step.", receipt: "support/phase-h-functions-runtime.md · benchmarks/phase-h-functions-runtime.json (receipts h1, h2h3Replay, h5) · conformance/fixtures/functions-runtime-v1",
+      steps: [["H0", true], ["H1", true], ["H2", true], ["H3", true], ["H4", true], ["H5", "qualified"]] },
+  ],
+  // status: done | partial | planned | missing | absent
+  services: [
+    { name: "Firestore", today: ["done", "gRPC/REST/WebChannel, rules, realtime, disk/WAL, official export"], after: ["done", ""], remaining: "Multiple named databases; Enterprise edition; strict composite-index validation is a nice-to-have", size: "days–weeks" },
+    { name: "Firestore Security Rules", today: ["done", "Rust engine, production + Java oracle corpus, coverage, Requests feed; request.path, regex split, error-tolerant && / || and lexical function scope landed with G"], after: ["done", ""], remaining: "—", size: "—" },
+    { name: "Authentication", today: ["partial", "Password, custom token, refresh, admin, captured Google popup/redirect"], after: ["partial", "Blocking functions (beforeCreate/beforeSignIn) now delivered by the owned runtime"], remaining: "Other OAuth providers, MFA, tenants", size: "weeks" },
+    { name: "Storage", today: ["done", "Firebase + GCS paths, metadata, gzip, pagination, single-file and multi-bucket rules config, export/import"], after: ["done", ""], remaining: "—", size: "—" },
+    { name: "Storage Security Rules", today: ["partial", "Published next.6: Java jar, no firestore.get(), no reload"], after: ["done", "Phase G, qualified: native engine, 306 + 334 oracle steps replayed, firestore.get()/exists(), /internal/setRules; every Storage stage of attempt 13 ran through it"], remaining: "Publication (next.7)", size: "—" },
+    { name: "Functions", today: ["partial", "Runs through firebase-tools' FunctionsEmulator in a Node host"], after: ["done", "Phase H, qualified: Rust supervisor + one Node worker per codebase; discovery, HTTP/callable/streaming, Firestore/Storage/Auth/Pub/Sub/Eventarc/schedule triggers, blocking Auth, dotenv/secrets, reload, background controls; 281/281 corpus steps; attempt 13 function delivery 2.6 ms p50 vs 3.8"], remaining: "Python/Dart functions stay unsupported (ignored with reason); pure-Rust JavaScript execution and a network sandbox are non-goals", size: "—" },
+    { name: "Extensions", today: ["partial", "Runs through firebase-tools' ExtensionsEmulator; needs Firebase CLI login"], after: ["done", "Phase H, qualified: local, vendored, cached and registry sources; params with official precedence; custom events; the consumer's three instances admitted like the official oracle (24 admitted, 2 upstream-ignored with reasons); offline vendored start verified"], remaining: "Own login flow (deferred; stored CLI token, FIREBASE_TOKEN and ext:vendor cover it); dynamic in-code extensions; Secret Manager access (secret.local instead)", size: "weeks" },
+    { name: "Pub/Sub", today: ["partial", "Topic control and onSchedule adapter for Functions"], after: ["partial", ""], remaining: "General subscribers, push/pull, ordering, ack semantics", size: "weeks" },
+    { name: "Eventarc", today: ["partial", "Registration accepted; delivery returns 501"], after: ["done", "Phase H: the owned runtime serves registration/removal, getTriggers and publishEvents on the google channel and on named channels, delivering to onCustomEventPublished (Extensions custom events included)"], remaining: "—", size: "—" },
+    { name: "Cloud Tasks", today: ["partial", "Queue registration accepted; dispatch returns 501"], after: ["partial", "Unchanged: queue registration only"], remaining: "Task enqueue and dispatch to onTaskDispatched", size: "1–2 weeks" },
+    { name: "Emulator Hub", today: ["done", "Locator, discovery, export/import, background controls, EmulatorLog"], after: ["done", ""], remaining: "—", size: "—" },
+    { name: "Emulator UI", today: ["partial", "Google's 1.15.0 bundle served by Fireside; upstream HTTPS data-browser defect inherited"], after: ["partial", ""], remaining: "Own UI (removes setup and the last Google asset)", size: "weeks" },
+    { name: "Logging emulator", today: ["done", "Bounded logging delivery and child output"], after: ["done", ""], remaining: "Debug log files (firebase-debug.log style) if wanted", size: "days" },
+    { name: "App Check", today: ["absent", ""], after: ["absent", ""], remaining: "Debug-token exchange and enforcement on Functions/Firestore/Storage", size: "1–2 weeks" },
+    { name: "Realtime Database", today: ["absent", ""], after: ["absent", ""], remaining: "Whole emulator: tree store, rules language, REST + WebSocket wire, export", size: "months" },
+    { name: "Hosting", today: ["absent", ""], after: ["absent", ""], remaining: "Static serving, rewrites/redirects/headers, function rewrites, /__/ SDK init", size: "1–2 weeks" },
+    { name: "Data Connect", today: ["absent", ""], after: ["absent", ""], remaining: "GraphQL schema/connectors over Postgres; Google ships a Go binary + pglite", size: "months" },
+    { name: "App Hosting", today: ["absent", ""], after: ["absent", ""], remaining: "Run the app with emulator env from apphosting.yaml", size: "days" },
+  ],
+  cli: [
+    { name: "emulators:start / emulators:exec", today: ["done", "Complete profile only"], after: ["done", ""], remaining: "Partial profiles (config row)", size: "—" },
+    { name: "setup / doctor / binary-path", today: ["done", "Fireside-specific"], after: ["done", "setup fetches only the UI zip; doctor lists every Extensions instance with its source and whether it starts offline"], remaining: "setup disappears with an own UI", size: "—" },
+    { name: "--import / --export-on-exit / --state-dir / --resume-state", today: ["done", "Resume is a Fireside extra"], after: ["done", ""], remaining: "—", size: "—" },
+    { name: "emulators:export (running suite)", today: ["partial", "Hub endpoint only"], after: ["partial", ""], remaining: "Command wrapper", size: "hours" },
+    { name: "init", today: ["missing", ""], after: ["missing", ""], remaining: "Scaffold firebase.json/.firebaserc/rules/indexes/functions with Fireside-shaped config; --adopt for existing projects", size: "days" },
+    { name: "use / target:apply / target:clear", today: ["missing", ""], after: ["missing", ""], remaining: "Local .firebaserc edits", size: "hours" },
+    { name: "firestore:delete against the emulator", today: ["missing", ""], after: ["missing", ""], remaining: "Via Fireside REST", size: "hours" },
+    { name: "--inspect-functions", today: ["missing", ""], after: ["done", "Phase H: one debugger port per codebase (9229, 9230, …) or an explicit port; attach verified in the consumer gate"], remaining: "—", size: "—" },
+    { name: "functions:shell / functions:invoke", today: ["missing", ""], after: ["partial", "Phase H: functions:invoke NAME [--data JSON] [--region] [--method] against the running suite; no REPL"], remaining: "Interactive REPL (functions:shell) if wanted", size: "days" },
+    { name: "ext:vendor (offline extensions)", today: ["missing", "No official equivalent"], after: ["done", "Phase H: copies each resolved source into extensions/.sources and records how unpinned refs resolved"], remaining: "—", size: "—" },
+    { name: "--offline / FIRESIDE_OFFLINE=1", today: ["missing", "No official equivalent"], after: ["done", "Phase H: any remaining registry access becomes a startup error; verified with an empty cache, a fake HOME and no token"], remaining: "—", size: "—" },
+    { name: "mcp (local MCP server)", today: ["missing", ""], after: ["missing", ""], remaining: "Emulator/data tools over MCP", size: "1 week" },
+    { name: "--debug / debug log files", today: ["missing", ""], after: ["missing", ""], remaining: "firebase-debug.log-style files beside the logging port", size: "days" },
+    { name: "Startup banner and status table", today: ["missing", "Bare 'All emulators ready' line"], after: ["missing", ""], remaining: "Designed launch experience keeping the ready contract", size: "1 week" },
+  ],
+  config: [
+    { name: "--only subset / project without Functions or Storage", today: ["missing", "Rejected: complete profile only"], after: ["missing", ""], remaining: "Services start independently", size: "days" },
+    { name: "Non-demo project id", today: ["missing", "demo-* only"], after: ["missing", ""], remaining: "Accept any id; Functions still credential-isolated", size: "days" },
+    { name: "host 0.0.0.0 (Docker, CI, LAN devices)", today: ["missing", "Loopback only"], after: ["missing", ""], remaining: "Bind policy + docs", size: "days" },
+    { name: "\"storage\": { \"rules\": … } object form", today: ["done", "Landed with G4: one file governs every bucket, default bucket {project}.appspot.com"], after: ["done", ""], remaining: "—", size: "—" },
+    { name: "Multiple Firestore databases", today: ["missing", ""], after: ["missing", ""], remaining: "Named databases in store, gRPC/REST and export", size: "1–2 weeks" },
+    { name: "ui.enabled: false / singleProjectMode: false", today: ["missing", ""], after: ["missing", ""], remaining: "Honour both flags", size: "hours–days" },
+    { name: "Multiple Functions codebases", today: ["partial", "Through firebase-tools"], after: ["done", "Phase H: one worker per codebase; the six-codebase oracle project replays, a broken codebase is reported and skipped"], remaining: "—", size: "—" },
+    { name: ".firebaserc targets for Storage buckets", today: ["done", "Targets optional since G4; a .firebaserc without targets (or none at all) is accepted"], after: ["done", ""], remaining: "—", size: "—" },
+  ],
+  backlog: [
+    { item: "Config/subset gaps + init + the trivial commands", why: "Every public first-run hits one of these; days of work; no engine risk", size: "1–2 weeks" },
+    { item: "Terminal launch experience", why: "First impression; keeps the 'All emulators ready' contract", size: "1 week" },
+    { item: "Own Emulator UI", why: "Removes the last Google asset and fireside setup; fixes the inherited HTTPS data-browser defect", size: "4–6 weeks" },
+    { item: "Cloud Tasks delivery", why: "Turns the last 501 into a working service; small wire surface (Eventarc landed with H)", size: "1–2 weeks" },
+    { item: "Auth breadth (providers, MFA, tenants) + App Check", why: "Most common remaining parity requests for app teams", size: "3–5 weeks" },
+    { item: "Hosting emulator", why: "Bounded static-server work; common in non-Next.js projects", size: "1–2 weeks" },
+    { item: "Multiple Firestore databases + general Pub/Sub", why: "Needed by a minority; moderate engine work", size: "3–4 weeks" },
+    { item: "Realtime Database", why: "A whole second database engine and rules language; do last, or never", size: "months" },
+    { item: "Data Connect / App Hosting", why: "Data Connect is a Postgres-backed product in its own right; App Hosting is small but niche", size: "months / days" },
+  ],
+};
+// ------------------------------------------------------------ RENDER -----
+const STATUS_LABEL = { done: "Done", qualified: "Qualified", partial: "Partial", planned: "Planned", missing: "Missing", absent: "Absent" };
+const tag = s => `<span class="tag t-${s}">${STATUS_LABEL[s] || s}</span>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+document.getElementById("meta").textContent = `Updated ${DATA.updated} · engine ${DATA.engine}`;
+
+function counts(rows, key) {
+  const c = { done: 0, qualified: 0, partial: 0, planned: 0, missing: 0, absent: 0 };
+  for (const r of rows) c[r[key][0]]++;
+  return c;
+}
+function meter(label, c, total, note) {
+  const seg = s => `<span class="b-${s}" style="width:${(100 * c[s] / total).toFixed(1)}%"></span>`;
+  return `<div class="meter"><div class="label">${label}</div><div class="value">${c.done}<small> / ${total} done</small></div>
+    <div class="bar">${seg("done")}${seg("qualified")}${seg("partial")}${seg("planned")}${seg("missing")}${seg("absent")}</div>
+    <div class="label" style="margin-top:8px;text-transform:none;letter-spacing:0">${note}</div></div>`;
+}
+(function renderMeters() {
+  const ph = DATA.phases; const phDone = ph.filter(p => p.status === "done").length; const phQualified = ph.filter(p => p.status === "qualified").length;
+  const sNow = counts(DATA.services, "today"), sAfter = counts(DATA.services, "after");
+  const cNow = counts(DATA.cli, "today"), cAfter = counts(DATA.cli, "after");
+  const deps = DATA.dependencies; const depsAfterH = deps.filter(d => d.status === "keep" || d.status === "later").length;
+  document.getElementById("meters").innerHTML =
+    meter("Phases", { done: phDone, qualified: phQualified, partial: 0, planned: ph.length - phDone - phQualified, missing: 0, absent: 0 }, ph.length, `${phQualified} qualified (G, H) · publication as next.7 pending`) +
+    meter("Services — published next.6", sNow, DATA.services.length, `${sNow.partial} partial · ${sNow.absent} absent`) +
+    meter("Services — candidate next.7", sAfter, DATA.services.length, `${sAfter.partial} partial · ${sAfter.absent} absent`) +
+    meter("CLI (local) — next.6 → candidate", cNow, DATA.cli.length, `${cAfter.done} of ${DATA.cli.length} done on the candidate`) +
+    `<div class="meter"><div class="label">Runtime dependencies</div><div class="value">${deps.length}<small> → ${depsAfterH} after H</small></div>
+     <div class="label" style="margin-top:8px;text-transform:none;letter-spacing:0">Node stays; UI zip until own UI; registry only for Extensions</div></div>`;
+})();
+
+(function renderDeps() {
+  document.getElementById("deps").innerHTML = DATA.dependencies.map(d => `
+    <div class="dep"><div class="name">${esc(d.name)}</div>
+      <div class="path">${d.path.map(([k, v]) => `<div><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("")}</div></div>`).join("");
+})();
+
+(function renderPhases() {
+  document.getElementById("phases").innerHTML = DATA.phases.map(p => `
+    <div class="phase">
+      <div class="letter">${p.letter}${p.release ? `<small>${esc(p.release)}</small>` : ""}</div>
+      <div><div class="title">${esc(p.title)}</div><div class="desc">${esc(p.desc)}</div>
+        <div class="receipt">${esc(p.receipt)}</div>
+        ${p.steps ? `<div class="steps">${p.steps.map(([s, ok]) => `<span class="step${ok === true ? " done" : ok === "qualified" ? " qualified" : ""}">${s}${ok === true ? " ✓" : ok === "qualified" ? " ◐ release pending" : ""}</span>`).join("")}</div>` : ""}
+      </div>
+      <div class="status">${tag(p.status)}</div>
+    </div>`).join("");
+})();
+
+function renderTable(id, rows) {
+  const tb = document.querySelector(`#${id} tbody`);
+  tb.innerHTML = rows.map(r => `<tr data-status="${r.today[0]}">
+    <td class="name">${esc(r.name)}</td>
+    <td>${tag(r.today[0])}${r.today[1] ? `<span class="why">${esc(r.today[1])}</span>` : ""}</td>
+    <td>${tag(r.after[0])}${r.after[1] ? `<span class="why">${esc(r.after[1])}</span>` : ""}</td>
+    <td>${esc(r.remaining)}</td><td class="size">${esc(r.size)}</td></tr>`).join("");
+}
+function renderLegend(id, tableId, rows) {
+  const present = [...new Set(rows.map(r => r.today[0]))];
+  const el = document.getElementById(id);
+  el.innerHTML = present.map(s => `<button class="chip" type="button" data-s="${s}" aria-pressed="false">${tag(s)}</button>`).join("");
+  let active = null;
+  el.addEventListener("click", e => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    active = active === b.dataset.s ? null : b.dataset.s;
+    for (const c of el.querySelectorAll(".chip")) c.setAttribute("aria-pressed", String(c.dataset.s === active));
+    for (const tr of document.querySelectorAll(`#${tableId} tbody tr`)) tr.hidden = active !== null && tr.dataset.status !== active;
+  });
+}
+renderTable("services", DATA.services); renderLegend("legend-services", "services", DATA.services);
+renderTable("cli", DATA.cli); renderLegend("legend-cli", "cli", DATA.cli);
+renderTable("config", DATA.config); renderLegend("legend-config", "config", DATA.config);
+document.querySelector("#backlog tbody").innerHTML = DATA.backlog.map((b, i) =>
+  `<tr><td class="size">${i + 1}</td><td class="name" style="white-space:normal">${esc(b.item)}</td><td>${esc(b.why)}</td><td class="size">${esc(b.size)}</td></tr>`).join("");
+
+(function theme() {
+  const btn = document.getElementById("theme"); const order = ["system", "light", "dark"]; let i = 0;
+  try { const saved = localStorage.getItem("fireside-roadmap-theme"); if (saved) i = Math.max(0, order.indexOf(saved)); } catch {}
+  const apply = () => { const t = order[i]; if (t === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); btn.textContent = `Theme: ${t}`; try { localStorage.setItem("fireside-roadmap-theme", t); } catch {} };
+  btn.addEventListener("click", () => { i = (i + 1) % order.length; apply(); }); apply();
+})();
+</script>
+</body>
+</html>
