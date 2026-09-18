@@ -354,6 +354,74 @@ const DATA = {
         true
       ]
     ]
+  },
+  {
+    "letter": "I",
+    "title": "Complete Authentication",
+    "status": "planned",
+    "release": "next.8",
+    "desc": "Every operation the official Auth emulator implements (62; Fireside has 23 before the phase): anonymous sign-in, every federated provider with linking and collision handling, email OOB flows (verify, reset, email link, change), phone auth, account update semantics (password, unlink, revoke), Admin SDK surface (batchDelete, session cookies, paging, v2 config), tenants, MFA (SMS/TOTP) and passkeys, blocking functions on every sign-in path, the action and openapi pages; official-emulator corpus first, Rust replay after.",
+    "receipt": "support/phase-i-auth.md · benchmarks/phase-i-auth.json (I0) · conformance/fixtures/auth-v1 (I1)",
+    "steps": [
+      [
+        "I0",
+        false
+      ],
+      [
+        "I1",
+        false
+      ],
+      [
+        "I2",
+        false
+      ],
+      [
+        "I3",
+        false
+      ],
+      [
+        "I4",
+        false
+      ],
+      [
+        "I5",
+        false
+      ]
+    ]
+  },
+  {
+    "letter": "J",
+    "title": "Pub/Sub emulator",
+    "status": "planned",
+    "release": "next.8",
+    "desc": "The google.pubsub.v1 Publisher, Subscriber and Schema services over gRPC and HTTP/JSON on the Pub/Sub port (37 RPCs as cloud-pubsub-emulator 0.8.33 serves them): real subscriptions with pull, streaming pull, push delivery, ack deadlines and redelivery, ordering keys, filters, retention, seek and snapshots, dead-letter and retry policies, Avro/Protobuf schemas; function delivery becomes the internal emulator-sub-<topic> subscriber; corpus recorded over both transports first.",
+    "receipt": "support/phase-j-pubsub.md · benchmarks/phase-j-pubsub.json (J0) · conformance/fixtures/pubsub-v1 (J1)",
+    "steps": [
+      [
+        "J0",
+        false
+      ],
+      [
+        "J1",
+        false
+      ],
+      [
+        "J2",
+        false
+      ],
+      [
+        "J3",
+        false
+      ],
+      [
+        "J4",
+        false
+      ],
+      [
+        "J5",
+        false
+      ]
+    ]
   }
 ],
   // status: done | partial | qualified | planned | missing | absent
@@ -376,7 +444,7 @@ const DATA = {
     "name": "Authentication",
     "status": "partial",
     "note": "Password, custom token, refresh, admin, captured Google popup/redirect; blocking functions (beforeCreate/beforeSignIn) delivered by the owned runtime",
-    "remaining": "Other OAuth providers, MFA, tenants",
+    "remaining": "Phase I (next.8): anonymous, OOB/email link, phone, linking/unlink/revoke, Admin batchDelete/session cookies/paging, tenants, MFA/passkeys, blocking on every path — 39 of the official 62 operations",
     "size": "weeks"
   },
   {
@@ -410,8 +478,8 @@ const DATA = {
   {
     "name": "Pub/Sub",
     "status": "partial",
-    "note": "Topic control and onSchedule adapter for Functions",
-    "remaining": "General subscribers, push/pull, ordering, ack semantics",
+    "note": "HTTP topic control, publish fan-out to Functions, onSchedule ticks",
+    "remaining": "Phase J (next.8): gRPC transport, real subscriptions (pull/streaming/push, ack deadlines), ordering, filters, seek/snapshots, schemas, IAM fakes",
     "size": "weeks"
   },
   {
@@ -675,9 +743,9 @@ const DATA = {
     "size": "1–2 weeks"
   },
   {
-    "item": "Multiple Firestore databases + general Pub/Sub",
-    "why": "Needed by a minority; moderate engine work",
-    "size": "3–4 weeks"
+    "item": "Multiple Firestore databases",
+    "why": "Needed by a minority; moderate engine work (general Pub/Sub moved to Phase J)",
+    "size": "2–3 weeks"
   },
   {
     "item": "Realtime Database",

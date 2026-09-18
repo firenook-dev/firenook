@@ -275,3 +275,58 @@ Done when a project with user Functions and Extensions starts on a machine
 with Node only, every supported trigger delivers with the recorded envelope,
 the consumer's Extensions gate passes on the owned runtime, and vendored
 extensions start with no network. Python/Dart functions stay unsupported.
+
+## Phase I — Complete Authentication (`0.1.0-next.8`, together with Phase J)
+
+The plan, current-state audit, oracle precedence and named checks are in the
+[Phase I plan](support/phase-i-auth.md). The official Auth emulator implements
+62 operations; Fireside implements 23 of them before this phase.
+
+| Step | Deliverable | Completion check |
+| --- | --- | --- |
+| I0 | Frozen gate `benchmarks/phase-i-auth.json` | Operation inventory, oracles and named checks recorded before fixtures |
+| I1 | `conformance/fixtures/auth-v1` | ≥60 programs / ≥500 steps against firebase-tools 15.22.0 covering every implemented operation, blocking functions on every sign-in method, tenants, MFA, passkeys, OOB and phone codes, export/import |
+| I2 | `auth-front` rewritten on a typed account model with every operation | Every I1 step is parity or a named divergence in a Rust replay |
+| I3 | Blocking functions and triggers on every path | Recorded functions calls match for each sign-in method |
+| I4 | Replay, SDK browser profile, Emulator UI check | Replay green; browser cells green; UI Auth tab manual check recorded |
+| I5 | Exact-candidate CI, consumer gates, paired acceptance, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
+
+- [ ] I0 — Freeze the gate and the operation inventory.
+- [ ] I1 — Record the official Auth emulator corpus; commit fixtures before
+  implementation.
+- [ ] I2 — Typed account model and every operation.
+- [ ] I3 — Blocking functions and lifecycle triggers on every sign-in path.
+- [ ] I4 — Replay the corpus; SDK and UI checks.
+- [ ] I5 — Qualify the exact candidate and publish `0.1.0-next.8` (with J5).
+
+Done when an application using any sign-in method, tenants, MFA, email or
+phone verification, session cookies or the Admin SDK's account management runs
+against Fireside with the recorded official behaviour.
+
+## Phase J — Pub/Sub emulator (`0.1.0-next.8`, together with Phase I)
+
+The plan, current-state audit, oracle precedence and named checks are in the
+[Phase J plan](support/phase-j-pubsub.md). The official emulator is
+`cloud-pubsub-emulator-0.8.33` with 37 RPCs over gRPC and HTTP/JSON; Fireside
+has a nine-route HTTP adapter with no message backlog before this phase.
+
+| Step | Deliverable | Completion check |
+| --- | --- | --- |
+| J0 | Frozen gate `benchmarks/phase-j-pubsub.json` | RPC inventory, oracles and named checks recorded before fixtures |
+| J1 | `conformance/fixtures/pubsub-v1` | ≥40 programs / ≥400 steps against emulator 0.8.33 over both transports |
+| J2 | Broker core: backlog, ack deadlines, ordering, filters, push, seek/snapshots, schemas | Unit replay of every J1 program's semantics |
+| J3 | gRPC services on the Pub/Sub port + full HTTP/JSON transcoding | `@google-cloud/pubsub` connects and every J1 step is parity or a named divergence |
+| J4 | Replay over both transports; Functions delivery through the broker | Replay green; existing schedule/dispatch fixtures unchanged |
+| J5 | Exact-candidate CI, consumer gates, paired acceptance, release | `0.1.0-next.8` published through the release workflow; receipts recorded |
+
+- [ ] J0 — Freeze the gate and the RPC inventory.
+- [ ] J1 — Record the official Pub/Sub emulator corpus over gRPC and HTTP.
+- [ ] J2 — Broker core.
+- [ ] J3 — gRPC and HTTP/JSON transports on one port.
+- [ ] J4 — Replay; Functions delivery as an internal subscriber.
+- [ ] J5 — Qualify the exact candidate and publish `0.1.0-next.8` (with I5).
+
+Done when a client library with `PUBSUB_EMULATOR_HOST` set publishes,
+subscribes (pull, streaming, push), orders, filters, seeks and validates
+schemas against Fireside with the recorded official behaviour, and function
+delivery is unchanged.

@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-j-pubsub",
+  "frozen": true,
+  "frozenAt": "2026-09-18T20:30:00+08:00",
+  "plan": "support/phase-j-pubsub.md",
+  "baseline": {
+    "engineRevision": "10f3087",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.7",
+    "publishedEngineRevision": "0720434e3de7e0886f129f52a39d5ef2972ce45f",
+    "pubsubFrontLines": 1246,
+    "pubsubFrontRoutes": 9,
+    "transportsBefore": [
+      "http-json"
+    ]
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "tonic": "0.14.6",
+    "prost": "0.14.4",
+    "protox": "0.9.1",
+    "node": "24.20.0",
+    "npm": "12.0.2",
+    "googleCloudPubsubClient": "5.3.1",
+    "firebaseToolsFunctionsOracle": "15.22.0",
+    "firebaseToolsPubsubEmulatorSourceSha256": {
+      "lib/emulator/pubsubEmulator.js": "edaa1585b0a3c71ea46d782bf715c9aae9afb6d6b82a8873371a120dd088d564"
+    },
+    "officialPubsubEmulator": "0.8.33",
+    "officialPubsubEmulatorZipSha256": "93768f8763d85c37f7f6e0f64d10195abaa088f4ff559b7d9fb8a2fc5520848d",
+    "officialPubsubEmulatorJarSha256": "4b2892ba1559028a959a8522f114147949b3d6e0cd90dd3c46f40e148410e56d",
+    "javaForOracleOnly": true
+  },
+  "oracles": {
+    "precedence": [
+      "official-cloud-pubsub-emulator-0.8.33",
+      "firebase-tools-15.22.0-pubsub-functions-integration",
+      "cloud-pubsub-api-reference-naming-only"
+    ],
+    "ownership": {
+      "validationStatusCodesMessages": "official-cloud-pubsub-emulator-0.8.33",
+      "httpJsonMapping": "official-cloud-pubsub-emulator-0.8.33",
+      "orderingRedeliveryPushTiming": "official-cloud-pubsub-emulator-0.8.33",
+      "schemaValidation": "official-cloud-pubsub-emulator-0.8.33",
+      "functionsEnvelopeAndSubscriptionNaming": "firebase-tools-15.22.0"
+    },
+    "classificationRule": "the official emulator wins; a divergence is allowed only for a documented emulator limitation where production behaviour is followed instead, named in the fixture README and asserted in the replay",
+    "emulator": {
+      "start": "cloud-pubsub-emulator from the cached zip with exact hashes, --host 127.0.0.1 --port <free>",
+      "clients": [
+        "@google-cloud/pubsub 5.3.1 v1.PublisherClient / v1.SubscriberClient / v1.SchemaServiceClient over gRPC",
+        "raw HTTP/JSON"
+      ],
+      "pushEndpoint": "recording HTTP server"
+    }
+  },
+  "inventory": {
+    "services": {
+      "google.pubsub.v1.Publisher": [
+        "CreateTopic",
+        "GetTopic",
+        "ListTopics",
+        "UpdateTopic",
+        "DeleteTopic",
+        "Publish",
+        "ListTopicSubscriptions",
+        "ListTopicSnapshots",
+        "DetachSubscription"
+      ],
+      "google.pubsub.v1.Subscriber": [
+        "CreateSubscription",
+        "GetSubscription",
+        "UpdateSubscription",
+        "ListSubscriptions",
+        "DeleteSubscription",
+        "ModifyAckDeadline",
+        "Acknowledge",
+        "Pull",
+        "StreamingPull",
+        "ModifyPushConfig",
+        "Seek",
+        "CreateSnapshot",
+        "GetSnapshot",
+        "ListSnapshots",
+        "DeleteSnapshot"
+      ],
+      "google.pubsub.v1.SchemaService": [
+        "CreateSchema",
+        "GetSchema",
+        "ListSchemas",
+        "ListSchemaRevisions",
+        "CommitSchema",
+        "RollbackSchema",
+        "DeleteSchemaRevision",
+        "DeleteSchema",
+        "ValidateSchema",
+        "ValidateMessage"
+      ],
+      "google.iam.v1.IAMPolicy": [
+        "GetIamPolicy",
+        "SetIamPolicy",
+        "TestIamPermissions"
+      ]
+    },
+    "rpcTotal": 37,
+    "transports": [
+      "grpc",
+      "http-json"
+    ],
+    "firesideBefore": {
+      "httpRoutes": [
+        "topics.list",
+        "topics.create",
+        "topics.get",
+        "topics.delete",
+        "topics.publish",
+        "subscriptions.list",
+        "subscriptions.create",
+        "subscriptions.get",
+        "subscriptions.delete",
+        "subscriptions.pull (empty)",
+        "subscriptions.acknowledge (no-op)"
+      ],
+      "grpc": []
+    },
+    "features": [
+      "backlog with ack deadlines and redelivery",
+      "deliveryAttempt",
+      "ordering keys",
+      "filters",
+      "retention and retainAckedMessages",
+      "push delivery with retry",
+      "seek to time and snapshot",
+      "snapshots",
+      "dead-letter policy",
+      "retry policy",
+      "expiration policy",
+      "exactly-once delivery flags",
+      "Avro and Protocol Buffer schemas with revisions",
+      "IAM fakes"
+    ]
+  },
+  "capture": {
+    "requiredBeforeProductImplementation": true,
+    "root": "conformance/fixtures/pubsub-v1",
+    "fixtureSchemaVersion": 1,
+    "emulatorPrograms": {
+      "tool": "conformance/src/pubsub/capture-emulator.ts",
+      "plan": "conformance/src/pubsub/emulator-plan.ts",
+      "script": "capture:pubsub:emulator",
+      "minimumPrograms": 40,
+      "minimumSteps": 400,
+      "freshEmulatorPerProgram": true,
+      "normalizedFields": [
+        "messageId",
+        "publishTime",
+        "ackId",
+        "deadlines as relative seconds",
+        "snapshot expireTime"
+      ]
+    },
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "SHA256SUMS"
+    ],
+    "fixturesFrozen": false
+  },
+  "gates": {
+    "emulatorReplay": {
+      "test": "crates/pubsub-front/src/replay_tests.rs",
+      "stepsMinimum": 400,
+      "transports": [
+        "grpc",
+        "http-json"
+      ],
+      "allowedUnexplainedStatusDivergences": 0,
+      "allowedUnexplainedBodyDivergences": 0,
+      "timingStepsUseInjectableClock": true,
+      "recordedDivergencesMustBeAssertedNotSkipped": true
+    },
+    "clientLibrary": {
+      "job": "conformance",
+      "client": "@google-cloud/pubsub 5.3.1",
+      "flows": [
+        "publish",
+        "subscription.on('message')",
+        "ordering",
+        "push",
+        "schema"
+      ]
+    },
+    "functionsDelivery": {
+      "existingFixturesUnchanged": [
+        "firebase-suite-v1/pubsub-schedule-and-function-dispatch",
+        "functions-topic-reload-v1",
+        "functions-runtime-v1"
+      ],
+      "internalSubscriberName": "emulator-sub-<topic>"
+    },
+    "noJavaAtRuntime": {
+      "suiteStartsWithJavaAbsentFromPath": true
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "rustTestsRequired": true,
+      "typescriptCheckRequired": true
+    }
+  },
+  "acceptance": {
+    "consumerGates": [
+      "consumer integration gate",
+      "consumer extensions gate",
+      "scheduled-function lane"
+    ],
+    "privateAcceptance": "paired acceptance; the scheduled-function lane and the extensions gate exercise the broker",
+    "release": "0.1.0-next.8",
+    "receipts": {}
+  },
+  "decisions": {
+    "persistence": {
+      "policy": "in-memory like the official emulator; topics and subscriptions from discovery are recreated on start; no export"
+    },
+    "functionsSubscriber": {
+      "policy": "function targets consume through a real emulator-sub-<topic> subscription so user pulls and functions compete as they do officially"
+    },
+    "schedules": {
+      "policy": "the Fireside-only scheduler keeps ticking onSchedule topics; non-UTC zones are finished in J2"
+    }
+  }
+}
