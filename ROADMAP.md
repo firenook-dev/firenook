@@ -242,7 +242,7 @@ JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
 | H0 | Frozen gate `benchmarks/phase-h-functions-runtime.json` | Trigger matrix, oracles, firebase-tools-surface inventory and the Extensions registry decision recorded before fixtures |
 | H1 | `conformance/fixtures/functions-runtime-v1` | ≥40 programs / ≥250 steps against firebase-tools 15.22.0 covering discovery, HTTP/callable, events, environment, lifecycle and Extensions |
 | H2 | `functions-runtime` crate + `support/functions-worker.mjs` | Every H1 runtime step is parity or a listed divergence; readiness/reload fixtures unchanged |
-| H3 | `extensions` crate with registry, cache, build, params and vendored offline mode | Synthetic extension and Twodart's three instances resolve and run from cache without network |
+| H3 | `extensions` crate with registry, cache, build, params and vendored offline mode | Synthetic extension and the consumer's three instances resolve and run from cache without network |
 | H4 | firebase-tools removed; `--inspect-functions`, `functions:invoke`, `ext:vendor` added | Suite starts with `firebase-tools` absent from `node_modules`; docs updated |
 | H5 | Exact-candidate CI, consumer gates, paired acceptance, offline clean setup, release | `0.1.0-next.7` published through the release workflow; receipts recorded |
 
@@ -269,5 +269,5 @@ JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
 
 Done when a project with user Functions and Extensions starts on a machine
 with Node only, every supported trigger delivers with the recorded envelope,
-the Twodart Extensions gate passes on the owned runtime, and vendored
+the consumer's Extensions gate passes on the owned runtime, and vendored
 extensions start with no network. Python/Dart functions stay unsupported.

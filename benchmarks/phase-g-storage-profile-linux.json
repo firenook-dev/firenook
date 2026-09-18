@@ -4,7 +4,7 @@
   "syntheticOnly": true,
   "acceptance": false,
   "recordedAt": "2026-09-17T17:33:00+08:00",
-  "scope": "Same driver, fixture and cycle counts as benchmarks/phase-g-storage-profile.json, run on the Hetzner acceptance host (Linux) with the packed linux-x64 candidate from the exact-candidate CI run; the before engine is the attempt-9/next.6 engine build already installed on the host (engine 572d4fb) with the Java rules runtime jar 1.1.3 under the host mise Java 26; Java is not on the host non-interactive PATH, so the native runs also stand as a no-Java start",
+  "scope": "Same driver, fixture and cycle counts as benchmarks/phase-g-storage-profile.json, run on the private acceptance host (Linux) with the packed linux-x64 candidate from the exact-candidate CI run; the before engine is the attempt-9/next.6 engine build already installed on the host (engine 572d4fb) with the Java rules runtime jar 1.1.3 under the host mise Java 26; Java is not on the host non-interactive PATH, so the native runs also stand as a no-Java start",
   "driver": "conformance/src/suite/profile-storage-rules.mjs",
   "host": {
     "platform": "linux",

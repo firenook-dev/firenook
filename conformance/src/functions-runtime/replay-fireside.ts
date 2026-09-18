@@ -89,7 +89,7 @@ const IGNORED_STEP_PATHS: ReadonlyMap<string, readonly RegExp[]> = new Map([
   // The Stripe extension's checkout handler writes its failure back into the
   // document; whether that lands before this read depends on how fast the
   // Auth lookup fails.
-  ["twodart-refs/registry-extensions-delivery/checkout-session-read", [/^response\.body\.fields\.error$/u]],
+  ["consumer-refs/registry-extensions-delivery/checkout-session-read", [/^response\.body\.fields\.error$/u]],
 ]);
 
 /** Recorded fields that vary between runs or engines without a contract. */

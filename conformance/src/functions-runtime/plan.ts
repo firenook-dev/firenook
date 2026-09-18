@@ -1367,8 +1367,8 @@ export const MISSING_PARAM_PROGRAMS: readonly Program[] = [
   },
 ];
 
-/** Synthetic parameters for the two public registry extensions of the `twodart-refs` profile. */
-export const TWODART_REFS_ENV_FILES: Readonly<Record<string, string>> = {
+/** Synthetic parameters for the two public registry extensions of the `consumer-refs` profile. */
+export const CONSUMER_REFS_ENV_FILES: Readonly<Record<string, string>> = {
   "stripe.env": [
     `LOCATION=${REGION}`,
     "PRODUCTS_COLLECTION=products",
@@ -1394,7 +1394,7 @@ export const TWODART_REFS_ENV_FILES: Readonly<Record<string, string>> = {
   "algolia.secret.local": "ALGOLIA_API_KEY=synthetic-algolia-key\n",
 };
 
-export const TWODART_REFS_PROGRAMS: readonly Program[] = [
+export const CONSUMER_REFS_PROGRAMS: readonly Program[] = [
   {
     id: "registry-extensions-inventory",
     category: "extensions",

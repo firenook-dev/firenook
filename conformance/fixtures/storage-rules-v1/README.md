@@ -146,7 +146,7 @@ The unsigned JWTs in `tokens` are synthetic test identities, not credentials.
 - Startup with a ruleset that does not compile: the emulator starts, logs the
   parse issues, and serves 403 "no loaded ruleset" (owner included) until
   `setRules` installs a valid one.
-- The consumer program replays the two Twodart rulesets verbatim: owner
+- The consumer program replays the consumer's two rulesets verbatim: owner
   get/put/list/patch/delete under `/users/{uid}`, admin claim, anonymous and
   other-user denials, anonymous `get` on the assets bucket, anonymous `list`
   denied there, token-URL reads bypassing rules.

@@ -110,7 +110,7 @@
       "vendoredSources": "<project>/extensions/.sources/<publisher>/<name>@<version> (or the configured directory) preferred over the cache; a fully vendored project starts with no network and no token"
     },
     "taskQueueTrigger": {
-      "policy": "extension resources with taskQueueTrigger are admitted without delivery and reported as ignored with reason `firebase-tools 15.22.0 drops taskQueueTrigger from emulated extension definitions`, so the Twodart extensions gate keeps its 2 ignored records"
+      "policy": "extension resources with taskQueueTrigger are admitted without delivery and reported as ignored with reason `firebase-tools 15.22.0 drops taskQueueTrigger from emulated extension definitions`, so the consumer's extensions gate keeps its 2 ignored records"
     },
     "eventarc": {
       "policy": "registration routes stay; H1 measured that the official Eventarc emulator delivers Extensions custom events published through the Admin SDK channel to user onCustomEventPublished handlers (extensions-triggers/publish-listened), so H2 adds delivery for Eventarc channel events",
@@ -148,8 +148,8 @@
     "frozenProgramCount": 43,
     "frozenStepCount": 281,
     "frozenFixtureSha256": {
-      "README.md": "c4a82d0f29c51b884200acb4c55bc545d8c2507c8801321b9ed53aa1ad210fd5",
-      "emulator-programs.json": "f22fad935afd7f34bd8fa8fa7f5da25e15f15239a8c22decedea003bac6d251f"
+      "README.md": "aa0525f9c2e7c02b837518b34d39c5c524f7377e3c08786d1159cf4d5113d999",
+      "emulator-programs.json": "231ebd0276924305b351251433f7b91621b4bed6492b1337dbd62cf0b1430b25"
     },
     "frozenAt": "2026-09-17T15:43:20.365Z",
     "requiredFixtures": [
@@ -186,7 +186,7 @@
         "skipped": null
       },
       {
-        "id": "twodart-refs",
+        "id": "consumer-refs",
         "programs": 2,
         "steps": 10,
         "skipped": null
@@ -262,11 +262,11 @@
       "ciStep": "Verify suite start without firebase-tools in node_modules"
     },
     "extensions": {
-      "twodartExtensionsGate": "bun test:fireside-extensions passes on the packed candidate with 26 definitions, 24 admitted, 2 ignored with reasons",
+      "consumerExtensionsGate": "the consumer extensions gate passes on the packed candidate with 26 definitions, 24 admitted, 2 ignored with reasons",
       "offlineStart": "a project with every extension vendored starts with the network blocked and no CLI token"
     },
     "performance": {
-      "profile": "Hetzner paired acceptance function lane and suite readiness",
+      "profile": "private paired acceptance function lane and suite readiness",
       "functionLaneP99RegressionPercentAllowed": 0,
       "readinessRegressionAllowed": false
     },
@@ -278,15 +278,15 @@
   },
   "acceptance": {
     "exactCandidateCi": "all jobs including the new no-firebase-tools step",
-    "twodartCheapGates": [
-      "bun test:fireside-integration",
-      "bun test:fireside-extensions",
+    "consumerGates": [
+      "consumer integration gate",
+      "consumer extensions gate",
       "journeys 1-9",
       "Stripe webhook round trip reaches the handler in the credential-free profile",
       "Algolia index trigger reaches the handler in the credential-free profile",
       "--inspect-functions attach"
     ],
-    "hetznerPairedAttempt": "candidate-attempt-11.json",
+    "privateAcceptanceAttempt": "candidate-attempt-11.json",
     "cleanSetup": "without firebase-tools and without Java; fully offline start with vendored extensions",
     "release": "0.1.0-next.7",
     "receipts": "receipts.h5"
@@ -314,25 +314,25 @@
         "v1-blocking": "5/5",
         "inspect": "5/5",
         "ext-missing-param": "1/1",
-        "twodart-refs": "10/10 offline from the shared cache with registry sidecars (FIRESIDE_OFFLINE=1)"
+        "consumer-refs": "10/10 offline from the shared cache with registry sidecars (FIRESIDE_OFFLINE=1)"
       },
       "assertedDivergences": 89,
       "divergenceTable": "conformance/src/functions-runtime/replay-fireside.ts DIVERGENCES + GLOBAL_DIVERGENCES; fixture README lists them"
     },
     "h5": {
-      "twodartGates": {
-        "candidate": "0.1.0-local.g8caaeba6b9b2 (packaging/build-local.mjs, installed with bun fireside:local)",
-        "extensionsGate": "PASS: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (same as the official oracle capture), ready 8.1 s (next.6 Node host: ~30 s); gate updated for the owned receipt in Twodart commit b2f974fc4",
-        "integration": "test:fireside-integration 24/24",
-        "installedSmoke": "test:fireside-installed PASS (default launcher; 21 Functions; listeners; Auth; gzip Storage both buckets; Pub/Sub; UI; export/shutdown; native reopen; dataset isolation)",
-        "browserJourneys": "Phase 5 journeys 1-9 PASS on the Mac full-data stack (TWODART_DISABLE_EXTERNALS=1 bun dev:mprocs --data full-data): otp-auth-login 3994 ms, dashboard-and-deck-list 1156, existing-deck-and-listener-edit 12851, catalog-slide-add 24856, deck-image-upload 15081, duplicate-and-delete-deck 11400, dotnet-deck-export 13647, dev-admin-pages 18026, sign-out-and-sign-in 5652"
+      "consumerGates": {
+        "candidate": "0.1.0-local.g8caaeba6b9b2 (packaging/build-local.mjs, installed as the consumer's local candidate)",
+        "extensionsGate": "PASS: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (same as the official oracle capture), ready 8.1 s (next.6 Node host: ~30 s); consumer gate updated for the owned receipt",
+        "integration": "consumer integration gate 24/24",
+        "installedSmoke": "consumer installed-launcher smoke PASS (default launcher; 21 Functions; listeners; Auth; gzip Storage both buckets; Pub/Sub; UI; export/shutdown; native reopen; dataset isolation)",
+        "browserJourneys": "the consumer's nine browser journeys PASS on the macOS full-data stack with external providers disabled: otp-auth-login 3994 ms, dashboard-and-deck-list 1156, existing-deck-and-listener-edit 12851, catalog-slide-add 24856, deck-image-upload 15081, duplicate-and-delete-deck 11400, dotnet-deck-export 13647, dev-admin-pages 18026, sign-out-and-sign-in 5652"
       },
       "packedInstall": {
         "local": "packaging/smoke-packed.mjs + smoke-suite.mjs on the darwin-arm64 local candidate: consumer node_modules holds firebase-functions only (no firebase-tools), full suite start, Functions call, export and shutdown PASS",
         "ci": "packages.yml packed installs on five platforms without setup-java"
       },
       "linuxSmoke": {
-        "host": "fireside-hetzner (Linux, 12 cpu), java absent from PATH, no gcloud credentials, no firebase-tools in the consumer",
+        "host": "the private acceptance host (Linux, 12 cpu), java absent from PATH, no gcloud credentials, no firebase-tools in the consumer",
         "candidate": "linux-x64 artifact of Installable packages run 35250492904 (0.1.0-local.g1f056eb1785f; engine identical to a054d81)",
         "noJava": "conformance/src/suite/verify-no-java.mjs PASS, 12 steps, ready 6522 ms",
         "corpusReplay": "281/281 steps across all five profiles offline (FIRESIDE_OFFLINE=1), registry extensions from ~/.cache/firebase/extensions with fireside-registry.json sidecars and Linux npm installs; publish-listened skipped (no gcloud ADC on the host); suite ready ~25.4 s per profile for the six-codebase oracle project (official 33-51 s)",

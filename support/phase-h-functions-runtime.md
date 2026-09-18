@@ -52,8 +52,7 @@ at `GET /__/functions.yaml` when `FUNCTIONS_CONTROL_API=true`; firebase-tools
 also accepts a static `functions.yaml`. Both are SDK contracts, not
 firebase-tools contracts.
 
-**Consumer shape (Twodart):** one codebase (`templates-firebase-function`,
-`nodejs24`, built to `dist/`), 34 TypeScript files / 5,620 lines, 18 exports:
+**Consumer shape:** one codebase (`nodejs24`, built to `dist/`), 34 TypeScript files / 5,620 lines, 18 exports:
 6 `onCall` + 1 v1 `https.onCall`, 1 `onRequest`, 5 `onDocumentWritten`,
 2 `onDocumentDeleted`, 1 `onDocumentCreated`, 2 `onSchedule`; SDKs
 `firebase-functions ^7.2.5`, `firebase-admin ^13.8.0`. Three Extension
@@ -159,14 +158,14 @@ Programs:
   requests, `--inspect` port assignment.
 - Extensions: a synthetic local extension (spec with every trigger kind, every
   param type, `${param:…}` substitution in resources, events) plus the three
-  Twodart refs from the shared cache: resolved definitions, injected
+  consumer refs from the shared cache: resolved definitions, injected
   parameters and auto-params, secret handling, `taskQueueTrigger` dropped with
   the recorded reason, extension `httpsTrigger` URL shape, Firestore
   `eventTrigger` delivery into the extension function, declared Extensions
   events published to Eventarc and consumed by a user `onCustomEventPublished`
   handler if the official emulator delivers them (measured).
 
-Exit: fixtures checksummed, README, CI integrity; the Twodart codebase and
+Exit: fixtures checksummed, README, CI integrity; the consumer codebase and
 Extensions run against the official emulator as a private, non-published
 smoke recorded as a checklist only.
 
@@ -225,7 +224,7 @@ smoke recorded as a checklist only.
 - Errors: unresolved ref, missing token, failed build, unknown param, missing
   required param — each with an actionable message and the official wording
   where the fixture recorded one.
-- Tests: the synthetic local extension end to end; the three Twodart refs
+- Tests: the synthetic local extension end to end; the three consumer refs
   from cache (no network in tests); registry resolution tested with a local
   mock server.
 
@@ -242,9 +241,9 @@ smoke recorded as a checklist only.
 - Docs: `README.md`, `packages/cli/README.md`, `COMPATIBILITY.md` Functions
   row ("Fireside runtime with Node workers; Extensions resolved and run by
   Fireside"), `DESIGN.md` sections "Functions runtime" and "Extensions", the
-  CLI guide, ROADMAP closing paragraph. Twodart: `CLAUDE.md` login sentence
-  ("Firebase CLI login is used only to download public Extension
-  definitions") becomes the vendored/token statement; `bun setup` no longer
+  CLI guide, ROADMAP closing paragraph. Consumer: its setup documentation's
+  login sentence ("Firebase CLI login is used only to download public Extension
+  definitions") becomes the vendored/token statement; its setup no longer
   needs firebase-tools for the Fireside backend (it stays for the official
   fallback and `deploy`).
 - Package: `firebase-tools` leaves the consumer's required dependency set for
@@ -254,14 +253,14 @@ smoke recorded as a checklist only.
 
 1. Exact-candidate CI on all jobs, including a new "start the suite with
    `firebase-tools` absent from `node_modules`" step.
-2. Twodart gates on the packed candidate: `bun test:fireside-integration`,
-   `bun test:fireside-extensions` (its oracle fixture was captured from the
+2. Consumer gates on the packed candidate: the integration gate and the
+   extensions gate (its oracle fixture was captured from the
    official emulator, so it is the right judge: 26 definitions, 24 admitted,
    2 upstream-ignored with reasons, clean stop), journeys 1–6, a Stripe
    webhook round trip and an Algolia index trigger in the credential-free
    profile (both must reach the handler; the external call is expected to
    fail deliberately), `--inspect-functions` attach from VS Code.
-3. Hetzner paired acceptance with the current harness; the function lane
+3. Private paired acceptance with the current harness; the function lane
    and startup time are the ones expected to move (no firebase-tools load,
    one worker per codebase instead of one per trigger).
 4. Clean setup without firebase-tools and without Java, and a fully offline
@@ -292,7 +291,7 @@ two phases touch different crates. Combined G + H is about three months.
   official emulator delivers `events` to user handlers. If it does, H2 adds
   delivery for that path only.
 - **`taskQueueTrigger`.** Upstream drops it; Fireside keeps the recorded
-  ignore reason so the Twodart gate's "2 ignored" expectation still holds.
+  ignore reason so the consumer gate's "2 ignored" expectation still holds.
 - **Worker model difference.** One worker per codebase (fireemu's choice)
   versus one per trigger (official) changes `FUNCTION_TARGET` visibility and
   secret isolation; the fixture records what handlers observe, and the worker
