@@ -1,6 +1,6 @@
 # Scoped roadmap progress
 
-Updated 2026-09-17 UTC. The A–F roadmap remains active; no full-release,
+Updated 2026-09-18 UTC. The A–F roadmap remains active; no full-release,
 universal-compatibility, publication or performance-win claim is made here.
 
 | Phase | Current state | Remaining qualification |
@@ -11,7 +11,8 @@ universal-compatibility, publication or performance-win claim is made here.
 | D | Upgrade, real ENOSPC, interrupted export and normal recovery qualified in combined seven-job CI | Repeat applicable lifecycle checks on the final combined candidate |
 | E | Short source/performance qualification complete; reviewed optimization and paired component, overhead, Storage/lifecycle and equivalent-query receipts | Full-data behavior and memory remain Phase F; no blanket efficiency claim |
 | F | Exact-engine seven-job CI and five-platform packages qualified in #24; #25 evidence also merged with green CI | Complete consumer cheap prerequisites, full acceptance and honest final report; publication requires approval |
-| G | G0–G4 on the main line: frozen gate, 306 production + 334 emulator oracle steps, native `service firebase.storage`, Java runtime/gates/asset removed, no-Java CI step, before/after rules profile (`benchmarks/phase-g-storage-profile.json`) | G5: exact-candidate CI green, consumer cheap gates + Mac journeys 1–9 on the packed candidate, Linux no-Java smoke with same-host profile (`benchmarks/phase-g-storage-profile-linux.json`) done; paired acceptance, named clean setup without Java and the `0.1.0-next.7` release approval deferred to the joint pre-release smoke |
+| G | G0–G5 done and published in `0.1.0-next.7` (2026-09-18): frozen gate, 306 production + 334 emulator oracle steps, native `service firebase.storage`, Java runtime/gates/asset removed, no-Java CI step, rules profiles (`benchmarks/phase-g-storage-profile.json`, `-linux.json`), paired acceptance attempt 13 PASS on engine 0720434 | Nothing for this release line; `latest` promotion remains a separate decision |
+| H | H0–H5 done and published in `0.1.0-next.7` (2026-09-18): 5-profile / 43-program / 281-step oracle corpus, Rust functions-runtime + Node worker, Rust Extensions loader with vendored offline mode, firebase-tools removed, `--inspect-functions` / `functions:invoke` / `ext:vendor` / `--offline`, exact-candidate CI 35254102986, paired acceptance attempt 13 PASS (function delivery 2.6 ms p50 vs 3.8 official) | Nothing for this release line; follow-ups recorded in the receipt (bind listeners before import, `/backends` during discovery, schedule-aware pair-state comparison in the private harness) |
 
 The [B–D audit](phase-bcd-qualification.md) maps each checked requirement to its
 actual executable/browser evidence and states the scope limitations. Checking

@@ -155,22 +155,22 @@
 
   <section>
     <h2>Runtime dependencies</h2>
-    <p class="section-note">What a developer must have installed to run Fireside, and when each requirement goes away.</p>
+    <p class="section-note">What a developer must have installed to run the published Fireside, and when each requirement went or goes away.</p>
     <div class="deps" id="deps"></div>
   </section>
 
   <section>
     <h2>Phases</h2>
-    <p class="section-note">A–F are the completed first-release phases with their receipts. G and H are implemented and qualified by the paired acceptance (attempt 13, 2026-09-18); both ship together as <code>0.1.0-next.7</code>, whose publication is the one step still open. Steps flip as receipts land.</p>
+    <p class="section-note">A–H are complete with their receipts. G and H shipped together as <code>0.1.0-next.7</code> on 2026-09-18 after the paired acceptance (attempt 13). Steps flip as receipts land.</p>
     <div class="phases" id="phases"></div>
   </section>
 
   <section>
     <h2>Services of the official suite</h2>
-    <p class="section-note">One row per emulator the official CLI can start. "Today" is the published <code>next.6</code>; "Candidate" is the verified state of the qualified <code>next.7</code> candidate (engine <code>0720434</code>); "Remaining" is the work after next.7.</p>
+    <p class="section-note">One row per emulator the official CLI can start. "Published" is <code>0.1.0-next.7</code> (engine <code>0720434</code>, the current <code>next</code>); "Before" is the previous <code>next.6</code>, kept so the G+H change stays visible; "Remaining" is the work after next.7.</p>
     <div class="legend" id="legend-services"></div>
     <div class="tablewrap"><table id="services">
-      <thead><tr><th>Service</th><th>Today (next.6)</th><th>Candidate (next.7)</th><th>Remaining for drop-in</th><th>Size</th></tr></thead>
+      <thead><tr><th>Service</th><th>Published (next.7)</th><th>Before (next.6)</th><th>Remaining for drop-in</th><th>Size</th></tr></thead>
       <tbody></tbody>
     </table></div>
   </section>
@@ -180,7 +180,7 @@
     <p class="section-note">Commands and options the official CLI provides <em>without</em> the cloud. Cloud commands (login, deploy, projects, secrets) are out of scope by design and are not listed.</p>
     <div class="legend" id="legend-cli"></div>
     <div class="tablewrap"><table id="cli">
-      <thead><tr><th>Command / option</th><th>Today (next.6)</th><th>Candidate (next.7)</th><th>Remaining</th><th>Size</th></tr></thead>
+      <thead><tr><th>Command / option</th><th>Published (next.7)</th><th>Before (next.6)</th><th>Remaining</th><th>Size</th></tr></thead>
       <tbody></tbody>
     </table></div>
   </section>
@@ -190,7 +190,7 @@
     <p class="section-note">What a stranger's <code>firebase.json</code> may contain and whether Fireside starts it. These are the first-run failures a public user would hit.</p>
     <div class="legend" id="legend-config"></div>
     <div class="tablewrap"><table id="config">
-      <thead><tr><th>Shape</th><th>Today (next.6)</th><th>Candidate (next.7)</th><th>Remaining</th><th>Size</th></tr></thead>
+      <thead><tr><th>Shape</th><th>Published (next.7)</th><th>Before (next.6)</th><th>Remaining</th><th>Size</th></tr></thead>
       <tbody></tbody>
     </table></div>
   </section>
@@ -216,18 +216,18 @@
 // with a receipt, "planned" only when a support/phase-*.md exists.
 const DATA = {
   updated: "2026-09-18",
-  engine: "candidate 0720434 (G0–G5 and H0–H5 qualified, paired acceptance attempt 13 PASS 2026-09-18, publication as 0.1.0-next.7 pending) · published 0.1.0-next.6 (engine 572d4fb)",
+  engine: "published 0.1.0-next.7 (engine 0720434, Phases G + H, paired acceptance attempt 13 PASS, release run 35327767919, 2026-09-18) · previous 0.1.0-next.6 (engine 572d4fb)",
   dependencies: [
-    { name: "Node 24", status: "keep", now: "Required: Functions host and the npm wrapper",
-      path: [["now", "Required"], ["after G", "Required"], ["after H", "Required — it is the user's Functions runtime; production runs Node too"]] },
-    { name: "Java 26 + Storage rules jar", status: "g", now: "Gone on the qualified candidate (G4): rules evaluated in process, no java gate, setup downloads the UI zip only; the Fireside stack of attempt 13 ran with no Java process. Still required by the published next.6",
-      path: [["now", "Required by next.6; gone on the candidate"], ["after G", "Gone: rules evaluated by the Rust rules-engine; jar download removed from setup"], ["after H", "Gone"]] },
-    { name: "firebase-tools 15.22.0 (npm)", status: "h", now: "Required by the published next.6 (FunctionsEmulator + ExtensionsEmulator loaded as a library). Gone on the qualified candidate (H4): removed from the CLI's dependencies; the suite starts with it absent from node_modules",
-      path: [["now", "Required by next.6, exact version; gone on the candidate"], ["after G", "Required"], ["after H", "Gone: Fireside runtime + one Node worker per codebase; Extensions resolved by Fireside"]] },
-    { name: "Google Emulator UI 1.15.0 zip", status: "later", now: "Downloaded by fireside setup and served by Fireside; the only asset setup still fetches on the candidate",
-      path: [["now", "Required for the UI"], ["after G", "Only asset left in setup"], ["after H", "Still required until an own UI ships (backlog #3)"]] },
-    { name: "Extensions registry (Google)", status: "keep", now: "Needed once to resolve registry extension sources. next.6: login token via firebase-tools. Candidate: the Firebase CLI's stored login or FIREBASE_TOKEN, registry objects cached beside the source, ext:vendor for offline projects, --offline turns any registry access into a startup error",
-      path: [["now", "Firebase CLI login required (next.6)"], ["after G", "Same"], ["after H", "Stored CLI token, FIREBASE_TOKEN, or offline vendored sources (ext:vendor) — the only Google call left, and optional"]] },
+    { name: "Node 24", status: "keep", now: "Required: the npm wrapper and the Functions worker",
+      path: [["next.6", "Required"], ["next.7", "Required — it is the user's Functions runtime; production runs Node too"]] },
+    { name: "Java 26 + Storage rules jar", status: "g", now: "Gone since next.7 (G4): rules evaluated in process, no java gate, setup downloads the UI zip only; the Fireside stack of the acceptance ran with no Java process",
+      path: [["next.6", "Required"], ["next.7", "Gone: rules evaluated by the Rust rules-engine; jar download removed from setup"]] },
+    { name: "firebase-tools 15.22.0 (npm)", status: "h", now: "Gone since next.7 (H4): removed from the CLI's dependencies; the suite starts with it absent from node_modules. next.6 loaded its FunctionsEmulator + ExtensionsEmulator as a library",
+      path: [["next.6", "Required, exact version"], ["next.7", "Gone: Fireside runtime + one Node worker per codebase; Extensions resolved by Fireside"]] },
+    { name: "Google Emulator UI 1.15.0 zip", status: "later", now: "Downloaded by fireside setup and served by Fireside; the only asset setup still fetches",
+      path: [["next.6", "Required for the UI (with the rules jar)"], ["next.7", "Only asset left in setup; required until an own UI ships (backlog #3)"]] },
+    { name: "Extensions registry (Google)", status: "keep", now: "Needed once to resolve registry extension sources: the Firebase CLI's stored login or FIREBASE_TOKEN, registry objects cached beside the source, ext:vendor for offline projects, --offline turns any registry access into a startup error",
+      path: [["next.6", "Firebase CLI login required, through firebase-tools"], ["next.7", "Stored CLI token, FIREBASE_TOKEN, or offline vendored sources (ext:vendor) — the only Google call left, and optional"]] },
   ],
   phases: [
     { letter: "A", title: "Baseline and oracle fixtures", status: "done", desc: "Pinned versions, supported profile, developer-tool contracts captured with synthetic data.", receipt: "PR #3 · CI 34499162765 · candidate 85ef3e7" },
@@ -236,12 +236,12 @@ const DATA = {
     { letter: "D", title: "State lifecycle and failure recovery", status: "done", desc: "Native upgrades, interrupted export, ENOSPC, rollback through portable exports.", receipt: "support/phase-d-recovery.md" },
     { letter: "E", title: "Measured efficiency", status: "done", desc: "Profiled reads, Storage, lifecycle; write-behind durability; lazy scan decode; TCP_NODELAY.", receipt: "support/phase-e-efficiency.md · benchmarks/results/phase-e" },
     { letter: "F", title: "Combined release qualification", status: "done", desc: "Exact-candidate CI, five platforms, paired consumer acceptance (attempt 9), next.4 → next.6 published.", receipt: "support/phase-f-qualification.md · release run 35132738094 · next.6 2026-09-17" },
-    { letter: "G", title: "Native Storage Security Rules", status: "qualified", release: "next.7", desc: "service firebase.storage in the Rust rules-engine, firestore.get()/exists(), /internal/setRules, Java removed. G0–G4 implemented; G5: exact-candidate CI, consumer cheap gates, browser journeys 1–9, Linux no-Java smoke and the paired acceptance (attempt 13: native rules on every Storage stage, Storage cycle 8.0 ms p50 vs 11.6 official, stable-state parity) all passed. Publication as next.7 together with H is the open step.", receipt: "support/phase-g-storage-rules.md · benchmarks/phase-g-storage-rules.json · benchmarks/phase-g-storage-profile-linux.json · benchmarks/phase-h-functions-runtime.json receipts.h5.pairedAcceptance",
-      steps: [["G0", true], ["G1", true], ["G2", true], ["G3", true], ["G4", true], ["G5", "qualified"]] },
-    { letter: "H", title: "Owned Functions runtime and Extensions", status: "qualified", release: "next.7", desc: "Rust functions-runtime with one Node worker per codebase, Rust Extensions loader (registry, cache, vendored, local; params with official precedence), Eventarc custom events, firebase-tools removed, --inspect-functions, functions:invoke, ext:vendor, --offline. H0–H4 implemented (corpus 5 profiles / 43 programs / 281 steps replays with every step identical or a listed divergence); H5: exact-candidate CI (run 35254102986), five-platform packed installs, consumer integration and Extensions gates, Linux smoke with an offline vendored start, and the paired acceptance (attempt 13: function delivery 2.6 ms p50 vs 3.8 official, emulator peak 1.77 GiB vs 19.35, no Java and no firebase-tools in the stack) all passed. Publication as next.7 is the open step.", receipt: "support/phase-h-functions-runtime.md · benchmarks/phase-h-functions-runtime.json (receipts h1, h2h3Replay, h5) · conformance/fixtures/functions-runtime-v1",
-      steps: [["H0", true], ["H1", true], ["H2", true], ["H3", true], ["H4", true], ["H5", "qualified"]] },
+    { letter: "G", title: "Native Storage Security Rules", status: "done", release: "next.7", desc: "service firebase.storage in the Rust rules-engine, firestore.get()/exists(), /internal/setRules, Java removed. G5: exact-candidate CI, consumer cheap gates, browser journeys 1–9, Linux no-Java smoke and the paired acceptance (attempt 13: native rules on every Storage stage, Storage cycle 8.0 ms p50 vs 11.6 official, stable-state parity) passed; published with H as 0.1.0-next.7 on 2026-09-18.", receipt: "support/phase-g-storage-rules.md · benchmarks/phase-g-storage-rules.json · benchmarks/phase-g-storage-profile-linux.json · benchmarks/phase-h-functions-runtime.json receipts.h5.pairedAcceptance · release run 35327767919 · next.7 2026-09-18",
+      steps: [["G0", true], ["G1", true], ["G2", true], ["G3", true], ["G4", true], ["G5", true]] },
+    { letter: "H", title: "Owned Functions runtime and Extensions", status: "done", release: "next.7", desc: "Rust functions-runtime with one Node worker per codebase, Rust Extensions loader (registry, cache, vendored, local; params with official precedence), Eventarc custom events, firebase-tools removed, --inspect-functions, functions:invoke, ext:vendor, --offline. H0–H4 implemented (corpus 5 profiles / 43 programs / 281 steps replays with every step identical or a listed divergence); H5: exact-candidate CI (run 35254102986), five-platform packed installs, consumer integration and Extensions gates, Linux smoke with an offline vendored start, and the paired acceptance (attempt 13: function delivery 2.6 ms p50 vs 3.8 official, emulator peak 1.77 GiB vs 19.35, no Java and no firebase-tools in the stack) all passed; published as 0.1.0-next.7 on 2026-09-18.", receipt: "support/phase-h-functions-runtime.md · benchmarks/phase-h-functions-runtime.json (receipts h1, h2h3Replay, h5) · conformance/fixtures/functions-runtime-v1 · release run 35327767919 · next.7 2026-09-18",
+      steps: [["H0", true], ["H1", true], ["H2", true], ["H3", true], ["H4", true], ["H5", true]] },
   ],
-  // status: done | partial | planned | missing | absent
+  // status: done | partial | planned | missing | absent. today = published next.7, after = the previous next.6 (see swapColumns below).
   services: [
     { name: "Firestore", today: ["done", "gRPC/REST/WebChannel, rules, realtime, disk/WAL, official export"], after: ["done", ""], remaining: "Multiple named databases; Enterprise edition; strict composite-index validation is a nice-to-have", size: "days–weeks" },
     { name: "Firestore Security Rules", today: ["done", "Rust engine, production + Java oracle corpus, coverage, Requests feed; request.path, regex split, error-tolerant && / || and lexical function scope landed with G"], after: ["done", ""], remaining: "—", size: "—" },
@@ -301,6 +301,12 @@ const DATA = {
   ],
 };
 // ------------------------------------------------------------ RENDER -----
+// The rows were authored as [today = next.6, after = next.7 candidate]; since next.7 is
+// published, the published state is the first column and next.6 the second.
+for (const rows of [DATA.services, DATA.cli, DATA.config]) for (const r of rows) {
+  const before = r.today, published = [r.after[0], r.after[1] || r.today[1]];
+  r.today = published; r.after = before;
+}
 const STATUS_LABEL = { done: "Done", qualified: "Qualified", partial: "Partial", planned: "Planned", missing: "Missing", absent: "Absent" };
 const tag = s => `<span class="tag t-${s}">${STATUS_LABEL[s] || s}</span>`;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -324,11 +330,11 @@ function meter(label, c, total, note) {
   const cNow = counts(DATA.cli, "today"), cAfter = counts(DATA.cli, "after");
   const deps = DATA.dependencies; const depsAfterH = deps.filter(d => d.status === "keep" || d.status === "later").length;
   document.getElementById("meters").innerHTML =
-    meter("Phases", { done: phDone, qualified: phQualified, partial: 0, planned: ph.length - phDone - phQualified, missing: 0, absent: 0 }, ph.length, `${phQualified} qualified (G, H) · publication as next.7 pending`) +
-    meter("Services — published next.6", sNow, DATA.services.length, `${sNow.partial} partial · ${sNow.absent} absent`) +
-    meter("Services — candidate next.7", sAfter, DATA.services.length, `${sAfter.partial} partial · ${sAfter.absent} absent`) +
-    meter("CLI (local) — next.6 → candidate", cNow, DATA.cli.length, `${cAfter.done} of ${DATA.cli.length} done on the candidate`) +
-    `<div class="meter"><div class="label">Runtime dependencies</div><div class="value">${deps.length}<small> → ${depsAfterH} after H</small></div>
+    meter("Phases", { done: phDone, qualified: phQualified, partial: 0, planned: ph.length - phDone - phQualified, missing: 0, absent: 0 }, ph.length, phQualified ? `${phQualified} qualified, publication pending` : "A–H shipped; next phases are the backlog below") +
+    meter("Services — published next.7", sNow, DATA.services.length, `${sNow.partial} partial · ${sNow.absent} absent`) +
+    meter("Services — before (next.6)", sAfter, DATA.services.length, `${sAfter.partial} partial · ${sAfter.absent} absent`) +
+    meter("CLI (local) — published next.7", cNow, DATA.cli.length, `${cAfter.done} of ${DATA.cli.length} on next.6`) +
+    `<div class="meter"><div class="label">Runtime dependencies</div><div class="value">${depsAfterH}<small> on next.7 (${deps.length} on next.6)</small></div>
      <div class="label" style="margin-top:8px;text-transform:none;letter-spacing:0">Node stays; UI zip until own UI; registry only for Extensions</div></div>`;
 })();
 

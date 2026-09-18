@@ -223,8 +223,10 @@ main line; G5 (qualification and release) is pending.
   (`crates/storage-front/src/rules_replay_tests.rs`).
 - [x] G4 — Remove the runtime, the CLI gate, the asset and the documentation
   of the Java requirement; add the no-Java CI step.
-- [ ] G5 — Qualify the exact candidate (CI, consumer gates, paired acceptance,
-  clean setup without Java) and publish `0.1.0-next.7` as a prerelease.
+- [x] G5 — Qualify the exact candidate (CI, consumer gates, paired acceptance,
+  clean setup without Java) and publish `0.1.0-next.7` as a prerelease
+  (2026-09-18: paired acceptance attempt 13 PASS on engine 0720434; release
+  run 35327767919; `next` → next.7).
 
 Done when a machine without Java can install, set up, start, enforce Storage
 rules including `firestore.get()`, resume and export, and the recorded corpus
@@ -264,8 +266,10 @@ JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
   (2026-09-17: `support/functions-host.cjs` deleted, `firebase-tools` left
   the CLI's dependencies, `--inspect-functions`, `--offline`,
   `functions:invoke`, `ext:vendor`, `doctor` extension report).
-- [ ] H5 — Qualify the exact candidate (CI, consumer gates incl. the Extensions
-  gate, paired acceptance, offline clean setup) and publish `0.1.0-next.7`.
+- [x] H5 — Qualify the exact candidate (CI, consumer gates incl. the Extensions
+  gate, paired acceptance, offline clean setup) and publish `0.1.0-next.7`
+  (2026-09-18: same acceptance and release as G5; function delivery 2.6 ms p50
+  against 3.8 official, emulator peak PSS 1.77 GiB against 19.35).
 
 Done when a project with user Functions and Extensions starts on a machine
 with Node only, every supported trigger delivers with the recorded envelope,

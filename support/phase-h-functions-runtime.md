@@ -1,8 +1,11 @@
 # Phase H — Owned Functions runtime and Extensions (`0.1.0-next.7`, together with Phase G)
 
-Written 2026-09-17 against `main` 39ba9a2. This is a plan, not a claim of
-work done. It follows [Phase G](phase-g-storage-rules.md) (native Storage
-rules, `next.7`); together they remove every runtime dependency except Node.
+Written 2026-09-17 against `main` 39ba9a2 as a plan. Status 2026-09-18: H0–H5
+are done — the plan below is kept as written, the receipts are in
+`benchmarks/phase-h-functions-runtime.json` (`receipts.h1`, `h2h3Replay`, `h5`
+including `pairedAcceptance`), and the qualified engine 0720434 was published 2026-09-18 as `@fireside-dev/cli@0.1.0-next.7` (tag `npm-v0.1.0-next.7` on main d38016d; release run 35327767919, 14/14 pre-publish jobs green, protected `npm-release` approval after a local `publish-packages --check`; registry integrity of all six packages equals the release assets; `npm audit signatures` verifies signatures and attestations; GitHub prerelease; `next` → next.7, `latest` untouched).
+It follows [Phase G](phase-g-storage-rules.md) (native Storage rules); together
+they removed every runtime dependency except Node.
 
 ## Goal
 
@@ -21,7 +24,7 @@ Hosting, Data Connect, general Pub/Sub subscribers, `functions.config()`
 (removed from firebase-functions 7). Those remain unsupported and are reported
 as ignored exports, as the official emulator does.
 
-## Current state (verified 2026-09-17)
+## State before the phase (verified 2026-09-17; superseded by the shipped runtime)
 
 **Rust already owns** the parts that are not JavaScript execution:
 
