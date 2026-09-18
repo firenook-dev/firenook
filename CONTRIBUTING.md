@@ -18,3 +18,16 @@ Public source must build/test without access to a private consumer checkout.
 Production cloud traffic requires explicit authorization and tiny synthetic
 fixtures. Package publication and source visibility are release-owner actions,
 not implied by a green test or a merged product change.
+
+## Independence
+
+This repository never names the consumers it is tested against, the hosts it
+is measured on, private repositories, people or personal paths (see
+`AGENTS.md` for the vocabulary to use instead). `node scripts/check-independence.mjs`
+scans every tracked file with built-in patterns plus a private term list that
+is never committed; CI runs it on the tree and on the commit messages of a
+change. Install the local hooks once:
+
+```sh
+git config core.hooksPath .githooks
+```

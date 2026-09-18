@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# The commit message is scanned with the same policy as the tree.
+node - "$1" <<'JS'
+const { readFileSync, existsSync } = require("node:fs");
+const { homedir } = require("node:os");
+const { join } = require("node:path");
+const message = readFileSync(process.argv[2], "utf8");
+const policyPath = process.env.FIRESIDE_PUBLIC_POLICY ?? join(homedir(), ".config", "fireside", "public-policy.json");
+const terms = existsSync(policyPath) ? JSON.parse(readFileSync(policyPath, "utf8")).forbiddenTerms ?? [] : [];
+const patterns = [/\/Users\/[a-z]/, /\/home\/(?!runner\/)[a-z]/, /\/srv\/[a-z]/, ...terms.map((t) => new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"))];
+const hit = patterns.findIndex((p) => p.test(message));
+if (hit >= 0) { console.error(`commit-msg: the message matches independence pattern #${hit + 1}; reword it`); process.exit(1); }
+JS

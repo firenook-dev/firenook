@@ -7,7 +7,7 @@
 // firebase-functions 7.2.5 package whose sibling node_modules holds
 // firebase-admin), NODE24, Java on PATH and the cached emulator jars under
 // ~/.cache/firebase/emulators. Everything recorded is synthetic. The optional
-// `twodart-refs` profile resolves two public registry extensions through the
+// `consumer-refs` profile resolves two public registry extensions through the
 // developer's Firebase CLI login; it is skipped, with the reason recorded,
 // when no login exists.
 import { spawn, type ChildProcess } from "node:child_process";

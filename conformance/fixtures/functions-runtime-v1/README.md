@@ -34,7 +34,7 @@ carries both the HTTP-visible contract and the handler-visible contract.
 | `v1-blocking` | 1 | 5 | First-generation `beforeCreate`/`beforeSignIn` (a project may hold one of each, so they need their own codebase) |
 | `inspect` | 1 | 5 | `--inspect-functions`: debug ports, sequential execution |
 | `ext-missing-param` | 1 | 1 | The local extension without its required secret and without the bucket parameter |
-| `twodart-refs` | 2 | 10 | `invertase/firestore-stripe-payments@0.3.12` and `algolia/firestore-algolia-search@1.2.10` resolved from the shared cache with synthetic parameters (requires a Firebase CLI login at capture time) |
+| `consumer-refs` | 2 | 10 | `invertase/firestore-stripe-payments@0.3.12` and `algolia/firestore-algolia-search@1.2.10` resolved from the shared cache with synthetic parameters (requires a Firebase CLI login at capture time) |
 
 Each profile records its readiness log, its `/backends` inventory (full
 extension specs), the programs, and the shutdown result. Inside programs every

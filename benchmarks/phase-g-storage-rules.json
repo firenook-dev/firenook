@@ -121,7 +121,7 @@
     "macJourneys": {
       "candidate": "0.1.0-local.ga472db6e3dce",
       "harness": "fireside (private) conformance/src/suite/run-phase5-browser-journeys.ts at c0faebd",
-      "stack": "Twodart worktree fireside-emulator, TWODART_DISABLE_EXTERNALS=1 bun dev:mprocs --data full-data, Fireside default backend, no Java arguments on the suite command line",
+      "stack": "the consumer development stack with external providers disabled, full-data dataset, Fireside default backend, no Java arguments on the suite command line",
       "passed": true,
       "journeys": [
         {
@@ -197,7 +197,7 @@
       "classification": "Two earlier failures (journey 4 catalog hover timeout, journey 5 missing Add Image control) reproduced identically on published next.6 (same errorHash b3a0410c...) and were harness dataset drift: the app provisions a premade Welcome deck on first login whose id sorted before the seeded smoke deck, so journeys 3+ ran on a premade deck. Harness now prefers the seeded deck (private commit c0faebd). One transient Next dev-server 404 on the first compile of an admin route did not recur."
     },
     "linuxSmoke": {
-      "host": "fireside-hetzner (Linux 6.8, 12 cpu), Java absent from the non-interactive PATH",
+      "host": "the private acceptance host (Linux 6.8, 12 cpu), Java absent from the non-interactive PATH",
       "candidate": "linux-x64 artifact of the exact-candidate CI run 35196947926 (0.1.0-local.gcdabf626577c)",
       "noJava": {
         "driver": "conformance/src/suite/verify-no-java.mjs",
@@ -311,8 +311,8 @@
     ],
     "fixturesFrozen": true,
     "frozenFixtureSha256": {
-      "README.md": "8b04bb91dd014ce4c87c51176e5e246cf78d72ce8affc447ddc5b89535594507",
-      "emulator-programs.json": "ac30bf85897939b6c2052d02d00acfc36a68ee9408d4d803932a528ef2dc8af3",
+      "README.md": "d52ae1165a34e7e2e17da533520e7d16d70a3ee4b4860af7ecb83208b9a6b983",
+      "emulator-programs.json": "cabff0d3d8a97a3f5944027385142b38436197271ffdbc17afb8566786d88653",
       "production-expression-corpus.json": "6603c8c7db661c423839994c5ff9c22ef99747fabacf361b9ede3ea7f2505f60",
       "SHA256SUMS": "586f6d4f6a63c3eceb641fd177995954e92da11d5f996fa601209ff65b8db67e"
     },
@@ -386,13 +386,13 @@
     }
   },
   "acceptance": {
-    "twodartCheapGates": [
-      "bun test:fireside-integration",
-      "bun test:fireside-extensions",
+    "consumerGates": [
+      "consumer integration gate",
+      "consumer extensions gate",
       "journeys 1-6",
       "cache-invalidation 403 on assets bucket"
     ],
-    "hetznerPairedAttempt": "candidate-attempt-10.json",
+    "privateAcceptanceAttempt": "candidate-attempt-10.json",
     "cleanSetupWithoutJava": {
       "namedStage": true,
       "steps": [
@@ -408,13 +408,13 @@
     },
     "release": "0.1.0-next.7",
     "receipts": {
-      "twodartCheapGates": {
+      "consumerGates": {
         "integration": "done",
         "extensions": "done",
         "journeys": "done (1-9 on Mac, receipts.macJourneys)",
         "cacheInvalidation403": "covered by journey deck-image-upload backend assertions"
       },
-      "hetznerPairedAttempt": "not run; deferred to the joint pre-release smoke before next.7",
+      "privateAcceptanceAttempt": "not run; deferred to the joint pre-release smoke before next.7",
       "cleanSetupWithoutJava": "not run as the named stage; the host no-Java suite start (receipts.linuxSmoke.noJava) covers first start + rules deny/allow only",
       "release": "not started"
     }

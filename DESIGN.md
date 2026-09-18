@@ -43,7 +43,7 @@ and compatibility helpers. The default redb cache budget is 64 MiB.
 Admin SDK's `listDocuments`) serves a named collection from the store's scoped
 collection iterator, the same index the query engine uses, and stops after one
 page plus a witness document when the order is the default `__key__` ascending.
-It never scans the database. Measured on the Twodart full-data seed the
+It never scans the database. Measured on the private consumer seed the
 `pageSize=1` listing went from 1.3 s (a 211,202-document scan per request) to
 1-4 ms. A listing ordered by a document field still reads the whole collection,
 as a query without a field index would, and a listing with no collection id
@@ -99,7 +99,7 @@ A top-level `__name__ ==` or `__name__ in` filter reads its named documents
 directly instead of scanning, and a count-only aggregation outside a
 transaction counts the lazy scan without decoding anything.
 
-Measured on the Twodart full-data seed (a 10,918-document collection of about
+Measured on the private consumer seed (a 10,918-document collection of about
 30 KiB documents, Apple Silicon Mac, disk/WAL) against the official emulator
 at p50: order by a field with limit 20 went from 642 ms to 106 ms (official
 70 ms), an integer range from 630 ms to 107 ms (80 ms), `count()` from 737 ms
@@ -122,7 +122,7 @@ decoding runs on a dedicated thread (`ExportReader::into_background`) with a
 bounded look-ahead of four batches of at most 64 documents or 4 MiB, so
 `LevelDB` framing and protobuf decoding overlap the redb inserts instead of
 alternating with them. Storage imports copy objects with bounded concurrency
-(16) and commit their metadata once at the end. Measured on the Twodart
+(16) and commit their metadata once at the end. Measured on the private consumer
 full-data seed (211,202 documents, 33,353 objects) on an Apple Silicon Mac,
 these changes took the Firestore seed from 14.7 s to 12.1 s and the Storage
 import from 11.1 s to 3.9 s; the remaining Firestore time is redb's

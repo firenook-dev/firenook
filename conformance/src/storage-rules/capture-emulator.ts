@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer as createTcpServer } from "node:net";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -475,6 +475,9 @@ function normalizeString(value: string): string {
     .replaceAll(storageOrigin, "<storage-origin>")
     .replaceAll(firestoreOrigin, "<firestore-origin>")
     .replaceAll(isolatedTmpdir, "<tmpdir>")
+    // The official rules runtime prints its jar path (under the capturing
+    // user's home) in JVM warnings; no personal path may reach a fixture.
+    .replaceAll(homedir(), "<home>")
     .replace(/([?&]upload_id=)[^&]+/gu, "$1<upload-id>")
     .replace(/([?&]token=)[^&]+/gu, "$1<download-token>")
     .replace(/([?&]delete_token=)[^&]+/gu, "$1<download-token>")

@@ -43284,7 +43284,7 @@
       }
     },
     {
-      "id": "twodart-refs",
+      "id": "consumer-refs",
       "description": "Two public registry extensions (Stripe payments 0.3.12, Algolia search 1.2.10) resolved from the shared cache with synthetic parameters.",
       "readiness": {
         "milliseconds": 51077,

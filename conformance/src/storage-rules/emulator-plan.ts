@@ -767,9 +767,9 @@ export const PROGRAMS: readonly Program[] = [
 
   // ------------------------------------------------------------ consumer shape
   {
-    id: "consumer-twodart",
+    id: "consumer-rulesets",
     category: "consumer-shaped",
-    description: "the Twodart default and assets rulesets verbatim, two targeted buckets",
+    description: "the consumer's default and assets rulesets verbatim, two targeted buckets",
     rules: [
       { name: "storage.default.rules", resource: B, content: `rules_version = '2';
 service firebase.storage {

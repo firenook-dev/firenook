@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Refuses a commit that would break the repository's independence. Install
+# once with `git config core.hooksPath .githooks`.
+exec node "$(git rev-parse --show-toplevel)/scripts/check-independence.mjs"

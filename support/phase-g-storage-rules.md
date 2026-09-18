@@ -19,7 +19,7 @@ branch:
 | G2 | `crates/rules-engine`: `service firebase.storage`, `RulesService`, `StorageObject`, `request.path`, `firestore.get`/`exists`, path indexing/slicing, `int()`/`float()`, `toMillis()`/`dayOfYear()`; shared-language corrections established by the corpus (regex `split`, three-valued `&&`/`||` over errors, lexical function scope, `(default)` path segments); `tests/storage_oracle_replay.rs` replays all 306 cases and the 1024 Phase 3 cases still pass — commit e3eb0d8 |
 | G3 | `crates/storage-front/src/rules.rs` native layer; `rules_replay_tests.rs` replays all 334 recorded steps over HTTP with parity or one of eight named divergences (five `request.method`, two list matching, one JSON-API PATCH); `storage-front` spawns no process; before/after rules-evaluated profile on the same Mac in `benchmarks/phase-g-storage-profile.json` (p50 upload 0.95 → 0.58 ms, metadata get 0.45 → 0.15 ms, denied read 0.48 → 0.14 ms; no regression at any percentile) — commits a98ee49, af93c14 |
 | G4 | `--java` / `--storage-rules-jar` removed from the native CLI and `suite-runtime`; npm wrapper without the `java -version` gate, `--java` option or jar download (`setup` fetches the UI zip only); docs updated (README, CLI guide, COMPATIBILITY, DESIGN "Native Storage rules", ROADMAP); harnesses updated; CI step "Verify suite start without Java on PATH" (`conformance/src/suite/verify-no-java.mjs`: `java` shadowed by a failing shim and JAVA_HOME unset, UI-only asset cache, single-file `storage.rules`, owner/admin/list rules, `firestore.get` against live Firestore, `setRules` reload, clean shutdown — passes locally in 7.0 s to readiness) — commit 4ac8a0d |
-| G5 | In progress. Done: exact-candidate CI green on PR #43 at cdabf62 (Rust gate, fixture/package checks, differential harness with the no-Java step, four browser-SDK cells, five packed installs — run 35196947926); Twodart cheap gates on the packed candidate `0.1.0-local.ga472db6e3dce` (`test:fireside-integration` 24/24; `test:fireside-extensions` 24 admitted / 2 upstream-ignored, as next.6; Phase 5 browser journeys 1–9 pass on the Mac against the full-data stack with no Java on the suite command line — `receipts.macJourneys`; two earlier journey failures reproduced identically on published next.6 and were harness dataset drift, fixed in the private harness at c0faebd); ~10-minute Linux smoke on the Hetzner host with the linux-x64 CI artifact and no Java on PATH (`verify-no-java.mjs` 12/12 steps, ready 5.6 s; same-host profile vs the next.6 engine under the Java runtime saves about 1 ms per rules-evaluated operation at p50 — `benchmarks/phase-g-storage-profile-linux.json`). Pending: Hetzner paired acceptance (`candidate-attempt-10.json`), the named clean-setup-without-Java stage, release `0.1.0-next.7` (both deferred to the joint pre-release smoke after Phase H) |
+| G5 | In progress. Done: exact-candidate CI green on PR #43 at cdabf62 (Rust gate, fixture/package checks, differential harness with the no-Java step, four browser-SDK cells, five packed installs — run 35196947926); consumer gates on the packed candidate `0.1.0-local.ga472db6e3dce` (integration gate 24/24; extensions gate 24 admitted / 2 upstream-ignored, as next.6; Phase 5 browser journeys 1–9 pass on the Mac against the full-data stack with no Java on the suite command line — `receipts.macJourneys`; two earlier journey failures reproduced identically on published next.6 and were harness dataset drift, fixed in the private harness at c0faebd); ~10-minute Linux smoke on the private acceptance host with the linux-x64 CI artifact and no Java on PATH (`verify-no-java.mjs` 12/12 steps, ready 5.6 s; same-host profile vs the next.6 engine under the Java runtime saves about 1 ms per rules-evaluated operation at p50 — `benchmarks/phase-g-storage-profile-linux.json`). Pending: private paired acceptance (`candidate-attempt-10.json`), the named clean-setup-without-Java stage, release `0.1.0-next.7` (both deferred to the joint pre-release smoke after Phase H) |
 
 Decisions the oracles settled differently from the plan's assumptions
 (details in the fixture README and the gate's `decisions`): the official
@@ -81,7 +81,7 @@ caching, evaluation traces and coverage layout. That is the majority of a
 Storage rules runtime; the missing parts are the service head, the object
 resource model, `firestore.*` and the Storage-side request construction.
 
-The consumer rulesets this must run unchanged (Twodart): two buckets via
+The consumer rulesets this must run unchanged: two buckets via
 `.firebaserc` targets, `request.auth.uid == uid`, `request.auth.token.admin ==
 true`, `allow get` distinct from `list`, `{allPaths=**}`; no `firestore.*`,
 no `request.resource` fields.
@@ -183,7 +183,7 @@ its own tiny ruleset so a failure localizes:
 - Ruleset lifecycle: startup with a compile error (status, message shape),
   `/internal/setRules` with valid and invalid sources, multi-bucket targets
   with different rulesets, requests to an unconfigured bucket.
-- Consumer-shaped program: Twodart's two rulesets verbatim with synthetic
+- Consumer-shaped program: the consumer's two rulesets verbatim with synthetic
   users (owner get/put/list, other-user denied, admin claim, anonymous `get`
   on assets, anonymous `list` denied on assets).
 
@@ -283,10 +283,10 @@ owner and download-token bypasses are unchanged; `storage-front` has no
   oracles; the packages and Rust jobs must pass on a runner without Java.
   Add an explicit `Verify suite start without Java on PATH` step (PATH scrubbed,
   `which java` must fail) to the differential harness job.
-- Consumer follow-ups, in Twodart, on the pin bump: `CLAUDE.md` "Java 26 is the
-  tested Fireside Storage-rules runtime" becomes "Java is needed only for the
-  official fallback"; `docs/dev/fireside-ai-pilot.md` likewise; `bun setup`
-  prerequisite check no longer requires Java when the backend is Fireside.
+- Consumer follow-ups on the pin bump: its setup documentation's "Java 26 is
+  the tested Fireside Storage-rules runtime" becomes "Java is needed only for
+  the official fallback"; its setup prerequisite check no longer requires Java
+  when the backend is Fireside.
 
 Exit: `grep -ri java crates packages` returns only oracle fixtures, comments
 and the capture tooling; `fireside setup` downloads one asset.
@@ -298,13 +298,13 @@ Named checks, all on the exact candidate commit:
 1. Exact-candidate CI: Rust quality gate, public fixture/package checks,
    differential harness (including the new no-Java step), five-platform
    packages.
-2. Twodart cheap gates on the packed candidate: `bun test:fireside-integration`,
-   `bun test:fireside-extensions`, journeys 1–6 on the Mac (studio uploads
+2. Consumer gates on the packed candidate: the integration gate, the
+   extensions gate, journeys 1–6 on macOS (studio uploads
    under `/users/{uid}`, anonymous `get` on the assets bucket, anonymous
    `list` denied), and the supplemental cache-invalidation check from Phase F,
    whose first version recorded a rules-driven 403 on the assets bucket — that
    403 must still occur.
-3. Hetzner paired acceptance with the attempt-9 harness (`aa8b528`), a new
+3. Private paired acceptance with the attempt-9 harness (`aa8b528`), a new
    `candidate-attempt-10.json`, frozen seed unchanged. The Storage cycle lane
    is the one expected to move; the official comparison from attempt 9 may be
    reused as banked evidence only if the host, seed and harness are unchanged,
@@ -318,7 +318,7 @@ Named checks, all on the exact candidate commit:
    commit → annotated tag `npm-v0.1.0-next.7` → `check-release.mjs --release` →
    `release-npm.yml` → download + `publish-packages.mjs --check` → approve →
    registry integrity == release assets → `gh release edit --prerelease` →
-   docs receipt PR → Twodart pin bump with the extensions gate. `latest` stays
+   docs receipt PR → consumer pin bump with the extensions gate. `latest` stays
    untouched.
 
 Exit: `support/phase-g-storage-rules.md` updated to a status document with
@@ -346,8 +346,8 @@ is measured against those recordings.
   checked in G0 with one request before the corpus is designed.
 - **v1 rulesets.** Measured in G1; decision recorded in G0's gate file rather
   than discovered by a consumer.
-- **`fireside native` callers passing `--java`.** None exist in Twodart
-  (`scripts/dev` only mentions Java for the official fallback); the argument
+- **`fireside native` callers passing `--java`.** None exist in the consumer
+  (its launcher only mentions Java for the official fallback); the argument
   is removed with a clear parse error rather than ignored.
 - **Access-limit and error-mapping details** (how many `firestore.*` calls,
   which status a runtime error yields) are taken from G1 recordings, never from
