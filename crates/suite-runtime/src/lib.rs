@@ -60,6 +60,7 @@ mod auxiliary;
 mod control;
 mod functions_readiness;
 mod native_state;
+mod project_scope;
 mod shutdown_io;
 pub use control::wait_for_shutdown;
 
@@ -88,6 +89,114 @@ pub struct SuitePorts {
     pub tasks: u16,
 }
 
+/// Which data services the suite starts (`--only`); the hub always runs,
+/// Eventarc and Tasks follow Functions, the Firestore requests WebSocket
+/// follows Firestore, the UI and logging listeners follow `ui_enabled`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// One switch per service, each mapped from one `--only` name.
+#[allow(clippy::struct_excessive_bools)]
+pub struct ServiceSelection {
+    pub firestore: bool,
+    pub auth: bool,
+    pub storage: bool,
+    pub functions: bool,
+    pub pubsub: bool,
+}
+
+impl ServiceSelection {
+    /// Every service.
+    pub const ALL: Self = Self {
+        firestore: true,
+        auth: true,
+        storage: true,
+        functions: true,
+        pubsub: true,
+    };
+
+    /// Parses the official `--only` names; `extensions` means Functions and
+    /// the auxiliary names (`eventarc`, `tasks`, `hub`, `ui`, `logging`) are
+    /// accepted and follow their parent.
+    pub fn parse(only: &str) -> Result<Self, String> {
+        let mut selection = Self {
+            firestore: false,
+            auth: false,
+            storage: false,
+            functions: false,
+            pubsub: false,
+        };
+        for name in only
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            match name {
+                "firestore" => selection.firestore = true,
+                "auth" => selection.auth = true,
+                "storage" => selection.storage = true,
+                "functions" | "extensions" => selection.functions = true,
+                "pubsub" => selection.pubsub = true,
+                "eventarc" | "tasks" | "hub" | "ui" | "logging" => {}
+                "database" | "hosting" | "dataconnect" | "apphosting" => {
+                    return Err(format!(
+                        "the {name} emulator is not implemented by fireside (see the roadmap)"
+                    ));
+                }
+                other => {
+                    return Err(format!(
+                        "unknown emulator {other}; valid names are auth,functions,firestore,pubsub,storage,eventarc,tasks,extensions,ui,logging,hub"
+                    ));
+                }
+            }
+        }
+        if selection.names().is_empty() {
+            return Err("No emulators to start; --only names none of firestore,auth,storage,functions,pubsub".to_owned());
+        }
+        Ok(selection)
+    }
+
+    /// The selected service names in the official listing order.
+    #[must_use]
+    pub fn names(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        if self.auth {
+            names.push("auth");
+        }
+        if self.functions {
+            names.push("functions");
+        }
+        if self.firestore {
+            names.push("firestore");
+        }
+        if self.pubsub {
+            names.push("pubsub");
+        }
+        if self.storage {
+            names.push("storage");
+        }
+        names
+    }
+
+    /// The official service names that are not selected (for the
+    /// "will affect production" warning on real project ids).
+    #[must_use]
+    pub fn missing(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        if !self.auth {
+            names.push("auth");
+        }
+        if !self.firestore {
+            names.push("firestore");
+        }
+        if !self.pubsub {
+            names.push("pubsub");
+        }
+        if !self.storage {
+            names.push("storage");
+        }
+        names
+    }
+}
+
 /// One Storage bucket and its source rules file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageBucketConfig {
@@ -102,15 +211,34 @@ pub enum StorageRulesConfig {
     Single(PathBuf),
     /// `storage: [{ target, rules }]`: one file per targeted bucket.
     PerBucket(Vec<StorageBucketConfig>),
+    /// No `storage` section: the official emulator's default open rules
+    /// (`templates/emulators/default_storage.rules`) govern every bucket of a
+    /// demo project.
+    OpenDefault,
 }
+
+/// The official `templates/emulators/default_storage.rules`.
+pub const DEFAULT_OPEN_STORAGE_RULES: &str = "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read, write;\n    }\n  }\n}\n";
 
 /// Complete suite startup settings resolved by the CLI.
 #[derive(Debug, Clone)]
 // Independent launch switches, each mapped from one CLI flag.
 #[allow(clippy::struct_excessive_bools)]
 pub struct SuiteConfig {
+    /// Listen address of every listener (`--host`); `0.0.0.0`/`::` are
+    /// accepted and `connect_host` names the loopback address clients use.
     pub host: String,
     pub project_id: String,
+    /// `--only` selection; `ServiceSelection::ALL` by default.
+    pub services: ServiceSelection,
+    /// `emulators.ui.enabled` / `--no-ui`: without the UI the logging
+    /// listener is not started either, as officially.
+    pub ui_enabled: bool,
+    /// `emulators.singleProjectMode` (default true): warn about requests that
+    /// name another project.
+    pub single_project_mode: bool,
+    /// `--debug-log`: append every suite log record to this file.
+    pub debug_log: Option<PathBuf>,
     pub project_dir: PathBuf,
     pub firebase_json: PathBuf,
     pub node: PathBuf,
@@ -136,6 +264,54 @@ pub struct SuiteConfig {
     pub export_on_exit: Option<PathBuf>,
     pub ports: SuitePorts,
     pub minimum_functions: usize,
+}
+
+impl SuiteConfig {
+    /// The address clients connect to: the listen host unless that is a
+    /// wildcard (`0.0.0.0` → `127.0.0.1`, `::` → `::1`), as the official
+    /// CLI's `connectableHostname`.
+    #[must_use]
+    pub fn connect_host(&self) -> String {
+        connectable_hostname(&self.host)
+    }
+
+    /// `host:port` (bracketed for IPv6) on the connect host.
+    #[must_use]
+    pub fn endpoint(&self, port: u16) -> String {
+        endpoint(&self.connect_host(), port)
+    }
+
+    /// `http://host:port` on the connect host.
+    #[must_use]
+    pub fn origin(&self, port: u16) -> String {
+        format!("http://{}", self.endpoint(port))
+    }
+
+    /// Whether the project id is a demo project (`demo-*`).
+    #[must_use]
+    pub fn is_demo_project(&self) -> bool {
+        self.project_id.starts_with("demo-")
+    }
+}
+
+/// `connectableHostname`: the address a client can reach a wildcard bind on.
+#[must_use]
+pub fn connectable_hostname(host: &str) -> String {
+    match host.trim_start_matches('[').trim_end_matches(']') {
+        "0.0.0.0" => "127.0.0.1".to_owned(),
+        "::" => "::1".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+/// `host:port`, bracketing IPv6 literals.
+#[must_use]
+pub fn endpoint(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
 }
 
 /// Final runtime counters emitted after clean shutdown.
@@ -228,13 +404,13 @@ struct PreparedSuite {
     store: Store,
     triggers: TriggerRegistry,
     delivery: DeliveryRuntime,
-    auth: Arc<AuthRuntime>,
-    storage: Arc<StorageRuntime>,
-    firestore: tonic::service::Routes,
+    auth: Option<Arc<AuthRuntime>>,
+    storage: Option<Arc<StorageRuntime>>,
+    firestore: Option<tonic::service::Routes>,
     request_history: Option<RequestHistory>,
     logging: LoggingRuntime,
     hub: HubRuntime,
-    ui: Router,
+    ui: Option<Router>,
     export_receiver: mpsc::Receiver<ExportCommand>,
     background_receiver: mpsc::UnboundedReceiver<BackgroundRequest>,
 }
@@ -243,12 +419,12 @@ struct ShutdownSuite {
     config: SuiteConfig,
     store: Store,
     delivery: DeliveryRuntime,
-    auth: Arc<AuthRuntime>,
-    storage: Arc<StorageRuntime>,
+    auth: Option<Arc<AuthRuntime>>,
+    storage: Option<Arc<StorageRuntime>>,
     hub: HubRuntime,
     exporter: JoinHandle<()>,
-    functions: FunctionsRuntime,
-    scheduler: SchedulerRuntime,
+    functions: Option<FunctionsRuntime>,
+    scheduler: Option<SchedulerRuntime>,
     servers: Vec<JoinHandle<()>>,
     shutdown: watch::Sender<bool>,
     function_count: usize,
@@ -317,6 +493,9 @@ fn spawn_functions_servers(
 }
 
 /// Runs the complete suite until SIGINT/SIGTERM or a child/listener failure.
+// Each optional service adds a guarded block; splitting them would hide the
+// startup order this function documents.
+#[allow(clippy::too_many_lines)]
 pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError> {
     validate_config(&config)?;
     // Keep the OS lock alive through every service's shutdown. It is released
@@ -340,17 +519,18 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let (shutdown, _) = watch::channel(false);
     let (server_failure, mut failed_server) = mpsc::unbounded_channel();
     let mut servers = spawn_static_servers(
+        &config,
         &mut listeners,
         StaticApplications {
-            project_id: config.project_id.clone(),
             firestore,
             request_history,
-            auth: auth.application(),
-            storage: storage.application(),
+            auth: auth.as_ref().map(|auth| auth.application()),
+            storage: storage.as_ref().map(|storage| storage.application()),
             hub: hub.application(),
             ui,
             logging: logging.application_with_shutdown(shutdown.subscribe()),
         },
+        &logging,
         &shutdown,
         &server_failure,
     )?;
@@ -359,35 +539,54 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         export_receiver,
         config.clone(),
         store.clone(),
-        Arc::clone(&auth),
-        Arc::clone(&storage),
+        auth.clone(),
+        storage.clone(),
     );
-    let functions = start_functions_runtime(&config, triggers.clone(), &logging).await?;
-    spawn_functions_servers(
-        &functions,
-        &mut listeners,
-        &shutdown,
-        &server_failure,
-        &mut servers,
-    )?;
-    let (inventory, function_count) =
-        verify_functions_readiness(&config, &functions, &logging).await?;
-    auth.set_blocking_functions(Arc::new(BlockingBridge(functions.blocking_handle())));
-    let mut pubsub = pubsub_router(&config.project_id, &inventory, delivery.queue(), triggers);
-    let schedule_count = pubsub.schedules().len();
-    let mut scheduler = pubsub
-        .start_scheduler()
-        .map_err(|error| failure(format!("scheduler failed to start: {error}")))?;
-    // gRPC (the client libraries with `PUBSUB_EMULATOR_HOST`) and HTTP/JSON
-    // share the Pub/Sub port, as on the official emulator.
-    servers.push(spawn_firestore(
-        "pubsub",
-        listeners.take("pubsub")?,
-        pubsub.routes(),
-        shutdown.subscribe(),
-        server_failure,
-    ));
-    let mut functions_updates = functions.updates();
+    let mut functions = None;
+    let mut function_count = 0;
+    let mut inventory = FunctionsInventory {
+        generation: 0,
+        backends: Vec::new(),
+    };
+    if config.services.functions {
+        let runtime = start_functions_runtime(&config, triggers.clone(), &logging).await?;
+        spawn_functions_servers(
+            &runtime,
+            &mut listeners,
+            &shutdown,
+            &server_failure,
+            &mut servers,
+        )?;
+        (inventory, function_count) =
+            verify_functions_readiness(&config, &runtime, &logging).await?;
+        if let Some(auth) = &auth {
+            auth.set_blocking_functions(Arc::new(BlockingBridge(runtime.blocking_handle())));
+        }
+        functions = Some(runtime);
+    }
+    let mut pubsub = None;
+    let mut scheduler = None;
+    let mut schedule_count = 0;
+    if config.services.pubsub {
+        let runtime = pubsub_router(&config.project_id, &inventory, delivery.queue(), triggers);
+        schedule_count = runtime.schedules().len();
+        scheduler = Some(
+            runtime
+                .start_scheduler()
+                .map_err(|error| failure(format!("scheduler failed to start: {error}")))?,
+        );
+        // gRPC (the client libraries with `PUBSUB_EMULATOR_HOST`) and HTTP/JSON
+        // share the Pub/Sub port, as on the official emulator.
+        servers.push(spawn_firestore(
+            "pubsub",
+            listeners.take("pubsub")?,
+            runtime.routes(),
+            shutdown.subscribe(),
+            server_failure.clone(),
+        ));
+        pubsub = Some(runtime);
+    }
+    drop(server_failure);
 
     announce_ready(&logging, function_count);
 
@@ -397,8 +596,8 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             Some(failed.unwrap_or_else(|| "service monitor closed".to_owned()))
         }
         error = follow_functions_inventory(
-            &functions, &mut functions_updates, background_receiver, &config.project_id,
-            &mut pubsub, &mut scheduler, &logging,
+            functions.as_ref(), background_receiver, &config.project_id,
+            pubsub.as_mut(), scheduler.as_mut(), &logging,
         ) => Some(error),
     };
 
@@ -433,14 +632,23 @@ fn announce_ready(logging: &LoggingRuntime, function_count: usize) {
 }
 
 async fn follow_functions_inventory(
-    functions: &FunctionsRuntime,
-    updates: &mut watch::Receiver<u64>,
+    functions: Option<&FunctionsRuntime>,
     mut background: mpsc::UnboundedReceiver<BackgroundRequest>,
     project: &str,
-    pubsub: &mut fireside_pubsub_front::PubsubRuntime,
-    scheduler: &mut SchedulerRuntime,
+    mut pubsub: Option<&mut fireside_pubsub_front::PubsubRuntime>,
+    mut scheduler: Option<&mut SchedulerRuntime>,
     logging: &LoggingRuntime,
 ) -> String {
+    let Some(functions) = functions else {
+        // Without Functions the hub's background-trigger switches are
+        // acknowledged (the registry flag already changed) and nothing else
+        // ever changes.
+        while let Some(request) = background.recv().await {
+            let _ = request.done.send(());
+        }
+        return "hub control channel closed".to_owned();
+    };
+    let mut updates = functions.updates();
     loop {
         tokio::select! {
             changed = updates.changed() => {
@@ -462,9 +670,10 @@ async fn follow_functions_inventory(
                 return format!("Functions reload inventory verification failed: {error}");
             }
         };
-        if let Err(error) = pubsub
-            .refresh_inventory(project, &inventory, scheduler)
-            .await
+        if let (Some(pubsub), Some(scheduler)) = (pubsub.as_deref_mut(), scheduler.as_deref_mut())
+            && let Err(error) = pubsub
+                .refresh_inventory(project, &inventory, scheduler)
+                .await
         {
             return format!("Functions reload schedule rejected: {error}");
         }
@@ -491,14 +700,15 @@ async fn prepare_native_suite(
     }
     let prepared = prepare_suite(&startup).await?;
     if config.resume_state {
-        prepared
-            .auth
-            .checkpoint_native_state()
-            .map_err(|error| failure(format!("Auth state checkpoint failed: {error}")))?;
-        prepared
-            .storage
-            .checkpoint_native_state()
-            .map_err(|error| failure(format!("Storage state checkpoint failed: {error}")))?;
+        if let Some(auth) = &prepared.auth {
+            auth.checkpoint_native_state()
+                .map_err(|error| failure(format!("Auth state checkpoint failed: {error}")))?;
+        }
+        if let Some(storage) = &prepared.storage {
+            storage
+                .checkpoint_native_state()
+                .map_err(|error| failure(format!("Storage state checkpoint failed: {error}")))?;
+        }
         guard.complete()?;
     }
     Ok((guard, prepared))
@@ -508,10 +718,15 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     tokio::fs::create_dir_all(&config.state_dir)
         .await
         .map_err(|error| failure(format!("failed to create suite state: {error}")))?;
-    let ui_client = prepare_ui(config).await?;
+    let logging = prepare_logging(config)?;
+    let ui_client = if config.ui_enabled {
+        Some(prepare_ui(config).await?)
+    } else {
+        None
+    };
     let store = open_store(config)?;
     let triggers = TriggerRegistry::default();
-    let functions_endpoint = format!("http://{}:{}/", config.host, config.ports.functions);
+    let functions_endpoint = format!("{}/", config.origin(config.ports.functions));
     let delivery = DeliveryRuntime::start(
         triggers.clone(),
         &functions_endpoint,
@@ -520,18 +735,124 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     .map_err(|error| failure(format!("Functions delivery failed: {error}")))?;
     store.add_commit_observer(delivery.observer());
 
-    let auth = Arc::new(
-        AuthRuntime::new(
-            &config.project_id,
-            delivery.queue(),
-            triggers.clone(),
-            Some(config.state_dir.join("auth-state.json")),
-        )
-        .map_err(|error| failure(format!("Auth failed to start: {error}")))?,
-    );
-    let storage = Arc::new(start_storage(config, &delivery, &triggers, &store).await?);
-    import_suite(config, &store, &auth, &storage).await?;
+    let auth = if config.services.auth {
+        Some(Arc::new(
+            AuthRuntime::new(
+                &config.project_id,
+                delivery.queue(),
+                triggers.clone(),
+                Some(config.state_dir.join("auth-state.json")),
+            )
+            .map_err(|error| failure(format!("Auth failed to start: {error}")))?,
+        ))
+    } else {
+        None
+    };
+    let storage = if config.services.storage {
+        Some(Arc::new(
+            start_storage(config, &delivery, &triggers, &store).await?,
+        ))
+    } else {
+        None
+    };
+    import_suite(config, &store, auth.as_deref(), storage.as_deref()).await?;
 
+    let (firestore_routes, request_history) =
+        prepare_firestore(config, &store, &triggers, &logging)?;
+
+    // Auth's operational lines (OOB links, verification codes, server
+    // errors) reach the console and the Emulator UI log like the official
+    // CLI's `i  auth: ...` output.
+    if let Some(auth) = &auth {
+        let auth_logging = logging.clone();
+        auth.set_log_sink(Arc::new(move |kind: &str, text: &str| {
+            let level = match kind {
+                "BULLET" | "SUCCESS" => "INFO",
+                other => other,
+            };
+            if level == "WARN" || level == "ERROR" {
+                eprintln!("fireside auth: {text}");
+            } else {
+                println!("fireside auth: {text}");
+            }
+            auth_logging.record(level, Some("auth"), text.to_owned());
+        }));
+    }
+    let directory = suite_directory(config)?;
+    let (export_sender, export_receiver) = mpsc::channel(4);
+    let (background_sender, background_receiver) = mpsc::unbounded_channel();
+    let hub = HubRuntime::start(HubConfig {
+        directory: directory.clone(),
+        locator_file: locator_path(config),
+        pid: std::process::id(),
+        exporter: export_sender,
+        triggers: triggers.clone(),
+        background: Some(background_sender),
+    })
+    .map_err(|error| failure(format!("Hub failed to start: {error}")))?;
+    let ui = match ui_client {
+        Some(client_directory) => Some(
+            ui_router(UiConfig {
+                directory,
+                archive: config.ui_archive.clone(),
+                client_directory,
+            })
+            .await
+            .map_err(|error| failure(format!("UI failed to start: {error}")))?,
+        ),
+        None => None,
+    };
+    Ok(PreparedSuite {
+        store,
+        triggers,
+        delivery,
+        auth,
+        storage,
+        firestore: firestore_routes,
+        request_history,
+        logging,
+        hub,
+        ui,
+        export_receiver,
+        background_receiver,
+    })
+}
+
+/// The log runtime with the `--debug-log` sink and the startup lines.
+fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeError> {
+    let logging = LoggingRuntime::new();
+    if let Some(path) = &config.debug_log {
+        logging.set_file_sink(path).map_err(|error| {
+            failure(format!(
+                "cannot open the debug log {}: {error}",
+                path.display()
+            ))
+        })?;
+    }
+    for message in startup_log_messages(config) {
+        logging.record("INFO", Some("hub"), message);
+    }
+    for (level, message) in startup_banner(config) {
+        if level == "WARN" {
+            eprintln!("fireside: {message}");
+        } else {
+            println!("fireside: {message}");
+        }
+        logging.record(level, Some("hub"), message);
+    }
+    Ok(logging)
+}
+
+/// The Firestore port's gRPC, REST and `WebChannel` routes, when selected.
+fn prepare_firestore(
+    config: &SuiteConfig,
+    store: &Store,
+    triggers: &TriggerRegistry,
+    logging: &LoggingRuntime,
+) -> Result<(Option<tonic::service::Routes>, Option<RequestHistory>), SuiteRuntimeError> {
+    if !config.services.firestore {
+        return Ok((None, None));
+    }
     let query_policy = query_policy(config)?;
     let firestore_rules = firestore_rules(config)?;
     let request_history = firestore_rules.request_history();
@@ -549,62 +870,11 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         service.clone(),
     )
     .merge(webchannel_router(FirestoreBackend::new(service.clone())));
-    let firestore_routes =
-        tonic::service::Routes::from(firestore_http).add_service(service.into_server());
-
-    let logging = LoggingRuntime::new();
-    for message in startup_log_messages(config) {
-        logging.record("INFO", Some("hub"), message);
-    }
-    // Auth's operational lines (OOB links, verification codes, server
-    // errors) reach the console and the Emulator UI log like the official
-    // CLI's `i  auth: ...` output.
-    let auth_logging = logging.clone();
-    auth.set_log_sink(Arc::new(move |kind: &str, text: &str| {
-        let level = match kind {
-            "BULLET" | "SUCCESS" => "INFO",
-            other => other,
-        };
-        if level == "WARN" || level == "ERROR" {
-            eprintln!("fireside auth: {text}");
-        } else {
-            println!("fireside auth: {text}");
-        }
-        auth_logging.record(level, Some("auth"), text.to_owned());
-    }));
-    let directory = suite_directory(config)?;
-    let (export_sender, export_receiver) = mpsc::channel(4);
-    let (background_sender, background_receiver) = mpsc::unbounded_channel();
-    let hub = HubRuntime::start(HubConfig {
-        directory: directory.clone(),
-        locator_file: locator_path(config),
-        pid: std::process::id(),
-        exporter: export_sender,
-        triggers: triggers.clone(),
-        background: Some(background_sender),
-    })
-    .map_err(|error| failure(format!("Hub failed to start: {error}")))?;
-    let ui = ui_router(UiConfig {
-        directory,
-        archive: config.ui_archive.clone(),
-        client_directory: ui_client,
-    })
-    .await
-    .map_err(|error| failure(format!("UI failed to start: {error}")))?;
-    Ok(PreparedSuite {
-        store,
-        triggers,
-        delivery,
-        auth,
-        storage,
-        firestore: firestore_routes,
+    let firestore_http = project_scope::apply(firestore_http, config, logging);
+    Ok((
+        Some(tonic::service::Routes::from(firestore_http).add_service(service.into_server())),
         request_history,
-        logging,
-        hub,
-        ui,
-        export_receiver,
-        background_receiver,
-    })
+    ))
 }
 
 async fn finish_suite(
@@ -619,8 +889,8 @@ async fn finish_suite(
             &BTreeSet::new(),
             &suite.config,
             &suite.store,
-            &suite.auth,
-            &suite.storage,
+            suite.auth.as_deref(),
+            suite.storage.as_deref(),
         )
         .await
     {
@@ -634,15 +904,19 @@ async fn finish_suite(
             suite.config.state_dir.display()
         ));
     }
-    suite.scheduler.shutdown().await;
+    if let Some(scheduler) = suite.scheduler.take() {
+        scheduler.shutdown().await;
+    }
     // Drain background delivery while both the Node workers and the Rust data
     // services they call remain available. The scheduler is stopped first, and
     // a coordinated suite shutdown has no external clients admitting new work.
     let delivery = suite.delivery.shutdown().await.into();
-    // The same line the former Node host printed: harnesses read it as the
-    // proof that Functions got an orderly stop even when export failed.
-    println!("fireside functions host: stopping after the suite shutdown request");
-    suite.functions.shutdown().await;
+    if let Some(functions) = suite.functions {
+        // The same line the former Node host printed: harnesses read it as the
+        // proof that Functions got an orderly stop even when export failed.
+        println!("fireside functions host: stopping after the suite shutdown request");
+        functions.shutdown().await;
+    }
     let _ = suite.shutdown.send(true);
     for server in suite.servers {
         let _ = server.await;
@@ -658,17 +932,25 @@ async fn finish_suite(
     if let Err(error) = suite.store.flush() {
         failures.push(format!("Firestore flush failed: {error}"));
     }
-    let auth_users = suite.auth.user_count();
+    let auth_users = suite.auth.as_ref().map_or(0, |auth| auth.user_count());
     let firestore_documents = suite.store.snapshot().logical_memory_usage().entries;
-    let storage_objects = suite.storage.object_count();
-    let storage_bytes = suite.storage.object_bytes();
-    match Arc::try_unwrap(suite.storage) {
-        Ok(storage) => {
-            if let Err(error) = storage.shutdown().await {
-                failures.push(format!("Storage shutdown failed: {error}"));
+    let storage_objects = suite
+        .storage
+        .as_ref()
+        .map_or(0, |storage| storage.object_count());
+    let storage_bytes = suite
+        .storage
+        .as_ref()
+        .map_or(0, |storage| storage.object_bytes());
+    if let Some(storage) = suite.storage {
+        match Arc::try_unwrap(storage) {
+            Ok(storage) => {
+                if let Err(error) = storage.shutdown().await {
+                    failures.push(format!("Storage shutdown failed: {error}"));
+                }
             }
+            Err(_) => failures.push("Storage runtime still has active owners".to_owned()),
         }
-        Err(_) => failures.push("Storage runtime still has active owners".to_owned()),
     }
     if !failures.is_empty() {
         return Err(failure(failures.join("; ")));
@@ -685,36 +967,45 @@ async fn finish_suite(
 }
 
 fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {
-    if !config.project_id.starts_with("demo-") {
-        return Err(failure("suite requires a demo-* project ID"));
+    if config.project_id.is_empty()
+        || config
+            .project_id
+            .chars()
+            .any(|character| character.is_whitespace() || character == '/')
+    {
+        return Err(failure(
+            "suite requires a project ID without whitespace or slashes",
+        ));
     }
-    if config.minimum_functions == 0 {
-        return Err(failure("minimum Functions count must be positive"));
+    if config.host.is_empty() || config.host.chars().any(char::is_whitespace) {
+        return Err(failure("suite requires a listen host"));
+    }
+    if config.resume_state
+        && !(config.services.firestore && config.services.auth && config.services.storage)
+    {
+        return Err(failure(
+            "--resume-state requires the firestore, auth and storage services (the native state receipt covers all three)",
+        ));
     }
     let mut ports = BTreeSet::new();
-    for port in [
-        config.ports.firestore,
-        config.ports.auth,
-        config.ports.storage,
-        config.ports.functions,
-        config.ports.pubsub,
-        config.ports.hub,
-        config.ports.ui,
-        config.ports.firestore_websocket,
-        config.ports.logging,
-        config.ports.eventarc,
-        config.ports.tasks,
-    ] {
+    for (name, port) in listener_plan(config) {
         if port == 0 || !ports.insert(port) {
-            return Err(failure("suite ports must be non-zero and unique"));
+            return Err(failure(format!(
+                "suite ports must be non-zero and unique ({name} at {port} collides)"
+            )));
         }
     }
-    for (name, path) in [
+    let mut required = vec![
         ("project directory", &config.project_dir),
         ("firebase.json", &config.firebase_json),
-        ("Node", &config.node),
-        ("UI archive", &config.ui_archive),
-    ] {
+    ];
+    if config.services.functions {
+        required.push(("Node", &config.node));
+    }
+    if config.ui_enabled {
+        required.push(("UI archive", &config.ui_archive));
+    }
+    for (name, path) in required {
         if !path.exists() {
             return Err(failure(format!(
                 "{name} does not exist: {}",
@@ -725,6 +1016,65 @@ fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {
     Ok(())
 }
 
+/// The startup lines the official CLI prints for the project kind and the
+/// selection, recorded to the log as well.
+fn startup_banner(config: &SuiteConfig) -> Vec<(&'static str, String)> {
+    let mut lines = vec![(
+        "INFO",
+        format!("Starting emulators: {}", config.services.names().join(", ")),
+    )];
+    if config.is_demo_project() {
+        lines.push((
+            "INFO",
+            format!(
+                "Detected demo project ID \"{}\", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.",
+                config.project_id
+            ),
+        ));
+    } else {
+        lines.push((
+            "WARN",
+            format!(
+                "Project ID \"{}\" is not a demo project. Functions workers are started with every emulator host set and without Google credentials, and this suite never contacts Firebase itself; user code that constructs its own clients with explicit credentials can still reach the real project.",
+                config.project_id
+            ),
+        ));
+        let missing = config.services.missing();
+        if config.services.functions && !missing.is_empty() {
+            lines.push((
+                "WARN",
+                format!(
+                    "The following emulators are not running, calls to these services from the Functions emulator will affect production: {}",
+                    missing.join(", ")
+                ),
+            ));
+        }
+    }
+    if !is_loopback(&config.host) {
+        lines.push((
+            "WARN",
+            format!(
+                "Listening on {}: the emulators have no authentication, so every service, its data and arbitrary Functions execution are reachable from any device that can reach this host.",
+                config.host
+            ),
+        ));
+    }
+    if !config.ui_enabled {
+        lines.push((
+            "INFO",
+            "Emulator UI disabled (emulators.ui.enabled is false); the logging emulator is not started either.".to_owned(),
+        ));
+    }
+    lines
+}
+
+fn is_loopback(host: &str) -> bool {
+    matches!(
+        host.trim_start_matches('[').trim_end_matches(']'),
+        "localhost" | "127.0.0.1" | "::1"
+    )
+}
+
 const fn storage_durability(durability: DiskDurability) -> StorageDurability {
     match durability {
         DiskDurability::PerCommit => StorageDurability::PerCommit,
@@ -733,7 +1083,9 @@ const fn storage_durability(durability: DiskDurability) -> StorageDurability {
 }
 
 fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
-    if config.firestore_in_memory {
+    // Without the Firestore service the store only backs Storage rules'
+    // `firestore.get()` and never persists anything.
+    if config.firestore_in_memory || !config.services.firestore {
         return Ok(Store::new(StoreOptions::default()));
     }
     Store::open_disk(
@@ -821,6 +1173,16 @@ async fn start_storage(
             name: path.display().to_string(),
             content: read_rules(path)?,
         }),
+        StorageRulesConfig::OpenDefault => {
+            eprintln!(
+                "fireside storage: no storage rules configured for demo project \"{}\", using a default (open) rules configuration.",
+                config.project_id
+            );
+            RulesSource::Single(RulesFile {
+                name: "emulators/default_storage.rules".to_owned(),
+                content: DEFAULT_OPEN_STORAGE_RULES.to_owned(),
+            })
+        }
         StorageRulesConfig::PerBucket(buckets) => RulesSource::PerBucket(
             buckets
                 .iter()
@@ -837,7 +1199,7 @@ async fn start_storage(
     StorageRuntime::start(
         StorageConfig {
             project: config.project_id.clone(),
-            origin: format!("http://{}:{}", config.host, config.ports.storage),
+            origin: config.origin(config.ports.storage),
             data_dir: config.state_dir.join("storage"),
             durability: storage_durability(config.durability),
             rules: Some(NativeRulesConfig {
@@ -855,28 +1217,52 @@ async fn start_storage(
     .map_err(|error| failure(format!("Storage failed to start: {error}")))
 }
 
+/// Every listener the selection needs, in the official listing order.
+fn listener_plan(config: &SuiteConfig) -> Vec<(&'static str, u16)> {
+    let services = config.services;
+    let mut plan = vec![("hub", config.ports.hub)];
+    if config.ui_enabled {
+        plan.push(("ui", config.ports.ui));
+        plan.push(("logging", config.ports.logging));
+    }
+    if services.firestore {
+        plan.push(("firestore", config.ports.firestore));
+        plan.push(("firestore.websocket", config.ports.firestore_websocket));
+    }
+    if services.auth {
+        plan.push(("auth", config.ports.auth));
+    }
+    if services.storage {
+        plan.push(("storage", config.ports.storage));
+    }
+    if services.functions {
+        plan.push(("functions", config.ports.functions));
+        plan.push(("eventarc", config.ports.eventarc));
+        plan.push(("tasks", config.ports.tasks));
+    }
+    if services.pubsub {
+        plan.push(("pubsub", config.ports.pubsub));
+    }
+    plan
+}
+
 fn suite_directory(config: &SuiteConfig) -> Result<SuiteDirectory, SuiteRuntimeError> {
-    let listening = |name: &str, port| ServiceInfo::listening(name, &config.host, port);
-    let dependency = |name: &str, port| ServiceInfo::dependency(name, &config.host, port);
-    let mut pubsub = listening("pubsub", config.ports.pubsub);
-    pubsub.pid = Some(std::process::id());
-    SuiteDirectory::new(
-        &config.project_id,
-        [
-            listening("firestore", config.ports.firestore),
-            listening("auth", config.ports.auth),
-            listening("storage", config.ports.storage),
-            listening("functions", config.ports.functions),
-            pubsub,
-            listening("hub", config.ports.hub),
-            listening("ui", config.ports.ui),
-            listening("logging", config.ports.logging),
-            listening("eventarc", config.ports.eventarc),
-            dependency("tasks", config.ports.tasks),
-            listening("firestore.websocket", config.ports.firestore_websocket),
-        ],
-    )
-    .map_err(|error| failure(format!("invalid suite directory: {error}")))
+    let host = config.connect_host();
+    let services = listener_plan(config).into_iter().map(|(name, port)| {
+        // The recorded official listing carries no `listen` array for the
+        // Eventarc and Tasks entries.
+        let mut service = if matches!(name, "eventarc" | "tasks") {
+            ServiceInfo::dependency(name, &host, port)
+        } else {
+            ServiceInfo::listening(name, &host, port)
+        };
+        if name == "pubsub" {
+            service.pid = Some(std::process::id());
+        }
+        service
+    });
+    SuiteDirectory::new(&config.project_id, services)
+        .map_err(|error| failure(format!("invalid suite directory: {error}")))
 }
 
 fn locator_path(config: &SuiteConfig) -> PathBuf {
@@ -884,18 +1270,16 @@ fn locator_path(config: &SuiteConfig) -> PathBuf {
 }
 
 fn startup_log_messages(config: &SuiteConfig) -> Vec<String> {
-    [
-        ("firestore", config.ports.firestore),
-        ("auth", config.ports.auth),
-        ("storage", config.ports.storage),
-        ("functions", config.ports.functions),
-        ("pubsub", config.ports.pubsub),
-        ("hub", config.ports.hub),
-        ("ui", config.ports.ui),
-    ]
-    .into_iter()
-    .map(|(name, port)| format!("{name} configured at {}:{port}", config.host))
-    .collect()
+    listener_plan(config)
+        .into_iter()
+        .filter(|(name, _)| {
+            !matches!(
+                *name,
+                "logging" | "eventarc" | "tasks" | "firestore.websocket"
+            )
+        })
+        .map(|(name, port)| format!("{name} configured at {}", config.endpoint(port)))
+        .collect()
 }
 
 async fn prepare_ui(config: &SuiteConfig) -> Result<PathBuf, SuiteRuntimeError> {
@@ -948,13 +1332,12 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<(), SuiteRuntimeErr
 struct ListenerSet(std::collections::BTreeMap<&'static str, TcpListener>);
 
 struct StaticApplications {
-    project_id: String,
-    firestore: tonic::service::Routes,
+    firestore: Option<tonic::service::Routes>,
     request_history: Option<RequestHistory>,
-    auth: Router,
-    storage: Router,
+    auth: Option<Router>,
+    storage: Option<Router>,
     hub: Router,
-    ui: Router,
+    ui: Option<Router>,
     logging: Router,
 }
 
@@ -967,22 +1350,9 @@ impl ListenerSet {
 }
 
 async fn bind_listeners(config: &SuiteConfig) -> Result<ListenerSet, SuiteRuntimeError> {
-    let requested = [
-        ("firestore", config.ports.firestore),
-        ("auth", config.ports.auth),
-        ("storage", config.ports.storage),
-        ("functions", config.ports.functions),
-        ("pubsub", config.ports.pubsub),
-        ("hub", config.ports.hub),
-        ("ui", config.ports.ui),
-        ("logging", config.ports.logging),
-        ("eventarc", config.ports.eventarc),
-        ("tasks", config.ports.tasks),
-        ("firestore.websocket", config.ports.firestore_websocket),
-    ];
     let mut listeners = std::collections::BTreeMap::new();
-    for (name, port) in requested {
-        let address = format!("{}:{port}", config.host);
+    for (name, port) in listener_plan(config) {
+        let address = endpoint(&config.host, port);
         let listener = TcpListener::bind(&address)
             .await
             .map_err(|error| failure(format!("cannot bind {name} at {address}: {error}")))?;
@@ -992,69 +1362,79 @@ async fn bind_listeners(config: &SuiteConfig) -> Result<ListenerSet, SuiteRuntim
 }
 
 fn spawn_static_servers(
+    config: &SuiteConfig,
     listeners: &mut ListenerSet,
     applications: StaticApplications,
+    logging: &LoggingRuntime,
     shutdown: &watch::Sender<bool>,
     failed: &mpsc::UnboundedSender<String>,
 ) -> Result<Vec<JoinHandle<()>>, SuiteRuntimeError> {
-    let mut servers = vec![
-        spawn_firestore(
+    let mut servers = vec![spawn_axum(
+        "hub",
+        listeners.take("hub")?,
+        applications.hub,
+        shutdown.subscribe(),
+        failed.clone(),
+    )];
+    if let Some(firestore) = applications.firestore {
+        servers.push(spawn_firestore(
             "firestore",
             listeners.take("firestore")?,
-            applications.firestore,
+            firestore,
             shutdown.subscribe(),
             failed.clone(),
-        ),
-        spawn_axum(
+        ));
+        servers.push(spawn_axum(
+            "firestore.websocket",
+            listeners.take("firestore.websocket")?,
+            requests_router(applications.request_history, shutdown.subscribe()),
+            shutdown.subscribe(),
+            failed.clone(),
+        ));
+    }
+    if let Some(auth) = applications.auth {
+        servers.push(spawn_axum(
             "auth",
             listeners.take("auth")?,
-            applications.auth,
+            project_scope::apply(auth, config, logging),
             shutdown.subscribe(),
             failed.clone(),
-        ),
-        spawn_axum(
+        ));
+    }
+    if let Some(storage) = applications.storage {
+        servers.push(spawn_axum(
             "storage",
             listeners.take("storage")?,
-            applications.storage,
+            storage,
             shutdown.subscribe(),
             failed.clone(),
-        ),
-        spawn_axum(
-            "hub",
-            listeners.take("hub")?,
-            applications.hub,
-            shutdown.subscribe(),
-            failed.clone(),
-        ),
-        spawn_axum(
+        ));
+    }
+    if let Some(ui) = applications.ui {
+        servers.push(spawn_axum(
             "ui",
             listeners.take("ui")?,
-            applications.ui,
+            ui,
             shutdown.subscribe(),
             failed.clone(),
-        ),
-        spawn_axum(
+        ));
+        servers.push(spawn_axum(
             "logging",
             listeners.take("logging")?,
             applications.logging,
             shutdown.subscribe(),
             failed.clone(),
-        ),
-    ];
-    servers.push(spawn_axum(
-        "tasks",
-        listeners.take("tasks")?,
-        auxiliary::router("tasks", &applications.project_id),
-        shutdown.subscribe(),
-        failed.clone(),
-    ));
-    servers.push(spawn_axum(
-        "firestore.websocket",
-        listeners.take("firestore.websocket")?,
-        requests_router(applications.request_history, shutdown.subscribe()),
-        shutdown.subscribe(),
-        failed.clone(),
-    ));
+        ));
+    }
+    if config.services.functions {
+        servers.push(spawn_axum(
+            "tasks",
+            listeners.take("tasks")?,
+            auxiliary::router("tasks", &config.project_id),
+            shutdown.subscribe(),
+            failed.clone(),
+        ));
+    }
     Ok(servers)
 }
 
@@ -1168,7 +1548,7 @@ async fn start_functions_runtime(
         sink_logging.record(&event.level, Some("functions"), line);
     });
     let extensions = load_extensions(config, &sink).await?;
-    let host = |port: u16| format!("{}:{port}", config.host);
+    let host = |port: u16| config.endpoint(port);
     let runtime_config = FunctionsRuntimeConfig {
         project_id: config.project_id.clone(),
         project_alias: None,
@@ -1252,7 +1632,8 @@ pub fn extensions_config(
         default_bucket: config.default_bucket.clone(),
         node: config.node.clone(),
         offline: config.offline,
-        ui_origin: ui_enabled.then(|| format!("http://{}:{}/", config.host, config.ports.ui)),
+        ui_origin: (ui_enabled && config.ui_enabled)
+            .then(|| format!("{}/", config.origin(config.ports.ui))),
     })
 }
 
@@ -1360,8 +1741,8 @@ fn spawn_exporter(
     mut receiver: mpsc::Receiver<ExportCommand>,
     config: SuiteConfig,
     store: Store,
-    auth: Arc<AuthRuntime>,
-    storage: Arc<StorageRuntime>,
+    auth: Option<Arc<AuthRuntime>>,
+    storage: Option<Arc<StorageRuntime>>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(command) = receiver.recv().await {
@@ -1370,8 +1751,8 @@ fn spawn_exporter(
                 &command.targets,
                 &config,
                 &store,
-                &auth,
-                &storage,
+                auth.as_deref(),
+                storage.as_deref(),
             )
             .await
             .map_err(|error| error.to_string());
@@ -1383,30 +1764,44 @@ fn spawn_exporter(
 async fn import_suite(
     config: &SuiteConfig,
     store: &Store,
-    auth: &AuthRuntime,
-    storage: &StorageRuntime,
+    auth: Option<&AuthRuntime>,
+    storage: Option<&StorageRuntime>,
 ) -> Result<(), SuiteRuntimeError> {
     let Some(root) = &config.import else {
         return Ok(());
     };
     let metadata = read_export_metadata(root)?;
+    // A component recorded in the export but not selected is skipped, as the
+    // official importer skips emulators that are not running.
     if let Some(firestore) = metadata.firestore {
-        let path = root.join(firestore.metadata_file);
-        let count = seed_store(store, &path, &config.project_id)?;
-        eprintln!("fireside imported {count} Firestore documents");
+        if config.services.firestore {
+            let path = root.join(firestore.metadata_file);
+            let count = seed_store(store, &path, &config.project_id)?;
+            eprintln!("fireside imported {count} Firestore documents");
+        } else {
+            eprintln!("fireside: firestore export not imported (service not started)");
+        }
     }
     if let Some(auth_metadata) = metadata.auth {
-        let count = auth
-            .import_directory(&root.join(auth_metadata.path))
-            .map_err(|error| failure(format!("Auth import failed: {error}")))?;
-        eprintln!("fireside imported {count} Auth users");
+        if let Some(auth) = auth {
+            let count = auth
+                .import_directory(&root.join(auth_metadata.path))
+                .map_err(|error| failure(format!("Auth import failed: {error}")))?;
+            eprintln!("fireside imported {count} Auth users");
+        } else {
+            eprintln!("fireside: auth export not imported (service not started)");
+        }
     }
     if let Some(storage_metadata) = metadata.storage {
-        let count = storage
-            .import(&root.join(storage_metadata.path))
-            .await
-            .map_err(|error| failure(format!("Storage import failed: {error}")))?;
-        eprintln!("fireside imported {count} Storage objects");
+        if let Some(storage) = storage {
+            let count = storage
+                .import(&root.join(storage_metadata.path))
+                .await
+                .map_err(|error| failure(format!("Storage import failed: {error}")))?;
+            eprintln!("fireside imported {count} Storage objects");
+        } else {
+            eprintln!("fireside: storage export not imported (service not started)");
+        }
     }
     Ok(())
 }
@@ -1492,8 +1887,8 @@ async fn export_suite(
     targets: &BTreeSet<String>,
     config: &SuiteConfig,
     store: &Store,
-    auth: &AuthRuntime,
-    storage: &StorageRuntime,
+    auth: Option<&AuthRuntime>,
+    storage: Option<&StorageRuntime>,
 ) -> Result<(), SuiteRuntimeError> {
     let destination = absolute_destination(destination)?;
     if config.resume_state {
@@ -1520,7 +1915,7 @@ async fn export_suite(
     let wants = |name: &str| targets.is_empty() || targets.contains(name);
     let mut metadata = serde_json::Map::new();
     metadata.insert("version".to_owned(), json!(EXPORT_VERSION));
-    if wants("firestore") {
+    if wants("firestore") && config.services.firestore {
         let database = DatabaseName::new(config.project_id.as_str(), "(default)")
             .map_err(|error| failure(error.to_string()))?;
         let snapshot = store.snapshot();
@@ -1539,7 +1934,9 @@ async fn export_suite(
             }),
         );
     }
-    if wants("auth") {
+    if wants("auth")
+        && let Some(auth) = auth
+    {
         auth.export_directory(&staging.join("auth_export"))
             .map_err(|error| failure(format!("Auth export failed: {error}")))?;
         metadata.insert(
@@ -1547,7 +1944,9 @@ async fn export_suite(
             json!({ "version": EXPORT_VERSION, "path": "auth_export" }),
         );
     }
-    if wants("storage") {
+    if wants("storage")
+        && let Some(storage) = storage
+    {
         storage
             .export(&staging.join("storage_export"))
             .await

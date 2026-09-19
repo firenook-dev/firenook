@@ -25,7 +25,8 @@ use fireside_rest_front::{
 };
 use fireside_rules_runtime::RulesRuntime;
 use fireside_suite_runtime::{
-    StorageBucketConfig, StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
+    ServiceSelection, StorageBucketConfig, StorageRulesConfig, SuiteConfig, SuitePorts,
+    run as run_suite,
 };
 use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use serde::Deserialize;
@@ -323,8 +324,26 @@ struct SuiteArgs {
     /// Disable Requests/coverage recording; the debug endpoint reports unavailable.
     #[arg(long)]
     no_diagnostics: bool,
+    /// Listen address of every listener; `0.0.0.0` and `::` are accepted
+    /// (clients are told the loopback address).
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
+    /// The data services to start (comma-separated: firestore, auth,
+    /// storage, functions, pubsub; `extensions` means functions). Default:
+    /// every service. Eventarc and Tasks follow Functions; the hub always runs.
+    #[arg(long)]
+    only: Option<String>,
+    /// Do not start the Emulator UI (nor the logging emulator), as
+    /// `emulators.ui.enabled: false` does officially.
+    #[arg(long = "no-ui")]
+    no_ui: bool,
+    /// `emulators.singleProjectMode`: warn about requests naming another
+    /// project (default true).
+    #[arg(long = "single-project-mode", value_name = "BOOL")]
+    single_project_mode: Option<bool>,
+    /// Append every suite log record to this file (`--debug`).
+    #[arg(long = "debug-log")]
+    debug_log: Option<PathBuf>,
     /// Firebase project root used as the Functions host working directory.
     #[arg(long = "project-dir", default_value = ".")]
     project_dir: PathBuf,
@@ -389,14 +408,14 @@ struct SuiteArgs {
     hub_port: Option<u16>,
     #[arg(long = "ui-port")]
     ui_port: Option<u16>,
-    #[arg(long = "firestore-websocket-port", default_value_t = 9150)]
-    firestore_websocket_port: u16,
-    #[arg(long = "logging-port", default_value_t = 21007)]
-    logging_port: u16,
-    #[arg(long = "eventarc-port", default_value_t = 21008)]
-    eventarc_port: u16,
-    #[arg(long = "tasks-port", default_value_t = 21009)]
-    tasks_port: u16,
+    #[arg(long = "firestore-websocket-port")]
+    firestore_websocket_port: Option<u16>,
+    #[arg(long = "logging-port")]
+    logging_port: Option<u16>,
+    #[arg(long = "eventarc-port")]
+    eventarc_port: Option<u16>,
+    #[arg(long = "tasks-port")]
+    tasks_port: Option<u16>,
 }
 
 fn main() -> ExitCode {
@@ -548,9 +567,51 @@ fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
 struct FirebaseProjectConfig {
     #[serde(default)]
     emulators: FirebaseEmulators,
-    firestore: Option<FirebaseFirestoreConfig>,
+    #[serde(default)]
+    firestore: Option<FirebaseFirestoreSection>,
     #[serde(default)]
     storage: Option<FirebaseStorageSection>,
+}
+
+/// `firestore` is one database's settings or a list of named databases.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FirebaseFirestoreSection {
+    Single(FirebaseFirestoreConfig),
+    Databases(Vec<FirebaseFirestoreConfig>),
+}
+
+impl FirebaseFirestoreSection {
+    /// The entry for `(default)` (an entry without `database` counts), and
+    /// the other named databases.
+    fn split(
+        &self,
+    ) -> (
+        Option<&FirebaseFirestoreConfig>,
+        Vec<&FirebaseFirestoreConfig>,
+    ) {
+        match self {
+            Self::Single(config) => (Some(config), Vec::new()),
+            Self::Databases(configs) => {
+                let default = configs.iter().find(|config| {
+                    config
+                        .database
+                        .as_deref()
+                        .is_none_or(|database| database == "(default)")
+                });
+                let others = configs
+                    .iter()
+                    .filter(|config| {
+                        config
+                            .database
+                            .as_deref()
+                            .is_some_and(|database| database != "(default)")
+                    })
+                    .collect();
+                (default, others)
+            }
+        }
+    }
 }
 
 /// `storage` is either one rules file for every bucket or a list of targets.
@@ -568,22 +629,41 @@ struct FirebaseStorageRules {
 
 #[derive(Debug, Default, Deserialize)]
 struct FirebaseEmulators {
-    firestore: Option<FirebaseEmulatorEndpoint>,
+    firestore: Option<FirebaseFirestoreEndpoint>,
     auth: Option<FirebaseEmulatorEndpoint>,
     storage: Option<FirebaseEmulatorEndpoint>,
     functions: Option<FirebaseEmulatorEndpoint>,
     pubsub: Option<FirebaseEmulatorEndpoint>,
     hub: Option<FirebaseEmulatorEndpoint>,
-    ui: Option<FirebaseEmulatorEndpoint>,
+    ui: Option<FirebaseUiEndpoint>,
+    logging: Option<FirebaseEmulatorEndpoint>,
+    eventarc: Option<FirebaseEmulatorEndpoint>,
+    tasks: Option<FirebaseEmulatorEndpoint>,
+    #[serde(rename = "singleProjectMode")]
+    single_project_mode: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct FirebaseEmulatorEndpoint {
     port: Option<u16>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct FirebaseFirestoreEndpoint {
+    port: Option<u16>,
+    #[serde(rename = "websocketPort")]
+    websocket_port: Option<u16>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FirebaseUiEndpoint {
+    port: Option<u16>,
+    enabled: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 struct FirebaseFirestoreConfig {
+    database: Option<String>,
     rules: Option<PathBuf>,
     indexes: Option<PathBuf>,
 }
@@ -653,24 +733,53 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
     let firebase_json = project_path(&project_dir, &arguments.config);
     let firebase_rc = project_path(&project_dir, &arguments.firebase_rc);
     let raw_config = read_json::<FirebaseProjectConfig>(&firebase_json)?;
-    let targets = read_json::<FirebaseRc>(&firebase_rc)?;
+    // Most projects have no `.firebaserc`; only Storage targets are read
+    // from it.
+    let targets = if firebase_rc.is_file() {
+        read_json::<FirebaseRc>(&firebase_rc)?
+    } else {
+        FirebaseRc::default()
+    };
     let storage_overrides = parse_storage_overrides(&arguments.storage_buckets)?;
     let config_dir = firebase_json
         .parent()
         .ok_or_else(|| "firebase.json has no parent directory".to_owned())?
         .to_owned();
+    let services = match arguments.only.as_deref() {
+        Some(only) => ServiceSelection::parse(only)?,
+        None => ServiceSelection::ALL,
+    };
     let (storage_rules, default_bucket) = resolve_storage_rules(
         &config_dir,
         raw_config.storage.as_ref(),
         &targets,
         &arguments.project_id,
         &storage_overrides,
+        services.storage,
     )?;
-    let firestore = raw_config.firestore.as_ref();
+    let firestore = default_firestore_config(raw_config.firestore.as_ref());
     let ports = resolve_suite_ports(arguments, &raw_config.emulators);
+    let ui_enabled = !arguments.no_ui
+        && raw_config
+            .emulators
+            .ui
+            .as_ref()
+            .and_then(|ui| ui.enabled)
+            .unwrap_or(true);
     Ok(SuiteConfig {
         host: arguments.host.clone(),
         project_id: arguments.project_id.clone(),
+        services,
+        ui_enabled,
+        single_project_mode: arguments
+            .single_project_mode
+            .or(raw_config.emulators.single_project_mode)
+            .unwrap_or(true),
+        debug_log: arguments
+            .debug_log
+            .as_deref()
+            .map(absolute_path)
+            .transpose()?,
         project_dir,
         firebase_json,
         inspect_functions: match arguments.inspect_functions.as_deref() {
@@ -711,12 +820,38 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
     })
 }
 
+/// The `(default)` database's rules/indexes entry; other named databases are
+/// announced.
+fn default_firestore_config(
+    section: Option<&FirebaseFirestoreSection>,
+) -> Option<&FirebaseFirestoreConfig> {
+    let (firestore, other_databases) =
+        section.map_or((None, Vec::new()), FirebaseFirestoreSection::split);
+    if !other_databases.is_empty() {
+        // The official emulator answers `Cloud Firestore Emulator does not
+        // support multiple databases yet.` and loads no rules at all;
+        // Fireside serves every database and applies the `(default)` entry's
+        // rules and indexes to it until per-database rules land.
+        eprintln!(
+            "fireside firestore: firebase.json configures {} additional Firestore database(s) ({}); the (default) entry's rules and indexes govern every database",
+            other_databases.len(),
+            other_databases
+                .iter()
+                .filter_map(|config| config.database.as_deref())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    firestore
+}
+
 fn resolve_storage_rules(
     config_dir: &std::path::Path,
     storage: Option<&FirebaseStorageSection>,
     firebase_rc: &FirebaseRc,
     project: &str,
     overrides: &BTreeMap<String, String>,
+    storage_selected: bool,
 ) -> Result<(StorageRulesConfig, String), String> {
     let storage = match storage {
         // The official emulator governs every bucket with the one file and
@@ -728,7 +863,19 @@ fn resolve_storage_rules(
             ));
         }
         Some(FirebaseStorageSection::Targets(targets)) => targets.as_slice(),
-        None => &[],
+        // No `storage` section: a demo project gets the official default
+        // (open) rules; a real project must configure rules, as officially.
+        None if !storage_selected || project.starts_with("demo-") => {
+            return Ok((
+                StorageRulesConfig::OpenDefault,
+                format!("{project}.appspot.com"),
+            ));
+        }
+        None => {
+            return Err(
+                "Cannot start the Storage emulator without rules file specified in firebase.json: run 'fireside init' and set up your Storage configuration, or use a demo-* project ID for the default open rules".to_owned(),
+            );
+        }
     };
     let project_targets = firebase_rc.targets.get(project);
     let mut buckets = Vec::with_capacity(storage.len());
@@ -777,23 +924,39 @@ fn parse_storage_overrides(values: &[String]) -> Result<BTreeMap<String, String>
 }
 
 fn resolve_suite_ports(arguments: &SuiteArgs, config: &FirebaseEmulators) -> SuitePorts {
-    let port = |argument: Option<u16>, configured: &Option<FirebaseEmulatorEndpoint>, fallback| {
-        argument
-            .or_else(|| configured.as_ref().and_then(|endpoint| endpoint.port))
-            .unwrap_or(fallback)
+    let port = |argument: Option<u16>, configured: Option<u16>, fallback| {
+        argument.or(configured).unwrap_or(fallback)
+    };
+    let endpoint = |endpoint: &Option<FirebaseEmulatorEndpoint>| {
+        endpoint.as_ref().and_then(|endpoint| endpoint.port)
     };
     SuitePorts {
-        firestore: port(arguments.firestore_port, &config.firestore, 8080),
-        auth: port(arguments.auth_port, &config.auth, 9099),
-        storage: port(arguments.storage_port, &config.storage, 9199),
-        functions: port(arguments.functions_port, &config.functions, 5001),
-        pubsub: port(arguments.pubsub_port, &config.pubsub, 8085),
-        hub: port(arguments.hub_port, &config.hub, 4400),
-        ui: port(arguments.ui_port, &config.ui, 4000),
-        firestore_websocket: arguments.firestore_websocket_port,
-        logging: arguments.logging_port,
-        eventarc: arguments.eventarc_port,
-        tasks: arguments.tasks_port,
+        firestore: port(
+            arguments.firestore_port,
+            config.firestore.as_ref().and_then(|endpoint| endpoint.port),
+            8080,
+        ),
+        auth: port(arguments.auth_port, endpoint(&config.auth), 9099),
+        storage: port(arguments.storage_port, endpoint(&config.storage), 9199),
+        functions: port(arguments.functions_port, endpoint(&config.functions), 5001),
+        pubsub: port(arguments.pubsub_port, endpoint(&config.pubsub), 8085),
+        hub: port(arguments.hub_port, endpoint(&config.hub), 4400),
+        ui: port(
+            arguments.ui_port,
+            config.ui.as_ref().and_then(|ui| ui.port),
+            4000,
+        ),
+        firestore_websocket: port(
+            arguments.firestore_websocket_port,
+            config
+                .firestore
+                .as_ref()
+                .and_then(|endpoint| endpoint.websocket_port),
+            9150,
+        ),
+        logging: port(arguments.logging_port, endpoint(&config.logging), 4500),
+        eventarc: port(arguments.eventarc_port, endpoint(&config.eventarc), 9299),
+        tasks: port(arguments.tasks_port, endpoint(&config.tasks), 9499),
     }
 }
 
@@ -2026,6 +2189,7 @@ mod tests {
             &firebase_rc,
             "demo-single",
             &BTreeMap::new(),
+            true,
         )
         .expect("single file resolves without targets");
         assert_eq!(

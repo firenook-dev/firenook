@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_clients() {
     for enabled in [false, true] {
         let mut listeners = BTreeMap::new();
@@ -27,9 +28,13 @@ async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_c
         let applications = applications(enabled);
         let (shutdown, _) = watch::channel(false);
         let (failed, mut failures) = mpsc::unbounded_channel();
+        let config = test_config();
+        let logging = LoggingRuntime::new();
         let servers = spawn_static_servers(
+            &config,
             &mut ListenerSet(listeners),
             applications,
+            &logging,
             &shutdown,
             &failed,
         )
@@ -123,14 +128,56 @@ fn applications(enabled: bool) -> StaticApplications {
         TriggerRegistry::default(),
     );
     StaticApplications {
-        project_id: "demo-diagnostics".to_owned(),
-        firestore: tonic::service::Routes::from(rest),
+        firestore: Some(tonic::service::Routes::from(rest)),
         request_history: history,
         // Unrelated services are inert shells in this listener-assembly test.
-        auth: Router::new(),
-        storage: Router::new(),
+        auth: Some(Router::new()),
+        storage: Some(Router::new()),
         hub: Router::new(),
-        ui: Router::new(),
+        ui: Some(Router::new()),
         logging: Router::new(),
+    }
+}
+
+fn test_config() -> SuiteConfig {
+    let root = std::env::temp_dir();
+    SuiteConfig {
+        host: "127.0.0.1".into(),
+        project_id: "demo-diagnostics".into(),
+        services: ServiceSelection::ALL,
+        ui_enabled: true,
+        single_project_mode: true,
+        debug_log: None,
+        project_dir: root.clone(),
+        firebase_json: root.join("firebase.json"),
+        node: root.clone(),
+        inspect_functions: None,
+        offline: true,
+        ui_archive: root.clone(),
+        state_dir: root.join("state"),
+        resume_state: false,
+        firestore_in_memory: true,
+        durability: fireside_core_store::DiskDurability::default(),
+        diagnostics: true,
+        firestore_rules: None,
+        firestore_indexes: None,
+        storage_rules: StorageRulesConfig::OpenDefault,
+        default_bucket: "demo-diagnostics.appspot.com".into(),
+        import: None,
+        export_on_exit: None,
+        ports: SuitePorts {
+            firestore: 1,
+            auth: 2,
+            storage: 3,
+            functions: 4,
+            pubsub: 5,
+            hub: 6,
+            ui: 7,
+            firestore_websocket: 8,
+            logging: 9,
+            eventarc: 10,
+            tasks: 11,
+        },
+        minimum_functions: 0,
     }
 }

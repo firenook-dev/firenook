@@ -1,5 +1,7 @@
 //! Bounded log replay with an atomic replay/live boundary and owned lifetimes.
 use std::collections::VecDeque;
+use std::io::Write as _;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -48,9 +50,23 @@ impl LoggingRuntime {
                 live,
                 shutdown,
                 slots: Arc::new(Semaphore::new(MAXIMUM_SUBSCRIBERS)),
+                file: Arc::new(Mutex::new(None)),
             },
             _owner: Arc::new(owner),
         }
+    }
+
+    /// Appends every record from now on to `path` as one text line
+    /// (`[LEVEL] [timestamp] [emulator] message`), the `--debug-log` file.
+    /// The file is opened for append and never truncated or deleted by the
+    /// suite.
+    pub fn set_file_sink(&self, path: &Path) -> std::io::Result<()> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        *lock(&self.state.file) = Some(file);
+        Ok(())
     }
 
     /// Router accepting bounded log WebSocket connections on any path.
@@ -85,6 +101,18 @@ impl LoggingRuntime {
             encoded = serde_json::to_string(&record).expect("omission is JSON serializable");
         }
         let encoded: Arc<str> = encoded.into();
+        if let Some(file) = lock(&self.state.file).as_mut() {
+            let line = format!(
+                "[{}] [{}] [{}] {}\n",
+                record.level,
+                record.timestamp,
+                emulator.unwrap_or("suite"),
+                record.message
+            );
+            // A full disk or a removed file must not stop the suite; the
+            // in-memory replay keeps serving the UI.
+            let _ = file.write_all(line.as_bytes());
+        }
         let mut history = lock(&self.state.history);
         if history.len() == LOG_REPLAY_CAPACITY {
             history.pop_front();
@@ -138,6 +166,7 @@ pub(super) struct LoggingState {
     pub(super) live: broadcast::Sender<Arc<str>>,
     pub(super) slots: Arc<Semaphore>,
     shutdown: watch::Receiver<bool>,
+    file: Arc<Mutex<Option<std::fs::File>>>,
 }
 
 async fn upgrade(State(state): State<LoggingState>, websocket: WebSocketUpgrade) -> Response {
