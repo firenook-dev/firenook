@@ -348,8 +348,10 @@ accounting. Errors preserve their original expression position when propagated.
 
 The opt-in runtime exposes serialized coverage to its caller; this component is
 not yet wired to shipping HTTP/HTML reports. Successful reloads (even identical
-source) reset counters, invalid reloads preserve them, and project histories are
-isolated. Namespace expressions are omitted from source layout. The new capture
+source) reset counters, invalid reloads preserve them, and histories are
+isolated per database (each database evaluates its own ruleset, so the
+project report route covers `(default)` unless `?database=` names another).
+Namespace expressions are omitted from source layout. The new capture
 also records the jar rejecting a function parameter named `duration`; Fireside's
 compiler currently accepts it. That is a tracked Phase C correction, not a
 claim of complete compiler compatibility.
@@ -363,7 +365,7 @@ compatibility guarantee. Fixture comparisons retain all members and duplicates
 while ignoring only the observed map-difference set's hash iteration order.
 
 `benchmarks/phase-b-coverage.json` pins coverage-specific limits before overhead
-qualification: 16 MiB charged retained state, four project histories, ten-minute
+qualification: 16 MiB charged retained state, four database histories, ten-minute
 idle expiry, 128 distinct complete values per expression, 64 KiB per value and
 32 MiB per complete JSON report. Tree/index/source metadata is conservatively
 charged before admission. Contended operations do not wait for diagnostics;

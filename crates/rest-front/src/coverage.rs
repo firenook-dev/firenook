@@ -1,9 +1,10 @@
 //! Local-only diagnostic reports: borrowed runtime serialization, bounded HTTP ownership.
 use super::{
-    Body, CONTENT_TYPE, HeaderValue, IntoResponse, Json, Path, Response, RestError, RestState,
-    State, StatusCode, json,
+    Body, CONTENT_TYPE, HeaderValue, IntoResponse, Json, Path, Query, Response, RestError,
+    RestState, State, StatusCode, json,
 };
 use axum::body::Bytes;
+use fireside_core_store::DatabaseName;
 use fireside_rules_runtime::coverage::CoverageError;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -16,9 +17,13 @@ pub(super) async fn script() -> Response {
     document("text/javascript; charset=utf-8", SCRIPT.into())
 }
 
+/// The project-level report route, as officially. The report covers the
+/// `(default)` database unless `?database=<id>` names another one of the
+/// project's databases, since each database evaluates its own ruleset.
 pub(super) async fn report(
     State(state): State<RestState>,
     Path(operation): Path<String>,
+    Query(parameters): Query<Vec<(String, String)>>,
 ) -> Response {
     let Some((project, suffix)) = operation.split_once(':') else {
         return RestError::not_found("unknown emulator project operation").into_response();
@@ -32,6 +37,14 @@ pub(super) async fn report(
     if suffix != "ruleCoverage" {
         return RestError::not_found("unknown emulator project operation").into_response();
     }
+    let database_id = parameters
+        .iter()
+        .find(|(name, _)| name == "database")
+        .map_or("(default)", |(_, value)| value.as_str());
+    let database = match DatabaseName::new(project, database_id) {
+        Ok(database) => database,
+        Err(error) => return RestError::invalid(error.to_string()).into_response(),
+    };
     // One complete serialized report across this shared router, including a
     // returned body or a frame still owned by Hyper/a slow reader. No waiter.
     let Ok(permit) = state.coverage_slots.try_acquire_owned() else {
@@ -40,13 +53,12 @@ pub(super) async fn report(
             "Coverage report already in flight; close the other request and retry",
         );
     };
-    let project = project.to_owned();
     // Keep serialization off the async transport worker; the permit also owns
     // queued/running work if the caller disconnects while the worker is active.
     let serialized = tokio::task::spawn_blocking(move || {
         state
             .rules
-            .coverage_json(&project)
+            .coverage_json(&database)
             .map(|bytes| ReportBytes {
                 bytes,
                 _permit: permit,
@@ -72,7 +84,7 @@ pub(super) async fn report(
                 ),
                 CoverageError::NoRules => (
                     StatusCode::NOT_FOUND,
-                    "No Security Rules source is installed for this project",
+                    "No Security Rules source is installed for this database",
                 ),
                 CoverageError::Busy => (
                     StatusCode::SERVICE_UNAVAILABLE,

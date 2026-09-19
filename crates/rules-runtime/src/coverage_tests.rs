@@ -1,6 +1,6 @@
 use super::*;
 use crate::{Authorization, RulesRuntime, SnapshotAccess, request_history::RequestHistory};
-use fireside_core_store::{Store, StoreOptions};
+use fireside_core_store::{DatabaseName, Store, StoreOptions};
 use fireside_rules_engine::{
     EmptyDocumentAccess, EvaluationRequest, RequestOperation, Resource, Timestamp, Value, compile,
 };
@@ -211,46 +211,106 @@ fn reload_project_isolation_and_nonblocking_contention_are_explicit() {
     );
     let request = request();
     let authorization = Authorization::Client(None);
+    let database = DatabaseName::new("demo-coverage", "(default)").unwrap();
+    let other_project = DatabaseName::new("demo-other", "(default)").unwrap();
     assert!(
         runtime
-            .evaluate("demo-coverage", &authorization, &request, &access)
+            .evaluate(&database, &authorization, &request, &access)
             .allowed
     );
-    let first: Json =
-        serde_json::from_slice(&runtime.coverage_json("demo-coverage").unwrap()).unwrap();
+    let first: Json = serde_json::from_slice(&runtime.coverage_json(&database).unwrap()).unwrap();
     assert_eq!(first["report"][0]["values"][0]["count"], 1);
     let other: Json =
-        serde_json::from_slice(&runtime.coverage_json("demo-other").unwrap()).unwrap();
+        serde_json::from_slice(&runtime.coverage_json(&other_project).unwrap()).unwrap();
     assert!(other["report"][0].get("values").is_none());
     assert!(runtime.install_project("demo-coverage", "broken").is_err());
     assert_eq!(
-        serde_json::from_slice::<Json>(&runtime.coverage_json("demo-coverage").unwrap()).unwrap()["report"],
+        serde_json::from_slice::<Json>(&runtime.coverage_json(&database).unwrap()).unwrap()["report"],
         first["report"]
     );
     runtime.install_project("demo-coverage", &source).unwrap();
-    let reset: Json =
-        serde_json::from_slice(&runtime.coverage_json("demo-coverage").unwrap()).unwrap();
+    let reset: Json = serde_json::from_slice(&runtime.coverage_json(&database).unwrap()).unwrap();
     assert!(reset["report"][0].get("values").is_none());
     let coverage = runtime.coverage.as_ref().unwrap();
     let guard = coverage.state.lock().unwrap();
-    assert_eq!(
-        runtime.coverage_json("demo-coverage"),
-        Err(CoverageError::Busy)
-    );
+    assert_eq!(runtime.coverage_json(&database), Err(CoverageError::Busy));
     assert!(
         runtime
-            .evaluate("demo-coverage", &authorization, &request, &access)
+            .evaluate(&database, &authorization, &request, &access)
             .allowed
     );
     drop(guard);
     assert_eq!(
-        report(coverage, &runtime.rules_for("demo-coverage").unwrap())["firesideCoverage"]["omittedOperations"],
+        serde_json::from_slice::<Json>(
+            &coverage
+                .report(
+                    &database.to_string(),
+                    &runtime.rules_for(&database).unwrap()
+                )
+                .unwrap()
+        )
+        .unwrap()["firesideCoverage"]["omittedOperations"],
         1
     );
     assert_eq!(
-        RulesRuntime::default().coverage_json("demo-coverage"),
+        RulesRuntime::default().coverage_json(&database),
         Err(CoverageError::Disabled)
     );
+}
+
+#[test]
+fn databases_of_one_project_keep_separate_counters_and_rulesets() {
+    let runtime = RulesRuntime::with_request_history(RequestHistory::default());
+    let default_source = source("request.method == 'get'");
+    runtime.install_default(&default_source).unwrap();
+    let other = DatabaseName::new("demo-coverage", "other").unwrap();
+    runtime
+        .install_database(&other, &source("request.method != 'get'"))
+        .unwrap();
+    let access = SnapshotAccess::current(
+        Store::new(StoreOptions::default()).snapshot(),
+        "demo-coverage",
+    );
+    let authorization = Authorization::Client(None);
+    let default = DatabaseName::new("demo-coverage", "(default)").unwrap();
+    assert!(
+        runtime
+            .evaluate(&default, &authorization, &request(), &access)
+            .allowed
+    );
+    let other_request = EvaluationRequest::new(
+        RequestOperation::Get,
+        "/databases/other/documents/items/one",
+        Timestamp::new(0, 0),
+    );
+    for _ in 0..2 {
+        assert!(
+            !runtime
+                .evaluate(&other, &authorization, &other_request, &access)
+                .allowed
+        );
+    }
+    // Alternating databases never evict or reset each other's history.
+    assert!(
+        runtime
+            .evaluate(&default, &authorization, &request(), &access)
+            .allowed
+    );
+    let default_report: Json =
+        serde_json::from_slice(&runtime.coverage_json(&default).unwrap()).unwrap();
+    let other_report: Json =
+        serde_json::from_slice(&runtime.coverage_json(&other).unwrap()).unwrap();
+    assert_eq!(default_report["report"][0]["values"][0]["count"], 2);
+    assert_eq!(
+        default_report["rules"]["files"][0]["content"],
+        default_source
+    );
+    assert_eq!(other_report["report"][0]["values"][0]["count"], 2);
+    assert_eq!(
+        other_report["rules"]["files"][0]["content"],
+        source("request.method != 'get'")
+    );
+    assert_eq!(default_report["firesideCoverage"]["evictedProjects"], 0);
 }
 
 #[test]
