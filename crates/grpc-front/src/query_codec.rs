@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fireside_query_engine::{
+use firenook_query_engine::{
     Aggregation, Direction, DistanceMeasure, FieldFilter, FieldOperator, FieldPath, Filter, Limit,
     Query, QueryScope,
 };
@@ -121,7 +121,7 @@ fn decode_nearest(query: Query, nearest: FindNearest) -> Result<Query, Status> {
     let query_vector = nearest
         .query_vector
         .ok_or_else(|| Status::invalid_argument("query vector is required"))?;
-    let fireside_core_store::Value::Vector(query_vector) = decode_value(query_vector)? else {
+    let firenook_core_store::Value::Vector(query_vector) = decode_value(query_vector)? else {
         return Err(Status::invalid_argument(
             "query vector must be a vector value",
         ));
@@ -276,17 +276,17 @@ fn decode_filter(
             let (operator, value) = match UnaryOperator::try_from(filter.op) {
                 Ok(UnaryOperator::IsNan) => (
                     FieldOperator::Equal,
-                    fireside_core_store::Value::Double(f64::NAN),
+                    firenook_core_store::Value::Double(f64::NAN),
                 ),
                 Ok(UnaryOperator::IsNull) => {
-                    (FieldOperator::Equal, fireside_core_store::Value::Null)
+                    (FieldOperator::Equal, firenook_core_store::Value::Null)
                 }
                 Ok(UnaryOperator::IsNotNan) => (
                     FieldOperator::NotEqual,
-                    fireside_core_store::Value::Double(f64::NAN),
+                    firenook_core_store::Value::Double(f64::NAN),
                 ),
                 Ok(UnaryOperator::IsNotNull) => {
-                    (FieldOperator::NotEqual, fireside_core_store::Value::Null)
+                    (FieldOperator::NotEqual, firenook_core_store::Value::Null)
                 }
                 Ok(UnaryOperator::Unspecified) | Err(_) => {
                     return Err(Status::invalid_argument("invalid unary-filter operator"));
@@ -309,7 +309,7 @@ fn decode_field_reference(field: Option<FieldReference>) -> Result<FieldPath, St
     FieldPath::parse_wire(&path).map_err(|error| query_status(&error))
 }
 
-pub(crate) fn query_status(error: &fireside_query_engine::QueryError) -> Status {
+pub(crate) fn query_status(error: &firenook_query_engine::QueryError) -> Status {
     Status::invalid_argument(error.to_string())
 }
 
@@ -380,7 +380,7 @@ mod tests {
                         field_path: "embedding".to_owned(),
                     }),
                     query_vector: Some(
-                        crate::codec::encode_value(&fireside_core_store::Value::Vector(vec![
+                        crate::codec::encode_value(&firenook_core_store::Value::Vector(vec![
                             1.0, 0.0,
                         ]))
                         .expect("vector should encode"),

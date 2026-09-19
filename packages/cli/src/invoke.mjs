@@ -48,7 +48,7 @@ async function readResponse(response) {
 export async function listFunctions(functions) {
   let response;
   try { response = await fetch(`${functions}/backends`, {signal:AbortSignal.timeout(10000)}); }
-  catch (error) { throw new Error(`no Functions emulator answered at ${functions}/backends (${describe(error)}); start it with fireside emulators:start`); }
+  catch (error) { throw new Error(`no Functions emulator answered at ${functions}/backends (${describe(error)}); start it with firenook emulators:start`); }
   if (!response.ok) throw new Error(`${functions}/backends answered HTTP ${response.status}`);
   const body = await response.json();
   const triggers = [];
@@ -247,10 +247,10 @@ export function buildEnvelope(trigger, project, eventData, opts, services = {}) 
   const kind = triggerKind(trigger);
   const event = trigger.eventTrigger;
   switch (kind) {
-    case 'https': case 'callable': throw new Error(`${trigger.name} is an HTTPS${kind === 'callable' ? ' callable' : ''} function; call it with --data (or a plain fireside functions:invoke ${trigger.name}), not --event-data`);
+    case 'https': case 'callable': throw new Error(`${trigger.name} is an HTTPS${kind === 'callable' ? ' callable' : ''} function; call it with --data (or a plain firenook functions:invoke ${trigger.name}), not --event-data`);
     case 'blocking': throw new Error(`${trigger.name} is an Auth blocking function; the Auth emulator calls it during sign-in/sign-up flows`);
-    case 'database': throw new Error(`${trigger.name} listens to Realtime Database, which Fireside does not emulate`);
-    case 'unknown': throw new Error(`${trigger.name} has no trigger Fireside can drive`);
+    case 'database': throw new Error(`${trigger.name} listens to Realtime Database, which Firenook does not emulate`);
+    case 'unknown': throw new Error(`${trigger.name} has no trigger Firenook can drive`);
     case 'taskQueue': return {kind, transport:'tasks', task:{httpRequest:{url:'', oidcToken:{serviceAccountEmail:EMULATED_SERVICE_ACCOUNT}, body:Buffer.from(JSON.stringify({data:eventData ?? {}})).toString('base64'), headers:{'Content-Type':'application/json'}}}};
     case 'firestore': return {kind, transport:'functions', ...firestoreEnvelope(trigger, project, eventData, opts)};
     case 'storage': return {kind, transport:'functions', ...storageEnvelope(trigger, project, eventData, opts, services.storage)};
@@ -268,8 +268,8 @@ export function buildEnvelope(trigger, project, eventData, opts, services = {}) 
 export async function resolveTriggerKey(functions, project, trigger) {
   const route = key => `${functions}/functions/projects/${encodeURIComponent(project)}/triggers/${key}`;
   let probe;
-  try { probe = await fetch(route(`fireside-probe-${randomUUID()}`), {method:'POST', headers:{'content-type':'application/json'}, body:'{}', signal:AbortSignal.timeout(10000)}); }
-  catch (error) { throw new Error(`no Functions emulator answered at ${functions} (${describe(error)}); start it with fireside emulators:start`); }
+  try { probe = await fetch(route(`firenook-probe-${randomUUID()}`), {method:'POST', headers:{'content-type':'application/json'}, body:'{}', signal:AbortSignal.timeout(10000)}); }
+  catch (error) { throw new Error(`no Functions emulator answered at ${functions} (${describe(error)}); start it with firenook emulators:start`); }
   const text = await probe.text();
   const listed = /valid functions are:\s*(.*)$/s.exec(text);
   if (probe.status !== 404 || !listed) throw new Error(`Unexpected answer from the Functions trigger route (HTTP ${probe.status}): ${text.slice(0, 200)}`);
@@ -309,7 +309,7 @@ export async function runInvoke(name, options, cwd = process.cwd()) {
     }
     let response;
     try { response = await fetch(url, {method, headers, body}); }
-    catch (error) { throw new Error(`no Functions emulator answered at ${url} (${describe(error)}); start it with fireside emulators:start`); }
+    catch (error) { throw new Error(`no Functions emulator answered at ${url} (${describe(error)}); start it with firenook emulators:start`); }
     return {function:name, region, transport:'https', method, url, ...await readResponse(response)};
   }
   const opts = {params:jsonOption(options.params, '--params'), auth:eventAuth(jsonOption(options.auth, '--auth')), resource:options.resource, eventType:options['event-type']};
@@ -352,7 +352,7 @@ export async function invokeFunction(name, options, cwd = process.cwd(), log = c
   if (options.json) { log.log(JSON.stringify(result, null, 2)); return result.ok ? 0 : 1; }
   if (result.transport !== 'https') {
     const via = {functions:`trigger key ${result.key}`, pubsub:`the Pub/Sub emulator (topic ${result.topic})`, tasks:'the Cloud Tasks emulator'}[result.transport];
-    log.error(`Fireside: ${[result.kind, 'event', result.eventType].filter(Boolean).join(' ')} for ${result.function} (${result.region}, ${result.platform}) via ${via}`);
+    log.error(`Firenook: ${[result.kind, 'event', result.eventType].filter(Boolean).join(' ')} for ${result.function} (${result.region}, ${result.platform}) via ${via}`);
   }
   log.log(`${result.status} ${result.statusText} ${result.url}`);
   if (result.body !== '' && result.body !== undefined) log.log(typeof result.body === 'string' ? result.body : JSON.stringify(result.body));

@@ -1,5 +1,5 @@
 // Phase H1 synthetic project shared by the official-emulator capture and the
-// Fireside replay: profiles, port reservation and the on-disk project layout
+// Firenook replay: profiles, port reservation and the on-disk project layout
 // (six user codebases, one local extension, dotenv chains, secrets, rules).
 import { mkdir, writeFile, symlink } from "node:fs/promises";
 import { createServer as createTcpServer } from "node:net";

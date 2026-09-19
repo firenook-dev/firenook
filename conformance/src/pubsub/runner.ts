@@ -1,5 +1,5 @@
 // Phase J1: the step executor shared by the official-emulator capture and the
-// Fireside replay, so both sides drive the transports and normalize the
+// Firenook replay, so both sides drive the transports and normalize the
 // results identically.
 import type { Json, PushEndpoint, PushRequest, RunningEmulator } from "./client.ts";
 import { httpCall } from "./client.ts";

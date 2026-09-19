@@ -74,7 +74,7 @@ test("raw Listen removes a malformed-token target without closing the stream", a
   const responses = rawResponseQueue(stream);
   const query = {
     parent: `${database}/documents/runs/${runId}`,
-    structuredQuery: { from: [{ collectionId: "fireside_conformance" }] },
+    structuredQuery: { from: [{ collectionId: "firenook_conformance" }] },
   } as const;
 
   context.after(async () => {
@@ -115,7 +115,7 @@ test("query listeners deliver an initial snapshot and ordered changes", async (c
   const configuration = resolveTarget(process.env);
   const firestore = createFirestore(configuration);
   const collection = firestore.collection(
-    `runs/${randomUUID()}/fireside_conformance`,
+    `runs/${randomUUID()}/firenook_conformance`,
   );
   const alpha = collection.doc("alpha");
   const beta = collection.doc("beta");
@@ -165,7 +165,7 @@ test("raw Listen resumes after a CURRENT checkpoint without replaying prior docu
   const firestore = createFirestore(configuration);
   const rawFirestore = createV1Firestore(configuration);
   const runId = randomUUID();
-  const collection = firestore.collection(`runs/${runId}/fireside_conformance`);
+  const collection = firestore.collection(`runs/${runId}/firenook_conformance`);
   const alpha = collection.doc("alpha");
   const beta = collection.doc("beta");
   const database = `projects/${configuration.projectId}/databases/(default)`;
@@ -173,7 +173,7 @@ test("raw Listen resumes after a CURRENT checkpoint without replaying prior docu
     query: {
       parent: `${database}/documents/runs/${runId}`,
       structuredQuery: {
-        from: [{ collectionId: "fireside_conformance" }],
+        from: [{ collectionId: "firenook_conformance" }],
         orderBy: [
           { field: { fieldPath: "rank" }, direction: "ASCENDING" },
         ],
@@ -318,7 +318,7 @@ test("raw Listen read_time delivers only changes after the historical snapshot",
   const firestore = createFirestore(configuration);
   const rawFirestore = createV1Firestore(configuration);
   const runId = randomUUID();
-  const collection = firestore.collection(`runs/${runId}/fireside_conformance`);
+  const collection = firestore.collection(`runs/${runId}/firenook_conformance`);
   const alpha = collection.doc("alpha");
   const beta = collection.doc("beta");
   const database = `projects/${configuration.projectId}/databases/(default)`;
@@ -344,7 +344,7 @@ test("raw Listen read_time delivers only changes after the historical snapshot",
       query: {
         parent: `${database}/documents/runs/${runId}`,
         structuredQuery: {
-          from: [{ collectionId: "fireside_conformance" }],
+          from: [{ collectionId: "firenook_conformance" }],
           orderBy: [
             { field: { fieldPath: "rank" }, direction: "ASCENDING" },
           ],
@@ -375,7 +375,7 @@ test("raw Listen falls back to the full target when read_time has expired", asyn
   const firestore = createFirestore(configuration);
   const rawFirestore = createV1Firestore(configuration);
   const runId = randomUUID();
-  const collection = firestore.collection(`runs/${runId}/fireside_conformance`);
+  const collection = firestore.collection(`runs/${runId}/firenook_conformance`);
   const alpha = collection.doc("alpha");
   const database = `projects/${configuration.projectId}/databases/(default)`;
   const stream = rawFirestore.listen({
@@ -396,7 +396,7 @@ test("raw Listen falls back to the full target when read_time has expired", asyn
       query: {
         parent: `${database}/documents/runs/${runId}`,
         structuredQuery: {
-          from: [{ collectionId: "fireside_conformance" }],
+          from: [{ collectionId: "firenook_conformance" }],
         },
       },
       targetId: 11,

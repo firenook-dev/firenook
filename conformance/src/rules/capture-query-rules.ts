@@ -34,7 +34,7 @@ if (external) {
 const output = resolve(argument("--output") ?? join(root, "conformance/fixtures/rules-v2/query-authorization"));
 await mkdir(output, { recursive: true });
 assert.deepEqual(await readdir(output), [], "capture output must be empty; never overwrite recorded oracle evidence");
-const temporary = await mkdtemp(join(tmpdir(), "fireside-query-rules-"));
+const temporary = await mkdtemp(join(tmpdir(), "firenook-query-rules-"));
 const diagnosticLog = join(temporary, "capture.log");
 const logs: string[] = [];
 const children: ChildProcess[] = [];
@@ -79,7 +79,7 @@ try {
   };
   observations.push(await grpcListen(client, owner, mutation));
   await seedDocument(client, ownedPath, ownedFields);
-  await save("grpc.json", { target: external ? "fireside" : `official-java-v${version}`, startedAt, cases: queryRuleCases, observations });
+  await save("grpc.json", { target: external ? "firenook" : `official-java-v${version}`, startedAt, cases: queryRuleCases, observations });
   assert.ok(observations.every((value) => value.code >= 0), "capture timeout is not an oracle verdict; inspect grpc.json");
 
   if (!process.argv.includes("--grpc-only")) {
@@ -101,15 +101,15 @@ try {
       for (const variant of ["long-poll", "streaming"]) {
         const proxyPort = await reservePort();
         const proxyOrigin = `http://127.0.0.1:${proxyPort}`;
-        const proxy = start(process.env.FIRESIDE_CAPTURE_BINARY ?? join(root, "target/debug/fireside"), ["capture-proxy", "--host", "127.0.0.1", "--port", String(proxyPort), "--upstream", origin, "--hypothesis", "Query authorization is over potential results, independent of stored rows", "--target", external ? "fireside" : "java", "--target-version", targetVersion, "--sdk", "firebase@12.18.0", "--recorded-at", startedAt, "--transport", "web-channel"]);
-        await ready(`${proxyOrigin}/__fireside_capture/fixture`);
+        const proxy = start(process.env.FIRENOOK_CAPTURE_BINARY ?? join(root, "target/debug/firenook"), ["capture-proxy", "--host", "127.0.0.1", "--port", String(proxyPort), "--upstream", origin, "--hypothesis", "Query authorization is over potential results, independent of stored rows", "--target", external ? "firenook" : "java", "--target-version", targetVersion, "--sdk", "firebase@12.18.0", "--recorded-at", startedAt, "--transport", "web-channel"]);
+        await ready(`${proxyOrigin}/__firenook_capture/fixture`);
         // A separate proxy pool keeps cancelled WebChannel backchannels from
         // sharing upstream HTTP/1 connections with the SDK's unary REST count.
         // Neither rules, requests, nor responses are altered by this isolation.
         const countPort = await reservePort();
         const countOrigin = `http://127.0.0.1:${countPort}`;
-        const countProxy = start(process.env.FIRESIDE_CAPTURE_BINARY ?? join(root, "target/debug/fireside"), ["capture-proxy", "--host", "127.0.0.1", "--port", String(countPort), "--upstream", origin, "--hypothesis", "Aggregation uses the same potential-result rules as Listen", "--target", external ? "fireside" : "java", "--target-version", targetVersion, "--sdk", "firebase@12.18.0", "--recorded-at", startedAt, "--transport", "http1"]);
-        await ready(`${countOrigin}/__fireside_capture/fixture`);
+        const countProxy = start(process.env.FIRENOOK_CAPTURE_BINARY ?? join(root, "target/debug/firenook"), ["capture-proxy", "--host", "127.0.0.1", "--port", String(countPort), "--upstream", origin, "--hypothesis", "Aggregation uses the same potential-result rules as Listen", "--target", external ? "firenook" : "java", "--target-version", targetVersion, "--sdk", "firebase@12.18.0", "--recorded-at", startedAt, "--transport", "http1"]);
+        await ready(`${countOrigin}/__firenook_capture/fixture`);
         const page = await browser.newPage();
         const pageErrors: string[] = [];
         const consoleErrors: string[] = [];
@@ -131,8 +131,8 @@ try {
             values.push({ id: testCase.id, operation, result: value });
             if (![0, "permission-denied"].includes((value as { code: number | string }).code)) {
               await save(`${variant}-browser-failure.json`, { variant, pageErrors, consoleErrors, requestFailures, httpFailures, observations: values });
-              await save(`${variant}-wire.json`, await (await fetch(`${proxyOrigin}/__fireside_capture/fixture`)).json());
-              await save(`${variant}-aggregation-wire.json`, await (await fetch(`${countOrigin}/__fireside_capture/fixture`)).json());
+              await save(`${variant}-wire.json`, await (await fetch(`${proxyOrigin}/__firenook_capture/fixture`)).json());
+              await save(`${variant}-aggregation-wire.json`, await (await fetch(`${countOrigin}/__firenook_capture/fixture`)).json());
               throw new Error(`non-rules browser failure: ${testCase.id} ${operation}: ${JSON.stringify(value)}`);
             }
           }
@@ -144,9 +144,9 @@ try {
         await Promise.all(diagnostics);
         await page.close();
         await save(`${variant}-browser.json`, { variant, browserVersion: browser.version(), pageErrors, consoleErrors, requestFailures, httpFailures, observations: values });
-        const capture = await (await fetch(`${proxyOrigin}/__fireside_capture/fixture`)).json();
+        const capture = await (await fetch(`${proxyOrigin}/__firenook_capture/fixture`)).json();
         await save(`${variant}-wire.json`, capture);
-        await save(`${variant}-aggregation-wire.json`, await (await fetch(`${countOrigin}/__fireside_capture/fixture`)).json());
+        await save(`${variant}-aggregation-wire.json`, await (await fetch(`${countOrigin}/__firenook_capture/fixture`)).json());
         await stop(countProxy);
         await stop(proxy);
         verifyBrowserCapture({ variant, pageErrors, consoleErrors, requestFailures, httpFailures, observations: values } as BrowserCapture, { cases: queryRuleCases, observations });
@@ -158,7 +158,7 @@ try {
       await new Promise<void>((done) => staticServer.close(() => done()));
     }
   }
-  await save("metadata.json", { schemaVersion: 1, caseSet, target: external ? "fireside" : "official-java-emulator", version: targetVersion, javaJarSha256: external ? null : jarSha, capturedAt: startedAt, rulesSourceSha256: sha(queryRulesSource), syntheticOnly: true, authorizationHeadersStored: false, cases: queryRuleCases.length, temporaryDirectory: "<isolated-local-directory>", hostPathsOmitted: true, rawDiagnosticsStoredOutsideFixture: true, nodeVersion: process.version, platform: process.platform, sdk: "firebase@12.18.0", nativeClient: "@google-cloud/firestore@9.0.0", separateListenAndAggregationProxyPools: true });
+  await save("metadata.json", { schemaVersion: 1, caseSet, target: external ? "firenook" : "official-java-emulator", version: targetVersion, javaJarSha256: external ? null : jarSha, capturedAt: startedAt, rulesSourceSha256: sha(queryRulesSource), syntheticOnly: true, authorizationHeadersStored: false, cases: queryRuleCases.length, temporaryDirectory: "<isolated-local-directory>", hostPathsOmitted: true, rawDiagnosticsStoredOutsideFixture: true, nodeVersion: process.version, platform: process.platform, sdk: "firebase@12.18.0", nativeClient: "@google-cloud/firestore@9.0.0", separateListenAndAggregationProxyPools: true });
   await writeFile(join(output, "firestore.rules"), queryRulesSource);
   generated.push("firestore.rules");
 } finally {

@@ -49,7 +49,7 @@ for (const jar of ["cloud-firestore-emulator-v1.21.0.jar", "cloud-storage-rules-
   jarHashes[jar] = sha256(await readFile(join(cacheRoot, jar)));
 }
 
-const runRoot = await mkdtemp(join(tmpdir(), "fireside-phase-h-"));
+const runRoot = await mkdtemp(join(tmpdir(), "firenook-phase-h-"));
 const shortTmp = await mkdtemp("/tmp/fsph-");
 process.env.TMPDIR = shortTmp;
 process.stderr.write(`phase H capture root ${runRoot}\n`);
@@ -82,7 +82,7 @@ const fixture = {
   recordedAt: new Date().toISOString(),
   transport: "http",
   hypothesis:
-    "The official Functions emulator's HTTP contract (routes, statuses, bodies, callable envelopes, CORS), the envelopes and environment handlers observe for every supported trigger, its lifecycle behaviour and its Extensions resolution define what the owned Fireside runtime must reproduce; divergences are recorded in the fixture invariants, never adopted silently.",
+    "The official Functions emulator's HTTP contract (routes, statuses, bodies, callable envelopes, CORS), the envelopes and environment handlers observe for every supported trigger, its lifecycle behaviour and its Extensions resolution define what the owned Firenook runtime must reproduce; divergences are recorded in the fixture invariants, never adopted silently.",
   projectId: PROJECT_ID,
   cachedEmulatorSha256: jarHashes,
   syntheticSourceSha256: {

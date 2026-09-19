@@ -24,9 +24,14 @@ test("Phase 2 conformance plan matches the unchanged frozen manifest", async () 
     };
   };
 
+  // The sealed manifest keeps the harness script names it was frozen with;
+  // the scripts were renamed with the project and run the same commands.
+  const sealedScriptName = /\btest:fireside\b/gu;
   assert.deepEqual(
     existingConformanceCommands,
-    manifest.gates.existingConformance.commands,
+    manifest.gates.existingConformance.commands.map((command) =>
+      command.replace(sealedScriptName, "test:firenook"),
+    ),
   );
 });
 

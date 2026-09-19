@@ -1,4 +1,4 @@
-//! Pub/Sub emulator for the fireside emulator suite: the `google.pubsub.v1`
+//! Pub/Sub emulator for the firenook emulator suite: the `google.pubsub.v1`
 //! Publisher, Subscriber and `SchemaService` services and the `google.iam.v1`
 //! policy service over gRPC and HTTP/JSON on one port, with a broker that
 //! answers like the official `cloud-pubsub-emulator` (recorded corpus in
@@ -24,7 +24,7 @@ pub use functions::ScheduleDefinition;
 pub use runtime::PubsubRuntime;
 pub use scheduler::{ScheduleError, SchedulerRuntime};
 
-use fireside_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
+use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
 
 /// Generated Google API protocol types: the `google.pubsub.v1` services and
 /// the `google.iam.v1` policy service, with proto3 JSON serialization.

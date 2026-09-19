@@ -15,7 +15,7 @@ interface RestError {
 
 test("strict indexes enforce the production missing-index contract", async (context) => {
   const configuration = resolveTarget(process.env);
-  assert.equal(configuration.name, "fireside");
+  assert.equal(configuration.name, "firenook");
   assert.equal(process.env.CONFORMANCE_STRICT_INDEXES, "1");
 
   const firestore = createFirestore(configuration);
@@ -79,13 +79,13 @@ test("strict indexes enforce the production missing-index contract", async (cont
 
 test("strict indexes require an explicit vector configuration", async (context) => {
   const configuration = resolveTarget(process.env);
-  assert.equal(configuration.name, "fireside");
+  assert.equal(configuration.name, "firenook");
   assert.equal(process.env.CONFORMANCE_STRICT_INDEXES, "1");
 
   const firestore = createFirestore(configuration);
   const runId = randomUUID();
   const indexed = firestore.collection(
-    `runs/${runId}/fireside_vector_conformance`,
+    `runs/${runId}/firenook_vector_conformance`,
   );
   const missing = firestore.collection(`runs/${runId}/strict_vector_missing`);
   const documents = [indexed.doc("indexed"), missing.doc("missing")];

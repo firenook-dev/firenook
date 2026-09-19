@@ -26,10 +26,10 @@
     "officialFirestoreEmulator": "1.22.0"
   },
   "sequence": [
-    "fireside-memory-soak",
-    "fireside-disk-soak",
-    "fireside-2gib-import",
-    "fireside-sigkill-recovery",
+    "firenook-memory-soak",
+    "firenook-disk-soak",
+    "firenook-2gib-import",
+    "firenook-sigkill-recovery",
     "java-default-soak",
     "java-2gib-import",
     "java-crash-observation"
@@ -79,7 +79,7 @@
       "largeDocumentsPerSize": 200,
       "rawPayloadBytes": 613376000,
       "rawPayloadMiB": 584.9609375,
-      "maximumObservedFiresideRssBytes": 8589934592,
+      "maximumObservedFirenookRssBytes": 8589934592,
       "listenerDocumentCount": 8,
       "listenerDocumentIndexes": [0, 1, 2, 3, 4, 5, 6, 7],
       "seedBatchSize": 500
@@ -110,7 +110,7 @@
       "failFast": {
         "sustainedWindowSeconds": 3600,
         "maximumSlopeMultiple": 10,
-        "rule": "abort Fireside soak when trailing post-warm-up Theil-Sen slope is greater than 10x the immutable limit for a full 60-minute window"
+        "rule": "abort Firenook soak when trailing post-warm-up Theil-Sen slope is greater than 10x the immutable limit for a full 60-minute window"
       }
     },
     "latency": {
@@ -125,7 +125,7 @@
     "payloadBytesPerDocument": 32768,
     "minimumArtifactBytes": 2147483648,
     "maximumArtifactBytes": 2164260864,
-    "firesideMode": "redb with default-on WAL",
+    "firenookMode": "redb with default-on WAL",
     "maximumPeakRssBytes": 536870912,
     "rssSampleIntervalMilliseconds": 250,
     "verificationRandomReads": 10000,
@@ -185,7 +185,7 @@
     ]
   },
   "failurePolicy": {
-    "stopSequenceOnFirstFiresideGateFailure": true,
+    "stopSequenceOnFirstFirenookGateFailure": true,
     "preserveAllMetricsAndLogs": true,
     "automaticRetuneOrRerun": false,
     "tagOnFailure": false

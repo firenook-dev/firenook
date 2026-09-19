@@ -2,10 +2,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { join, resolve } from "node:path";
 
-const PROJECT_ID = "demo-fireside-import-remap";
+const PROJECT_ID = "demo-firenook-import-remap";
 const HOST = "127.0.0.1";
 const repositoryRoot = resolve(process.cwd(), "..");
-const executable = process.platform === "win32" ? "fireside.exe" : "fireside";
+const executable = process.platform === "win32" ? "firenook.exe" : "firenook";
 const overallMetadata = join(
   process.cwd(),
   "fixtures",
@@ -19,7 +19,7 @@ await run("cargo", [
   "--quiet",
   "--locked",
   "-p",
-  "fireside",
+  "firenook",
 ], repositoryRoot);
 const port = await reserveAvailablePort();
 const server = spawn(
@@ -49,7 +49,7 @@ try {
     process.cwd(),
     {
       ...process.env,
-      CONFORMANCE_TARGET: "fireside",
+      CONFORMANCE_TARGET: "firenook",
       FIRESTORE_EMULATOR_HOST: `${HOST}:${String(port)}`,
       GCLOUD_PROJECT: PROJECT_ID,
     },
@@ -114,14 +114,14 @@ async function waitUntilListening(
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null || server.signalCode !== null) {
-      throw new Error("fireside exited before its port became available");
+      throw new Error("firenook exited before its port became available");
     }
     if (await canConnect(port)) {
       return;
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
-  throw new Error("timed out waiting for fireside to listen");
+  throw new Error("timed out waiting for firenook to listen");
 }
 
 async function canConnect(port: number): Promise<boolean> {

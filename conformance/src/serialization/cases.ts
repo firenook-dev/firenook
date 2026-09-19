@@ -1,4 +1,4 @@
-export const serializationProject = "demo-fireside-map-serialization";
+export const serializationProject = "demo-firenook-map-serialization";
 export const serializationRepeats = 8;
 export const serializationCases = [
   { id: "flat", fields: { zulu: "last", alpha: "first", middle: true, number: 42, nullable: null } },

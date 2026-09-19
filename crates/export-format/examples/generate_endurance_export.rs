@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use fireside_core_store::{DatabaseName, DocumentKey, Value};
-use fireside_export_format::{ExportedDocument, write_export};
+use firenook_core_store::{DatabaseName, DocumentKey, Value};
+use firenook_export_format::{ExportedDocument, write_export};
 
-const PROJECT_ID: &str = "demo-fireside-endurance-import";
+const PROJECT_ID: &str = "demo-firenook-endurance-import";
 const DATABASE_ID: &str = "(default)";
 
 fn main() -> ExitCode {

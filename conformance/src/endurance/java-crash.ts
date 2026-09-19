@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { DurableLog } from "./durable-log.ts";
 import { startServer, type ServerHandle } from "./server.ts";
 
-const PROJECT_ID = "demo-fireside-java-crash";
+const PROJECT_ID = "demo-firenook-java-crash";
 const DATABASE_ROOT = `projects/${PROJECT_ID}/databases/(default)`;
 
 export async function observeJavaCrash(

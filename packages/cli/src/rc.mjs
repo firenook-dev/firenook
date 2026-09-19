@@ -31,7 +31,7 @@ function listAliases(rc, path, log) {
     for (const [alias, id] of entries) log.log(`${id === active ? '*' : ' '} ${alias} (${id})`);
   }
   log.log(active ? `Active project: ${active}` : 'No active project (projects.default is unset).');
-  log.log('Run fireside use --add <projectId> --alias <name> to define an alias, fireside use <alias|projectId> to activate one.');
+  log.log('Run firenook use --add <projectId> --alias <name> to define an alias, firenook use <alias|projectId> to activate one.');
 }
 
 // use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]
@@ -41,7 +41,7 @@ export function use(selection, options, cwd = process.cwd(), log = console) {
   const table = projects(rc);
   const modes = ['add', 'unalias', 'clear'].filter(name => options[name] !== undefined);
   if (modes.length > 1 || (modes.length && selection)) throw new Error('use takes one of: an alias or project id, --add, --unalias, --clear');
-  if (options.alias !== undefined && !selection && options.add === undefined) throw new Error('--alias needs the project id: fireside use --add <projectId> --alias <name>');
+  if (options.alias !== undefined && !selection && options.add === undefined) throw new Error('--alias needs the project id: firenook use --add <projectId> --alias <name>');
   if (options.add !== undefined) {
     assertId(options.add);
     const alias = options.alias || 'default';
@@ -86,13 +86,13 @@ function targetProject(rc, options) {
   const table = projects(rc);
   const selection = options.project || table.default;
   const id = (selection !== undefined && table[selection]) || selection;
-  if (!id) throw new Error('Must have an active project to set deploy targets. Try fireside use --add <projectId>, or pass --project');
+  if (!id) throw new Error('Must have an active project to set deploy targets. Try firenook use --add <projectId>, or pass --project');
   assertId(id);
   return id;
 }
 function assertType(type) {
   if (!TARGET_TYPES[type]) throw new Error(`Unrecognized target type ${type}. Must be one of ${Object.keys(TARGET_TYPES).join(', ')}`);
-  if (UNIMPLEMENTED.includes(type)) throw new Error(`${type} targets are not implemented by Fireside (roadmap); only storage targets are consulted.`);
+  if (UNIMPLEMENTED.includes(type)) throw new Error(`${type} targets are not implemented by Firenook (roadmap); only storage targets are consulted.`);
 }
 const targetsOf = (rc, project, type) => {
   if (!isObject(rc.targets)) rc.targets = {};
@@ -126,7 +126,7 @@ export function clearTarget(rc, project, type, name) {
 
 // target:apply <type> <name> <resource...>
 export function targetApply([type, name, ...resources], options, cwd = process.cwd(), log = console) {
-  if (!type || !name || !resources.length) throw new Error('target:apply needs a type, a target name and at least one resource: fireside target:apply storage <target> <bucket>...');
+  if (!type || !name || !resources.length) throw new Error('target:apply needs a type, a target name and at least one resource: firenook target:apply storage <target> <bucket>...');
   assertType(type);
   const path = rcPath(options, cwd);
   const rc = readRc(path);
@@ -140,7 +140,7 @@ export function targetApply([type, name, ...resources], options, cwd = process.c
 }
 // target:clear <type> <name>
 export function targetClear([type, name, ...extra], options, cwd = process.cwd(), log = console) {
-  if (!type || !name || extra.length) throw new Error('target:clear needs a type and a target name: fireside target:clear storage <target>');
+  if (!type || !name || extra.length) throw new Error('target:clear needs a type and a target name: firenook target:clear storage <target>');
   assertType(type);
   const path = rcPath(options, cwd);
   const rc = readRc(path);

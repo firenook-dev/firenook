@@ -63,7 +63,7 @@ async function proxy(name,upstream,port){
   const deadline=Date.now()+10000;
   while(true){
     assert.equal(child.exitCode,null,row.log);
-    try{const response=await fetch(`http://127.0.0.1:${port}/__fireside_capture/fixture`,{signal:AbortSignal.timeout(200)});if(response.ok){await response.arrayBuffer();break;}}catch{}
+    try{const response=await fetch(`http://127.0.0.1:${port}/__firenook_capture/fixture`,{signal:AbortSignal.timeout(200)});if(response.ok){await response.arrayBuffer();break;}}catch{}
     assert(Date.now()<deadline,'capture proxy readiness');await delay(25);
   }
   EmulatorRegistry.set(name,{getName:()=>name,getInfo:()=>({name,host:'127.0.0.1',port}),start:async()=>{},connect:async()=>{},stop:async()=>{}});
@@ -114,7 +114,7 @@ try{
     }finally{await emulator.stop();EmulatorRegistry.clear(Emulators.FUNCTIONS);}
   }
   for(const row of proxies){
-    const response=await fetch(`http://127.0.0.1:${row.port}/__fireside_capture/fixture`,{signal:AbortSignal.timeout(5000)});
+    const response=await fetch(`http://127.0.0.1:${row.port}/__firenook_capture/fixture`,{signal:AbortSignal.timeout(5000)});
     assert.equal(response.status,200);record.auxiliary.push({name:row.name,fixture:await response.json()});
   }
   record.passed=true;

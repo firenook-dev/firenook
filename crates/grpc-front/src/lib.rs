@@ -1,4 +1,4 @@
-//! Firestore gRPC transport for fireside.
+//! Firestore gRPC transport for firenook.
 //!
 //! The vendored Apache-2.0 Google API definitions are compiled with a pure
 //! Rust protocol compiler, keeping builds reproducible without `protoc`.
@@ -19,8 +19,8 @@ pub use service::{FirestoreService, ResponseStream};
 /// Suite components use this at protocol boundaries so background-event and
 /// request transports cannot drift from the gRPC representation.
 pub fn encode_document(
-    key: &fireside_core_store::DocumentKey,
-    document: &fireside_core_store::Document,
+    key: &firenook_core_store::DocumentKey,
+    document: &firenook_core_store::Document,
 ) -> Result<google::firestore::v1::Document, tonic::Status> {
     codec::encode_document_masked(key, document, None)
 }

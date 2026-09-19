@@ -10,11 +10,11 @@ use serde_json::Value;
 
 use crate::ExtensionsError;
 use crate::refs::ExtensionRef;
-use fireside_functions_runtime::LogSink;
+use firenook_functions_runtime::LogSink;
 
-/// The sidecar Fireside writes next to a downloaded or vendored source so
+/// The sidecar Firenook writes next to a downloaded or vendored source so
 /// later starts need neither the registry nor a token.
-pub const REGISTRY_SIDECAR: &str = "fireside-registry.json";
+pub const REGISTRY_SIDECAR: &str = "firenook-registry.json";
 /// Vendored sources live under the project's `extensions/` parameter directory.
 pub const VENDOR_DIRECTORY: &str = ".sources";
 /// Maps an unresolved ref (as written in `firebase.json`) to the vendored version.
@@ -138,7 +138,7 @@ pub async fn download_source(
     log: &LogSink,
 ) -> Result<(), ExtensionsError> {
     let version_ref = reference.version_ref()?;
-    log.record(fireside_functions_runtime::LogEvent::new(
+    log.record(firenook_functions_runtime::LogEvent::new(
         "INFO",
         "extensions",
         format!(
@@ -149,7 +149,7 @@ pub async fn download_source(
     std::fs::create_dir_all(target).map_err(|error| {
         ExtensionsError(format!("failed to create {}: {error}", target.display()))
     })?;
-    log.record(fireside_functions_runtime::LogEvent::new(
+    log.record(firenook_functions_runtime::LogEvent::new(
         "INFO",
         "extensions",
         format!("downloading {uri}..."),
@@ -171,7 +171,7 @@ pub async fn download_source(
     tokio::task::spawn_blocking(move || extract_zip(&bytes, &target_owned))
         .await
         .map_err(|error| ExtensionsError(format!("archive extraction failed: {error}")))??;
-    log.record(fireside_functions_runtime::LogEvent::new(
+    log.record(firenook_functions_runtime::LogEvent::new(
         "INFO",
         "extensions",
         format!("Downloaded to {}...", target.display()),
@@ -226,7 +226,7 @@ pub async fn install_and_build(
 ) -> Result<(), ExtensionsError> {
     let functions = source.join("functions");
     for arguments in [vec!["install"], vec!["run", "gcp-build"]] {
-        log.record(fireside_functions_runtime::LogEvent::new(
+        log.record(firenook_functions_runtime::LogEvent::new(
             "DEBUG",
             "Extensions",
             format!(

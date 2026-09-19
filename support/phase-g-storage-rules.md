@@ -1,13 +1,13 @@
 # Phase G — Native Storage Security Rules (`0.1.0-next.7`)
 
 Written 2026-09-17 against `main` 39ba9a2 (published engine 572d4fb,
-`@fireside-dev/cli@0.1.0-next.6`). The plan below is retained as written; the
+`firenook@0.1.0-next.6`). The plan below is retained as written; the
 status section records what has landed since.
 
 ## Status (2026-09-18)
 
 G0–G5 are done. PR #43 (Phases G and H together) merged into main as 860f4e1
-and the qualified engine 0720434 was published 2026-09-18 as `@fireside-dev/cli@0.1.0-next.7` (tag `npm-v0.1.0-next.7` on main d38016d; release run 35327767919, 14/14 pre-publish jobs green, protected `npm-release` approval after a local `publish-packages --check`; registry integrity of all six packages equals the release assets; `npm audit signatures` verifies signatures and attestations; GitHub prerelease; `next` → next.7, `latest` untouched). Receipts:
+and the qualified engine 0720434 was published 2026-09-18 as `firenook@0.1.0-next.7` (tag `npm-v0.1.0-next.7` on main d38016d; release run 35327767919, 14/14 pre-publish jobs green, protected `npm-release` approval after a local `publish-packages --check`; registry integrity of all six packages equals the release assets; `npm audit signatures` verifies signatures and attestations; GitHub prerelease; `next` → next.7, `latest` untouched). Receipts:
 
 | Step | Receipt |
 | --- | --- |
@@ -16,7 +16,7 @@ and the qualified engine 0720434 was published 2026-09-18 as `@fireside-dev/cli@
 | G2 | `crates/rules-engine`: `service firebase.storage`, `RulesService`, `StorageObject`, `request.path`, `firestore.get`/`exists`, path indexing/slicing, `int()`/`float()`, `toMillis()`/`dayOfYear()`; shared-language corrections established by the corpus (regex `split`, three-valued `&&`/`||` over errors, lexical function scope, `(default)` path segments); `tests/storage_oracle_replay.rs` replays all 306 cases and the 1024 Phase 3 cases still pass — commit e3eb0d8 |
 | G3 | `crates/storage-front/src/rules.rs` native layer; `rules_replay_tests.rs` replays all 334 recorded steps over HTTP with parity or one of eight named divergences (five `request.method`, two list matching, one JSON-API PATCH); `storage-front` spawns no process; before/after rules-evaluated profile on the same Mac in `benchmarks/phase-g-storage-profile.json` (p50 upload 0.95 → 0.58 ms, metadata get 0.45 → 0.15 ms, denied read 0.48 → 0.14 ms; no regression at any percentile) — commits a98ee49, af93c14 |
 | G4 | `--java` / `--storage-rules-jar` removed from the native CLI and `suite-runtime`; npm wrapper without the `java -version` gate, `--java` option or jar download (`setup` fetches the UI zip only); docs updated (README, CLI guide, COMPATIBILITY, DESIGN "Native Storage rules", ROADMAP); harnesses updated; CI step "Verify suite start without Java on PATH" (`conformance/src/suite/verify-no-java.mjs`: `java` shadowed by a failing shim and JAVA_HOME unset, UI-only asset cache, single-file `storage.rules`, owner/admin/list rules, `firestore.get` against live Firestore, `setRules` reload, clean shutdown — passes locally in 7.0 s to readiness) — commit 4ac8a0d |
-| G5 | In progress. Done: exact-candidate CI green on PR #43 at cdabf62 (Rust gate, fixture/package checks, differential harness with the no-Java step, four browser-SDK cells, five packed installs — run 35196947926); consumer gates on the packed candidate `0.1.0-local.ga472db6e3dce` (integration gate 24/24; extensions gate 24 admitted / 2 upstream-ignored, as next.6; Phase 5 browser journeys 1–9 pass on the Mac against the full-data stack with no Java on the suite command line — `receipts.macJourneys`; two earlier journey failures reproduced identically on published next.6 and were harness dataset drift, fixed in the private harness at c0faebd); ~10-minute Linux smoke on the private acceptance host with the linux-x64 CI artifact and no Java on PATH (`verify-no-java.mjs` 12/12 steps, ready 5.6 s; same-host profile vs the next.6 engine under the Java runtime saves about 1 ms per rules-evaluated operation at p50 — `benchmarks/phase-g-storage-profile-linux.json`). Paired acceptance PASSED on the private acceptance host (attempt 13, 2026-09-18, engine 0720434: both 2 h soaks, export/restart, 36/36 browser journeys, exact stable-state parity, fresh setup on both backends — the Fireside stack ran with no Java process; Storage cycle 8.0 ms p50 vs 11.6 official with the native evaluator on every stage; 95 evidence checksums re-verified by an independent audit; three earlier attempts with identical inputs retained as failures for a browser verifier transient, a disk preflight and a consumer schedule firing in one stack's window — `benchmarks/phase-h-functions-runtime.json` `receipts.h5.pairedAcceptance`); the clean-setup-without-Java stage is the fresh-checkout stage of that run plus the Linux smoke; released as `0.1.0-next.7` on 2026-09-18 (release run 35327767919) |
+| G5 | In progress. Done: exact-candidate CI green on PR #43 at cdabf62 (Rust gate, fixture/package checks, differential harness with the no-Java step, four browser-SDK cells, five packed installs — run 35196947926); consumer gates on the packed candidate `0.1.0-local.ga472db6e3dce` (integration gate 24/24; extensions gate 24 admitted / 2 upstream-ignored, as next.6; Phase 5 browser journeys 1–9 pass on the Mac against the full-data stack with no Java on the suite command line — `receipts.macJourneys`; two earlier journey failures reproduced identically on published next.6 and were harness dataset drift, fixed in the private harness at c0faebd); ~10-minute Linux smoke on the private acceptance host with the linux-x64 CI artifact and no Java on PATH (`verify-no-java.mjs` 12/12 steps, ready 5.6 s; same-host profile vs the next.6 engine under the Java runtime saves about 1 ms per rules-evaluated operation at p50 — `benchmarks/phase-g-storage-profile-linux.json`). Paired acceptance PASSED on the private acceptance host (attempt 13, 2026-09-18, engine 0720434: both 2 h soaks, export/restart, 36/36 browser journeys, exact stable-state parity, fresh setup on both backends — the Firenook stack ran with no Java process; Storage cycle 8.0 ms p50 vs 11.6 official with the native evaluator on every stage; 95 evidence checksums re-verified by an independent audit; three earlier attempts with identical inputs retained as failures for a browser verifier transient, a disk preflight and a consumer schedule firing in one stack's window — `benchmarks/phase-h-functions-runtime.json` `receipts.h5.pairedAcceptance`); the clean-setup-without-Java stage is the fresh-checkout stage of that run plus the Linux smoke; released as `0.1.0-next.7` on 2026-09-18 (release run 35327767919) |
 
 Decisions the oracles settled differently from the plan's assumptions
 (details in the fixture README and the gate's `decisions`): the official
@@ -25,22 +25,22 @@ production semantics are implemented and both are asserted as divergences; a
 failed `/internal/setRules` drops the ruleset (parity, not "previous ruleset
 kept"); every upload is `create` with `resource` set for an existing object;
 the official rules runtime crashes on an object name with an empty segment,
-which Fireside evaluates with the empty segment dropped. Two drop-in gaps
+which Firenook evaluates with the empty segment dropped. Two drop-in gaps
 found on the way were closed in G4: the single-file `storage.rules` shape and
 a `.firebaserc` without `targets`.
 
 ## Goal
 
 Evaluate `service firebase.storage` rulesets in the existing Rust
-`rules-engine`, so that Fireside has no Java dependency at all: no
+`rules-engine`, so that Firenook has no Java dependency at all: no
 `cloud-storage-rules-runtime` jar, no `java -version` gate, no jar download in
-`fireside setup`, no per-request JVM round trip on the Storage path. Behaviour
+`firenook setup`, no per-request JVM round trip on the Storage path. Behaviour
 is measured against the pinned official Storage emulator and the production
 Rules API before the jar is removed, using the same oracle-first discipline as
 Phase 3 (`conformance/fixtures/rules-v2`, `benchmarks/phase-3-rules.json`).
 
 Out of scope: an own Emulator UI, the terminal launch experience, partial
-`--only` profiles, `fireside init`, and replacing the firebase-tools
+`--only` profiles, `firenook init`, and replacing the firebase-tools
 Functions/Extensions host — the last is [Phase H](phase-h-functions-runtime.md),
 which follows this phase and is not started by it.
 
@@ -60,7 +60,7 @@ exist to feed it.
 | `crates/suite-runtime/src/lib.rs:627,731` | Preflight requires `java` and the jar; Storage is always started with `rules: Some(RulesRuntimeConfig { java, jar, buckets })`. `StorageConfig.rules: None` already exists in `storage-front` and is never used by the suite |
 | `packages/cli/src/runtime.mjs:17–19,38` | Every `emulators:start`/`exec`/`doctor` runs `java -version` and fails without it; passes `--java` and `--storage-rules-jar` to the native binary |
 | `packages/cli/src/assets.mjs:9` | `setup` downloads `cloud-storage-rules-runtime-v1.1.3.jar` (52,892,936 bytes, pinned SHA-256) beside the UI zip |
-| `packages/cli/bin/fireside.mjs` | `--java PATH` option; help text "Requires Node 24 and Java for Storage rules" |
+| `packages/cli/bin/firenook.mjs` | `--java PATH` option; help text "Requires Node 24 and Java for Storage rules" |
 | `crates/rules-engine/src/parser.rs:57–59` | The Rust parser accepts only `service cloud.firestore` |
 | `crates/rules-engine/src/evaluator.rs:612–671` | `request.{auth,method,time,resource,query}` and `resource.{data,__name__,createTime,updateTime}` are Firestore-shaped; `request.path` is not implemented for either service |
 | `conformance/fixtures/firebase-suite-v1/storage-multi-bucket-rules-and-import-export` | The only Storage-rules oracle evidence today: four rule-relevant observations (owner upload/read, other-user denied, public read) |
@@ -129,7 +129,7 @@ commit; the long acceptance stays in G5.
   source to confirm the Rules API accepts the Storage service for this project
   before the corpus is designed. Record the receipt.
 - Decision recorded now: rulesets without `rules_version = '2'` (v1) are
-  measured in G1; if the emulator accepts them, Fireside accepts them with
+  measured in G1; if the emulator accepts them, Firenook accepts them with
   v1 semantics for Storage only if the oracle shows a difference that matters
   (`list`), otherwise they are rejected with a diagnostic naming the line.
   The official init template is v2.
@@ -143,7 +143,7 @@ New fixture set `conformance/fixtures/storage-rules-v1/` with its own README,
 `conformance/src/suite/capture-storage-rules.ts` built from `capture-storage.ts`):
 raw HTTP against the official Storage emulator with the Firestore emulator
 registered, every step recorded as `{id, method, path, headers (synthetic),
-body digest, status, decoded verdict}` and diffed later against Fireside by the
+body digest, status, decoded verdict}` and diffed later against Firenook by the
 existing replay pattern. Target ≥25 programs / ≥150 steps. Programs, each with
 its own tiny ruleset so a failure localizes:
 
@@ -249,7 +249,7 @@ divergences, not skipped; `cargo clippy -D warnings`, `cargo fmt`.
 - Rules runtime errors and denials map to the statuses/bodies recorded in G1.
 - Remove the `Mutex<RulesChild>`; evaluation is in-process and read-locked.
 - Tests: storage-front unit tests replay every G1 emulator program over HTTP
-  against Fireside (the existing `firebase-suite-v1` replay style) and assert
+  against Firenook (the existing `firebase-suite-v1` replay style) and assert
   parity or the recorded divergence; the two existing Storage rules tests keep
   passing; `profile-storage.mjs` (`benchmarks/phase-e-storage-profile.json`)
   is re-run before/after on the same Mac for the 64 KiB cycle so the removed
@@ -281,12 +281,12 @@ owner and download-token bypasses are unchanged; `storage-front` has no
   Add an explicit `Verify suite start without Java on PATH` step (PATH scrubbed,
   `which java` must fail) to the differential harness job.
 - Consumer follow-ups on the pin bump: its setup documentation's "Java 26 is
-  the tested Fireside Storage-rules runtime" becomes "Java is needed only for
+  the tested Firenook Storage-rules runtime" becomes "Java is needed only for
   the official fallback"; its setup prerequisite check no longer requires Java
-  when the backend is Fireside.
+  when the backend is Firenook.
 
 Exit: `grep -ri java crates packages` returns only oracle fixtures, comments
-and the capture tooling; `fireside setup` downloads one asset.
+and the capture tooling; `firenook setup` downloads one asset.
 
 ### G5 — Qualification and release as `0.1.0-next.7` (3–5 days)
 
@@ -308,7 +308,7 @@ Named checks, all on the exact candidate commit:
    and is labelled as such.
 4. **Clean-setup without Java**: a fresh-colleague stage on a machine or
    container where `java` is absent from PATH, from `bun install` through
-   `fireside setup`, first start, an upload denied by rules, an upload allowed
+   `firenook setup`, first start, an upload denied by rules, an upload allowed
    by rules, restart with resume, export. This is the headline claim of the
    release and is a named pass/fail stage, not a note.
 5. Release, following the recorded procedure: release branch → PR → merge
@@ -335,7 +335,7 @@ is measured against those recordings.
   freeze rule decides (production wins, emulator divergence recorded). The
   consumer rulesets do not touch the known divergent fields.
 - **`firestore.*` in the emulator oracle needs a registered Firestore
-  emulator**, otherwise the jar's callback fails the way Fireside's does today.
+  emulator**, otherwise the jar's callback fails the way Firenook's does today.
   The capture harness registers the pinned Firestore emulator before any
   `firestore.*` program runs; a program that observes the callback error is a
   harness bug, not evidence.
@@ -343,7 +343,7 @@ is measured against those recordings.
   checked in G0 with one request before the corpus is designed.
 - **v1 rulesets.** Measured in G1; decision recorded in G0's gate file rather
   than discovered by a consumer.
-- **`fireside native` callers passing `--java`.** None exist in the consumer
+- **`firenook native` callers passing `--java`.** None exist in the consumer
   (its launcher only mentions Java for the official fallback); the argument
   is removed with a clear parse error rather than ignored.
 - **Access-limit and error-mapping details** (how many `firestore.*` calls,
@@ -355,7 +355,7 @@ is measured against those recordings.
 
 ## Not done by this phase
 
-The Emulator UI is still the downloaded official bundle, so `fireside setup`
+The Emulator UI is still the downloaded official bundle, so `firenook setup`
 remains (with one asset). Storage coverage/Requests reporting in the UI is not
-added. Partial service profiles, `fireside init`, non-demo project ids,
+added. Partial service profiles, `firenook init`, non-demo project ids,
 non-loopback binding and the terminal launch experience are separate items.

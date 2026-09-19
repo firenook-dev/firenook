@@ -1,16 +1,24 @@
-# Fireside
+# Firenook
 
 A Rust-based Firebase-compatible local emulator preview.
+
+Firenook (formerly Fireside) is the same project under its new name: the last
+release under the old name was `@fireside-dev/cli@0.1.0-next.9`, and every
+release from `0.2.0-next.1` on is published as `firenook`. To migrate, replace
+`@fireside-dev/cli` with `firenook` in `package.json`, the `fireside` command
+with `firenook`, every `FIRESIDE_*` environment variable with its `FIRENOOK_*`
+counterpart, and the `.fireside/` run directory with `.firenook/`; persisted
+suite state is adopted in place on the first start.
 
 This public project uses synthetic protocol fixtures and independent build/install
 tests. Install the published preview through the `next` channel:
 
 ```sh
-npm install --save-dev @fireside-dev/cli@next
+npm install --save-dev firenook@next
 ```
 
 This is a preview channel, not a stable or universal-compatibility promise. See
-the [releases](https://github.com/sanjevirau/fireside/releases) for exact versions,
+the [releases](https://github.com/firenook-dev/firenook/releases) for exact versions,
 source identities, platform checks and publication receipts. Pin an exact version
 when a reproducible installation is required.
 
@@ -28,9 +36,9 @@ Application integration belongs in the consuming application's private test
 environment. Public fixtures must use synthetic data; product compatibility
 must not rely on a private checkout, credentials or application architecture.
 
-## Using Fireside
+## Using Firenook
 
-Developers install one package, `@fireside-dev/cli`; optional dependencies select
+Developers install one package, `firenook`; optional dependencies select
 the native binary. The preview supports a complete local suite configuration,
 not every Firebase service or every CLI option. See the
 [CLI guide](packages/cli/README.md) for setup, configuration, state retention,
@@ -38,8 +46,8 @@ native resume and rollback.
 
 Disk/WAL is the default. Firestore, Auth and Storage services, including
 Storage Security Rules, are implemented in Rust; no Java runtime is used.
-Functions run the user's JavaScript in Node workers supervised by Fireside's
-own runtime, and Extensions are resolved and run by Fireside from local,
+Functions run the user's JavaScript in Node workers supervised by Firenook's
+own runtime, and Extensions are resolved and run by Firenook from local,
 vendored or cached sources (or fetched once from the registry); firebase-tools
 is not installed or loaded. Client SDKs are unchanged.
 
@@ -58,22 +66,22 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 npm ci --prefix conformance
 npm run check --prefix conformance
 npm test --prefix conformance
-npm run test:fireside:disk --prefix conformance
+npm run test:firenook:disk --prefix conformance
 node --test packaging/*.test.mjs
 ```
 
 For source-development builds, bounded Firestore coverage can be enabled with
-`cargo run -p fireside -- firestore --diagnostics --rules firestore.rules`.
+`cargo run -p firenook -- firestore --diagnostics --rules firestore.rules`.
 Open `/emulator/v1/projects/demo-my-app:ruleCoverage.html` on that Firestore port
 for the report, or omit `.html` for JSON. Recording is opt-in for the standalone
 command; specifying `--websocket-port` also enables recording and serves the real
 Requests feed on that port. Source-built suites enable bounded diagnostics by
-default; `fireside emulators:start --no-diagnostics` (or native `suite
+default; `firenook emulators:start --no-diagnostics` (or native `suite
 --no-diagnostics`) disables recording and returns an explicit unavailable response
 from the debug endpoint. Reports can contain document data and decoded auth
 claims, so keep them local. The published `next` packages since
 `0.1.0-next.4` carry these features, since `0.1.0-next.7` Storage rules
-are evaluated natively and Functions and Extensions run in Fireside's own
+are evaluated natively and Functions and Extensions run in Firenook's own
 runtime (Node is the only runtime dependency), since `0.1.0-next.8` Auth
 carries every operation of the official emulator and Pub/Sub is a full
 emulator over gRPC and HTTP/JSON, and since `0.1.0-next.9` Cloud Tasks is a
@@ -99,3 +107,9 @@ No universal compatibility, performance advantage or memory reduction is claimed
 Publication requires reviewed source, exact-candidate verification, public
 provenance and protected release-owner approval. See [Security boundaries](SECURITY.md)
 for local-only use, dependency advisories and disclosure limitations.
+
+## License and trademarks
+
+Firenook is licensed under the [Apache License 2.0](LICENSE); see
+[NOTICE](NOTICE) for the reference-only sources studied and
+[TRADEMARKS.md](TRADEMARKS.md) for the use of the Firenook name and mark.

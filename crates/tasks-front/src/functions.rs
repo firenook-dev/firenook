@@ -3,7 +3,7 @@
 //! registers it, a `POST` of `{...taskQueueTrigger, defaultUri}` with the
 //! function's HTTP URL.
 
-use fireside_functions_bridge::FunctionsInventory;
+use firenook_functions_bridge::FunctionsInventory;
 
 use crate::config::{ConfigError, QueueConfig, queue_key, valid_queue_id};
 use crate::json::OrderedJson;

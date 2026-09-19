@@ -67,7 +67,7 @@ export async function publishVerifiedRelease(records, {
   wait = waitForRegistry,
   accepted = [],
 } = {}) {
-  const cli = records.find(record => record.name === '@fireside-dev/cli');
+  const cli = records.find(record => record.name === 'firenook');
   assert.ok(cli, 'CLI record required');
   const natives = records.filter(record => record !== cli);
   for (const name of accepted) assert.ok(records.some(record => record.name === name), `Unknown accepted package: ${name}`);

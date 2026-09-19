@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use fireside_functions_bridge::{DispatchRequest, FunctionDefinition, FunctionsInventory};
+use firenook_functions_bridge::{DispatchRequest, FunctionDefinition, FunctionsInventory};
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 use time::OffsetDateTime;

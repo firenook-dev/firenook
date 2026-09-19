@@ -11,7 +11,7 @@ reference: `lib/emulator/controller.js` catches export-on-exit errors, reports
 them and continues the exit sequence; `cleanShutdown()` stops owned emulators.
 The inspected file SHA-256 is
 `9759fa0910a1b3430d80f75cfecdc0e8adb8a595e5810ea9aba5dcc3727ce196`.
-Fireside deliberately reports unsuccessful export with a nonzero exit instead
+Firenook deliberately reports unsuccessful export with a nonzero exit instead
 of treating it as a successful portable backup.
 
 `conformance/src/suite/verify-export-failure.mjs` is a **constructed filesystem
@@ -53,7 +53,7 @@ recorded, and the latter includes runtime `365ad2a`. Linux CI repeats the test
 using the exact installed `next.3` platform package with scripts disabled. This
 does not qualify arbitrary native downgrades or other historical versions.
 
-The first Linux CI attempt [34532489876](https://github.com/sanjevirau/fireside/actions/runs/34532489876)
+The first Linux CI attempt [34532489876](https://github.com/firenook-dev/firenook/actions/runs/34532489876)
 failed before its browser checks: the version-pinned Playwright Chromium binary
 was not installed on the fresh runner. This is a harness prerequisite failure,
 not native-state corruption or a passing upgrade. Its uploaded failure receipt

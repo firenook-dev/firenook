@@ -22,11 +22,11 @@ use crate::{RuntimeState, WORKER_READY_TIMEOUT};
 type Shared = Arc<RuntimeState>;
 
 const EXPRESS: &str = "Express";
-const CONTROL_TARGET: &str = "x-fireside-target";
-const CONTROL_SIGNATURE: &str = "x-fireside-signature";
-const CONTROL_SERVICE: &str = "x-fireside-service";
+const CONTROL_TARGET: &str = "x-firenook-target";
+const CONTROL_SIGNATURE: &str = "x-firenook-signature";
+const CONTROL_SERVICE: &str = "x-firenook-service";
 /// Set by the worker on a background invocation whose handler threw.
-const HANDLER_ERROR_HEADER: &str = "x-fireside-handler-error";
+const HANDLER_ERROR_HEADER: &str = "x-firenook-handler-error";
 const HOP_BY_HOP: [&str; 8] = [
     "connection",
     "keep-alive",
@@ -374,12 +374,12 @@ async fn dispatch(state: Shared, trigger_id: &str, request: Request, path: Strin
     let status = upstream.status();
     if upstream.headers().contains_key(HANDLER_ERROR_HEADER) {
         // A background handler that threw kills the official worker, and the
-        // proxy reports the dropped connection; Fireside keeps its worker but
+        // proxy reports the dropped connection; Firenook keeps its worker but
         // answers the same way (a handled failure, not retried).
         let mut response = proxy_failure();
         response.headers_mut().insert(
-            fireside_functions_bridge::DELIVERY_HEADER,
-            HeaderValue::from_static(fireside_functions_bridge::DELIVERY_HANDLED),
+            firenook_functions_bridge::DELIVERY_HEADER,
+            HeaderValue::from_static(firenook_functions_bridge::DELIVERY_HANDLED),
         );
         return response;
     }
@@ -394,8 +394,8 @@ async fn dispatch(state: Shared, trigger_id: &str, request: Request, path: Strin
         }
         // Tells the bridge the handler ran, so a failure is not retried.
         response_headers.insert(
-            fireside_functions_bridge::DELIVERY_HEADER,
-            HeaderValue::from_static(fireside_functions_bridge::DELIVERY_HANDLED),
+            firenook_functions_bridge::DELIVERY_HEADER,
+            HeaderValue::from_static(firenook_functions_bridge::DELIVERY_HANDLED),
         );
     }
     let log = state.log.clone();

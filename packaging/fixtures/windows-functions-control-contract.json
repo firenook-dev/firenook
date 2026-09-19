@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "recordedBeforeImplementation": true,
-  "run": "https://github.com/sanjevirau/fireside/actions/runs/34142138630/job/101806235317",
+  "run": "https://github.com/firenook-dev/firenook/actions/runs/34142138630/job/101806235317",
   "passedBeforeFailure": "native static-CRT build, Rust control/Auth tests, npm and Bun install/listeners/disk reopen",
   "sequence": [
-    "FIRESIDE_FUNCTIONS_HOST_READY",
+    "FIRENOOK_FUNCTIONS_HOST_READY",
     "All emulators ready",
-    "fireside functions host: stopping after launcher disconnected",
+    "firenook functions host: stopping after launcher disconnected",
     "Functions HTTP request: ECONNREFUSED"
   ],
   "cause": "tokio::process::Child::wait drops child.stdin before waiting; using it in select closed the private Functions control pipe",

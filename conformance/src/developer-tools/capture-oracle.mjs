@@ -29,7 +29,7 @@ assert.equal(process.versions.node, '24.20.0');
 const output = resolve(process.argv[2] ?? 'missing-output');
 assert.ok(process.argv[2], 'provide a fresh output directory; no existing fixture is overwritten');
 await mkdir(output, { recursive: false });
-const work = await mkdtemp(join(tmpdir(), 'fireside-devtools-oracle-'));
+const work = await mkdtemp(join(tmpdir(), 'firenook-devtools-oracle-'));
 const ports = {};
 for (const name of ['firestore', 'auth', 'storage', 'hub', 'logging', 'ui', 'websocket']) {
   const server = createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');

@@ -31,27 +31,27 @@ for (const name of [key, 'cli']) {
     // Canonical source archive mode on Windows and Unix. Package managers
     // create/fix the installed executable from package.json's bin mapping;
     // the actual npm/Bun command-shim smokes verify this with scripts disabled.
-    chmodSync(join(dir, 'bin/fireside.mjs'), 0o644);
+    chmodSync(join(dir, 'bin/firenook.mjs'), 0o644);
   } else {
     const [os, cpu] = key.split('-');
     mkdirSync(join(dir, 'bin'));
-    const binaryName = os === 'win32' ? 'fireside.exe' : 'fireside';
+    const binaryName = os === 'win32' ? 'firenook.exe' : 'firenook';
     copyFileSync(binary, join(dir, 'bin', binaryName));
     chmodSync(join(dir, 'bin', binaryName), 0o755);
     const platformManifest = {
-      name:`@fireside-dev/${key}`, version:manifest.version,
+      name:`@firenook/cli-${key}`, version:manifest.version,
       ...(localRevision ? {private:true} : {}),
-      description:`Prebuilt Fireside engine for ${key}; install @fireside-dev/cli`,
+      description:`Prebuilt Firenook engine for ${key}; install firenook`,
       os:[os], cpu:[cpu], ...(os === 'linux' ? {libc:['glibc']} : {}),
       license:manifest.license, repository:{...manifest.repository, directory:'packaging'},
-      publishConfig:manifest.publishConfig, files:['bin','receipt.json','LICENSE-MIT','LICENSE-APACHE'],
+      publishConfig:manifest.publishConfig, files:['bin','receipt.json','LICENSE','NOTICE'],
     };
     writeFileSync(join(dir, 'package.json'), JSON.stringify(platformManifest, null, 2) + '\n');
     writeFileSync(join(dir, 'receipt.json'), JSON.stringify({version:manifest.version, platform:key,
       target:release.platforms[key], engineRevision:release.engineRevision, sha256:sha256(readFileSync(binary))}, null, 2) + '\n');
   }
-  for (const license of ['LICENSE-MIT','LICENSE-APACHE']) copyFileSync(join(root, license), join(dir, license));
-  const expectedName = name === 'cli' ? manifest.name : `@fireside-dev/${key}`;
+  for (const license of ['LICENSE','NOTICE']) copyFileSync(join(root, license), join(dir, license));
+  const expectedName = name === 'cli' ? manifest.name : `@firenook/cli-${key}`;
   console.log(JSON.stringify({stage:'pack',package:expectedName}));
   const result = packResult(packageManager('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', out], {cwd:dir, encoding:'utf8'}), expectedName);
   console.log(JSON.stringify({stage:'audit',package:expectedName}));

@@ -8,7 +8,7 @@ use crate::google::firestore::v1::{WriteRequest, WriteResponse};
 use crate::service::{AuthorizationSource, FirestoreService, ResponseStream};
 
 const RESPONSE_BUFFER: usize = 128;
-const STREAM_TOKEN_PREFIX: &[u8] = b"fireside-write-token-";
+const STREAM_TOKEN_PREFIX: &[u8] = b"firenook-write-token-";
 
 pub(crate) fn stream<S>(
     service: FirestoreService,
@@ -63,7 +63,7 @@ where
     }
 
     let stream_number = service.next_stream_id();
-    let stream_id = format!("fireside-write-{stream_number}");
+    let stream_id = format!("firenook-write-{stream_number}");
     let mut token_sequence = 0_u64;
     let mut acknowledged_sequence = 0_u64;
     send(

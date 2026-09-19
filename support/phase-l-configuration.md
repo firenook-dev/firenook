@@ -19,8 +19,8 @@ all-or-nothing profile: service subsets (`--only`, a project without
 Functions or Storage), any project id, a wildcard listen host, several
 Firestore databases, `emulators.ui.enabled: false` and
 `emulators.singleProjectMode: false`. Where the official suite warns,
-Fireside warns with the same words; where the official suite is silent about
-a safety matter (a public bind), Fireside says so once at startup.
+Firenook warns with the same words; where the official suite is silent about
+a safety matter (a public bind), Firenook says so once at startup.
 
 ## State before the phase (verified 2026-09-19)
 

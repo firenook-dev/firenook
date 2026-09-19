@@ -4,7 +4,7 @@ use crate::{
     router_with_query_policy_memory_and_rules,
 };
 use axum::body::to_bytes;
-use fireside_rules_runtime::request_history::RequestHistory;
+use firenook_rules_runtime::request_history::RequestHistory;
 use tower::ServiceExt as _;
 
 const PROJECT: &str = "demo-fireside-coverage";
@@ -109,7 +109,7 @@ async fn project_report_covers_the_default_database_unless_another_is_named() {
     let other_source = SOURCE.replace("== 'get'", "!= 'get'");
     rules
         .install_database(
-            &fireside_core_store::DatabaseName::new(PROJECT, "other").unwrap(),
+            &firenook_core_store::DatabaseName::new(PROJECT, "other").unwrap(),
             &other_source,
         )
         .unwrap();

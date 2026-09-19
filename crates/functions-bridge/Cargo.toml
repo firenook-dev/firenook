@@ -1,6 +1,6 @@
 [package]
-name = "fireside-functions-bridge"
-description = "Firestore trigger and scheduler bridge for the fireside emulator suite"
+name = "firenook-functions-bridge"
+description = "Firestore trigger and scheduler bridge for the firenook emulator suite"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,8 +11,8 @@ publish = false
 
 [dependencies]
 base64.workspace = true
-fireside-core-store = { path = "../core-store" }
-fireside-grpc-front = { path = "../grpc-front" }
+firenook-core-store = { path = "../core-store" }
+firenook-grpc-front = { path = "../grpc-front" }
 prost.workspace = true
 reqwest.workspace = true
 serde.workspace = true

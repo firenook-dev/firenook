@@ -34,7 +34,7 @@ impl LogSink {
     /// A sink that writes `<label>: <message>` to stderr.
     #[must_use]
     pub fn stderr() -> Self {
-        Self::new(|event| eprintln!("fireside {}: {}", event.label, event.message))
+        Self::new(|event| eprintln!("firenook {}: {}", event.label, event.message))
     }
 
     /// A sink that keeps every event in memory (tests and harnesses).

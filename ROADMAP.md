@@ -59,9 +59,9 @@ this scope; expanding scope or changing a frozen criterion requires explicit rev
   tool's buffer/retention and diagnostic-overhead checks before implementation.
 
 Local evidence and limitations are in the [Phase A report](support/phase-a-developer-tools.md).
-Phase A was reviewed and merged in [PR #3](https://github.com/sanjevirau/fireside/pull/3).
+Phase A was reviewed and merged in [PR #3](https://github.com/firenook-dev/firenook/pull/3).
 All seven jobs passed for candidate `85ef3e74abc8a5381eaf5535a8430ef06f8c48ce`
-in [CI run 34499162765](https://github.com/sanjevirau/fireside/actions/runs/34499162765).
+in [CI run 34499162765](https://github.com/firenook-dev/firenook/actions/runs/34499162765).
 This receipt covers the oracle/baseline work, not later product changes.
 
 Done when Phase B has versioned fixture inputs, expected observations, provenance
@@ -237,7 +237,7 @@ divergence. `latest` promotion remains a separate decision.
 
 The plan, current-state audit, oracle precedence and named checks are in the
 [Phase H plan](support/phase-h-functions-runtime.md). User and extension
-JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
+JavaScript keeps running in Node; Firenook replaced firebase-tools as the host.
 
 | Step | Deliverable | Completion check |
 | --- | --- | --- |
@@ -259,7 +259,7 @@ JavaScript keeps running in Node; Fireside replaced firebase-tools as the host.
   main, v1-blocking and inspect profiles replay with every non-extension step
   identical or a listed divergence).
 - [x] H3 — Build the Extensions loader; vendored offline mode (2026-09-17:
-  `crates/extensions`, `fireside extensions status|vendor`, `--offline`;
+  `crates/extensions`, `firenook extensions status|vendor`, `--offline`;
   the synthetic extension and the two registry instances replay from the
   shared cache with their registry sidecars).
 - [x] H4 — Remove firebase-tools from the product and add the local commands
@@ -280,7 +280,7 @@ extensions start with no network. Python/Dart functions stay unsupported.
 
 The plan, current-state audit, oracle precedence and named checks are in the
 [Phase I plan](support/phase-i-auth.md). The official Auth emulator implements
-61 operations; Fireside implements 23 of them before this phase.
+61 operations; Firenook implements 23 of them before this phase.
 
 | Step | Deliverable | Completion check |
 | --- | --- | --- |
@@ -301,13 +301,13 @@ The plan, current-state audit, oracle precedence and named checks are in the
   on the official `OpenAPI` contract — routing, credentials, validation and
   coercions from the bundled document; all 61 implemented operations, the 42
   `501` answers, pages, legacy `relyingparty` routes, tenants, SMS MFA,
-  passkeys, session cookies, export/import; standalone `fireside auth`).
+  passkeys, session cookies, export/import; standalone `firenook auth`).
 - [x] I3 — Blocking functions on every blocked sign-in method and lifecycle
   multicasts on every create/delete path (2026-09-18; the recorded calls
   match per method).
 - [x] I4 — Replay green (2026-09-18: 61 programs / 1068 steps / 17,303
   values, 0 mismatches, four named divergences — parse-error prose, the
-  Node stack trace on a 500 log line, Fireside's own picker page — three
+  Node stack trace on a 500 log line, Firenook's own picker page — three
   consecutive runs identical; the real-SDK popup/redirect browser gate and
   the five earlier `firebase-suite-v1` Auth fixtures stay green). Emulator UI
   Auth-tab check recorded at I5 with the candidate.
@@ -318,13 +318,13 @@ The plan, current-state audit, oracle precedence and named checks are in the
 
 Done when an application using any sign-in method, tenants, MFA, email or
 phone verification, session cookies or the Admin SDK's account management runs
-against Fireside with the recorded official behaviour.
+against Firenook with the recorded official behaviour.
 
 ## Phase J — Pub/Sub emulator (`0.1.0-next.8`, together with Phase I)
 
 The plan, current-state audit, oracle precedence and named checks are in the
 [Phase J plan](support/phase-j-pubsub.md). The official emulator is
-`cloud-pubsub-emulator-0.8.33` with 37 RPCs over gRPC and HTTP/JSON; Fireside
+`cloud-pubsub-emulator-0.8.33` with 37 RPCs over gRPC and HTTP/JSON; Firenook
 has a nine-route HTTP adapter with no message backlog before this phase.
 
 | Step | Deliverable | Completion check |
@@ -349,11 +349,11 @@ has a nine-route HTTP adapter with no message backlog before this phase.
   keeps `emulator-sub-<topic>` and the unchanged envelopes).
 - [x] J3 — `google.pubsub.v1` Publisher/Subscriber/SchemaService and
   `google.iam.v1` IAMPolicy over tonic plus the full HTTP/JSON transcoding on
-  the one Pub/Sub port (2026-09-18; `fireside pubsub` runs it standalone).
+  the one Pub/Sub port (2026-09-18; `firenook pubsub` runs it standalone).
 - [x] J4 — Replay green (2026-09-18: 42 programs / 916 steps / 3,755 values,
   0 mismatches, no named divergences, three consecutive runs identical);
   `@google-cloud/pubsub` 5.3.1 with `PUBSUB_EMULATOR_HOST` publishes,
-  streams, orders, pushes and validates schemas against Fireside; the Phase H
+  streams, orders, pushes and validates schemas against Firenook; the Phase H
   Functions/Extensions corpus replays unchanged (271/271).
 - [x] J5 — Qualified and published as `0.1.0-next.8` on 2026-09-19 (tag `npm-v0.1.0-next.8` on 316a464, release run 35372788758, registry integrity equal to the release assets, `next` → next.8, `latest` untouched) (same candidate, gates and waiver as
   I5; the scheduled functions and function targets ran on the rewritten
@@ -361,7 +361,7 @@ has a nine-route HTTP adapter with no message backlog before this phase.
 
 Done when a client library with `PUBSUB_EMULATOR_HOST` set publishes,
 subscribes (pull, streaming, push), orders, filters, seeks and validates
-schemas against Fireside with the recorded official behaviour, and function
+schemas against Firenook with the recorded official behaviour, and function
 delivery is unchanged.
 
 ## Phase K — Cloud Tasks emulator (`0.1.0-next.9`, with Phases L and M)
@@ -369,7 +369,7 @@ delivery is unchanged.
 The plan, current-state audit, oracle precedence and named checks are in the
 [Phase K plan](support/phase-k-tasks.md). The official Cloud Tasks emulator
 is four Express routes and a dispatcher inside firebase-tools 15.22.0;
-Fireside has a registration-only stub answering 501 elsewhere before this
+Firenook has a registration-only stub answering 501 elsewhere before this
 phase.
 
 | Step | Deliverable | Completion check |

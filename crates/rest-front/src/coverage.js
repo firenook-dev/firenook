@@ -38,7 +38,7 @@ async function renderCoverage() {
       count++;
       pending.push(...[...(node.children || [])].reverse());
     }
-    const info = report.firesideCoverage;
+    const info = report.firenookCoverage;
     status.textContent = info?.truncated
       ? `Incomplete coverage: ${info.omittedValues} omitted values, ${info.omittedOperations} omitted operations, ${info.evictedProjects} evicted project histories. ${count} expressions shown.`
       : `${count} expressions. Actual evaluator visits; refresh manually for current results.`;

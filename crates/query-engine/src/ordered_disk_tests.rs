@@ -1,12 +1,12 @@
 use super::*;
-use fireside_core_store::{DiskOptions, Precondition, Store, Write};
+use firenook_core_store::{DiskOptions, Precondition, Store, Write};
 
 struct TestDirectory(std::path::PathBuf);
 impl TestDirectory {
     fn new() -> Self {
         static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
-            "fireside-ordered-disk-{}-{}-{}",
+            "firenook-ordered-disk-{}-{}-{}",
             std::process::id(),
             SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()

@@ -59,7 +59,7 @@ acceptance and short idle/light-load component measurements on one host:
   single-transaction seed import the consumer's whole-application readiness
   reached parity with the official stack (45.6 s versus 45.4 s), while a
   standalone Firestore import of the same seed is still 16 s versus 7 s: the
-  Java emulator only deserializes into memory, Fireside builds a durable store
+  Java emulator only deserializes into memory, Firenook builds a durable store
   and its field directory. Persistent-dataset resume is unaffected (about 2 s).
 - Queries that read a whole large collection in field order, or count it, run
   at roughly half the Java emulator's speed on `0.1.0-next.6` (a 10,918
@@ -79,9 +79,9 @@ host and one workload, not a universal guarantee.
 
 ## Publication and registry-installed verification
 
-`@fireside-dev/cli@0.1.0-next.4` and its five platform packages, pinned to
+`firenook@0.1.0-next.4` and its five platform packages, pinned to
 engine `fc54e341a6da4fc6ca26849287f92f335a6184ce`, were published on 2026-09-11
-by [release run 34599776222](https://github.com/sanjevirau/fireside/actions/runs/34599776222)
+by [release run 34599776222](https://github.com/firenook-dev/firenook/actions/runs/34599776222)
 from tag `npm-v0.1.0-next.4` at main commit `178dc0181f57df7d375f13bd29d385c3558150b1`.
 All seven quality jobs, five fresh native platform builds with npm/Bun/suite
 smokes, and the combined artifact verifier passed inside that run before the
@@ -92,8 +92,8 @@ Registry-installed verification, performed on macOS arm64 with `npm install
 --save-exact --ignore-scripts` from the public registry into an empty project:
 all six exact versions resolve; the registry `dist.integrity` of the CLI and
 platform tarballs equals the SHA-512 of the reviewed release assets attached to
-the [GitHub prerelease](https://github.com/sanjevirau/fireside/releases/tag/npm-v0.1.0-next.4);
-`fireside binary-path` verifies the packaged native hash and exits 0; `npm
+the [GitHub prerelease](https://github.com/firenook-dev/firenook/releases/tag/npm-v0.1.0-next.4);
+`firenook binary-path` verifies the packaged native hash and exits 0; `npm
 audit signatures` reports verified attestations. The `next` dist-tag points at
 `0.1.0-next.4`; `latest` was not moved and remains a separate reviewed step.
 
@@ -110,10 +110,10 @@ records with the pinned service resolver: a handler upstream cannot type is
 reported with its reason and counted in the readiness receipt, while a handler
 that fails registration with this suite still fails startup. The oracle fixture
 gained an extension-shaped backend built with the pinned host's own
-`extension.yaml` normalizer. That correction is `@fireside-dev/cli@0.1.0-next.5`
+`extension.yaml` normalizer. That correction is `firenook@0.1.0-next.5`
 (engine `40c9f3f4fd32e9cc4409b14bee5ba390b1bf3c12`, tag `npm-v0.1.0-next.5`,
-[release run 34675478799](https://github.com/sanjevirau/fireside/actions/runs/34675478799),
-[prerelease](https://github.com/sanjevirau/fireside/releases/tag/npm-v0.1.0-next.5)):
+[release run 34675478799](https://github.com/firenook-dev/firenook/actions/runs/34675478799),
+[prerelease](https://github.com/firenook-dev/firenook/releases/tag/npm-v0.1.0-next.5)):
 registry contents and attestations were verified against the release assets
 for all six packages, `next` now selects `next.5`, and `latest` still selects
 `next.2`. The engine is otherwise the qualified candidate plus that host
@@ -122,29 +122,29 @@ the full-data acceptance was not re-run; the consumer verified the correction
 with a private local build on its real three-extension project before
 publication and pinned `next.5` exactly.
 
-`@fireside-dev/cli@0.1.0-next.6` pins engine
+`firenook@0.1.0-next.6` pins engine
 `572d4fb5f9d986accf2473858930c1e9bc3e5d57` (the merge of PR #39 on `main`:
 `TCP_NODELAY` on every HTTP front, the single-transaction seed import, scoped
 REST listing, lazy scan decoding and write-behind durability by default). That
 exact engine passed the seven-job CI on its merge commit
-([run 35089506458](https://github.com/sanjevirau/fireside/actions/runs/35089506458))
+([run 35089506458](https://github.com/firenook-dev/firenook/actions/runs/35089506458))
 and, as the release PR's head, the five-platform packed-install matrix; the
 prior head of PR #39 had failed the Windows packed install (Storage metadata
 flush through a read-only handle, `Access is denied`), which was corrected
 before the merge and is retained as a failure. The representative private
 consumer then ran its full paired acceptance on that engine (2026-09-16): a
-fresh official-then-Fireside sequence with no banked baseline and no host
+fresh official-then-Firenook sequence with no banked baseline and no host
 waiver, two two-hour soaks, initial and post-restart browser journeys,
 lifecycle parity, fresh setup and regression commands, all with zero errors,
 60,000 of 60,000 listener deliveries on both backends and no swap activity on
-Fireside. A first attempt on the same inputs failed before any measurement
+Firenook. A first attempt on the same inputs failed before any measurement
 when the official emulator's editor page did not load within 300 s; it is
 retained as a failure, not relabelled. The consumer's private report holds the
 raw evidence and an independent audit that re-derives every percentile and
 memory peak from the recorded samples.
 
 `0.1.0-next.6` was published on 2026-09-16 (UTC) by
-[release run 35132738094](https://github.com/sanjevirau/fireside/actions/runs/35132738094)
+[release run 35132738094](https://github.com/firenook-dev/firenook/actions/runs/35132738094)
 from tag `npm-v0.1.0-next.6` at main commit
 `65d9dce6067c8885ae7bb92c9c63322435e48c07` (the merge of release PR #40). All
 seven quality jobs, five fresh native platform builds with npm/Bun/suite
@@ -154,12 +154,12 @@ downloaded artifacts were re-checked locally with
 was approved. Publication used OIDC trusted publishing. Registry-installed
 verification on macOS arm64 (`npm install --save-exact --ignore-scripts` into
 an empty project from the public registry): all six exact versions resolve,
-`fireside --version` reports the package version and engine
-`572d4fb5f9d986accf2473858930c1e9bc3e5d57`, `fireside binary-path` verifies the
+`firenook --version` reports the package version and engine
+`572d4fb5f9d986accf2473858930c1e9bc3e5d57`, `firenook binary-path` verifies the
 packaged native hash and exits 0, `npm audit signatures` reports verified
 attestations, and the registry `dist.integrity` of every tarball equals the
 SHA-512 of the corresponding asset on the
-[GitHub prerelease](https://github.com/sanjevirau/fireside/releases/tag/npm-v0.1.0-next.6).
+[GitHub prerelease](https://github.com/firenook-dev/firenook/releases/tag/npm-v0.1.0-next.6).
 `next` now selects `0.1.0-next.6`; `latest` still selects `next.2` and remains
 a separate reviewed decision.
 
@@ -173,9 +173,9 @@ handlers reported and counted rather than fatal, a clean stop). It fails on
 recorded with extensions omitted does not stand in for it.
 
 Candidate `fc54e341a6da4fc6ca26849287f92f335a6184ce` passed all seven jobs in
-[CI 34538321458](https://github.com/sanjevirau/fireside/actions/runs/34538321458)
+[CI 34538321458](https://github.com/firenook-dev/firenook/actions/runs/34538321458)
 and all five native build/install jobs plus the combined verifier in
-[packages 34538321468](https://github.com/sanjevirau/fireside/actions/runs/34538321468).
+[packages 34538321468](https://github.com/firenook-dev/firenook/actions/runs/34538321468).
 All five downloaded sets passed `check-local-platforms.mjs` locally too.
 The [receipt](../benchmarks/results/phase-e/source-qualification.json) preserves
 exact versions, archive hashes and npm/Bun/full-suite checks. The prior attempt

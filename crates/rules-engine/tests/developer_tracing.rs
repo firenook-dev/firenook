@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     AllowDecision, DocumentAccess, DocumentAccessError, EmptyDocumentAccess, EvaluationRequest,
     MAXIMUM_TRACE_OUTCOMES, RequestOperation, Resource, Timestamp, Value, compile,
 };

@@ -1,12 +1,12 @@
 //! Crate-level checks; the behavioural gate is the corpus replay
-//! (`conformance/src/pubsub/replay-fireside.ts`). These keep the function
+//! (`conformance/src/pubsub/replay-firenook.ts`). These keep the function
 //! delivery and schedule contracts the suite relies on.
 
 use axum::body::Body;
 use axum::http::{Request, Response, StatusCode};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use fireside_functions_bridge::{
+use firenook_functions_bridge::{
     DispatchRequest, FunctionBackend, TriggerObserver, TriggerRegistry,
 };
 use serde::Deserialize;
@@ -27,7 +27,7 @@ const PUBSUB_ORACLE: &str = include_str!(
 );
 const PROJECT: &str = "demo-fireside-phase4-suite-oracle";
 
-fn inventory() -> fireside_functions_bridge::FunctionsInventory {
+fn inventory() -> firenook_functions_bridge::FunctionsInventory {
     #[derive(Deserialize)]
     struct Response {
         backends: Vec<FunctionBackend>,
@@ -36,7 +36,7 @@ fn inventory() -> fireside_functions_bridge::FunctionsInventory {
     let response =
         serde_json::from_value::<Response>(oracle["observations"][0]["response"].clone())
             .expect("backends response");
-    fireside_functions_bridge::FunctionsInventory {
+    firenook_functions_bridge::FunctionsInventory {
         generation: 0,
         backends: response.backends,
     }
@@ -262,7 +262,7 @@ async fn refreshed_function_targets_preserve_topics_ids_and_queued_work() {
     );
     assert!(deliveries.try_recv().is_err());
 
-    let empty = fireside_functions_bridge::FunctionsInventory {
+    let empty = firenook_functions_bridge::FunctionsInventory {
         generation: 0,
         backends: Vec::new(),
     };
@@ -293,7 +293,7 @@ async fn unsupported_reloaded_schedule_keeps_its_topic_without_automatic_ticks()
             schedule.schedule = "not a schedule".to_owned();
         }
     }
-    // An expression Fireside cannot evaluate does not reject the reload (the
+    // An expression Firenook cannot evaluate does not reject the reload (the
     // official emulator never runs schedules on a clock); the topic and its
     // manual trigger route survive, only the ticks are skipped.
     runtime

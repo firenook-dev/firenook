@@ -52,7 +52,7 @@ const packageRoot = process.env.FIREBASE_TOOLS_15_22_ROOT;
 if (!packageRoot) throw new Error("FIREBASE_TOOLS_15_22_ROOT is required");
 const originalTmpdir = process.env.TMPDIR;
 const isolatedTmpdir = await mkdtemp(
-  join(originalTmpdir ?? "/tmp", "fireside-phase4-storage-oracle-"),
+  join(originalTmpdir ?? "/tmp", "firenook-phase4-storage-oracle-"),
 );
 process.env.TMPDIR = isolatedTmpdir;
 

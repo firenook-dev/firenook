@@ -1,7 +1,7 @@
 use super::*;
 use crate::{Authorization, RulesRuntime, SnapshotAccess, request_history::RequestHistory};
-use fireside_core_store::{DatabaseName, Store, StoreOptions};
-use fireside_rules_engine::{
+use firenook_core_store::{DatabaseName, Store, StoreOptions};
+use firenook_rules_engine::{
     EmptyDocumentAccess, EvaluationRequest, RequestOperation, Resource, Timestamp, Value, compile,
 };
 use serde_json::{Value as Json, json};
@@ -82,7 +82,7 @@ fn non_resource_reports_match_all_captured_values_and_counts() {
                 canonicalize_sets(&mut expected);
             }
             assert_eq!(actual["report"], expected, "{} after", profile["id"]);
-            assert_eq!(actual["firesideCoverage"]["truncated"], false);
+            assert_eq!(actual["firenookCoverage"]["truncated"], false);
         }
     }
 }
@@ -167,7 +167,7 @@ fn distinct_value_and_byte_caps_keep_complete_values_and_expose_omissions() {
         execute(&store, &rules, &request);
     }
     let actual = report(&store, &rules);
-    assert_eq!(actual["firesideCoverage"]["truncated"], true);
+    assert_eq!(actual["firenookCoverage"]["truncated"], true);
     assert_eq!(
         actual["report"][0]["values"][0]["count"],
         MAXIMUM_VALUES_PER_EXPRESSION + 1
@@ -190,9 +190,9 @@ fn distinct_value_and_byte_caps_keep_complete_values_and_expose_omissions() {
     ));
     execute(&store, &rules, &request);
     let actual = report(&store, &rules);
-    assert_eq!(actual["firesideCoverage"]["truncated"], true);
+    assert_eq!(actual["firenookCoverage"]["truncated"], true);
     assert!(
-        actual["firesideCoverage"]["retainedBytes"]
+        actual["firenookCoverage"]["retainedBytes"]
             .as_u64()
             .unwrap()
             < u64::try_from(MAXIMUM_BYTES).unwrap()
@@ -249,7 +249,7 @@ fn reload_project_isolation_and_nonblocking_contention_are_explicit() {
                 )
                 .unwrap()
         )
-        .unwrap()["firesideCoverage"]["omittedOperations"],
+        .unwrap()["firenookCoverage"]["omittedOperations"],
         1
     );
     assert_eq!(
@@ -310,7 +310,7 @@ fn databases_of_one_project_keep_separate_counters_and_rulesets() {
         other_report["rules"]["files"][0]["content"],
         source("request.method != 'get'")
     );
-    assert_eq!(default_report["firesideCoverage"]["evictedProjects"], 0);
+    assert_eq!(default_report["firenookCoverage"]["evictedProjects"], 0);
 }
 
 #[test]

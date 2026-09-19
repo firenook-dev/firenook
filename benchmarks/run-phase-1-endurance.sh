@@ -7,7 +7,7 @@ cd "$repository_dir"
 
 test -n "${ENDURANCE_ARTIFACT_DIR:-}"
 test -n "${FIRESTORE_EMULATOR_JAR:-}"
-test -x target/release/fireside
+test -x target/release/firenook
 test -f "$FIRESTORE_EMULATOR_JAR"
 
 cd conformance

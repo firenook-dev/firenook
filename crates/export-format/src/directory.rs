@@ -221,7 +221,7 @@ impl ExportReader {
     pub fn into_background(self) -> BackgroundExportReader {
         let (sender, receiver) = sync_channel(BACKGROUND_QUEUE_DEPTH);
         let worker = thread::Builder::new()
-            .name("fireside-export-decode".to_owned())
+            .name("firenook-export-decode".to_owned())
             .spawn(move || decode_in_background(self, &sender))
             .ok();
         BackgroundExportReader {
@@ -528,7 +528,7 @@ impl TemporaryDirectory {
         for _ in 0..100 {
             let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
             let path = parent.join(format!(
-                ".fireside-export-{}-{sequence}",
+                ".firenook-export-{}-{sequence}",
                 std::process::id()
             ));
             match fs::create_dir(&path) {
@@ -681,7 +681,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{Seek as _, Write as _};
 
-    use fireside_core_store::Value;
+    use firenook_core_store::Value;
 
     use super::*;
 
@@ -793,7 +793,7 @@ mod tests {
 
     fn unique_test_directory() -> PathBuf {
         std::env::temp_dir().join(format!(
-            "fireside-export-format-test-{}-{}",
+            "firenook-export-format-test-{}-{}",
             std::process::id(),
             TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ))

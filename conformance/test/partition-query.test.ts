@@ -12,7 +12,7 @@ import {
 
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1000;
 const DOCUMENT_COUNT = 256;
-const COLLECTION_ID = "fireside_partition_conformance";
+const COLLECTION_ID = "firenook_partition_conformance";
 
 test("partitionQuery returns ordered document-name split cursors", async (context) => {
   const configuration = resolveTarget(process.env);

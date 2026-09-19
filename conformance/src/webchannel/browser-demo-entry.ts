@@ -43,7 +43,7 @@ interface BrowserDemoResult {
 
 declare global {
   interface Window {
-    firesideRunWebChannelDemo(
+    firenookRunWebChannelDemo(
       configuration: BrowserDemoConfiguration,
     ): Promise<BrowserDemoResult>;
   }
@@ -53,13 +53,13 @@ const COLLECTION = "fireside_phase2_browser_demo";
 const LISTENER_DELIVERY_SAMPLES = 100;
 const TIMEOUT_MILLISECONDS = 20_000;
 
-window.firesideRunWebChannelDemo = async (
+window.firenookRunWebChannelDemo = async (
   configuration,
 ): Promise<BrowserDemoResult> => {
   const app = initializeApp(
     {
-      apiKey: "fireside-synthetic-emulator-key",
-      appId: "1:123456789:web:fireside-phase2-browser-demo",
+      apiKey: "firenook-synthetic-emulator-key",
+      appId: "1:123456789:web:firenook-phase2-browser-demo",
       projectId: configuration.projectId,
     },
     `phase2-${configuration.variant}-${configuration.runId}`,

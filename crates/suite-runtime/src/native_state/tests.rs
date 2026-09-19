@@ -11,7 +11,7 @@ struct Case {
 impl Case {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "fireside-native-state-{}-{}",
+            "firenook-native-state-{}-{}",
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -21,7 +21,7 @@ impl Case {
         fs::write(seed.join("firebase-export-metadata.json"), b"{}").unwrap();
         fs::write(seed.join("documents"), "seed-\u{706b}\u{1f525}").unwrap();
         let config = SuiteConfig {
-            durability: fireside_core_store::DiskDurability::default(),
+            durability: firenook_core_store::DiskDurability::default(),
             host: "127.0.0.1".into(),
             project_id: "demo-native-resume".into(),
             services: crate::ServiceSelection::ALL,
@@ -70,8 +70,8 @@ impl Case {
         // Structural guard fixtures; real-format reopen is covered by core,
         // Auth, Storage and the process recovery tests, not these dummy bytes.
         for name in [
-            "firestore/fireside.redb",
-            "firestore/fireside.wal",
+            "firestore/firenook.redb",
+            "firestore/firenook.wal",
             "auth-state.json",
             "storage/metadata.json",
             "storage/metadata.redb",
@@ -192,8 +192,8 @@ fn project_bucket_and_format_mismatches_are_rejected() {
 #[test]
 fn every_required_state_file_must_exist_and_receipt_must_parse() {
     for file in [
-        "firestore/fireside.redb",
-        "firestore/fireside.wal",
+        "firestore/firenook.redb",
+        "firestore/firenook.wal",
         "auth-state.json",
         "storage/metadata.json",
         "storage/metadata.redb",

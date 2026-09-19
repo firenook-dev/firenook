@@ -1,7 +1,7 @@
-//! Firebase Functions event bridge for the fireside emulator suite.
+//! Firebase Functions event bridge for the firenook emulator suite.
 //!
 //! Registration and event envelopes are derived from permanent captures of
-//! the official emulator. Fireside owns trigger matching and delivery while a
+//! the official emulator. Firenook owns trigger matching and delivery while a
 //! Node Functions host executes the user's JavaScript handlers.
 
 #![forbid(unsafe_code)]
@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use fireside_core_store::{Change, CommitObservation, CommitObserver, Document, DocumentKey};
-use fireside_grpc_front::google::firestore::v1 as firestore_proto;
+use firenook_core_store::{Change, CommitObservation, CommitObserver, Document, DocumentKey};
+use firenook_grpc_front::google::firestore::v1 as firestore_proto;
 use prost::Message as _;
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest as _, Sha256};
@@ -32,7 +32,7 @@ const V2_DELETED: &str = "google.cloud.firestore.document.v1.deleted";
 const V2_WRITTEN: &str = "google.cloud.firestore.document.v1.written";
 const AUTH_CONTEXT_SUFFIX: &str = ".withAuthContext";
 /// Response header the owned runtime sets to `handled` once a worker answered.
-pub const DELIVERY_HEADER: &str = "x-fireside-delivery";
+pub const DELIVERY_HEADER: &str = "x-firenook-delivery";
 /// `DELIVERY_HEADER` value meaning the handler executed (no retry).
 pub const DELIVERY_HANDLED: &str = "handled";
 /// The emulated Firestore database location every v2 event carries.
@@ -552,7 +552,7 @@ fn optional_proto_document(
 ) -> Result<Option<firestore_proto::Document>, RegistrationError> {
     document
         .map(|document| {
-            fireside_grpc_front::encode_document(key, document)
+            firenook_grpc_front::encode_document(key, document)
                 .map_err(|error| invalid(format!("failed to encode Firestore document: {error}")))
         })
         .transpose()
@@ -592,7 +592,7 @@ fn utc_timestamps_as_z(value: &mut JsonValue) {
     }
 }
 
-fn event_timestamp(change: &Change) -> fireside_core_store::Timestamp {
+fn event_timestamp(change: &Change) -> firenook_core_store::Timestamp {
     change.after.as_deref().map_or_else(
         || {
             change
@@ -606,7 +606,7 @@ fn event_timestamp(change: &Change) -> fireside_core_store::Timestamp {
 }
 
 fn format_timestamp(
-    timestamp: fireside_core_store::Timestamp,
+    timestamp: firenook_core_store::Timestamp,
 ) -> Result<String, RegistrationError> {
     OffsetDateTime::from_unix_timestamp(timestamp.seconds())
         .and_then(|value| value.replace_nanosecond(timestamp.nanos()))
@@ -616,7 +616,7 @@ fn format_timestamp(
 }
 
 fn format_seconds_timestamp(
-    timestamp: fireside_core_store::Timestamp,
+    timestamp: firenook_core_store::Timestamp,
 ) -> Result<String, RegistrationError> {
     OffsetDateTime::from_unix_timestamp(timestamp.seconds())
         .map_err(|error| invalid(format!("invalid event timestamp: {error}")))?
@@ -1225,7 +1225,7 @@ mod tests {
     use axum::extract::State;
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::post;
-    use fireside_core_store::{DatabaseName, Fields, Precondition, Store, Value, Write};
+    use firenook_core_store::{DatabaseName, Fields, Precondition, Store, Value, Write};
 
     use super::*;
 
@@ -2066,7 +2066,7 @@ mod tests {
             )
             .into_future(),
         );
-        let project = "demo-fireside-phase4-chaos";
+        let project = "demo-firenook-phase4-chaos";
         let database = DatabaseName::new(project, "(default)").expect("database");
         let registry = TriggerRegistry::default();
         phase4_register_six_patterns(&registry, project);
@@ -2134,7 +2134,7 @@ mod tests {
 
     fn chaos_dispatch(event_id: &str, trigger: &str) -> DispatchRequest {
         DispatchRequest {
-            path: format!("/functions/projects/demo-fireside-phase4-chaos/triggers/{trigger}"),
+            path: format!("/functions/projects/demo-firenook-phase4-chaos/triggers/{trigger}"),
             headers: BTreeMap::from([
                 ("ce-id".to_owned(), event_id.to_owned()),
                 ("content-type".to_owned(), "application/json".to_owned()),

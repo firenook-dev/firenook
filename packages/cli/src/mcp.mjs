@@ -1,4 +1,4 @@
-// fireside mcp: a Model Context Protocol server over stdio (newline-delimited
+// firenook mcp: a Model Context Protocol server over stdio (newline-delimited
 // JSON-RPC 2.0, as the MCP stdio transport specifies) that exposes the running
 // local suite to an agent: Firestore documents, Auth accounts and codes,
 // Storage objects, Functions inventory and invocation, Pub/Sub publishing,
@@ -61,7 +61,7 @@ const DATABASE = string('Firestore database id; default (default)');
 const BUCKET = string('Storage bucket; default <project>.appspot.com');
 
 export const TOOLS = [
-  {name:'fireside_status', group:'status', description:'The running Fireside suite: hub locator, hub status, the emulators listing (host and port per service) and the CLI version.',
+  {name:'firenook_status', group:'status', description:'The running Firenook suite: hub locator, hub status, the emulators listing (host and port per service) and the CLI version.',
     inputSchema:schema({}),
     async run(_args, context) {
       const project = resolveProject(context.options, context.cwd);
@@ -233,7 +233,7 @@ export const TOOLS = [
       const {origin} = await suite(context, 'tasks');
       return (await call(`${origin}/queueStats`)).body;
     }},
-  {name:'emulators_export', group:'status', description:'Export the running Firestore, Auth and Storage data to a directory outside the project (fireside emulators:export).',
+  {name:'emulators_export', group:'status', description:'Export the running Firestore, Auth and Storage data to a directory outside the project (firenook emulators:export).',
     inputSchema:schema({path:string('Destination directory'), force:{type:'boolean', description:'Overwrite a non-empty foreign directory'}}, ['path']),
     async run({path, force = false}, context) {
       const lines = [];
@@ -316,8 +316,8 @@ export function createMcpServer(options, cwd = process.cwd(), log = console) {
       case 'initialize': {
         const requested = params?.protocolVersion;
         const protocolVersion = PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0];
-        return result(id, {protocolVersion, capabilities:{tools:{}}, serverInfo:{name:'fireside', version:manifest.version},
-          instructions:'Tools act on the local Fireside emulator suite only (found through the hub locator of the configured project). Firestore values use plain JSON with {"$timestamp"}, {"$ref"}, {"$geo"} and {"$bytes"} sentinels. Nothing is sent to any cloud service.'});
+        return result(id, {protocolVersion, capabilities:{tools:{}}, serverInfo:{name:'firenook', version:manifest.version},
+          instructions:'Tools act on the local Firenook emulator suite only (found through the hub locator of the configured project). Firestore values use plain JSON with {"$timestamp"}, {"$ref"}, {"$geo"} and {"$bytes"} sentinels. Nothing is sent to any cloud service.'});
       }
       case 'ping': return result(id, {});
       case 'tools/list': return result(id, {tools:tools.map(({name, description, inputSchema}) => ({name, description, inputSchema}))});
@@ -332,7 +332,7 @@ export function createMcpServer(options, cwd = process.cwd(), log = console) {
           const value = await tool.run(params.arguments ?? {}, context);
           return result(id, {content:[{type:'text', text:JSON.stringify(value, null, 2)}]});
         } catch (failure) {
-          log.error(`fireside mcp: ${tool.name}: ${failure.message}`);
+          log.error(`firenook mcp: ${tool.name}: ${failure.message}`);
           return result(id, {content:[{type:'text', text:JSON.stringify({error:failure.message}, null, 2)}], isError:true});
         }
       }
@@ -351,7 +351,7 @@ export async function serveMcp(options, cwd = process.cwd(), streams = {input:pr
   output.on?.('error', () => { closed = true; input.destroy?.(); });
   const send = message => { if (!closed) output.write(`${JSON.stringify(message)}\n`); };
   const pending = new Set();
-  log.error(`fireside mcp ${manifest.version}: ${server.tools.length} tools over stdio for project ${describeProject(options, cwd)}; local emulators only`);
+  log.error(`firenook mcp ${manifest.version}: ${server.tools.length} tools over stdio for project ${describeProject(options, cwd)}; local emulators only`);
   const lines = createInterface({input, crlfDelay:Infinity});
   for await (const line of lines) {
     if (!line.trim()) continue;

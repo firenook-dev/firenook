@@ -9,7 +9,7 @@ use time::{OffsetDateTime, Time};
 use crate::functions::ScheduleDefinition;
 use crate::runtime::PubsubRuntime;
 
-/// A schedule Fireside cannot run on a clock.
+/// A schedule Firenook cannot run on a clock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleError(pub String);
 
@@ -36,10 +36,10 @@ impl SchedulerRuntime {
                 Ok(cadence) => cadence,
                 Err(error) => {
                     // The official emulator never runs schedules on a clock;
-                    // an expression Fireside cannot evaluate keeps the manual
+                    // an expression Firenook cannot evaluate keeps the manual
                     // trigger route and loses only the automatic ticks.
                     eprintln!(
-                        "fireside pubsub: schedule for {} not run automatically ({error}); fire it through the Functions trigger route",
+                        "firenook pubsub: schedule for {} not run automatically ({error}); fire it through the Functions trigger route",
                         schedule.topic
                     );
                     continue;
@@ -215,7 +215,7 @@ impl Cadence {
                 .is_some_and(|zone| zone != "UTC" && zone != "Etc/UTC")
             {
                 eprintln!(
-                    "fireside pubsub: cron schedule {} declares time zone {}; Fireside evaluates it in UTC",
+                    "firenook pubsub: cron schedule {} declares time zone {}; Firenook evaluates it in UTC",
                     schedule.expression,
                     schedule.time_zone.as_deref().unwrap_or_default()
                 );

@@ -1,6 +1,6 @@
 //! Isolated HTTP peer for the mandatory Auth refresh/browser differential test.
-use fireside_auth_front::AuthRuntime;
-use fireside_functions_bridge::{TriggerObserver, TriggerRegistry};
+use firenook_auth_front::AuthRuntime;
+use firenook_functions_bridge::{TriggerObserver, TriggerRegistry};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

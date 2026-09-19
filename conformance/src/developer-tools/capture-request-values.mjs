@@ -14,7 +14,7 @@ assert.ok(process.argv[2], 'provide a new output directory');
 const output = resolve(process.argv[2]);
 const metadataMode = process.argv[3] === '--metadata';
 await mkdir(output, {recursive:false});
-const work = await mkdtemp(join(tmpdir(), 'fireside-request-values-'));
+const work = await mkdtemp(join(tmpdir(), 'firenook-request-values-'));
 const jar = join(homedir(), '.cache/firebase/emulators/cloud-firestore-emulator-v1.22.0.jar');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const jarSha256 = hash(await readFile(jar));

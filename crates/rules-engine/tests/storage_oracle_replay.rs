@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     Auth, DocumentAccess, DocumentAccessError, EmptyDocumentAccess, EvaluationRequest,
     RequestOperation, Resource, RulesService, StorageObject, Timestamp, Value, compile,
 };
@@ -17,7 +17,7 @@ const EXPRESSION_CORPUS: &str = include_str!(
 );
 
 /// Cases whose supplied resource carries keys the Storage runtime never
-/// exposes (`cacheControl`, `contentLanguage`). Fireside's object model has
+/// exposes (`cacheControl`, `contentLanguage`). Firenook's object model has
 /// fourteen keys (storage-rules-v1 emulator programs), so the same
 /// expressions are asserted to deny with a runtime error instead.
 const OUTSIDE_RUNTIME_VALUE_DOMAIN: &[&str] = &[
@@ -73,7 +73,7 @@ fn replays_every_production_storage_expression_case() {
             if !expected_allowed && expected_error {
                 assert!(
                     actual.error.is_some(),
-                    "{id}: production denied with a runtime error, Fireside denied silently"
+                    "{id}: production denied with a runtime error, Firenook denied silently"
                 );
                 with_error += 1;
             }

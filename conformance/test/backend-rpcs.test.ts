@@ -20,7 +20,7 @@ test("CreateDocument assigns an ID, preserves masked fields, and rejects conflic
   const database = `projects/${configuration.projectId}/databases/(default)`;
   const parentPath = `runs/${runId}`;
   const parent = `${database}/documents/${parentPath}`;
-  const collectionId = "fireside_conformance";
+  const collectionId = "firenook_conformance";
   const expiresAt = Timestamp.fromMillis(Date.now() + DAY_MILLISECONDS);
   const callOptions = configuration.host === undefined
     ? {}
@@ -85,7 +85,7 @@ test("BulkWriter commits independent writes and surfaces per-write errors", asyn
   const firestore = createFirestore(configuration);
   const runId = randomUUID();
   const collection = firestore.collection(
-    `runs/${runId}/fireside_bulk_writer`,
+    `runs/${runId}/firenook_bulk_writer`,
   );
   const expiresAt = Timestamp.fromMillis(Date.now() + DAY_MILLISECONDS);
   const created = collection.doc("created");
@@ -169,7 +169,7 @@ test("BulkWriter accepts a near-5-MiB batch of individually valid documents", as
   const firestore = createFirestore(configuration);
   const runId = randomUUID();
   const collection = firestore.collection(
-    `runs/${runId}/fireside_large_bulk_writer`,
+    `runs/${runId}/firenook_large_bulk_writer`,
   );
   const expiresAt = Timestamp.fromMillis(Date.now() + DAY_MILLISECONDS);
   const sizes = [102_400, 307_200, 512_000, 716_800, 921_600];
@@ -528,7 +528,7 @@ test("BatchWrite reports per-write conflicts and commits independent writes", as
   const runId = randomUUID();
   const database = `projects/${configuration.projectId}/databases/(default)`;
   const collection = firestore.collection(
-    `runs/${runId}/fireside_conformance`,
+    `runs/${runId}/firenook_conformance`,
   );
   const existing = collection.doc("existing");
   const created = collection.doc("created");

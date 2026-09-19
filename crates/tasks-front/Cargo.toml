@@ -1,6 +1,6 @@
 [package]
-name = "fireside-tasks-front"
-description = "Cloud Tasks emulator for the fireside emulator suite"
+name = "firenook-tasks-front"
+description = "Cloud Tasks emulator for the firenook emulator suite"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ publish = false
 
 [dependencies]
 axum.workspace = true
-fireside-functions-bridge = { path = "../functions-bridge" }
+firenook-functions-bridge = { path = "../functions-bridge" }
 flate2.workspace = true
 indexmap.workspace = true
 reqwest.workspace = true

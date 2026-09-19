@@ -32,8 +32,8 @@
     "checksum validation and explicit unsupported-platform errors"
   ],
   "localControlDesignNotFirebaseProtocol": {
-    "enabledOnlyForOwnedPipe": "FIRESIDE_CONTROL_STDIN=1",
-    "shutdownLine": "FIRESIDE_SHUTDOWN\n",
+    "enabledOnlyForOwnedPipe": "FIRENOOK_CONTROL_STDIN=1",
+    "shutdownLine": "FIRENOOK_SHUTDOWN\n",
     "eof": "request graceful shutdown when launcher disconnects",
     "limits": "one bounded line; no network endpoint or arbitrary command execution"
   },

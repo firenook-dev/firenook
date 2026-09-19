@@ -32,7 +32,7 @@ use url::{Url, form_urlencoded};
 pub const FIXTURE_SCHEMA_VERSION: u32 = 1;
 
 /// Read-only endpoint that returns the current redacted fixture snapshot.
-pub const CAPTURE_FIXTURE_PATH: &str = "/__fireside_capture/fixture";
+pub const CAPTURE_FIXTURE_PATH: &str = "/__firenook_capture/fixture";
 
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CAPTURE_EXCHANGES: usize = 4_096;

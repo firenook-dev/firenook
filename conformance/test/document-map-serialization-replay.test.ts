@@ -15,11 +15,11 @@ const execute = promisify(execFile);
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
 test("repeated native, REST and browser reads match the map oracle in memory and disk/WAL", { timeout: 240_000 }, async context => {
-  await execute("cargo", ["build", "--locked", "-p", "fireside"], { cwd: root });
+  await execute("cargo", ["build", "--locked", "-p", "firenook"], { cwd: root });
   const metadata = JSON.parse((await execute("cargo", ["metadata", "--no-deps", "--format-version", "1"], { cwd: root })).stdout) as { target_directory: string };
   const expected = JSON.parse(await readFile(new URL("../fixtures/document-map-serialization/java-1.21.0/observations.json", import.meta.url), "utf8")) as SerializationCapture;
   for (const mode of ["memory", "disk-wal"]) {
-    const output = await mkdtemp(join(tmpdir(), `fireside-map-replay-${mode}-`));
+    const output = await mkdtemp(join(tmpdir(), `firenook-map-replay-${mode}-`));
     context.diagnostic(`${mode} evidence: ${output}`);
     const reservation = createServer();
     await new Promise<void>(done => reservation.listen(0, "127.0.0.1", done));
@@ -27,7 +27,7 @@ test("repeated native, REST and browser reads match the map oracle in memory and
     await new Promise<void>(done => reservation.close(() => done()));
     const args = ["--host", "127.0.0.1", "--port", String(address.port), "--project_id", serializationProject];
     if (mode === "disk-wal") args.push("--data-dir", join(output, "database"));
-    const server = spawn(join(metadata.target_directory, "debug/fireside"), args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    const server = spawn(join(metadata.target_directory, "debug/firenook"), args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
     const exited = once(server, "exit");
     let logs = ""; server.stdout.on("data", data => { logs += String(data); }); server.stderr.on("data", data => { logs += String(data); });
     try {

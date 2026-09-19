@@ -1,9 +1,9 @@
 import FirestorePackage, { Firestore } from "@google-cloud/firestore";
 import { credentials } from "@grpc/grpc-js";
 
-export const TARGET_NAMES = ["cloud", "java", "fireside"] as const;
+export const TARGET_NAMES = ["cloud", "java", "firenook"] as const;
 export const CLOUD_PROJECT_ID = "fireside-conformance";
-export const ENTERPRISE_DATABASE_ID = "fireside-enterprise-conformance";
+export const ENTERPRISE_DATABASE_ID = "firenook-enterprise-conformance";
 
 export type TargetName = (typeof TARGET_NAMES)[number];
 
@@ -30,7 +30,7 @@ export function resolveTarget(
 
   return {
     name,
-    projectId: environment.GCLOUD_PROJECT ?? `demo-fireside-${name}`,
+    projectId: environment.GCLOUD_PROJECT ?? `demo-firenook-${name}`,
     host,
   };
 }

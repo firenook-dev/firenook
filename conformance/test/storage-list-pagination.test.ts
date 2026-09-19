@@ -67,11 +67,11 @@ test("official Storage pagination crosses the default 1,000-object boundary", as
   assert.equal(fixture.invariants.sdkAutopaginationReturnsAllObjects, true);
 });
 
-test("Fireside HTTP replays the oracle's inclusive continuation contract", { timeout: 600_000 }, async () => {
+test("Firenook HTTP replays the oracle's inclusive continuation contract", { timeout: 600_000 }, async () => {
   const repository = fileURLToPath(new URL("../../", import.meta.url));
   await promisify(execFile)(
     "cargo",
-    ["build", "--locked", "-p", "fireside-storage-front", "--example", "encoding_fixture_server"],
+    ["build", "--locked", "-p", "firenook-storage-front", "--example", "encoding_fixture_server"],
     { cwd: repository },
   );
   const cargoMetadata = await promisify(execFile)(
@@ -80,7 +80,7 @@ test("Fireside HTTP replays the oracle's inclusive continuation contract", { tim
     { cwd: repository },
   );
   const targetDirectory = (JSON.parse(cargoMetadata.stdout) as { target_directory: string }).target_directory;
-  const scratch = await mkdtemp("/tmp/fireside-storage-pagination-replay-");
+  const scratch = await mkdtemp("/tmp/firenook-storage-pagination-replay-");
   const child = spawn(
     `${targetDirectory}/debug/examples/encoding_fixture_server`,
     [scratch],
@@ -120,13 +120,13 @@ test("Fireside HTTP replays the oracle's inclusive continuation contract", { tim
     }
 
     for (const route of ["storage/v1", "v0"]) {
-      const first = await listFireside(origin, route, "");
+      const first = await listFirenook(origin, route, "");
       assert.deepEqual(first.itemNames, names.slice(0, 2));
       assert.equal(first.nextPageToken, names[2]);
-      const second = await listFireside(origin, route, first.nextPageToken ?? "");
+      const second = await listFirenook(origin, route, first.nextPageToken ?? "");
       assert.deepEqual(second.itemNames, names.slice(2, 4));
       assert.equal(second.nextPageToken, names[4]);
-      const third = await listFireside(origin, route, second.nextPageToken ?? "");
+      const third = await listFirenook(origin, route, second.nextPageToken ?? "");
       assert.deepEqual(third.itemNames, names.slice(4));
       assert.equal(third.nextPageToken, undefined);
     }
@@ -146,7 +146,7 @@ function observation(
   return result;
 }
 
-async function listFireside(
+async function listFirenook(
   origin: string,
   route: string,
   pageToken: string,

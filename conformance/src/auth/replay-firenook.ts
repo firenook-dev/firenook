@@ -1,9 +1,9 @@
-// Phase I4: replay the frozen Auth corpus against Fireside's standalone
-// `fireside auth` service (one fresh process per program) with the same
+// Phase I4: replay the frozen Auth corpus against Firenook's standalone
+// `firenook auth` service (one fresh process per program) with the same
 // functions stub and the same normalization as the capture, and report every
 // step that is not parity or a named divergence.
 //
-//   node --import tsx src/auth/replay-fireside.ts --binary ../target/release/fireside \
+//   node --import tsx src/auth/replay-firenook.ts --binary ../target/release/firenook \
 //     [--programs=a,b] [--report-only] [--output report.json]
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -53,28 +53,28 @@ const DIVERGENCES: readonly Divergence[] = [
     program: /.*/u,
     step: /.*/u,
     path: /^response\.body\.\$html\.(sha256|bytes)$/u,
-    reason: "Fireside ships its own popup helper page; the accounts it offers are compared",
+    reason: "Firenook ships its own popup helper page; the accounts it offers are compared",
     anyValue: true,
   },
   {
     program: /.*/u,
     step: /^(malformed-json|body-string)$/u,
     path: /^response\.body\.error\.(message|errors\.0\.message)$/u,
-    reason: "the JSON parse error text is V8's; Fireside reports serde's message with the same status and shape",
+    reason: "the JSON parse error text is V8's; Firenook reports serde's message with the same status and shape",
     anyValue: true,
   },
   {
     program: /.*/u,
     step: /^signin-function-text$/u,
     path: /^response\.body\.error\.errors\.0\.reason$/u,
-    reason: "a blocking function's non-JSON body is reported with V8's parse error as the reason; Fireside reports serde's",
+    reason: "a blocking function's non-JSON body is reported with V8's parse error as the reason; Firenook reports serde's",
     anyValue: true,
   },
   {
     program: /.*/u,
     step: /.*/u,
     path: /^logs\.\d+\.text$/u,
-    reason: "the official server logs a 500 with its Node stack trace; Fireside logs the same first line",
+    reason: "the official server logs a 500 with its Node stack trace; Firenook logs the same first line",
     accept: (expected, actual) =>
       typeof expected === "string" && typeof actual === "string" && expected.includes("\n    at ") && expected.split("\n")[0] === actual,
   },
@@ -104,7 +104,7 @@ const binary = resolve(args.binary);
 const fixture = JSON.parse(await readFile(join(fixtureRoot, "emulator-programs.json"), "utf8")) as Fixture;
 const constants = new Set<string>([PROJECT_ID, API_KEY]);
 collectConstants(PROGRAMS, constants);
-const runRoot = await mkdtemp(join(tmpdir(), "fireside-auth-replay-"));
+const runRoot = await mkdtemp(join(tmpdir(), "firenook-auth-replay-"));
 
 const stub = new FunctionsStub();
 await stub.start();

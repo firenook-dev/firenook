@@ -2,8 +2,8 @@
 //! The deterministic Listen unit test covers the otherwise legal bad select order.
 
 use axum::http::Request;
-use fireside_grpc_front::google::firestore::v1::firestore_server::Firestore as _;
-use fireside_grpc_front::google::firestore::v1::value::ValueType;
+use firenook_grpc_front::google::firestore::v1::firestore_server::Firestore as _;
+use firenook_grpc_front::google::firestore::v1::value::ValueType;
 use http_body_util::BodyExt as _;
 use tower::ServiceExt as _;
 

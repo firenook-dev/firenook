@@ -9,7 +9,7 @@
       ]
     },
     {
-      "collectionGroup": "fireside_vector_conformance",
+      "collectionGroup": "firenook_vector_conformance",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -21,7 +21,7 @@
   ],
   "fieldOverrides": [
     {
-      "collectionGroup": "fireside_conformance",
+      "collectionGroup": "firenook_conformance",
       "fieldPath": "runId",
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION" },
@@ -31,7 +31,7 @@
       ]
     },
     {
-      "collectionGroup": "fireside_partition_conformance",
+      "collectionGroup": "firenook_partition_conformance",
       "fieldPath": "ordinal",
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION" },

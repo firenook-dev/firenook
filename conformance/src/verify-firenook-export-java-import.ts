@@ -8,9 +8,9 @@ const PROJECT_ID = "demo-fireside-export-oracle";
 const HOST = "127.0.0.1";
 const EXPORT_NAME = "firestore_export";
 const repositoryRoot = resolve(process.cwd(), "..");
-const executable = process.platform === "win32" ? "fireside.exe" : "fireside";
+const executable = process.platform === "win32" ? "firenook.exe" : "firenook";
 const temporaryDirectory = await mkdtemp(
-  join(tmpdir(), "fireside-public-export-"),
+  join(tmpdir(), "firenook-public-export-"),
 );
 
 try {
@@ -19,16 +19,16 @@ try {
     "--quiet",
     "--locked",
     "-p",
-    "fireside",
+    "firenook",
   ], repositoryRoot);
-  const firesidePort = await reserveAvailablePort();
-  const fireside = spawn(
+  const firenookPort = await reserveAvailablePort();
+  const firenook = spawn(
     join(repositoryRoot, "target", "debug", executable),
     [
       "--host",
       HOST,
       "--port",
-      String(firesidePort),
+      String(firenookPort),
       "--project_id",
       PROJECT_ID,
     ],
@@ -40,21 +40,21 @@ try {
   );
 
   try {
-    await waitUntilListening(fireside, firesidePort);
-    const firesideEnvironment = {
+    await waitUntilListening(firenook, firenookPort);
+    const firenookEnvironment = {
       ...process.env,
-      CONFORMANCE_TARGET: "fireside",
-      FIRESTORE_EMULATOR_HOST: `${HOST}:${String(firesidePort)}`,
+      CONFORMANCE_TARGET: "firenook",
+      FIRESTORE_EMULATOR_HOST: `${HOST}:${String(firenookPort)}`,
       GCLOUD_PROJECT: PROJECT_ID,
     };
     await run(
       process.execPath,
       ["--import", "tsx", "src/seed-export.ts"],
       process.cwd(),
-      firesideEnvironment,
+      firenookEnvironment,
     );
     const response = await fetch(
-      `http://${HOST}:${String(firesidePort)}/emulator/v1/projects/${PROJECT_ID}:export`,
+      `http://${HOST}:${String(firenookPort)}/emulator/v1/projects/${PROJECT_ID}:export`,
       {
         method: "POST",
         headers: {
@@ -70,11 +70,11 @@ try {
     );
     if (!response.ok) {
       throw new Error(
-        `Fireside export failed with ${String(response.status)}: ${await response.text()}`,
+        `Firenook export failed with ${String(response.status)}: ${await response.text()}`,
       );
     }
   } finally {
-    await stop(fireside);
+    await stop(firenook);
   }
 
   await copyFile(
@@ -183,14 +183,14 @@ async function waitUntilListening(
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null || server.signalCode !== null) {
-      throw new Error("fireside exited before its port became available");
+      throw new Error("firenook exited before its port became available");
     }
     if (await canConnect(port)) {
       return;
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
-  throw new Error("timed out waiting for fireside to listen");
+  throw new Error("timed out waiting for firenook to listen");
 }
 
 async function canConnect(port: number): Promise<boolean> {

@@ -1,7 +1,7 @@
 //! HTTP router regression for the captured bounded-history Listen reset.
 
 use axum::http::Request;
-use fireside_grpc_front::google::firestore::v1::firestore_server::Firestore as _;
+use firenook_grpc_front::google::firestore::v1::firestore_server::Firestore as _;
 use http_body_util::BodyExt as _;
 use tower::ServiceExt as _;
 

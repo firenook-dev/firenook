@@ -13,7 +13,7 @@ RPC of the four services covered, two recordings identical (`receipts.j1`).
 `crates/pubsub-front` is rewritten as a broker (leases, ack deadlines,
 redelivery behind later messages, dead-lettering, ordering keys, filters,
 topic retention, seek/snapshots, push loop, Avro schema revisions) behind
-tonic services and the HTTP/JSON transcoder on one port; `fireside pubsub`
+tonic services and the HTTP/JSON transcoder on one port; `firenook pubsub`
 runs it standalone for the replay. The replay compares 3,755 values with
 0 mismatches and no named divergence, three runs identical; the pinned
 `@google-cloud/pubsub` 5.3.1 client passes publish, streaming `on('message')`,
@@ -32,7 +32,7 @@ tests, so both sides share one transport and normalization; and timing steps
 replay against the real clock (the corpus records only the timing outcomes
 the official emulator answers consistently) instead of an injectable clock.
 The official emulator's multi-key ordered delivery differs between its own
-runs, so the corpus holds Fireside to the single-key contract only
+runs, so the corpus holds Firenook to the single-key contract only
 (`conformance/fixtures/pubsub-v1/README.md`, Divergences).
 
 ## Goal
@@ -84,7 +84,7 @@ deleteSchema, validateSchema, validateMessage), `IamPolicyService`
 `OrderedMessageBacklog`/`OrderingKeyHasher`, `FilterExpression*`,
 `HttpEndpointPusher`/`PushLoop`, `SnapshotData`, `AvroSchema`.
 
-Why it matters beyond the consumer: Fireside exports `PUBSUB_EMULATOR_HOST`
+Why it matters beyond the consumer: Firenook exports `PUBSUB_EMULATOR_HOST`
 to every function worker (`functions-runtime/src/lib.rs:516`), and every
 Google client library that honours it speaks gRPC, so
 `new PubSub().topic(t).publishMessage(...)` from a function or an app fails
@@ -188,7 +188,7 @@ divergences empty or justified); CI integrity green.
 - Validation and error mapping tables from J1 (gRPC code, message, HTTP
   status, JSON body).
 - Function delivery becomes an internal subscriber: for every discovered
-  topic target Fireside creates `emulator-sub-<topic>` (visible to
+  topic target Firenook creates `emulator-sub-<topic>` (visible to
   list/get, deletable like the official one) and consumes it through the
   broker, so user `pull` and functions compete exactly as they do officially.
 
@@ -209,7 +209,7 @@ divergences empty or justified); CI integrity green.
   both transports (tonic client + tower oneshot) with a recording push
   endpoint; parity or a named divergence; timing steps use the recorded
   relative deadlines with a bounded clock.
-- `@google-cloud/pubsub` 5.3.1 end to end against Fireside in the conformance
+- `@google-cloud/pubsub` 5.3.1 end to end against Firenook in the conformance
   job: publish, subscription `on('message')`, ordering, push, schema.
 - Functions: the existing schedule/dispatch fixtures and the Phase H corpus
   replay unchanged.

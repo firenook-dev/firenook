@@ -11,38 +11,38 @@ import { serveMcp } from '../src/mcp.mjs';
 import { targetApply, targetClear, use } from '../src/rc.mjs';
 import { adopt, scaffold } from '../src/init.mjs';
 
-const help = `Fireside ${manifest.version} — Firebase-compatible local emulator suite
+const help = `Firenook ${manifest.version} — Firebase-compatible local emulator suite
 
 Project
-  fireside init [--force] [--dry-run] [--no-functions]   Scaffold firebase.json, rules, a Functions codebase
-  fireside init --adopt [--dry-run]                       Check an existing firebase.json; add what Fireside needs
-  fireside use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]   .firebaserc aliases
-  fireside target:apply storage NAME BUCKET...            Map a Storage target to buckets in .firebaserc
-  fireside target:clear storage NAME
-  fireside setup                                          Download the verified Emulator UI asset
-  fireside doctor [options]                               Read-only package/runtime/config checks (JSON)
+  firenook init [--force] [--dry-run] [--no-functions]   Scaffold firebase.json, rules, a Functions codebase
+  firenook init --adopt [--dry-run]                       Check an existing firebase.json; add what Firenook needs
+  firenook use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]   .firebaserc aliases
+  firenook target:apply storage NAME BUCKET...            Map a Storage target to buckets in .firebaserc
+  firenook target:clear storage NAME
+  firenook setup                                          Download the verified Emulator UI asset
+  firenook doctor [options]                               Read-only package/runtime/config checks (JSON)
 
 Emulators
-  fireside emulators:start [options]
-  fireside emulators:exec [options] "npm test"            Script through the shell, as the official CLI
-  fireside emulators:exec [options] -- CMD [ARGS...]      Argv command, no shell interpretation
-  fireside emulators:export DIR [--force] [--only firestore,auth,storage]
-  fireside firestore:delete PATH (-r | --shallow) [-f] [--database ID]
-  fireside firestore:delete --all-collections -f [--database ID]
-  fireside functions:invoke NAME [--data JSON] [--region us-central1] [--method POST]
-  fireside functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON]
+  firenook emulators:start [options]
+  firenook emulators:exec [options] "npm test"            Script through the shell, as the official CLI
+  firenook emulators:exec [options] -- CMD [ARGS...]      Argv command, no shell interpretation
+  firenook emulators:export DIR [--force] [--only firestore,auth,storage]
+  firenook firestore:delete PATH (-r | --shallow) [-f] [--database ID]
+  firenook firestore:delete --all-collections -f [--database ID]
+  firenook functions:invoke NAME [--data JSON] [--region us-central1] [--method POST]
+  firenook functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON]
                                                           Inject a background event (Firestore, Storage,
                                                           Pub/Sub, Auth, schedule, Eventarc, task queue)
-  fireside ext:vendor [--instance ID]...                  Copy registry Extensions into the project
-  fireside mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio
+  firenook ext:vendor [--instance ID]...                  Copy registry Extensions into the project
+  firenook mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio
 
 Advanced
-  fireside binary-path                                    Verified packaged native binary location
-  fireside native ARGS...                                 Explicit native CLI (no adapter safeguards)
+  firenook binary-path                                    Verified packaged native binary location
+  firenook native ARGS...                                 Explicit native CLI (no adapter safeguards)
 
 Common options: -P/--project ID, -c/--config firebase.json, --json (doctor, export, delete, init),
-  --debug (engine log in .fireside/runs/session-*/fireside-debug.log), --log-verbosity LEVEL,
-  --non-interactive (accepted; Fireside never prompts, destructive commands need --force).
+  --debug (engine log in .firenook/runs/session-*/firenook-debug.log), --log-verbosity LEVEL,
+  --non-interactive (accepted; Firenook never prompts, destructive commands need --force).
 Start/exec: --only auth,functions,firestore,storage,pubsub (extensions=functions; eventarc/tasks/hub/ui/
   logging follow their parent), --import DIR, --export-on-exit[=DIR], --state-dir DIR, --resume-state,
   --storage-bucket target=bucket (repeatable), --host HOST, --ui, --minimum-functions N,
@@ -53,7 +53,7 @@ firebase.json service subsets, storage {rules} or targets, several Firestore dat
 singleProjectMode are honoured; database/hosting/dataconnect/apphosting entries are skipped with a
 warning. Any lowercase project id is accepted; demo-* ids never reach cloud services. Functions run on
 the owned runtime with Node 24 workers; Storage rules are evaluated natively. Not provided:
-functions:shell (Fireside never starts a second Functions runtime; use functions:invoke), and every
+functions:shell (Firenook never starts a second Functions runtime; use functions:invoke), and every
 deploy/login command (never intercepted). Disk/WAL state by default; runs are kept, never deleted.
 `;
 
@@ -72,11 +72,11 @@ const accepted = {
 function checkOptions(action, options) {
   for (const [name, value] of Object.entries(options)) {
     if (Array.isArray(value) ? !value.length : value === undefined) continue;
-    if (!accepted[action].includes(name)) throw new Error(`--${name} is not an option of fireside ${action}; see --help`);
+    if (!accepted[action].includes(name)) throw new Error(`--${name} is not an option of firenook ${action}; see --help`);
   }
 }
 function noPositionals(action, positionals) {
-  if (positionals.length) throw new Error(`Unexpected argument ${positionals[0]}; fireside ${action} takes options only${action === 'emulators:start' ? ' (test commands belong to emulators:exec)' : ''}.`);
+  if (positionals.length) throw new Error(`Unexpected argument ${positionals[0]}; firenook ${action} takes options only${action === 'emulators:start' ? ' (test commands belong to emulators:exec)' : ''}.`);
 }
 
 // emulators:exec accepts either an argv command after -- or one script string.
@@ -87,10 +87,10 @@ function execCommand(action, {command, positionals, flags}) {
     return command;
   }
   if (positionals.length === 1) {
-    console.error('Fireside: running the script through the shell as the official CLI does; use -- for an argv command without shell interpretation');
+    console.error('Firenook: running the script through the shell as the official CLI does; use -- for an argv command without shell interpretation');
     return positionals[0];
   }
-  if (positionals.length > 1) throw new Error(`emulators:exec received ${positionals.length} arguments without --; run: fireside emulators:exec ${[...flags, '--', ...positionals].join(' ')}`);
+  if (positionals.length > 1) throw new Error(`emulators:exec received ${positionals.length} arguments without --; run: firenook emulators:exec ${[...flags, '--', ...positionals].join(' ')}`);
   throw new Error('emulators:exec requires a script (one quoted string) or an argv command after --');
 }
 
@@ -139,4 +139,4 @@ async function main() {
   return supervise(prepareLaunch(diagnostic, options, action === 'emulators:exec' ? 'exec' : 'start'), testCommand);
 }
 try { process.exitCode = await main(); }
-catch (error) { console.error(`Fireside: ${error.message}`); process.exitCode = 1; }
+catch (error) { console.error(`Firenook: ${error.message}`); process.exitCode = 1; }

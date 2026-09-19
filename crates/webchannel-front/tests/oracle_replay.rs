@@ -5,7 +5,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode, Version};
-use fireside_webchannel_front::{Backend, BackendChannel, ChannelKind, OpenRequest, router};
+use firenook_webchannel_front::{Backend, BackendChannel, ChannelKind, OpenRequest, router};
 use futures_util::StreamExt as _;
 use http_body_util::BodyExt as _;
 use serde::Deserialize;
@@ -438,7 +438,7 @@ async fn replay_unknown_sid(
     } else {
         assert!(
             !body.is_empty(),
-            "Fireside retains the cloud-compatible diagnostic body"
+            "Firenook retains the cloud-compatible diagnostic body"
         );
     }
 }

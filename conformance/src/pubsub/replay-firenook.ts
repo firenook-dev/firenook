@@ -1,15 +1,15 @@
-// Phase J4: replay the frozen Pub/Sub corpus against Fireside's standalone
-// `fireside pubsub` service (one fresh process per program) with the same
+// Phase J4: replay the frozen Pub/Sub corpus against Firenook's standalone
+// `firenook pubsub` service (one fresh process per program) with the same
 // transports, push endpoint and normalization as the capture, and report
 // every step that is not parity or a named divergence.
 //
-//   node --import tsx src/pubsub/replay-fireside.ts --binary ../target/release/fireside \
+//   node --import tsx src/pubsub/replay-firenook.ts --binary ../target/release/firenook \
 //     [--programs=a,b] [--report-only] [--output report.json] [--debug]
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PushEndpoint, startFireside, type Json } from "./client.ts";
+import { PushEndpoint, startFirenook, type Json } from "./client.ts";
 import { PROGRAMS, PROJECT_ID } from "./emulator-plan.ts";
 import { canonicalize } from "./normalize.ts";
 import { runProgram, type RecordedProgram, type RecordedStep } from "./runner.ts";
@@ -76,7 +76,7 @@ try {
     const recorded = fixture.programs.find((candidate) => candidate.id === program.id);
     if (!recorded) throw new Error(`program ${program.id} is not in the fixture; re-record first`);
     programsRun += 1;
-    const emulator = await startFireside(binary, PROJECT_ID);
+    const emulator = await startFirenook(binary, PROJECT_ID);
     let actual: RecordedProgram;
     try {
       actual = await runProgram(program, { emulator, push, debug: args.debug });

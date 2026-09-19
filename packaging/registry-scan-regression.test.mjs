@@ -6,8 +6,8 @@ import { publishVerifiedRelease, waitForRegistry } from './registry-readiness.mj
 const metadataVisibleAfterMs = 180_000;
 
 test('acknowledged npm uploads may hide BOTH metadata endpoints beyond two minutes', async () => {
-  const names = ['darwin-arm64', 'linux-x64', 'cli'];
-  const records = names.map(name => ({name:`@fireside-dev/${name}`,version:'0.1.0-next.1',integrity:'sha512-fixture'}));
+  const names = ['@firenook/cli-darwin-arm64', '@firenook/cli-linux-x64', 'firenook'];
+  const records = names.map(name => ({name,version:'0.2.0-next.1',integrity:'sha512-fixture'}));
   const accepted = new Map();
   let elapsed = 0;
   const probe = async (record, kind) => {
@@ -19,7 +19,7 @@ test('acknowledged npm uploads may hide BOTH metadata endpoints beyond two minut
     probe,
     publish: async record => {
       assert.equal(accepted.has(record.name), false, 'never upload accepted bytes again');
-      if (record.name.endsWith('/cli')) {
+      if (record.name === 'firenook') {
         for (const native of records.slice(0, -1)) assert.ok(await probe(native, 'index'), 'CLI must wait for installable natives');
       }
       accepted.set(record.name, elapsed);

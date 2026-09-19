@@ -12,7 +12,7 @@ const directory = resolve(directoryArgument);
 const receipt = JSON.parse(readFileSync(join(directory,'npm-smoke.json')));
 const root = join(receipt.consumer,'suite-smoke');
 mkdirSync(root);
-const cli = join(receipt.consumer,'node_modules/@fireside-dev/cli/bin/fireside.mjs');
+const cli = join(receipt.consumer,'node_modules/firenook/bin/firenook.mjs');
 const env = {...process.env};
 packageManager('npm',['install','--ignore-scripts','--no-audit','--no-fund','firebase-functions@7.2.5'],{cwd:receipt.consumer,env,stdio:'inherit'});
 execFileSync(process.execPath,[cli,'setup'],{env,stdio:'inherit'});
@@ -29,7 +29,7 @@ writeFileSync(join(root,'.firebaserc'),JSON.stringify({projects:{default:project
 writeFileSync(join(root,'firestore.rules'),"rules_version = '2'; service cloud.firestore { match /databases/{database}/documents { match /{document=**} { allow read, write: if true; } } }");
 writeFileSync(join(root,'storage.rules'),"rules_version = '2'; service firebase.storage { match /b/{bucket}/o { match /{object=**} { allow read, write: if true; } } }");
 mkdirSync(join(root,'functions'));
-writeFileSync(join(root,'functions/package.json'),JSON.stringify({name:'fireside-smoke-functions',main:'index.cjs',engines:{node:'24'},dependencies:{'firebase-functions':'7.2.5'}}));
+writeFileSync(join(root,'functions/package.json'),JSON.stringify({name:'firenook-smoke-functions',main:'index.cjs',engines:{node:'24'},dependencies:{'firebase-functions':'7.2.5'}}));
 writeFileSync(join(root,'functions/index.cjs'),"const {onRequest}=require('firebase-functions/v2/https'); exports.echo=onRequest((req,res)=>res.json({ok:true}));\n");
 writeFileSync(join(root,'check.cjs'),`
 const assert = require('node:assert/strict');

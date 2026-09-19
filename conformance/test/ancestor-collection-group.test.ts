@@ -11,7 +11,7 @@ import {
   resolveTarget,
 } from "../src/target.ts";
 
-const COLLECTION_ID = "fireside_ancestor_items";
+const COLLECTION_ID = "firenook_ancestor_items";
 const DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
 
 interface RunQueryResponse {

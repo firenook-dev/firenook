@@ -4,7 +4,7 @@
 //! registration of Firestore triggers with the bridge.
 use std::collections::{BTreeMap, HashMap};
 
-use fireside_functions_bridge::TriggerRegistry;
+use firenook_functions_bridge::TriggerRegistry;
 use serde_json::{Map, Value, json};
 
 use crate::log::{LogEvent, LogSink};

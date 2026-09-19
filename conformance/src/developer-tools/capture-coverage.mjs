@@ -13,7 +13,7 @@ assert.equal(process.versions.node, '24.20.0');
 assert.ok(process.argv[2], 'provide a fresh output directory');
 const output = resolve(process.argv[2]);
 await mkdir(output, { recursive: false });
-const work = await mkdtemp(join(tmpdir(), 'fireside-coverage-'));
+const work = await mkdtemp(join(tmpdir(), 'firenook-coverage-'));
 const jar = join(homedir(), '.cache/firebase/emulators/cloud-firestore-emulator-v1.22.0.jar');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const jarSha256 = hash(await readFile(jar));

@@ -7,7 +7,7 @@ import { join } from "node:path";
 const PROJECT_ID = "demo-fireside-export-oracle";
 
 const temporaryDirectory = await mkdtemp(
-  join(tmpdir(), "fireside-export-oracle-"),
+  join(tmpdir(), "firenook-export-oracle-"),
 );
 const exportDirectory = join(temporaryDirectory, "export");
 const configPath = join(temporaryDirectory, "firebase.json");

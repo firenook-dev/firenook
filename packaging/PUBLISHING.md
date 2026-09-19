@@ -1,20 +1,20 @@
 # Release owner runbook
 
 Status: preview packages exist. Release publication requires the protected
-workflow and human approval; never publish a placeholder or bypass that review.
+workflow and human approval; never bypass that review.
 
 ## Package ownership and one-time bootstrap
 
-The `fireside-dev` npm organization owns:
+The `firenook` npm organization (team `developers`) owns:
 
 | Package | Purpose |
 | --- | --- |
-| `@fireside-dev/cli` | Public command and platform selector |
-| `@fireside-dev/darwin-arm64` | macOS arm64 engine |
-| `@fireside-dev/darwin-x64` | Intel macOS engine |
-| `@fireside-dev/linux-x64` | Linux x64/glibc engine |
-| `@fireside-dev/linux-arm64` | Linux arm64/glibc engine |
-| `@fireside-dev/win32-x64` | Native Windows x64 engine |
+| `firenook` | Public command and platform selector |
+| `@firenook/cli-darwin-arm64` | macOS arm64 engine |
+| `@firenook/cli-darwin-x64` | Intel macOS engine |
+| `@firenook/cli-linux-x64` | Linux x64/glibc engine |
+| `@firenook/cli-linux-arm64` | Linux arm64/glibc engine |
+| `@firenook/cli-win32-x64` | Native Windows x64 engine |
 
 1. Verify the organization owner account's email and enable 2FA. Account email
    may appear in npm package metadata; use an appropriate developer email.
@@ -25,28 +25,33 @@ The `fireside-dev` npm organization owns:
    `artifacts.json`, npm/Bun/full-suite smoke receipts and the tarballs. Validate with
    `node packaging/publish-packages.mjs <artifact-root> --check` from the same
    source commit. Inspect the packed file lists: no secrets, app data or reports.
-4. The release owner signs in interactively with `npm login`. Do not send
-   tokens/passwords/2FA/recovery codes to an assistant or put them in GitHub
-   secrets. Bootstrap the **real tested prerelease**, native packages first,
-   CLI last, using `npm publish <exact-tarball> --access public --tag next
-   --ignore-scripts` and completing npm's interactive authentication. Do not
-   claim OIDC provenance for this one-time local bootstrap. Keep workflow and
-   checksum evidence for the build; future OIDC publications have provenance.
-   **Observed first-publication caveat:** npm assigned `latest` as well as
-   `next` to `darwin-arm64@0.1.0-next.0` despite `--tag next`, then rejected
-   authenticated removal with HTTP 400. Before the first CLI publication, obtain
-   the owner's explicit decision about this automatic channel behavior. Never
-   create a placeholder, delete a version or claim that `next` is the only tag.
+4. A trusted publisher can only be attached to a package that exists, so each
+   of the six names was created once by the release owner, signed in
+   interactively (`npm publish --auth-type=web`), as a `0.0.0` reservation
+   that contains no engine (its command prints a reservation notice and exits
+   1). Do not send tokens/passwords/2FA/recovery codes to an assistant or put
+   them in GitHub secrets. Every real version is published by the workflow
+   through OIDC with provenance; nothing real is ever published interactively.
+   **Observed first-publication caveat:** npm assigns `latest` as well as the
+   requested tag to the first version of a package (the former packages saw it
+   with `--tag next`, and then rejected authenticated removal with HTTP 400).
+   The reservations therefore hold `latest` until the first real release is
+   verified; see step 6. Never delete a version.
 5. For **each package**, open npm package Settings → Trusted publishing →
    GitHub Actions. Configure these exact values after the workflow is merged:
 
    | Field | Value |
    | --- | --- |
-   | Organization or user | `sanjevirau` |
-   | Repository | `fireside` |
+   | Organization or user | `firenook-dev` |
+   | Repository | `firenook` |
    | Workflow filename | `release-npm.yml` |
    | Environment | `npm-release` |
    | Allowed action | Permit direct `npm publish` (the GitHub environment supplies human approval) |
+
+   The OIDC subject names the repository owner, so a repository transfer or
+   rename invalidates every trusted publisher: reconfigure all six before the
+   next release. `package.json`'s `repository.url` must name the same
+   repository.
 
    This is package-level trust, not merely linking an npm organization to a
    GitHub account. No personal access token is needed for normal release jobs.
@@ -101,11 +106,15 @@ macOS notarization and more platforms remain separate supported-platform work.
    immediately. A timeout preserves the partial publication for investigation.
    Unexpected automatic `latest` on a prerelease stops for owner review.
 6. After successful npm publication, a **draft** GitHub release gets the exact
-   tarballs/manifests/test receipts. Review and publish those notes. Prereleases
-   stay on `next`. Stable release promotion requires the release owner to run
-   `npm dist-tag add @fireside-dev/cli@VERSION latest` interactively after all
-   packages are verified. npm OIDC does not authenticate dist-tag management;
-   never add a long-lived token merely to automate that last step.
+   tarballs/manifests/test receipts. Review and publish those notes. The
+   workflow publishes to `next` only. Until the first stable release, `latest`
+   follows the newest verified prerelease so that `npx firenook` resolves to a
+   real engine rather than the `0.0.0` reservation: after registry
+   verification the release owner runs `npm dist-tag add <package>@VERSION
+   latest` interactively for the CLI and the five platform packages. From the
+   first stable release on, `latest` moves only for a separately reviewed
+   stable version. npm OIDC does not authenticate dist-tag management; never
+   add a long-lived token merely to automate that last step.
 
 ## Recovering a partially published version without rebuilding
 

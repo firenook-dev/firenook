@@ -25,11 +25,11 @@ const rulesPath = argumentValue("--rules");
 const mockUserToken = optionalJsonArgument("--mock-user-token");
 const releaseMode = process.argv.includes("--release");
 const skipBuild = process.argv.includes("--skip-build");
-const target = demoTarget(argumentValue("--target") ?? "fireside");
+const target = demoTarget(argumentValue("--target") ?? "firenook");
 const repetitions = positiveIntegerArgument("--repetitions", 1);
 const warmupRepetitions = positiveIntegerArgument("--warmup-repetitions", 0, true);
 
-type DemoTarget = "fireside" | "java";
+type DemoTarget = "firenook" | "java";
 
 interface NetworkObservations {
   droppedBackchannels: number;
@@ -66,7 +66,7 @@ const MAXIMUM_P99_MILLISECONDS: Record<(typeof VARIANTS)[number], number> = {
 async function main(): Promise<void> {
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
   const repositoryRoot = resolve(scriptDirectory, "../../..");
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "fireside-browser-demo-"));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "firenook-browser-demo-"));
   const dataDirectory = diskMode ? join(temporaryDirectory, "data") : undefined;
   let browser: Browser | undefined;
   let staticServer: Server | undefined;
@@ -74,13 +74,13 @@ async function main(): Promise<void> {
   let resourceMonitor: ResourceMonitor | undefined;
 
   try {
-    if (diskMode && target !== "fireside") {
-      throw new Error("--disk is only valid for the Fireside target");
+    if (diskMode && target !== "firenook") {
+      throw new Error("--disk is only valid for the Firenook target");
     }
-    if (!skipBuild && target === "fireside") {
+    if (!skipBuild && target === "firenook") {
       await runCommand(
         "cargo",
-        ["build", "--locked", "-p", "fireside", ...(releaseMode ? ["--release"] : [])],
+        ["build", "--locked", "-p", "firenook", ...(releaseMode ? ["--release"] : [])],
         repositoryRoot,
       );
     }
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     const staticRuntime = await startStaticServer(await readFile(bundlePath));
     staticServer = staticRuntime.server;
     const port = await reserveAvailablePort();
-    if (target === "fireside") {
+    if (target === "firenook") {
       const serverArguments = [
         "--host",
         HOST,
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
           repositoryRoot,
           "target",
           releaseMode ? "release" : "debug",
-          process.platform === "win32" ? "fireside.exe" : "fireside",
+          process.platform === "win32" ? "firenook.exe" : "firenook",
         ),
         serverArguments,
         repositoryRoot,
@@ -184,7 +184,7 @@ async function main(): Promise<void> {
           const result = await page.evaluate(
           async ({ host, mockUserToken, projectId, runId, variant }) => {
             const demoWindow = window as Window & {
-              firesideRunWebChannelDemo(configuration: {
+              firenookRunWebChannelDemo(configuration: {
                 readonly host: string;
                 readonly mockUserToken?: Readonly<Record<string, unknown>> | string;
                 readonly projectId: string;
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
                   | "streaming";
               }): Promise<unknown>;
             };
-            return await demoWindow.firesideRunWebChannelDemo({
+            return await demoWindow.firenookRunWebChannelDemo({
               host,
               ...(mockUserToken === undefined ? {} : { mockUserToken }),
               projectId,
@@ -293,8 +293,8 @@ function argumentValue(name: string): string | undefined {
 }
 
 function demoTarget(value: string): DemoTarget {
-  if (value !== "fireside" && value !== "java") {
-    throw new Error(`--target must be fireside or java, found ${value}`);
+  if (value !== "firenook" && value !== "java") {
+    throw new Error(`--target must be firenook or java, found ${value}`);
   }
   return value;
 }

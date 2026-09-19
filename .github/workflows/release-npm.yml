@@ -109,7 +109,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_RUN: ${{ needs.authorize.outputs.source_run || github.run_id }}
         run: |
-          gh release create "$RELEASE_TAG" --verify-tag --draft --title "Fireside ${RELEASE_TAG#npm-v}" --notes-file packaging/CHANGELOG.md
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "Firenook ${RELEASE_TAG#npm-v}" --notes-file packaging/CHANGELOG.md
           VERSION="${RELEASE_TAG#npm-v}"
           mkdir release-receipts
           for PLATFORM in linux-x64 linux-arm64 darwin-arm64 darwin-x64 win32-x64; do
@@ -117,6 +117,6 @@ jobs:
               cp "dist/$PLATFORM/$RECEIPT.json" "release-receipts/$PLATFORM-$RECEIPT.json"
             done
           done
-          gh release upload "$RELEASE_TAG" "dist/linux-x64/fireside-dev-cli-$VERSION.tgz" dist/*/fireside-dev-linux-*.tgz dist/*/fireside-dev-darwin-*.tgz dist/*/fireside-dev-win32-*.tgz dist/*/*-manifest.json release-receipts/*.json
+          gh release upload "$RELEASE_TAG" "dist/linux-x64/firenook-$VERSION.tgz" dist/*/firenook-cli-linux-*.tgz dist/*/firenook-cli-darwin-*.tgz dist/*/firenook-cli-win32-*.tgz dist/*/*-manifest.json release-receipts/*.json
           node -e 'const fs=require("node:fs");fs.writeFileSync("release-source.json",JSON.stringify({tag:process.env.RELEASE_TAG,artifactBuildRun:process.env.SOURCE_RUN,publicationRun:process.env.GITHUB_RUN_ID,publicationCommit:process.env.GITHUB_SHA,rebuiltDuringRecovery:false},null,2));'
           gh release upload "$RELEASE_TAG" release-source.json

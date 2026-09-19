@@ -20,18 +20,18 @@ assert(args.length===1||(args.length===3&&candidateEngine),
 if(candidateEngine)assert.match(candidateEngine,/^[a-f0-9]{40}$/);
 const expectedVersion=candidateEngine?`0.1.0-local.g${candidateEngine.slice(0,12)}`:manifest.npmBaseline;
 const expectedEngine=candidateEngine??manifest.engineBaseline;
-const binary=resolve(process.env.FIRESIDE_BASELINE_BINARY??'missing-baseline-binary');
-assert.ok(process.env.FIRESIDE_BASELINE_BINARY,'provide the verified release binary');
+const binary=resolve(process.env.FIRENOOK_BASELINE_BINARY??'missing-baseline-binary');
+assert.ok(process.env.FIRENOOK_BASELINE_BINARY,'provide the verified release binary');
 const packageMetadata=JSON.parse(await readFile(join(dirname(binary),'../package.json')));
 assert.equal(packageMetadata.version,expectedVersion);
-assert.equal(packageMetadata.name,`@fireside-dev/${platform()}-${arch()}`);
+assert.equal(packageMetadata.name,`@firenook/cli-${platform()}-${arch()}`);
 const packageReceipt=JSON.parse(await readFile(join(dirname(binary),'../receipt.json')));
 assert.equal(packageReceipt.engineRevision,expectedEngine);
 assert.equal(packageReceipt.sha256,createHash('sha256').update(await readFile(binary)).digest('hex'));
 assert.equal(process.versions.node,manifest.oracle.node);
 assert.ok(['darwin','linux'].includes(platform()),'RSS sampler implemented for macOS/Linux only; no Windows claim');
 const output=resolve(process.argv[2]??'missing-output');assert.ok(process.argv[2]);await mkdir(output);
-const root=await mkdtemp(join(tmpdir(),'fireside-developer-baseline-'));
+const root=await mkdtemp(join(tmpdir(),'firenook-developer-baseline-'));
 const rules=join(root,'firestore.rules');await writeFile(rules,"rules_version = '2'; service cloud.firestore { match /databases/{database}/documents { match /{doc=**} { allow read, write: if true; } } }\n");
 const data=join(root,'state');
 const receipt={schemaVersion:1,manifestSha256:createHash('sha256').update(manifestBytes).digest('hex'),

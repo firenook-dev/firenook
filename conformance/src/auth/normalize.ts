@@ -1,5 +1,5 @@
 // Phase I1: normalization shared by the official-emulator capture and the
-// Fireside replay. Every value that differs between two runs of the same
+// Firenook replay. Every value that differs between two runs of the same
 // program (random identifiers, tokens, codes, timestamps, the emulator and
 // functions-stub origins) is replaced by a template that names the step that
 // produced it, so two recordings of the same program compare equal and the

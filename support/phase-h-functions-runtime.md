@@ -3,19 +3,19 @@
 Written 2026-09-17 against `main` 39ba9a2 as a plan. Status 2026-09-18: H0–H5
 are done — the plan below is kept as written, the receipts are in
 `benchmarks/phase-h-functions-runtime.json` (`receipts.h1`, `h2h3Replay`, `h5`
-including `pairedAcceptance`), and the qualified engine 0720434 was published 2026-09-18 as `@fireside-dev/cli@0.1.0-next.7` (tag `npm-v0.1.0-next.7` on main d38016d; release run 35327767919, 14/14 pre-publish jobs green, protected `npm-release` approval after a local `publish-packages --check`; registry integrity of all six packages equals the release assets; `npm audit signatures` verifies signatures and attestations; GitHub prerelease; `next` → next.7, `latest` untouched).
+including `pairedAcceptance`), and the qualified engine 0720434 was published 2026-09-18 as `firenook@0.1.0-next.7` (tag `npm-v0.1.0-next.7` on main d38016d; release run 35327767919, 14/14 pre-publish jobs green, protected `npm-release` approval after a local `publish-packages --check`; registry integrity of all six packages equals the release assets; `npm audit signatures` verifies signatures and attestations; GitHub prerelease; `next` → next.7, `latest` untouched).
 It follows [Phase G](phase-g-storage-rules.md) (native Storage rules); together
 they removed every runtime dependency except Node.
 
 ## Goal
 
 Run user Cloud Functions and Firebase Extensions without firebase-tools.
-Fireside owns the Functions port, discovery, the worker processes, HTTP and
+Firenook owns the Functions port, discovery, the worker processes, HTTP and
 callable routing, event delivery, environment and secrets, reload, and the
 Extensions lifecycle (registry resolution, download and cache, build,
 parameters, registration). The user's JavaScript/TypeScript — and the
 extension authors' JavaScript — still executes in Node, because that is the
-production runtime; Fireside ships a small Node worker of its own for that.
+production runtime; Firenook ships a small Node worker of its own for that.
 After this phase `firebase-tools` is not imported, spawned or version-pinned
 anywhere in the product.
 
@@ -33,13 +33,13 @@ as ignored exports, as the official emulator does.
 | `crates/functions-bridge` (2,014 lines) | Trigger registry, v1/v2 registration (`/functions/projects/{p}/triggers/{key}`), Firestore/Auth/Storage change matching, event envelopes derived from official captures, bounded dispatch queue, delivery policy and health, `/backends` inventory discovery |
 | `crates/pubsub-front` (1,022 lines) + `SchedulerRuntime` in `suite-runtime` | Topic control and publish contract used by Functions and Extensions, `onSchedule` scheduling, inventory refresh on reload |
 | `crates/suite-runtime/src/auxiliary.rs` | Eventarc/Tasks registration endpoints (delivery answers 501) |
-| `crates/suite-runtime/src/functions_readiness.rs`, `lib.rs:1012–1160` | Spawns the host, parses `FIRESIDE_FUNCTIONS_HOST_READY` / `_UPDATED` receipts, refreshes routing after reload, shutdown |
+| `crates/suite-runtime/src/functions_readiness.rs`, `lib.rs:1012–1160` | Spawns the host, parses `FIRENOOK_FUNCTIONS_HOST_READY` / `_UPDATED` receipts, refreshes routing after reload, shutdown |
 
 **Node/firebase-tools owns** execution, through `support/functions-host.cjs`
 (389 lines, embedded in the binary), which loads from the consumer's
 `node_modules/firebase-tools@15.22.0`:
 
-| firebase-tools module | Lines | What it does for Fireside |
+| firebase-tools module | Lines | What it does for Firenook |
 | --- | --- | --- |
 | `emulator/functionsEmulator.js` | 1,301 | Binds the Functions port itself, discovers endpoints, spawns one worker per trigger, routes `/{project}/{region}/{name}` and `/functions/projects/{p}/triggers/{id}`, `/backends`, source watching and reload, `--inspect` plumbing |
 | `emulator/functionsEmulatorRuntime.js` + `functionsEmulatorShared.js` | 968 | The worker: loads the codebase, resolves `FUNCTION_TARGET`, serves `/*` with an express app, converts HTTP bodies into `http`, `cloudevent` or legacy-event invocations, raw-body capture, health route, timeouts |
@@ -99,7 +99,7 @@ Record in `benchmarks/phase-h-functions-runtime.json`, `frozen: true`:
    manifest (`stackToWire`) and the runtime environment variables it reads.
 
 Classification as in Phases 3 and G: match the official emulator; when
-Fireside deliberately differs (it must not fail startup on an upstream-ignored
+Firenook deliberately differs (it must not fail startup on an upstream-ignored
 export, for instance), the difference is recorded in the fixture invariants.
 
 ## Work packages
@@ -198,7 +198,7 @@ smoke recorded as a checklist only.
 - Eventarc: keep registration; add delivery only for Extensions custom events
   if H1 shows the official emulator delivers them.
 - Tests: unit tests in the crate; replay of every H1 program against
-  Fireside; the readiness/topic-reload/lifecycle fixtures keep passing
+  Firenook; the readiness/topic-reload/lifecycle fixtures keep passing
   unchanged, because their contracts are the suite's, not the host's.
 
 ### H3 — Extensions in Rust (5–7 days)
@@ -219,7 +219,7 @@ smoke recorded as a checklist only.
   `DATABASE_INSTANCE`, `PROJECT_NUMBER`); convert resources into the same
   endpoint definitions user functions produce; register them as an extra
   codebase per instance in `functions-runtime`, with the instance's env.
-- Offline mode: `fireside ext:vendor` copies resolved sources into
+- Offline mode: `firenook ext:vendor` copies resolved sources into
   `<project>/extensions/.sources/<ref>` (or a configured directory) and the
   loader prefers a vendored source; a project with all extensions vendored
   starts with no network and no token. This is the recommended public path
@@ -237,20 +237,20 @@ smoke recorded as a checklist only.
   and `15.22.0` checks in `packages/cli/src/runtime.mjs:16` and
   `suite-runtime` (`firebase_tools_root`, preflight row, `--firebase-tools-root`).
 - `packages/cli`: `emulators:start --inspect-functions[=port]`,
-  `functions:shell`-style `fireside functions:invoke <name> [--data …]`
+  `functions:shell`-style `firenook functions:invoke <name> [--data …]`
   (built on the runtime's invoke route; the interactive REPL is optional),
-  `fireside ext:vendor`, `doctor` reports codebases, extension instances and
+  `firenook ext:vendor`, `doctor` reports codebases, extension instances and
   their source state.
 - Docs: `README.md`, `packages/cli/README.md`, `COMPATIBILITY.md` Functions
-  row ("Fireside runtime with Node workers; Extensions resolved and run by
-  Fireside"), `DESIGN.md` sections "Functions runtime" and "Extensions", the
+  row ("Firenook runtime with Node workers; Extensions resolved and run by
+  Firenook"), `DESIGN.md` sections "Functions runtime" and "Extensions", the
   CLI guide, ROADMAP closing paragraph. Consumer: its setup documentation's
   login sentence ("Firebase CLI login is used only to download public Extension
   definitions") becomes the vendored/token statement; its setup no longer
-  needs firebase-tools for the Fireside backend (it stays for the official
+  needs firebase-tools for the Firenook backend (it stays for the official
   fallback and `deploy`).
 - Package: `firebase-tools` leaves the consumer's required dependency set for
-  the Fireside path; the wrapper never resolves it.
+  the Firenook path; the wrapper never resolves it.
 
 ### H5 — Qualification and release as `0.1.0-next.7` (4–6 days)
 
@@ -284,7 +284,7 @@ two phases touch different crates. Combined G + H is about three months.
   reuse the token the Firebase CLI stores in its configstore (works for every
   developer who has ever run `firebase login`), accept `FIREBASE_TOKEN`, or
   vendor sources. All three are in scope; an own OAuth device flow with a
-  Fireside-registered client is a later decision. Consequence: a machine that
+  Firenook-registered client is a later decision. Consequence: a machine that
   has never logged in and has no vendored sources cannot fetch an extension —
   the same constraint as today, stated instead of hidden.
 - **Fidelity breadth.** The trigger matrix is frozen in H0; anything outside
@@ -293,7 +293,7 @@ two phases touch different crates. Combined G + H is about three months.
 - **Extensions events (Eventarc).** Today 501; H1 measures whether the
   official emulator delivers `events` to user handlers. If it does, H2 adds
   delivery for that path only.
-- **`taskQueueTrigger`.** Upstream drops it; Fireside keeps the recorded
+- **`taskQueueTrigger`.** Upstream drops it; Firenook keeps the recorded
   ignore reason so the consumer gate's "2 ignored" expectation still holds.
 - **Worker model difference.** One worker per codebase (fireemu's choice)
   versus one per trigger (official) changes `FUNCTION_TARGET` visibility and

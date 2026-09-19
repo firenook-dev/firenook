@@ -4,7 +4,7 @@ This records completion of the named short source-qualification checks, not a
 stable release, universal Firebase compatibility or full-data acceptance.
 The combined runtime through `7f9a0f35ac842546c1027c2eb536f2d8729d3548`
 passed the exact PR #21 head's seven checks in
-[CI 34535582289](https://github.com/sanjevirau/fireside/actions/runs/34535582289).
+[CI 34535582289](https://github.com/firenook-dev/firenook/actions/runs/34535582289).
 That head is `40070506ab3154e750204147395315f2e08870fd`; later evidence/packaging
 changes do not retroactively acquire this receipt. Phase F repeats the applicable
 checks on its immutable combined candidate and qualifies new-source platforms.

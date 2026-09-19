@@ -18,9 +18,9 @@ const javaRuntime=process.argv[7]==='--java-runtime';
 assert(process.argv.length===7||(process.argv.length===8&&javaRuntime),'binary toolsRoot sdkRoot emulator-cache output.json [--java-runtime]');
 const [binary,tools,sdk,cache,outputPath]=process.argv.slice(2,7).map(path=>resolve(path));
 const WARMUP=10,MEASURED=200;
-const project='demo-fireside-rules-profile';
+const project='demo-firenook-rules-profile';
 const bucket=project+'.appspot.com';
-const output=await mkdtemp(join(os.tmpdir(),'fireside-rules-profile-'));
+const output=await mkdtemp(join(os.tmpdir(),'firenook-rules-profile-'));
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const json=(name,value)=>writeFile(join(output,name),JSON.stringify(value,null,2)+'\n');
 await mkdir(join(output,'functions/node_modules'),{recursive:true});
@@ -38,7 +38,7 @@ for(const service of ['firestore','auth','storage','functions','pubsub','hub','u
   ports[service]=listener.address().port;reservations.push(listener);
 }
 const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH','JAVA_HOME'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
-Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRESIDE_CONTROL_STDIN:'1'});
+Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRENOOK_CONTROL_STDIN:'1'});
 const args=['suite','--host','127.0.0.1','--project-id',project,'--project-dir',output,'--state-dir',join(output,'state'),
   '--storage-bucket','default='+bucket,'--firebase-tools-root',tools,'--node',process.execPath,'--ui-archive',join(cache,'ui-v1.15.0.zip')];
 if(javaRuntime)args.push('--java',process.env.JAVA_HOME?join(process.env.JAVA_HOME,'bin/java'):'/usr/bin/java','--storage-rules-jar',join(cache,'cloud-storage-rules-runtime-v1.1.3.jar'));
@@ -51,7 +51,7 @@ for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{log+=ch
 const origin=`http://127.0.0.1:${ports.storage}`;
 const jwt=claims=>{const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');return `${encode({alg:'none',typ:'JWT'})}.${encode({...claims,iat:1700000000,exp:4102444800,aud:project,iss:`https://securetoken.google.com/${project}`})}.`;};
 const alice=jwt({sub:'alice',user_id:'alice'}),bob=jwt({sub:'bob',user_id:'bob'});
-const boundary='fireside-rules-profile';
+const boundary='firenook-rules-profile';
 const payload=Buffer.from(JSON.stringify({synthetic:true,values:Array.from({length:256},(_,n)=>hash('profile-item-'+n))}));
 const multipart=name=>Buffer.concat([
   Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${JSON.stringify({name,contentType:'application/json',metadata:{owner:'alice'}})}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`),
@@ -96,7 +96,7 @@ try{
   }
   receipt.passed=true;
 }finally{
-  if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRESIDE_SHUTDOWN\n');
+  if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRENOOK_SHUTDOWN\n');
   const result=await Promise.race([exited,delay(30000,null,{ref:false})]);
   receipt.shutdown=result;receipt.finishedAt=new Date().toISOString();
   await writeFile(outputPath,JSON.stringify(receipt,null,2)+'\n');

@@ -1,6 +1,6 @@
 //! REST's captured null/special-double spelling and the browser SDK's UTC form.
 //! Traverse typed values, never arbitrary user map names or string contents.
-use fireside_grpc_front::google::firestore::v1::{
+use firenook_grpc_front::google::firestore::v1::{
     BatchGetDocumentsResponse, CommitResponse, Document, Value, value::ValueType,
 };
 use serde::Serialize;
@@ -82,7 +82,7 @@ pub(super) fn document(document: &Document) -> Result<JsonValue, RestError> {
 }
 
 pub(super) fn batch(response: &BatchGetDocumentsResponse) -> Result<JsonValue, RestError> {
-    use fireside_grpc_front::google::firestore::v1::batch_get_documents_response::Result;
+    use firenook_grpc_front::google::firestore::v1::batch_get_documents_response::Result;
     let mut encoded = encode(response)?;
     if let Some(Result::Found(found)) = &response.result {
         encoded["found"] = document(found)?;
@@ -155,7 +155,7 @@ mod profile {
         for _ in 0..16 {
             nested = Value {
                 value_type: Some(ValueType::MapValue(
-                    fireside_grpc_front::google::firestore::v1::MapValue {
+                    firenook_grpc_front::google::firestore::v1::MapValue {
                         fields: BTreeMap::from([("child".to_owned(), nested)]),
                     },
                 )),
@@ -199,7 +199,7 @@ mod profile {
         }
         let elapsed = started.elapsed().as_nanos();
         let bytes = expected.to_string();
-        if let Some(path) = std::env::var_os("FIRESIDE_ENCODING_PROFILE_OUTPUT") {
+        if let Some(path) = std::env::var_os("FIRENOOK_ENCODING_PROFILE_OUTPUT") {
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)

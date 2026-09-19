@@ -10,7 +10,7 @@ test("target accepts an SDK write/read/delete round trip", async (context) => {
   const configuration = resolveTarget(process.env);
   const firestore = createFirestore(configuration);
   const document = firestore.doc(
-    `fireside_conformance/smoke-${randomUUID()}`,
+    `firenook_conformance/smoke-${randomUUID()}`,
   );
 
   context.after(async () => {
@@ -22,7 +22,7 @@ test("target accepts an SDK write/read/delete round trip", async (context) => {
     _fireside_expires_at: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
     message: "harness reaches the selected target",
     target: configuration.name,
-    unicode: "fireside 🔥",
+    unicode: "firenook 🔥",
     value: 42,
   };
 

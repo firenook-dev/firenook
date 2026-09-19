@@ -32,7 +32,7 @@ export async function setupAssets(root = cacheRoot()) {
     const path = join(root, asset.file);
     try { await stat(path); await verifyAsset(path, asset); continue; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const lockPath = `${path}.fireside-lock`;
+    const lockPath = `${path}.firenook-lock`;
     const lock = await open(lockPath, 'wx');
     const temporary = `${path}.${randomUUID()}.partial`;
     try {

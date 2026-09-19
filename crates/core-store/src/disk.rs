@@ -35,17 +35,20 @@ const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("metadata_v1
 const STATE_KEY: &str = "state";
 const DOCUMENTS_V2_MIGRATION_KEY: &str = "documents_v2_migrated";
 const ORDERED_SCOPE_INDEX_MIGRATION_KEY: &str = "ordered_scope_indexes_v2_migrated";
-const DATABASE_FILE: &str = "fireside.redb";
-const JOURNAL_FILE: &str = "fireside.wal";
+const DATABASE_FILE: &str = "firenook.redb";
+const JOURNAL_FILE: &str = "firenook.wal";
+// File names written by releases up to 0.1.0-next.9, before the project was renamed.
+const LEGACY_DATABASE_FILE: &str = "fireside.redb";
+const LEGACY_JOURNAL_FILE: &str = "fireside.wal";
 const FRAME_MAGIC: [u8; 8] = *b"FSWAL001";
 const FRAME_HEADER_LEN: usize = 16;
 const MAX_WAL_RECORD_BYTES: usize = 64 * 1024 * 1024;
 type LoadedDatabase = (Revision, Timestamp, LogicalMemoryUsage);
 
-/// Fireside's deliberate combined redb read/write page-cache budget.
+/// Firenook's deliberate combined redb read/write page-cache budget.
 ///
 /// redb 4.2.0 inherits a 1 GiB default. Controlled endurance measurements
-/// proved that normal cache warming toward that value violated Fireside's
+/// proved that normal cache warming toward that value violated Firenook's
 /// bounded-memory contract, so disk mode instead defaults to an accounted
 /// 64 MiB budget. Operators can override it explicitly for capacity planning.
 pub const DEFAULT_REDB_CACHE_SIZE_BYTES: usize = 64 * 1024 * 1024;
@@ -119,12 +122,33 @@ pub struct DiskStore {
     write_buffers: Arc<WriteBufferAccounting>,
 }
 
+/// Renames a store written under the project's former name to the current
+/// file names, once, so that persisted state survives the rename. Nothing
+/// happens when the current files already exist or no legacy store is present.
+/// Returns whether a file was renamed.
+pub fn adopt_legacy_files(directory: &Path) -> io::Result<bool> {
+    let mut adopted = false;
+    for (legacy, current) in [
+        (LEGACY_DATABASE_FILE, DATABASE_FILE),
+        (LEGACY_JOURNAL_FILE, JOURNAL_FILE),
+    ] {
+        let from = directory.join(legacy);
+        let to = directory.join(current);
+        if from.is_file() && !to.exists() {
+            fs::rename(&from, &to)?;
+            adopted = true;
+        }
+    }
+    Ok(adopted)
+}
+
 impl DiskStore {
     /// Opens or creates a disk store inside `directory` and replays any
     /// journaled commit not already present in redb.
     pub fn open(directory: impl AsRef<Path>, options: DiskOptions) -> Result<Self, DiskError> {
         let directory = directory.as_ref();
         fs::create_dir_all(directory)?;
+        adopt_legacy_files(directory)?;
         let database_path = directory.join(DATABASE_FILE);
         let mut builder = Builder::new();
         builder.set_cache_size(options.cache_size_bytes);
@@ -838,7 +862,7 @@ fn spawn_flusher(
     interval: Duration,
 ) {
     let spawned = thread::Builder::new()
-        .name("fireside-disk-flusher".to_owned())
+        .name("firenook-disk-flusher".to_owned())
         .spawn(move || {
             loop {
                 thread::sleep(interval);
@@ -854,7 +878,7 @@ fn spawn_flusher(
         });
     if let Err(error) = spawned {
         eprintln!(
-            "fireside: write-behind flusher unavailable, commits stay unflushed until shutdown: {error}"
+            "firenook: write-behind flusher unavailable, commits stay unflushed until shutdown: {error}"
         );
     }
 }
@@ -1875,6 +1899,36 @@ mod tests {
     static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
+    fn a_store_written_under_the_former_name_is_adopted_in_place() {
+        let directory = TestDirectory::new();
+        {
+            let store = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+            store
+                .commit(&[Write::Create {
+                    key: key("items/kept"),
+                    fields: fields(Value::Integer(7)),
+                }])
+                .unwrap();
+            store.flush().unwrap();
+        }
+        for (current, legacy) in [
+            (DATABASE_FILE, LEGACY_DATABASE_FILE),
+            (JOURNAL_FILE, LEGACY_JOURNAL_FILE),
+        ] {
+            fs::rename(
+                directory.path().join(current),
+                directory.path().join(legacy),
+            )
+            .unwrap();
+        }
+        assert!(adopt_legacy_files(directory.path()).unwrap());
+        assert!(!adopt_legacy_files(directory.path()).unwrap());
+        assert!(!directory.path().join(LEGACY_DATABASE_FILE).exists());
+        let store = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
+        assert!(store.snapshot().get(&key("items/kept")).is_some());
+    }
+
+    #[test]
     fn wal_record_shares_immutable_commit_documents_without_deep_clones() {
         let directory = TestDirectory::new();
         let store = DiskStore::open(directory.path(), DiskOptions::default()).unwrap();
@@ -1994,7 +2048,7 @@ mod tests {
                 .unwrap_or_default()
                 .as_nanos();
             let path = std::env::temp_dir().join(format!(
-                "fireside-core-store-{}-{nanos}-{sequence}",
+                "firenook-core-store-{}-{nanos}-{sequence}",
                 std::process::id()
             ));
             fs::create_dir_all(&path).expect("test directory should be created");
@@ -2013,7 +2067,7 @@ mod tests {
     }
 
     fn database() -> DatabaseName {
-        DatabaseName::new("fireside-test", "tenant-a").expect("valid database")
+        DatabaseName::new("firenook-test", "tenant-a").expect("valid database")
     }
 
     fn key(path: &str) -> DocumentKey {
@@ -2298,7 +2352,7 @@ mod tests {
     /// acknowledged commit, replayed from the journal the OS retained.
     #[test]
     fn acknowledged_write_behind_commits_survive_a_process_abort() {
-        const CHILD_ENVIRONMENT: &str = "FIRESIDE_TEST_ABORT_CHILD";
+        const CHILD_ENVIRONMENT: &str = "FIRENOOK_TEST_ABORT_CHILD";
         if let Ok(directory) = std::env::var(CHILD_ENVIRONMENT) {
             let store = DiskStore::open(
                 &directory,

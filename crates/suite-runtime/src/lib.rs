@@ -1,4 +1,4 @@
-//! Lifecycle coordinator for the complete Fireside emulator suite.
+//! Lifecycle coordinator for the complete Firenook emulator suite.
 //!
 //! The coordinator owns every data and control listener, including the
 //! Functions port: user and Extension JavaScript runs in Node workers
@@ -13,37 +13,37 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::serve::{ListenerExt as _, TapIo};
-use fireside_auth_front::AuthRuntime;
-use fireside_core_store::{
+use firenook_auth_front::AuthRuntime;
+use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
     Write, document_key_logical_bytes, fields_logical_bytes,
 };
-use fireside_export_format::{ExportReader, ExportedDocument, write_export};
-use fireside_functions_bridge::{
+use firenook_export_format::{ExportReader, ExportedDocument, write_export};
+use firenook_functions_bridge::{
     DeliveryHealth, DeliveryPolicy, DeliveryRuntime, FunctionsInventory, TriggerRegistry,
 };
-pub use fireside_functions_runtime::InspectConfig;
-use fireside_functions_runtime::{
+pub use firenook_functions_runtime::InspectConfig;
+use firenook_functions_runtime::{
     CodebaseConfig, EmulatorHosts, FunctionsRuntime, LogEvent, LogSink,
     RuntimeConfig as FunctionsRuntimeConfig, codebases_from_config,
 };
-use fireside_grpc_front::FirestoreService;
-use fireside_pubsub_front::{SchedulerRuntime, router as pubsub_router};
-use fireside_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
-use fireside_rest_front::router_with_shared_service as rest_router;
-use fireside_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
-use fireside_rules_runtime::request_history::RequestHistory;
-use fireside_rules_runtime::{RulesRuntime, SnapshotAccess};
-use fireside_storage_front::{
+use firenook_grpc_front::FirestoreService;
+use firenook_pubsub_front::{SchedulerRuntime, router as pubsub_router};
+use firenook_query_engine::{DatabaseEdition, IndexCatalog, QueryPolicy};
+use firenook_rest_front::router_with_shared_service as rest_router;
+use firenook_rules_engine::{DocumentAccess as _, DocumentAccessError, Resource};
+use firenook_rules_runtime::request_history::RequestHistory;
+use firenook_rules_runtime::{RulesRuntime, SnapshotAccess};
+use firenook_storage_front::{
     BucketRules, FirestoreDocuments, NativeRulesConfig, RulesFile, RulesSource, StorageConfig,
     StorageDurability, StorageRuntime,
 };
-use fireside_suite_front::{
+use firenook_suite_front::{
     BackgroundRequest, ExportCommand, HubConfig, HubRuntime, LoggingRuntime, ServiceInfo,
     SuiteDirectory, UiConfig, requests_router, ui_router,
 };
-use fireside_tasks_front::TasksRuntime;
-use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
+use firenook_tasks_front::TasksRuntime;
+use firenook_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -136,7 +136,7 @@ impl ServiceSelection {
                 "eventarc" | "tasks" | "hub" | "ui" | "logging" => {}
                 "database" | "hosting" | "dataconnect" | "apphosting" => {
                     return Err(format!(
-                        "the {name} emulator is not implemented by fireside (see the roadmap)"
+                        "the {name} emulator is not implemented by firenook (see the roadmap)"
                     ));
                 }
                 other => {
@@ -489,11 +489,11 @@ async fn verify_functions_readiness(
     }
     let receipt_line =
         serde_json::to_string(&receipt).map_err(|error| failure(error.to_string()))?;
-    println!("FIRESIDE_FUNCTIONS_HOST_READY {receipt_line}");
+    println!("FIRENOOK_FUNCTIONS_HOST_READY {receipt_line}");
     logging.record(
         "INFO",
         Some("functions"),
-        format!("FIRESIDE_FUNCTIONS_HOST_READY {receipt_line}"),
+        format!("FIRENOOK_FUNCTIONS_HOST_READY {receipt_line}"),
     );
     Ok((inventory, function_count))
 }
@@ -603,9 +603,9 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             &config.origin(config.ports.functions),
             Arc::new(move |level: &str, text: &str| {
                 if level == "WARN" || level == "ERROR" {
-                    eprintln!("fireside tasks: {text}");
+                    eprintln!("firenook tasks: {text}");
                 } else if level != "DEBUG" {
-                    println!("fireside tasks: {text}");
+                    println!("firenook tasks: {text}");
                 }
                 tasks_logging.record(level, Some("tasks"), text.to_owned());
             }),
@@ -691,7 +691,7 @@ async fn follow_functions_inventory(
     functions: Option<&FunctionsRuntime>,
     mut background: mpsc::UnboundedReceiver<BackgroundRequest>,
     config: &SuiteConfig,
-    mut pubsub: Option<&mut fireside_pubsub_front::PubsubRuntime>,
+    mut pubsub: Option<&mut firenook_pubsub_front::PubsubRuntime>,
     mut scheduler: Option<&mut SchedulerRuntime>,
     tasks: Option<&TasksRuntime>,
     logging: &LoggingRuntime,
@@ -746,7 +746,7 @@ async fn follow_functions_inventory(
         );
         // Announce completion on stdout so a supervisor or harness can wait
         // for native delivery readiness after a reload.
-        println!("fireside functions routing refreshed: {count} registered functions");
+        println!("firenook functions routing refreshed: {count} registered functions");
     }
 }
 
@@ -757,7 +757,7 @@ async fn prepare_native_suite(
     let mut startup = config.clone();
     if guard.reusing() {
         startup.import = None;
-        eprintln!("fireside resuming validated native state (seed import skipped)");
+        eprintln!("firenook resuming validated native state (seed import skipped)");
     }
     let prepared = prepare_suite(&startup).await?;
     if config.resume_state {
@@ -832,9 +832,9 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
                 other => other,
             };
             if level == "WARN" || level == "ERROR" {
-                eprintln!("fireside auth: {text}");
+                eprintln!("firenook auth: {text}");
             } else {
-                println!("fireside auth: {text}");
+                println!("firenook auth: {text}");
             }
             auth_logging.record(level, Some("auth"), text.to_owned());
         }));
@@ -895,9 +895,9 @@ fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeE
     }
     for (level, message) in startup_banner(config) {
         if level == "WARN" {
-            eprintln!("fireside: {message}");
+            eprintln!("firenook: {message}");
         } else {
-            println!("fireside: {message}");
+            println!("firenook: {message}");
         }
         logging.record(level, Some("hub"), message);
     }
@@ -983,7 +983,7 @@ async fn finish_suite(
     if let Some(functions) = suite.functions {
         // The same line the former Node host printed: harnesses read it as the
         // proof that Functions got an orderly stop even when export failed.
-        println!("fireside functions host: stopping after the suite shutdown request");
+        println!("firenook functions host: stopping after the suite shutdown request");
         functions.shutdown().await;
     }
     let _ = suite.shutdown.send(true);
@@ -1056,7 +1056,7 @@ fn without_absent_functions(mut config: SuiteConfig) -> Result<SuiteConfig, Suit
         .is_some_and(|instances| !instances.is_empty());
     if codebases.is_empty() && !extensions {
         eprintln!(
-            "fireside: firebase.json configures no Functions codebase and no Extensions; the Functions emulator (with Eventarc and Tasks) is not started"
+            "firenook: firebase.json configures no Functions codebase and no Extensions; the Functions emulator (with Eventarc and Tasks) is not started"
         );
         config.services.functions = false;
         config.minimum_functions = 0;
@@ -1191,7 +1191,7 @@ fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
         DiskOptions {
             store: StoreOptions::default(),
             journal: true,
-            cache_size_bytes: fireside_core_store::DEFAULT_REDB_CACHE_SIZE_BYTES,
+            cache_size_bytes: firenook_core_store::DEFAULT_REDB_CACHE_SIZE_BYTES,
             durability: config.durability,
         },
     )
@@ -1238,7 +1238,7 @@ fn suite_query_policy(indexes: Option<&str>) -> Result<QueryPolicy, SuiteRuntime
 fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeError> {
     let runtime = if config.diagnostics {
         eprintln!(
-            "fireside local diagnostics enabled: bounded request/coverage values may include document data and decoded auth claims; do not publish consumer reports"
+            "firenook local diagnostics enabled: bounded request/coverage values may include document data and decoded auth claims; do not publish consumer reports"
         );
         RulesRuntime::with_request_history(RequestHistory::default())
     } else {
@@ -1286,7 +1286,7 @@ fn install_firestore_rules(
                 ))
             })?;
         println!(
-            "fireside firestore: database \"{}\" rules {}",
+            "firenook firestore: database \"{}\" rules {}",
             entry.database_id,
             path.display()
         );
@@ -1330,7 +1330,7 @@ async fn start_storage(
         }),
         StorageRulesConfig::OpenDefault => {
             eprintln!(
-                "fireside storage: no storage rules configured for demo project \"{}\", using a default (open) rules configuration.",
+                "firenook storage: no storage rules configured for demo project \"{}\", using a default (open) rules configuration.",
                 config.project_id
             );
             RulesSource::Single(RulesFile {
@@ -1593,7 +1593,7 @@ fn spawn_static_servers(
 pub fn no_delay(listener: TcpListener) -> TapIo<TcpListener, fn(&mut tokio::net::TcpStream)> {
     listener.tap_io(|stream| {
         if let Err(error) = stream.set_nodelay(true) {
-            eprintln!("fireside: TCP_NODELAY unavailable on an accepted connection: {error}");
+            eprintln!("firenook: TCP_NODELAY unavailable on an accepted connection: {error}");
         }
     })
 }
@@ -1649,17 +1649,17 @@ fn spawn_firestore(
 }
 
 /// Adapts the runtime's blocking-function configuration for the Auth front.
-struct BlockingBridge(fireside_functions_runtime::BlockingHandle);
+struct BlockingBridge(firenook_functions_runtime::BlockingHandle);
 
-impl fireside_auth_front::BlockingResolver for BlockingBridge {
+impl firenook_auth_front::BlockingResolver for BlockingBridge {
     fn resolve(
         &self,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = fireside_auth_front::BlockingFunctions> + Send + '_>,
+        Box<dyn std::future::Future<Output = firenook_auth_front::BlockingFunctions> + Send + '_>,
     > {
         Box::pin(async move {
             let config = self.0.config().await;
-            fireside_auth_front::BlockingFunctions {
+            firenook_auth_front::BlockingFunctions {
                 before_create: config.before_create,
                 before_sign_in: config.before_sign_in,
                 forward_access_token: config.forward_access_token,
@@ -1687,9 +1687,9 @@ async fn start_functions_runtime(
         let label = event.label.clone();
         let line = format!("{label}: {}", event.message);
         match event.level.as_str() {
-            "ERROR" | "WARN" => eprintln!("fireside {line}"),
+            "ERROR" | "WARN" => eprintln!("firenook {line}"),
             "DEBUG" => {}
-            _ => println!("fireside {line}"),
+            _ => println!("firenook {line}"),
         }
         sink_logging.record(&event.level, Some("functions"), line);
     });
@@ -1726,20 +1726,20 @@ async fn start_functions_runtime(
 async fn load_extensions(
     config: &SuiteConfig,
     sink: &LogSink,
-) -> Result<Vec<fireside_functions_runtime::ExtensionBackend>, SuiteRuntimeError> {
+) -> Result<Vec<firenook_functions_runtime::ExtensionBackend>, SuiteRuntimeError> {
     let extensions_config = extensions_config(config)?;
     if extensions_config.extensions.is_empty() {
         return Ok(Vec::new());
     }
-    let loaded = fireside_extensions::load(&extensions_config, sink)
+    let loaded = firenook_extensions::load(&extensions_config, sink)
         .await
         .map_err(|error| failure(format!("Extensions failed to load: {error}")))?;
     for extension in &loaded {
         let origin = match extension.origin {
-            fireside_extensions::SourceOrigin::Local => "local".to_owned(),
-            fireside_extensions::SourceOrigin::Vendored => "vendored".to_owned(),
-            fireside_extensions::SourceOrigin::Cache => "shared cache".to_owned(),
-            fireside_extensions::SourceOrigin::Downloaded => "downloaded".to_owned(),
+            firenook_extensions::SourceOrigin::Local => "local".to_owned(),
+            firenook_extensions::SourceOrigin::Vendored => "vendored".to_owned(),
+            firenook_extensions::SourceOrigin::Cache => "shared cache".to_owned(),
+            firenook_extensions::SourceOrigin::Downloaded => "downloaded".to_owned(),
         };
         sink.record(LogEvent::new(
             "INFO",
@@ -1763,7 +1763,7 @@ async fn load_extensions(
 /// registry credential the Firebase CLI would use.
 pub fn extensions_config(
     config: &SuiteConfig,
-) -> Result<fireside_extensions::ExtensionsConfig, SuiteRuntimeError> {
+) -> Result<firenook_extensions::ExtensionsConfig, SuiteRuntimeError> {
     // The official emulator rewrites POSTINSTALL console links to the UI only
     // when the UI is enabled in firebase.json (`unknown` otherwise).
     let ui_enabled = std::fs::read_to_string(&config.firebase_json)
@@ -1784,7 +1784,7 @@ pub fn extensions_config(
 }
 
 /// What the extensions loader needs from a project, without a running suite
-/// (`fireside extensions vendor|status`).
+/// (`firenook extensions vendor|status`).
 #[derive(Debug, Clone)]
 pub struct ExtensionsInputs {
     pub project_id: String,
@@ -1799,7 +1799,7 @@ pub struct ExtensionsInputs {
 /// Builds the loader configuration from project inputs.
 pub fn extensions_config_from(
     config: &ExtensionsInputs,
-) -> Result<fireside_extensions::ExtensionsConfig, SuiteRuntimeError> {
+) -> Result<firenook_extensions::ExtensionsConfig, SuiteRuntimeError> {
     let text = std::fs::read_to_string(&config.firebase_json)
         .map_err(|error| failure(format!("failed to read firebase.json: {error}")))?;
     // YAML parsing keeps the object order the official planner iterates in.
@@ -1823,7 +1823,7 @@ pub fn extensions_config_from(
         .map(|directory| directory.join("npm"))
         .filter(|candidate| candidate.is_file())
         .unwrap_or_else(|| PathBuf::from("npm"));
-    Ok(fireside_extensions::ExtensionsConfig {
+    Ok(firenook_extensions::ExtensionsConfig {
         project_id: config.project_id.clone(),
         project_dir: config.project_dir.clone(),
         extensions,
@@ -1831,12 +1831,12 @@ pub fn extensions_config_from(
         database_url: format!("https://{}.firebaseio.com", config.project_id),
         storage_bucket: config.default_bucket.clone(),
         npm,
-        cache_dir: fireside_extensions::source::cache_directory(),
-        endpoints: fireside_extensions::registry::Endpoints::from_env(),
+        cache_dir: firenook_extensions::source::cache_directory(),
+        endpoints: firenook_extensions::registry::Endpoints::from_env(),
         credential: if config.offline {
             None
         } else {
-            fireside_extensions::registry::discover_credential()
+            firenook_extensions::registry::discover_credential()
         },
         offline: config.offline,
         ui_origin: config.ui_origin.clone(),
@@ -1923,9 +1923,9 @@ async fn import_suite(
         if config.services.firestore {
             let path = root.join(firestore.metadata_file);
             let count = seed_store(store, &path, &config.project_id)?;
-            eprintln!("fireside imported {count} Firestore documents");
+            eprintln!("firenook imported {count} Firestore documents");
         } else {
-            eprintln!("fireside: firestore export not imported (service not started)");
+            eprintln!("firenook: firestore export not imported (service not started)");
         }
     }
     if let Some(auth_metadata) = metadata.auth {
@@ -1933,9 +1933,9 @@ async fn import_suite(
             let count = auth
                 .import_directory(&root.join(auth_metadata.path))
                 .map_err(|error| failure(format!("Auth import failed: {error}")))?;
-            eprintln!("fireside imported {count} Auth users");
+            eprintln!("firenook imported {count} Auth users");
         } else {
-            eprintln!("fireside: auth export not imported (service not started)");
+            eprintln!("firenook: auth export not imported (service not started)");
         }
     }
     if let Some(storage_metadata) = metadata.storage {
@@ -1944,9 +1944,9 @@ async fn import_suite(
                 .import(&root.join(storage_metadata.path))
                 .await
                 .map_err(|error| failure(format!("Storage import failed: {error}")))?;
-            eprintln!("fireside imported {count} Storage objects");
+            eprintln!("firenook imported {count} Storage objects");
         } else {
-            eprintln!("fireside: storage export not imported (service not started)");
+            eprintln!("firenook: storage export not imported (service not started)");
         }
     }
     Ok(())
@@ -2048,11 +2048,11 @@ async fn export_suite(
         .map_err(|error| failure(format!("failed to create export parent: {error}")))?;
     let sequence = OffsetDateTime::now_utc().unix_timestamp_nanos();
     let staging = parent.join(format!(
-        ".fireside-export-{}-{sequence}",
+        ".firenook-export-{}-{sequence}",
         std::process::id()
     ));
     let backup = parent.join(format!(
-        ".fireside-export-backup-{}-{sequence}",
+        ".firenook-export-backup-{}-{sequence}",
         std::process::id()
     ));
     tokio::fs::create_dir(&staging)
@@ -2067,7 +2067,7 @@ async fn export_suite(
         metadata.insert(
             "firestore".to_owned(),
             json!({
-                "version": "fireside-0.0.1",
+                "version": "firenook-0.0.1",
                 "path": "firestore_export",
                 "metadata_file": metadata_file,
             }),
@@ -2123,7 +2123,7 @@ fn export_firestore(
     store: &Store,
     project: &str,
     staging: &Path,
-) -> Result<fireside_export_format::WrittenExport, SuiteRuntimeError> {
+) -> Result<firenook_export_format::WrittenExport, SuiteRuntimeError> {
     let snapshot = store.snapshot();
     let documents = snapshot
         .databases(project)
@@ -2171,7 +2171,7 @@ fn failure(message: impl Into<String>) -> SuiteRuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use fireside_query_engine::{FieldFilter, FieldOperator, FieldPath, Filter, Query, QueryScope};
+    use firenook_query_engine::{FieldFilter, FieldOperator, FieldPath, Filter, Query, QueryScope};
 
     use super::*;
 
@@ -2184,12 +2184,12 @@ mod tests {
                 Filter::Field(FieldFilter {
                     path: FieldPath::parse_wire("subscriptionQuota.active").expect("field"),
                     operator: FieldOperator::Equal,
-                    value: fireside_core_store::Value::Boolean(true),
+                    value: firenook_core_store::Value::Boolean(true),
                 }),
                 Filter::Field(FieldFilter {
                     path: FieldPath::parse_wire("subscriptionQuota.periodEndDate").expect("field"),
                     operator: FieldOperator::LessThanOrEqual,
-                    value: fireside_core_store::Value::Null,
+                    value: firenook_core_store::Value::Null,
                 }),
             ]),
         );
@@ -2203,7 +2203,7 @@ mod tests {
     #[test]
     fn export_writes_every_database_of_the_project_and_import_restores_them() {
         let unique = format!(
-            "fireside-suite-export-databases-{}-{}",
+            "firenook-suite-export-databases-{}-{}",
             std::process::id(),
             OffsetDateTime::now_utc().unix_timestamp_nanos()
         );
@@ -2215,9 +2215,9 @@ mod tests {
         let foreign = DatabaseName::new("demo-elsewhere", "other").expect("database");
         let store = Store::default();
         let fields = |value: i64| {
-            fireside_core_store::Fields::from([(
+            firenook_core_store::Fields::from([(
                 "value".to_owned(),
-                fireside_core_store::Value::Integer(value),
+                firenook_core_store::Value::Integer(value),
             )])
         };
         store
@@ -2289,7 +2289,7 @@ mod tests {
     #[test]
     fn firestore_rules_are_installed_per_configured_database() {
         let unique = format!(
-            "fireside-suite-rules-databases-{}-{}",
+            "firenook-suite-rules-databases-{}-{}",
             std::process::id(),
             OffsetDateTime::now_utc().unix_timestamp_nanos()
         );
@@ -2316,16 +2316,16 @@ mod tests {
         let access = SnapshotAccess::current(Store::default().snapshot(), project);
         for (id, allowed) in [("(default)", false), ("other", true), ("third", true)] {
             let database = DatabaseName::new(project, id).expect("database");
-            let request = fireside_rules_engine::EvaluationRequest::new(
-                fireside_rules_runtime::RequestOperation::Get,
+            let request = firenook_rules_engine::EvaluationRequest::new(
+                firenook_rules_runtime::RequestOperation::Get,
                 format!("/databases/{id}/documents/items/one"),
-                fireside_rules_engine::Timestamp::new(0, 0),
+                firenook_rules_engine::Timestamp::new(0, 0),
             );
             assert_eq!(
                 runtime
                     .evaluate(
                         &database,
-                        &fireside_rules_runtime::Authorization::Client(None),
+                        &firenook_rules_runtime::Authorization::Client(None),
                         &request,
                         &access,
                     )
@@ -2364,7 +2364,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let unique = format!(
-            "fireside-suite-export-path-{}-{}",
+            "firenook-suite-export-path-{}-{}",
             std::process::id(),
             OffsetDateTime::now_utc().unix_timestamp_nanos()
         );

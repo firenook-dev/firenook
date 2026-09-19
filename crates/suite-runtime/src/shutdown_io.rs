@@ -40,7 +40,7 @@ impl ShutdownIo {
         if self.closed {
             Err(io::Error::new(
                 io::ErrorKind::ConnectionAborted,
-                "Fireside suite is shutting down",
+                "Firenook suite is shutting down",
             ))
         } else {
             Ok(())

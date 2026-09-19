@@ -107,7 +107,7 @@
       "grpc",
       "http-json"
     ],
-    "firesideBefore": {
+    "firenookBefore": {
       "httpRoutes": [
         "topics.list",
         "topics.create",
@@ -174,7 +174,7 @@
   },
   "gates": {
     "emulatorReplay": {
-      "test": "conformance/src/pubsub/replay-fireside.ts (npm run replay:pubsub -- --binary <fireside>); the replay shares client.ts/runner.ts/normalize.ts with the capture and drives the binary's standalone `fireside pubsub` service over gRPC and HTTP/JSON with the same push endpoint",
+      "test": "conformance/src/pubsub/replay-firenook.ts (npm run replay:pubsub -- --binary <firenook>); the replay shares client.ts/runner.ts/normalize.ts with the capture and drives the binary's standalone `firenook pubsub` service over gRPC and HTTP/JSON with the same push endpoint",
       "stepsMinimum": 400,
       "transports": [
         "grpc",
@@ -196,7 +196,7 @@
         "push",
         "schema"
       ],
-      "test": "conformance/src/pubsub/verify-client-library.ts (npm run verify:pubsub:client -- --binary <fireside>)"
+      "test": "conformance/src/pubsub/verify-client-library.ts (npm run verify:pubsub:client -- --binary <firenook>)"
     },
     "functionsDelivery": {
       "existingFixturesUnchanged": [
@@ -234,7 +234,7 @@
       "policy": "function targets consume through a real emulator-sub-<topic> subscription so user pulls and functions compete as they do officially"
     },
     "schedules": {
-      "policy": "the Fireside-only scheduler keeps ticking onSchedule topics; non-UTC zones are finished in J2"
+      "policy": "the Firenook-only scheduler keeps ticking onSchedule topics; non-UTC zones are finished in J2"
     },
     "pairedAcceptanceWaiver": {
       "policy": "the paired 2 h soak is a per-release-line gate; the owner waived by the owner on 2026-09-19 for this release: the change set is confined to Authentication and Pub/Sub, both proven by oracle replay against the official emulators; the paired 2 h soak runs once per release line and the next.6 and next.7 records stand for the 0.1.0-next line"
@@ -259,7 +259,7 @@
     },
     "j4": {
       "date": "2026-09-18",
-      "replay": "npm run replay:pubsub -- --binary target/debug/fireside",
+      "replay": "npm run replay:pubsub -- --binary target/debug/firenook",
       "programs": 42,
       "steps": 916,
       "valuesCompared": 3755,

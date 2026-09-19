@@ -4,7 +4,7 @@
 //! `paramHelper.ts`.
 use std::path::Path;
 
-use fireside_functions_runtime::dotenv;
+use firenook_functions_runtime::dotenv;
 use regex::Regex;
 use serde_json::Value;
 

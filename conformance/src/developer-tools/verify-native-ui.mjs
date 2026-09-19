@@ -46,7 +46,7 @@ for(const service of ['firestore','auth','storage','functions','pubsub','hub','u
   ports[service]=listener.address().port;reservations.push(listener);
 }
 const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH','JAVA_HOME'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
-Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRESIDE_CONTROL_STDIN:'1'});
+Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRENOOK_CONTROL_STDIN:'1'});
 const args=['suite','--host','127.0.0.1','--project-id',project,'--project-dir',output,'--state-dir',join(output,'state'),
   '--storage-bucket','default='+project+'.appspot.com','--firebase-tools-root',tools,'--node',process.execPath,
   '--ui-archive',join(cache,'ui-v1.15.0.zip')];
@@ -112,7 +112,7 @@ try{
     }
     // Upstream lists the handler at registration; native topic routing follows
     // its own refresh. Wait for that announced completion before publishing.
-    while(!log.includes('fireside functions routing refreshed: 3 registered functions')){
+    while(!log.includes('firenook functions routing refreshed: 3 registered functions')){
       assert(Date.now()<deadline,'native routing refresh timeout');await delay(50);
     }
     await publish('added-handler','beta-topic','beta',2);
@@ -122,7 +122,7 @@ try{
 }catch(error){await json('failure.json',{message:error.message,stack:error.stack});throw error;}
 finally{
   requests?.close();
-  if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRESIDE_SHUTDOWN\n');
+  if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRENOOK_SHUTDOWN\n');
   const result=await Promise.race([exited,delay(20000,null,{ref:false})]);
   await writeFile(join(output,'suite.log'),log);
   record.passed=record.browserAndFunctionPassed===true&&result?.[0]===0;

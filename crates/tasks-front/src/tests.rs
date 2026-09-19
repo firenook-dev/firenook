@@ -12,7 +12,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
-use fireside_functions_bridge::FunctionsInventory;
+use firenook_functions_bridge::FunctionsInventory;
 use serde_json::json;
 use tower::ServiceExt as _;
 

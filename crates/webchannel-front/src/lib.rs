@@ -1,4 +1,4 @@
-//! `WebChannel` version 8 transport for Fireside's Firestore streams.
+//! `WebChannel` version 8 transport for Firenook's Firestore streams.
 //!
 //! The wire contract is implemented from the pinned Java, production-cloud,
 //! Firebase JS SDK, closure-net, and Closure Library oracles recorded for
@@ -24,7 +24,7 @@ use axum::http::header::{
 };
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, Version};
 use axum::routing::get;
-use fireside_grpc_front::FirestoreService;
+use firenook_grpc_front::FirestoreService;
 use futures_util::{StreamExt as _, stream};
 use serde_json::{Value as JsonValue, json};
 use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, watch};
@@ -631,8 +631,8 @@ impl SessionRegistry {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let sid = format!("fireside-{time:032x}-{sequence:016x}");
-        let gsession_id = format!("fireside-gsession-{time:032x}-{sequence:016x}");
+        let sid = format!("firenook-{time:032x}-{sequence:016x}");
+        let gsession_id = format!("firenook-gsession-{time:032x}-{sequence:016x}");
         let (termination, _) = watch::channel(false);
         let session = Arc::new(Session {
             sid: sid.clone(),

@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-// The five data services Fireside emulates.
+// The five data services Firenook emulates.
 export const SERVICES = ['firestore', 'auth', 'storage', 'functions', 'pubsub'];
 // Every name the official CLI accepts in --only and under firebase.json emulators.
 export const OFFICIAL_EMULATORS = ['auth', 'functions', 'firestore', 'database', 'hosting', 'pubsub', 'storage', 'eventarc', 'dataconnect', 'tasks', 'apphosting', 'extensions', 'ui', 'logging', 'hub'];
-// Official services Fireside does not implement (roadmap).
+// Official services Firenook does not implement (roadmap).
 export const UNIMPLEMENTED = ['database', 'hosting', 'dataconnect', 'apphosting'];
 // Listeners that follow their parent: eventarc/tasks with functions, the rest always.
 const FOLLOWERS = ['eventarc', 'tasks', 'hub', 'ui', 'logging'];
@@ -103,7 +103,7 @@ export const contains = (parent, child) => {
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 // Reads firebase.json and .firebaserc with every check the launcher applies,
-// collecting findings instead of throwing: `errors` (Fireside cannot start),
+// collecting findings instead of throwing: `errors` (Firenook cannot start),
 // `warnings` (configured official services it skips, safety notes). Invalid
 // JSON and a missing firebase.json still throw.
 export function inspectProject(options, cwd = process.cwd()) {
@@ -112,7 +112,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   const fail = (code, message) => errors.push({code, message});
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
-  if (!existsSync(config)) throw new Error(`No firebase.json at ${config}; run fireside init in the project directory or pass --config`);
+  if (!existsSync(config)) throw new Error(`No firebase.json at ${config}; run firenook init in the project directory or pass --config`);
   let data;
   try { data = readJson(config); } catch (error) { throw new Error(`${config} is not valid JSON: ${error.message}`); }
   if (!isObject(data)) throw new Error(`${config} must contain a JSON object`);
@@ -124,7 +124,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   const aliases = isObject(rcData?.projects) ? rcData.projects : {};
   const selection = options.project || aliases.default;
   const project = (selection !== undefined && aliases[selection]) || selection;
-  if (!project) fail('project-missing', 'No project id. Pass --project <id> (or -P <id>), or record one with fireside use --add <id> (projects.default in .firebaserc).');
+  if (!project) fail('project-missing', 'No project id. Pass --project <id> (or -P <id>), or record one with firenook use --add <id> (projects.default in .firebaserc).');
   else if (!validProjectId(project)) fail('project-invalid', `Invalid project id ${project}: use lowercase letters, digits and hyphens (6 to 30 characters, starting with a letter), or a demo- prefix for a local-only project.`);
   const demo = isDemoProject(project);
 
@@ -133,7 +133,7 @@ export function inspectProject(options, cwd = process.cwd()) {
   const known = [...SERVICES, 'hub', 'ui', 'logging', 'eventarc', 'tasks', 'extensions', 'singleProjectMode'];
   const skipped = [];
   for (const name of Object.keys(isObject(emulators) ? emulators : {})) {
-    if (UNIMPLEMENTED.includes(name)) { skipped.push(name); warnings.push(`Fireside: firebase.json configures the ${name} emulator, which Fireside does not implement; skipping it.`); }
+    if (UNIMPLEMENTED.includes(name)) { skipped.push(name); warnings.push(`Firenook: firebase.json configures the ${name} emulator, which Firenook does not implement; skipping it.`); }
     else if (!known.includes(name)) fail('emulators-key', `Unsupported configured emulator: ${name}. Valid emulators keys are ${[...known, ...UNIMPLEMENTED].join(', ')}.`);
   }
   const has = key => Object.hasOwn(data, key);
@@ -152,14 +152,14 @@ export function inspectProject(options, cwd = process.cwd()) {
     const wanted = new Set();
     for (const name of requested) {
       if (!OFFICIAL_EMULATORS.includes(name)) fail('only', `${name} is not a valid emulator name, valid options are: ${JSON.stringify(OFFICIAL_EMULATORS)}`);
-      else if (UNIMPLEMENTED.includes(name)) fail('only', `The ${name} emulator is not implemented by Fireside (roadmap); remove it from --only.`);
+      else if (UNIMPLEMENTED.includes(name)) fail('only', `The ${name} emulator is not implemented by Firenook (roadmap); remove it from --only.`);
       else if (name === 'extensions') wanted.add('functions');
       else if (!FOLLOWERS.includes(name)) wanted.add(name);
     }
-    for (const name of wanted) if (!configured.includes(name)) warnings.push(`Fireside: not starting the ${name} emulator; firebase.json does not configure it (run fireside init --adopt or add emulators.${name}).`);
+    for (const name of wanted) if (!configured.includes(name)) warnings.push(`Firenook: not starting the ${name} emulator; firebase.json does not configure it (run firenook init --adopt or add emulators.${name}).`);
     services = configured.filter(name => wanted.has(name));
   }
-  if (!errors.length && !services.length) fail('services', 'No emulators to start, run fireside init to get started.');
+  if (!errors.length && !services.length) fail('services', 'No emulators to start, run firenook init to get started.');
 
   const uiConfig = isObject(emulators) ? emulators.ui : undefined;
   if (uiConfig !== undefined && !isObject(uiConfig)) fail('ui', 'firebase.json emulators.ui must be an object');
@@ -192,9 +192,9 @@ export function inspectProject(options, cwd = process.cwd()) {
   if (typeof host !== 'string' || !host.trim()) fail('host', '--host requires a host name or address');
   for (const name of LISTENERS) {
     const own = entry(name)?.host;
-    if (own && own !== host && !isLoopback(own)) fail('host', `Unsupported host for ${name}: ${own} differs from ${host}; the Fireside suite listens on one host (use --host or the same emulators.<name>.host everywhere).`);
+    if (own && own !== host && !isLoopback(own)) fail('host', `Unsupported host for ${name}: ${own} differs from ${host}; the Firenook suite listens on one host (use --host or the same emulators.<name>.host everywhere).`);
   }
-  if (typeof host === 'string' && !isLoopback(host)) warnings.push(`Fireside: binding ${host}; the emulators have no authentication, so every service, the data and arbitrary Functions execution are reachable from any device that can reach this host.`);
+  if (typeof host === 'string' && !isLoopback(host)) warnings.push(`Firenook: binding ${host}; the emulators have no authentication, so every service, the data and arbitrary Functions execution are reachable from any device that can reach this host.`);
 
   const ports = {};
   for (const name of [...LISTENERS, 'firestore-websocket']) {

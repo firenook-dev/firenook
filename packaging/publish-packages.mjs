@@ -26,7 +26,7 @@ for (const platform of Object.keys(release.platforms)) {
     if (result.passed !== true || result.version !== manifest.version || result.engineRevision !== release.engineRevision) throw new Error(`Missing or mismatched passing smoke: ${platform}/${smoke}`);
   }
   for (const record of receipt.packages) {
-    if (![manifest.name, `@fireside-dev/${platform}`].includes(record.name) || record.version !== manifest.version || basename(record.filename) !== record.filename || !record.filename.endsWith('.tgz')) throw new Error('Unexpected package in artifact set');
+    if (![manifest.name, `@firenook/cli-${platform}`].includes(record.name) || record.version !== manifest.version || basename(record.filename) !== record.filename || !record.filename.endsWith('.tgz')) throw new Error('Unexpected package in artifact set');
     const path = join(directory, record.filename);
     const bytes = readFileSync(path);
     if (sha256(bytes) !== record.sha256) throw new Error(`Artifact checksum mismatch: ${path}`);

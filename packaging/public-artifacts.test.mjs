@@ -24,11 +24,11 @@ function archive(files) {
   }
   return gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
 }
-const expected = {name: '@fireside-dev/linux-x64', version: '0.0.0-test.0', engineRevision: '1'.repeat(40)};
+const expected = {name: '@firenook/cli-linux-x64', version: '0.0.0-test.0', engineRevision: '1'.repeat(40)};
 const native = () => [
   ['package.json', JSON.stringify({name: expected.name, version: expected.version})],
   ['receipt.json', JSON.stringify({engineRevision: expected.engineRevision})],
-  ['LICENSE-APACHE', 'synthetic license'], ['LICENSE-MIT', 'synthetic license'], ['bin/fireside', 'synthetic executable'],
+  ['LICENSE', 'synthetic license'], ['NOTICE', 'synthetic notice'], ['bin/firenook', 'synthetic executable'],
 ];
 
 test('allowlisted package bytes pass without extraction or execution', () => {
@@ -121,7 +121,7 @@ test('current CLI metadata does not link private acceptance or assert a consumer
   const release = JSON.parse(readFileSync(new URL('../packages/cli/release.json', import.meta.url)));
   assert.ok(!Object.hasOwn(release, 'acceptanceReport'));
   assert.ok(!Object.hasOwn(release, 'acceptedBaselineRevision'));
-  for (const file of ['README.md', 'package.json', 'bin/fireside.mjs', 'src/options.mjs']) {
+  for (const file of ['README.md', 'package.json', 'bin/firenook.mjs', 'src/options.mjs']) {
     const bytes = readFileSync(new URL(`../packages/cli/${file}`, import.meta.url));
     assert.doesNotMatch(bytes.toString(), /private-customer\.invalid|\/reports\//i);
   }
@@ -138,7 +138,7 @@ test('publication requires reviewed clean history and public provenance; normal 
 test('unreviewed history blocks direct publication before accessing artifacts or npm', () => {
   // Exercise the rejection even after this repository's review is complete.
   // Only the throwaway copy gets an unreviewed receipt; never modify live state.
-  const root = mkdtempSync(join(tmpdir(), 'fireside-unreviewed-publication-'));
+  const root = mkdtempSync(join(tmpdir(), 'firenook-unreviewed-publication-'));
   try {
     cpSync(new URL('./', import.meta.url), join(root, 'packaging'), {recursive: true});
     cpSync(new URL('../packages/cli/', import.meta.url), join(root, 'packages/cli'), {recursive: true});

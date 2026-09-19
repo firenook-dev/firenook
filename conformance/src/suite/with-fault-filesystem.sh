@@ -7,7 +7,7 @@ if [[ "$(uname -s)" != Linux || $# != 6 ]]; then
 fi
 binary=$1 tools=$2 sdk=$3 cache=$4 output=$5 mode=$6
 [[ "$output" = /* && ! -e "$output" && ( "$mode" = export || "$mode" = working ) ]] || exit 2
-fault_root=$(mktemp -d "${RUNNER_TEMP:?}/fireside-enospc.XXXXXX")
+fault_root=$(mktemp -d "${RUNNER_TEMP:?}/firenook-enospc.XXXXXX")
 fault_image="$fault_root/fault.img"
 fault_mount="$fault_root/mount"
 mkdir "$fault_mount"

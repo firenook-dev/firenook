@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fireside_core_store::{DiskOptions, Precondition, StoreOptions, Value, Write};
-use fireside_query_engine::{FieldFilter, FieldOperator, FieldPath, Filter, Query, QueryScope};
+use firenook_core_store::{DiskOptions, Precondition, StoreOptions, Value, Write};
+use firenook_query_engine::{FieldFilter, FieldOperator, FieldPath, Filter, Query, QueryScope};
 
 use super::*;
 
@@ -40,7 +40,7 @@ impl TestStore {
             .expect("test clock")
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "fireside-expired-listen-{}-{nanos}-{}",
+            "firenook-expired-listen-{}-{nanos}-{}",
             std::process::id(),
             NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
         ));

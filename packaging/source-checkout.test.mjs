@@ -10,10 +10,10 @@ test('package source and licenses retain LF bytes on Windows checkouts', () => {
   // autocrlf conversion makes the common CLI differ from Unix builds even
   // though every platform can install it successfully.
   const paths = execFileSync('git', ['ls-files', '-z', '--', 'packages', 'packaging',
-    'LICENSE-MIT', 'LICENSE-APACHE'], {cwd: root, encoding: 'utf8'})
+    'LICENSE', 'NOTICE'], {cwd: root, encoding: 'utf8'})
     .split('\0').filter(Boolean);
   assert.ok(paths.includes('packages/cli/package.json'));
-  assert.ok(paths.includes('LICENSE-APACHE'));
+  assert.ok(paths.includes('LICENSE'));
   const fields = execFileSync('git', ['check-attr', '-z', 'eol', '--', ...paths],
     {cwd: root, encoding: 'utf8'}).split('\0');
   fields.pop();

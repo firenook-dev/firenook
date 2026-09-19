@@ -94,7 +94,7 @@ assertHash(await readFile(rulesRuntimePath), RULES_RUNTIME_SHA256, "Storage rule
 assertHash(await readFile(firestoreJarPath), FIRESTORE_JAR_SHA256, "Firestore emulator jar");
 
 const originalTmpdir = process.env.TMPDIR;
-const isolatedTmpdir = await mkdtemp(join(tmpdir(), "fireside-phase-g-storage-rules-"));
+const isolatedTmpdir = await mkdtemp(join(tmpdir(), "firenook-phase-g-storage-rules-"));
 process.env.TMPDIR = isolatedTmpdir;
 
 const require = createRequire(packageJsonPath);

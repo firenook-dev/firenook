@@ -1,5 +1,5 @@
 // Phase I: the step executor and the recording functions stub shared by the
-// official-emulator capture and the Fireside replay, so both sides record
+// official-emulator capture and the Firenook replay, so both sides record
 // and normalize a step identically.
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";

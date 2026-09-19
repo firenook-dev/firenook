@@ -3,7 +3,7 @@
 //! inventory it serves, pinned by `functions-readiness-v1`.
 use std::fmt::Write as _;
 
-use fireside_functions_bridge::FunctionsInventory;
+use firenook_functions_bridge::FunctionsInventory;
 use sha2::{Digest as _, Sha256};
 
 pub(crate) fn fingerprint(inventory: &FunctionsInventory) -> Result<String, String> {

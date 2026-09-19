@@ -1,9 +1,9 @@
 use super::{Payload, WatchDocument};
 use crate::{ChangeBatch, ChangeKind, TargetSpec, WatchTarget};
-use fireside_core_store::{
+use firenook_core_store::{
     DatabaseName, DiskOptions, DocumentKey, Fields, Precondition, Store, Value, Write,
 };
-use fireside_query_engine::{DatabaseEdition, FieldPath, Limit, Query, QueryScope};
+use firenook_query_engine::{DatabaseEdition, FieldPath, Limit, Query, QueryScope};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,7 +16,7 @@ impl Directory {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "fireside-compact-watch-{}-{unique}",
+            "firenook-compact-watch-{}-{unique}",
             std::process::id()
         ));
         std::fs::create_dir(&path).unwrap();

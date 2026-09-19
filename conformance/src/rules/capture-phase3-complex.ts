@@ -38,7 +38,7 @@ if (nonBlankLines < 400) {
 
 const externalOrigin = argumentValue("--origin");
 if (externalOrigin !== undefined) {
-  await captureFireside(externalOrigin, requiredArgumentValue("--output"));
+  await captureFirenook(externalOrigin, requiredArgumentValue("--output"));
 } else {
 if (process.env.CONFORMANCE_CLOUD_ALLOWLIST !== PHASE3_RULES_PROJECT_ID) {
   throw new Error(
@@ -161,7 +161,7 @@ try {
 }
 }
 
-async function captureFireside(originValue: string, outputPath: string): Promise<void> {
+async function captureFirenook(originValue: string, outputPath: string): Promise<void> {
   await seed(originValue);
   const observations = await runCases(originValue);
   const mismatches = observations.filter(
@@ -181,7 +181,7 @@ async function captureFireside(originValue: string, outputPath: string): Promise
     passed: mismatches.length === 0 && allowCases >= 24 && denyCases >= 12,
     rulesSourceSha256: sha256(rulesSource),
     schemaVersion: 1,
-    target: "fireside",
+    target: "firenook",
   };
   await mkdir(resolve(outputPath, ".."), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
@@ -200,7 +200,7 @@ async function captureFireside(originValue: string, outputPath: string): Promise
     ),
   );
   if (!result.passed) {
-    throw new Error(`Fireside complex rules mismatches: ${JSON.stringify(mismatches)}`);
+    throw new Error(`Firenook complex rules mismatches: ${JSON.stringify(mismatches)}`);
   }
 }
 

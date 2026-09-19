@@ -17,7 +17,7 @@ const [binary,tools,sdk,cache,output]=process.argv.slice(2,7).map(path=>resolve(
 assert.equal(JSON.parse(await readFile(join(tools,'package.json'))).version,'15.22.0');
 // The id must not contain the word the assertion below scans for: the owned
 // Functions runtime prints HTTPS function URLs (with the project id) at startup.
-const project='demo-fireside-without-jvm';
+const project='demo-firenook-without-jvm';
 const bucket=project+'.appspot.com';
 await mkdir(output,{mode:0o700});
 const json=(name,value)=>writeFile(join(output,name),JSON.stringify(value,null,2)+'\n');
@@ -63,7 +63,7 @@ await mkdir(shims);
 await writeFile(join(shims,'java'),'#!/bin/sh\necho "java invoked by the suite: $*" >&2\nexit 127\n',{mode:0o755});
 const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
 Object.assign(env,{PATH:[shims,dirname(process.execPath),env.PATH].join(delimiter),GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),
-  CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRESIDE_CONTROL_STDIN:'1'});
+  CLOUDSDK_CONFIG:join(output,'gcloud'),GCLOUD_PROJECT:project,GOOGLE_CLOUD_PROJECT:project,FIRENOOK_CONTROL_STDIN:'1'});
 const javaProbe=spawnSync('java',['-version'],{env,encoding:'utf8'});
 assert.equal(javaProbe.status,127,`java on the suite PATH must be the failing shim: ${javaProbe.stderr}`);
 
@@ -121,7 +121,7 @@ try{
   assert(!/\bjava\b/i.test(log.replaceAll(output,'<output>')),'the suite must not mention Java');
   record.passed=true;
 }finally{
-  if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRESIDE_SHUTDOWN\n');
+  if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRENOOK_SHUTDOWN\n');
   const result=await Promise.race([exited,delay(20000,null,{ref:false})]);
   await writeFile(join(output,'suite.log'),log);
   await json('result.json',{...record,shutdown:result});

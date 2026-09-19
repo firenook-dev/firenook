@@ -94,7 +94,7 @@ test("emulator export writes the named official-format directory", async (contex
     authorization: "Bearer owner",
     "content-type": "application/json",
   };
-  const exportDirectory = await mkdtemp(join(tmpdir(), "fireside-control-export-"));
+  const exportDirectory = await mkdtemp(join(tmpdir(), "firenook-control-export-"));
   const exportName = `export-${randomUUID()}`;
 
   try {

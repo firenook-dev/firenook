@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use axum::http::header::{ACCEPT, USER_AGENT};
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
-use fireside_functions_bridge::FunctionsInventory;
+use firenook_functions_bridge::FunctionsInventory;
 use indexmap::IndexMap;
 
 use crate::config::QueueConfig;

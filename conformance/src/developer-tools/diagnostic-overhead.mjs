@@ -51,7 +51,7 @@ async function run(repetition,variant){
     '--data-dir',join(dir,'state'),'--rules',join(output,'firestore.rules')];
   if(variant!=='disabled')args.push('--websocket-port',String(ports[1]));
   const env=Object.fromEntries(['HOME','PATH','LANG','TZ'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
-  env.FIRESIDE_CONTROL_STDIN='1';
+  env.FIRENOOK_CONTROL_STDIN='1';
   const child=spawn(binary,args,{cwd:dir,env,stdio:['pipe','pipe','pipe']});
   const exited=once(child,'exit');let log='',socket,phase='startup',sampling=false,sampleTask=Promise.resolve();
   for(const stream of [child.stdout,child.stderr])stream.on('data',bytes=>{log+=bytes;});
@@ -131,7 +131,7 @@ async function run(repetition,variant){
   }catch(error){row.failure={message:error.message,stack:error.stack};throw error;}
   finally{
     phase='shutdown';clearInterval(timer);await sampleTask;socket?.close();
-    const before=performance.now();if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRESIDE_SHUTDOWN\n');
+    const before=performance.now();if(child.exitCode===null&&child.signalCode===null)child.stdin.end('FIRENOOK_SHUTDOWN\n');
     const stopped=await Promise.race([exited,delay(manifest.shutdownDeadlineMilliseconds,null,{ref:false})]);
     row.shutdownMs=performance.now()-before;row.exit=stopped;
     await writeFile(join(dir,'native.log'),log);await save();

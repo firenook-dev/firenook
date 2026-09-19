@@ -6,15 +6,15 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fireside_core_store::{
+use firenook_core_store::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DatabaseName, DiskOptions, DocumentKey, Fields, Precondition,
     Store, Value, Write,
 };
-use fireside_query_engine::{
+use firenook_query_engine::{
     DatabaseEdition, Direction, FieldFilter, FieldOperator, FieldPath, Filter, Limit, Query,
     QueryScope, execute, execute_iter,
 };
-use fireside_watch_broker::{ChangeKind, TargetSpec, WatchTarget};
+use firenook_watch_broker::{ChangeKind, TargetSpec, WatchTarget};
 
 const DATASET_DOCUMENTS: usize = 200_000;
 const PARALLEL_DOCUMENTS: usize = 11_379;
@@ -49,7 +49,7 @@ impl TestDirectory {
             .unwrap_or_default()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "fireside-phase5-query-scaling-{}-{nanos}",
+            "firenook-phase5-query-scaling-{}-{nanos}",
             std::process::id()
         ));
         fs::create_dir_all(&path).expect("quality-gate directory should be created");
@@ -113,7 +113,7 @@ fn phase5_200k_query_scaling_gate() {
 }
 
 fn measure_single_collection(
-    snapshot: &fireside_core_store::Snapshot,
+    snapshot: &firenook_core_store::Snapshot,
     database: &DatabaseName,
 ) -> Measurement {
     let single_query = Query::new(QueryScope::collection("collection00").expect("valid scope"));
@@ -133,7 +133,7 @@ fn measure_single_collection(
 }
 
 fn measure_parallel_collections(
-    snapshot: &fireside_core_store::Snapshot,
+    snapshot: &firenook_core_store::Snapshot,
     database: &DatabaseName,
 ) -> Measurement {
     let (parallel_count, parallel) = measure(|| {
@@ -180,7 +180,7 @@ fn measure_parallel_collections(
 }
 
 fn measure_dashboard(
-    snapshot: &fireside_core_store::Snapshot,
+    snapshot: &firenook_core_store::Snapshot,
     database: &DatabaseName,
 ) -> Measurement {
     let dashboard = Query::new(QueryScope::collection("records").expect("valid scope"))
@@ -210,7 +210,7 @@ fn measure_dashboard(
 }
 
 fn measure_collection_group(
-    snapshot: &fireside_core_store::Snapshot,
+    snapshot: &firenook_core_store::Snapshot,
     database: &DatabaseName,
 ) -> Measurement {
     let group = Query::new(QueryScope::collection_group("events").expect("valid group"));
@@ -230,7 +230,7 @@ fn measure_collection_group(
 }
 
 fn measure_listener_fanout(
-    snapshot: &fireside_core_store::Snapshot,
+    snapshot: &firenook_core_store::Snapshot,
     database: &DatabaseName,
 ) -> Measurement {
     let (listen_documents, listen) = measure(|| {

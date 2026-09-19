@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
-use fireside_core_store::{
+use firenook_core_store::{
     DatabaseName, DocumentKey, Fields, Timestamp, Value, document_key_logical_bytes,
     fields_logical_bytes,
 };

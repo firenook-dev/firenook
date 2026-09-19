@@ -103,50 +103,50 @@ export const existingConformanceCommandSpecifications = [
     executable: "npm",
   },
   {
-    arguments: ["run", "test:fireside", "--prefix", "conformance"],
-    displayCommand: "npm run test:fireside --prefix conformance",
+    arguments: ["run", "test:firenook", "--prefix", "conformance"],
+    displayCommand: "npm run test:firenook --prefix conformance",
     executable: "npm",
   },
   {
-    arguments: ["run", "test:fireside:disk", "--prefix", "conformance"],
-    displayCommand: "npm run test:fireside:disk --prefix conformance",
+    arguments: ["run", "test:firenook:disk", "--prefix", "conformance"],
+    displayCommand: "npm run test:firenook:disk --prefix conformance",
     executable: "npm",
   },
   {
-    arguments: ["run", "test:fireside:strict", "--prefix", "conformance"],
-    displayCommand: "npm run test:fireside:strict --prefix conformance",
+    arguments: ["run", "test:firenook:strict", "--prefix", "conformance"],
+    displayCommand: "npm run test:firenook:strict --prefix conformance",
     executable: "npm",
   },
   {
-    arguments: ["run", "test:fireside:enterprise", "--prefix", "conformance"],
-    displayCommand: "npm run test:fireside:enterprise --prefix conformance",
-    executable: "npm",
-  },
-  {
-    arguments: [
-      "run",
-      "test:fireside:enterprise:disk",
-      "--prefix",
-      "conformance",
-    ],
-    displayCommand:
-      "npm run test:fireside:enterprise:disk --prefix conformance",
+    arguments: ["run", "test:firenook:enterprise", "--prefix", "conformance"],
+    displayCommand: "npm run test:firenook:enterprise --prefix conformance",
     executable: "npm",
   },
   {
     arguments: [
       "run",
-      "test:fireside-disk-recovery",
+      "test:firenook:enterprise:disk",
       "--prefix",
       "conformance",
     ],
     displayCommand:
-      "npm run test:fireside-disk-recovery --prefix conformance",
+      "npm run test:firenook:enterprise:disk --prefix conformance",
     executable: "npm",
   },
   {
-    arguments: ["run", "test:fireside-import", "--prefix", "conformance"],
-    displayCommand: "npm run test:fireside-import --prefix conformance",
+    arguments: [
+      "run",
+      "test:firenook-disk-recovery",
+      "--prefix",
+      "conformance",
+    ],
+    displayCommand:
+      "npm run test:firenook-disk-recovery --prefix conformance",
+    executable: "npm",
+  },
+  {
+    arguments: ["run", "test:firenook-import", "--prefix", "conformance"],
+    displayCommand: "npm run test:firenook-import --prefix conformance",
     executable: "npm",
   },
   {
@@ -173,12 +173,12 @@ export const existingConformanceCommandSpecifications = [
   {
     arguments: [
       "run",
-      "test:fireside-export-java-import",
+      "test:firenook-export-java-import",
       "--prefix",
       "conformance",
     ],
     displayCommand:
-      "npm run test:fireside-export-java-import --prefix conformance",
+      "npm run test:firenook-export-java-import --prefix conformance",
     executable: "npm",
   },
 ] as const satisfies readonly GateCommandSpecification[];

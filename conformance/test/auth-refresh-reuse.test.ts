@@ -52,10 +52,10 @@ test("official Auth refresh grants survive repetition, concurrency, disable/enab
   }
 });
 
-test("Fireside matches password/custom refresh fixtures and real two-tab/reload SDK behavior", { timeout: 600_000 }, async () => {
+test("Firenook matches password/custom refresh fixtures and real two-tab/reload SDK behavior", { timeout: 600_000 }, async () => {
   const repository = fileURLToPath(new URL("../../", import.meta.url));
   const execute = promisify(execFile);
-  await execute("cargo", ["build", "--locked", "-p", "fireside-auth-front", "--example", "refresh_fixture_server"], { cwd: repository });
+  await execute("cargo", ["build", "--locked", "-p", "firenook-auth-front", "--example", "refresh_fixture_server"], { cwd: repository });
   const metadata = JSON.parse((await execute("cargo", ["metadata", "--no-deps", "--format-version", "1"], { cwd: repository })).stdout) as { target_directory: string };
   const peer = spawn(`${metadata.target_directory}/debug/examples/refresh_fixture_server`, [], { stdio: ["ignore", "pipe", "pipe"] });
   const exited = once(peer, "exit");

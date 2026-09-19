@@ -38,7 +38,7 @@ export function verifyPublishingAuth(records, { env = process.env, run = spawnSy
   assert.ok(version.status === 0 && version.stdout.trim() === '12.0.2',
     'Authentication contract requires the reviewed npm 12.0.2 client');
   for (const record of records) {
-    assert.match(record.name, /^@fireside-dev\/(?:cli|darwin-arm64|darwin-x64|linux-arm64|linux-x64|win32-x64)$/);
+    assert.match(record.name, /^(?:firenook|@firenook\/cli-(?:darwin-arm64|darwin-x64|linux-arm64|linux-x64|win32-x64))$/);
     const result = run('npm', ['publish', record.path, '--dry-run', '--provenance',
       '--access', 'public', '--tag', 'next', '--ignore-scripts', '--loglevel', 'verbose', '--logs-max', '0'],
     { encoding: 'utf8', env, maxBuffer: 4 * 1024 * 1024, timeout: 120_000 });

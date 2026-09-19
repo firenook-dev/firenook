@@ -65,7 +65,7 @@ interface BrowserCaptureResult {
 
 declare global {
   interface Window {
-    firesideRunWebChannelCapture(
+    firenookRunWebChannelCapture(
       configuration: BrowserCaptureConfiguration,
     ): Promise<BrowserCaptureResult>;
   }
@@ -75,7 +75,7 @@ const COLLECTION = "fireside_webchannel_capture";
 const DOCUMENT = "oracle";
 const BUNDLE_COLLECTION = "fireside_webchannel_bundle_capture";
 
-window.firesideRunWebChannelCapture = async (
+window.firenookRunWebChannelCapture = async (
   configuration,
 ): Promise<BrowserCaptureResult> => {
   if (configuration.scenario === "unknown-sid") {
@@ -427,7 +427,7 @@ function nanosecondReadTimeBundle(projectId: string): string {
   const metadata = {
     metadata: {
       createTime: { nanos: 9999, seconds: 1001 },
-      id: "fireside-nanosecond-read-time",
+      id: "firenook-nanosecond-read-time",
       totalBytes: 0,
       totalDocuments: 2,
       version: 1,

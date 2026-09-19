@@ -27,7 +27,7 @@ fn object(index: usize) -> StoredObject {
 
 fn root(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "fireside-metadata-{name}-{}-{}",
+        "firenook-metadata-{name}-{}-{}",
         std::process::id(),
         now_rfc3339().replace(':', "-")
     ));
@@ -160,7 +160,7 @@ fn corrupt_or_locked_database_never_falls_back_to_legacy_json() {
 #[ignore = "manual short profile against a preserved synthetic metadata file"]
 fn profile_internal_metadata_serialization() {
     let filename =
-        std::env::var("FIRESIDE_STORAGE_PROFILE_INPUT").expect("explicit metadata input");
+        std::env::var("FIRENOOK_STORAGE_PROFILE_INPUT").expect("explicit metadata input");
     let data = load_state(FilePath::new(&filename)).expect("preserved metadata");
     assert!(!data.objects.is_empty());
     let mut samples = Vec::new();
@@ -306,14 +306,14 @@ fn a_torn_journal_tail_ends_replay_and_a_sequence_gap_fails_closed() {
 /// the same directory and must serve the object with the bytes intact.
 #[tokio::test(flavor = "multi_thread")]
 async fn uploaded_objects_survive_a_process_abort_under_write_behind() {
-    const CHILD_ENVIRONMENT: &str = "FIRESIDE_STORAGE_TEST_ABORT_CHILD";
+    const CHILD_ENVIRONMENT: &str = "FIRENOOK_STORAGE_TEST_ABORT_CHILD";
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request, StatusCode};
     use tower::ServiceExt as _;
     let start = |root: PathBuf, durability: StorageDurability| async move {
-        let registry = fireside_functions_bridge::TriggerRegistry::default();
+        let registry = firenook_functions_bridge::TriggerRegistry::default();
         let (observer, _receiver) =
-            fireside_functions_bridge::TriggerObserver::channel(registry.clone());
+            firenook_functions_bridge::TriggerObserver::channel(registry.clone());
         StorageRuntime::start(
             StorageConfig {
                 project: "demo-abort".to_owned(),

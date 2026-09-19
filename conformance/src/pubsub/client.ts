@@ -1,5 +1,5 @@
 // Phase J1: the transports shared by the official-emulator capture and the
-// Fireside replay — the `google.pubsub.v1` services over gRPC (grpc-js with
+// Firenook replay — the `google.pubsub.v1` services over gRPC (grpc-js with
 // the client library's own proto files), the HTTP/JSON surface on the same
 // port, a recording push endpoint, and the official emulator's launcher.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -344,8 +344,8 @@ export async function startOfficialEmulator(jar: string, java = "java"): Promise
   return wrapProcess(child, port, origin, () => exited, () => output.join(""));
 }
 
-/** Starts Fireside's standalone Pub/Sub service on a free port. */
-export async function startFireside(binary: string, project: string): Promise<RunningEmulator> {
+/** Starts Firenook's standalone Pub/Sub service on a free port. */
+export async function startFirenook(binary: string, project: string): Promise<RunningEmulator> {
   const port = await reserveAvailablePort();
   const child: ChildProcess = spawn(binary, ["pubsub", "--host", HOST, "--port", String(port), "--project-id", project], {
     stdio: ["ignore", "pipe", "pipe"],

@@ -1,6 +1,6 @@
 [package]
-name = "fireside-grpc-front"
-description = "Firestore gRPC frontend for fireside"
+name = "firenook-grpc-front"
+description = "Firestore gRPC frontend for firenook"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,10 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-fireside-core-store = { path = "../core-store" }
-fireside-query-engine = { path = "../query-engine" }
-fireside-rules-runtime = { path = "../rules-runtime" }
-fireside-watch-broker = { path = "../watch-broker" }
+firenook-core-store = { path = "../core-store" }
+firenook-query-engine = { path = "../query-engine" }
+firenook-rules-runtime = { path = "../rules-runtime" }
+firenook-watch-broker = { path = "../watch-broker" }
 md-5.workspace = true
 pbjson.workspace = true
 pbjson-types.workspace = true

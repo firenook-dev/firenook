@@ -1,5 +1,5 @@
 use super::*;
-use fireside_core_store::{DatabaseName, Timestamp};
+use firenook_core_store::{DatabaseName, Timestamp};
 
 fn key() -> DocumentKey {
     DocumentKey::new(DatabaseName::new("demo", "(default)").unwrap(), "items/one").unwrap()

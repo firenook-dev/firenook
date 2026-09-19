@@ -7,7 +7,7 @@ import { repositoryRoot } from "./manifest.ts";
 
 const HOST = "127.0.0.1";
 
-export type ServerKind = "fireside-memory" | "fireside-disk" | "java";
+export type ServerKind = "firenook-memory" | "firenook-disk" | "java";
 
 export interface StartServerOptions {
   readonly kind: ServerKind;
@@ -113,9 +113,9 @@ function serverCommand(
     "--project_id",
     options.projectId,
   ];
-  if (options.kind === "fireside-disk") {
+  if (options.kind === "firenook-disk") {
     if (options.dataDirectory === undefined) {
-      throw new Error("fireside disk mode requires a data directory");
+      throw new Error("firenook disk mode requires a data directory");
     }
     arguments_.push("--data-dir", options.dataDirectory);
     if (options.diskCacheSizeBytes !== undefined) {
@@ -126,7 +126,7 @@ function serverCommand(
     arguments_.push("--seed_from_export", options.importMetadata);
   }
   return {
-    executable: resolve(repositoryRoot, "target/release/fireside"),
+    executable: resolve(repositoryRoot, "target/release/firenook"),
     arguments: arguments_,
     environment: process.env,
   };

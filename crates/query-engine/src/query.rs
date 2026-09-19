@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
-use fireside_core_store::{
+use firenook_core_store::{
     DatabaseName, Document, DocumentKey, Fields, LazyDocument, Snapshot, Value,
     compare_resource_paths,
 };
@@ -969,7 +969,7 @@ fn insert_nested_value(fields: &mut Fields, segments: &[String], value: Value) {
 /// Produces deterministic split points for a supported collection-group query.
 ///
 /// Production may return fewer points because placement follows its physical
-/// index partitions. A local store has no physical shards, so fireside divides
+/// index partitions. A local store has no physical shards, so firenook divides
 /// the ordered result set evenly while honoring the same maximum and cursor
 /// contract.
 pub fn partition(
@@ -1667,12 +1667,12 @@ impl Error for QueryError {}
 mod tests {
     use std::collections::BTreeMap;
 
-    use fireside_core_store::{DatabaseName, Precondition, Store, Write};
+    use firenook_core_store::{DatabaseName, Precondition, Store, Write};
 
     use super::*;
 
     fn database() -> DatabaseName {
-        DatabaseName::new("fireside-test", "(default)").expect("valid database")
+        DatabaseName::new("firenook-test", "(default)").expect("valid database")
     }
 
     fn field(name: &str) -> FieldPath {
@@ -1720,7 +1720,7 @@ mod tests {
             writes.push(Write::Set {
                 key: DocumentKey::new(
                     database.clone(),
-                    format!("runs/run/fireside_conformance/{id}"),
+                    format!("runs/run/firenook_conformance/{id}"),
                 )
                 .expect("valid key"),
                 fields,
@@ -1729,7 +1729,7 @@ mod tests {
             });
         }
         writes.push(Write::Set {
-            key: DocumentKey::new(database.clone(), "peers/run/fireside_conformance/peer")
+            key: DocumentKey::new(database.clone(), "peers/run/firenook_conformance/peer")
                 .expect("valid key"),
             fields: BTreeMap::from([
                 ("id".to_owned(), string("peer")),
@@ -1745,7 +1745,7 @@ mod tests {
 
     fn collection_query() -> Query {
         Query::new(
-            QueryScope::collection("runs/run/fireside_conformance")
+            QueryScope::collection("runs/run/firenook_conformance")
                 .expect("valid collection scope"),
         )
     }
@@ -1762,7 +1762,7 @@ mod tests {
         let writes = cases.map(|(id, embedding)| Write::Set {
             key: DocumentKey::new(
                 database.clone(),
-                format!("runs/run/fireside_vector_conformance/{id}"),
+                format!("runs/run/firenook_vector_conformance/{id}"),
             )
             .expect("valid key"),
             fields: BTreeMap::from([("embedding".to_owned(), Value::Vector(embedding))]),
@@ -1854,7 +1854,7 @@ mod tests {
     fn nearest_vectors_apply_all_distance_measures_and_thresholds() {
         let (database, snapshot) = vector_snapshot();
         let scope = || {
-            QueryScope::collection("runs/run/fireside_vector_conformance")
+            QueryScope::collection("runs/run/firenook_vector_conformance")
                 .expect("valid collection scope")
         };
         let nearest = |measure, vector, threshold| {
@@ -2226,7 +2226,7 @@ mod tests {
         let (database, snapshot) = seeded_snapshot();
         let names = ["b", "d"].map(|id| {
             Value::Reference(Arc::from(format!(
-                "projects/fireside-test/databases/(default)/documents/runs/run/fireside_conformance/{id}"
+                "projects/firenook-test/databases/(default)/documents/runs/run/firenook_conformance/{id}"
             )))
         });
         let document_ids = collection_query().filter(Filter::Field(FieldFilter {
@@ -2237,7 +2237,7 @@ mod tests {
         assert_eq!(ids(&database, &snapshot, &document_ids), ["b", "d"]);
 
         let group = Query::new(
-            QueryScope::collection_group("fireside_conformance").expect("valid collection group"),
+            QueryScope::collection_group("firenook_conformance").expect("valid collection group"),
         )
         .filter(filter("runId", FieldOperator::Equal, string("run")));
         assert_eq!(
@@ -2246,7 +2246,7 @@ mod tests {
         );
 
         let ancestor_group = Query::new(
-            QueryScope::collection_group("fireside_conformance").expect("valid collection group"),
+            QueryScope::collection_group("firenook_conformance").expect("valid collection group"),
         )
         .under_ancestor("runs/run")
         .expect("valid document ancestor");
@@ -2291,7 +2291,7 @@ mod tests {
     fn partition_cursors_evenly_split_the_supported_query() {
         let (database, snapshot) = seeded_snapshot();
         let query = Query::new(
-            QueryScope::collection_group("fireside_conformance").expect("valid collection group"),
+            QueryScope::collection_group("firenook_conformance").expect("valid collection group"),
         )
         .order_by(FieldPath::DocumentId, Direction::Ascending);
 

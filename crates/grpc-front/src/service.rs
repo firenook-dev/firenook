@@ -4,17 +4,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use fireside_core_store::{
+use firenook_core_store::{
     CommitError, CommitResult, DatabaseName, Document, DocumentKey, FieldTransform, Snapshot,
     SnapshotError, Store, Timestamp, TransactionMemoryRegistration, TransformOperation, Value,
     Write, compare_resource_paths, database_name_logical_bytes, document_key_logical_bytes,
 };
-use fireside_query_engine::{
+use firenook_query_engine::{
     Aggregation as QueryAggregation, DatabaseEdition, Direction as QueryDirection,
     FieldPath as QueryFieldPath, IndexConfigError, Query as StructuredQuery, QueryDocument,
     QueryPolicy, QueryScope, aggregate, compare_values, count, execute, execute_iter, partition,
 };
-use fireside_rules_runtime::{
+use firenook_rules_runtime::{
     AtomicEvaluationResult, Authorization, EvaluationResult, RequestOperation, RulesQuery,
     RulesRuntime, RulesWriteGuard, SnapshotAccess, evaluation_request,
 };
@@ -298,7 +298,7 @@ impl FirestoreService {
             }
         };
         let sequence = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut token = b"fireside-txn-".to_vec();
+        let mut token = b"firenook-txn-".to_vec();
         token.extend_from_slice(&sequence.to_be_bytes());
         let accounting = self.store.runtime_memory_accounting().register_transaction(
             database_name_logical_bytes(&database)
@@ -1194,8 +1194,8 @@ impl Firestore for FirestoreService {
             .map(|_| query_plan_summary(&structured));
         let skipped_results = structured.offset;
         let query = decode_query(parent.as_deref(), structured)?;
-        let rules_query = fireside_rules_runtime::query_policy(&query);
-        let rules_candidate = fireside_rules_runtime::query_candidate(&database, &query)
+        let rules_query = firenook_rules_runtime::query_policy(&query);
+        let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;
         self.query_policy
             .validate(&query)
@@ -1413,8 +1413,8 @@ impl Firestore for FirestoreService {
             .as_ref()
             .map(|_| query_plan_summary(&structured));
         let query = decode_query(parent.as_deref(), structured)?;
-        let rules_query = fireside_rules_runtime::query_policy(&query);
-        let rules_candidate = fireside_rules_runtime::query_candidate(&database, &query)
+        let rules_query = firenook_rules_runtime::query_policy(&query);
+        let rules_candidate = firenook_rules_runtime::query_candidate(&database, &query)
             .map_err(Status::invalid_argument)?;
         self.query_policy
             .validate(&query)
@@ -1711,7 +1711,7 @@ impl Firestore for FirestoreService {
         }
         let document_id = if request.document_id.is_empty() {
             format!(
-                "fireside-{:016x}",
+                "firenook-{:016x}",
                 self.next_id.fetch_add(1, Ordering::Relaxed)
             )
         } else {
@@ -1948,7 +1948,7 @@ fn query_explain_metrics(
                     fields: HashMap::from([
                         (
                             "execution_engine".to_owned(),
-                            struct_string("fireside-mvcc"),
+                            struct_string("firenook-mvcc"),
                         ),
                         (
                             "results_materialized".to_owned(),
@@ -2034,7 +2034,7 @@ fn count_only_result(
     matched: u64,
     aggregation: &crate::query_codec::DecodedAggregation,
 ) -> Result<proto::AggregationResult, Status> {
-    let mut fields = fireside_core_store::Fields::new();
+    let mut fields = firenook_core_store::Fields::new();
     for operation in &aggregation.operations {
         if let QueryAggregation::Count { alias } = operation {
             let bound = aggregation
@@ -2266,7 +2266,7 @@ mod tests {
     #[tokio::test]
     async fn standard_edition_rejects_pipeline_execution() {
         let service =
-            FirestoreService::new(Store::new(fireside_core_store::StoreOptions::default()));
+            FirestoreService::new(Store::new(firenook_core_store::StoreOptions::default()));
         let Err(error) = service
             .execute_pipeline(Request::new(ExecutePipelineRequest::default()))
             .await
@@ -2317,7 +2317,7 @@ mod tests {
             .map(|index| Write::Create {
                 key: DocumentKey::new(database.clone(), format!("items/{index:03}"))
                     .expect("document key"),
-                fields: fireside_core_store::Fields::new(),
+                fields: firenook_core_store::Fields::new(),
             })
             .collect::<Vec<_>>();
         service.store().commit(&writes).expect("seed documents");
@@ -2365,7 +2365,7 @@ mod tests {
             .iter()
             .map(|id| Write::Create {
                 key: key(&format!("items/{id}")),
-                fields: fireside_core_store::Fields::new(),
+                fields: firenook_core_store::Fields::new(),
             })
             .collect::<Vec<_>>();
         for path in [
@@ -2376,7 +2376,7 @@ mod tests {
         ] {
             writes.push(Write::Create {
                 key: key(path),
-                fields: fireside_core_store::Fields::new(),
+                fields: firenook_core_store::Fields::new(),
             });
         }
         store.commit(&writes).expect("seed");
@@ -2386,7 +2386,7 @@ mod tests {
     #[test]
     fn scoped_listing_serves_only_the_named_collection_on_both_backends() {
         let directory = std::env::temp_dir().join(format!(
-            "fireside-grpc-scoped-listing-{}-{}",
+            "firenook-grpc-scoped-listing-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2394,7 +2394,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir(&directory).unwrap();
-        let disk = Store::open_disk(&directory, fireside_core_store::DiskOptions::default())
+        let disk = Store::open_disk(&directory, firenook_core_store::DiskOptions::default())
             .expect("disk store");
         for store in [Store::default(), disk] {
             let database = DatabaseName::new("scoped-list", "(default)").expect("database");
@@ -2426,7 +2426,7 @@ mod tests {
                 .map(|id| format!("items/{id}"))
                 .collect::<Vec<_>>();
             expected
-                .sort_by(|left, right| fireside_core_store::compare_resource_paths(left, right));
+                .sort_by(|left, right| firenook_core_store::compare_resource_paths(left, right));
             assert_eq!(
                 expected[..3],
                 ["items/__id2__", "items/__id9__", "items/__id10__"]
@@ -2578,14 +2578,14 @@ mod tests {
             .commit(&[
                 Write::Create {
                     key: DocumentKey::new(database.clone(), "public/news").expect("public key"),
-                    fields: fireside_core_store::Fields::from([(
+                    fields: firenook_core_store::Fields::from([(
                         "title".to_owned(),
                         Value::String("News".into()),
                     )]),
                 },
                 Write::Create {
                     key: DocumentKey::new(database, "users/alice").expect("user key"),
-                    fields: fireside_core_store::Fields::from([(
+                    fields: firenook_core_store::Fields::from([(
                         "name".to_owned(),
                         Value::String("Alice".into()),
                     )]),
@@ -2627,7 +2627,7 @@ mod tests {
 
     #[tokio::test]
     async fn requests_diagnostics_distinguish_batch_read_only_and_read_write_reads() {
-        let history = fireside_rules_runtime::request_history::RequestHistory::default();
+        let history = firenook_rules_runtime::request_history::RequestHistory::default();
         let rules = RulesRuntime::with_request_history(history.clone());
         rules.install_default("rules_version = '2'; service cloud.firestore { match /databases/{db}/documents/{doc=**} { allow read: if true; } }").unwrap();
         let service = FirestoreService::new_with_query_policy_and_rules(
@@ -2934,12 +2934,12 @@ mod tests {
                     "unrelated/rules-recheck",
                 )
                 .expect("key"),
-                fields: fireside_core_store::Fields::from([(
+                fields: firenook_core_store::Fields::from([(
                     "value".to_owned(),
                     Value::Integer(3),
                 )]),
                 transforms: Vec::new(),
-                precondition: fireside_core_store::Precondition::None,
+                precondition: firenook_core_store::Precondition::None,
             }])
             .expect("store revision");
 
@@ -3012,7 +3012,7 @@ mod tests {
             .await
             .expect("write engine should answer the handshake")
             .expect("write handshake should succeed");
-        assert!(write_handshake.stream_id.starts_with("fireside-write-"));
+        assert!(write_handshake.stream_id.starts_with("firenook-write-"));
         assert!(!write_handshake.stream_token.is_empty());
 
         let (listen_requests, mut listen_responses) = service.open_listen_channel();
@@ -3250,7 +3250,7 @@ mod tests {
         assert_eq!(conflict.code(), tonic::Code::Aborted);
         assert_eq!(
             service.store().memory_usage().transactions,
-            fireside_core_store::TransactionMemoryUsage::default(),
+            firenook_core_store::TransactionMemoryUsage::default(),
         );
     }
 

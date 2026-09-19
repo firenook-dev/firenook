@@ -19,7 +19,7 @@ test("read_time reconstructs committed versions after a later delete", async (co
   const runId = randomUUID();
   const database = `projects/${configuration.projectId}/databases/(default)`;
   const document = firestore.doc(
-    `runs/${runId}/fireside_historical/document`,
+    `runs/${runId}/firenook_historical/document`,
   );
   const name = `${database}/documents/${document.path}`;
 
@@ -64,7 +64,7 @@ test("read_time reconstructs committed versions after a later delete", async (co
 
   const queryParent = `${database}/documents/runs/${runId}`;
   const structuredQuery = {
-    from: [{ collectionId: "fireside_historical" }],
+    from: [{ collectionId: "firenook_historical" }],
   };
   const query = await collect<ObservedRunQuery>(
     rawFirestore.runQuery(
@@ -100,7 +100,7 @@ test("read_time reconstructs committed versions after a later delete", async (co
   const [listed] = await rawFirestore.listDocuments(
     {
       parent: queryParent,
-      collectionId: "fireside_historical",
+      collectionId: "firenook_historical",
       pageSize: 10,
       readTime,
     },
@@ -114,7 +114,7 @@ test("read_time reconstructs committed versions after a later delete", async (co
     { parent: queryParent, pageSize: 10, readTime },
     { ...callOptions, autoPaginate: false },
   );
-  assert.deepEqual(collectionIds, ["fireside_historical"]);
+  assert.deepEqual(collectionIds, ["firenook_historical"]);
 
   const [transaction] = await rawFirestore.beginTransaction(
     { database, options: { readOnly: { readTime } } },

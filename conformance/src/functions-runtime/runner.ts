@@ -1,5 +1,5 @@
 // Phase H1 program runner shared by the official-emulator capture and the
-// Fireside replay. A target is a running suite (any engine) plus the synthetic
+// Firenook replay. A target is a running suite (any engine) plus the synthetic
 // project it serves; the runner drives the programs from `plan.ts`, reads the
 // handler observations back, and normalizes every volatile value so two
 // recordings of the same target behaviour compare equal.
@@ -415,7 +415,7 @@ async function storageAction(context: RunContext, action: Extract<Action, { kind
   if (action.op === "patch") {
     return fetchRecorded(objectUrl, { method: "PATCH", headers: { authorization }, body: { kind: "json", json: { metadata: action.metadata ?? {} } } });
   }
-  const boundary = "fireside-phase-h-boundary";
+  const boundary = "firenook-phase-h-boundary";
   const metadata = { name: action.name, contentType: action.contentType ?? "application/octet-stream", ...(action.metadata ? { metadata: action.metadata } : {}) };
   const multipart = [
     `--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,

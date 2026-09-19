@@ -82,7 +82,7 @@ pub fn hash_password(password: &str, salt: &str) -> String {
     format!("fakeHash:salt={salt}:password={password}")
 }
 
-/// The digest early Fireside builds exported before adopting the official
+/// The digest early Firenook builds exported before adopting the official
 /// format (`base64(sha256(salt, 0, password))`); accepted on sign-in and
 /// upgraded to `hash_password` so later exports are portable.
 #[must_use]
@@ -97,7 +97,7 @@ pub fn legacy_hash_password(password: &str, salt: &str) -> String {
 }
 
 /// Whether `password` matches the account's stored hash (official format, or
-/// the legacy Fireside digest).
+/// the legacy Firenook digest).
 #[must_use]
 pub fn password_matches(user: &UserRecord, password: &str) -> bool {
     let Some(salt) = truthy_str(user, "salt") else {

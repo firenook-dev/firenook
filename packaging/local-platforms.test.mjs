@@ -31,20 +31,20 @@ function fixture(root, fault) {
     const identity = localIdentity(manifest, release, revision, platform);
     const version = identity.manifest.version;
     const packages = [];
-    for (const name of [manifest.name, `@fireside-dev/${platform}`]) {
+    for (const name of [manifest.name, `@firenook/cli-${platform}`]) {
       const cli = name === manifest.name;
       const metadata = cli ? {...identity.manifest} : {name, version, private: true};
       if (fault === 'non-private') delete metadata.private;
       if (fault === 'wrong-dependency' && cli) metadata.optionalDependencies = {};
-      const files = {'package.json': JSON.stringify(metadata), 'LICENSE-MIT': 'synthetic', 'LICENSE-APACHE': 'synthetic'};
+      const files = {'package.json': JSON.stringify(metadata), 'LICENSE': 'synthetic', 'NOTICE': 'synthetic'};
       if (cli) {
         files['release.json'] = JSON.stringify(identity.release);
-        for (const path of ['README.md', 'bin/fireside.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/firestore-values.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs']) files[path] = 'synthetic';
+        for (const path of ['README.md', 'bin/firenook.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/firestore-values.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs']) files[path] = 'synthetic';
       } else {
         files['receipt.json'] = JSON.stringify({engineRevision: revision, platform,
           version, target: release.platforms[platform],
           sha256: createHash('sha256').update('not an executable').digest('hex')});
-        files[platform.startsWith('win32') ? 'bin/fireside.exe' : 'bin/fireside'] = 'not an executable';
+        files[platform.startsWith('win32') ? 'bin/firenook.exe' : 'bin/firenook'] = 'not an executable';
       }
       const bytes = archive(files), filename = cli ? 'cli.tgz' : 'native.tgz';
       writeFileSync(join(directory, filename), bytes);
@@ -62,7 +62,7 @@ function fixture(root, fault) {
   }
 }
 test('current-source platform checker accepts complete private identities and never publishes', () => {
-  const root = mkdtempSync(join(tmpdir(), 'fireside-candidate-model-'));
+  const root = mkdtempSync(join(tmpdir(), 'firenook-candidate-model-'));
   try {
     fixture(root);
     assert.deepEqual(checkLocalPlatforms(root, revision), {passed: true, publication: false,
@@ -73,7 +73,7 @@ test('current-source platform checker accepts complete private identities and ne
 });
 test('candidate checks reject missing platforms, wrong identity, corrupted bytes and incomplete smokes', () => {
   for (const fault of ['non-private', 'wrong-dependency', 'checksum', 'duplicate-package', 'failed-smoke', 'wrong-smoke-revision', 'missing-platform']) {
-    const root = mkdtempSync(join(tmpdir(), 'fireside-candidate-model-'));
+    const root = mkdtempSync(join(tmpdir(), 'firenook-candidate-model-'));
     try {
       fixture(root, fault);
       if (fault === 'missing-platform') rmSync(join(root, 'win32-x64'), {recursive: true});

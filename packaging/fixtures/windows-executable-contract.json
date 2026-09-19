@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "recordedBeforeImplementation": true,
-  "run": "https://github.com/sanjevirau/fireside/actions/runs/34140895168/job/101802408252",
+  "run": "https://github.com/firenook-dev/firenook/actions/runs/34140895168/job/101802408252",
   "passedBeforeFailure": "npm actual install, listeners, Unicode, disk/WAL and reopen",
   "failure": "spawnSync C:\\npm\\prefix\\bun ENOENT",
   "cause": "Executable discovery accepted npm's extensionless shell shim on Windows",

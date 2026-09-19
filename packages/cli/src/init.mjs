@@ -7,7 +7,7 @@ import { DEFAULT_PORTS, inspectProject, readJson, validProjectId } from './optio
 // The official `firebase init` port defaults, written explicitly.
 export const INIT_PORTS = Object.fromEntries(['auth', 'functions', 'firestore', 'pubsub', 'storage', 'eventarc', 'tasks', 'hub', 'logging', 'ui'].map(name => [name, DEFAULT_PORTS[name]]));
 const FUNCTIONS_IGNORE = ['node_modules', '.git', 'firebase-debug.log', 'firebase-debug.*.log', '*.local'];
-const GITIGNORE_LINES = ['.fireside/', '*-debug.log'];
+const GITIGNORE_LINES = ['.firenook/', '*-debug.log'];
 
 // The official `firebase init firestore` template: open for thirty days, then
 // closed until real rules are written.
@@ -60,7 +60,7 @@ exports.helloWorld = onRequest((request, response) => {
 `;
 const functionsPackage = () => `${JSON.stringify({
   name:'functions', description:'Cloud Functions for Firebase', main:'index.js',
-  scripts:{serve:'fireside emulators:start --only functions'},
+  scripts:{serve:'firenook emulators:start --only functions'},
   engines:{node:'24'},
   dependencies:{'firebase-admin':'^13.0.0', 'firebase-functions':'^7.0.0'},
   private:true,
@@ -95,7 +95,7 @@ function writePlan(plan, log, quiet) {
 export function scaffold(options, cwd = process.cwd(), log = console) {
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
-  if (existsSync(config) && !options.force) throw new Error(`${config} exists; use fireside init --adopt to adapt it, or --force to overwrite the scaffold files`);
+  if (existsSync(config) && !options.force) throw new Error(`${config} exists; use firenook init --adopt to adapt it, or --force to overwrite the scaffold files`);
   // An existing .firebaserc default is kept (the file is never overwritten).
   const rcPath = join(directory, '.firebaserc');
   let recorded;
@@ -124,11 +124,11 @@ export function scaffold(options, cwd = process.cwd(), log = console) {
   if (functions) plan.push(file('functions/package.json', functionsPackage()), file('functions/index.js', FUNCTIONS_INDEX), file('functions/.gitignore', 'node_modules/\n*.local\n'));
   const gitignore = gitignoreAddition(directory);
   if (gitignore) plan.push({path:gitignore.path, content:gitignore.content, skip:false});
-  const next = [...(functions ? ['cd functions && npm install'] : []), 'fireside setup', `fireside emulators:start --project ${project}`];
+  const next = [...(functions ? ['cd functions && npm install'] : []), 'firenook setup', `firenook emulators:start --project ${project}`];
   const dry = Boolean(options['dry-run']);
   if (options.json) log.log(JSON.stringify({directory, project, functions, files:plan.map(item => ({path:item.path, action:item.skip ? 'keep' : 'write'})), applied:!dry, next}));
   else {
-    log.error(`Fireside init: project ${project} in ${directory}${dry ? ' (dry run, nothing written)' : ''}`);
+    log.error(`Firenook init: project ${project} in ${directory}${dry ? ' (dry run, nothing written)' : ''}`);
     if (dry) for (const item of plan) log.error(`  ${item.skip ? 'keep ' : 'write'}   ${item.path}`);
   }
   if (dry) return 0;
@@ -165,7 +165,7 @@ function referencedFiles(data, directory) {
 export function adopt(options, cwd = process.cwd(), log = console) {
   const config = resolve(cwd, options.config || 'firebase.json');
   const directory = dirname(config);
-  if (!existsSync(config)) throw new Error(`${config} does not exist; run fireside init without --adopt to scaffold a project`);
+  if (!existsSync(config)) throw new Error(`${config} does not exist; run firenook init without --adopt to scaffold a project`);
   const inspection = inspectProject(options, cwd);
   const errors = inspection.errors.filter(error => error.code !== 'project-missing').map(error => error.message);
   const warnings = inspection.warnings;
@@ -190,7 +190,7 @@ export function adopt(options, cwd = process.cwd(), log = console) {
   if (options.json) {
     log.log(JSON.stringify({config, project, services:inspection.services, errors, warnings, additions:additions.map(({description, ...rest}) => rest), applied:false}));
   } else {
-    log.error(`Fireside init --adopt: ${config}`);
+    log.error(`Firenook init --adopt: ${config}`);
     for (const message of errors) log.error(`  error   ${message}`);
     for (const message of warnings) log.error(`  skip    ${message}`);
     for (const addition of additions) log.error(`  add     ${addition.description}`);
@@ -210,7 +210,7 @@ export function adopt(options, cwd = process.cwd(), log = console) {
       log.error(`  wrote   ${inspection.rc}`);
     }
     for (const file of files) { mkdirSync(dirname(file.path), {recursive:true}); writeFileSync(file.path, file.content); log.error(`  wrote   ${file.path}`); }
-  } else if (!options.json && errors.length) log.error('Fix the errors above, then re-run fireside init --adopt; nothing was written.');
+  } else if (!options.json && errors.length) log.error('Fix the errors above, then re-run firenook init --adopt; nothing was written.');
   else if (!options.json && options['dry-run'] && additions.length) log.error('Dry run: nothing was written.');
   return errors.length ? 1 : 0;
 }

@@ -2,7 +2,7 @@
 //! Ordinary mutations encode one record, not the whole bucket inventory.
 //!
 //! Durability follows the Firestore store's contract (see
-//! `fireside_core_store::DiskDurability`). Under write-behind, each mutation
+//! `firenook_core_store::DiskDurability`). Under write-behind, each mutation
 //! is appended to `metadata.journal` with a plain `write` and committed to
 //! redb without a sync, so it survives the process; the flusher then syncs
 //! the object files written since the last flush, syncs the journal, commits

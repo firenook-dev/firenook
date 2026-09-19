@@ -1,6 +1,6 @@
 [package]
-name = "fireside-rules-engine"
-description = "Clean-room security rules engine for fireside"
+name = "firenook-rules-engine"
+description = "Clean-room security rules engine for firenook"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

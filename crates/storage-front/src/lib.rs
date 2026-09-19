@@ -2,8 +2,8 @@
 //!
 //! Object bytes are streamed to disk and metadata is committed atomically.
 //! Security Rules are compiled and evaluated in process by
-//! `fireside-rules-engine` with the request model recorded from the official
-//! emulator; Functions lifecycle delivery shares Fireside's bounded dispatch
+//! `firenook-rules-engine` with the request model recorded from the official
+//! emulator; Functions lifecycle delivery shares Firenook's bounded dispatch
 //! queue.
 
 #![forbid(unsafe_code)]
@@ -23,7 +23,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
-use fireside_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
+use firenook_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
@@ -129,7 +129,7 @@ impl StorageRuntime {
                     };
                     let flushed = tokio::task::spawn_blocking(move || store.flush()).await;
                     if let Ok(Err(error)) = flushed {
-                        eprintln!("fireside Storage: write-behind flush failed: {error}");
+                        eprintln!("firenook Storage: write-behind flush failed: {error}");
                     }
                 }
             });
@@ -1915,7 +1915,7 @@ fn authorize(
         Verdict::Allowed => Ok(()),
         Verdict::Denied(error) => {
             if let Some(error) = error {
-                eprintln!("fireside Storage rules: {error}");
+                eprintln!("firenook Storage rules: {error}");
             }
             Err(permission_denied(operation.permission()))
         }
@@ -1982,7 +1982,7 @@ async fn internal_set_rules(
         )
             .into_response()),
         Err(error) => {
-            eprintln!("fireside Storage rules: {error}");
+            eprintln!("firenook Storage rules: {error}");
             Ok((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
@@ -2600,7 +2600,7 @@ mod tests {
     mod developer_tools;
     use axum::body::to_bytes;
     use axum::http::Request;
-    use fireside_functions_bridge::TriggerObserver;
+    use firenook_functions_bridge::TriggerObserver;
     use tower::ServiceExt as _;
 
     use super::*;
@@ -2611,7 +2611,7 @@ mod tests {
 
     fn test_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "fireside-storage-{label}-{}-{}",
+            "firenook-storage-{label}-{}-{}",
             std::process::id(),
             OffsetDateTime::now_utc().unix_timestamp_nanos()
         ))
@@ -2729,7 +2729,7 @@ mod tests {
         let body = serde_json::to_vec(&json!({
             "bucket": DEFAULT_BUCKET,
             "contentType": "text/plain; charset=utf-8",
-            "name": "_firesidePhase4/fixed-run/0-火🔥.txt"
+            "name": "_firenookPhase4/fixed-run/0-火🔥.txt"
         }))
         .expect("metadata JSON");
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());

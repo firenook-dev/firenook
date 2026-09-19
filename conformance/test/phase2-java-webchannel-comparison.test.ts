@@ -46,10 +46,10 @@ test("Java WebChannel comparison plan is frozen, balanced, and non-gating", asyn
   assert.equal(manifest.name, "phase-2-java-webchannel-comparison");
   assert.equal(manifest.classification, "non-gating-post-pass-comparison");
   assert.deepEqual(manifest.workload.targetBlockOrder, [
-    "fireside",
+    "firenook",
     "java",
     "java",
-    "fireside",
+    "firenook",
   ]);
   assert.deepEqual(manifest.workload.variants, [
     "long-polling",

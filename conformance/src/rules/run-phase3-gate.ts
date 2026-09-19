@@ -166,7 +166,7 @@ async function main(): Promise<void> {
       await runCommand(
         "release-build",
         "cargo",
-        ["build", "--release", "--locked", "-p", "fireside"],
+        ["build", "--release", "--locked", "-p", "firenook"],
         outputDirectory,
       ),
     );
@@ -263,14 +263,14 @@ async function runRulesMode(
   mode: "disk-wal" | "memory",
   outputDirectory: string,
 ): Promise<Readonly<Record<string, unknown>>> {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), `fireside-phase3-${mode}-`));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), `firenook-phase3-${mode}-`));
   const port = await reserveAvailablePort();
   const origin = `http://${HOST}:${String(port)}`;
   const executable = join(
     repositoryRoot,
     "target",
     "release",
-    process.platform === "win32" ? "fireside.exe" : "fireside",
+    process.platform === "win32" ? "firenook.exe" : "firenook",
   );
   const serverArguments = [
     "--host",
@@ -343,7 +343,7 @@ async function runRulesMode(
         "--release",
         "--locked",
         "-p",
-        "fireside-rules-engine",
+        "firenook-rules-engine",
         "--example",
         "phase3_benchmark",
         "--",
@@ -709,7 +709,7 @@ async function waitForHttp(
   const deadline = Date.now() + timeoutMilliseconds;
   while (Date.now() < deadline) {
     if (processValue.exitCode !== null || processValue.signalCode !== null) {
-      throw new Error("Fireside exited before readiness");
+      throw new Error("Firenook exited before readiness");
     }
     try {
       const response = await fetch(url);

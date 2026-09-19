@@ -18,10 +18,10 @@ test("queries match the production operator and shaping contract", async (contex
   const firestore = createFirestore(configuration);
   const runId = randomUUID();
   const collection = firestore.collection(
-    `runs/${runId}/fireside_conformance`,
+    `runs/${runId}/firenook_conformance`,
   );
   const collectionGroupPeer = firestore.doc(
-    `peers/${runId}/fireside_conformance/peer`,
+    `peers/${runId}/firenook_conformance/peer`,
   );
   const expiresAt = Timestamp.fromMillis(Date.now() + DAY_MILLISECONDS);
   const documents = [
@@ -117,7 +117,7 @@ test("queries match the production operator and shaping contract", async (contex
   );
 
   const groupSnapshot = await firestore
-    .collectionGroup("fireside_conformance")
+    .collectionGroup("firenook_conformance")
     .where("runId", "==", runId)
     .get();
   assert.deepEqual(

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fireside_core_store::{DiskOptions, Precondition, StoreOptions, Value, Write};
+use firenook_core_store::{DiskOptions, Precondition, StoreOptions, Value, Write};
 
 use super::*;
 use crate::google::firestore::v1::value::ValueType::IntegerValue;
@@ -143,7 +143,7 @@ fn test_store(disk: bool) -> (Store, Option<OwnedDirectory>) {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "fireside-global-checkpoint-{}-{stamp}",
+            "firenook-global-checkpoint-{}-{stamp}",
             std::process::id()
         ));
         std::fs::create_dir(&path).expect("new owned test directory");

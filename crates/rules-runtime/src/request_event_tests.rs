@@ -1,6 +1,6 @@
 use super::*;
 use crate::{Authorization, RulesRuntime, SnapshotAccess};
-use fireside_core_store::{DatabaseName, Store, StoreOptions};
+use firenook_core_store::{DatabaseName, Store, StoreOptions};
 use serde_json::{Value as Json, json};
 
 const PROJECT: &str = "demo-fireside-request-values";
@@ -60,7 +60,7 @@ fn decode(value: &Json) -> Value {
             ))
         }
         "referenceValue" => Value::Path(v.as_str().unwrap().into()),
-        "geoPointValue" => Value::LatLng(fireside_rules_engine::LatLng {
+        "geoPointValue" => Value::LatLng(firenook_rules_engine::LatLng {
             latitude: v["latitude"].as_f64().unwrap(),
             longitude: v["longitude"].as_f64().unwrap(),
         }),
@@ -223,7 +223,7 @@ async fn truncated_allow_trace_is_reported_as_an_omission_not_a_complete_event()
     let runtime = RulesRuntime::with_request_history(history.clone());
     let source = format!(
         "rules_version = '2'; service cloud.firestore {{ match /databases/{{database}}/documents/{{doc=**}} {{ {} }} }}",
-        "allow read: if false;".repeat(fireside_rules_engine::MAXIMUM_TRACE_OUTCOMES + 17)
+        "allow read: if false;".repeat(firenook_rules_engine::MAXIMUM_TRACE_OUTCOMES + 17)
     );
     runtime.install_default(&source).unwrap();
     let result = runtime.evaluate(
@@ -268,7 +268,7 @@ async fn parsed_auth_is_reported_without_the_original_bearer_and_reload_is_snaps
 
 #[tokio::test]
 async fn query_domains_and_options_match_the_captured_root_nested_and_group_contexts() {
-    use fireside_rules_engine::QueryScope;
+    use firenook_rules_engine::QueryScope;
 
     let fixture = metadata_fixture();
     let cases = [
@@ -317,7 +317,7 @@ async fn query_domains_and_options_match_the_captured_root_nested_and_group_cont
 
 #[tokio::test]
 async fn write_preview_preserves_captured_masks_transforms_and_escaped_field_names() {
-    use fireside_core_store::{
+    use firenook_core_store::{
         DocumentKey, FieldPath, FieldTransform, Precondition, TransformOperation,
     };
 
@@ -346,7 +346,7 @@ async fn write_preview_preserves_captured_masks_transforms_and_escaped_field_nam
             vec![FieldPath::top("yes").unwrap()],
             vec![FieldTransform {
                 path: FieldPath::top("negative").unwrap(),
-                operation: TransformOperation::Increment(fireside_core_store::Value::Integer(1)),
+                operation: TransformOperation::Increment(firenook_core_store::Value::Integer(1)),
             }],
             16,
         ),
@@ -359,7 +359,7 @@ async fn write_preview_preserves_captured_masks_transforms_and_escaped_field_nam
         }])
         .unwrap();
     let snapshot = store.snapshot();
-    let time = fireside_core_store::Timestamp::new(1_577_934_245, 0).unwrap();
+    let time = firenook_core_store::Timestamp::new(1_577_934_245, 0).unwrap();
     for (index, (update_mask, transforms, message)) in cases.into_iter().enumerate() {
         let writes = [Write::Patch {
             key: key.clone(),
@@ -439,7 +439,7 @@ async fn read_batches_are_not_mislabeled_as_read_write_transactions() {
 
 #[test]
 fn replacement_transform_and_empty_mask_metadata_match_the_additional_live_capture() {
-    use fireside_core_store::{
+    use firenook_core_store::{
         DocumentKey, FieldPath, FieldTransform, Precondition, TransformOperation,
     };
 
@@ -454,7 +454,7 @@ fn replacement_transform_and_empty_mask_metadata_match_the_additional_live_captu
         fields: BTreeMap::new(),
         transforms: vec![FieldTransform {
             path: FieldPath::top("negative").unwrap(),
-            operation: TransformOperation::Increment(fireside_core_store::Value::Integer(1)),
+            operation: TransformOperation::Increment(firenook_core_store::Value::Integer(1)),
         }],
         precondition: Precondition::None,
     };

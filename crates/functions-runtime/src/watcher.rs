@@ -62,7 +62,7 @@ impl SourceWatcher {
         let stopped = Arc::new(AtomicBool::new(false));
         let stopped_for_thread = Arc::clone(&stopped);
         std::thread::Builder::new()
-            .name("fireside-functions-watch".to_owned())
+            .name("firenook-functions-watch".to_owned())
             .spawn(move || {
                 while !stopped_for_thread.load(Ordering::SeqCst) {
                     match receiver.recv_timeout(Duration::from_millis(500)) {

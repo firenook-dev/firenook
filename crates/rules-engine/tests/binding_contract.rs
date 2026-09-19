@@ -1,4 +1,4 @@
-use fireside_rules_engine::compile;
+use firenook_rules_engine::compile;
 use serde_json::Value;
 
 #[test]

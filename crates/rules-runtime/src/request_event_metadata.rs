@@ -1,8 +1,8 @@
 //! Oracle-backed domain and mutation metadata, independent of evaluation.
 use std::collections::BTreeSet;
 
-use fireside_core_store::FieldPath;
-use fireside_rules_engine::QueryScope;
+use firenook_core_store::FieldPath;
+use firenook_rules_engine::QueryScope;
 
 use super::*;
 

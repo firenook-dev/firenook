@@ -15,18 +15,18 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuar
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use fireside_core_store::{
+use firenook_core_store::{
     DatabaseName, Document, DocumentKey, Snapshot, Timestamp as StoreTimestamp,
     Value as StoreValue, Write, WritePreview,
 };
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     Auth, Diagnostic, DocumentAccess, DocumentAccessError, EvaluationRequest, Resource, Ruleset,
     Timestamp, Value, compile,
 };
 use serde_json::Value as JsonValue;
 use sha2::{Digest as _, Sha256};
 
-pub use fireside_rules_engine::{
+pub use firenook_rules_engine::{
     AtomicEvaluationResult, EvaluationResult, Query as RulesQuery, RequestOperation,
 };
 
@@ -253,7 +253,7 @@ impl RulesRuntime {
         authorization: &Authorization,
         requests: &[EvaluationRequest],
         access: &SnapshotAccess,
-    ) -> fireside_rules_engine::AtomicEvaluationResult {
+    ) -> firenook_rules_engine::AtomicEvaluationResult {
         self.evaluate_atomic_with_read_transaction(database, authorization, requests, access, false)
     }
 
@@ -289,7 +289,7 @@ impl RulesRuntime {
         context: AtomicContext<'_>,
     ) -> AtomicEvaluationResult {
         let Some(installed) = self.installed_for(database) else {
-            return fireside_rules_engine::AtomicEvaluationResult {
+            return firenook_rules_engine::AtomicEvaluationResult {
                 allowed: true,
                 operations: requests.iter().map(|_| allowed_result()).collect(),
                 document_accesses: 0,
@@ -297,7 +297,7 @@ impl RulesRuntime {
             };
         };
         if authorization.is_owner() {
-            return fireside_rules_engine::AtomicEvaluationResult {
+            return firenook_rules_engine::AtomicEvaluationResult {
                 allowed: true,
                 operations: requests.iter().map(|_| allowed_result()).collect(),
                 document_accesses: 0,
@@ -357,7 +357,7 @@ impl RulesRuntime {
         writes: &[Write],
         snapshot: &Snapshot,
         time: StoreTimestamp,
-    ) -> Result<AtomicEvaluationResult, fireside_core_store::CommitError> {
+    ) -> Result<AtomicEvaluationResult, firenook_core_store::CommitError> {
         if writes.is_empty() {
             return Ok(AtomicEvaluationResult {
                 allowed: true,
@@ -642,7 +642,7 @@ impl SnapshotAccess {
         snapshot: Snapshot,
         writes: &[Write],
         request_time: StoreTimestamp,
-    ) -> Result<Self, fireside_core_store::CommitError> {
+    ) -> Result<Self, firenook_core_store::CommitError> {
         let preview = snapshot.preview_writes(writes, request_time)?;
         let project = writes
             .first()
@@ -692,7 +692,7 @@ pub fn evaluation_request(
     request.query = query;
     if operation == RequestOperation::List && current.is_none() && request.query.scope.is_none() {
         request.query.scope = key.path().rsplit_once('/').map(|(collection, _)| {
-            fireside_rules_engine::QueryScope::Collection(collection.to_owned())
+            firenook_rules_engine::QueryScope::Collection(collection.to_owned())
         });
     }
     request
@@ -777,7 +777,7 @@ fn store_value(value: &StoreValue) -> Value {
         StoreValue::GeoPoint {
             latitude,
             longitude,
-        } => Value::LatLng(fireside_rules_engine::LatLng {
+        } => Value::LatLng(firenook_rules_engine::LatLng {
             latitude: *latitude,
             longitude: *longitude,
         }),
@@ -816,7 +816,7 @@ fn mutex_lock<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fireside_core_store::{Fields, Precondition, Store, StoreOptions};
+    use firenook_core_store::{Fields, Precondition, Store, StoreOptions};
     use serde_json::json;
 
     const PROJECT: &str = "demo-rules";

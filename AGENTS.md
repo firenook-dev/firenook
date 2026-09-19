@@ -1,6 +1,6 @@
 # Working in this repository
 
-Fireside is an independent, open-source Firebase emulator. Read this file
+Firenook is an independent, open-source Firebase emulator. Read this file
 before changing anything; `support/pipeline.md` has the long form.
 
 ## Independence rule
@@ -23,6 +23,15 @@ are fine; identities are not. `node scripts/check-independence.mjs` enforces
 the rule on every tracked file and, in CI, on commit messages; install the
 hooks once with `git config core.hooksPath .githooks`. The private term list
 is never committed here.
+
+The same script fails on the project's former name (it was published as
+"Fireside" up to `0.1.0-next.9`). The name survives only where it was
+sealed: the frozen oracle corpora and their READMEs, the banked benchmark
+results, the digest-pinned gate manifests, the release history and the
+recovery receipts, plus the recorded identifiers those corpora carry
+(`demo-fireside-*` project ids and the like, which the harness and the gates
+must keep naming exactly) and the README's rename note. Everything else says
+Firenook; do not add aliases of the old command, package or variable names.
 
 Consumer-specific commands, gate names and documentation edits belong in the
 consumer's own repository; here they are "the consumer integration gate",
@@ -61,7 +70,7 @@ runner.
 
 ## Layout
 
-- `crates/` — the Rust workspace (`fireside` CLI, suite runtime, one crate per
+- `crates/` — the Rust workspace (`firenook` CLI, suite runtime, one crate per
   emulated service).
 - `conformance/` — TypeScript oracle capture and replay tooling plus frozen
   fixtures.

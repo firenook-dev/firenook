@@ -75,17 +75,17 @@ jobs:
             export CARGO_BUILD_TARGET=x86_64-pc-windows-msvc
             export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS='-C target-feature=+crt-static'
           fi
-          cargo "+$TOOLCHAIN" build --manifest-path accepted-engine/Cargo.toml --locked --release --bin fireside
-          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p fireside-suite-runtime --lib control::tests
-          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p fireside-auth-front --lib password_tests
-          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p fireside-auth-front --lib tests::oauth
+          cargo "+$TOOLCHAIN" build --manifest-path accepted-engine/Cargo.toml --locked --release --bin firenook
+          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-suite-runtime --lib control::tests
+          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib password_tests
+          cargo "+$TOOLCHAIN" test --manifest-path accepted-engine/Cargo.toml --locked --release -p firenook-auth-front --lib tests::oauth
       - name: Pack actual public artifacts
         env:
           LOCAL_REVISION: ${{ steps.engine.outputs.local_revision }}
         run: |
           extra=()
           if [[ -n "$LOCAL_REVISION" ]]; then extra=("$LOCAL_REVISION"); fi
-          node packaging/build-packages.mjs accepted-engine/target/${{ matrix.target-directory }}release/fireside${{ matrix.extension }} ${{ matrix.platform }} dist/${{ matrix.platform }} "${extra[@]}"
+          node packaging/build-packages.mjs accepted-engine/target/${{ matrix.target-directory }}release/firenook${{ matrix.extension }} ${{ matrix.platform }} dist/${{ matrix.platform }} "${extra[@]}"
       - name: Install and run actual tarballs with dependency scripts disabled
         run: |
           node packaging/smoke-packed.mjs dist/${{ matrix.platform }} npm

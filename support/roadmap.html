@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Fireside Drop-in Tracker</title>
-<meta name="description" content="What Fireside has completed, what is planned, and what remains before it is a full drop-in replacement for the official Firebase Emulator Suite. Data lives in the DATA block at the bottom of this file.">
+<title>Firenook Drop-in Tracker</title>
+<meta name="description" content="What Firenook has completed, what is planned, and what remains before it is a full drop-in replacement for the official Firebase Emulator Suite. Data lives in the DATA block at the bottom of this file.">
 <style>
   :root {
     --bg: #f7f5f1;
@@ -140,8 +140,8 @@
   <header>
     <div class="topbar">
       <div>
-        <h1>Fireside drop-in tracker</h1>
-        <p class="sub">One list of what Fireside does today against the official Firebase Emulator Suite, what works with a limitation, and what still separates it from a full drop-in replacement. Statuses describe the published package.</p>
+        <h1>Firenook drop-in tracker</h1>
+        <p class="sub">One list of what Firenook does today against the official Firebase Emulator Suite, what works with a limitation, and what still separates it from a full drop-in replacement. Statuses describe the published package.</p>
         <p class="meta" id="meta"></p>
       </div>
       <button class="theme" id="theme" type="button">Theme: system</button>
@@ -154,7 +154,7 @@
 
   <section>
     <h2>Runtime dependencies</h2>
-    <p class="section-note">What a developer must have installed to run Fireside.</p>
+    <p class="section-note">What a developer must have installed to run Firenook.</p>
     <div class="deps" id="deps"></div>
   </section>
 
@@ -186,7 +186,7 @@
 
   <section>
     <h2>Configuration shapes</h2>
-    <p class="section-note">What a stranger's <code>firebase.json</code> may contain and whether Fireside starts it. These are the first-run failures a public user would hit.</p>
+    <p class="section-note">What a stranger's <code>firebase.json</code> may contain and whether Firenook starts it. These are the first-run failures a public user would hit.</p>
     <div class="legend" id="legend-config"></div>
     <div class="tablewrap"><table id="config">
       <thead><tr><th>Shape</th><th>Status</th><th>What works</th><th>Remaining</th><th>Size</th></tr></thead>
@@ -231,12 +231,12 @@ const DATA = {
   {
     "name": "firebase-tools",
     "status": "gone",
-    "note": "Not a dependency since 0.1.0-next.7: Fireside hosts Functions and Extensions itself and starts with the package absent from node_modules."
+    "note": "Not a dependency since 0.1.0-next.7: Firenook hosts Functions and Extensions itself and starts with the package absent from node_modules."
   },
   {
     "name": "Google Emulator UI 1.15.0",
     "status": "asset",
-    "note": "The one asset fireside setup still downloads; served by Fireside until an own UI ships (backlog #3)."
+    "note": "The one asset firenook setup still downloads; served by Firenook until an own UI ships (backlog #3)."
   },
   {
     "name": "Extensions registry (Google)",
@@ -360,7 +360,7 @@ const DATA = {
     "title": "Complete Authentication",
     "status": "done",
     "release": "next.8",
-    "desc": "Every operation the official Auth emulator implements (61; Fireside had 23 before the phase): anonymous sign-in, every federated provider with linking and collision handling, email OOB flows (verify, reset, email link, change, recover), phone auth, account update semantics (password, unlink, revoke), Admin SDK surface (batchDelete, session cookies, paging, v2 config), tenants, MFA (SMS) and passkeys, blocking functions on every sign-in path the official emulator blocks, the action, openapi and legacy relyingparty routes; official-emulator corpus first, Rust replay after.",
+    "desc": "Every operation the official Auth emulator implements (61; Firenook had 23 before the phase): anonymous sign-in, every federated provider with linking and collision handling, email OOB flows (verify, reset, email link, change, recover), phone auth, account update semantics (password, unlink, revoke), Admin SDK surface (batchDelete, session cookies, paging, v2 config), tenants, MFA (SMS) and passkeys, blocking functions on every sign-in path the official emulator blocks, the action, openapi and legacy relyingparty routes; official-emulator corpus first, Rust replay after.",
     "receipt": "support/phase-i-auth.md · benchmarks/phase-i-auth.json (I0 frozen, I1–I5 receipts incl. publication) · conformance/fixtures/auth-v1 (61 programs / 1068 steps, 61/61 implemented + 42/42 unimplemented official routes) · replay 17,303 values, 0 mismatches, 4 named divergences · crates/auth-front on the bundled official OpenAPI document · release run 35372788758 · next.8 2026-09-19",
     "steps": [
       [
@@ -551,14 +551,14 @@ const DATA = {
   {
     "name": "Emulator UI",
     "status": "partial",
-    "note": "Google's 1.15.0 bundle served by Fireside; upstream HTTPS data-browser defect inherited",
+    "note": "Google's 1.15.0 bundle served by Firenook; upstream HTTPS data-browser defect inherited",
     "remaining": "Own UI (removes setup and the last Google asset)",
     "size": "weeks"
   },
   {
     "name": "Logging emulator",
     "status": "done",
-    "note": "Bounded replay + WebSocket; --debug writes every record to the run's fireside-debug.log (next.9)",
+    "note": "Bounded replay + WebSocket; --debug writes every record to the run's firenook-debug.log (next.9)",
     "remaining": "—",
     "size": "days"
   },
@@ -616,7 +616,7 @@ const DATA = {
   {
     "name": "--import / --export-on-exit / --state-dir / --resume-state",
     "status": "done",
-    "note": "Resume is a Fireside extra",
+    "note": "Resume is a Firenook extra",
     "remaining": "—",
     "size": "—"
   },
@@ -670,7 +670,7 @@ const DATA = {
     "size": "—"
   },
   {
-    "name": "--offline / FIRESIDE_OFFLINE=1",
+    "name": "--offline / FIRENOOK_OFFLINE=1",
     "status": "done",
     "note": "Any remaining registry access becomes a startup error; verified with an empty cache, a fake HOME and no token",
     "remaining": "—",
@@ -686,7 +686,7 @@ const DATA = {
   {
     "name": "--debug / debug log files",
     "status": "done",
-    "note": "One fireside-debug.log per run under .fireside/runs, never deleted (next.9)",
+    "note": "One firenook-debug.log per run under .firenook/runs, never deleted (next.9)",
     "remaining": "—",
     "size": "—"
   },
@@ -759,7 +759,7 @@ const DATA = {
   backlog: [
   {
     "item": "Own Emulator UI (Phase N, next.10)",
-    "why": "Removes the last Google asset and fireside setup; fixes the inherited HTTPS data-browser defect; the only remaining partial service row",
+    "why": "Removes the last Google asset and firenook setup; fixes the inherited HTTPS data-browser defect; the only remaining partial service row",
     "size": "4–6 weeks"
   },
   {
@@ -869,8 +869,8 @@ document.querySelector("#backlog tbody").innerHTML = DATA.backlog.map((b, i) =>
 
 (function theme() {
   const btn = document.getElementById("theme"); const order = ["system", "light", "dark"]; let i = 0;
-  try { const saved = localStorage.getItem("fireside-roadmap-theme"); if (saved) i = Math.max(0, order.indexOf(saved)); } catch {}
-  const apply = () => { const t = order[i]; if (t === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); btn.textContent = `Theme: ${t}`; try { localStorage.setItem("fireside-roadmap-theme", t); } catch {} };
+  try { const saved = localStorage.getItem("firenook-roadmap-theme"); if (saved) i = Math.max(0, order.indexOf(saved)); } catch {}
+  const apply = () => { const t = order[i]; if (t === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); btn.textContent = `Theme: ${t}`; try { localStorage.setItem("firenook-roadmap-theme", t); } catch {} };
   btn.addEventListener("click", () => { i = (i + 1) % order.length; apply(); }); apply();
 })();
 </script>

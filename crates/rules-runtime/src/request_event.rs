@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use base64::Engine as _;
-use fireside_core_store::Write;
-use fireside_rules_engine::{
+use firenook_core_store::Write;
+use firenook_rules_engine::{
     AllowDecision, Auth, EvaluationRequest, EvaluationResult, EvaluationTrace, RequestOperation,
     Resource, Timestamp, Value,
 };
@@ -52,7 +52,7 @@ impl RequestRecorder {
             .as_nanos();
         Self {
             history,
-            identity: format!("fireside-{}-{time}", std::process::id()).into(),
+            identity: format!("firenook-{}-{time}", std::process::id()).into(),
         }
     }
 

@@ -5,7 +5,7 @@ import { DurableLog } from "./durable-log.ts";
 import type { EnduranceManifest } from "./manifest.ts";
 import { startServer, type ServerHandle } from "./server.ts";
 
-const PROJECT_ID = "demo-fireside-endurance-recovery";
+const PROJECT_ID = "demo-firenook-endurance-recovery";
 const DATABASE_ROOT = `projects/${PROJECT_ID}/databases/(default)`;
 const COLLECTION = "phase1_recovery";
 
@@ -42,7 +42,7 @@ export async function runRecoveryGate(
   try {
     for (let round = 0; round < manifest.recovery.rounds; round += 1) {
       active = await startServer({
-        kind: "fireside-disk",
+        kind: "firenook-disk",
         projectId: PROJECT_ID,
         outputDirectory,
         dataDirectory,
@@ -101,7 +101,7 @@ export async function runRecoveryGate(
     }
 
     active = await startServer({
-      kind: "fireside-disk",
+      kind: "firenook-disk",
       projectId: PROJECT_ID,
       outputDirectory,
       dataDirectory,

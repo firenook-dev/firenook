@@ -7,7 +7,7 @@ use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, Response, StatusCode};
-use fireside_webchannel_front::{
+use firenook_webchannel_front::{
     Backend, BackendChannel, ChannelKind, LISTEN_CHANNEL_PATH, OpenRequest, router,
 };
 use futures_util::StreamExt as _;

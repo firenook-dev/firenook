@@ -1,6 +1,6 @@
 [package]
-name = "fireside-rest-front"
-description = "Firestore REST and emulator-control frontend for fireside"
+name = "firenook-rest-front"
+description = "Firestore REST and emulator-control frontend for firenook"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,12 +12,12 @@ publish = false
 [dependencies]
 axum.workspace = true
 base64.workspace = true
-fireside-core-store = { path = "../core-store" }
-fireside-export-format = { path = "../export-format" }
-fireside-functions-bridge = { path = "../functions-bridge" }
-fireside-grpc-front = { path = "../grpc-front" }
-fireside-query-engine = { path = "../query-engine" }
-fireside-rules-runtime = { path = "../rules-runtime" }
+firenook-core-store = { path = "../core-store" }
+firenook-export-format = { path = "../export-format" }
+firenook-functions-bridge = { path = "../functions-bridge" }
+firenook-grpc-front = { path = "../grpc-front" }
+firenook-query-engine = { path = "../query-engine" }
+firenook-rules-runtime = { path = "../rules-runtime" }
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true

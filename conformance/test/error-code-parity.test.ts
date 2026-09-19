@@ -16,7 +16,7 @@ test("write conflicts return the production gRPC status codes", async (context) 
   const rawFirestore = createV1Firestore(configuration);
   const runId = randomUUID();
   const collection = firestore.collection(
-    `runs/${runId}/fireside_conformance`,
+    `runs/${runId}/firenook_conformance`,
   );
   const database = `projects/${configuration.projectId}/databases/(default)`;
   const expiresAt = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1_000);
@@ -132,7 +132,7 @@ test("Admin SDK retries an aborted read-write transaction", async (context) => {
   const firestore = createFirestore(configuration);
   const rawFirestore = createV1Firestore(configuration);
   const document = firestore.doc(
-    `runs/${randomUUID()}/fireside_conformance/transaction-retry`,
+    `runs/${randomUUID()}/firenook_conformance/transaction-retry`,
   );
   const database = `projects/${configuration.projectId}/databases/(default)`;
   const documentName = `${database}/documents/${document.path}`;

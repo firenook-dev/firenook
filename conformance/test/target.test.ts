@@ -22,7 +22,7 @@ test("resolves an emulator target only with an explicit host", () => {
   );
 
   assert.throws(
-    () => resolveTarget({ CONFORMANCE_TARGET: "fireside" }),
+    () => resolveTarget({ CONFORMANCE_TARGET: "firenook" }),
     /requires FIRESTORE_EMULATOR_HOST/,
   );
 });
@@ -86,7 +86,7 @@ test("only allows the dedicated Enterprise cloud database", () => {
         ...environment,
         CONFORMANCE_CLOUD_DATABASE: "other-database",
       }),
-    /only allows cloud database fireside-enterprise-conformance/,
+    /only allows cloud database firenook-enterprise-conformance/,
   );
 });
 

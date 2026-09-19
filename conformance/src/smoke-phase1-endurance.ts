@@ -16,22 +16,22 @@ import { startServer, type ServerHandle } from "./endurance/server.ts";
 import { runSoak } from "./endurance/soak.ts";
 
 const execute = promisify(execFile);
-const directory = await mkdtemp(join(tmpdir(), "fireside-endurance-smoke-"));
+const directory = await mkdtemp(join(tmpdir(), "firenook-endurance-smoke-"));
 let server: ServerHandle | undefined;
 let succeeded = false;
 
 try {
-  await execute("cargo", ["build", "--release", "--locked", "-p", "fireside"], {
+  await execute("cargo", ["build", "--release", "--locked", "-p", "firenook"], {
     cwd: repositoryRoot,
   });
   const manifest = smokeManifest(await loadManifest());
-  for (const kind of ["fireside-memory", "fireside-disk"] as const) {
+  for (const kind of ["firenook-memory", "firenook-disk"] as const) {
     const output = resolve(directory, `${kind}-soak`);
     server = await startServer({
       kind,
-      projectId: "demo-fireside-endurance",
+      projectId: "demo-firenook-endurance",
       outputDirectory: output,
-      ...(kind === "fireside-disk"
+      ...(kind === "firenook-disk"
         ? {
           dataDirectory: resolve(directory, "disk-soak-state"),
           diskCacheSizeBytes: 67_108_864,
@@ -47,7 +47,7 @@ try {
     const releasedMemory = await waitForReleasedRuntimeMemory(server);
     assert.equal(Reflect.get(releasedMemory, "schemaVersion"), 3);
     const diskCache = Reflect.get(releasedMemory, "diskCache") as unknown;
-    if (kind === "fireside-disk") {
+    if (kind === "firenook-disk") {
       assert.equal(
         Reflect.get(requiredObject(releasedMemory, "diskCache"), "configuredBytes"),
         67_108_864,
@@ -108,12 +108,12 @@ try {
 
   const failedSeedOutput = resolve(directory, "failed-seed");
   server = await startServer({
-    kind: "fireside-memory",
-    projectId: "demo-fireside-endurance",
+    kind: "firenook-memory",
+    projectId: "demo-firenook-endurance",
     outputDirectory: failedSeedOutput,
   });
   await assert.rejects(
-    runSoak(failedSeedManifest(manifest), server, "fireside-memory", failedSeedOutput),
+    runSoak(failedSeedManifest(manifest), server, "firenook-memory", failedSeedOutput),
   );
   await server.stop();
   server = undefined;
@@ -130,7 +130,7 @@ try {
       "--release",
       "--locked",
       "-p",
-      "fireside-export-format",
+      "firenook-export-format",
       "--example",
       "generate_endurance_export",
       "--",
@@ -142,7 +142,7 @@ try {
   );
   const imported = await runImportGate(
     manifest,
-    "fireside-disk",
+    "firenook-disk",
     artifact,
     resolve(directory, "import"),
     resolve(directory, "import-state"),
@@ -238,7 +238,7 @@ function smokeManifest(source: EnduranceManifest): EnduranceManifest {
         smallDocumentCount: 95,
         largeDocumentCount: 10,
         largeDocumentSizesBytes: [102_400, 204_800, 307_200, 409_600, 512_000],
-        maximumObservedFiresideRssBytes: 2_147_483_648,
+        maximumObservedFirenookRssBytes: 2_147_483_648,
         listenerDocumentCount: 2,
         listenerDocumentIndexes: [0, 1],
         seedBatchSize: 25,

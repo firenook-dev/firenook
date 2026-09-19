@@ -9,14 +9,14 @@ test('public package tooling runs without a private checkout or embedded custome
   assert.deepEqual(publicationPolicy({}), {forbiddenTerms: []});
 });
 test('an explicitly supplied external policy is enforced and malformed policies fail closed', () => {
-  const root = mkdtempSync(join(tmpdir(), 'fireside-policy-'));
+  const root = mkdtempSync(join(tmpdir(), 'firenook-policy-'));
   const path = join(root, 'policy.json');
   try {
     writeFileSync(path, JSON.stringify({schemaVersion: 1, forbiddenTerms: ['private-customer.invalid']}));
-    assert.deepEqual(publicationPolicy({FIRESIDE_PUBLICATION_POLICY: path}), {forbiddenTerms: ['private-customer.invalid']});
+    assert.deepEqual(publicationPolicy({FIRENOOK_PUBLICATION_POLICY: path}), {forbiddenTerms: ['private-customer.invalid']});
     writeFileSync(path, JSON.stringify({schemaVersion: 1, forbiddenTerms: [null]}));
-    assert.throws(() => publicationPolicy({FIRESIDE_PUBLICATION_POLICY: path}));
-    assert.throws(() => publicationPolicy({FIRESIDE_PUBLICATION_POLICY: join(root, 'missing.json')}));
-    assert.throws(() => publicationPolicy({FIRESIDE_PUBLICATION_POLICY: 'relative.json'}));
+    assert.throws(() => publicationPolicy({FIRENOOK_PUBLICATION_POLICY: path}));
+    assert.throws(() => publicationPolicy({FIRENOOK_PUBLICATION_POLICY: join(root, 'missing.json')}));
+    assert.throws(() => publicationPolicy({FIRENOOK_PUBLICATION_POLICY: 'relative.json'}));
   } finally { rmSync(root, {recursive: true}); }
 });

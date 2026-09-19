@@ -4,7 +4,7 @@ use super::{
     RestState, State, StatusCode, json, request_authorization, run_query_at_parent,
 };
 use axum::body::Bytes;
-use fireside_grpc_front::google::firestore::v1::{
+use firenook_grpc_front::google::firestore::v1::{
     ListCollectionIdsRequest, ListDocumentsRequest, firestore_server::Firestore,
 };
 

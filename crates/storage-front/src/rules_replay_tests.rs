@@ -3,7 +3,7 @@
 //! against the native rules layer. Each step must reproduce the recorded
 //! status (and error message, when both sides carry one) unless it is listed
 //! in `DIVERGENCES`, where production precedence or a non-rules difference is
-//! named and the Fireside outcome is asserted instead.
+//! named and the Firenook outcome is asserted instead.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -11,8 +11,8 @@ use std::sync::{Arc, RwLock};
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request};
 use base64::engine::general_purpose::STANDARD as BASE64;
-use fireside_functions_bridge::{TriggerObserver, TriggerRegistry};
-use fireside_rules_engine::{DocumentAccessError, Resource, Value};
+use firenook_functions_bridge::{TriggerObserver, TriggerRegistry};
+use firenook_rules_engine::{DocumentAccessError, Resource, Value};
 use serde_json::{Value as JsonValue, json};
 use tower::ServiceExt as _;
 
@@ -23,14 +23,14 @@ const PROGRAMS: &str =
 
 fn test_root(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "fireside-storage-{label}-{}-{}",
+        "firenook-storage-{label}-{}-{}",
         std::process::id(),
         OffsetDateTime::now_utc().unix_timestamp_nanos()
     ))
 }
 
-/// Steps where Fireside must differ from the recording, with the reason and
-/// the asserted Fireside status. Every entry names a divergence recorded in
+/// Steps where Firenook must differ from the recording, with the reason and
+/// the asserted Firenook status. Every entry names a divergence recorded in
 /// the fixture README or a non-rules API difference.
 const DIVERGENCES: &[(&str, &str, u16, &str)] = &[
     (
@@ -79,7 +79,7 @@ const DIVERGENCES: &[(&str, &str, u16, &str)] = &[
         "bypass-json-api",
         "json-patch-anonymous",
         200,
-        "the JSON API PATCH route is implemented by Fireside (501 in the official emulator); rules are not consulted either way",
+        "the JSON API PATCH route is implemented by Firenook (501 in the official emulator); rules are not consulted either way",
     ),
 ];
 
@@ -451,7 +451,7 @@ async fn replays_every_recorded_emulator_program() {
         "every listed divergence must be exercised"
     );
 
-    // The crash the official runtime suffers on an empty path segment: Fireside
+    // The crash the official runtime suffers on an empty path segment: Firenook
     // answers, evaluating the remaining segments.
     let crash = &fixture["oracleCrashNotRecordedLive"];
     let install = send(
