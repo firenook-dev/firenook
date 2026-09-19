@@ -164,9 +164,14 @@ try{
     record.fullDiskRequests.firestore=await serviceRequest('firestore',`/v1/projects/${project}/databases/(default)/documents:commit`,batch);
     record.fullDiskRequests.auth=await serviceRequest('auth',authPath,{localId:'attempt-user',email:'attempt@example.test',displayName:'Synthetic attempted account'});
     record.fullDiskRequests.storage=await serviceRequest('storage',uploadPath('attempt-object'),largeBody,'POST',true);
+    // The write-behind flusher (one-second cadence) can meet the full disk
+    // before the first request does; it then fences the store, and the request
+    // sees the fence instead of ENOSPC. Both are correct refusals: the fence
+    // is asserted on the next commit below, and the suite log must still
+    // carry the ENOSPC report (exportErrorReported).
     for(const result of Object.values(record.fullDiskRequests)){
       assert(result.status>=400&&result.status<600,JSON.stringify(result));
-      assert.match(result.body,/No space left on device|os error 28/i);
+      assert.match(result.body,/No space left on device|os error 28|reopen the store to recover before writing/i);
     }
     record.writeFence=await serviceRequest('firestore',`/v1/projects/${project}/databases/(default)/documents:commit`,batch);
     assert.equal(record.writeFence.status,503);assert.match(record.writeFence.body,/reopen the store to recover before writing/);
