@@ -1,6 +1,6 @@
 # Scoped roadmap progress
 
-Updated 2026-09-19 UTC (next.9 published). The A–F roadmap remains active; no full-release,
+Updated 2026-09-19 UTC (renamed to Firenook; `firenook@0.2.0-next.1` published). The A–F roadmap remains active; no full-release,
 universal-compatibility, publication or performance-win claim is made here.
 
 | Phase | Current state | Remaining qualification |
@@ -96,6 +96,7 @@ checks on its exact combined candidate instead of substituting older binaries.
 | Disabled diagnostics | Requests unavailable-upgrade test and enabled/disabled suite listener assembly, not a healthy empty feed |
 | Buffer retention and slow clients | Real TCP non-readers for Requests/Logs, fixed send-deadline tests, client admission/reclamation, byte/count/age bounds and coverage expiry/contention tests |
 | Unchanged decisions and overhead | Traced/untraced rules corpora; rotated nine-run overhead driver asserting every result and final state, with all samples retained |
+| Rename | Renamed to Firenook and published as `firenook@0.2.0-next.1` (2026-09-19): PR #58, repositories moved to `firenook-dev`, release run 35449320572, registry integrity and provenance verified, fresh-machine installs on three platforms | Consumer pin swap and gates on the installed package; then deprecate the former packages |
 
 The public preview compatibility document continues to describe the installed
 release. Merged but unpublished source improvements must not be presented as
