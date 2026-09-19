@@ -18,6 +18,7 @@ fireside-extensions = { path = "../extensions" }
 fireside-functions-runtime = { path = "../functions-runtime" }
 fireside-grpc-front = { path = "../grpc-front" }
 fireside-pubsub-front = { path = "../pubsub-front" }
+fireside-tasks-front = { path = "../tasks-front" }
 fireside-query-engine = { path = "../query-engine" }
 fireside-rest-front = { path = "../rest-front" }
 fireside-rules-engine = { path = "../rules-engine" }

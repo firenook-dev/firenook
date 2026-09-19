@@ -42,6 +42,7 @@ use fireside_suite_front::{
     BackgroundRequest, ExportCommand, HubConfig, HubRuntime, LoggingRuntime, ServiceInfo,
     SuiteDirectory, UiConfig, requests_router, ui_router,
 };
+use fireside_tasks_front::TasksRuntime;
 use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
@@ -56,7 +57,6 @@ const EXPORT_VERSION: &str = "15.22.0";
 const IMPORT_BATCH_SIZE: usize = 500;
 const IMPORT_BATCH_LOGICAL_BYTES: u64 = 8 * 1024 * 1024;
 
-mod auxiliary;
 mod control;
 mod functions_readiness;
 mod native_state;
@@ -64,8 +64,6 @@ mod project_scope;
 mod shutdown_io;
 pub use control::wait_for_shutdown;
 
-#[cfg(test)]
-mod auxiliary_tests;
 #[cfg(test)]
 mod diagnostics_tests;
 #[cfg(test)]
@@ -320,6 +318,7 @@ pub fn endpoint(host: &str, port: u16) -> String {
 pub struct SuiteOutcome {
     pub functions: usize,
     pub schedules: usize,
+    pub task_queues: usize,
     pub firestore_documents: u64,
     pub auth_users: usize,
     pub storage_objects: usize,
@@ -425,6 +424,7 @@ struct ShutdownSuite {
     exporter: JoinHandle<()>,
     functions: Option<FunctionsRuntime>,
     scheduler: Option<SchedulerRuntime>,
+    tasks: Option<TasksRuntime>,
     servers: Vec<JoinHandle<()>>,
     shutdown: watch::Sender<bool>,
     function_count: usize,
@@ -544,6 +544,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         storage.clone(),
     );
     let mut functions = None;
+    let mut tasks: Option<TasksRuntime> = None;
     let mut function_count = 0;
     let mut inventory = FunctionsInventory {
         generation: 0,
@@ -564,6 +565,30 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             auth.set_blocking_functions(Arc::new(BlockingBridge(runtime.blocking_handle())));
         }
         functions = Some(runtime);
+        // The Cloud Tasks emulator registers a queue per onTaskDispatched
+        // export, as the official Functions emulator does at startup.
+        let tasks_logging = logging.clone();
+        let tasks_runtime = TasksRuntime::new(
+            &config.project_id,
+            &inventory,
+            &config.origin(config.ports.functions),
+            Arc::new(move |level: &str, text: &str| {
+                if level == "WARN" || level == "ERROR" {
+                    eprintln!("fireside tasks: {text}");
+                } else if level != "DEBUG" {
+                    println!("fireside tasks: {text}");
+                }
+                tasks_logging.record(level, Some("tasks"), text.to_owned());
+            }),
+        );
+        servers.push(spawn_axum(
+            "tasks",
+            listeners.take("tasks")?,
+            tasks_runtime.application(),
+            shutdown.subscribe(),
+            server_failure.clone(),
+        ));
+        tasks = Some(tasks_runtime);
     }
     let mut pubsub = None;
     let mut scheduler = None;
@@ -597,8 +622,8 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             Some(failed.unwrap_or_else(|| "service monitor closed".to_owned()))
         }
         error = follow_functions_inventory(
-            functions.as_ref(), background_receiver, &config.project_id,
-            pubsub.as_mut(), scheduler.as_mut(), &logging,
+            functions.as_ref(), background_receiver, &config,
+            pubsub.as_mut(), scheduler.as_mut(), tasks.as_ref(), &logging,
         ) => Some(error),
     };
 
@@ -613,6 +638,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             exporter,
             functions,
             scheduler,
+            tasks,
             servers,
             shutdown,
             function_count,
@@ -635,11 +661,13 @@ fn announce_ready(logging: &LoggingRuntime, function_count: usize) {
 async fn follow_functions_inventory(
     functions: Option<&FunctionsRuntime>,
     mut background: mpsc::UnboundedReceiver<BackgroundRequest>,
-    project: &str,
+    config: &SuiteConfig,
     mut pubsub: Option<&mut fireside_pubsub_front::PubsubRuntime>,
     mut scheduler: Option<&mut SchedulerRuntime>,
+    tasks: Option<&TasksRuntime>,
     logging: &LoggingRuntime,
 ) -> String {
+    let project = config.project_id.as_str();
     let Some(functions) = functions else {
         // Without Functions the hub's background-trigger switches are
         // acknowledged (the registry flag already changed) and nothing else
@@ -677,6 +705,9 @@ async fn follow_functions_inventory(
                 .await
         {
             return format!("Functions reload schedule rejected: {error}");
+        }
+        if let Some(tasks) = tasks {
+            tasks.refresh_inventory(&inventory, &config.origin(config.ports.functions));
         }
         let count = inventory.functions().count();
         logging.record(
@@ -908,6 +939,14 @@ async fn finish_suite(
     if let Some(scheduler) = suite.scheduler.take() {
         scheduler.shutdown().await;
     }
+    let task_queues = match &suite.tasks {
+        Some(tasks) => {
+            let count = tasks.queue_keys().len();
+            tasks.shutdown().await;
+            count
+        }
+        None => 0,
+    };
     // Drain background delivery while both the Node workers and the Rust data
     // services they call remain available. The scheduler is stopped first, and
     // a coordinated suite shutdown has no external clients admitting new work.
@@ -959,6 +998,7 @@ async fn finish_suite(
     Ok(SuiteOutcome {
         functions: suite.function_count,
         schedules: suite.schedule_count,
+        task_queues,
         firestore_documents,
         auth_users,
         storage_objects,
@@ -1451,15 +1491,6 @@ fn spawn_static_servers(
             "logging",
             listeners.take("logging")?,
             applications.logging,
-            shutdown.subscribe(),
-            failed.clone(),
-        ));
-    }
-    if config.services.functions {
-        servers.push(spawn_axum(
-            "tasks",
-            listeners.take("tasks")?,
-            auxiliary::router("tasks", &config.project_id),
             shutdown.subscribe(),
             failed.clone(),
         ));
