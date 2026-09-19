@@ -67,7 +67,8 @@ const {Firestore} = require('@google-cloud/firestore');
 `);
 const logs = [];
 async function run(mode, imported, exported, state) {
-  const args = [cli,'emulators:exec','--project',project,'--minimum-functions','1','--firestore-websocket-port',String(ports.websocket),'--state-dir',state,'--export-on-exit',exported];
+  // --ui: like the official CLI, emulators:exec keeps the Emulator UI off unless asked; the check asserts it.
+  const args = [cli,'emulators:exec','--ui','--project',project,'--minimum-functions','1','--firestore-websocket-port',String(ports.websocket),'--state-dir',state,'--export-on-exit',exported];
   if(imported) args.push('--import',imported);
   args.push('--',process.execPath,'check.cjs',mode);
   const child = spawn(process.execPath,args,{cwd:root,env,stdio:['ignore','pipe','pipe']});
