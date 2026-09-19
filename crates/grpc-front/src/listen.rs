@@ -906,8 +906,13 @@ fn resume_token(revision: Revision) -> Vec<u8> {
 
 fn decode_resume_token(token: &[u8]) -> Result<Revision, Status> {
     const PREFIX: &[u8] = b"firenook-resume-";
+    // Tokens issued by releases up to 0.1.0-next.9 carry the project's former
+    // name and the same revision layout; a client that stays connected across
+    // an engine upgrade resumes with one of them.
+    const LEGACY_PREFIX: &[u8] = b"fireside-resume-";
     let revision = token
         .strip_prefix(PREFIX)
+        .or_else(|| token.strip_prefix(LEGACY_PREFIX))
         .and_then(|revision| <[u8; 8]>::try_from(revision).ok())
         .map(u64::from_be_bytes)
         .ok_or_else(|| Status::invalid_argument("invalid firenook resume token"))?;
@@ -945,6 +950,18 @@ mod resume_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_tokens_from_before_the_rename_still_decode() {
+        let revision = Revision::from_u64(42);
+        let current = resume_token(revision);
+        assert!(current.starts_with(b"firenook-resume-"));
+        assert_eq!(decode_resume_token(&current).unwrap(), revision);
+        let mut legacy = b"fireside-resume-".to_vec();
+        legacy.extend_from_slice(&42u64.to_be_bytes());
+        assert_eq!(decode_resume_token(&legacy).unwrap(), revision);
+        assert!(decode_resume_token(b"other-resume-\0\0\0\0\0\0\0\x2a").is_err());
+    }
 
     #[test]
     fn bloom_dimensions_match_the_cloud_existence_filter_fixture() {

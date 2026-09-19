@@ -76,6 +76,7 @@ const FORMER_NAME_PARAGRAPHS = [
 // Single lines that mention the former name on purpose.
 const FORMER_NAME_LINES = [
   [/^crates\/core-store\/src\/disk\.rs$/, /LEGACY_(?:DATABASE|JOURNAL)_FILE: &str = "fireside\./, "adopts store files written before the rename"],
+  [/^crates\/grpc-front\/src\/listen\.rs$/, /(?:LEGACY_PREFIX: &\[u8\] = |let mut legacy = )b"fireside-resume-"/, "decodes listen resume tokens issued before the rename"],
   [/^conformance\/test\/phase2-gate-plan\.test\.ts$/, /const sealedScriptName = \/\\btest:fireside\\b\/gu;/, "maps the sealed Phase 2 manifest's script names onto the renamed scripts"],
   [/^\.github\/workflows\/ci\.yml$/, /@fireside-dev\/linux-x64(?:@0\.1\.0-next\.3|\/bin\/fireside")/, "the previously published engine the native-upgrade check resumes from"],
 ];
