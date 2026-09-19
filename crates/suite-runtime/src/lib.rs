@@ -2062,7 +2062,17 @@ async fn export_suite(
     let mut metadata = serde_json::Map::new();
     metadata.insert("version".to_owned(), json!(EXPORT_VERSION));
     if wants("firestore") && config.services.firestore {
-        let written = export_firestore(store, &config.project_id, &staging)?;
+        // A whole-database export runs for minutes on a large store; it
+        // belongs on the blocking pool, not on the workers serving every
+        // other emulator meanwhile.
+        let written = {
+            let store = store.clone();
+            let project = config.project_id.clone();
+            let staging = staging.clone();
+            tokio::task::spawn_blocking(move || export_firestore(&store, &project, &staging))
+                .await
+                .map_err(|error| failure(format!("Firestore export task failed: {error}")))??
+        };
         let metadata_file = relative_export_path(&staging, written.overall_metadata_path())?;
         metadata.insert(
             "firestore".to_owned(),

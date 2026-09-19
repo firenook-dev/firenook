@@ -410,6 +410,12 @@ impl DiskSnapshot {
         decode_stored_document(value.value()).ok().map(Arc::new)
     }
 
+    /// Key-only cursor over the documents whose path starts with `prefix`,
+    /// in byte order, with this snapshot's overlay merged in.
+    pub(crate) fn key_cursor(&self, database: &DatabaseName, prefix: &str) -> DiskKeyCursor {
+        DiskKeyCursor::open(self, database, prefix)
+    }
+
     pub(crate) fn iter_documents(&self, database: &DatabaseName) -> DiskDocumentIterator {
         let scope = DiskDocumentScope::Database(database.clone());
         let source = database_prefix(database)
@@ -451,6 +457,78 @@ impl DiskSnapshot {
             .and_then(|prefix| indexed_range(&self.transaction, COLLECTION_GROUPS, &prefix))
             .unwrap_or(DiskRange::Empty);
         self.iterator(scope, source)
+    }
+
+    /// Counts the documents of one collection or collection group without
+    /// reading a single document body: the index range is counted and the
+    /// overlay adjusts it for keys written or deleted since the disk state.
+    pub(crate) fn count_scope(
+        &self,
+        database: &DatabaseName,
+        collection_path: Option<&str>,
+        collection_id: Option<&str>,
+        ancestor: Option<&str>,
+    ) -> usize {
+        let (scope, definition, prefix) = match (collection_path, collection_id) {
+            (Some(collection_path), _) => (
+                DiskDocumentScope::Collection {
+                    database: database.clone(),
+                    collection_path: collection_path.to_owned(),
+                },
+                COLLECTIONS,
+                collection_index_prefix(database, collection_path).ok(),
+            ),
+            (None, Some(collection_id)) => (
+                DiskDocumentScope::CollectionGroup {
+                    ancestor: ancestor.map(str::to_owned),
+                    collection_id: collection_id.to_owned(),
+                    database: database.clone(),
+                },
+                COLLECTION_GROUPS,
+                collection_group_index_prefix(database, collection_id).ok(),
+            ),
+            (None, None) => return 0,
+        };
+        let Some(prefix) = prefix else {
+            return 0;
+        };
+        let mut count = 0_usize;
+        if let Some(range) = bounded_range(&self.transaction, definition, &prefix) {
+            for entry in range {
+                let Ok((_, encoded_key)) = entry else {
+                    continue;
+                };
+                let Ok(key) = decode_document_key(encoded_key.value()) else {
+                    continue;
+                };
+                if scope.matches(&key) {
+                    count += 1;
+                }
+            }
+        }
+        if self.overlay.is_empty() {
+            return count;
+        }
+        let documents = self.transaction.open_table(DOCUMENTS).ok();
+        let on_disk = |key: &DocumentKey| {
+            documents.as_ref().is_some_and(|table| {
+                encode_document_key(key)
+                    .ok()
+                    .and_then(|encoded| table.get(encoded.as_slice()).ok().flatten())
+                    .is_some()
+            })
+        };
+        for (key, document) in &self.overlay {
+            if !scope.matches(key) {
+                continue;
+            }
+            match (on_disk(key), document.is_some()) {
+                (true, false) => count = count.saturating_sub(1),
+                (false, true) => count += 1,
+                _ => {}
+            }
+        }
+        count
     }
 
     fn iterator(&self, scope: DiskDocumentScope, source: DiskRange) -> DiskDocumentIterator {
@@ -539,6 +617,153 @@ pub(crate) struct DiskDocumentIterator {
     overlay: std::vec::IntoIter<(DocumentKey, Option<Arc<Document>>)>,
     scope: DiskDocumentScope,
     source: DiskRange,
+}
+
+/// Walks document keys under one path prefix without touching document
+/// bodies. `seek` repositions the walk, so a caller can skip a whole
+/// subtree in one B-tree descent instead of stepping through its entries.
+///
+/// Keys are visited in byte order of the path, which is the on-disk order.
+/// The overlay of the owning snapshot is merged: keys deleted in the overlay
+/// are hidden, keys written in the overlay are reported once.
+pub(crate) struct DiskKeyCursor {
+    database: DatabaseName,
+    lower: Vec<u8>,
+    upper: Option<Vec<u8>>,
+    transaction: Arc<ReadTransaction>,
+    range: Option<redb::Range<'static, &'static [u8], &'static [u8]>>,
+    next_disk: Option<DocumentKey>,
+    overlay: Vec<(DocumentKey, bool)>,
+    overlay_position: usize,
+    exhausted: bool,
+}
+
+impl DiskKeyCursor {
+    fn open(snapshot: &DiskSnapshot, database: &DatabaseName, prefix: &str) -> Self {
+        let mut lower = database_prefix(database).unwrap_or_default();
+        lower.extend_from_slice(prefix.as_bytes());
+        let upper = prefix_successor(&lower);
+        let overlay = snapshot
+            .overlay
+            .range(DocumentKey::unchecked(database.clone(), prefix)..)
+            .take_while(|(key, _)| key.database() == database && key.path().starts_with(prefix))
+            .map(|(key, document)| (key.clone(), document.is_some()))
+            .collect::<Vec<_>>();
+        let mut cursor = Self {
+            database: database.clone(),
+            lower: lower.clone(),
+            upper,
+            transaction: Arc::clone(&snapshot.transaction),
+            range: None,
+            next_disk: None,
+            overlay,
+            overlay_position: 0,
+            exhausted: false,
+        };
+        cursor.range = cursor.open_range(&lower);
+        cursor
+    }
+
+    fn open_range(
+        &self,
+        lower: &[u8],
+    ) -> Option<redb::Range<'static, &'static [u8], &'static [u8]>> {
+        let upper = self.upper.as_deref()?;
+        if lower >= upper {
+            return None;
+        }
+        let table = self.transaction.open_table(DOCUMENTS).ok()?;
+        table.range::<&[u8]>(lower..upper).ok()
+    }
+
+    fn next_disk_key(&mut self) -> Option<DocumentKey> {
+        if let Some(key) = self.next_disk.take() {
+            return Some(key);
+        }
+        let range = self.range.as_mut()?;
+        loop {
+            let entry = range.next()?;
+            let Ok((key, _)) = entry else {
+                continue;
+            };
+            if let Ok(key) = decode_document_key(key.value()) {
+                return Some(key);
+            }
+        }
+    }
+
+    /// The next key at or after the current position, or `None` once the
+    /// prefix is exhausted.
+    pub(crate) fn next(&mut self) -> Option<DocumentKey> {
+        if self.exhausted {
+            return None;
+        }
+        loop {
+            if self.next_disk.is_none() {
+                self.next_disk = self.next_disk_key();
+            }
+            let overlay = self.overlay.get(self.overlay_position);
+            match (&self.next_disk, overlay) {
+                (None, None) => {
+                    self.exhausted = true;
+                    return None;
+                }
+                (Some(_), None) => return self.next_disk.take(),
+                (None, Some((key, present))) => {
+                    self.overlay_position += 1;
+                    if *present {
+                        return Some(key.clone());
+                    }
+                }
+                (Some(disk), Some((key, present))) => match disk.cmp(key) {
+                    std::cmp::Ordering::Less => return self.next_disk.take(),
+                    std::cmp::Ordering::Equal => {
+                        self.next_disk.take();
+                        self.overlay_position += 1;
+                        if *present {
+                            return Some(key.clone());
+                        }
+                    }
+                    std::cmp::Ordering::Greater => {
+                        self.overlay_position += 1;
+                        if *present {
+                            return Some(key.clone());
+                        }
+                    }
+                },
+            }
+        }
+    }
+
+    /// Repositions the walk at the first key whose path is at or after
+    /// `path` in byte order. `path` must extend the cursor's prefix; an
+    /// earlier position is never revisited.
+    pub(crate) fn seek(&mut self, path: &str) {
+        if self.exhausted {
+            return;
+        }
+        let mut lower = database_prefix(&self.database).unwrap_or_default();
+        lower.extend_from_slice(path.as_bytes());
+        if lower < self.lower {
+            return;
+        }
+        let keep = self
+            .next_disk
+            .as_ref()
+            .is_some_and(|key| key.path().as_bytes() >= path.as_bytes());
+        if !keep {
+            self.next_disk = None;
+            self.range = self.open_range(&lower);
+        }
+        let position = DocumentKey::unchecked(self.database.clone(), path);
+        while self
+            .overlay
+            .get(self.overlay_position)
+            .is_some_and(|(key, _)| *key < position)
+        {
+            self.overlay_position += 1;
+        }
+    }
 }
 
 enum DiskRange {

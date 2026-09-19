@@ -5,9 +5,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use firenook_core_store::{
-    CommitError, CommitResult, DatabaseName, Document, DocumentKey, FieldTransform, Snapshot,
-    SnapshotError, Store, Timestamp, TransactionMemoryRegistration, TransformOperation, Value,
-    Write, compare_resource_paths, database_name_logical_bytes, document_key_logical_bytes,
+    CommitError, CommitObservation, CommitObserver, CommitResult, DatabaseName, Document,
+    DocumentKey, FieldTransform, Snapshot, SnapshotError, Store, Timestamp,
+    TransactionMemoryRegistration, TransformOperation, Value, Write, compare_resource_paths,
+    database_name_logical_bytes, document_key_logical_bytes,
 };
 use firenook_query_engine::{
     Aggregation as QueryAggregation, DatabaseEdition, Direction as QueryDirection,
@@ -93,6 +94,58 @@ pub struct FirestoreService {
     transactions: Arc<Mutex<HashMap<Vec<u8>, TransactionState>>>,
     next_id: Arc<AtomicU64>,
     disk_write_queue: Option<Arc<tokio::sync::Semaphore>>,
+    reads: ReadPool,
+    commits: tokio::sync::watch::Receiver<u64>,
+}
+
+/// Wakes listener streams when a commit lands, so they wait on commits
+/// instead of polling the store.
+struct CommitNotifier {
+    revision: tokio::sync::watch::Sender<u64>,
+}
+
+impl CommitObserver for CommitNotifier {
+    fn committed(&self, observation: &CommitObservation) {
+        self.revision
+            .send_replace(observation.result.revision.get());
+    }
+}
+
+/// Runs CPU-bound reads (scans, queries, listings, listener refreshes) on
+/// the blocking pool instead of the async workers that serve every emulator
+/// in the suite, so a slow Firestore read never stalls Auth, Storage, the UI
+/// or a cheap Firestore request. Concurrency is bounded by the host's
+/// parallelism; further reads wait without holding a worker.
+#[derive(Clone)]
+pub(crate) struct ReadPool {
+    permits: Arc<tokio::sync::Semaphore>,
+}
+
+impl Default for ReadPool {
+    fn default() -> Self {
+        Self {
+            permits: Arc::new(tokio::sync::Semaphore::new(read_parallelism())),
+        }
+    }
+}
+
+impl ReadPool {
+    pub(crate) async fn run<T, F>(&self, operation: F) -> Result<T, Status>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, Status> + Send + 'static,
+    {
+        let permit = Arc::clone(&self.permits)
+            .acquire_owned()
+            .await
+            .map_err(|_| Status::unavailable("read pool closed"))?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation()
+        })
+        .await
+        .map_err(|_| Status::internal("read task failed"))?
+    }
 }
 
 impl FirestoreService {
@@ -124,6 +177,8 @@ impl FirestoreService {
         let disk_write_queue = store
             .is_disk_backed()
             .then(|| Arc::new(tokio::sync::Semaphore::new(1)));
+        let (revision, commits) = tokio::sync::watch::channel(store.revision().get());
+        store.add_commit_observer(Arc::new(CommitNotifier { revision }));
         Self {
             store,
             query_policy,
@@ -131,7 +186,19 @@ impl FirestoreService {
             transactions: Arc::new(Mutex::new(HashMap::new())),
             next_id: Arc::new(AtomicU64::new(1)),
             disk_write_queue,
+            reads: ReadPool::default(),
+            commits,
         }
+    }
+
+    /// Runs a CPU-bound read on the service's bounded read pool; see
+    /// [`ReadPool`]. The REST front shares the pool through this method.
+    pub async fn run_read<T, F>(&self, operation: F) -> Result<T, Status>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, Status> + Send + 'static,
+    {
+        self.reads.run(operation).await
     }
 
     /// Wraps this adapter in tonic's generated HTTP service.
@@ -238,6 +305,8 @@ impl FirestoreService {
             self.store.clone(),
             self.query_policy.clone(),
             self.rules.clone(),
+            self.reads.clone(),
+            self.commits.clone(),
             authorization,
             self.store.runtime_memory_accounting(),
             input,
@@ -500,64 +569,32 @@ impl FirestoreService {
         parent: Option<&str>,
         request: &ListDocumentsRequest,
         orders: &[ListOrder],
-    ) -> Result<(Vec<ListedDocument>, String), Status> {
+    ) -> (Vec<ListedDocument>, String) {
         if !request.show_missing {
-            return Ok(
-                self.collect_present_list_documents(snapshot, database, parent, request, orders)
-            );
+            return self
+                .collect_present_list_documents(snapshot, database, parent, request, orders);
         }
-
-        let mut listed = BTreeMap::new();
-        for (key, document) in snapshot.iter_documents(database) {
-            if direct_child_matches(key.path(), parent, &request.collection_id) {
-                listed.insert(key.clone(), Some(document));
-            }
-            if let Some(path) = missing_direct_child(key.path(), parent, &request.collection_id) {
-                let candidate = DocumentKey::new(database.clone(), path)
-                    .map_err(|error| Status::internal(error.to_string()))?;
-                listed.entry(candidate).or_insert(None);
-            }
-        }
-        let mut documents = listed
+        // `show_missing` cannot combine with `order_by`, so the listing is in
+        // `__name__` order and pages on keys alone: only the page's present
+        // documents are loaded. The store reports each direct child once,
+        // present or missing, in a walk proportional to the children.
+        let collection_id =
+            (!request.collection_id.is_empty()).then_some(request.collection_id.as_str());
+        let mut children = snapshot.direct_children(database, parent, collection_id);
+        children.sort_by(|(left, _), (right, _)| compare_resource_paths(left.path(), right.path()));
+        let page = paginate_keys(children, &request.page_token, request.page_size);
+        let documents = page
+            .keys
             .into_iter()
-            .map(|(key, document)| ListedDocument { key, document })
-            .filter(|listed| {
-                orders
-                    .iter()
-                    .all(|order| list_order_exists(order, listed.document.as_deref()))
+            .map(|(key, present)| ListedDocument {
+                document: present.then(|| snapshot.get(&key)).flatten(),
+                key,
             })
             .collect::<Vec<_>>();
-        documents.sort_by(|left, right| {
-            compare_list_documents(
-                &left.key,
-                left.document.as_deref(),
-                &right.key,
-                right.document.as_deref(),
-                orders,
-                self.query_policy.edition(),
-            )
-        });
-        if !request.page_token.is_empty() {
-            documents = documents
-                .into_iter()
-                .skip_while(|document| document.key.to_string() != request.page_token)
-                .skip(1)
-                .collect();
-        }
-        let page_size = normalize_page_size(request.page_size);
-        let has_more = documents.len() > page_size;
-        documents.truncate(page_size);
-        let next_page_token = if has_more {
-            documents
-                .last()
-                .map(|document| document.key.to_string())
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
-        Ok((documents, next_page_token))
+        (documents, page.next_page_token)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn collect_present_list_documents(
         &self,
         snapshot: &Snapshot,
@@ -591,10 +628,31 @@ impl FirestoreService {
                 |parent| format!("{parent}/{}", request.collection_id),
             )
         });
-        let source = match &scoped_collection {
-            Some(collection_path) => snapshot.iter_collection(database, collection_path),
-            None => snapshot.iter_documents(database),
+        let Some(collection_path) = &scoped_collection else {
+            // Every direct child of the parent, whatever its collection: the
+            // handler only admits `__name__` ascending here, so the listing
+            // pages on keys and loads the page's documents afterwards.
+            let mut children = snapshot
+                .direct_children(database, parent, None)
+                .into_iter()
+                .filter(|(_, present)| *present)
+                .collect::<Vec<_>>();
+            children
+                .sort_by(|(left, _), (right, _)| compare_resource_paths(left.path(), right.path()));
+            let page = paginate_keys(children, &request.page_token, request.page_size);
+            let documents = page
+                .keys
+                .into_iter()
+                .filter_map(|(key, _)| {
+                    snapshot.get(&key).map(|document| ListedDocument {
+                        key,
+                        document: Some(document),
+                    })
+                })
+                .collect::<Vec<_>>();
+            return (documents, page.next_page_token);
         };
+        let source = snapshot.iter_collection(database, collection_path);
         // The scoped iterator's order is the default `__key__` ascending order,
         // so once a full page plus one witness document is collected, no later
         // document can precede them and the scan stops.
@@ -858,13 +916,24 @@ impl Firestore for FirestoreService {
                 .validate(&query)
                 .map_err(|error| index_status(&error))?;
         }
-        let (documents, next_page_token) = self.collect_list_documents(
-            &snapshot,
-            &database,
-            parent.as_deref(),
-            &request,
-            &orders,
-        )?;
+        let (documents, next_page_token) = {
+            let service = self.clone();
+            let snapshot = snapshot.clone();
+            let database = database.clone();
+            let parent = parent.clone();
+            let request = request.clone();
+            let orders = orders.clone();
+            self.run_read(move || {
+                Ok(service.collect_list_documents(
+                    &snapshot,
+                    &database,
+                    parent.as_deref(),
+                    &request,
+                    &orders,
+                ))
+            })
+            .await?
+        };
         let candidate = list_candidate_key(&database, parent.as_deref(), &request.collection_id)?;
         self.authorize_query(
             &authorization,
@@ -990,6 +1059,7 @@ impl Firestore for FirestoreService {
 
     type BatchGetDocumentsStream = ResponseStream<BatchGetDocumentsResponse>;
 
+    #[allow(clippy::too_many_lines)]
     async fn batch_get_documents(
         &self,
         request: Request<BatchGetDocumentsRequest>,
@@ -1027,56 +1097,70 @@ impl Firestore for FirestoreService {
         };
         let read_time = Some(encode_system_read_time(now()));
         let request_time = now();
-        let mut seen = BTreeSet::new();
-        let mut responses = Vec::new();
-        let mut evaluations = Vec::new();
-        let mut reads = Vec::new();
-        for name in request.documents {
-            if !seen.insert(name.clone()) {
-                continue;
-            }
-            let key = decode_document_name(&name)?;
-            if key.database() != &database {
-                return Err(Status::invalid_argument(
-                    "batch document belongs to a different database",
-                ));
-            }
-            let document = snapshot.get(&key);
-            evaluations.push(evaluation_request(
-                RequestOperation::Get,
-                &key,
-                request_time,
-                document.as_deref(),
-                None,
-                RulesQuery::default(),
-            ));
-            reads.push((key.clone(), document.clone()));
-            let result = if let Some(document) = document {
-                batch_get_documents_response::Result::Found(encode_document_masked(
-                    &key,
-                    &document,
-                    request.mask.as_ref(),
-                )?)
-            } else {
-                batch_get_documents_response::Result::Missing(name)
-            };
-            responses.push(BatchGetDocumentsResponse {
-                transaction: if new_transaction && responses.is_empty() {
-                    token.clone()
-                } else {
-                    Vec::new()
-                },
-                read_time,
-                result: Some(result),
-            });
-        }
-        require_atomic_rules_allowed(self.rules.evaluate_atomic_with_read_transaction(
-            &database,
-            &authorization,
-            &evaluations,
-            &SnapshotAccess::current(snapshot, database.project_id()),
-            read_write_transaction,
-        ))?;
+        // Decoding, masking and the atomic rules check of every requested
+        // document run on the read pool.
+        let (responses, reads) = {
+            let service = self.clone();
+            let database = database.clone();
+            let token = token.clone();
+            let names = request.documents;
+            let mask = request.mask;
+            self.run_read(move || {
+                let mut seen = BTreeSet::new();
+                let mut responses = Vec::new();
+                let mut evaluations = Vec::new();
+                let mut reads = Vec::new();
+                for name in names {
+                    if !seen.insert(name.clone()) {
+                        continue;
+                    }
+                    let key = decode_document_name(&name)?;
+                    if key.database() != &database {
+                        return Err(Status::invalid_argument(
+                            "batch document belongs to a different database",
+                        ));
+                    }
+                    let document = snapshot.get(&key);
+                    evaluations.push(evaluation_request(
+                        RequestOperation::Get,
+                        &key,
+                        request_time,
+                        document.as_deref(),
+                        None,
+                        RulesQuery::default(),
+                    ));
+                    reads.push((key.clone(), document.clone()));
+                    let result = if let Some(document) = document {
+                        batch_get_documents_response::Result::Found(encode_document_masked(
+                            &key,
+                            &document,
+                            mask.as_ref(),
+                        )?)
+                    } else {
+                        batch_get_documents_response::Result::Missing(name)
+                    };
+                    responses.push(BatchGetDocumentsResponse {
+                        transaction: if new_transaction && responses.is_empty() {
+                            token.clone()
+                        } else {
+                            Vec::new()
+                        },
+                        read_time,
+                        result: Some(result),
+                    });
+                }
+                require_atomic_rules_allowed(service.rules.evaluate_atomic_with_read_transaction(
+                    &database,
+                    &authorization,
+                    &evaluations,
+                    &SnapshotAccess::current(snapshot, database.project_id()),
+                    read_write_transaction,
+                ))?;
+                Ok((responses, reads))
+            })
+            .await?
+        };
+        let mut responses = responses;
         for (key, document) in reads {
             self.record_read(&token, &key, document.as_deref());
         }
@@ -1246,29 +1330,29 @@ impl Firestore for FirestoreService {
         }
         if explain_options.is_none() {
             let read_time = Some(encode_system_read_time(now()));
-            let mut documents =
-                execute_iter(&snapshot, &database, &query, self.query_policy.edition())
-                    .map_err(|error| query_status(&error))?
-                    .peekable();
-            let empty = documents.peek().is_none();
+            // Planning, and the scan or sort behind a first result, run on
+            // the read pool; the query fails as an RPC error exactly as
+            // before. The results are then decoded and encoded by a blocking
+            // producer paced by the client through a bounded channel, so a
+            // large result set never occupies an async worker and never
+            // sits fully materialized in memory.
+            let (mut documents, empty) = {
+                let snapshot = snapshot.clone();
+                let database = database.clone();
+                let query = query.clone();
+                let edition = self.query_policy.edition();
+                self.run_read(move || {
+                    let mut documents = execute_iter(&snapshot, &database, &query, edition)
+                        .map_err(|error| query_status(&error))?
+                        .peekable();
+                    let empty = documents.peek().is_none();
+                    Ok((documents, empty))
+                })
+                .await?
+            };
             let transaction_response = new_transaction.then(|| {
                 Ok(RunQueryResponse {
                     transaction: token.clone(),
-                    ..RunQueryResponse::default()
-                })
-            });
-            let service = self.clone();
-            let response_token = token.clone();
-            let document_responses = documents.enumerate().map(move |(index, document)| {
-                service.record_read(
-                    &response_token,
-                    document.key(),
-                    Some(document.document().as_ref()),
-                );
-                encode_query_document(&document).map(|document| RunQueryResponse {
-                    document: Some(document),
-                    read_time,
-                    skipped_results: if index == 0 { skipped_results } else { 0 },
                     ..RunQueryResponse::default()
                 })
             });
@@ -1278,16 +1362,60 @@ impl Firestore for FirestoreService {
                     ..RunQueryResponse::default()
                 })
             });
-            return Ok(Response::new(Box::pin(iter(
-                transaction_response
-                    .into_iter()
-                    .chain(document_responses)
-                    .chain(empty_response),
-            ))));
+            let (sender, receiver) = mpsc::channel(QUERY_STREAM_BUFFER);
+            tokio::task::spawn_blocking(move || {
+                if let Some(response) = transaction_response
+                    && sender.blocking_send(response.map(|r| (r, None))).is_err()
+                {
+                    return;
+                }
+                for (index, document) in documents.by_ref().enumerate() {
+                    let read = (document.key().clone(), Arc::clone(document.document()));
+                    let response =
+                        encode_query_document(&document).map(|document| RunQueryResponse {
+                            document: Some(document),
+                            read_time,
+                            skipped_results: if index == 0 { skipped_results } else { 0 },
+                            ..RunQueryResponse::default()
+                        });
+                    let failed = response.is_err();
+                    if sender
+                        .blocking_send(response.map(|r| (r, Some(read))))
+                        .is_err()
+                        || failed
+                    {
+                        return;
+                    }
+                }
+                if let Some(response) = empty_response {
+                    let _ = sender.blocking_send(response.map(|r| (r, None)));
+                }
+            });
+            // A transaction's read set grows exactly as the client consumes
+            // results, never ahead of it.
+            let service = self.clone();
+            let response_token = token.clone();
+            let responses = ReceiverStream::new(receiver).map(move |item| {
+                item.map(|(response, read)| {
+                    if let Some((key, document)) = read {
+                        service.record_read(&response_token, &key, Some(document.as_ref()));
+                    }
+                    response
+                })
+            });
+            return Ok(Response::new(Box::pin(responses)));
         }
         let started = Instant::now();
-        let documents = execute(&snapshot, &database, &query, self.query_policy.edition())
-            .map_err(|error| query_status(&error))?;
+        let documents = {
+            let snapshot = snapshot.clone();
+            let database = database.clone();
+            let query = query.clone();
+            let edition = self.query_policy.edition();
+            self.run_read(move || {
+                execute(&snapshot, &database, &query, edition).map_err(|error| query_status(&error))
+            })
+            .await?
+        };
         let execution_duration = started.elapsed();
         let document_count = documents.len();
         let read_time = Some(encode_system_read_time(now()));
@@ -1370,17 +1498,18 @@ impl Firestore for FirestoreService {
             .validate(&plan.query)
             .map_err(|error| index_status(&error))?;
         let snapshot = self.store.snapshot();
-        let documents = execute(
-            &snapshot,
-            &database,
-            &plan.query,
-            self.query_policy.edition(),
-        )
-        .map_err(|error| query_status(&error))?;
-        let results = documents
-            .iter()
-            .map(|document| encode_pipeline_document(document, &plan))
-            .collect::<Result<Vec<_>, _>>()?;
+        let results = {
+            let edition = self.query_policy.edition();
+            self.run_read(move || {
+                let documents = execute(&snapshot, &database, &plan.query, edition)
+                    .map_err(|error| query_status(&error))?;
+                documents
+                    .iter()
+                    .map(|document| encode_pipeline_document(document, &plan))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await?
+        };
         let response = ExecutePipelineResponse {
             results,
             execution_time: Some(encode_timestamp(now())),
@@ -1391,6 +1520,7 @@ impl Firestore for FirestoreService {
 
     type RunAggregationQueryStream = ResponseStream<RunAggregationQueryResponse>;
 
+    #[allow(clippy::too_many_lines)]
     async fn run_aggregation_query(
         &self,
         request: Request<RunAggregationQueryRequest>,
@@ -1464,7 +1594,17 @@ impl Firestore for FirestoreService {
             )));
         }
         let started = Instant::now();
-        let result = self.aggregate_snapshot(&snapshot, &database, &query, &token, aggregation)?;
+        let result = {
+            let service = self.clone();
+            let snapshot = snapshot.clone();
+            let database = database.clone();
+            let query = query.clone();
+            let token = token.clone();
+            self.run_read(move || {
+                service.aggregate_snapshot(&snapshot, &database, &query, &token, aggregation)
+            })
+            .await?
+        };
         let execution_duration = started.elapsed();
         let mut responses = Vec::with_capacity(
             1 + usize::from(new_transaction) + usize::from(explain_options.is_some()),
@@ -1521,14 +1661,16 @@ impl Firestore for FirestoreService {
             .map_err(|error| index_status(&error))?;
         let maximum = usize::try_from(request.partition_count)
             .map_err(|_| Status::invalid_argument("partition_count must be positive"))?;
-        let mut partitions = partition(
-            &snapshot,
-            &database,
-            &query,
-            self.query_policy.edition(),
-            maximum,
-        )
-        .map_err(|error| query_status(&error))?;
+        let mut partitions = {
+            let database = database.clone();
+            let query = query.clone();
+            let edition = self.query_policy.edition();
+            self.run_read(move || {
+                partition(&snapshot, &database, &query, edition, maximum)
+                    .map_err(|error| query_status(&error))
+            })
+            .await?
+        };
         let offset = if request.page_token.is_empty() {
             0
         } else {
@@ -1593,6 +1735,8 @@ impl Firestore for FirestoreService {
             self.store.clone(),
             self.query_policy.clone(),
             self.rules.clone(),
+            self.reads.clone(),
+            self.commits.clone(),
             authorization,
             self.store.runtime_memory_accounting(),
             request.into_inner(),
@@ -1612,20 +1756,16 @@ impl Firestore for FirestoreService {
                 .map_err(snapshot_status)?,
         };
         let (database, parent) = decode_parent(&request.parent)?;
-        let parent_segments = parent
-            .as_deref()
-            .map_or_else(Vec::new, |path| path.split('/').collect::<Vec<_>>());
-        let mut collection_ids = snapshot
-            .iter_documents(&database)
-            .filter_map(|(key, _)| {
-                let segments = key.path().split('/').collect::<Vec<_>>();
-                (segments.len() >= parent_segments.len() + 2
-                    && segments[..parent_segments.len()] == parent_segments)
-                    .then(|| segments[parent_segments.len()].to_owned())
+        // One subtree skip per collection: the walk never visits the
+        // documents inside a collection, only its first key.
+        let mut collection_ids = self
+            .run_read(move || {
+                Ok(snapshot
+                    .direct_collection_ids(&database, parent.as_deref())
+                    .into_iter()
+                    .collect::<Vec<_>>())
             })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+            .await?;
         if !request.page_token.is_empty() {
             collection_ids.retain(|id| id > &request.page_token);
         }
@@ -2209,18 +2349,54 @@ fn direct_child_matches(path: &str, parent: Option<&str>, collection_id: &str) -
     }
 }
 
-fn missing_direct_child(path: &str, parent: Option<&str>, collection_id: &str) -> Option<String> {
-    let segments = path.split('/').collect::<Vec<_>>();
-    let parent_segments = parent.map_or_else(Vec::new, |path| path.split('/').collect());
-    let direct_length = parent_segments.len() + 2;
-    if segments.len() <= direct_length
-        || segments[..parent_segments.len()] != parent_segments
-        || (!collection_id.is_empty()
-            && segments.get(parent_segments.len()) != Some(&collection_id))
-    {
-        return None;
+/// A page of a key-sorted listing: everything after `page_token` (the last
+/// key of the previous page), at most `page_size` entries, and the token for
+/// the next page when more remain.
+struct KeyPage<T> {
+    keys: Vec<T>,
+    next_page_token: String,
+}
+
+fn paginate_keys(
+    mut sorted: Vec<(DocumentKey, bool)>,
+    page_token: &str,
+    page_size: i32,
+) -> KeyPage<(DocumentKey, bool)> {
+    if !page_token.is_empty() {
+        sorted = sorted
+            .into_iter()
+            .skip_while(|(key, _)| key.to_string() != page_token)
+            .skip(1)
+            .collect();
     }
-    Some(segments[..direct_length].join("/"))
+    let page_size = normalize_page_size(page_size);
+    let has_more = sorted.len() > page_size;
+    sorted.truncate(page_size);
+    let next_page_token = if has_more {
+        sorted
+            .last()
+            .map(|(key, _)| key.to_string())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    KeyPage {
+        keys: sorted,
+        next_page_token,
+    }
+}
+
+/// Query responses a streaming producer may run ahead of its client. Each
+/// buffered response holds one document, so the bound also caps the
+/// memory a slow client can pin.
+const QUERY_STREAM_BUFFER: usize = 64;
+
+/// Concurrent CPU-bound reads the service admits at once: one per core, at
+/// least two so a long scan never serializes every other read behind it.
+fn read_parallelism() -> usize {
+    std::thread::available_parallelism()
+        .map_or(2, std::num::NonZeroUsize::get)
+        .max(2)
 }
 
 fn normalize_page_size(page_size: i32) -> usize {
@@ -2332,9 +2508,8 @@ mod tests {
         let mut paths = Vec::new();
 
         loop {
-            let (page, token) = service
-                .collect_list_documents(&snapshot, &database, None, &request, &orders)
-                .expect("page should collect");
+            let (page, token) =
+                service.collect_list_documents(&snapshot, &database, None, &request, &orders);
             paths.extend(
                 page.into_iter()
                     .map(|document| document.key.path().to_owned()),
@@ -2411,9 +2586,8 @@ mod tests {
             };
             let mut paths = Vec::new();
             loop {
-                let (page, token) = service
-                    .collect_list_documents(&snapshot, &database, None, &request, &orders)
-                    .expect("page");
+                let (page, token) =
+                    service.collect_list_documents(&snapshot, &database, None, &request, &orders);
                 assert!(page.len() <= 5);
                 paths.extend(page.into_iter().map(|listed| listed.key.path().to_owned()));
                 if token.is_empty() {
@@ -2436,71 +2610,38 @@ mod tests {
                 "no neighbour leaks and pages stay in key order"
             );
 
-            let (nested, token) = service
-                .collect_list_documents(
-                    &snapshot,
-                    &database,
-                    Some("items/3"),
-                    &ListDocumentsRequest {
-                        parent: format!("{database}/documents/items/3"),
-                        collection_id: "children".to_owned(),
-                        page_size: 1,
-                        ..ListDocumentsRequest::default()
-                    },
-                    &orders,
-                )
-                .expect("nested page");
+            let (nested, token) = service.collect_list_documents(
+                &snapshot,
+                &database,
+                Some("items/3"),
+                &ListDocumentsRequest {
+                    parent: format!("{database}/documents/items/3"),
+                    collection_id: "children".to_owned(),
+                    page_size: 1,
+                    ..ListDocumentsRequest::default()
+                },
+                &orders,
+            );
             assert_eq!(nested.len(), 1);
             assert_eq!(nested[0].key.path(), "items/3/children/c1");
             assert!(token.ends_with("items/3/children/c1"));
 
             // Without a collection id every direct child of the parent is
             // listed, across collections; this path still scans.
-            let (all, _) = service
-                .collect_list_documents(
-                    &snapshot,
-                    &database,
-                    None,
-                    &ListDocumentsRequest {
-                        parent: database.to_string(),
-                        page_size: 100,
-                        ..ListDocumentsRequest::default()
-                    },
-                    &orders,
-                )
-                .expect("unscoped page");
+            let (all, _) = service.collect_list_documents(
+                &snapshot,
+                &database,
+                None,
+                &ListDocumentsRequest {
+                    parent: database.to_string(),
+                    page_size: 100,
+                    ..ListDocumentsRequest::default()
+                },
+                &orders,
+            );
             assert_eq!(all.len(), 14);
         }
         let _ = std::fs::remove_dir_all(&directory);
-    }
-
-    #[test]
-    fn missing_direct_child_derives_only_the_requested_ancestor() {
-        assert_eq!(
-            missing_direct_child(
-                "runs/run/containers/missing/children/leaf",
-                Some("runs/run"),
-                "containers",
-            )
-            .as_deref(),
-            Some("runs/run/containers/missing")
-        );
-        assert_eq!(
-            missing_direct_child(
-                "runs/run/containers/existing",
-                Some("runs/run"),
-                "containers",
-            ),
-            None
-        );
-        assert_eq!(
-            missing_direct_child(
-                "runs/run/other/missing/children/leaf",
-                Some("runs/run"),
-                "containers",
-            ),
-            None
-        );
     }
 
     #[test]

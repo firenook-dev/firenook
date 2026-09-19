@@ -475,5 +475,34 @@ resume tokens issued before it; no emulator behaviour changed.
   the scaffold; `npm audit signatures` verifies the attestations);
   the native-upgrade verifier resumed state written by the last old-name
   engine (`0.1.0-next.3`) under this one.
-- [ ] Deprecation of the six packages published under the former name waits
-  for the consumer's pin swap and gates on `0.2.0-next.1`.
+- [x] The six packages published under the former name were deprecated on
+  2026-09-20 after the consumer's pin swap and gates on `0.2.0-next.1`
+  (every version carries the deprecation notice; a notice-only
+  `0.1.0-next.10` with no engine is their `latest`/`next`).
+
+## Read path and listener maintenance (`0.2.0-next.2`, unreleased)
+
+A fix round on the `0.2.0-next.1` engine, recorded in
+`support/read-path-audit.md`: the official Emulator UI's Firestore browser
+polls `ListCollectionIds` and `ListDocuments(show_missing)` every 10 s, and
+both walked the whole database and copied every document body; every
+Firestore read ran on the shared async workers, so four such scans stalled
+Auth, Storage and the UI itself. No new service or API.
+
+- [x] Key cursor with subtree skips in the store; `ListCollectionIds`,
+  `ListDocuments` (missing documents, unnamed listing), recursive delete and
+  clear-database walk keys under a prefix instead of the database.
+- [x] Index-only `count()` on both backends; the REST aggregation handler
+  shares the gRPC lazy count path; REST `runQuery` honours `select`
+  (recorded against the official emulator first).
+- [x] Bounded read pool for every CPU-bound Firestore read, listener
+  initialization and refresh, the REST query bodies and the suite export;
+  `RunQuery` streams through a bounded channel.
+- [x] Auth persists its state only when a request changed it, writing after
+  the lock is released; the Requests-diagnostics report is summarized once a
+  minute and events serialize outside the buffer lock.
+- [x] Listen streams wake on a commit notifier instead of a 10 ms poll and
+  maintain their views incrementally (window entry/eviction included), with a
+  randomized equivalence test against full evaluation on both backends.
+- [ ] Acceptance-host lanes and publication as `0.2.0-next.2`.
+

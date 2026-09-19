@@ -89,8 +89,11 @@ full emulator, any service subset, project id, listen host and Firestore
 database list starts, and the CLI carries `init`, `use`, `target:*`,
 `emulators:export`, `firestore:delete`, background-event `functions:invoke`,
 `mcp` and `--debug`; a source build ahead of the published engine may carry
-more, and this README does not qualify the full suite's developer tools for
-every application.
+more (the current source removes the whole-database scans behind
+`ListCollectionIds`, `ListDocuments(show_missing)` and unfiltered counts,
+runs Firestore reads on a bounded pool and maintains listeners incrementally;
+see `support/read-path-audit.md`), and this README does not qualify the full
+suite's developer tools for every application.
 
 [DESIGN.md](DESIGN.md) describes the component boundaries;
 [COMPATIBILITY.md](COMPATIBILITY.md) records limits and

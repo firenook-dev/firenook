@@ -3,12 +3,15 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use firenook_core_store::{
     Change, DatabaseName, DocumentKey, LogicalMemoryUsage, Revision, Snapshot,
     database_name_logical_bytes, document_key_logical_bytes,
 };
-use firenook_query_engine::{DatabaseEdition, Query, QueryError, QueryScope, execute_iter};
+use firenook_query_engine::{
+    DatabaseEdition, IncrementalQuery, OrderKey, Query, QueryError, QueryScope, execute_iter,
+};
 
 #[cfg(test)]
 mod invalidation_tests;
@@ -65,6 +68,9 @@ pub struct WatchTarget {
     edition: DatabaseEdition,
     revision: Revision,
     documents: BTreeMap<DocumentKey, WatchDocument>,
+    /// Each visible document's sort key under a query target's order, so a
+    /// change can be placed against the view without decoding the view.
+    order_keys: BTreeMap<DocumentKey, OrderKey>,
     logical_usage: LogicalMemoryUsage,
 }
 
@@ -77,7 +83,7 @@ impl WatchTarget {
         edition: DatabaseEdition,
         snapshot: &Snapshot,
     ) -> Result<(Self, ChangeBatch), QueryError> {
-        let documents = evaluate(snapshot, &database, &spec, edition)?;
+        let (documents, order_keys) = evaluate(snapshot, &database, &spec, edition)?;
         let logical_usage = visible_logical_usage(&database, &spec, &documents);
         let changes = documents
             .values()
@@ -100,6 +106,7 @@ impl WatchTarget {
                 edition,
                 revision: snapshot.revision(),
                 documents,
+                order_keys,
                 logical_usage,
             },
             batch,
@@ -140,23 +147,209 @@ impl WatchTarget {
         changes: Option<&[Change]>,
     ) -> Result<ChangeBatch, QueryError> {
         if snapshot.revision() >= self.revision
-            && changes.is_some_and(|changes| {
-                !changes.iter().any(|change| {
+            && let Some(changes) = changes
+        {
+            // The keys touched between this view and the snapshot, in the
+            // target's scope. Their state is read from the snapshot itself,
+            // never from the change log, so later commits cannot leak in.
+            let touched = changes
+                .iter()
+                .filter(|change| {
                     change.revision > self.revision
                         && change.revision <= snapshot.revision()
                         && self.contains_scope_key(&change.key)
                 })
-            })
-        {
-            self.revision = snapshot.revision();
-            return Ok(ChangeBatch {
-                revision: self.revision,
-                changes: Vec::new(),
-            });
+                .map(|change| change.key.clone())
+                .collect::<BTreeSet<_>>();
+            if touched.is_empty() {
+                self.revision = snapshot.revision();
+                return Ok(ChangeBatch {
+                    revision: self.revision,
+                    changes: Vec::new(),
+                });
+            }
+            if let Some(batch) = self.apply_touched(snapshot, &touched)? {
+                return Ok(batch);
+            }
         }
         self.refresh(snapshot)
     }
 
+    /// Applies the touched keys to the view without re-running the query.
+    /// Returns `None` when only a full evaluation can restore the view: a
+    /// document left a full `limit` window (the store must refill it), or
+    /// moved within one, or the query's shape is not maintained incrementally.
+    #[allow(clippy::too_many_lines)]
+    fn apply_touched(
+        &mut self,
+        snapshot: &Snapshot,
+        touched: &BTreeSet<DocumentKey>,
+    ) -> Result<Option<ChangeBatch>, QueryError> {
+        let compact = snapshot.is_disk_backed();
+        // Work on a copy: a fallback part-way through must leave the view
+        // exactly as it was, or the full refresh's diff would skip the
+        // transitions already applied here.
+        let mut documents = self.documents.clone();
+        let mut order_keys = self.order_keys.clone();
+        let mut changes = Vec::new();
+        match &self.spec {
+            TargetSpec::Documents(_) => {
+                for key in touched {
+                    match (documents.get(key), snapshot.get(key)) {
+                        (_, Some(document)) => {
+                            let visible = WatchDocument::new(key.clone(), document, None, compact);
+                            if documents.get(key) != Some(&visible) {
+                                changes.push(WatchChange {
+                                    key: key.clone(),
+                                    kind: ChangeKind::Upsert,
+                                    document: Some(visible.clone()),
+                                });
+                                documents.insert(key.clone(), visible);
+                            }
+                        }
+                        (Some(_), None) => {
+                            documents.remove(key);
+                            changes.push(WatchChange {
+                                key: key.clone(),
+                                kind: ChangeKind::Delete,
+                                document: None,
+                            });
+                        }
+                        (None, None) => {}
+                    }
+                }
+            }
+            TargetSpec::Query(query) => {
+                let Some(incremental) = IncrementalQuery::new(query, self.edition)? else {
+                    return Ok(None);
+                };
+                let window = incremental.window();
+                for key in touched {
+                    let stored = snapshot.get(key);
+                    let matches = stored
+                        .as_ref()
+                        .is_some_and(|document| incremental.matches(key, document));
+                    let was_visible = documents.contains_key(key);
+                    let full = window.is_some_and(|limit| documents.len() >= limit);
+                    match (was_visible, matches, stored) {
+                        (false, true, Some(document)) => {
+                            let order_key = incremental.order_key(key, &document);
+                            if full {
+                                // Only a document sorting before the window's
+                                // last entry enters it, and that entry leaves.
+                                let Some((last_key, last_order)) =
+                                    last_in_window(&incremental, &order_keys)
+                                else {
+                                    return Ok(None);
+                                };
+                                if incremental.compare(key, &order_key, &last_key, &last_order)
+                                    != std::cmp::Ordering::Less
+                                {
+                                    continue;
+                                }
+                                documents.remove(&last_key);
+                                order_keys.remove(&last_key);
+                                changes.push(WatchChange {
+                                    key: last_key,
+                                    kind: ChangeKind::Remove,
+                                    document: None,
+                                });
+                            }
+                            let visible = WatchDocument::new(
+                                key.clone(),
+                                Arc::clone(&document),
+                                incremental.project(&document),
+                                compact,
+                            );
+                            changes.push(WatchChange {
+                                key: key.clone(),
+                                kind: ChangeKind::Upsert,
+                                document: Some(visible.clone()),
+                            });
+                            documents.insert(key.clone(), visible);
+                            order_keys.insert(key.clone(), order_key);
+                        }
+                        (true, true, Some(document)) => {
+                            let order_key = incremental.order_key(key, &document);
+                            if full && order_keys.get(key) != Some(&order_key) {
+                                // A move inside a full window may cross its edge.
+                                return Ok(None);
+                            }
+                            let visible = WatchDocument::new(
+                                key.clone(),
+                                Arc::clone(&document),
+                                incremental.project(&document),
+                                compact,
+                            );
+                            if documents.get(key) != Some(&visible) {
+                                changes.push(WatchChange {
+                                    key: key.clone(),
+                                    kind: ChangeKind::Upsert,
+                                    document: Some(visible.clone()),
+                                });
+                                documents.insert(key.clone(), visible);
+                            }
+                            order_keys.insert(key.clone(), order_key);
+                        }
+                        (true, false, stored) => {
+                            if full {
+                                // The window lost an entry; the store decides
+                                // which document fills it.
+                                return Ok(None);
+                            }
+                            documents.remove(key);
+                            order_keys.remove(key);
+                            changes.push(WatchChange {
+                                key: key.clone(),
+                                kind: if stored.is_some() {
+                                    ChangeKind::Remove
+                                } else {
+                                    ChangeKind::Delete
+                                },
+                                document: None,
+                            });
+                        }
+                        (false, false, _) | (false | true, true, None) => {}
+                    }
+                }
+            }
+        }
+        self.revision = snapshot.revision();
+        if !changes.is_empty() {
+            self.logical_usage = visible_logical_usage(&self.database, &self.spec, &documents);
+        }
+        self.documents = documents;
+        self.order_keys = order_keys;
+        Ok(Some(ChangeBatch {
+            revision: snapshot.revision(),
+            changes,
+        }))
+    }
+}
+
+/// The window's last entry under the query order, from the cached sort keys
+/// alone.
+fn last_in_window(
+    incremental: &IncrementalQuery,
+    order_keys: &BTreeMap<DocumentKey, OrderKey>,
+) -> Option<(DocumentKey, OrderKey)> {
+    let mut last: Option<(&DocumentKey, &OrderKey)> = None;
+    for (key, order_key) in order_keys {
+        last = match last {
+            None => Some((key, order_key)),
+            Some((last_key, last_order))
+                if incremental.compare(key, order_key, last_key, last_order)
+                    == std::cmp::Ordering::Greater =>
+            {
+                Some((key, order_key))
+            }
+            Some(last) => Some(last),
+        };
+    }
+    last.map(|(key, order_key)| (key.clone(), order_key.clone()))
+}
+
+impl WatchTarget {
     fn contains_scope_key(&self, key: &DocumentKey) -> bool {
         if key.database() != &self.database {
             return false;
@@ -181,7 +374,7 @@ impl WatchTarget {
 
     /// Re-evaluates the target and returns only transitions from its prior view.
     pub fn refresh(&mut self, snapshot: &Snapshot) -> Result<ChangeBatch, QueryError> {
-        let next = evaluate(snapshot, &self.database, &self.spec, self.edition)?;
+        let (next, order_keys) = evaluate(snapshot, &self.database, &self.spec, self.edition)?;
         let keys = self
             .documents
             .keys()
@@ -215,6 +408,7 @@ impl WatchTarget {
         }
         self.revision = snapshot.revision();
         self.logical_usage = visible_logical_usage(&self.database, &self.spec, &next);
+        self.order_keys = order_keys;
         self.documents = next;
         Ok(ChangeBatch {
             revision: snapshot.revision(),
@@ -248,38 +442,58 @@ fn visible_logical_usage(
     )
 }
 
+type View = (
+    BTreeMap<DocumentKey, WatchDocument>,
+    BTreeMap<DocumentKey, OrderKey>,
+);
+
+/// Evaluates the target. A query target's sort keys are taken while each
+/// result is still decoded, so a compact disk view is never decoded again
+/// just to place a later change.
 fn evaluate(
     snapshot: &Snapshot,
     database: &DatabaseName,
     spec: &TargetSpec,
     edition: DatabaseEdition,
-) -> Result<BTreeMap<DocumentKey, WatchDocument>, QueryError> {
+) -> Result<View, QueryError> {
     match spec {
         TargetSpec::Query(query) => {
-            execute_iter(snapshot, database, query, edition).map(|documents| {
-                documents
-                    .map(|document| {
+            let incremental = IncrementalQuery::new(query, edition)?;
+            let mut documents = BTreeMap::new();
+            let mut order_keys = BTreeMap::new();
+            for document in execute_iter(snapshot, database, query, edition)? {
+                if let Some(incremental) = &incremental {
+                    order_keys.insert(
+                        document.key().clone(),
+                        incremental.order_key(document.key(), document.document()),
+                    );
+                }
+                let visible = WatchDocument::new(
+                    document.key().clone(),
+                    document.document().clone(),
+                    document.projected_fields().cloned(),
+                    snapshot.is_disk_backed(),
+                );
+                documents.insert(visible.key.clone(), visible);
+            }
+            Ok((documents, order_keys))
+        }
+        TargetSpec::Documents(keys) => Ok((
+            keys.iter()
+                .filter_map(|key| {
+                    snapshot.get(key).map(|document| {
                         let visible = WatchDocument::new(
-                            document.key().clone(),
-                            document.document().clone(),
-                            document.projected_fields().cloned(),
+                            key.clone(),
+                            document,
+                            None,
                             snapshot.is_disk_backed(),
                         );
-                        (visible.key.clone(), visible)
+                        (key.clone(), visible)
                     })
-                    .collect()
-            })
-        }
-        TargetSpec::Documents(keys) => Ok(keys
-            .iter()
-            .filter_map(|key| {
-                snapshot.get(key).map(|document| {
-                    let visible =
-                        WatchDocument::new(key.clone(), document, None, snapshot.is_disk_backed());
-                    (key.clone(), visible)
                 })
-            })
-            .collect()),
+                .collect(),
+            BTreeMap::new(),
+        )),
     }
 }
 

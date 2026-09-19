@@ -167,6 +167,7 @@ fn test_store(disk: bool) -> (Store, Option<OwnedDirectory>) {
     (store, directory)
 }
 
+#[allow(clippy::too_many_lines)]
 async fn reproduce(disk: bool, mode: AddMode) {
     let (store, _directory) = test_store(disk);
     set(&store, "a", 0);
@@ -180,6 +181,7 @@ async fn reproduce(disk: bool, mode: AddMode) {
         sender: &sender,
         query_policy: &policy,
         rules: &rules,
+        reads: &ReadPool::default(),
         authorization: &AuthorizationSource::Owner,
     };
     let mut live = BTreeMap::new();
@@ -306,6 +308,7 @@ async fn global_checkpoint_reauthorizes_sibling_before_new_owner_target() {
         sender: &sender,
         query_policy: &policy,
         rules: &rules,
+        reads: &ReadPool::default(),
         authorization: &AuthorizationSource::Owner,
     };
     let mut live = BTreeMap::new();
@@ -361,6 +364,7 @@ async fn global_checkpoint_rejected_add_does_not_advance_siblings() {
         sender: &sender,
         query_policy: &policy,
         rules: &rules,
+        reads: &ReadPool::default(),
         authorization: &AuthorizationSource::Owner,
     };
     let mut live = BTreeMap::new();
@@ -411,6 +415,7 @@ async fn global_checkpoint_sibling_refresh_uses_only_captured_snapshot() {
         sender: &sender,
         query_policy: &policy,
         rules: &rules,
+        reads: &ReadPool::default(),
         authorization: &AuthorizationSource::Owner,
     };
     let mut live = BTreeMap::new();
@@ -430,9 +435,16 @@ async fn global_checkpoint_sibling_refresh_uses_only_captured_snapshot() {
     let captured = store.snapshot();
     set(&store, "a", 2); // A concurrent commit must not replace the captured boundary.
     assert!(
-        refresh_targets_at_snapshot(&store, &captured, &rules, &sender, &mut live)
-            .await
-            .unwrap()
+        refresh_targets_at_snapshot(
+            &store,
+            &captured,
+            &rules,
+            &ReadPool::default(),
+            &sender,
+            &mut live
+        )
+        .await
+        .unwrap()
     );
     assert_eq!(live[&A].watch.revision(), captured.revision());
     let frame = receiver.try_recv().unwrap().unwrap();
@@ -447,7 +459,7 @@ async fn global_checkpoint_sibling_refresh_uses_only_captured_snapshot() {
         receiver.try_recv().is_err(),
         "helper cannot emit its own global checkpoint"
     );
-    refresh_targets(&store, &rules, &sender, &mut live)
+    refresh_targets(&store, &rules, &ReadPool::default(), &sender, &mut live)
         .await
         .unwrap();
     through_checkpoint(&mut receiver, &mut cache);

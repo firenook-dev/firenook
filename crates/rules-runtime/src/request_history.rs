@@ -61,6 +61,13 @@ pub struct HistoryStatistics {
     pub evicted_events: usize,
     /// Omitted events because of size, serialization failure or contention.
     pub omitted_events: usize,
+    /// Omitted because another diagnostic operation held the buffer, or too
+    /// many events were being serialized at once.
+    pub omitted_busy: usize,
+    /// Omitted because one event exceeded the serialized history limit.
+    pub omitted_oversized: usize,
+    /// Omitted because the event failed JSON serialization.
+    pub omitted_invalid: usize,
     /// Slow/overflowing subscribers disconnected instead of blocking producers.
     pub disconnected_subscribers: usize,
 }
@@ -70,8 +77,18 @@ pub struct HistoryStatistics {
 pub struct RequestHistory {
     state: Arc<Mutex<State>>,
     omitted: Arc<AtomicUsize>,
+    omitted_busy: Arc<AtomicUsize>,
+    omitted_oversized: Arc<AtomicUsize>,
+    omitted_invalid: Arc<AtomicUsize>,
+    /// Events being serialized outside the buffer lock right now.
+    serializing: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
 }
+
+/// Events that may be serialized concurrently, each bounded by
+/// [`MAXIMUM_BYTES`]; further producers are omitted as busy rather than
+/// allocating without bound.
+const MAXIMUM_CONCURRENT_SERIALIZATIONS: usize = 16;
 
 #[derive(Default)]
 struct State {
@@ -163,28 +180,42 @@ impl RequestHistory {
     }
 
     fn record_at(&self, event: &impl Serialize, now: Instant) -> RecordOutcome {
-        // Serialize under the try-locked diagnostic mutex: simultaneous requests
-        // cannot allocate unbounded numbers of maximum-sized temporary frames.
-        let Ok(mut state) = self.state.try_lock() else {
-            self.omitted.fetch_add(1, Ordering::Relaxed);
-            return RecordOutcome::Busy;
-        };
+        // Admission is a non-blocking probe of the buffer lock: a producer
+        // that finds the buffer held by a slow diagnostic operation neither
+        // waits nor allocates the event. Serialization then happens outside
+        // the lock, bounded in count and in bytes per event, so the lock is
+        // held only for the push and the buffer no longer contends with
+        // concurrent requests serializing their events.
+        match self.state.try_lock() {
+            Ok(admitted) => drop(admitted),
+            Err(_) => return self.omit(&self.omitted_busy, RecordOutcome::Busy),
+        }
+        if self.serializing.fetch_add(1, Ordering::AcqRel) >= MAXIMUM_CONCURRENT_SERIALIZATIONS {
+            self.serializing.fetch_sub(1, Ordering::AcqRel);
+            return self.omit(&self.omitted_busy, RecordOutcome::Busy);
+        }
         let mut writer = CappedWriter(Vec::new());
-        if serde_json::to_writer(&mut writer, event).is_err() {
-            self.omitted.fetch_add(1, Ordering::Relaxed);
+        let serialized = serde_json::to_writer(&mut writer, event);
+        self.serializing.fetch_sub(1, Ordering::AcqRel);
+        if serialized.is_err() {
             return if writer.0.len() == MAXIMUM_BYTES - 3 {
-                RecordOutcome::Oversized
+                self.omit(&self.omitted_oversized, RecordOutcome::Oversized)
             } else {
-                RecordOutcome::Invalid
+                self.omit(&self.omitted_invalid, RecordOutcome::Invalid)
             };
         }
         if writer.0.first() != Some(&b'{') {
-            self.omitted.fetch_add(1, Ordering::Relaxed);
-            return RecordOutcome::Invalid;
+            return self.omit(&self.omitted_invalid, RecordOutcome::Invalid);
         }
         let text: Arc<str> = String::from_utf8(writer.0)
             .expect("JSON serializer produces UTF-8")
             .into();
+        // Only pushes and subscriber bookkeeping ever hold this lock now, so
+        // the wait is microseconds, never a database stall.
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.expire(now);
         while state.entries.len() >= MAXIMUM_EVENTS || state.bytes + text.len() + 3 > MAXIMUM_BYTES
         {
@@ -253,6 +284,12 @@ impl RequestHistory {
         Ok(subscription)
     }
 
+    fn omit(&self, reason: &AtomicUsize, outcome: RecordOutcome) -> RecordOutcome {
+        reason.fetch_add(1, Ordering::Relaxed);
+        self.omitted.fetch_add(1, Ordering::Relaxed);
+        outcome
+    }
+
     /// Expire idle history and return metadata-only statistics. The serving
     /// transport must call this periodically, not only when requests arrive.
     #[must_use]
@@ -272,6 +309,9 @@ impl RequestHistory {
             subscribers: self.active.load(Ordering::Acquire),
             evicted_events: state.evicted,
             omitted_events: self.omitted.load(Ordering::Relaxed),
+            omitted_busy: self.omitted_busy.load(Ordering::Relaxed),
+            omitted_oversized: self.omitted_oversized.load(Ordering::Relaxed),
+            omitted_invalid: self.omitted_invalid.load(Ordering::Relaxed),
             disconnected_subscribers: state.disconnected,
         })
     }
