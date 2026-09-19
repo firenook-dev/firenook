@@ -23,12 +23,12 @@
     ],
     "recorded": {
       "onlyDerivation": "filterEmulatorTargets: a top-level section or an emulators.<name> entry configures an emulator; --only filters without dependency expansion; zero targets = 'No emulators to start'",
-      "demoStorageDefault": "no storage section on a demo project => templates/emulators/default_storage.rules (open) with the 'Detected demo project ID … default (open) rules configuration' line; a real project must configure rules",
+      "demoStorageDefault": "no storage section on a demo project => templates/emulators/default_storage.rules (open) with the 'Detected demo project ID \u2026 default (open) rules configuration' line; a real project must configure rules",
       "demoBanner": "Detected demo project ID \"<id>\", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.",
       "realProjectWarning": "The following emulators are not running, calls to these services from the Functions emulator will affect production: <list> (only when functions runs and only for real ids)",
       "hostPolicy": "0.0.0.0 and :: accepted without a warning; connectableHostname maps them to 127.0.0.1 / ::1 for the hub, the UI and every exported *_EMULATOR_HOST",
       "uiDisabled": "ui.enabled false also stops the logging emulator; the hub is unaffected",
-      "singleProjectMode": "default true; the Auth emulator logs WARN 'Multiple projectIds are not recommended in single project mode…' and keeps serving; never an error",
+      "singleProjectMode": "default true; the Auth emulator logs WARN 'Multiple projectIds are not recommended in single project mode\u2026' and keeps serving; never an error",
       "multipleDatabases": "the official Firestore emulator refuses a firestore array with more than one entry ('Cloud Firestore Emulator does not support multiple databases yet.') and then loads no rules"
     }
   },
@@ -67,5 +67,23 @@
       "policy": "a differentiator, not parity: every named database is served with its own rules (database-specific, then the project-wide hot-reload ruleset, then the default) and exported; the official emulator refuses the configuration"
     }
   },
-  "receipts": {}
+  "receipts": {
+    "l5": {
+      "date": "2026-09-19",
+      "candidate": "0.1.0-local.ged21d020ccfd (packaging/build-local.mjs on head ed21d02, installed as the consumer's local candidate)",
+      "consumerGates": {
+        "extensionsGate": "PASS: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (same as the official oracle capture), ready 7.8 s",
+        "integration": "consumer integration gate 24/24",
+        "installedSmoke": "consumer installed-launcher smoke PASS (default launcher; 21 Functions; two listeners; Unicode; Auth; gzip Storage both buckets; Pub/Sub; UI; export/shutdown; official-format import; dataset isolation; immutable seed protected)",
+        "browserJourneys": "the consumer's nine browser journeys PASS on the macOS full-data stack with external providers disabled: otp-auth-login 5047 ms, dashboard-and-deck-list 1276, existing-deck-and-listener-edit 15123, catalog-slide-add 24503, deck-image-upload 14117, duplicate-and-delete-deck 4969, dotnet-deck-export 8731, dev-admin-pages 15258, sign-out-and-sign-in 4282; 0 page errors, 0 failures among 6127 required first-party requests (7059 first-party responses, 8 WebSocket connections); the persistent full-data working state reopened on the candidate and the suite stopped cleanly (16 functions, 2 schedules, 0 task queues, 211,257 documents, 1 Auth user, 33,354 objects)"
+      },
+      "syntheticEndToEnd": "a fresh project scaffolded by `fireside init` with firebase-functions 7.4.0 (Express 5) on the packed candidate: helloWorld over HTTP, functions:invoke for an HTTPS function, a Firestore document event and a task-queue payload, getFunctions().taskQueue().enqueue() from a function reaching the handler, /queueStats, firestore:delete (document, shallow refused without -r, recursive with -f), emulators:export, use, target:apply, a second Firestore database (rules line per database, reads on both), fireside mcp (19 tools: status, query, cross-database get, auth_create_user, functions_list, tasks_stats), init --adopt on a hosting-bearing firebase.json (skip + additions), a real project id on --host 0.0.0.0 with the official banners and loopback connect addresses",
+      "pairedAcceptance": "the per-release-line 2 h soak stands from next.6/next.7; the consumer gates and journeys above ran on this candidate",
+      "pending": [
+        "exact-candidate CI on the feature PR head",
+        "release PR, tag, release workflow, registry verification",
+        "consumer pin bump with the extensions gate on the installed package"
+      ]
+    }
+  }
 }
