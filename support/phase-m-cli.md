@@ -5,9 +5,11 @@ Written 2026-09-19 against `main` 2c1ceb3 (published engine 03000f0,
 and [Phase L](phase-l-configuration.md) (configuration shapes) as
 `0.1.0-next.9`.
 
-## Status
+## Status (2026-09-19)
 
-See the checklist in [ROADMAP.md](../ROADMAP.md#phase-m--cli-surface-010-next9-with-phases-k-and-l)
+Published as `0.1.0-next.9` on 2026-09-19 (release run 35440801335, `next` → next.9,
+`latest` untouched) after exact-candidate CI on 7fb0c35, the consumer gates
+and the nine browser journeys on the local candidate; see the checklist in [ROADMAP.md](../ROADMAP.md#phase-m--cli-surface-010-next9-with-phases-k-and-l)
 and the receipts in `benchmarks/phase-m-cli.json`.
 
 ## Goal

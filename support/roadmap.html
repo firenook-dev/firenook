@@ -215,7 +215,7 @@
 // with a receipt, "planned" only when a support/phase-*.md exists.
 const DATA = {
   updated: "2026-09-19",
-  engine: "candidate 0.1.0-next.9 (Phases K + L + M, qualification in progress) · published 0.1.0-next.8 (engine 03000f0cc082, Phases I + J, release run 35372788758, 2026-09-19) · previous 0.1.0-next.7 (engine 0720434e3de7, Phases G + H, 2026-09-18)",
+  engine: "published 0.1.0-next.9 (engine 7fb0c350078c, Phases K + L + M, release run 35440801335, 2026-09-19) · previous 0.1.0-next.8 (engine 03000f0cc082, Phases I + J, 2026-09-19) · previous 0.1.0-next.7 (engine 0720434e3de7, Phases G + H, 2026-09-18)",
   // dependency status: required | optional | asset | gone
   dependencies: [
   {
@@ -426,46 +426,46 @@ const DATA = {
   {
     "letter": "K",
     "title": "Cloud Tasks emulator",
-    "status": "qualified",
+    "status": "done",
     "release": "next.9",
     "desc": "The official Cloud Tasks emulator on the Tasks port: queue registration for every onTaskDispatched export, enqueue, delete and /queueStats as firebase-tools 15.22.0 serves them, and its dispatcher — token bucket, dispatch slots, the X-CloudTasks headers, the retry ladder and backoff formula, execution count on non-5xx failures, the dispatch deadline, the idle/active poll cadence; corpus recorded with the Phase H harness first.",
-    "receipt": "support/phase-k-tasks.md · benchmarks/phase-k-tasks.json (K0 frozen, K1–K3 receipts) · conformance/fixtures/tasks-v1 (6 programs / 61 steps / 39 handler observations) · replay 61/61, 0 mismatches, no divergences, three runs identical · Phase H corpus 271/271 with the Tasks emulator mounted · crates/tasks-front",
+    "receipt": "support/phase-k-tasks.md · benchmarks/phase-k-tasks.json (K0 frozen, K1–K5 receipts incl. publication) · release run 35440801335 · next.9 2026-09-19 · conformance/fixtures/tasks-v1 (6 programs / 61 steps / 39 handler observations) · replay 61/61, 0 mismatches, no divergences, three runs identical · Phase H corpus 271/271 with the Tasks emulator mounted · crates/tasks-front",
     "steps": [
       ["K0", true],
       ["K1", true],
       ["K2", true],
       ["K3", true],
-      ["K5", false]
+      ["K5", true]
     ]
   },
   {
     "letter": "L",
     "title": "Configuration shapes",
-    "status": "qualified",
+    "status": "done",
     "release": "next.9",
     "desc": "Every firebase.json / .firebaserc / launch shape a generic project brings, as the official CLI reads them: service subsets (--only, projects without Functions or Storage), any project id with the official banners, any listen host with loopback connect addresses and a public-bind warning, ui.enabled: false (with the logging listener, as officially), singleProjectMode, multiple Firestore databases with per-database rules and export, storage object form and absence, missing .firebaserc.",
-    "receipt": "support/phase-l-configuration.md · benchmarks/phase-l-configuration.json · suite-runtime service selection, connect_host, startup banners, project-scope warning, debug log · rules per database · packaging/cli.test.mjs derivation and flag tests",
+    "receipt": "support/phase-l-configuration.md · benchmarks/phase-l-configuration.json · suite-runtime service selection, connect_host, startup banners, project-scope warning, debug log · rules per database · packaging/cli.test.mjs derivation and flag tests · release run 35440801335 · next.9 2026-09-19",
     "steps": [
       ["L1", true],
       ["L2", true],
       ["L3", true],
       ["L4", true],
-      ["L5", false]
+      ["L5", true]
     ]
   },
   {
     "letter": "M",
     "title": "CLI surface",
-    "status": "qualified",
+    "status": "done",
     "release": "next.9",
     "desc": "Every command row except the terminal launch experience: emulators:export on a running suite, init and init --adopt, use, target:apply / target:clear, firestore:delete (path-scoped emulator route), functions:invoke --event-data with the official shell's envelopes, a dependency-free mcp server, --debug log files, the official compatibility flags and the exec shell-string form; functions:shell deliberately not provided.",
-    "receipt": "support/phase-m-cli.md · benchmarks/phase-m-cli.json · packaging/cli.test.mjs + cli-commands.test.mjs (92 tests) · rest-front path-scoped delete test",
+    "receipt": "support/phase-m-cli.md · benchmarks/phase-m-cli.json · packaging/cli.test.mjs + cli-commands.test.mjs (92 tests) · rest-front path-scoped delete test · release run 35440801335 · next.9 2026-09-19",
     "steps": [
       ["M1", true],
       ["M2", true],
       ["M3", true],
       ["M4", true],
-      ["M5", false]
+      ["M5", true]
     ]
   }
 ],
@@ -536,8 +536,8 @@ const DATA = {
   },
   {
     "name": "Cloud Tasks",
-    "status": "qualified",
-    "note": "Phase K, next.9 candidate: the official four routes, a queue per onTaskDispatched export, the dispatcher (token bucket, slots, X-CloudTasks headers, retry ladder, dispatch deadline), /queueStats; 61-step corpus replays 0 mismatches",
+    "status": "done",
+    "note": "Phase K, next.9: the official four routes, a queue per onTaskDispatched export, the dispatcher (token bucket, slots, X-CloudTasks headers, retry ladder, dispatch deadline), /queueStats; 61-step corpus replays 0 mismatches",
     "remaining": "—",
     "size": "—"
   },
@@ -622,29 +622,29 @@ const DATA = {
   },
   {
     "name": "emulators:export (running suite)",
-    "status": "qualified",
-    "note": "Locator, hub check, destination guard, /_admin/export (next.9 candidate)",
+    "status": "done",
+    "note": "Locator, hub check, destination guard, /_admin/export (next.9)",
     "remaining": "—",
     "size": "—"
   },
   {
     "name": "init",
-    "status": "qualified",
-    "note": "Non-interactive scaffold with the official templates; --adopt diagnoses and completes an existing project (next.9 candidate)",
+    "status": "done",
+    "note": "Non-interactive scaffold with the official templates; --adopt diagnoses and completes an existing project (next.9)",
     "remaining": "—",
     "size": "—"
   },
   {
     "name": "use / target:apply / target:clear",
-    "status": "qualified",
-    "note": "Pure .firebaserc edits, no login (next.9 candidate)",
+    "status": "done",
+    "note": "Pure .firebaserc edits, no login (next.9)",
     "remaining": "—",
     "size": "—"
   },
   {
     "name": "firestore:delete against the emulator",
-    "status": "qualified",
-    "note": "Path-scoped emulator route (recursive/shallow) and whole-database clear; no login (next.9 candidate)",
+    "status": "done",
+    "note": "Path-scoped emulator route (recursive/shallow) and whole-database clear; no login (next.9)",
     "remaining": "—",
     "size": "—"
   },
@@ -657,7 +657,7 @@ const DATA = {
   },
   {
     "name": "functions:shell / functions:invoke",
-    "status": "qualified",
+    "status": "done",
     "note": "functions:invoke calls HTTPS/callable functions and injects background events with the official shell's envelopes; the REPL is deliberately not provided (no second Functions runtime)",
     "remaining": "—",
     "size": "—"
@@ -678,15 +678,15 @@ const DATA = {
   },
   {
     "name": "mcp (local MCP server)",
-    "status": "qualified",
-    "note": "Dependency-free stdio server: status, Firestore, Auth, Storage, Functions, Pub/Sub, Tasks, export (next.9 candidate)",
+    "status": "done",
+    "note": "Dependency-free stdio server: status, Firestore, Auth, Storage, Functions, Pub/Sub, Tasks, export (next.9)",
     "remaining": "—",
     "size": "—"
   },
   {
     "name": "--debug / debug log files",
-    "status": "qualified",
-    "note": "One fireside-debug.log per run under .fireside/runs, never deleted (next.9 candidate)",
+    "status": "done",
+    "note": "One fireside-debug.log per run under .fireside/runs, never deleted (next.9)",
     "remaining": "—",
     "size": "—"
   },
@@ -701,22 +701,22 @@ const DATA = {
   config: [
   {
     "name": "--only subset / project without Functions or Storage",
-    "status": "qualified",
-    "note": "Official service derivation, --only filter, every listener/runtime conditional (next.9 candidate)",
+    "status": "done",
+    "note": "Official service derivation, --only filter, every listener/runtime conditional (next.9)",
     "remaining": "—",
     "size": "—"
   },
   {
     "name": "Non-demo project id",
-    "status": "qualified",
-    "note": "Accepted with the official banners; workers get the emulator hosts and no credentials (next.9 candidate)",
+    "status": "done",
+    "note": "Accepted with the official banners; workers get the emulator hosts and no credentials (next.9)",
     "remaining": "—",
     "size": "—"
   },
   {
     "name": "host 0.0.0.0 (Docker, CI, LAN devices)",
-    "status": "qualified",
-    "note": "Wildcard bind with loopback connect addresses and one warning (next.9 candidate)",
+    "status": "done",
+    "note": "Wildcard bind with loopback connect addresses and one warning (next.9)",
     "remaining": "—",
     "size": "—"
   },
@@ -729,15 +729,15 @@ const DATA = {
   },
   {
     "name": "Multiple Firestore databases",
-    "status": "qualified",
-    "note": "firestore arrays, rules per database, every database exported (the official emulator refuses this) (next.9 candidate)",
+    "status": "done",
+    "note": "firestore arrays, rules per database, every database exported (the official emulator refuses this) (next.9)",
     "remaining": "—",
     "size": "—"
   },
   {
     "name": "ui.enabled: false / singleProjectMode: false",
-    "status": "qualified",
-    "note": "Both honoured; the UI flag also drops the logging listener as officially (next.9 candidate)",
+    "status": "done",
+    "note": "Both honoured; the UI flag also drops the logging listener as officially (next.9)",
     "remaining": "—",
     "size": "—"
   },

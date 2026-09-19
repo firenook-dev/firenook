@@ -196,7 +196,6 @@
       "syntheticEndToEnd": "a fresh project scaffolded by `fireside init` with firebase-functions 7.4.0 (Express 5) on the packed candidate: helloWorld over HTTP, functions:invoke for an HTTPS function, a Firestore document event and a task-queue payload, getFunctions().taskQueue().enqueue() from a function reaching the handler, /queueStats, firestore:delete (document, shallow refused without -r, recursive with -f), emulators:export, use, target:apply, a second Firestore database (rules line per database, reads on both), fireside mcp (19 tools: status, query, cross-database get, auth_create_user, functions_list, tasks_stats), init --adopt on a hosting-bearing firebase.json (skip + additions), a real project id on --host 0.0.0.0 with the official banners and loopback connect addresses",
       "pairedAcceptance": "the per-release-line 2 h soak stands from next.6/next.7; the consumer gates and journeys above ran on this candidate",
       "pending": [
-        "release PR, tag, release workflow, registry verification",
         "consumer pin bump with the extensions gate on the installed package"
       ],
       "exactCandidateCi": {
@@ -222,6 +221,16 @@
           "verify"
         ],
         "note": "the Cloud Tasks replay, the Functions runtime corpus, the Auth and Pub/Sub replays and the Pub/Sub client-library check run inside the Differential harness job; the engine sources at this head equal ed21d02 (docs-only commits after it)"
+      },
+      "publication": {
+        "version": "0.1.0-next.9",
+        "tag": "npm-v0.1.0-next.9",
+        "taggedCommit": "e9c58e0f2dcf8cbaa47490085f6389e6ea4363cd",
+        "engineRevision": "7fb0c350078c94fc65a83a6f3c012a917779fbbd",
+        "releaseRun": 35440801335,
+        "publishedAt": "2026-09-19T12:08:25.507Z",
+        "registry": "registry integrity (sha512 and sha1) equal to the release assets for all six packages; npm audit signatures on a fresh install; GitHub prerelease with latest=false",
+        "distTags": "next -> 0.1.0-next.9; latest untouched (stable promotion is a separate decision)"
       }
     }
   }
