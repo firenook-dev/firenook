@@ -125,6 +125,10 @@ pub struct FunctionDefinition {
     /// Presence identifies HTTP and callable handlers.
     #[serde(default)]
     pub https_trigger: Option<JsonValue>,
+    /// `onTaskDispatched` queue settings (`retryConfig`, `rateLimits`), the
+    /// document the Functions emulator registers with the Tasks emulator.
+    #[serde(default)]
+    pub task_queue_trigger: Option<JsonValue>,
 }
 
 /// Discovered background event filter.
@@ -1331,6 +1335,63 @@ mod tests {
                 .event_filters["topic"],
             "projects/demo-fireside-phase4-suite-oracle/topics/phase4-topic"
         );
+    }
+
+    #[test]
+    fn functions_inventory_keeps_the_task_queue_trigger_document() {
+        let inventory = FunctionsInventory::from_backends_json(
+            &json!({
+                "backends": [{
+                    "functionTriggers": [
+                        {
+                            "entryPoint": "taskRetry",
+                            "platform": "gcfv2",
+                            "region": "us-central1",
+                            "name": "taskRetry",
+                            "id": "us-central1-taskRetry",
+                            "httpsTrigger": {},
+                            "taskQueueTrigger": {
+                                "retryConfig": {
+                                    "maxAttempts": 3,
+                                    "maxRetrySeconds": null,
+                                    "maxBackoffSeconds": 1,
+                                    "maxDoublings": 2,
+                                    "minBackoffSeconds": 0.2
+                                },
+                                "rateLimits": {
+                                    "maxConcurrentDispatches": null,
+                                    "maxDispatchesPerSecond": null
+                                }
+                            }
+                        },
+                        {
+                            "entryPoint": "httpEcho",
+                            "platform": "gcfv2",
+                            "region": "us-central1",
+                            "name": "httpEcho",
+                            "httpsTrigger": {}
+                        }
+                    ]
+                }]
+            }),
+            0,
+        )
+        .expect("inventory with a task queue");
+        let functions = inventory.functions().collect::<Vec<_>>();
+
+        assert_eq!(functions.len(), 2);
+        let trigger = functions[0]
+            .task_queue_trigger
+            .as_ref()
+            .expect("taskQueueTrigger kept");
+        assert_eq!(trigger["retryConfig"]["maxAttempts"], json!(3));
+        assert_eq!(trigger["retryConfig"]["minBackoffSeconds"], json!(0.2));
+        assert_eq!(
+            trigger["rateLimits"]["maxConcurrentDispatches"],
+            JsonValue::Null
+        );
+        assert!(functions[0].https_trigger.is_some());
+        assert!(functions[1].task_queue_trigger.is_none());
     }
 
     #[test]
