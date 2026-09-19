@@ -407,7 +407,7 @@ impl FirestoreService {
         let current = snapshot.get(key);
         let request = evaluation_request(operation, key, now(), current.as_deref(), None, query);
         require_rules_allowed(self.rules.evaluate_with_read_transaction(
-            key.database().project_id(),
+            key.database(),
             authorization,
             &request,
             &SnapshotAccess::current(snapshot.clone(), key.database().project_id()),
@@ -426,7 +426,7 @@ impl FirestoreService {
         let request =
             evaluation_request(RequestOperation::List, candidate, now(), None, None, query);
         require_rules_allowed(self.rules.evaluate_with_read_transaction(
-            candidate.database().project_id(),
+            candidate.database(),
             authorization,
             &request,
             &SnapshotAccess::current(snapshot.clone(), candidate.database().project_id()),
@@ -448,13 +448,7 @@ impl FirestoreService {
             .collect::<Vec<_>>();
         let verdict = self
             .rules
-            .evaluate_writes(
-                database.project_id(),
-                authorization,
-                &writes,
-                snapshot,
-                request_time,
-            )
+            .evaluate_writes(database, authorization, &writes, snapshot, request_time)
             .map_err(commit_status)?;
         require_atomic_rules_allowed(verdict)
     }
@@ -1077,7 +1071,7 @@ impl Firestore for FirestoreService {
             });
         }
         require_atomic_rules_allowed(self.rules.evaluate_atomic_with_read_transaction(
-            database.project_id(),
+            &database,
             &authorization,
             &evaluations,
             &SnapshotAccess::current(snapshot, database.project_id()),

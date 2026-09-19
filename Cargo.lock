@@ -886,6 +886,7 @@ dependencies = [
  "fireside-rules-runtime",
  "fireside-storage-front",
  "fireside-suite-front",
+ "fireside-tasks-front",
  "fireside-webchannel-front",
  "futures-util",
  "reqwest",
@@ -900,6 +901,22 @@ dependencies = [
  "tonic",
  "tower",
  "zip",
+]
+
+[[package]]
+name = "fireside-tasks-front"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "fireside-functions-bridge",
+ "flate2",
+ "indexmap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

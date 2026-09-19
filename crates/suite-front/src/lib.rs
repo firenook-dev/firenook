@@ -130,10 +130,11 @@ impl SuiteDirectory {
                 return Err(SuiteError("duplicate service name".to_owned()));
             }
         }
-        for required in ["hub", "ui", "logging", "auth", "functions", "pubsub"] {
-            if !indexed.contains_key(required) {
-                return Err(SuiteError(format!("missing required {required} service")));
-            }
+        // Every other service is optional: a suite started with a subset
+        // (`--only`), without the UI (which also drops the logging emulator,
+        // as officially) or without Functions advertises only what runs.
+        if !indexed.contains_key("hub") {
+            return Err(SuiteError("missing required hub service".to_owned()));
         }
         Ok(Self {
             project,

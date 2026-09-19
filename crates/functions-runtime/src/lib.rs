@@ -33,6 +33,37 @@ pub use log::{LogEvent, LogSink};
 pub use manifest::Definition;
 pub use registry::BlockingConfig;
 
+/// The gcloud configuration directory every worker sees.
+fn demo_gcloud_dir(state_dir: &Path) -> PathBuf {
+    state_dir.join("gcloud")
+}
+
+/// Writes the synthetic `application_default_credentials.json` (no real
+/// client id, secret or refresh token) that keeps the Admin SDK off the
+/// metadata server.
+fn materialize_demo_credentials(state_dir: &Path) -> Result<(), RuntimeError> {
+    let directory = demo_gcloud_dir(state_dir);
+    let path = directory.join("application_default_credentials.json");
+    if path.is_file() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&directory).map_err(|error| {
+        RuntimeError(format!(
+            "failed to create the worker gcloud directory: {error}"
+        ))
+    })?;
+    std::fs::write(
+        &path,
+        "{\"type\":\"authorized_user\",\"client_id\":\"demo\",\"client_secret\":\"demo\",\"refresh_token\":\"demo\"}\n",
+    )
+    .map_err(|error| {
+        RuntimeError(format!(
+            "failed to write the synthetic credential {}: {error}",
+            path.display()
+        ))
+    })
+}
+
 /// The embedded worker script.
 pub const WORKER_SOURCE: &str = include_str!("../../../support/functions-worker.mjs");
 /// Compatibility label reported in readiness receipts.
@@ -241,6 +272,7 @@ impl FunctionsRuntime {
         log: LogSink,
     ) -> Result<Self, RuntimeError> {
         let script = worker::materialize_script(&config.state_dir, WORKER_SOURCE)?;
+        materialize_demo_credentials(&config.state_dir)?;
         let debug_mode = config.inspect.is_some();
         let mut backends = Vec::new();
         let mut next_inspect_port = config
@@ -572,6 +604,20 @@ impl RuntimeState {
             .collect();
         env.insert("node".to_owned(), self.config.node.display().to_string());
         env.insert("METADATA_SERVER_DETECTION".to_owned(), "none".to_owned());
+        // The gcloud configuration directory the worker sees holds a
+        // synthetic authorized-user credential: the Admin SDK and the Google
+        // auth library then hold a refresh-token credential that fails fast
+        // against the real OAuth endpoint instead of falling back to the
+        // Compute Engine metadata server (169.254.169.254), which the
+        // task-queue client probes for a service-account email and which
+        // hangs for a minute off Google Cloud. The developer's own gcloud
+        // directory is never read.
+        env.insert(
+            "CLOUDSDK_CONFIG".to_owned(),
+            demo_gcloud_dir(&self.config.state_dir)
+                .display()
+                .to_string(),
+        );
         env.extend(loaded.user_env.clone());
         env.extend(self.system_envs());
         env.extend(self.emulator_envs());

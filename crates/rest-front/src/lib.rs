@@ -47,6 +47,10 @@ const RUN_AGGREGATION_QUERY_ROUTE: &str =
 const TRIGGER_ROUTE: &str = "/emulator/v1/projects/{project}/triggers/{key}";
 const EVENTARC_ROUTE: &str = "/emulator/v1/projects/{project}/eventarcTrigger";
 const CLEAR_ROUTE: &str = "/emulator/v1/projects/{project}/databases/{database}/documents";
+/// `fireside firestore:delete <path>`: delete one document, a collection's
+/// documents (`mode=shallow`) or everything under a path (`mode=recursive`).
+const DELETE_PATH_ROUTE: &str =
+    "/emulator/v1/projects/{project}/databases/{database}/documents/{*path}";
 const DEBUG_MEMORY_ROUTE: &str = "/emulator/v1/debug/memory";
 const CORS_ALLOWED_METHODS: HeaderValue =
     HeaderValue::from_static("DELETE,GET,HEAD,PATCH,POST,PUT");
@@ -169,6 +173,7 @@ pub fn router_with_shared_service(
         )
         .route(EVENTARC_ROUTE, axum::routing::post(post_eventarc_trigger))
         .route(CLEAR_ROUTE, axum::routing::delete(clear_database))
+        .route(DELETE_PATH_ROUTE, axum::routing::delete(delete_path))
         .route(DEBUG_MEMORY_ROUTE, get(debug_memory))
         .route("/emulator/v1/coverage.js", get(coverage::script))
         .route(
@@ -510,7 +515,7 @@ async fn patch_document(
     let verdict = state
         .rules
         .evaluate_writes(
-            &project,
+            key.database(),
             &authorization,
             std::slice::from_ref(&write),
             &snapshot,
@@ -540,6 +545,7 @@ async fn delete_document(
     let project = path.project.clone();
     let key = document_key(path)?;
     let authorization = request_authorization(&headers, &project)?;
+    let database = key.database().clone();
     let write = Write::Delete {
         key,
         precondition: decode_precondition(&parameters)?,
@@ -549,7 +555,7 @@ async fn delete_document(
     let verdict = state
         .rules
         .evaluate_writes(
-            &project,
+            &database,
             &authorization,
             std::slice::from_ref(&write),
             &snapshot,
@@ -707,6 +713,107 @@ async fn clear_database(
     Ok(Json(json!({})))
 }
 
+#[derive(Deserialize)]
+struct DeletePathParams {
+    project: String,
+    database: String,
+    path: String,
+}
+
+#[derive(Deserialize, Default)]
+struct DeletePathQuery {
+    mode: Option<String>,
+}
+
+/// Which documents a `firestore:delete` request names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeleteMode {
+    /// The document itself (a document path), or the documents directly in
+    /// the collection (a collection path).
+    Shallow,
+    /// The named document or collection and every document beneath it.
+    Recursive,
+}
+
+fn delete_selection(path: &str, mode: Option<&str>) -> Result<(DeleteMode, bool), RestError> {
+    let segments = path.split('/').collect::<Vec<_>>();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return Err(RestError::invalid(format!("invalid document path: {path}")));
+    }
+    let is_document = segments.len() % 2 == 0;
+    let mode = match mode {
+        None | Some("") if is_document => DeleteMode::Shallow,
+        None | Some("") => {
+            return Err(RestError::invalid(
+                "a collection path needs mode=recursive or mode=shallow",
+            ));
+        }
+        Some("recursive") => DeleteMode::Recursive,
+        Some("shallow") => DeleteMode::Shallow,
+        Some(other) => {
+            return Err(RestError::invalid(format!(
+                "mode must be recursive or shallow, not {other}"
+            )));
+        }
+    };
+    Ok((mode, is_document))
+}
+
+/// Whether a stored document path is selected by a delete request.
+fn delete_selects(candidate: &str, path: &str, mode: DeleteMode, is_document: bool) -> bool {
+    if candidate == path {
+        return true;
+    }
+    let Some(rest) = candidate
+        .strip_prefix(path)
+        .and_then(|rest| rest.strip_prefix('/'))
+    else {
+        return false;
+    };
+    match (mode, is_document) {
+        (DeleteMode::Recursive, _) => true,
+        // A collection's own documents have exactly one more segment.
+        (DeleteMode::Shallow, false) => !rest.contains('/'),
+        (DeleteMode::Shallow, true) => false,
+    }
+}
+
+async fn delete_path(
+    State(state): State<RestState>,
+    Path(params): Path<DeletePathParams>,
+    Query(query): Query<DeletePathQuery>,
+) -> Result<Json<JsonValue>, RestError> {
+    let database = database_name(DatabasePath {
+        project: params.project,
+        database: params.database,
+    })?;
+    let path = params.path.trim_matches('/').to_owned();
+    let (mode, is_document) = delete_selection(&path, query.mode.as_deref())?;
+    let mut deleted = 0_u64;
+    loop {
+        let writes = state
+            .store
+            .snapshot()
+            .iter_documents(&database)
+            .filter(|(key, _)| delete_selects(key.path(), &path, mode, is_document))
+            .take(500)
+            .map(|(key, _)| Write::Delete {
+                key,
+                precondition: Precondition::None,
+            })
+            .collect::<Vec<_>>();
+        if writes.is_empty() {
+            break;
+        }
+        deleted += writes.len() as u64;
+        state
+            .store
+            .commit(&writes)
+            .map_err(|error| RestError::commit(&error))?;
+    }
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
 async fn commit(
     State(state): State<RestState>,
     Path(path): Path<DatabasePath>,
@@ -732,7 +839,7 @@ async fn commit(
     let verdict = state
         .rules
         .evaluate_writes(
-            &project,
+            &database,
             &authorization,
             &writes,
             &snapshot,
@@ -937,7 +1044,7 @@ fn authorize_query(
         query,
     );
     require_allowed(state.rules.evaluate(
-        database.project_id(),
+        database,
         authorization,
         &request,
         &SnapshotAccess::current(snapshot.clone(), database.project_id()),
@@ -2095,12 +2202,11 @@ mod tests {
     #[tokio::test]
     async fn security_rules_hot_reload_is_atomic() {
         let runtime = RulesRuntime::default();
+        let database = DatabaseName::new("demo-hot-reload", "(default)").expect("database");
         runtime
             .install_project("demo-hot-reload", &test_rules("true"))
             .expect("initial rules");
-        let previous = runtime
-            .rules_for("demo-hot-reload")
-            .expect("initial ruleset");
+        let previous = runtime.rules_for(&database).expect("initial ruleset");
         let application = router_with_query_policy_memory_and_rules(
             Store::default(),
             QueryPolicy::default(),
@@ -2120,9 +2226,7 @@ mod tests {
             .await
             .expect("valid reload response");
         assert_eq!(valid.status(), StatusCode::OK);
-        let installed = runtime
-            .rules_for("demo-hot-reload")
-            .expect("replacement ruleset");
+        let installed = runtime.rules_for(&database).expect("replacement ruleset");
         assert!(!Arc::ptr_eq(&previous, &installed));
 
         let invalid = application
@@ -2138,9 +2242,139 @@ mod tests {
         assert!(Arc::ptr_eq(
             &installed,
             &runtime
-                .rules_for("demo-hot-reload")
+                .rules_for(&database)
                 .expect("previous rules retained")
         ));
+    }
+
+    const MULTI_DATABASE_PROJECT: &str = "demo-multi-db";
+
+    /// One project with `items/one` in `(default)`, `other` and `third`;
+    /// `(default)` denies everything and `other` allows everything through
+    /// their own rulesets, `third` has none.
+    fn multi_database_application() -> (Router, RulesRuntime) {
+        let store = Store::default();
+        let writes = ["(default)", "other", "third"]
+            .into_iter()
+            .map(|id| Write::Create {
+                key: DocumentKey::new(
+                    DatabaseName::new(MULTI_DATABASE_PROJECT, id).expect("database"),
+                    "items/one",
+                )
+                .expect("key"),
+                fields: Fields::from([("db".to_owned(), Value::String(id.into()))]),
+            })
+            .collect::<Vec<_>>();
+        store.commit(&writes).expect("seed");
+        let runtime = RulesRuntime::default();
+        for (id, condition) in [("(default)", "false"), ("other", "true")] {
+            runtime
+                .install_database(
+                    &DatabaseName::new(MULTI_DATABASE_PROJECT, id).expect("database"),
+                    &test_rules(condition),
+                )
+                .expect("database rules");
+        }
+        let application = router_with_query_policy_memory_and_rules(
+            store,
+            QueryPolicy::default(),
+            None,
+            runtime.clone(),
+        );
+        (application, runtime)
+    }
+
+    /// Status of `GET items/one` (or `PATCH` with a body) on each database of
+    /// the multi-database project, in `(default)`, `other`, `third` order.
+    async fn multi_database_statuses(application: &Router, method: Method) -> Vec<StatusCode> {
+        let mut statuses = Vec::new();
+        for id in ["(default)", "other", "third"] {
+            let uri =
+                format!("/v1/projects/{MULTI_DATABASE_PROJECT}/databases/{id}/documents/items/one");
+            let request = if method == Method::PATCH {
+                Request::patch(uri)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"fields":{"touched":{"booleanValue":true}}}).to_string(),
+                    ))
+            } else {
+                Request::get(uri).body(Body::empty())
+            }
+            .expect("request");
+            statuses.push(response_status(application, request).await);
+        }
+        statuses
+    }
+
+    /// Each database evaluates its own ruleset: the ruleset installed for
+    /// `other` governs `/databases/other/documents` while `(default)` keeps
+    /// its own, and a database without one is open, as without any rules.
+    #[tokio::test]
+    async fn security_rules_are_resolved_per_database() {
+        let (application, _) = multi_database_application();
+        assert_eq!(
+            multi_database_statuses(&application, Method::GET).await,
+            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::OK]
+        );
+        assert_eq!(
+            multi_database_statuses(&application, Method::PATCH).await,
+            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::OK]
+        );
+    }
+
+    /// Database-specific rules beat the project-wide hot reload, which beats
+    /// the startup default: the reload governs only `third`, and the default
+    /// only a project without rulesets of its own.
+    #[tokio::test]
+    async fn project_wide_hot_reload_governs_every_database_of_the_project() {
+        let (application, runtime) = multi_database_application();
+        let reload = application
+            .clone()
+            .oneshot(
+                Request::put(format!(
+                    "/emulator/v1/projects/{MULTI_DATABASE_PROJECT}:securityRules"
+                ))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"source": test_rules("false")}).to_string(),
+                ))
+                .expect("reload request"),
+            )
+            .await
+            .expect("reload response");
+        assert_eq!(reload.status(), StatusCode::OK);
+        // The hot reload replaces the project's rules: `other` no longer keeps
+        // its startup ruleset, as on the official emulator.
+        assert_eq!(
+            multi_database_statuses(&application, Method::GET).await,
+            [
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN
+            ]
+        );
+
+        runtime
+            .install_default(&test_rules("false"))
+            .expect("default rules");
+        assert_eq!(
+            multi_database_statuses(&application, Method::GET).await,
+            [
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN
+            ]
+        );
+        assert_eq!(
+            response_status(
+                &application,
+                Request::get("/v1/projects/demo-elsewhere/databases/(default)/documents/items/one")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[tokio::test]
@@ -2603,6 +2837,72 @@ mod tests {
             observed_update_time,
             "a verify write must not mutate the document version"
         );
+    }
+
+    #[tokio::test]
+    async fn path_scoped_delete_selects_documents_shallowly_or_recursively() {
+        async fn body(response: axum::response::Response) -> JsonValue {
+            serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("bytes"),
+            )
+            .expect("json")
+        }
+        let store = Store::default();
+        let database = DatabaseName::new("demo-delete", "(default)").expect("database");
+        let mut writes = Vec::new();
+        for path in [
+            "cities/sf",
+            "cities/la",
+            "cities/sf/landmarks/bridge",
+            "cities/sf/landmarks/bridge/photos/one",
+            "citiesArchive/old",
+            "regions/west",
+        ] {
+            writes.push(Write::Set {
+                key: DocumentKey::new(database.clone(), path).expect("key"),
+                fields: Fields::new(),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            });
+        }
+        store.commit(&writes).expect("seed");
+        let count = |store: &Store| store.snapshot().iter_documents(&database).count();
+        let delete = |path: &str| {
+            router(store.clone()).oneshot(
+                Request::delete(format!(
+                    "/emulator/v1/projects/demo-delete/databases/(default)/documents/{path}"
+                ))
+                .body(Body::empty())
+                .expect("request"),
+            )
+        };
+        let response = delete("cities").await.expect("collection without mode");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = delete("cities?mode=sideways").await.expect("bad mode");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        // A document path deletes that document only.
+        let response = delete("cities/la").await.expect("document");
+        assert_eq!(body(response).await, json!({"deleted": 1}));
+        assert_eq!(count(&store), 5);
+        // Shallow on a collection: its own documents, not their subcollections
+        // and not the sibling collection sharing the prefix.
+        let response = delete("cities?mode=shallow").await.expect("shallow");
+        assert_eq!(body(response).await, json!({"deleted": 1}));
+        assert_eq!(count(&store), 4);
+        // Recursive on a document path: the (already deleted) document and
+        // everything beneath it.
+        let response = delete("cities/sf?mode=recursive").await.expect("recursive");
+        assert_eq!(body(response).await, json!({"deleted": 2}));
+        assert_eq!(count(&store), 2);
+        let response = delete("nothing/here?mode=recursive")
+            .await
+            .expect("missing");
+        assert_eq!(body(response).await, json!({"deleted": 0}));
+        let response = delete("regions?mode=recursive").await.expect("regions");
+        assert_eq!(body(response).await, json!({"deleted": 1}));
+        assert_eq!(count(&store), 1);
     }
 
     #[tokio::test]

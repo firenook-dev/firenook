@@ -41,7 +41,9 @@ export type Action =
   | {
       readonly kind: "http";
       readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
-      /** Path on the Functions emulator origin. `{{project}}` expands to the project id. */
+      /** Which emulator answers: the Functions origin unless `tasks` (Phase K) is named. */
+      readonly origin?: "functions" | "tasks";
+      /** Path on the origin. `{{project}}` expands to the project id; `{{origin:<name>}}` inside a JSON body expands to that origin. */
       readonly path: string;
       /** `@name` sends `Authorization: Bearer <unsigned test JWT for name>`. */
       readonly auth?: string;
@@ -52,6 +54,8 @@ export type Action =
     }
   | {
       readonly kind: "http-parallel";
+      /** Which emulator answers: the Functions origin unless `tasks` is named. */
+      readonly origin?: "functions" | "tasks";
       /** Requests started together; `delayMs` staggers a request after the first. */
       readonly requests: ReadonlyArray<{ readonly method: "GET" | "POST"; readonly path: string; readonly body?: StepBody; readonly delayMs?: number }>;
       readonly clientTimeoutMs?: number;
@@ -1417,6 +1421,237 @@ export const CONSUMER_REFS_PROGRAMS: readonly Program[] = [
       step("delivery-logs", { kind: "logs", pattern: "ext-" }),
       step("portal-link", { kind: "http", method: "POST", path: httpPath(REGION, "ext-stripe-createPortalLink"), body: json({ data: { returnUrl: "https://example.test" } }) }, { expect: 0, timeoutMs: 6000 }),
       step("webhook", { kind: "http", method: "POST", path: httpPath(REGION, "ext-stripe-handleWebhookEvents"), headers: { "stripe-signature": "t=1,v1=invalid" }, body: json({ id: "evt_synthetic", type: "product.created" }) }, { expect: 0, timeoutMs: 6000 }),
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Phase K — Cloud Tasks emulator oracle: the primary codebase replaced by
+// task-queue handlers with distinct retry/rate configurations, plus HTTP
+// handlers that enqueue and delete through the Admin SDK (the real
+// `CLOUD_TASKS_EMULATOR_HOST` path). Every handler records what the
+// `onTaskDispatched` request carries: the `X-CloudTasks-*` headers, the
+// parsed retry/execution counts, the previous response, the schedule time.
+
+export const TASKS_QUEUE_NAMES = ["taskDefault", "taskRetry", "taskSlow", "taskSerial", "taskRate", "taskAlt"] as const;
+
+export function tasksSource(): string {
+  return `${OBSERVE_PRELUDE}
+const { onRequest, HttpsError } = require("firebase-functions/v2/https");
+const { onTaskDispatched } = require("firebase-functions/v2/tasks");
+const { getFunctions } = require("firebase-admin/functions");
+const admin = require("firebase-admin");
+admin.initializeApp();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const attempts = new Map();
+let active = 0;
+function taskHeaders(headers) {
+  const out = {};
+  for (const key of Object.keys(headers || {}).sort()) {
+    if (key.startsWith("x-cloudtasks-") || key.startsWith("x-synthetic-") || key === "content-type") out[key] = headers[key];
+  }
+  out.authorizationPresent = Object.prototype.hasOwnProperty.call(headers || {}, "authorization");
+  return out;
+}
+function taskShape(request) {
+  return {
+    data: safe(request.data),
+    queueName: request.queueName,
+    id: request.id,
+    retryCount: request.retryCount,
+    executionCount: request.executionCount,
+    scheduledTime: request.scheduledTime,
+    previousResponse: request.previousResponse === undefined ? { $undefined: true } : request.previousResponse,
+    retryReason: request.retryReason === undefined ? { $undefined: true } : request.retryReason,
+    auth: request.auth === undefined ? { $undefined: true } : safe(request.auth),
+    headers: taskHeaders(request.headers),
+  };
+}
+async function handle(name, request, options = {}) {
+  const key = name + ":" + request.id;
+  const attempt = (attempts.get(key) || 0) + 1;
+  attempts.set(key, attempt);
+  active += 1;
+  const startedAt = Date.now();
+  try {
+    if (options.sleepMs) await sleep(options.sleepMs);
+    record(name, { task: taskShape(request), attempt, concurrent: active, startedAt });
+    const data = request.data || {};
+    if (typeof data.failUntil === "number" && attempt <= data.failUntil) {
+      throw new HttpsError(data.code || "internal", "synthetic failure on attempt " + attempt);
+    }
+  } finally {
+    active -= 1;
+  }
+}
+exports.taskDefault = onTaskDispatched((request) => handle("taskDefault", request));
+exports.taskRetry = onTaskDispatched(
+  { retryConfig: { maxAttempts: 3, minBackoffSeconds: 0.2, maxBackoffSeconds: 1, maxDoublings: 2 } },
+  (request) => handle("taskRetry", request),
+);
+exports.taskSlow = onTaskDispatched(
+  { retryConfig: { maxAttempts: 1, minBackoffSeconds: 0.1 } },
+  (request) => handle("taskSlow", request, { sleepMs: Number((request.data || {}).sleepMs || 0) }),
+);
+exports.taskSerial = onTaskDispatched(
+  { rateLimits: { maxConcurrentDispatches: 1, maxDispatchesPerSecond: 500 } },
+  (request) => handle("taskSerial", request, { sleepMs: 1500 }),
+);
+exports.taskRate = onTaskDispatched(
+  { rateLimits: { maxConcurrentDispatches: 10, maxDispatchesPerSecond: 1 } },
+  (request) => handle("taskRate", request),
+);
+exports.taskAlt = onTaskDispatched({ region: "${ALT_REGION}" }, (request) => handle("taskAlt", request));
+exports.enqueueViaAdmin = onRequest(async (request, response) => {
+  const { queue, data, opts, region } = request.body || {};
+  const name = region ? "locations/" + region + "/functions/" + queue : queue;
+  try {
+    await getFunctions().taskQueue(name).enqueue(data === undefined ? {} : data, opts);
+    record("enqueueViaAdmin", { queue: name, opts: safe(opts), ok: true });
+    response.json({ ok: true });
+  } catch (error) {
+    record("enqueueViaAdmin", { queue: name, opts: safe(opts), ok: false, error: { code: error.code, message: String(error.message) } });
+    response.status(500).json({ ok: false, code: error.code, message: String(error.message) });
+  }
+});
+exports.deleteViaAdmin = onRequest(async (request, response) => {
+  const { queue, id, region } = request.body || {};
+  const name = region ? "locations/" + region + "/functions/" + queue : queue;
+  try {
+    await getFunctions().taskQueue(name).delete(id);
+    record("deleteViaAdmin", { queue: name, id, ok: true });
+    response.json({ ok: true });
+  } catch (error) {
+    record("deleteViaAdmin", { queue: name, id, ok: false, error: { code: error.code, message: String(error.message) } });
+    response.status(500).json({ ok: false, code: error.code, message: String(error.message) });
+  }
+});
+`;
+}
+
+const TASK_BODY = (data: unknown): string => Buffer.from(JSON.stringify({ data })).toString("base64");
+const queuePath = (queue: string, region = REGION): string => `/projects/{{project}}/locations/${region}/queues/${queue}`;
+const taskName = (queue: string, id: string, region = REGION): string => `projects/{{project}}/locations/${region}/queues/${queue}/tasks/${id}`;
+/** A task as the Admin SDK shapes it: empty url (the queue's default), the emulated service account, base64 `{data}`. */
+const task = (data: unknown, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}): unknown => ({
+  httpRequest: { url: "", oidcToken: { serviceAccountEmail: "emulated-service-acct@email.com" }, body: TASK_BODY(data), headers: { "Content-Type": "application/json", ...headers } },
+  ...extra,
+});
+const tasksStep = (id: string, method: "GET" | "POST" | "DELETE", path: string, body?: unknown, extra: Partial<Omit<Step, "id" | "action">> = {}): Step =>
+  step(id, { kind: "http", origin: "tasks", method, path, ...(body === undefined ? {} : { body: json(body) }) }, extra);
+
+export const TASKS_PROGRAMS: readonly Program[] = [
+  {
+    id: "tasks-discovery-and-registration",
+    category: "tasks-registration",
+    description: "Every onTaskDispatched export is discovered with its taskQueueTrigger and registered as a queue; a caller can register queues directly with the official defaults, an invalid queue id and an over-limit concurrency are rejected.",
+    steps: [
+      step("backends", { kind: "http", method: "GET", path: "/backends" }),
+      step("startup-logs", { kind: "logs", pattern: "queue" }),
+      tasksStep("stats-initial", "GET", "/queueStats"),
+      tasksStep("register-defaults", "POST", queuePath("manual-defaults"), { defaultUri: "http://127.0.0.1:1/never" }),
+      tasksStep("register-explicit", "POST", queuePath("manual-explicit"), {
+        retryConfig: { maxAttempts: 5, maxRetrySeconds: 30, maxBackoffSeconds: 10, maxDoublings: 3, minBackoffSeconds: 0.5 },
+        rateLimits: { maxConcurrentDispatches: 2, maxDispatchesPerSecond: 3 },
+        timeoutSeconds: 20,
+        retry: true,
+        defaultUri: "http://127.0.0.1:1/never",
+      }),
+      tasksStep("register-null-fields", "POST", queuePath("manual-nulls"), { retryConfig: { maxAttempts: null, maxRetrySeconds: null }, rateLimits: { maxConcurrentDispatches: null }, defaultUri: null }),
+      tasksStep("register-empty-body", "POST", queuePath("manual-empty"), {}),
+      tasksStep("register-over-limit", "POST", queuePath("manual-over"), { rateLimits: { maxConcurrentDispatches: 5001 } }),
+      tasksStep("register-invalid-id-underscore", "POST", queuePath("bad_name"), {}),
+      tasksStep("register-invalid-id-long", "POST", queuePath("a".repeat(101)), {}),
+      tasksStep("register-invalid-id-dot", "POST", queuePath("bad.name"), {}),
+      tasksStep("register-foreign-project", "POST", "/projects/another-project/locations/us-central1/queues/foreign", { defaultUri: "http://127.0.0.1:1/never" }),
+      tasksStep("register-replaces", "POST", queuePath("manual-explicit"), { rateLimits: { maxConcurrentDispatches: 7 } }),
+      tasksStep("stats-after-register", "GET", "/queueStats"),
+      tasksStep("unknown-route-get", "GET", "/v2/projects/{{project}}/locations/us-central1/queues"),
+      tasksStep("unknown-route-post", "POST", "/unknown", {}),
+      tasksStep("queue-get-not-a-route", "GET", queuePath("manual-defaults")),
+    ],
+  },
+  {
+    id: "tasks-enqueue-and-dispatch",
+    category: "tasks-dispatch",
+    description: "Enqueue over the wire: a named task and an auto-named task reach the default-config handler with the X-CloudTasks headers; duplicate names, unknown queues and caller headers overriding the emulator's are recorded.",
+    steps: [
+      tasksStep("enqueue-named", "POST", `${queuePath("taskDefault")}/tasks`, { task: task({ job: "named" }, { name: taskName("taskDefault", "job-named-1") }) }, { expect: ["taskDefault"], timeoutMs: 8000 }),
+      tasksStep("enqueue-auto-named", "POST", `${queuePath("taskDefault")}/tasks`, { task: task({ job: "auto" }) }, { expect: ["taskDefault"], timeoutMs: 8000 }),
+      tasksStep("enqueue-duplicate-name", "POST", `${queuePath("taskDefault")}/tasks`, { task: task({ job: "dup" }, { name: taskName("taskDefault", "job-named-1") }) }, { expect: 0, timeoutMs: 1500 }),
+      tasksStep("enqueue-unknown-queue", "POST", `${queuePath("noSuchQueue")}/tasks`, { task: task({ job: 1 }) }),
+      tasksStep("enqueue-with-schedule-time", "POST", `${queuePath("taskDefault")}/tasks`, { task: task({ job: "scheduled" }, { name: taskName("taskDefault", "job-scheduled"), scheduleTime: "2030-01-01T00:00:00.000Z" }) }, { expect: ["taskDefault"], timeoutMs: 8000 }),
+      tasksStep("enqueue-caller-headers", "POST", `${queuePath("taskDefault")}/tasks`, { task: task({ job: "headers" }, { name: taskName("taskDefault", "job-headers") }, { "X-Synthetic-Header": "from-caller", "X-CloudTasks-QueueName": "caller-override" }) }, { expect: ["taskDefault"], timeoutMs: 8000 }),
+      tasksStep("enqueue-explicit-url", "POST", `${queuePath("taskDefault")}/tasks`, { task: { httpRequest: { url: "{{origin:functions}}/{{project}}/us-central1/taskRetry", body: TASK_BODY({ job: "routed-elsewhere" }), headers: { "Content-Type": "application/json" } }, name: taskName("taskDefault", "job-explicit-url") } }, { expect: ["taskRetry"], timeoutMs: 8000 }),
+      tasksStep("enqueue-alt-region", "POST", `${queuePath("taskAlt", ALT_REGION)}/tasks`, { task: task({ job: "alt" }, { name: taskName("taskAlt", "job-alt", ALT_REGION) }) }, { expect: ["taskAlt"], timeoutMs: 8000 }),
+      tasksStep("enqueue-wrong-region", "POST", `${queuePath("taskAlt")}/tasks`, { task: task({ job: "wrong-region" }) }),
+      tasksStep("enqueue-manual-queue-unreachable", "POST", `${queuePath("manual-defaults")}/tasks`, { task: task({ job: "unreachable" }, { name: taskName("manual-defaults", "unreachable-1") }) }, { expect: 0, timeoutMs: 1500 }),
+      tasksStep("stats-after-dispatch", "GET", "/queueStats"),
+    ],
+  },
+  {
+    id: "tasks-retry-ladder",
+    category: "tasks-dispatch",
+    description: "Retry semantics: a 500 keeps the execution count, a 400 increments it, exhausting maxAttempts runs maxAttempts+1 times, and the previous response reaches the handler.",
+    steps: [
+      tasksStep("retry-once-500", "POST", `${queuePath("taskRetry")}/tasks`, { task: task({ failUntil: 1, code: "internal" }, { name: taskName("taskRetry", "retry-500") }) }, { expect: 2, timeoutMs: 10000 }),
+      tasksStep("retry-once-400", "POST", `${queuePath("taskRetry")}/tasks`, { task: task({ failUntil: 1, code: "invalid-argument" }, { name: taskName("taskRetry", "retry-400") }) }, { expect: 2, timeoutMs: 10000 }),
+      tasksStep("retry-exhausted", "POST", `${queuePath("taskRetry")}/tasks`, { task: task({ failUntil: 99, code: "internal" }, { name: taskName("taskRetry", "retry-exhausted") }) }, { expect: 4, timeoutMs: 15000 }),
+      tasksStep("retry-then-succeed-twice", "POST", `${queuePath("taskRetry")}/tasks`, { task: task({ failUntil: 2, code: "unavailable" }, { name: taskName("taskRetry", "retry-twice") }) }, { expect: 3, timeoutMs: 12000 }),
+      tasksStep("stats-after-retries", "GET", "/queueStats"),
+    ],
+  },
+  {
+    id: "tasks-deadline-and-limits",
+    category: "tasks-dispatch",
+    description: "A dispatch deadline aborts the emulator's request while the handler completes (a retry follows); maxConcurrentDispatches 1 serialises a queue; maxDispatchesPerSecond 1 paces one.",
+    steps: [
+      tasksStep("slow-deadline", "POST", `${queuePath("taskSlow")}/tasks`, { task: task({ sleepMs: 2500 }, { name: taskName("taskSlow", "slow-1"), dispatchDeadline: "1s" }) }, { expect: 2, timeoutMs: 15000 }),
+      tasksStep("serial-a", "POST", `${queuePath("taskSerial")}/tasks`, { task: task({ order: "a" }, { name: taskName("taskSerial", "serial-a") }) }, { expect: 0, timeoutMs: 0 }),
+      tasksStep("serial-b", "POST", `${queuePath("taskSerial")}/tasks`, { task: task({ order: "b" }, { name: taskName("taskSerial", "serial-b") }) }, { expect: 0, timeoutMs: 0 }),
+      tasksStep("serial-c", "POST", `${queuePath("taskSerial")}/tasks`, { task: task({ order: "c" }, { name: taskName("taskSerial", "serial-c") }) }, { expect: 3, timeoutMs: 10000 }),
+      // Three tasks enqueued together on a one-per-second queue: the official
+      // controller's idle poll (up to a second) makes per-step observation
+      // windows a race, so the whole ladder is one step.
+      step("rate-abc", { kind: "http-parallel", origin: "tasks", requests: ["a", "b", "c"].map((order) => ({ method: "POST" as const, path: `${queuePath("taskRate")}/tasks`, body: json({ task: task({ order }, { name: taskName("taskRate", `rate-${order}`) }) }) })) }, { expect: 3, timeoutMs: 10000 }),
+      tasksStep("stats-after-limits", "GET", "/queueStats"),
+    ],
+  },
+  {
+    id: "tasks-delete",
+    category: "tasks-delete",
+    description: "Deleting a pending task, an unknown task, a task on an unknown queue, and a task already dispatched; the Admin SDK's delete swallows 404.",
+    steps: [
+      tasksStep("enqueue-pending-a", "POST", `${queuePath("manual-defaults")}/tasks`, { task: task({ job: "pending-a" }, { name: taskName("manual-defaults", "pending-a") }) }, { expect: 0, timeoutMs: 0 }),
+      tasksStep("enqueue-pending-b", "POST", `${queuePath("manual-defaults")}/tasks`, { task: task({ job: "pending-b" }, { name: taskName("manual-defaults", "pending-b") }) }, { expect: 0, timeoutMs: 0 }),
+      tasksStep("stats-pending", "GET", "/queueStats"),
+      tasksStep("delete-unknown-queue", "DELETE", `${queuePath("noSuchQueue")}/tasks/pending-a`),
+      tasksStep("delete-unknown-task", "DELETE", `${queuePath("manual-defaults")}/tasks/no-such-task`),
+      tasksStep("delete-dispatched", "DELETE", `${queuePath("taskDefault")}/tasks/job-named-1`),
+      tasksStep("delete-again", "DELETE", `${queuePath("taskDefault")}/tasks/job-named-1`),
+      tasksStep("reuse-deleted-name", "POST", `${queuePath("taskDefault")}/tasks`, { task: task({ job: "reuse" }, { name: taskName("taskDefault", "job-named-1") }) }, { expect: 0, timeoutMs: 1500 }),
+      tasksStep("stats-after-delete", "GET", "/queueStats"),
+    ],
+  },
+  {
+    id: "tasks-admin-sdk",
+    category: "tasks-admin-sdk",
+    description: "The Admin SDK path handlers use: getFunctions().taskQueue().enqueue() with data, id, scheduleDelaySeconds, dispatchDeadlineSeconds, headers and uri, a duplicate id, an unknown queue, an explicit region; delete() of a pending, an unknown and an auto-named task.",
+    steps: [
+      step("admin-enqueue-plain", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "taskDefault", data: { via: "admin" } }) }, { expect: ["enqueueViaAdmin", "taskDefault"], timeoutMs: 8000 }),
+      step("admin-enqueue-options", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "taskDefault", data: { via: "admin-options" }, opts: { id: "admin-opt-1", scheduleDelaySeconds: 0, dispatchDeadlineSeconds: 15, headers: { "x-synthetic-header": "admin" } } }) }, { expect: ["enqueueViaAdmin", "taskDefault"], timeoutMs: 8000 }),
+      step("admin-enqueue-duplicate", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "taskDefault", data: { via: "dup" }, opts: { id: "admin-opt-1" } }) }, { expect: ["enqueueViaAdmin"], timeoutMs: 8000 }),
+      step("admin-enqueue-uri", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "taskDefault", data: { via: "uri" }, opts: { id: "admin-uri-1", uri: "{{origin:functions}}/{{project}}/us-central1/taskRetry" } }) }, { expect: ["enqueueViaAdmin", "taskRetry"], timeoutMs: 8000 }),
+      step("admin-enqueue-unknown-queue", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "noSuchQueue", data: {} }) }, { expect: ["enqueueViaAdmin"], timeoutMs: 8000 }),
+      step("admin-enqueue-alt-region", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "taskAlt", region: ALT_REGION, data: { via: "alt" }, opts: { id: "admin-alt-1" } }) }, { expect: ["enqueueViaAdmin", "taskAlt"], timeoutMs: 8000 }),
+      step("admin-enqueue-pending", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "manual-defaults", data: { via: "pending" }, opts: { id: "admin-pending-1" } }) }, { expect: ["enqueueViaAdmin"], timeoutMs: 8000 }),
+      // Let the controller's idle poll dispatch the task (its target is unreachable) before deleting it.
+      step("admin-pending-settles", { kind: "wait", ms: 1500 }),
+      step("admin-delete-pending", { kind: "http", method: "POST", path: httpPath(REGION, "deleteViaAdmin"), body: json({ queue: "manual-defaults", id: "admin-pending-1" }) }, { expect: ["deleteViaAdmin"], timeoutMs: 8000 }),
+      step("admin-delete-unknown", { kind: "http", method: "POST", path: httpPath(REGION, "deleteViaAdmin"), body: json({ queue: "manual-defaults", id: "never-existed" }) }, { expect: ["deleteViaAdmin"], timeoutMs: 8000 }),
+      step("admin-delete-unknown-queue", { kind: "http", method: "POST", path: httpPath(REGION, "deleteViaAdmin"), body: json({ queue: "noSuchQueue", id: "x" }) }, { expect: ["deleteViaAdmin"], timeoutMs: 8000 }),
+      tasksStep("stats-final", "GET", "/queueStats"),
+      step("tasks-logs", { kind: "logs", pattern: "task" }),
     ],
   },
 ];

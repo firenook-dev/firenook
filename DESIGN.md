@@ -18,6 +18,7 @@ this repository. A passing fixture is evidence for its recorded scope only.
 | functions-bridge / suite-runtime | Trigger dispatch, owned child lifecycle and complete-suite startup/shutdown |
 | functions-runtime / extensions | Owned Functions runtime (discovery, Node workers, routing, delivery, reload, blocking Auth functions) and the Extensions loader (parameters, specs, registry, source cache, vendoring) |
 | pubsub-front | Pub/Sub broker (leases, redelivery, dead-lettering, ordering keys, filters, seek/snapshots, push, Avro schemas) behind the `google.pubsub.v1` gRPC services and the HTTP/JSON transcoder on one port; function delivery and `onSchedule` ticks |
+| tasks-front | Cloud Tasks emulator: queue registry (one queue per `onTaskDispatched` export, plus caller registration), the official four routes with Express-shaped answers, the dispatcher (token bucket, dispatch slots, `X-CloudTasks-*` headers, retry ladder, dispatch deadline) and `/queueStats` |
 | suite-front | Hub/UI/control adapters |
 | capture-proxy | Synthetic oracle traffic capture with credential redaction; not an application gateway |
 | npm CLI | Platform selection, dependency/asset checks, configuration validation and state ownership |
@@ -348,8 +349,10 @@ accounting. Errors preserve their original expression position when propagated.
 
 The opt-in runtime exposes serialized coverage to its caller; this component is
 not yet wired to shipping HTTP/HTML reports. Successful reloads (even identical
-source) reset counters, invalid reloads preserve them, and project histories are
-isolated. Namespace expressions are omitted from source layout. The new capture
+source) reset counters, invalid reloads preserve them, and histories are
+isolated per database (each database evaluates its own ruleset, so the
+project report route covers `(default)` unless `?database=` names another).
+Namespace expressions are omitted from source layout. The new capture
 also records the jar rejecting a function parameter named `duration`; Fireside's
 compiler currently accepts it. That is a tracked Phase C correction, not a
 claim of complete compiler compatibility.
@@ -363,7 +366,7 @@ compatibility guarantee. Fixture comparisons retain all members and duplicates
 while ignoring only the observed map-difference set's hash iteration order.
 
 `benchmarks/phase-b-coverage.json` pins coverage-specific limits before overhead
-qualification: 16 MiB charged retained state, four project histories, ten-minute
+qualification: 16 MiB charged retained state, four database histories, ten-minute
 idle expiry, 128 distinct complete values per expression, 64 KiB per value and
 32 MiB per complete JSON report. Tree/index/source metadata is conservatively
 charged before admission. Contended operations do not wait for diagnostics;
@@ -706,14 +709,47 @@ handlers cannot pass by borrowing a healthy backend's count. No environment
 values cross this receipt. Discovery fetches have a five-second response/body
 deadline inside the unchanged 120-second overall startup allowance.
 
-Eventarc/Tasks auxiliary listeners now accept only their pinned startup POST
-routes, scoped to the configured project. Eventarc returns the captured
-`{"res":"OK"}`; Tasks returns the captured nullish-default queue configuration.
-These adapters retain no delivery queue and never fetch a submitted callback
-URI. Other routes return HTTP 501 `UNIMPLEMENTED` with an explicit startup-only
-message, instead of the previous catch-all HTTP 200 empty object. This is a
-deliberate capability boundary, not claimed parity for general Eventarc/Tasks.
-The corresponding official startup bytes are in `functions-readiness-v1`.
+The Eventarc port is served by the Functions runtime (trigger registration,
+`getTriggers`, `publishEvents` and delivery to `onCustomEventPublished`
+handlers, Phase H). The Tasks port is served by `tasks-front` (Phase K): the
+suite registers a queue for every discovered `onTaskDispatched` export at
+readiness and after each reload with the function's URL as the default
+target, exactly as the official Functions emulator posts to its Tasks
+emulator; callers may register queues through the same route. The dispatcher
+reproduces `taskQueue.js` — a token bucket per queue that starts empty and
+refills once a second, a slot array sized by `maxConcurrentDispatches`, the
+header set and caller-override order, the retry ladder with its backoff
+formula and the `maxAttempts` off-by-one, the execution count incremented on
+non-5xx failures only, the `dispatchDeadline` abort, and the controller's
+cadence (idle queues polled once a second, active queues continuously). The
+recorded contract, including the quirks Fireside reproduces on purpose
+(leading slash on generated names, a negative count after deleting a
+dispatched task, `runningTasks` equal to the concurrency), is
+`conformance/fixtures/tasks-v1`; the official queue's linked-list corruption
+after such a delete is the one path not reproduced.
+
+## Service selection, hosts and project ids
+
+The suite starts the data services `SuiteConfig.services` names (`--only`;
+the wrapper derives the default set from `firebase.json` as the official
+`filterEmulatorTargets` does). The hub always runs; Eventarc and Tasks follow
+Functions, the requests WebSocket follows Firestore, the UI and logging
+listeners follow `emulators.ui.enabled`. Every runtime, listener, hub entry,
+import and export step is conditional on that selection; a selection naming
+Functions while `firebase.json` configures no codebase and no extension drops
+Functions with one notice; `--resume-state` keeps requiring Firestore, Auth
+and Storage because the native state receipt covers all three. The listen
+host (`--host`) may be a wildcard; `connect_host()` maps `0.0.0.0` to
+`127.0.0.1` and `::` to `::1` for the hub locator, the hub and UI listings,
+the worker environment and every internal origin, and a non-loopback bind is
+announced once. Any project id is accepted: a `demo-*` id prints the official
+demo line; a real id prints the official "will affect production" line for
+services not running, and the suite never contacts Firebase either way (the
+worker environment sets every emulator host and strips the developer's
+credentials). `singleProjectMode` (default true) warns once per foreign
+project id on the Auth and Firestore HTTP routes with the official Auth
+wording; the data plane is multi-project either way. `--debug-log` appends
+every log record to a file beside the in-memory replay.
 
 The independent `functions-topic-reload-v1` capture verifies actual official
 source watching and delivery after adding a Pub/Sub handler and updating an

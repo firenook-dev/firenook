@@ -363,3 +363,90 @@ Done when a client library with `PUBSUB_EMULATOR_HOST` set publishes,
 subscribes (pull, streaming, push), orders, filters, seeks and validates
 schemas against Fireside with the recorded official behaviour, and function
 delivery is unchanged.
+
+## Phase K — Cloud Tasks emulator (`0.1.0-next.9`, with Phases L and M)
+
+The plan, current-state audit, oracle precedence and named checks are in the
+[Phase K plan](support/phase-k-tasks.md). The official Cloud Tasks emulator
+is four Express routes and a dispatcher inside firebase-tools 15.22.0;
+Fireside has a registration-only stub answering 501 elsewhere before this
+phase.
+
+| Step | Deliverable | Completion check |
+| --- | --- | --- |
+| K0 | Frozen gate `benchmarks/phase-k-tasks.json` | Route/dispatch inventory, oracle source digests and named checks recorded before fixtures |
+| K1 | `conformance/fixtures/tasks-v1` | ≥6 programs / ≥60 steps against firebase-tools 15.22.0 covering every route, the dispatch headers, the retry ladder, the deadline, the limits, deletion and the Admin SDK path |
+| K2 | `crates/tasks-front`: queue registry, four routes, dispatcher, discovery from the Functions inventory | Unit tests for every recorded status/body and dispatch rule |
+| K3 | Replay of the tasks profile against the suite; Phase H corpus unchanged | Replay green in CI |
+| K5 | Exact-candidate CI, consumer gates, release | `0.1.0-next.9` published through the release workflow; receipts recorded |
+
+- [x] K0 — Freeze the gate (2026-09-19, `benchmarks/phase-k-tasks.json`).
+- [x] K1 — Corpus recorded and frozen (2026-09-19: 6 programs / 62 steps /
+  39 handler observations in `conformance/fixtures/tasks-v1`, recorded by
+  the Phase H harness's new `tasks` profile).
+- [x] K2 — Engine (2026-09-19: `crates/tasks-front` — queue registry, the
+  four routes with Express-shaped answers, the dispatcher with the official
+  cadence, `/queueStats`, discovery from the Functions inventory at readiness
+  and after reloads; mounted on the Tasks port in place of the stub).
+- [x] K3 — Replay green (2026-09-19: 61/61 steps, 0 mismatches, no named
+  divergence, three runs identical; the Functions runtime corpus replays
+  271/271 with the Tasks emulator mounted).
+- [ ] K5 — Qualification and release.
+
+Done when `getFunctions().taskQueue().enqueue()` from a function or an app
+with `CLOUD_TASKS_EMULATOR_HOST` set reaches the handler with the recorded
+headers, retries and limits, and `/queueStats` answers.
+
+## Phase L — Configuration shapes (`0.1.0-next.9`, with Phases K and M)
+
+The plan and the recorded official behaviours are in the
+[Phase L plan](support/phase-l-configuration.md); the gate is
+`benchmarks/phase-l-configuration.json`.
+
+| Step | Deliverable | Completion check |
+| --- | --- | --- |
+| L1 | Service subsets (`--only`, projects without Functions or Storage) | Every listener, runtime, hub entry, import and export step conditional; a subset suite starts and stops cleanly |
+| L2 | Any project id, any listen host, `ui.enabled: false`, `singleProjectMode`, `--debug-log` | Official banners and warnings; loopback connect addresses for a wildcard bind; UI and logging follow the flag; foreign-project warning once |
+| L3 | Multiple Firestore databases | Rules per database with the documented precedence; every database exported and imported |
+| L4 | Wrapper acceptance of every shape | `packaging/cli.test.mjs` covers derivation, `--only`, storage forms, real ids, hosts, flags |
+| L5 | Exact-candidate CI, consumer gates, release | `0.1.0-next.9` published; receipts recorded |
+
+- [x] L1 — Service subsets in the engine (2026-09-19).
+- [x] L2 — Project ids, hosts, UI/logging coupling, single-project mode,
+  debug log, missing `.firebaserc` and missing `storage` section
+  (2026-09-19).
+- [x] L3 — Multiple Firestore databases (2026-09-19: `firestore` arrays,
+  rules per database with a project-wide hot reload replacing every
+  database's rules as officially, every database exported and imported).
+- [x] L4 — Wrapper (2026-09-19: official service derivation and `--only`,
+  storage object form and absence, `firestore` arrays, real ids, hosts,
+  `ui.enabled`, `singleProjectMode`, `--debug`, the compatibility flags).
+- [ ] L5 — Qualification and release.
+
+## Phase M — CLI surface (`0.1.0-next.9`, with Phases K and L)
+
+The command-by-command decisions are in the [Phase M plan](support/phase-m-cli.md);
+the gate is `benchmarks/phase-m-cli.json`.
+
+| Step | Deliverable | Completion check |
+| --- | --- | --- |
+| M1 | `emulators:export`, `use`, `target:apply` / `target:clear`, `firestore:delete`, `init` / `init --adopt`, `--debug`, compatibility flags, exec shell-string form | Unit tests against fake binaries and servers |
+| M2 | Engine support: path-scoped delete route, `--debug-log` | rest-front and suite-runtime tests |
+| M3 | `functions:invoke --event-data` | Background envelopes delivered to the running suite |
+| M4 | `mcp` | Dependency-free stdio server with the emulator-facing tools |
+| M5 | Exact-candidate CI, consumer gates, release | `0.1.0-next.9` published; receipts recorded |
+
+- [x] M1 — Wrapper commands (2026-09-19: `emulators:export`, `use`,
+  `target:apply` / `target:clear`, `firestore:delete`, `init` /
+  `init --adopt`, `--debug`, `-P`/`-c`/`--json`/`--non-interactive`/
+  `--log-verbosity`/`--ui`/`--force`, the exec shell-string form; 92
+  packaging tests).
+- [x] M2 — Engine support (2026-09-19: `DELETE
+  /emulator/v1/projects/{p}/databases/{db}/documents/{path}?mode=…` and
+  `--debug-log`).
+- [x] M3 — `functions:invoke --event-data` (2026-09-19: the official shell's
+  envelopes for Firestore, Storage, Pub/Sub, Auth v1, schedules, Eventarc
+  custom events and task queues, posted to the running suite).
+- [x] M4 — `mcp` (2026-09-19: dependency-free stdio server with status,
+  Firestore, Auth, Storage, Functions, Pub/Sub, Tasks and export tools).
+- [ ] M5 — Qualification and release.

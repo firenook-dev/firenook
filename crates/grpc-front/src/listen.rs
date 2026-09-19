@@ -577,6 +577,11 @@ fn authorize_target(
 ) -> Result<(), Status> {
     match policy {
         TargetPolicy::Documents(documents) => {
+            // A documents target names one database; an empty target has
+            // nothing to authorize.
+            let Some(database) = documents.first().map(DocumentKey::database) else {
+                return Ok(());
+            };
             let request_time = now();
             let requests = documents
                 .iter()
@@ -592,14 +597,11 @@ fn authorize_target(
                     )
                 })
                 .collect::<Vec<_>>();
-            let project = documents
-                .first()
-                .map_or("", |key| key.database().project_id());
             require_atomic_rules_allowed(rules.evaluate_atomic(
-                project,
+                database,
                 authorization,
                 &requests,
-                &SnapshotAccess::current(snapshot.clone(), project),
+                &SnapshotAccess::current(snapshot.clone(), database.project_id()),
             ))
         }
         TargetPolicy::Query { candidate, query } => {
@@ -612,7 +614,7 @@ fn authorize_target(
                 query.clone(),
             );
             require_rules_allowed(rules.evaluate(
-                candidate.database().project_id(),
+                candidate.database(),
                 authorization,
                 &request,
                 &SnapshotAccess::current(snapshot.clone(), candidate.database().project_id()),
