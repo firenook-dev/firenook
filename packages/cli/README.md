@@ -78,6 +78,7 @@ fireside emulators:export DIR [--force] [--only firestore,auth,storage]
 fireside firestore:delete PATH (-r | --shallow) [-f] [--database ID]
 fireside firestore:delete --all-collections -f [--database ID]
 fireside functions:invoke NAME [--data JSON] [--region R] [--method M]
+fireside functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON] [--event-type T]
 fireside ext:vendor [--instance ID]...
 fireside binary-path | native ARGS...
 ```
@@ -121,8 +122,9 @@ appends every suite log record to
 the launch banner and recorded in `launch.json`.
 
 Not provided: `functions:shell` (Fireside never starts a second Functions
-runtime; call functions on the running suite with `functions:invoke`), and
-every deploy/login command (never intercepted). `mcp` arrives separately.
+runtime; call functions on the running suite with `functions:invoke`, which
+also injects the background events the shell would), and every deploy/login
+command (never intercepted). `mcp` arrives separately.
 
 ## Configuration
 
@@ -172,9 +174,39 @@ fireside emulators:start --project demo-my-app --inspect-functions        # debu
 fireside emulators:start --project demo-my-app --inspect-functions=9333   # one codebase, explicit port
 fireside functions:invoke helloWorld --project demo-my-app                # GET-less POST to the HTTPS route
 fireside functions:invoke addMessage --project demo-my-app --data '{"text":"hi"}'   # callable body {"data": ...}
+fireside functions:invoke onUserWritten --project demo-my-app --resource users/alice \
+  --event-data '{"before":{"plan":"free"},"after":{"plan":"pro"}}'        # a Firestore document event
 fireside ext:vendor --project demo-my-app                                 # copy registry Extensions into the project
 fireside emulators:start --project demo-my-app --offline                  # never contact the Extensions registry
 ```
+
+`functions:invoke` finds the running suite through the hub locator (so a
+suite started on other ports is found) and, without `--event-data`, sends a
+plain request (`--method`, default `POST`) or a callable body (`--data`) to the
+function's HTTPS route. With `--event-data` it reads the loaded functions
+(`GET /backends`), selects the named one (`--region` when a name is deployed
+in several regions), builds the event exactly as the official `functions:shell`
+does (`createLegacyEvent` for first-generation functions, a structured
+`application/json` CloudEvent for second-generation ones) and posts it to the
+suite's trigger route, which hands it unchanged to the codebase worker. The
+delivery status and body are printed; `--json` prints the whole record
+including the envelope. HTTPS/callable functions refuse `--event-data` (use
+`--data`); Auth blocking functions are driven by the Auth emulator; Realtime
+Database functions are not emulated.
+
+| Trigger | `--event-data` | Notes |
+| --- | --- | --- |
+| Firestore (v1 `document.*`, v2 `google.cloud.firestore.document.v1.*`) | `{"before": {...}, "after": {...}}` as plain JSON fields (a bare object is the created/deleted document) | `--resource users/alice` names the document; wildcards are read back into `params`, or `--params '{"uid":"alice"}'` fills the trigger pattern. Values are encoded like the shell (`integerValue`, `mapValue`, ...) with `{"$timestamp"}`, `{"$ref"}`, `{"$geo"}` and `{"$bytes"}` sentinels for the types JSON lacks; each document value also carries its `name`, which the SDK uses for `snapshot.ref`. |
+| Storage (v1 `google.storage.object.*`, v2 `google.cloud.storage.object.v1.*`) | the object metadata; `name` is required, `bucket` defaults to the trigger's bucket, `contentType`, `size`, `generation`, `metageneration`, timestamps, `id`, `selfLink` and `mediaLink` are defaulted | v1 events carry `resource: projects/_/buckets/<bucket>/objects/<name>`. |
+| Pub/Sub (v1 `google.pubsub.topic.publish`, v2 `messagePublished`) | `{"data": <string or JSON>, "attributes": {...}, "orderingKey": "..."}` (string data is sent as given, other JSON as its text; both base64 on the wire) | Published through the Pub/Sub emulator when it runs, so every subscriber sees the message; otherwise the shell envelope goes straight to the trigger. |
+| Auth v1 (`user.create`, `user.delete`) | a UserRecord (`uid` and `metadata` timestamps are defaulted) | `resource` defaults to `projects/<id>`. |
+| Schedule | ignored (`{}`) | v2: an empty CloudEvent with Cloud Scheduler's `X-CloudScheduler-*` headers; v1: the legacy event on the `firebase-schedule-<name>` topic. |
+| Eventarc custom (`onCustomEventPublished`) | the CloudEvent `data` | `--event-type` overrides the type; the channel is part of the trigger key. |
+| Task queue (`onTaskDispatched`) | the task payload, enqueued as `{"data": ...}` | Sent to the Cloud Tasks emulator (`POST .../queues/<name>/tasks`) with the Admin SDK's request, so retries and rate limits apply. |
+
+`--auth '{"uid": "...", "token": {...}}'` (or `{"admin": true}`) fills the
+legacy event's `auth` as the shell's `constructAuth` does; first-generation
+events default to `{"admin": false}` like the shell.
 
 `firebase.json` `extensions` instances run like the official emulator: a
 local path is read from disk; a registry ref (`publisher/name@version`) is

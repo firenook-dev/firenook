@@ -52,13 +52,34 @@ export async function findHub(project, options = {}) {
 }
 
 // Services the running suite reports, or undefined when the hub cannot list them.
-async function runningServices(origin) {
+export async function runningServices(origin) {
   try {
     const response = await fetch(`${origin}/emulators`, {signal:AbortSignal.timeout(5000)});
     if (!response.ok) return undefined;
     const body = await response.json();
     return body && typeof body === 'object' ? body : undefined;
   } catch { return undefined; }
+}
+
+// The HTTP origin of one running service: the hub's listing first (the suite
+// may run on ports other than the configured ones), otherwise the configured
+// host and port. `listing` (from runningServices) avoids a second hub round
+// trip when the caller already has it. A listing that omits the service means
+// the suite did not start it, which is an error.
+export const SERVICE_LABELS = {firestore:'Firestore', auth:'Auth', storage:'Storage', functions:'Functions', pubsub:'Pub/Sub', tasks:'Cloud Tasks', eventarc:'Eventarc', hub:'the hub', ui:'the Emulator UI', logging:'logging'};
+export function serviceOrigin(project, name, listing, options = {}) {
+  const service = listing?.[name];
+  if (listing && !service) throw new Error(`The running suite for ${project.project} did not start ${SERVICE_LABELS[name] || name} (it is absent from the hub's /emulators listing)`);
+  if (service?.host && service?.port) return `http://${connectHost(String(service.host))}:${service.port}`;
+  const port = options[`${name}-port`] || project.ports?.[name];
+  if (!port) throw new Error(`No port is known for the ${name} emulator of ${project.project}`);
+  return `http://${connectHost(project.host)}:${port}`;
+}
+
+// Finds the hub and resolves a service origin in one step.
+export async function locateService(project, name, options = {}) {
+  const {origin} = await findHub(project, options);
+  return serviceOrigin(project, name, await runningServices(origin), options);
 }
 
 // emulators:export <path>: like the official command, the export runs inside
@@ -97,14 +118,7 @@ export async function exportEmulators(target, options, cwd = process.cwd(), log 
 
 // The Firestore REST origin of the running suite: the hub's listing when it
 // answers, otherwise the configured port.
-async function firestoreOrigin(project, options) {
-  const {origin} = await findHub(project, options);
-  const running = await runningServices(origin);
-  const service = running?.firestore;
-  if (running && !service) throw new Error(`The running suite for ${project.project} did not start Firestore (it is absent from ${origin}/emulators)`);
-  if (service?.host && service?.port) return `http://${connectHost(String(service.host))}:${service.port}`;
-  return `http://${connectHost(project.host)}:${project.ports.firestore}`;
-}
+const firestoreOrigin = (project, options) => locateService(project, 'firestore', options);
 
 // firestore:delete [path]: the official flag contract over the emulator's
 // DELETE routes. Fireside never prompts, so the destructive forms need --force.

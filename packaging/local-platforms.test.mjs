@@ -39,7 +39,7 @@ function fixture(root, fault) {
       const files = {'package.json': JSON.stringify(metadata), 'LICENSE-MIT': 'synthetic', 'LICENSE-APACHE': 'synthetic'};
       if (cli) {
         files['release.json'] = JSON.stringify(identity.release);
-        for (const path of ['README.md', 'bin/fireside.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs']) files[path] = 'synthetic';
+        for (const path of ['README.md', 'bin/fireside.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/firestore-values.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs']) files[path] = 'synthetic';
       } else {
         files['receipt.json'] = JSON.stringify({engineRevision: revision, platform,
           version, target: release.platforms[platform],

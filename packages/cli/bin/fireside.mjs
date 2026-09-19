@@ -3,9 +3,10 @@ import { spawn } from 'node:child_process';
 import { binaryPath, manifest, release } from '../src/binary.mjs';
 import { setupAssets } from '../src/assets.mjs';
 import { parseOptions } from '../src/options.mjs';
-import { diagnose, invokeFunction, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
+import { diagnose, prepareLaunch, supervise, vendorExtensions } from '../src/runtime.mjs';
 import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
 import { exportEmulators, firestoreDelete } from '../src/hub.mjs';
+import { invokeFunction } from '../src/invoke.mjs';
 import { targetApply, targetClear, use } from '../src/rc.mjs';
 import { adopt, scaffold } from '../src/init.mjs';
 
@@ -28,6 +29,9 @@ Emulators
   fireside firestore:delete PATH (-r | --shallow) [-f] [--database ID]
   fireside firestore:delete --all-collections -f [--database ID]
   fireside functions:invoke NAME [--data JSON] [--region us-central1] [--method POST]
+  fireside functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON]
+                                                          Inject a background event (Firestore, Storage,
+                                                          Pub/Sub, Auth, schedule, Eventarc, task queue)
   fireside ext:vendor [--instance ID]...                  Copy registry Extensions into the project
 
 Advanced
@@ -60,6 +64,7 @@ const accepted = {
   use:[...common, 'add', 'alias', 'unalias', 'clear'],
   'target:apply':common, 'target:clear':common,
   init:[...common, 'adopt', 'dry-run', 'force', 'functions', 'no-functions'],
+  'functions:invoke':[...common, 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'hub-port'],
 };
 function checkOptions(action, options) {
   for (const [name, value] of Object.entries(options)) {
@@ -108,6 +113,7 @@ async function main() {
     const {options, command, positionals} = parseOptions(rest);
     if (command !== undefined) throw new Error('functions:invoke takes no command after --');
     noPositionals(action, positionals);
+    checkOptions(action, options);
     return invokeFunction(name, options);
   }
   if (!Object.hasOwn(accepted, action)) throw new Error(`Unsupported command ${action}; use --help. Firebase deploy/login commands are never intercepted.`);

@@ -30,30 +30,6 @@ export function extensionsStatus(binary, project) {
   return JSON.parse(result.stdout);
 }
 
-// Calls a function on the running suite through its HTTPS route: a callable
-// body when --data is given, a plain request otherwise. Prints status and body.
-export async function invokeFunction(name, options, cwd = process.cwd()) {
-  const project = loadProject(options, cwd);
-  const region = options.region || 'us-central1';
-  const url = `http://${project.host}:${project.ports.functions}/${project.project}/${region}/${name}`;
-  const method = (options.method || 'POST').toUpperCase();
-  const headers = {};
-  let body;
-  if (options.data !== undefined) {
-    let parsed;
-    try { parsed = JSON.parse(options.data); } catch { throw new Error('--data must be JSON'); }
-    headers['content-type'] = 'application/json';
-    body = JSON.stringify({data: parsed});
-  }
-  let response;
-  try { response = await fetch(url, {method, headers, body}); }
-  catch (error) { throw new Error(`no Functions emulator answered at ${url} (${error.cause?.code || error.message}); start it with fireside emulators:start`); }
-  const text = await response.text();
-  console.log(`${response.status} ${response.statusText} ${url}`);
-  if (text) console.log(text);
-  return response.ok ? 0 : 1;
-}
-
 // Copies registry extensions into <project>/extensions/.sources with their
 // registry metadata; later starts need no network and no token.
 export function vendorExtensions(binary, project, instances = []) {
