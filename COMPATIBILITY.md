@@ -30,9 +30,9 @@ exports every database of the project into the one `firestore_export`, which
 an import restores in full. A `firebase.json` `firestore` array lists one
 entry per database (`database`, `rules`, `indexes`; an entry without
 `database` is `(default)`, and a project may list only named databases); each
-entry's rules govern that database alone, while the project-wide
-`PUT /emulator/v1/projects/{project}:securityRules` hot reload governs only
-databases without an entry. The official emulator refuses more than one
+entry's rules govern that database alone until a project-wide
+`PUT /emulator/v1/projects/{project}:securityRules` hot reload, which replaces
+the project's rules for every database as it does on the official emulator. The official emulator refuses more than one
 database (`Cloud Firestore Emulator does not support multiple databases yet.`)
 and then loads no rules at all.
 

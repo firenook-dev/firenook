@@ -2326,7 +2326,7 @@ mod tests {
     /// the startup default: the reload governs only `third`, and the default
     /// only a project without rulesets of its own.
     #[tokio::test]
-    async fn project_wide_hot_reload_governs_only_databases_without_their_own_rules() {
+    async fn project_wide_hot_reload_governs_every_database_of_the_project() {
         let (application, runtime) = multi_database_application();
         let reload = application
             .clone()
@@ -2343,9 +2343,15 @@ mod tests {
             .await
             .expect("reload response");
         assert_eq!(reload.status(), StatusCode::OK);
+        // The hot reload replaces the project's rules: `other` no longer keeps
+        // its startup ruleset, as on the official emulator.
         assert_eq!(
             multi_database_statuses(&application, Method::GET).await,
-            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::FORBIDDEN]
+            [
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN
+            ]
         );
 
         runtime
@@ -2353,7 +2359,11 @@ mod tests {
             .expect("default rules");
         assert_eq!(
             multi_database_statuses(&application, Method::GET).await,
-            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::FORBIDDEN]
+            [
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN,
+                StatusCode::FORBIDDEN
+            ]
         );
         assert_eq!(
             response_status(

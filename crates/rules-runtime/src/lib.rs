@@ -44,12 +44,14 @@ pub const OWNER_BEARER_TOKEN: &str = "Bearer owner";
 /// 2. the project-wide ruleset ([`install_project`](Self::install_project)),
 ///    which the emulator's `PUT /emulator/v1/projects/{project}:securityRules`
 ///    hot-reload route installs — that route stays project-wide, as the
-///    official route is;
+///    official route is, and a hot reload replaces the project's rules
+///    outright: it drops the database-specific rulesets installed at startup,
+///    so a client reloading rules (rules unit testing) governs every database
+///    of the project from then on, as on the official emulator;
 /// 3. the startup default ([`install_default`](Self::install_default)).
 ///
-/// A database-specific ruleset therefore beats a project-wide one, which
-/// beats the default. No ruleset at any level is the emulator's explicit
-/// open-with-warning mode.
+/// No ruleset at any level is the emulator's explicit open-with-warning
+/// mode.
 #[derive(Clone, Default)]
 pub struct RulesRuntime {
     state: Arc<RwLock<RuntimeState>>,
@@ -109,13 +111,16 @@ impl RulesRuntime {
     }
 
     /// Compiles then atomically replaces one project's project-wide ruleset,
-    /// the hot-reload route's level. A failed compilation leaves the previous
+    /// the hot-reload route's level, displacing the project's
+    /// database-specific rulesets. A failed compilation leaves every previous
     /// ruleset untouched.
     pub fn install_project(&self, project: &str, source: &str) -> Result<(), LoadError> {
         let rules = InstalledRules::compile(source)?;
-        write_lock(&self.state)
-            .projects
-            .insert(project.to_owned(), rules);
+        let mut state = write_lock(&self.state);
+        state
+            .databases
+            .retain(|database, _| database.project_id() != project);
+        state.projects.insert(project.to_owned(), rules);
         Ok(())
     }
 
@@ -874,18 +879,26 @@ mod tests {
             &project_wide,
             &runtime.rules_for(&default).expect("project rules")
         ));
-        // A later project-wide reload does not displace the database's own rules.
-        runtime
-            .install_project(PROJECT, rules("false"))
-            .expect("project again");
-        assert!(Arc::ptr_eq(
-            &database_specific,
-            &runtime.rules_for(&other).expect("database rules")
-        ));
         assert!(runtime.install_database(&other, "broken").is_err());
         assert!(Arc::ptr_eq(
             &database_specific,
             &runtime.rules_for(&other).expect("database rules")
+        ));
+        // A project-wide hot reload replaces the project's rules for every
+        // database, as on the official emulator; a failed reload changes nothing.
+        assert!(runtime.install_project(PROJECT, "broken").is_err());
+        assert!(Arc::ptr_eq(
+            &database_specific,
+            &runtime.rules_for(&other).expect("database rules")
+        ));
+        runtime
+            .install_project(PROJECT, rules("false"))
+            .expect("project again");
+        let reloaded = runtime.rules_for(&other).expect("reloaded rules");
+        assert!(!Arc::ptr_eq(&reloaded, &database_specific));
+        assert!(Arc::ptr_eq(
+            &reloaded,
+            &runtime.rules_for(&default).expect("reloaded rules")
         ));
     }
 
