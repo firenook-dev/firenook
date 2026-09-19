@@ -391,7 +391,7 @@ phase.
 - [x] K3 — Replay green (2026-09-19: 61/61 steps, 0 mismatches, no named
   divergence, three runs identical; the Functions runtime corpus replays
   271/271 with the Tasks emulator mounted).
-- [ ] K5 — Qualification and release.
+- [x] K5 — Qualified and published as `0.1.0-next.9` on 2026-09-19 (tag `npm-v0.1.0-next.9` on e9c58e0, release run 35440801335, registry integrity equal to the release assets, `next` → next.9, `latest` untouched): exact-candidate CI 35437156565 / 35437156569 on 7fb0c35, consumer gates and nine browser journeys on the local candidate (`receipts.k5`).
 
 Done when `getFunctions().taskQueue().enqueue()` from a function or an app
 with `CLOUD_TASKS_EMULATOR_HOST` set reaches the handler with the recorded
@@ -421,7 +421,7 @@ The plan and the recorded official behaviours are in the
 - [x] L4 — Wrapper (2026-09-19: official service derivation and `--only`,
   storage object form and absence, `firestore` arrays, real ids, hosts,
   `ui.enabled`, `singleProjectMode`, `--debug`, the compatibility flags).
-- [ ] L5 — Qualification and release.
+- [x] L5 — Qualified and published as `0.1.0-next.9` on 2026-09-19 (tag `npm-v0.1.0-next.9` on e9c58e0, release run 35440801335, registry integrity equal to the release assets, `next` → next.9, `latest` untouched) (same candidate and gates as K5).
 
 ## Phase M — CLI surface (`0.1.0-next.9`, with Phases K and L)
 
@@ -449,4 +449,4 @@ the gate is `benchmarks/phase-m-cli.json`.
   custom events and task queues, posted to the running suite).
 - [x] M4 — `mcp` (2026-09-19: dependency-free stdio server with status,
   Firestore, Auth, Storage, Functions, Pub/Sub, Tasks and export tools).
-- [ ] M5 — Qualification and release.
+- [x] M5 — Qualified and published as `0.1.0-next.9` on 2026-09-19 (tag `npm-v0.1.0-next.9` on e9c58e0, release run 35440801335, registry integrity equal to the release assets, `next` → next.9, `latest` untouched) (same candidate and gates as K5).

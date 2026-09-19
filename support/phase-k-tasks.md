@@ -5,9 +5,11 @@ Written 2026-09-19 against `main` 2c1ceb3 (published engine 03000f0,
 (configuration shapes) and [Phase M](phase-m-cli.md) (CLI surface) as
 `0.1.0-next.9`, the release that closes every non-UI row of the tracker.
 
-## Status
+## Status (2026-09-19)
 
-See the checklist in [ROADMAP.md](../ROADMAP.md#phase-k--cloud-tasks-emulator-010-next9-with-phases-l-and-m)
+Published as `0.1.0-next.9` on 2026-09-19 (release run 35440801335, `next` → next.9,
+`latest` untouched) after exact-candidate CI on 7fb0c35, the consumer gates
+and the nine browser journeys on the local candidate; see the checklist in [ROADMAP.md](../ROADMAP.md#phase-k--cloud-tasks-emulator-010-next9-with-phases-l-and-m)
 and the receipts in `benchmarks/phase-k-tasks.json`.
 
 ## Goal

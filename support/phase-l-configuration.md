@@ -4,9 +4,11 @@ Written 2026-09-19 against `main` 2c1ceb3 (published engine 03000f0,
 `0.1.0-next.8`). It ships with [Phase K](phase-k-tasks.md) (Cloud Tasks)
 and [Phase M](phase-m-cli.md) (CLI surface) as `0.1.0-next.9`.
 
-## Status
+## Status (2026-09-19)
 
-See the checklist in [ROADMAP.md](../ROADMAP.md#phase-l--configuration-shapes-010-next9-with-phases-k-and-m)
+Published as `0.1.0-next.9` on 2026-09-19 (release run 35440801335, `next` → next.9,
+`latest` untouched) after exact-candidate CI on 7fb0c35, the consumer gates
+and the nine browser journeys on the local candidate; see the checklist in [ROADMAP.md](../ROADMAP.md#phase-l--configuration-shapes-010-next9-with-phases-k-and-m)
 and the receipts in `benchmarks/phase-l-configuration.json`.
 
 ## Goal
