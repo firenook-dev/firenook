@@ -16,7 +16,7 @@ test("nearest-vector queries match production distance semantics", async (contex
   const database = `projects/${configuration.projectId}/databases/(default)`;
   const parent = `${database}/documents/runs/${runId}`;
   const collection = firestore.collection(
-    `runs/${runId}/fireside_vector_conformance`,
+    `runs/${runId}/firenook_vector_conformance`,
   );
   const documents = [
     collection.doc("a"),
@@ -153,7 +153,7 @@ test("nearest-vector queries match production distance semantics", async (contex
     },
     body: JSON.stringify({
       structuredQuery: {
-        from: [{ collectionId: "fireside_vector_conformance" }],
+        from: [{ collectionId: "firenook_vector_conformance" }],
         findNearest: {
           vectorField: { fieldPath: "embedding" },
           queryVector: vectorValue([0, 0, 0]),

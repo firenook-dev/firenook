@@ -52,7 +52,7 @@ needed a scoped Clippy allowance because its inferred timestamp type belongs to
 a transitive protobuf dependency; the measured loop and input remain unchanged.
 
 The optimized source passed all seven checks in
-[CI 34535582289](https://github.com/sanjevirau/fireside/actions/runs/34535582289)
+[CI 34535582289](https://github.com/firenook-dev/firenook/actions/runs/34535582289)
 and was reviewed/merged as PR #21. Its
 [merge receipt](../benchmarks/results/phase-e/merged-encoding-ci.json) explicitly
 separates the old release-pinned package matrix from the new-source platform
@@ -119,10 +119,10 @@ consumer or browser memory, and do not measure full-data scaling. Empty-store
 readiness is neither initial import nor export/reimport. Prior full-data evidence
 must not be replaced with these tiny successful cycles.
 
-Reproduce the microprofile with `cargo test --release -p fireside-rest-front
+Reproduce the microprofile with `cargo test --release -p firenook-rest-front
 nested_document_encoding_profile -- --ignored --nocapture` at the original
 profile commit and corrected commit on the same host. Set
-`FIRESIDE_ENCODING_PROFILE_OUTPUT` to a fresh path for exact output hashing.
+`FIRENOOK_ENCODING_PROFILE_OUTPUT` to a fresh path for exact output hashing.
 Preserve both executables and interleave repetitions; do not compare different
 hardware or count compilation time as encoder time.
 
@@ -182,7 +182,7 @@ show a general speed or memory win.
 Native-only sampled peaks span 17.25–19.50 MiB published and 17.52–20.00 MiB
 corrected. Samples are 100 ms apart and cannot guarantee continuous peaks. Java,
 Functions, Node's SDK/client and Chromium memory are deliberately not counted
-as Fireside memory. This tiny dataset does not establish full-data retention.
+as Firenook memory. This tiny dataset does not establish full-data retention.
 
 All warmup and measured operations, decoded hashes, native RSS samples and
 unchanged lifecycle assertions are retained in `storage-pair*.json.gz` with

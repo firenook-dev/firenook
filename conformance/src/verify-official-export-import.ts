@@ -12,7 +12,7 @@ const fixtureRoot = join(
   "official-export-v1.22.0",
 );
 const temporaryDirectory = await mkdtemp(
-  join(tmpdir(), "fireside-official-import-"),
+  join(tmpdir(), "firenook-official-import-"),
 );
 
 try {
@@ -23,7 +23,7 @@ try {
       "run",
       "--quiet",
       "-p",
-      "fireside-export-format",
+      "firenook-export-format",
       "--example",
       "rewrite_export",
       "--",

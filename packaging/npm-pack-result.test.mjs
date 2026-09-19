@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { packResult, registryIntegrity } from './npm-pack-result.mjs';
 
-const result = {name:'@fireside-dev/cli', filename:'fireside-dev-cli-0.1.0-next.0.tgz'};
+const result = {name:'firenook', filename:'firenook-0.1.0-next.0.tgz'};
 test('npm 12 keyed object and earlier array pack results preserve identity', () => {
   for (const value of [{[result.name]:result}, [result]]) {
     assert.deepEqual(packResult(JSON.stringify(value), result.name), result);

@@ -4,8 +4,8 @@ use super::{
     RestState, State, StatusCode, json,
 };
 use axum::body::Bytes;
-use fireside_core_store::DatabaseName;
-use fireside_rules_runtime::coverage::CoverageError;
+use firenook_core_store::DatabaseName;
+use firenook_rules_runtime::coverage::CoverageError;
 use tokio::sync::OwnedSemaphorePermit;
 
 const HTML: &str = include_str!("coverage.html");

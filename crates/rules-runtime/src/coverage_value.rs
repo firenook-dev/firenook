@@ -1,6 +1,6 @@
 //! Coverage borrows the same typed representation as Requests.
 use super::*;
-use fireside_rules_engine::{ExpressionValue, SourcePosition};
+use firenook_rules_engine::{ExpressionValue, SourcePosition};
 
 pub(crate) struct Observed<'a> {
     pub value: ExpressionValue<'a>,
@@ -78,10 +78,10 @@ impl Serialize for Observed<'_> {
                 )
             }
             ExpressionValue::MapDiff(diff) => {
-                struct Statuses<'a>(fireside_rules_engine::MapDifference<'a>);
+                struct Statuses<'a>(firenook_rules_engine::MapDifference<'a>);
                 impl Serialize for Statuses<'_> {
                     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-                        use fireside_rules_engine::MapKeyStatus;
+                        use firenook_rules_engine::MapKeyStatus;
                         s.collect_map(self.0.keys().map(|(key, status)| {
                             (
                                 key,

@@ -1,6 +1,6 @@
 # Pipeline: from a change to a release
 
-This is the record of how a Fireside change is proven, measured and shipped.
+This is the record of how a Firenook change is proven, measured and shipped.
 `AGENTS.md` is the short form. The vocabulary rule there applies here: the
 consumer, the private harness, the private acceptance host and the private
 consumer seed are named only as such.
@@ -9,7 +9,7 @@ consumer seed are named only as such.
 
 - **The official emulator is the specification.** Behaviour is recorded from a
   pinned official emulator (or an authorized synthetic cloud project) into a
-  frozen fixture before Fireside is changed. Replays are deterministic and run
+  frozen fixture before Firenook is changed. Replays are deterministic and run
   anywhere.
 - **Regressions are caught by deterministic checks, not wall-clock timing.**
   Fixture replays, Rust tests and counters run on shared CI without noise.
@@ -32,7 +32,7 @@ consumer seed are named only as such.
 | 5 | Consumer gates on the packed candidate | private harness, private acceptance host | ~10 min | the consumer's integration and extensions gates, its browser journeys, an offline vendored start |
 | 6 | Candidate benchmark | private acceptance host | ~30 min | readiness, latency lanes, peak memory, lifecycle parity against the previous release row and the banked official row; no lane regresses beyond its recorded band |
 | 6b | Bank an official row | private acceptance host | ~30 min, only when a lane is added or the official toolchain, seed or harness changes | stored keyed by those identities; a stale key is never compared |
-| 7 | Release qualification | private acceptance host | ~2.5 h (Fireside soak, export/restart, fresh-setup stages); the official 2 h row only when its key changed | `result.passed`, checksums, an independent audit of the evidence, the phase receipt's `receipts` block |
+| 7 | Release qualification | private acceptance host | ~2.5 h (Firenook soak, export/restart, fresh-setup stages); the official 2 h row only when its key changed | `result.passed`, checksums, an independent audit of the evidence, the phase receipt's `receipts` block |
 | 8 | Release | GitHub + npm | ~20 min | tag, protected `npm-release` approval, registry integrity equals the release assets, consumer pin bump |
 
 Layers 1–4 and 8 live in this repository. Layers 5–7 run from the private
@@ -60,7 +60,7 @@ once per release line.
 
 ## Comparison rows
 
-Two rows exist for every lane: the previous Fireside release and the official
+Two rows exist for every lane: the previous Firenook release and the official
 emulator. The official row is banked from a layer-6b run keyed by the official
 toolchain version, the seed identity, the harness identity and the lane set;
 any key change invalidates it. A new lane therefore always starts with one

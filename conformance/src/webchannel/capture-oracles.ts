@@ -21,7 +21,7 @@ const CLOUD_PROJECT_ID = "fireside-conformance";
 const COLLECTION = "fireside_webchannel_capture";
 const DOCUMENT = "oracle";
 const QUERY_COLLECTION = "fireside_webchannel_capture_query";
-const CAPTURE_FIXTURE_PATH = "/__fireside_capture/fixture";
+const CAPTURE_FIXTURE_PATH = "/__firenook_capture/fixture";
 const FIREBASE_SDK = "firebase@12.18.0";
 const JAVA_VERSION = "1.22.0";
 const JAVA_JAR_SHA256 =
@@ -254,7 +254,7 @@ async function main(): Promise<void> {
       ? await startJavaTarget()
       : await resolveCloudTarget();
 
-    await runCommand("cargo", ["build", "--locked", "-p", "fireside"], repositoryRoot);
+    await runCommand("cargo", ["build", "--locked", "-p", "firenook"], repositoryRoot);
     browser = await chromium.launch({
       executablePath: await resolveChromiumExecutable(),
       headless: true,
@@ -298,7 +298,7 @@ async function captureCaseAgainstTarget(options: {
   const proxyAddress = `127.0.0.1:${String(proxyPort)}`;
   const recordedAt = new Date().toISOString();
   const proxy = startProcess(
-    join(repositoryRoot, "target/debug/fireside"),
+    join(repositoryRoot, "target/debug/firenook"),
     [
       "capture-proxy",
       "--host",
@@ -335,7 +335,7 @@ async function captureCaseAgainstTarget(options: {
         const result = await page.evaluate(
           async ({ accessToken, apiKey, host, projectId, scenario, variant }) => {
             const captureWindow = window as Window & {
-              firesideRunWebChannelCapture(configuration: {
+              firenookRunWebChannelCapture(configuration: {
                 readonly accessToken?: string;
                 readonly apiKey: string;
                 readonly host: string;
@@ -344,7 +344,7 @@ async function captureCaseAgainstTarget(options: {
                 readonly variant: string;
               }): Promise<unknown>;
             };
-            return await captureWindow.firesideRunWebChannelCapture({
+            return await captureWindow.firenookRunWebChannelCapture({
               ...(accessToken === undefined ? {} : { accessToken }),
               apiKey,
               host,
@@ -443,7 +443,7 @@ async function startJavaTarget(): Promise<TargetRuntime> {
   await waitForHttp(upstreamOrigin, 20_000);
 
   return {
-    apiKey: "fireside-synthetic-emulator-key",
+    apiKey: "firenook-synthetic-emulator-key",
     javaProcess,
     outputName: "java-v1.22.0",
     projectId: JAVA_PROJECT_ID,

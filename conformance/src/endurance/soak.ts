@@ -82,7 +82,7 @@ export async function runSoak(
     "timestamp,elapsed_seconds,write_count,write_p50_ms,write_p95_ms,write_p99_ms,write_max_ms,listener_count,listener_p50_ms,listener_p95_ms,listener_p99_ms,listener_max_ms",
   );
   const firestore = new Firestore({
-    projectId: "demo-fireside-endurance",
+    projectId: "demo-firenook-endurance",
     host: `${server.host}:${String(server.port)}`,
     ssl: false,
   });
@@ -271,7 +271,7 @@ export async function runSoak(
         && finalMedian <= initialMedian + medianAllowance,
       workingSetRss:
         kind === "java"
-        || peakRss <= manifest.soak.workingSet.maximumObservedFiresideRssBytes,
+        || peakRss <= manifest.soak.workingSet.maximumObservedFirenookRssBytes,
       serverAlive,
     };
     const passed = kind === "java"

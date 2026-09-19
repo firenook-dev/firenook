@@ -1,4 +1,4 @@
-//! Multi-version document storage for fireside.
+//! Multi-version document storage for firenook.
 //!
 //! Snapshots hold persistent immutable map roots. Superseded roots are released
 //! automatically when no snapshot references them, so the store does not retain
@@ -26,7 +26,7 @@ mod lazy;
 
 pub use disk::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DiskBulkCommit, DiskDurability,
-    DiskError, DiskOptions, DiskStore,
+    DiskError, DiskOptions, DiskStore, adopt_legacy_files,
 };
 pub use lazy::{EncodedDocument, LazyDocument};
 use lazy::{decode_stored_document, encode_stored_document};
@@ -2637,7 +2637,7 @@ mod tests {
     use super::*;
 
     fn database(id: &str) -> DatabaseName {
-        DatabaseName::new("fireside-test", id).expect("database name should be valid")
+        DatabaseName::new("firenook-test", id).expect("database name should be valid")
     }
 
     fn key(database: &DatabaseName, path: &str) -> DocumentKey {
@@ -2710,7 +2710,7 @@ mod tests {
     #[test]
     fn bulk_commit_reports_each_batch_to_observers_on_both_backends() {
         let directory = std::env::temp_dir().join(format!(
-            "fireside-core-store-bulk-{}-{}",
+            "firenook-core-store-bulk-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2752,7 +2752,7 @@ mod tests {
     #[test]
     fn snapshots_enumerate_the_databases_holding_documents_on_both_backends() {
         let directory = std::env::temp_dir().join(format!(
-            "fireside-core-store-databases-{}-{}",
+            "firenook-core-store-databases-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2762,8 +2762,8 @@ mod tests {
         let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
         for store in [Store::default(), disk] {
             let other_project =
-                DatabaseName::new("fireside-other-project", "(default)").expect("database");
-            assert!(store.snapshot().databases("fireside-test").is_empty());
+                DatabaseName::new("firenook-other-project", "(default)").expect("database");
+            assert!(store.snapshot().databases("firenook-test").is_empty());
             let seeded = store
                 .commit(&[
                     Write::Create {
@@ -2789,15 +2789,15 @@ mod tests {
                 ])
                 .expect("seed");
             assert_eq!(
-                store.snapshot().databases("fireside-test"),
+                store.snapshot().databases("firenook-test"),
                 vec![database("(default)"), database("other"), database("zeta")]
             );
             assert_eq!(
-                store.snapshot().databases("fireside-other-project"),
+                store.snapshot().databases("firenook-other-project"),
                 vec![other_project]
             );
-            assert!(store.snapshot().databases("fireside-tes").is_empty());
-            assert!(store.snapshot().databases("fireside-test-2").is_empty());
+            assert!(store.snapshot().databases("firenook-tes").is_empty());
+            assert!(store.snapshot().databases("firenook-test-2").is_empty());
 
             let emptied = store
                 .commit(&[Write::Delete {
@@ -2806,7 +2806,7 @@ mod tests {
                 }])
                 .expect("delete");
             assert_eq!(
-                store.snapshot().databases("fireside-test"),
+                store.snapshot().databases("firenook-test"),
                 vec![database("(default)"), database("zeta")]
             );
             // Historical views merge the reverse overlay: the deleted document
@@ -2815,21 +2815,21 @@ mod tests {
                 store
                     .snapshot_at(seeded.revision)
                     .expect("seeded revision")
-                    .databases("fireside-test"),
+                    .databases("firenook-test"),
                 vec![database("(default)"), database("other"), database("zeta")]
             );
             assert_eq!(
                 store
                     .snapshot_at(emptied.revision)
                     .expect("emptied revision")
-                    .databases("fireside-test"),
+                    .databases("firenook-test"),
                 vec![database("(default)"), database("zeta")]
             );
             assert!(
                 store
                     .snapshot_at(Revision::from_u64(0))
                     .expect("initial revision")
-                    .databases("fireside-test")
+                    .databases("firenook-test")
                     .is_empty()
             );
         }
@@ -2838,7 +2838,7 @@ mod tests {
 
     #[test]
     fn short_firestore_strings_are_inline_and_round_trip() {
-        let token = FirestoreString::new("fireside-memory-185002");
+        let token = FirestoreString::new("firenook-memory-185002");
         assert_eq!(token.len(), 22);
         assert!(!token.is_heap_allocated());
         assert!(std::mem::size_of::<Value>() <= 32);

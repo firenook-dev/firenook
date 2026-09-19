@@ -239,7 +239,7 @@ async function runFixtureReplay(outputDirectory: string): Promise<void> {
         "test",
         "--locked",
         "-p",
-        "fireside-webchannel-front",
+        "firenook-webchannel-front",
         "--test",
         "oracle_replay",
       ],
@@ -505,7 +505,7 @@ async function runSessionChaos(
       "test",
       "--locked",
       "-p",
-      "fireside-webchannel-front",
+      "firenook-webchannel-front",
       "--test",
       "session_chaos",
     ],
@@ -596,26 +596,26 @@ async function writeDeviations(outputDirectory: string): Promise<void> {
       {
         area: "handshake session header",
         cloud: "returns X-HTTP-Session-Id and requires the value as gsessionid",
-        fireside: "matches cloud",
+        firenook: "matches cloud",
         java: "header absent in captured HTTP/1.1 sessions",
       },
       {
         area: "concurrent-forward advertisement",
         cloud: "returns X-Client-Wire-Protocol: h2 when HTTP/2 is negotiated",
-        fireside:
+        firenook:
           "returns X-Client-Wire-Protocol: h2 only when HTTP/2 is negotiated",
         java: "header absent in captured HTTP/1.1 sessions",
       },
       {
         area: "unknown SID body",
         cloud: "HTTP 400 body contains client-matched literal Unknown SID",
-        fireside: "matches the exact checked-in cloud body",
+        firenook: "matches the exact checked-in cloud body",
         java: "HTTP 400 with an empty body",
       },
       {
         area: "handshake server version",
         cloud: "c array reports server version 14",
-        fireside: "matches cloud server version 14",
+        firenook: "matches cloud server version 14",
         java: "c array reports server version 12",
       },
     ],

@@ -23,17 +23,17 @@ function normalized(value){
 }
 
 test('native HTTP read options replay in memory and disk/WAL with explicit Java adapter deviations',{timeout:600000},async()=>{
-  await execute('cargo',['build','--locked','-p','fireside'],{cwd:root});
+  await execute('cargo',['build','--locked','-p','firenook'],{cwd:root});
   const metadata=JSON.parse((await execute('cargo',['metadata','--no-deps','--format-version','1'],{cwd:root})).stdout);
   for(const mode of ['memory','disk-wal']){
-    const work=await mkdtemp(join(tmpdir(),'fireside-rest-reads-'));
+    const work=await mkdtemp(join(tmpdir(),'firenook-rest-reads-'));
     await writeFile(join(work,'firestore.rules'),fixture.rules);
     const reservation=createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');
     const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
-    const binary=join(metadata.target_directory,'debug',process.platform==='win32'?'fireside.exe':'fireside');
+    const binary=join(metadata.target_directory,'debug',process.platform==='win32'?'firenook.exe':'firenook');
     const args=['firestore','--host','127.0.0.1','--port',String(port),'--rules',join(work,'firestore.rules')];
     if(mode==='disk-wal')args.push('--data-dir',join(work,'state'));
-    const peer=spawn(binary,args,{cwd:work,env:{...process.env,FIRESIDE_CONTROL_STDIN:'1'},stdio:['pipe','pipe','pipe']});
+    const peer=spawn(binary,args,{cwd:work,env:{...process.env,FIRENOOK_CONTROL_STDIN:'1'},stdio:['pipe','pipe','pipe']});
     const exited=once(peer,'exit');let log='';for(const stream of [peer.stdout,peer.stderr])stream.on('data',bytes=>log+=bytes);
     const origin=`http://127.0.0.1:${port}`,base=origin+`/v1/projects/${fixture.project}/databases/(default)/documents`;
     const observations=[],native=new Map();let passed=false;
@@ -74,7 +74,7 @@ test('native HTTP read options replay in memory and disk/WAL with explicit Java 
       }
       passed=true;
     }finally{
-      peer.stdin.end('FIRESIDE_SHUTDOWN\n');
+      peer.stdin.end('FIRENOOK_SHUTDOWN\n');
       const exit=await Promise.race([exited,delay(10000,null,{ref:false})]);
       await writeFile(join(work,'server.log'),log);
       await writeFile(join(work,'result.json'),JSON.stringify({passed,syntheticOnly:true,acceptance:false,mode,observations,exit},null,2)+'\n');

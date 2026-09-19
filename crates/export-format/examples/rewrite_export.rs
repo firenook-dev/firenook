@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use fireside_export_format::{ExportReader, write_export};
+use firenook_export_format::{ExportReader, write_export};
 
 fn main() -> ExitCode {
     match run() {

@@ -1,10 +1,10 @@
 //! One typed query-to-policy adapter shared by REST, gRPC, and `WebChannel`.
 
-use fireside_core_store::{DatabaseName, DocumentKey};
-use fireside_query_engine::{
+use firenook_core_store::{DatabaseName, DocumentKey};
+use firenook_query_engine::{
     Direction, FieldOperator, FieldPath, Filter, Limit, Query, QueryScope,
 };
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     ConstraintOperator, FieldConstraint, Query as RulesQuery, QueryFilter, QueryScope as RulesScope,
 };
 

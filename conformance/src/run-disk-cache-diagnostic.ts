@@ -25,9 +25,9 @@ import { runSoak } from "./endurance/soak.ts";
 const execute = promisify(execFile);
 const OBSERVATION_DURATION_SECONDS = 3_600;
 const REDB_4_2_DEFAULT_CACHE_BYTES = 1_024 * 1_024 * 1_024;
-const FIRESIDE_DEFAULT_CACHE_BYTES = 64 * 1_024 * 1_024;
-const FIRESIDE_DEFAULT_PURGE_DELAY_MILLISECONDS = 0;
-const FIRESIDE_DEFAULT_PURGE_DECOMMITS = true;
+const FIRENOOK_DEFAULT_CACHE_BYTES = 64 * 1_024 * 1_024;
+const FIRENOOK_DEFAULT_PURGE_DELAY_MILLISECONDS = 0;
+const FIRENOOK_DEFAULT_PURGE_DECOMMITS = true;
 const WRITE_BUFFER_DIAGNOSTIC = process.argv.includes("--write-buffers");
 const PRODUCTION_DEFAULT_VERIFICATION = process.argv.includes("--production-default");
 const DIAGNOSTIC_STAGE = PRODUCTION_DEFAULT_VERIFICATION
@@ -72,16 +72,16 @@ async function main(): Promise<void> {
       resolve(outputDirectory, "diagnostic-control.json"),
       `${JSON.stringify({
         hypothesis: PRODUCTION_DEFAULT_VERIFICATION
-          ? "the deliberate Fireside production cache and eager-decommit allocator defaults satisfy the immutable bounded-memory criterion without overrides"
+          ? "the deliberate Firenook production cache and eager-decommit allocator defaults satisfy the immutable bounded-memory criterion without overrides"
           : WRITE_BUFFER_DIAGNOSTIC
             ? "WAL and redb encoding buffers remain live after acknowledged commits"
             : "redb internal cache warming toward its configured bound",
         redbVersion: "4.2.0",
         productionBehaviorCacheBytes: REDB_4_2_DEFAULT_CACHE_BYTES,
-        firesideDefaultCacheBytes: FIRESIDE_DEFAULT_CACHE_BYTES,
-        firesideDefaultPurgeDelayMilliseconds:
-          FIRESIDE_DEFAULT_PURGE_DELAY_MILLISECONDS,
-        firesideDefaultPurgeDecommits: FIRESIDE_DEFAULT_PURGE_DECOMMITS,
+        firenookDefaultCacheBytes: FIRENOOK_DEFAULT_CACHE_BYTES,
+        firenookDefaultPurgeDelayMilliseconds:
+          FIRENOOK_DEFAULT_PURGE_DELAY_MILLISECONDS,
+        firenookDefaultPurgeDecommits: FIRENOOK_DEFAULT_PURGE_DECOMMITS,
         diagnosticCacheBytes: cacheSizeBytes ?? null,
         observationDurationSeconds: OBSERVATION_DURATION_SECONDS,
         manifestDurationSeconds: manifest.soak.durationSeconds,
@@ -95,12 +95,12 @@ async function main(): Promise<void> {
       }, null, 2)}\n`,
       "utf8",
     );
-    const stageDirectory = resolve(outputDirectory, "fireside-disk-soak");
+    const stageDirectory = resolve(outputDirectory, "firenook-disk-soak");
     server = await startServer({
-      kind: "fireside-disk",
-      projectId: "demo-fireside-endurance",
+      kind: "firenook-disk",
+      projectId: "demo-firenook-endurance",
       outputDirectory: stageDirectory,
-      dataDirectory: resolve(outputDirectory, "state/fireside-soak"),
+      dataDirectory: resolve(outputDirectory, "state/firenook-soak"),
       ...(cacheSizeBytes === undefined ? {} : { diskCacheSizeBytes: cacheSizeBytes }),
     });
     await assertProductionAllocatorConfiguration(server);
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
       revision,
       manifestSha256,
       serverPid: server.pid,
-      cacheSizeBytes: cacheSizeBytes ?? FIRESIDE_DEFAULT_CACHE_BYTES,
+      cacheSizeBytes: cacheSizeBytes ?? FIRENOOK_DEFAULT_CACHE_BYTES,
       observationDurationSeconds: OBSERVATION_DURATION_SECONDS,
       measurementStatus: "seeding-or-measuring",
       updatedAt: new Date().toISOString(),
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     const result = await runSoak(
       manifest,
       server,
-      "fireside-disk",
+      "firenook-disk",
       stageDirectory,
       { observationDurationSeconds: OBSERVATION_DURATION_SECONDS },
     );
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
       stage: DIAGNOSTIC_STAGE,
       revision,
       manifestSha256,
-      cacheSizeBytes: cacheSizeBytes ?? FIRESIDE_DEFAULT_CACHE_BYTES,
+      cacheSizeBytes: cacheSizeBytes ?? FIRENOOK_DEFAULT_CACHE_BYTES,
       completedAt: new Date().toISOString(),
       passed: result.passed,
       summaryPath: result.summaryPath,
@@ -156,7 +156,7 @@ async function preflightHost(): Promise<Record<string, unknown>> {
   if (process.platform !== "linux") {
     throw new Error("the controlled disk diagnostic venue requires Linux");
   }
-  await access(resolve(repositoryRoot, "target/release/fireside"));
+  await access(resolve(repositoryRoot, "target/release/firenook"));
   const memory = await readFile("/proc/meminfo", "utf8");
   const swapTotalBytes = meminfoBytes(memory, "SwapTotal");
   const swapUsedBytes = swapTotalBytes - meminfoBytes(memory, "SwapFree");
@@ -210,8 +210,8 @@ async function assertProductionAllocatorConfiguration(
   const configured = allocator as Record<string, unknown>;
   if (
     configured.purgeDelayMilliseconds
-      !== FIRESIDE_DEFAULT_PURGE_DELAY_MILLISECONDS
-    || configured.purgeDecommits !== FIRESIDE_DEFAULT_PURGE_DECOMMITS
+      !== FIRENOOK_DEFAULT_PURGE_DELAY_MILLISECONDS
+    || configured.purgeDecommits !== FIRENOOK_DEFAULT_PURGE_DECOMMITS
   ) {
     throw new Error(
       `unexpected allocator configuration: ${JSON.stringify(configured)}`,

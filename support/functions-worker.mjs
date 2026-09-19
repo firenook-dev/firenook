@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Fireside Functions worker: one Node process per codebase. The Rust runtime
+// Firenook Functions worker: one Node process per codebase. The Rust runtime
 // starts it with the codebase's environment, forwards every invocation over
-// loopback HTTP with `x-fireside-target`, `x-fireside-signature` and
-// `x-fireside-service` control headers, and reads this process's stdout for
+// loopback HTTP with `x-firenook-target`, `x-firenook-signature` and
+// `x-firenook-service` control headers, and reads this process's stdout for
 // the readiness line and for log lines.
 //
 // The request handling mirrors firebase-tools 15.22.0
@@ -19,18 +19,18 @@ import path from "node:path";
 const sourceDir = process.argv[2] ? path.resolve(process.argv[2]) : process.cwd();
 const codebase = process.argv[3] ?? "default";
 const require = createRequire(path.join(sourceDir, "package.json"));
-const CONTROL_HEADERS = ["x-fireside-target", "x-fireside-signature", "x-fireside-service"];
+const CONTROL_HEADERS = ["x-firenook-target", "x-firenook-signature", "x-firenook-service"];
 const BODY_LIMIT = "32mb";
 
 let functionModule;
 let ready = false;
 
 function log(level, message) {
-  process.stdout.write(`FIRESIDE_WORKER_LOG ${JSON.stringify({ level, message: String(message) })}\n`);
+  process.stdout.write(`FIRENOOK_WORKER_LOG ${JSON.stringify({ level, message: String(message) })}\n`);
 }
 
 function fatal(message) {
-  process.stdout.write(`FIRESIDE_WORKER_FATAL ${JSON.stringify({ message: String(message) })}\n`);
+  process.stdout.write(`FIRENOOK_WORKER_FATAL ${JSON.stringify({ message: String(message) })}\n`);
   process.exit(1);
 }
 
@@ -150,9 +150,9 @@ async function main() {
     });
   }
   app.all(/.*/, async (request, response) => {
-    const target = request.header("x-fireside-target") || process.env.FUNCTION_TARGET || "";
-    const signature = request.header("x-fireside-signature") || process.env.FUNCTION_SIGNATURE_TYPE || "http";
-    const service = request.header("x-fireside-service") || process.env.K_SERVICE || target;
+    const target = request.header("x-firenook-target") || process.env.FUNCTION_TARGET || "";
+    const signature = request.header("x-firenook-signature") || process.env.FUNCTION_SIGNATURE_TYPE || "http";
+    const service = request.header("x-firenook-service") || process.env.K_SERVICE || target;
     for (const name of CONTROL_HEADERS) delete request.headers[name];
     // The environment a handler observes for this invocation, set before any
     // user code runs (one worker serves every function of the codebase). The
@@ -188,7 +188,7 @@ async function main() {
       if (!response.headersSent) {
         // A background handler failure ends the official worker; the runtime
         // turns this marker into the same dropped-connection answer.
-        if (signature === "event" || signature === "cloudevent") response.set("x-fireside-handler-error", "1");
+        if (signature === "event" || signature === "cloudevent") response.set("x-firenook-handler-error", "1");
         response.status(500).send(error && typeof error === "object" && error.message ? error.message : String(error));
       } else {
         response.end();
@@ -197,7 +197,7 @@ async function main() {
   });
   const server = app.listen(0, "127.0.0.1", () => {
     ready = true;
-    process.stdout.write(`FIRESIDE_WORKER_READY ${JSON.stringify({ port: server.address().port, codebase, pid: process.pid, node: process.versions.node })}\n`);
+    process.stdout.write(`FIRENOOK_WORKER_READY ${JSON.stringify({ port: server.address().port, codebase, pid: process.pid, node: process.versions.node })}\n`);
   });
   server.keepAliveTimeout = 65000;
   process.on("SIGTERM", () => {

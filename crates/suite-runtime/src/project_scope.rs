@@ -1,6 +1,6 @@
 //! `singleProjectMode`: the official Auth emulator warns once per foreign
 //! project id it is asked about ("Multiple projectIds are not recommended in
-//! single project mode") and keeps serving; Fireside applies the same warning
+//! single project mode") and keeps serving; Firenook applies the same warning
 //! to every Auth and Firestore HTTP request whose path names another project.
 //! With `singleProjectMode: false` nothing is logged. The data plane is
 //! multi-project either way.
@@ -12,7 +12,7 @@ use axum::Router;
 use axum::extract::Request;
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use fireside_suite_front::LoggingRuntime;
+use firenook_suite_front::LoggingRuntime;
 
 use crate::SuiteConfig;
 
@@ -54,7 +54,7 @@ async fn warn(
                 "Multiple projectIds are not recommended in single project mode. Requested project ID {project}, but the emulator is configured for {}. To opt-out of single project mode add/set the '\"singleProjectMode\": false' property in the firebase.json emulators config.",
                 scope.configured
             );
-            eprintln!("fireside: {message}");
+            eprintln!("firenook: {message}");
             scope.logging.record("WARN", Some("hub"), message);
         }
     }

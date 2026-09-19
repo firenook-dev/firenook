@@ -14,7 +14,7 @@ test("Enterprise pipelines filter, sort, shape, and preserve selected metadata",
   const firestore = createFirestore(configuration);
   const runId = randomUUID();
   const collection = firestore.collection(
-    `runs/${runId}/fireside_pipeline_conformance`,
+    `runs/${runId}/firenook_pipeline_conformance`,
   );
   const documents = [collection.doc("a"), collection.doc("b"), collection.doc("c")];
   const expiresAt = Timestamp.fromMillis(Date.now() + DAY_MILLISECONDS);

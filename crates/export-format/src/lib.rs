@@ -1,4 +1,4 @@
-//! Import and export formats for fireside.
+//! Import and export formats for firenook.
 //!
 //! The LevelDB-log framing layer is verified byte-for-byte against synthetic
 //! exports captured from the official emulator. Entity and metadata decoding

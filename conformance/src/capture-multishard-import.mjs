@@ -1,6 +1,6 @@
 // Construct a four-shard input from an existing synthetic official export, then
 // record what the official importer accepts. This is NOT an observed multi-shard
-// export and must never be described as one. No Fireside encoder is involved.
+// export and must never be described as one. No Firenook encoder is involved.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
@@ -15,7 +15,7 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const source=join(root,'fixtures/official-export-v1.22.0/firestore_export');
 const output=join(root,'fixtures/firebase-suite-v1/firestore-multi-shard-export-metadata');
 await mkdir(output,{recursive:true});assert.deepEqual(await readdir(output),[],'never overwrite evidence');
-const temporary=await mkdtemp(join(tmpdir(),'fireside-multishard-'));
+const temporary=await mkdtemp(join(tmpdir(),'firenook-multishard-'));
 const kindPath='all_namespaces/all_kinds/all_namespaces_all_kinds.export_metadata';
 const overall='firestore_export.overall_export_metadata';
 const exportRoot=join(temporary,'firestore_export');

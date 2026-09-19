@@ -579,26 +579,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 
 [[package]]
-name = "fireside"
+name = "firenook"
 version = "0.0.1"
 dependencies = [
  "axum",
  "clap",
- "fireside-auth-front",
- "fireside-capture-proxy",
- "fireside-core-store",
- "fireside-export-format",
- "fireside-extensions",
- "fireside-functions-bridge",
- "fireside-functions-runtime",
- "fireside-grpc-front",
- "fireside-pubsub-front",
- "fireside-query-engine",
- "fireside-rest-front",
- "fireside-rules-runtime",
- "fireside-suite-front",
- "fireside-suite-runtime",
- "fireside-webchannel-front",
+ "firenook-auth-front",
+ "firenook-capture-proxy",
+ "firenook-core-store",
+ "firenook-export-format",
+ "firenook-extensions",
+ "firenook-functions-bridge",
+ "firenook-functions-runtime",
+ "firenook-grpc-front",
+ "firenook-pubsub-front",
+ "firenook-query-engine",
+ "firenook-rest-front",
+ "firenook-rules-runtime",
+ "firenook-suite-front",
+ "firenook-suite-runtime",
+ "firenook-webchannel-front",
  "mimalloc",
  "serde",
  "serde_json",
@@ -608,12 +608,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-auth-front"
+name = "firenook-auth-front"
 version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "fireside-functions-bridge",
+ "firenook-functions-bridge",
  "indexmap",
  "reqwest",
  "serde",
@@ -626,7 +626,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-capture-proxy"
+name = "firenook-capture-proxy"
 version = "0.0.1"
 dependencies = [
  "axum",
@@ -640,7 +640,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-core-store"
+name = "firenook-core-store"
 version = "0.0.1"
 dependencies = [
  "bincode",
@@ -652,21 +652,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-export-format"
+name = "firenook-export-format"
 version = "0.0.1"
 dependencies = [
  "crc32c",
- "fireside-core-store",
+ "firenook-core-store",
  "prost",
  "serde_json",
 ]
 
 [[package]]
-name = "fireside-extensions"
+name = "firenook-extensions"
 version = "0.0.1"
 dependencies = [
  "axum",
- "fireside-functions-runtime",
+ "firenook-functions-runtime",
  "regex",
  "reqwest",
  "semver",
@@ -679,13 +679,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-functions-bridge"
+name = "firenook-functions-bridge"
 version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "fireside-core-store",
- "fireside-grpc-front",
+ "firenook-core-store",
+ "firenook-grpc-front",
  "prost",
  "reqwest",
  "serde",
@@ -696,12 +696,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-functions-runtime"
+name = "firenook-functions-runtime"
 version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "fireside-functions-bridge",
+ "firenook-functions-bridge",
  "futures-util",
  "http-body-util",
  "notify",
@@ -717,14 +717,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-grpc-front"
+name = "firenook-grpc-front"
 version = "0.0.1"
 dependencies = [
  "base64 0.23.1",
- "fireside-core-store",
- "fireside-query-engine",
- "fireside-rules-runtime",
- "fireside-watch-broker",
+ "firenook-core-store",
+ "firenook-query-engine",
+ "firenook-rules-runtime",
+ "firenook-watch-broker",
  "md-5",
  "pbjson",
  "pbjson-build",
@@ -741,13 +741,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-pubsub-front"
+name = "firenook-pubsub-front"
 version = "0.0.1"
 dependencies = [
  "apache-avro",
  "axum",
  "base64 0.23.1",
- "fireside-functions-bridge",
+ "firenook-functions-bridge",
  "pbjson",
  "pbjson-build",
  "pbjson-types",
@@ -768,26 +768,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-query-engine"
+name = "firenook-query-engine"
 version = "0.0.1"
 dependencies = [
- "fireside-core-store",
+ "firenook-core-store",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "fireside-rest-front"
+name = "firenook-rest-front"
 version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "fireside-core-store",
- "fireside-export-format",
- "fireside-functions-bridge",
- "fireside-grpc-front",
- "fireside-query-engine",
- "fireside-rules-runtime",
+ "firenook-core-store",
+ "firenook-export-format",
+ "firenook-functions-bridge",
+ "firenook-grpc-front",
+ "firenook-query-engine",
+ "firenook-rules-runtime",
  "serde",
  "serde_json",
  "time",
@@ -797,7 +797,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-rules-engine"
+name = "firenook-rules-engine"
 version = "0.0.1"
 dependencies = [
  "base64 0.23.1",
@@ -809,13 +809,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-rules-runtime"
+name = "firenook-rules-runtime"
 version = "0.0.1"
 dependencies = [
  "base64 0.23.1",
- "fireside-core-store",
- "fireside-query-engine",
- "fireside-rules-engine",
+ "firenook-core-store",
+ "firenook-query-engine",
+ "firenook-rules-engine",
  "serde",
  "serde_json",
  "sha2",
@@ -824,14 +824,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-storage-front"
+name = "firenook-storage-front"
 version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
  "crc32c",
- "fireside-functions-bridge",
- "fireside-rules-engine",
+ "firenook-functions-bridge",
+ "firenook-rules-engine",
  "flate2",
  "futures-util",
  "md-5",
@@ -847,15 +847,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-suite-front"
+name = "firenook-suite-front"
 version = "0.0.1"
 dependencies = [
  "axum",
- "fireside-core-store",
- "fireside-functions-bridge",
- "fireside-query-engine",
- "fireside-rest-front",
- "fireside-rules-runtime",
+ "firenook-core-store",
+ "firenook-functions-bridge",
+ "firenook-query-engine",
+ "firenook-rest-front",
+ "firenook-rules-runtime",
  "futures-util",
  "serde",
  "serde_json",
@@ -868,26 +868,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-suite-runtime"
+name = "firenook-suite-runtime"
 version = "0.0.1"
 dependencies = [
  "axum",
- "fireside-auth-front",
- "fireside-core-store",
- "fireside-export-format",
- "fireside-extensions",
- "fireside-functions-bridge",
- "fireside-functions-runtime",
- "fireside-grpc-front",
- "fireside-pubsub-front",
- "fireside-query-engine",
- "fireside-rest-front",
- "fireside-rules-engine",
- "fireside-rules-runtime",
- "fireside-storage-front",
- "fireside-suite-front",
- "fireside-tasks-front",
- "fireside-webchannel-front",
+ "firenook-auth-front",
+ "firenook-core-store",
+ "firenook-export-format",
+ "firenook-extensions",
+ "firenook-functions-bridge",
+ "firenook-functions-runtime",
+ "firenook-grpc-front",
+ "firenook-pubsub-front",
+ "firenook-query-engine",
+ "firenook-rest-front",
+ "firenook-rules-engine",
+ "firenook-rules-runtime",
+ "firenook-storage-front",
+ "firenook-suite-front",
+ "firenook-tasks-front",
+ "firenook-webchannel-front",
  "futures-util",
  "reqwest",
  "serde",
@@ -904,12 +904,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-tasks-front"
+name = "firenook-tasks-front"
 version = "0.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "fireside-functions-bridge",
+ "firenook-functions-bridge",
  "flate2",
  "indexmap",
  "reqwest",
@@ -920,20 +920,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "fireside-watch-broker"
+name = "firenook-watch-broker"
 version = "0.0.1"
 dependencies = [
  "bincode",
- "fireside-core-store",
- "fireside-query-engine",
+ "firenook-core-store",
+ "firenook-query-engine",
 ]
 
 [[package]]
-name = "fireside-webchannel-front"
+name = "firenook-webchannel-front"
 version = "0.0.1"
 dependencies = [
  "axum",
- "fireside-grpc-front",
+ "firenook-grpc-front",
  "futures-util",
  "http-body-util",
  "pbjson-types",

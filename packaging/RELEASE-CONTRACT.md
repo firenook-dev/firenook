@@ -5,7 +5,7 @@ release tag, emulator feature expansion or acceptance rerun is authorized by a
 passing packaging test. First publication and npm account configuration remain
 interactive release-owner operations.
 
-- Public package namespace: `@fireside-dev`; command: `fireside`.
+- Public packages: `firenook` (command `firenook`) and the `@firenook/cli-<platform>` engines.
 - The first package version is a prerelease, not a universal replacement claim.
 - Pin the native source revision in release.json. Application-specific accepted
   baselines and reports stay in private receipts, never in npm metadata.
@@ -40,9 +40,13 @@ interactive release-owner operations.
   This exception never permits skipping a failed product/platform gate or
   rebuilding different bytes under an already partially published version.
 - npm trusted publishing uses OIDC, not a stored publishing token. A package
-  must first exist before its trusted publisher can be registered. Initially
-  bootstrap the real tested prerelease packages interactively, not placeholders.
-- npm latest is for a separately reviewed stable release. Prereleases use next.
+  must first exist before its trusted publisher can be registered: each name
+  was reserved once with an engine-less `0.0.0` version; every real version is
+  published by the workflow with provenance.
+- Prereleases are published to `next`. Until the first stable release the
+  release owner moves `latest` to the newest verified prerelease by hand
+  (`npx firenook` must resolve to a real engine); afterwards `latest` is for a
+  separately reviewed stable release.
   GitHub release notes carry compatibility, dependency, performance limitations,
   artifact checksums and reviewed generic compatibility evidence. Private
   application acceptance links and raw receipts are not release assets.

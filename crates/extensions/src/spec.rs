@@ -3,8 +3,8 @@
 //! `triggerHelper.ts`).
 use std::path::Path;
 
-use fireside_functions_runtime::LogSink;
-use fireside_functions_runtime::manifest::service_from_event_type;
+use firenook_functions_runtime::LogSink;
+use firenook_functions_runtime::manifest::service_from_event_type;
 use serde_json::{Map, Value, json};
 
 use crate::ExtensionsError;
@@ -91,7 +91,7 @@ pub fn populate_registry_spec(spec: &mut Value) -> Result<(), ExtensionsError> {
                 Err(error) => {
                     // The official client logs and keeps the resource.
                     eprintln!(
-                        "fireside extensions: failed to parse resource properties yaml: {}",
+                        "firenook extensions: failed to parse resource properties yaml: {}",
                         error.0
                     );
                 }

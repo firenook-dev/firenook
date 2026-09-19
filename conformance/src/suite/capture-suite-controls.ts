@@ -94,7 +94,7 @@ assertHash(await readFile(uiZip), UI_ZIP_SHA256, "Emulator UI archive");
 
 const originalTmpdir = process.env.TMPDIR;
 const suiteRoot = await mkdtemp(
-  join(originalTmpdir ?? "/tmp", "fireside-phase4-suite-oracle-"),
+  join(originalTmpdir ?? "/tmp", "firenook-phase4-suite-oracle-"),
 );
 const shortTmpRoot = await mkdtemp("/tmp/fsp4-");
 process.env.TMPDIR = shortTmpRoot;
@@ -295,7 +295,7 @@ async function writeSyntheticProject(
     join(outputDir, "package.json"),
     `${JSON.stringify(
       {
-        name: "fireside-phase4-suite-oracle-functions",
+        name: "firenook-phase4-suite-oracle-functions",
         version: "0.0.0",
         private: true,
         main: "index.js",

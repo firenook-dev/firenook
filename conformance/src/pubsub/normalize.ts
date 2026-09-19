@@ -1,5 +1,5 @@
 // Phase J1: normalization shared by the official-emulator capture and the
-// Fireside replay. Message ids, ack ids and schema revision ids are
+// Firenook replay. Message ids, ack ids and schema revision ids are
 // registered under templates named after the step that produced them;
 // timestamps become `{{time}}`; the push endpoint's origin `{{pushOrigin}}`.
 import { Registry, type Json } from "../auth/normalize.ts";

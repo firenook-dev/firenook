@@ -1,6 +1,6 @@
-//! Owned Cloud Functions runtime for the fireside emulator suite.
+//! Owned Cloud Functions runtime for the firenook emulator suite.
 //!
-//! Fireside binds the Functions port, discovers endpoints through the
+//! Firenook binds the Functions port, discovers endpoints through the
 //! firebase-functions SDK's control API, runs one Node worker per codebase
 //! (user codebases and Extension instances), routes HTTP and callable
 //! requests, converts bridge deliveries into worker invocations, fans Auth
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fireside_functions_bridge::{FunctionsInventory, TriggerRegistry};
+use firenook_functions_bridge::{FunctionsInventory, TriggerRegistry};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::{RwLock, watch};
@@ -243,7 +243,7 @@ struct RuntimeState {
 }
 
 /// Readiness receipt printed by the suite (compatible with the previous
-/// host's `FIRESIDE_FUNCTIONS_HOST_READY` line).
+/// host's `FIRENOOK_FUNCTIONS_HOST_READY` line).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadyReceipt {
@@ -979,7 +979,7 @@ impl RuntimeState {
         let bytes = serde_json::to_vec(&rows).map_err(|error| RuntimeError(error.to_string()))?;
         let inventory_sha256 = hex_digest(&bytes);
         Ok(ReadyReceipt {
-            runtime: "fireside",
+            runtime: "firenook",
             oracle_compatibility: ORACLE_COMPATIBILITY,
             backend_count: self.backends.len(),
             custom_function_count,

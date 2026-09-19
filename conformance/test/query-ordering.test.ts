@@ -16,7 +16,7 @@ test("orderBy follows the production mixed-value order", async (context) => {
   const configuration = resolveTarget(process.env);
   const firestore = createFirestore(configuration);
   const collection = firestore.collection(
-    `runs/${randomUUID()}/fireside_conformance`,
+    `runs/${randomUUID()}/firenook_conformance`,
   );
   const expiresAt = Timestamp.fromMillis(Date.now() + DAY_MILLISECONDS);
 
@@ -135,7 +135,7 @@ test("integer and double ordering does not lose int64 precision", async (context
   const rawFirestore = createV1Firestore(configuration);
   const runId = randomUUID();
   const collection = firestore.collection(
-    `runs/${runId}/fireside_conformance`,
+    `runs/${runId}/firenook_conformance`,
   );
   const parent = `projects/${configuration.projectId}/databases/(default)/documents/runs/${runId}`;
   const expiresAtSeconds = Math.floor((Date.now() + DAY_MILLISECONDS) / 1_000);
@@ -188,7 +188,7 @@ test("integer and double ordering does not lose int64 precision", async (context
     cases.map(async (entry) => {
       await rawFirestore.createDocument({
         parent,
-        collectionId: "fireside_conformance",
+        collectionId: "firenook_conformance",
         documentId: entry.id,
         document: {
           fields: {

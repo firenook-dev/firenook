@@ -46,7 +46,7 @@
       "discoveryWireManifest": "firebase-functions-sdk-7.2.5-source (lib/runtime/manifest.js stackToWire, served as JSON at /__/functions.yaml when FUNCTIONS_CONTROL_API=true)",
       "extensionsResolutionAndParameters": "official-firebase-tools-functions-and-extensions-emulator-15.22.0"
     },
-    "classificationRule": "match the official emulator; where Fireside deliberately differs (it must not fail startup on an upstream-ignored export, one worker per codebase instead of one per trigger, no Google Analytics call per invocation) the difference is recorded in the fixture invariants and asserted by the replay; no divergence is adopted silently and no fixture is edited after freezing",
+    "classificationRule": "match the official emulator; where Firenook deliberately differs (it must not fail startup on an upstream-ignored export, one worker per codebase instead of one per trigger, no Google Analytics call per invocation) the difference is recorded in the fixture invariants and asserted by the replay; no divergence is adopted silently and no fixture is edited after freezing",
     "production": {
       "usedFor": "nothing unless H1 finds an emulator behaviour the SDK documents as different in production; every such case is listed here before implementation",
       "cases": []
@@ -105,7 +105,7 @@
       "policy": "spawn the codebase's own node_modules/.bin/firebase-functions with FUNCTIONS_CONTROL_API=true and read /__/functions.yaml (JSON body), then /__/quitquitquit; a static functions.yaml in the source directory takes precedence as in firebase-tools; the manifest is the SDK's stackToWire v1alpha1 contract"
     },
     "extensionsRegistry": {
-      "policy": "reuse the Firebase CLI's stored account (configstore) refresh token when present, accept FIREBASE_TOKEN, and add `fireside ext:vendor` offline mode; an own OAuth login flow is not in this phase",
+      "policy": "reuse the Firebase CLI's stored account (configstore) refresh token when present, accept FIREBASE_TOKEN, and add `firenook ext:vendor` offline mode; an own OAuth login flow is not in this phase",
       "cacheDirectory": "FIREBASE_EXTENSIONS_CACHE_PATH or ~/.cache/firebase/extensions/<publisher>/<name>@<version>, shared with firebase-tools so nothing is downloaded twice",
       "vendoredSources": "<project>/extensions/.sources/<publisher>/<name>@<version> (or the configured directory) preferred over the cache; a fully vendored project starts with no network and no token"
     },
@@ -114,7 +114,7 @@
     },
     "eventarc": {
       "policy": "registration routes stay; H1 measured that the official Eventarc emulator delivers Extensions custom events published through the Admin SDK channel to user onCustomEventPublished handlers (extensions-triggers/publish-listened), so H2 adds delivery for Eventarc channel events",
-      "settled": "delivered by the official emulator; Fireside implements channel event delivery"
+      "settled": "delivered by the official emulator; Firenook implements channel event delivery"
     },
     "credentialIsolation": {
       "policy": "workers never receive the developer's ADC or CLI credentials; GOOGLE_APPLICATION_CREDENTIALS is unset in worker environments and the registry token is used by the Rust parent only"
@@ -231,7 +231,7 @@
     },
     {
       "where": "packages/cli/README.md, README.md, COMPATIBILITY.md, DESIGN.md, docs",
-      "what": "every statement that firebase-tools is required by the Fireside path"
+      "what": "every statement that firebase-tools is required by the Firenook path"
     }
   ],
   "gates": {
@@ -305,7 +305,7 @@
       "test": "conformance/test/functions-runtime-fixtures.test.mjs"
     },
     "h2h3Replay": {
-      "harness": "conformance/src/functions-runtime/replay-fireside.ts (npm run replay:functions:runtime)",
+      "harness": "conformance/src/functions-runtime/replay-firenook.ts (npm run replay:functions:runtime)",
       "replayedAt": "2026-09-17T16:05:00Z",
       "engine": "crates/functions-runtime + crates/extensions (this commit)",
       "node": "24.20.0",
@@ -314,10 +314,10 @@
         "v1-blocking": "5/5",
         "inspect": "5/5",
         "ext-missing-param": "1/1",
-        "consumer-refs": "10/10 offline from the shared cache with registry sidecars (FIRESIDE_OFFLINE=1)"
+        "consumer-refs": "10/10 offline from the shared cache with registry sidecars (FIRENOOK_OFFLINE=1)"
       },
       "assertedDivergences": 89,
-      "divergenceTable": "conformance/src/functions-runtime/replay-fireside.ts DIVERGENCES + GLOBAL_DIVERGENCES; fixture README lists them"
+      "divergenceTable": "conformance/src/functions-runtime/replay-firenook.ts DIVERGENCES + GLOBAL_DIVERGENCES; fixture README lists them"
     },
     "h5": {
       "consumerGates": {
@@ -335,8 +335,8 @@
         "host": "the private acceptance host (Linux, 12 cpu), java absent from PATH, no gcloud credentials, no firebase-tools in the consumer",
         "candidate": "linux-x64 artifact of Installable packages run 35250492904 (0.1.0-local.g1f056eb1785f; engine identical to a054d81)",
         "noJava": "conformance/src/suite/verify-no-java.mjs PASS, 12 steps, ready 6522 ms",
-        "corpusReplay": "281/281 steps across all five profiles offline (FIRESIDE_OFFLINE=1), registry extensions from ~/.cache/firebase/extensions with fireside-registry.json sidecars and Linux npm installs; publish-listened skipped (no gcloud ADC on the host); suite ready ~25.4 s per profile for the six-codebase oracle project (official 33-51 s)",
-        "offlineVendoredStart": "fireside ext:vendor copied both registry instances into <project>/extensions/.sources (481 MB with their Linux node_modules) and recorded the resolution; then `fireside emulators:exec --offline` with FIREBASE_EXTENSIONS_CACHE_PATH pointed at an empty directory, HOME at a directory holding only the UI asset, no FIREBASE_TOKEN and no firebase-tools started the suite (8 backends, 71 functions, 2 upstream-ignored), served both instances from the vendored copies and answered ext-stripe-createPortalLink with the extension's own 401; clean stop",
+        "corpusReplay": "281/281 steps across all five profiles offline (FIRENOOK_OFFLINE=1), registry extensions from ~/.cache/firebase/extensions with firenook-registry.json sidecars and Linux npm installs; publish-listened skipped (no gcloud ADC on the host); suite ready ~25.4 s per profile for the six-codebase oracle project (official 33-51 s)",
+        "offlineVendoredStart": "firenook ext:vendor copied both registry instances into <project>/extensions/.sources (481 MB with their Linux node_modules) and recorded the resolution; then `firenook emulators:exec --offline` with FIREBASE_EXTENSIONS_CACHE_PATH pointed at an empty directory, HOME at a directory holding only the UI asset, no FIREBASE_TOKEN and no firebase-tools started the suite (8 backends, 71 functions, 2 upstream-ignored), served both instances from the vendored copies and answered ext-stripe-createPortalLink with the extension's own 401; clean stop",
         "scope": "about ten minutes; not the paired 2 h acceptance"
       },
       "cleanSetupWithoutJavaOrFirebaseTools": "the Linux smoke is that stage: a fresh consumer directory with the packed CLI + platform package, firebase-functions 7.2.5 and firebase-admin 13.10.0 only; java absent from PATH; suite start, corpus replay and the offline vendored start all pass",
@@ -351,100 +351,100 @@
         "engine": "0720434e3de7e0886f129f52a39d5ef2972ce45f",
         "candidate": "0.1.0-local.g0720434e3de7 (installed-package launcher), binary sha256 48f0f427bff54e375b3891c56a1194910079ab34da95cb869c4deb9238c961bf, artifact sha256 25472a108918c9091540cfac1ba1521829ec608d9cc5c9ccc46a24390a7f67ed",
         "harness": "aa8b52816d6886c71dd4940f40eed93dd3fac730 (unchanged since the next.6 qualification)",
-        "host": "the private acceptance host (AMD Ryzen 5 3600, 12 cpu, 64 GiB, NVMe RAID1, Linux 6.8); official emulator on untuned HotSpot defaults with Java 26 and firebase-tools 15.22.0; the Fireside stack ran without Java and without firebase-tools",
-        "workload": "sequential official then Fireside: cheap smoke, 7,200 s app-shaped soak (two busy sessions plus an idle observer), export/restart, nine browser journeys before and after restart, then a fresh checkout on the default backend and on the documented official fallback",
+        "host": "the private acceptance host (AMD Ryzen 5 3600, 12 cpu, 64 GiB, NVMe RAID1, Linux 6.8); official emulator on untuned HotSpot defaults with Java 26 and firebase-tools 15.22.0; the Firenook stack ran without Java and without firebase-tools",
+        "workload": "sequential official then Firenook: cheap smoke, 7,200 s app-shaped soak (two busy sessions plus an idle observer), export/restart, nine browser journeys before and after restart, then a fresh checkout on the default backend and on the documented official fallback",
         "stableStateParity": "1 Auth user, 211,205 Firestore documents, 33,352 stable Storage objects (6,688,940,031 bytes) and the same normalized generated-cache digest on both stacks after every soak, journey set and restart",
         "soakP50P99Milliseconds": {
           "writeCommit": {
             "official": "198.0 / 255.7",
-            "fireside": "3.3 / 22.3",
+            "firenook": "3.3 / 22.3",
             "samples": 5280
           },
           "listenerDelivery": {
             "official": "198 / 248",
-            "fireside": "9 / 51",
+            "firenook": "9 / 51",
             "samples": 60000,
             "gaps": 0
           },
           "functionDelivery": {
             "official": "3.8 / 8.5",
-            "fireside": "2.6 / 4.4",
+            "firenook": "2.6 / 4.4",
             "samples": 240,
             "note": "the Phase H lane: the consumer's Firestore-triggered function dispatched and executed by the owned runtime; next.6 measured 3.2 / 5.9 with the firebase-tools Functions emulator"
           },
           "catalogRead": {
             "official": "31.1 / 41.1",
-            "fireside": "6.4 / 22.2",
+            "firenook": "6.4 / 22.2",
             "samples": 480
           },
           "storageCycle": {
             "official": "11.6 / 21.6",
-            "fireside": "8.0 / 38.4",
+            "firenook": "8.0 / 38.4",
             "samples": 240,
             "note": "the Phase G lanes (native rules on every stage); next.6 measured 8.1 / 27.7"
           },
           "observerCatalogRead": {
             "official": "30.8 / 39.8",
-            "fireside": "7.0 / 22.4",
+            "firenook": "7.0 / 22.4",
             "samples": 240
           },
           "observerStorageCycle": {
             "official": "13.7 / 23.8",
-            "fireside": "7.4 / 46.8",
+            "firenook": "7.4 / 46.8",
             "samples": 120
           }
         },
         "memory": {
           "peakEmulatorPssGiB": {
             "official": 19.35,
-            "fireside": 1.77,
+            "firenook": 1.77,
             "reductionPercent": 90.8
           },
           "peakStackPssGiB": {
             "official": 23.24,
-            "fireside": 4.21,
+            "firenook": 4.21,
             "reductionPercent": 81.9
           },
           "largestFunctionsWorkerPssGiB": {
             "official": 0.59,
-            "fireside": 0.13
+            "firenook": 0.13
           },
           "stackGrowthGiBPerHour": {
             "official": 3.39,
-            "fireside": 0.05
+            "firenook": 0.05
           },
           "swap": "none on either stack"
         },
         "lifecycleSeconds": {
           "initialReadiness": {
             "official": 49.25,
-            "fireside": 51.25,
-            "note": "application readiness including the consumer's own builds and probes; Fireside binds its listeners only after the full-data import (all ports at 38.7 s) and the /backends inventory answered 7 s after the bind because discovery runs before that route is served — both recorded as follow-ups, neither a gate"
+            "firenook": 51.25,
+            "note": "application readiness including the consumer's own builds and probes; Firenook binds its listeners only after the full-data import (all ports at 38.7 s) and the /backends inventory answered 7 s after the bind because discovery runs before that route is served — both recorded as follow-ups, neither a gate"
           },
           "restartReadiness": {
             "official": 46.72,
-            "fireside": 46.75
+            "firenook": 46.75
           },
           "exportAndShutdownAfterSoak": {
             "official": 60.02,
-            "fireside": 27.03
+            "firenook": 27.03
           },
           "exportAndShutdownAfterRestart": {
             "official": 58.0,
-            "fireside": 28.03
+            "firenook": 28.03
           },
           "freshCheckoutReadiness": {
             "officialFallback": 57.17,
-            "firesideDefault": 51.51
+            "firenookDefault": 51.51
           }
         },
-        "browserJourneys": "36/36 passes (nine journeys, both stacks, before and after restart), 0 page errors, 0 request failures; the catalogue journey still ends on the watcher's two-minute heartbeat on Fireside because the frozen runner's synthetic stimulus lacks the observer's filter field (recorded since the next.4 qualification; not an emulator latency)",
+        "browserJourneys": "36/36 passes (nine journeys, both stacks, before and after restart), 0 page errors, 0 request failures; the catalogue journey still ends on the watcher's two-minute heartbeat on Firenook because the frozen runner's synthetic stimulus lacks the observer's filter field (recorded since the next.4 qualification; not an emulator latency)",
         "regressions": "11/11 harness, engine, Rust and consumer build commands exit 0",
-        "stability": "attempts 11, 12 and 13 with identical inputs agree within noise on every lane (Fireside p50: catalogue 6.3-6.4, write 3.2-3.3, listener 9-13, function 2.6-2.7, Storage 8.0-8.1 ms; emulator peak 1.59-1.77 GiB)",
+        "stability": "attempts 11, 12 and 13 with identical inputs agree within noise on every lane (Firenook p50: catalogue 6.3-6.4, write 3.2-3.3, listener 9-13, function 2.6-2.7, Storage 8.0-8.1 ms; emulator peak 1.59-1.77 GiB)",
         "retainedFailures": {
-          "attempt10": "failed in the Fireside cheap smoke before any measurement: the browser raised ERR_CERT_VERIFIER_CHANGED on the first page's script requests about 200 ms after its own start (browser-internal verifier swap; certificates unchanged); Fireside readiness had passed",
+          "attempt10": "failed in the Firenook cheap smoke before any measurement: the browser raised ERR_CERT_VERIFIER_CHANGED on the first page's script requests about 200 ms after its own start (browser-internal verifier swap; certificates unchanged); Firenook readiness had passed",
           "attempt11": "measured cleanly (both soaks, both restarts, 36/36 journeys) and failed only the fresh-checkout disk preflight: 75,435,433,984 bytes available against the frozen 80,000,000,000 minimum after the exports of the run itself",
-          "attempt12": "measured cleanly and failed only the cross-stack stable-state comparison: the consumer's own daily 03:00 UTC scheduled function fired inside the Fireside soak window only and wrote one 529-byte Storage object (33,353 vs 33,352). Fireside runs schedules; the official emulator never does. A harness pair-state timing hazard, not an emulator defect; attempt 13 was timed so neither window crossed a schedule"
+          "attempt12": "measured cleanly and failed only the cross-stack stable-state comparison: the consumer's own daily 03:00 UTC scheduled function fired inside the Firenook soak window only and wrote one 529-byte Storage object (33,353 vs 33,352). Firenook runs schedules; the official emulator never does. A harness pair-state timing hazard, not an emulator defect; attempt 13 was timed so neither window crossed a schedule"
         },
         "harnessFollowUps": [
           "make the cross-stack stable-state comparison schedule-aware (or refuse launch windows that cross a consumer schedule)",

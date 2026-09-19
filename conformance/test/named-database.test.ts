@@ -11,8 +11,8 @@ test("named databases preserve isolation in the v1 resource path", async (contex
   const firestore = createV1Firestore(configuration);
   const runId = randomUUID();
   const parent = `projects/${configuration.projectId}/databases/${DATABASE_ID}/documents/runs/${runId}`;
-  const name = `${parent}/fireside_conformance/named`;
-  const defaultName = `projects/${configuration.projectId}/databases/(default)/documents/runs/${runId}/fireside_conformance/named`;
+  const name = `${parent}/firenook_conformance/named`;
+  const defaultName = `projects/${configuration.projectId}/databases/(default)/documents/runs/${runId}/firenook_conformance/named`;
 
   context.after(async () => {
     await Promise.all([
@@ -24,7 +24,7 @@ test("named databases preserve isolation in the v1 resource path", async (contex
 
   const create = firestore.createDocument({
     parent,
-    collectionId: "fireside_conformance",
+    collectionId: "firenook_conformance",
     documentId: "named",
     document: {
       fields: { database: { stringValue: DATABASE_ID } },

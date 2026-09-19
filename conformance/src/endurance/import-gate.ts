@@ -14,7 +14,7 @@ export interface ImportResult {
 
 export async function runImportGate(
   manifest: EnduranceManifest,
-  kind: "fireside-disk" | "java",
+  kind: "firenook-disk" | "java",
   artifactDirectory: string,
   outputDirectory: string,
   dataDirectory?: string,
@@ -47,7 +47,7 @@ export async function runImportGate(
     events.json(event("import-start", { artifactBytes, kind, metadata }));
     const serverPromise = startServer({
       kind,
-      projectId: "demo-fireside-endurance-import",
+      projectId: "demo-firenook-endurance-import",
       outputDirectory,
       ...(dataDirectory === undefined ? {} : { dataDirectory }),
       ...(javaToolOptions === undefined ? {} : { javaToolOptions }),
@@ -162,7 +162,7 @@ async function verifyRandomReads(
         state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
         const ordinal = state % manifest.import.documentCount;
         const id = `document-${String(ordinal).padStart(8, "0")}`;
-        const url = `http://${server.host}:${String(server.port)}/v1/projects/demo-fireside-endurance-import/databases/(default)/documents/phase1_import/${id}`;
+        const url = `http://${server.host}:${String(server.port)}/v1/projects/demo-firenook-endurance-import/databases/(default)/documents/phase1_import/${id}`;
         try {
           const response = await fetch(url, {
             headers: { authorization: "Bearer owner" },

@@ -1,6 +1,6 @@
 //! Firebase Emulator Hub, UI, and Logging compatibility surfaces.
 //!
-//! Fireside owns these coordination endpoints. The retained Node Functions
+//! Firenook owns these coordination endpoints. The retained Node Functions
 //! workload host is deliberately absent from this crate and cannot register a
 //! second Hub or data service.
 
@@ -23,7 +23,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use fireside_functions_bridge::TriggerRegistry;
+use firenook_functions_bridge::TriggerRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest as _, Sha256};
@@ -468,7 +468,7 @@ impl LocatorFile {
                 .map_err(|error| SuiteError(format!("failed to remove locator: {error}")))?,
             Ok(_) => {
                 return Err(SuiteError(
-                    "locator ownership changed while Fireside was running".to_owned(),
+                    "locator ownership changed while Firenook was running".to_owned(),
                 ));
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -518,7 +518,7 @@ mod tests {
 
     fn temporary(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "fireside-suite-{label}-{}-{}",
+            "firenook-suite-{label}-{}-{}",
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ))

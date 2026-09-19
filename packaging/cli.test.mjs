@@ -11,7 +11,7 @@ import { canonical, inspectProject, loadProject, parseOptions } from '../package
 import { prepareLaunch, supervise } from '../packages/cli/src/runtime.mjs';
 
 function project() {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-cli-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-cli-test-'));
   const config = {firestore:{rules:'firestore.rules'}, storage:[{target:'default',rules:'storage.rules'}], functions:{source:'functions'},
     emulators:Object.fromEntries(['firestore','auth','storage','functions','pubsub'].map(name=>[name,{}]))};
   writeFileSync(join(dir, 'firebase.json'), JSON.stringify(config));
@@ -20,11 +20,11 @@ function project() {
   return {dir, config, save, options:{'storage-bucket':[]}};
 }
 function binaryPackage() {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-bin-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-bin-test-'));
   mkdirSync(join(dir,'bin'));
-  writeFileSync(join(dir,'bin/fireside'), '#!/bin/sh\nexit 0\n', {mode:0o755});
-  writeFileSync(join(dir,'package.json'), JSON.stringify({name:'@fireside-dev/darwin-arm64',version:manifest.version}));
-  const receipt = {version:manifest.version,platform:'darwin-arm64',target:release.platforms['darwin-arm64'],engineRevision:release.engineRevision,sha256:sha256(readFileSync(join(dir,'bin/fireside')))};
+  writeFileSync(join(dir,'bin/firenook'), '#!/bin/sh\nexit 0\n', {mode:0o755});
+  writeFileSync(join(dir,'package.json'), JSON.stringify({name:'@firenook/cli-darwin-arm64',version:manifest.version}));
+  const receipt = {version:manifest.version,platform:'darwin-arm64',target:release.platforms['darwin-arm64'],engineRevision:release.engineRevision,sha256:sha256(readFileSync(join(dir,'bin/firenook')))};
   writeFileSync(join(dir,'receipt.json'), JSON.stringify(receipt));
   return {dir,receipt};
 }
@@ -47,9 +47,9 @@ test('CLI source oracle pins asset hashes and export conventions', () => {
 });
 test('registry-only exact dependencies; no lifecycle scripts or source-build installer', () => {
   assert.equal(manifest.scripts,undefined);
-  assert.equal(manifest.name,'@fireside-dev/cli');
+  assert.equal(manifest.name,'firenook');
   for (const version of Object.values({...manifest.dependencies,...manifest.optionalDependencies})) assert.match(version,/^\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?$/);
-  assert.equal(manifest.bin.fireside,'bin/fireside.mjs');
+  assert.equal(manifest.bin.firenook,'bin/firenook.mjs');
 });
 test('explicit supported platforms; untested architectures and musl rejected', () => {
   assert.equal(platformKey('linux','x64',{header:{glibcVersionRuntime:'2.39'}}),'linux-x64');
@@ -62,13 +62,13 @@ test('explicit supported platforms; untested architectures and musl rejected', (
 });
 test('binary checks identity, target, checksum and executable bit', () => {
   const {dir,receipt} = binaryPackage();
-  assert.equal(verifyBinary(dir,'darwin-arm64'),join(dir,'bin/fireside'));
+  assert.equal(verifyBinary(dir,'darwin-arm64'),join(dir,'bin/firenook'));
   for (const [key,value] of [['version','9.9.9'],['engineRevision','wrong'],['platform','linux-x64'],['target','wrong'],['sha256','wrong']]) {
     writeFileSync(join(dir,'receipt.json'),JSON.stringify({...receipt,[key]:value}));
     assert.throws(()=>verifyBinary(dir,'darwin-arm64'));
   }
   writeFileSync(join(dir,'receipt.json'),JSON.stringify(receipt));
-  chmodSync(join(dir,'bin/fireside'),0o600);
+  chmodSync(join(dir,'bin/firenook'),0o600);
   if (process.platform !== 'win32') assert.throws(()=>verifyBinary(dir,'darwin-arm64'));
 });
 test('options preserve argv; no ignored flags, duplicate options or shell interpretation', () => {
@@ -109,13 +109,13 @@ test('existing config, project aliases and full or partial --only selection', ()
   // extensions maps to functions, a codebase suffix is dropped, followers are ignored.
   assert.deepEqual(loadProject({...options,only:'extensions,ui,hub,eventarc,tasks,logging'},dir).services,['functions']);
   assert.deepEqual(loadProject({...options,only:'functions:default,pubsub'},dir).services,['functions','pubsub']);
-  assert.throws(()=>loadProject({...options,only:'database'},dir),/not implemented by Fireside/);
+  assert.throws(()=>loadProject({...options,only:'database'},dir),/not implemented by Firenook/);
   assert.throws(()=>loadProject({...options,only:'wat'},dir),/not a valid emulator name/);
   assert.throws(()=>loadProject({...options,only:''},dir),/comma-separated/);
   // --only naming only unconfigured services leaves nothing to start.
   const {dir:bare,save} = project();
   save({firestore:{rules:'firestore.rules'}});
-  assert.throws(()=>loadProject({...options,only:'auth'},bare),/No emulators to start, run fireside init/);
+  assert.throws(()=>loadProject({...options,only:'auth'},bare),/No emulators to start, run firenook init/);
   assert.match(inspectProject({...options,only:'auth'},bare).warnings.join('\n'),/not starting the auth emulator/);
 });
 test('services are derived from top-level sections and emulators entries like the official CLI', () => {
@@ -171,7 +171,7 @@ test('any lowercase project id is accepted with a safety line; malformed and mis
   assert.equal(loadProject({...options,project:'demo-x'},dir).project,'demo-x');
   for (const id of ['Real-App','ab','-leading','trailing-','a'.repeat(31),'demo-']) assert.throws(()=>loadProject({...options,project:id},dir),/Invalid project id/);
   writeFileSync(join(dir,'.firebaserc'),'{}');
-  assert.throws(()=>loadProject(options,dir),/No project id.*--project.*fireside use --add/);
+  assert.throws(()=>loadProject(options,dir),/No project id.*--project.*firenook use --add/);
   assert.equal(readFileSync(join(dir,'.firebaserc'),'utf8'),'{}');
 });
 test('unimplemented official emulators are skipped with a warning; unknown keys fail before side effects', () => {
@@ -181,7 +181,7 @@ test('unimplemented official emulators are skipped with a warning; unknown keys 
   save(config);
   const p = loadProject(options,dir);
   assert.deepEqual(p.skipped,['database','hosting']);
-  assert.match(p.warnings.join('\n'),/configures the database emulator, which Fireside does not implement; skipping it/);
+  assert.match(p.warnings.join('\n'),/configures the database emulator, which Firenook does not implement; skipping it/);
   assert.deepEqual(p.services,['firestore','auth','storage','functions','pubsub']);
   config.emulators.wat = {};
   save(config);
@@ -220,8 +220,8 @@ test('--debug and --log-verbosity DEBUG add a debug log under the run directory'
   const {dir,options} = project();
   const launch = launchFor(dir,{...options,debug:true});
   const log = flagValue(launch.args,'--debug-log');
-  assert.ok(log.startsWith(join(dir,'.fireside','runs','session-')) && log.endsWith('fireside-debug.log'), log);
-  assert.match(launch.stderr,/Debug log: .*fireside-debug\.log/);
+  assert.ok(log.startsWith(join(dir,'.firenook','runs','session-')) && log.endsWith('firenook-debug.log'), log);
+  assert.match(launch.stderr,/Debug log: .*firenook-debug\.log/);
   assert.equal(launch.debugLog,log);
   assert.ok(launchFor(dir,{...options,'log-verbosity':'DEBUG'}).args.includes('--debug-log'));
   const quiet = launchFor(dir,{...options,'log-verbosity':'QUIET'});
@@ -300,7 +300,7 @@ test('state and credential isolation stay outside original config and seed', () 
   assert.equal(launch.env.FIREBASE_TOKEN,undefined);
 });
 test('asset verification refuses corrupt data without changing it', async () => {
-  const dir = mkdtempSync(join(tmpdir(),'fireside-asset-test-'));
+  const dir = mkdtempSync(join(tmpdir(),'firenook-asset-test-'));
   const file = join(dir,'test'); writeFileSync(file,'okay');
   await verifyAsset(file,{bytes:4,sha256:sha256('okay')});
   await assert.rejects(verifyAsset(file,{bytes:4,sha256:'wrong'}),/Checksum/);
@@ -319,7 +319,7 @@ test('export failure overrides passing test and unrequested exits fail', async (
   await assert.rejects(supervise({...launch,args:['-e','process.exit(0)']}),/unexpectedly/);
 });
 test('help and version do not need installed binaries; deploy is not intercepted', () => {
-  const cli = fileURLToPath(new URL('../packages/cli/bin/fireside.mjs',import.meta.url));
+  const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs',import.meta.url));
   const run = (...args) => spawnSync(process.execPath,[cli,...args],{encoding:'utf8'});
   const help = run('--help');
   assert.equal(help.status,0);
@@ -330,17 +330,17 @@ test('help and version do not need installed binaries; deploy is not intercepted
   assert.equal(run('functions:shell').status,1);
 });
 test('emulators:exec argument forms are decided before any binary is touched', () => {
-  const cli = fileURLToPath(new URL('../packages/cli/bin/fireside.mjs',import.meta.url));
+  const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs',import.meta.url));
   const {dir} = project();
   const run = (...args) => spawnSync(process.execPath,[cli,...args],{encoding:'utf8',cwd:dir});
   // Two bare arguments: refuse with the exact argv rewrite.
   const two = run('emulators:exec','--project','demo-fixture','node','test.mjs');
   assert.equal(two.status,1);
-  assert.match(two.stderr,/run: fireside emulators:exec --project demo-fixture -- node test\.mjs/);
+  assert.match(two.stderr,/run: firenook emulators:exec --project demo-fixture -- node test\.mjs/);
   assert.match(run('emulators:exec','--project','demo-fixture').stderr,/requires a script/);
   assert.match(run('emulators:start','--project','demo-fixture','npm','test').stderr,/Unexpected argument npm/);
-  assert.match(run('emulators:start','--recursive').stderr,/--recursive is not an option of fireside emulators:start/);
-  assert.match(run('doctor','--only','database').stderr,/not implemented by Fireside/);
+  assert.match(run('emulators:start','--recursive').stderr,/--recursive is not an option of firenook emulators:start/);
+  assert.match(run('doctor','--only','database').stderr,/not implemented by Firenook/);
   // One script string is accepted; the shell notice precedes the binary check.
   assert.match(run('emulators:exec','--project','demo-fixture','exit 3').stderr,/running the script through the shell as the official CLI does/);
 });

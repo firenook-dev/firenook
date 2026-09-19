@@ -24,7 +24,7 @@ export function digestOf(value: unknown): string {
 
 const LARGE_STRING = 4096;
 const RFC1123 = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
-// Epoch milliseconds (official generations) or microseconds (Fireside generations).
+// Epoch milliseconds (official generations) or microseconds (Firenook generations).
 const EPOCH_MILLIS_IN_STRING = /(?<![\d.])1[6-9]\d{11}(?:\d{3})?(?![\d.])/g;
 const SHORT_RANDOM_ID = /^[A-Za-z0-9_-]{16}$/;
 const VOLATILE_NUMBER_KEYS = new Set(["passwordUpdatedAt", "lastLoginAt", "createdAt", "validSince", "expiresIn"]);

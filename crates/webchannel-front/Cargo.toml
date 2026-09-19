@@ -1,6 +1,6 @@
 [package]
-name = "fireside-webchannel-front"
-description = "WebChannel v8 frontend for fireside"
+name = "firenook-webchannel-front"
+description = "WebChannel v8 frontend for firenook"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 axum.workspace = true
-fireside-grpc-front = { path = "../grpc-front" }
+firenook-grpc-front = { path = "../grpc-front" }
 futures-util.workspace = true
 pbjson-types.workspace = true
 serde.workspace = true

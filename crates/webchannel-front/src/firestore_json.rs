@@ -1,7 +1,7 @@
-use fireside_grpc_front::google::firestore::v1::{
+use firenook_grpc_front::google::firestore::v1::{
     ListenRequest, ListenResponse, WriteRequest, WriteResponse,
 };
-use fireside_grpc_front::google::firestore::v1::{listen_response, value};
+use firenook_grpc_front::google::firestore::v1::{listen_response, value};
 use serde_json::Value as JsonValue;
 
 use crate::BackendError;
@@ -59,7 +59,7 @@ fn encode_response(response: &impl serde::Serialize) -> Result<JsonValue, Backen
 }
 
 fn normalize_field_special_doubles(
-    fields: &std::collections::BTreeMap<String, fireside_grpc_front::google::firestore::v1::Value>,
+    fields: &std::collections::BTreeMap<String, firenook_grpc_front::google::firestore::v1::Value>,
     encoded: &mut JsonValue,
 ) {
     let Some(encoded) = encoded.as_object_mut() else {
@@ -73,7 +73,7 @@ fn normalize_field_special_doubles(
 }
 
 fn normalize_value_special_doubles(
-    value: &fireside_grpc_front::google::firestore::v1::Value,
+    value: &firenook_grpc_front::google::firestore::v1::Value,
     encoded: &mut JsonValue,
 ) {
     match value.value_type.as_ref() {
@@ -164,12 +164,12 @@ fn internal_json(error: &serde_json::Error) -> BackendError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use fireside_grpc_front::google::firestore::v1::listen_request::TargetChange as RequestedTargetChange;
-    use fireside_grpc_front::google::firestore::v1::listen_response::ResponseType;
-    use fireside_grpc_front::google::firestore::v1::target::TargetType;
-    use fireside_grpc_front::google::firestore::v1::target_change::TargetChangeType;
-    use fireside_grpc_front::google::firestore::v1::value::ValueType;
-    use fireside_grpc_front::google::firestore::v1::{
+    use firenook_grpc_front::google::firestore::v1::listen_request::TargetChange as RequestedTargetChange;
+    use firenook_grpc_front::google::firestore::v1::listen_response::ResponseType;
+    use firenook_grpc_front::google::firestore::v1::target::TargetType;
+    use firenook_grpc_front::google::firestore::v1::target_change::TargetChangeType;
+    use firenook_grpc_front::google::firestore::v1::value::ValueType;
+    use firenook_grpc_front::google::firestore::v1::{
         Document, DocumentChange, TargetChange, Value, WriteResult,
     };
     use serde_json::json;
@@ -230,7 +230,7 @@ mod tests {
             .operation
             .as_ref()
             .and_then(|operation| match operation {
-                fireside_grpc_front::google::firestore::v1::write::Operation::Update(update) => {
+                firenook_grpc_front::google::firestore::v1::write::Operation::Update(update) => {
                     Some(update)
                 }
                 _ => None,
@@ -268,7 +268,7 @@ mod tests {
             .operation
             .as_ref()
             .and_then(|operation| match operation {
-                fireside_grpc_front::google::firestore::v1::write::Operation::Update(update) => {
+                firenook_grpc_front::google::firestore::v1::write::Operation::Update(update) => {
                     Some(update)
                 }
                 _ => None,
@@ -313,7 +313,7 @@ mod tests {
             .operation
             .as_ref()
             .and_then(|operation| match operation {
-                fireside_grpc_front::google::firestore::v1::write::Operation::Update(update) => {
+                firenook_grpc_front::google::firestore::v1::write::Operation::Update(update) => {
                     Some(update)
                 }
                 _ => None,

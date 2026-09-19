@@ -155,7 +155,7 @@ files or use a consumer checkout. Provide Chrome/Chromium via
 FIREBASE_TOOLS_15_22_ROOT=/absolute/isolated-tools/node_modules/firebase-tools \
   npm run capture:developer-tools --prefix conformance -- /absolute/new-capture-directory
 
-FIRESIDE_BASELINE_BINARY=/absolute/isolated-install/node_modules/@fireside-dev/darwin-arm64/bin/fireside \
+FIRENOOK_BASELINE_BINARY=/absolute/isolated-install/node_modules/@firenook/cli-darwin-arm64/bin/firenook \
   npm run benchmark:developer-tools:baseline --prefix conformance -- /absolute/new-baseline-directory
 
 npm run test:developer-tools-fixtures --prefix conformance

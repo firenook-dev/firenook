@@ -16,7 +16,7 @@ if (!packageRoot) throw new Error("FIREBASE_TOOLS_15_22_ROOT is required");
 const oracleRequire = createRequire(join(packageRoot, "package.json"));
 assert.equal(oracleRequire("./package.json").version, "15.22.0");
 
-const scratch = await mkdtemp("/tmp/fireside-storage-list-pagination-oracle-");
+const scratch = await mkdtemp("/tmp/firenook-storage-list-pagination-oracle-");
 process.env.TMPDIR = scratch;
 const { StorageEmulator } = oracleRequire("./lib/emulator/storage/index.js");
 const { EmulatorRegistry } = oracleRequire("./lib/emulator/registry.js");

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::{AtomicContext, request_event};
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     CoverageNode, CoverageObserver, ExpressionKey, ExpressionValue, Ruleset, SourcePosition,
 };
 use request_event::coverage_value::{Observed, Position};
@@ -188,7 +188,7 @@ impl CoverageStore {
                     nodes: &entry.tree,
                     records: &entry.records,
                 },
-                fireside_coverage: Statistics {
+                firenook_coverage: Statistics {
                     count_model: "actual-evaluator-visits",
                     truncated: entry.omitted_values != 0
                         || self.omitted_operations.load(Ordering::Relaxed) != 0
@@ -321,7 +321,7 @@ struct CoverageDocument<'a> {
     rules: Rules<'a>,
     #[serde(skip_serializing_if = "Nodes::is_empty")]
     report: Nodes<'a>,
-    fireside_coverage: Statistics,
+    firenook_coverage: Statistics,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

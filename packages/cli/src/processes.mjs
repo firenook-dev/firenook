@@ -11,7 +11,7 @@ export function nativeEnvironment(env = process.env, platform = process.platform
     // Set before native allocator initialization. Respect deliberate overrides.
     if (envValue(copy,'MIMALLOC_PURGE_DELAY') === undefined) copy.MIMALLOC_PURGE_DELAY = '100';
     if (envValue(copy,'MIMALLOC_PURGE_DECOMMITS') === undefined) copy.MIMALLOC_PURGE_DECOMMITS = '1';
-    copy.FIRESIDE_CONTROL_STDIN = '1';
+    copy.FIRENOOK_CONTROL_STDIN = '1';
   }
   return copy;
 }
@@ -32,6 +32,6 @@ export function requestNativeStop(child, signal = 'SIGINT', platform = process.p
   if (child.exitCode !== null || child.signalCode !== null) return;
   if (platform === 'win32') {
     if (!child.stdin || child.stdin.destroyed) throw new Error('Native shutdown pipe unavailable; preserve state, do not force-kill');
-    if (!child.stdin.writableEnded) child.stdin.end('FIRESIDE_SHUTDOWN\n');
+    if (!child.stdin.writableEnded) child.stdin.end('FIRENOOK_SHUTDOWN\n');
   } else child.kill(signal);
 }

@@ -3,7 +3,7 @@ use std::fs;
 use std::hint::black_box;
 use std::time::Instant;
 
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     EmptyDocumentAccess, EvaluationRequest, Query, RequestOperation, Timestamp, compile,
 };
 use serde_json::json;

@@ -1,6 +1,6 @@
 use super::*;
-use fireside_core_store::{Precondition, Store, StoreOptions, Value, Write};
-use fireside_query_engine::{FieldPath, Limit};
+use firenook_core_store::{Precondition, Store, StoreOptions, Value, Write};
+use firenook_query_engine::{FieldPath, Limit};
 
 fn database() -> DatabaseName {
     DatabaseName::new("demo", "(default)").unwrap()

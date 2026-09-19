@@ -72,13 +72,13 @@ const BROWSER_PROCESS_PLAN = {
 } as const;
 const TARGETS = [
   {
-    apiKey: "fireside-synthetic-emulator-key",
+    apiKey: "firenook-synthetic-emulator-key",
     directory: "java-v1.22.0",
     name: "Java",
     targetVersion: "1.22.0",
   },
   {
-    apiKey: "fireside-synthetic-cloud-key",
+    apiKey: "firenook-synthetic-cloud-key",
     directory: "production-cloud-firestore",
     name: "production cloud",
     targetVersion: "production-2026-08-31",

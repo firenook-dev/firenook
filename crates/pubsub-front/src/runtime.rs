@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use fireside_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
+use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
 
 use crate::broker::{Broker, Published, PushJob};
 use crate::functions::{ScheduleDefinition, Target, build_dispatch, discover, topic_resource};

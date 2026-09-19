@@ -30,7 +30,7 @@ interface LanguageCase {
 }
 
 const cases: readonly LanguageCase[] = [
-  expression("string-trim", "string", "'  Fireside  '.trim() == 'Fireside'"),
+  expression("string-trim", "string", "'  Firenook  '.trim() == 'Firenook'"),
   expression("string-case", "string", "'FiRe'.lower() == 'fire' && 'FiRe'.upper() == 'FIRE'"),
   expression("string-replace", "string", "'abcabc'.replace('a', 'x') == 'xbcxbc'"),
   expression("string-split", "string", "'a,b,c'.split(',') == ['a', 'b', 'c']"),

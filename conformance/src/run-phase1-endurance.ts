@@ -64,32 +64,32 @@ async function main(): Promise<void> {
       "utf8",
     );
 
-    await updateStage("fireside-memory-soak");
-    await runFiresideSoak("fireside-memory", "fireside-memory-soak");
+    await updateStage("firenook-memory-soak");
+    await runFirenookSoak("firenook-memory", "firenook-memory-soak");
 
-    await updateStage("fireside-disk-soak");
-    await runFiresideSoak("fireside-disk", "fireside-disk-soak");
+    await updateStage("firenook-disk-soak");
+    await runFirenookSoak("firenook-disk", "firenook-disk-soak");
 
-    await updateStage("fireside-2gib-import");
+    await updateStage("firenook-2gib-import");
     const importResult = await runImportGate(
       manifest,
-      "fireside-disk",
+      "firenook-disk",
       artifactDirectory,
-      resolve(outputDirectory, "fireside-2gib-import"),
-      resolve(outputDirectory, "state/fireside-import"),
+      resolve(outputDirectory, "firenook-2gib-import"),
+      resolve(outputDirectory, "state/firenook-import"),
     );
-    requireGate(importResult.passed, "fireside-2gib-import", importResult.summary);
+    requireGate(importResult.passed, "firenook-2gib-import", importResult.summary);
 
-    await updateStage("fireside-sigkill-recovery");
+    await updateStage("firenook-sigkill-recovery");
     const recovery = await runRecoveryGate(
       manifest,
-      resolve(outputDirectory, "fireside-sigkill-recovery"),
-      resolve(outputDirectory, "state/fireside-recovery"),
+      resolve(outputDirectory, "firenook-sigkill-recovery"),
+      resolve(outputDirectory, "state/firenook-recovery"),
     );
-    requireGate(recovery.passed, "fireside-sigkill-recovery", recovery.summary);
+    requireGate(recovery.passed, "firenook-sigkill-recovery", recovery.summary);
 
     await writeState(outputDirectory, {
-      status: "fireside-gate-passed",
+      status: "firenook-gate-passed",
       revision,
       manifestSha256,
       completedAt: new Date().toISOString(),
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
       revision,
       manifestSha256,
       completedAt: new Date().toISOString(),
-      firesideGatePassed: true,
+      firenookGatePassed: true,
       javaComparisonCompleted: comparisonCanContinue,
     });
     console.log(`phase 1 endurance sequence complete: ${outputDirectory}`);
@@ -172,8 +172,8 @@ async function main(): Promise<void> {
     console.log(`${new Date().toISOString()} starting ${stage}`);
   }
 
-  async function runFiresideSoak(
-    kind: "fireside-memory" | "fireside-disk",
+  async function runFirenookSoak(
+    kind: "firenook-memory" | "firenook-disk",
     label: string,
   ): Promise<void> {
     const directory = resolve(outputDirectory, label);
@@ -181,10 +181,10 @@ async function main(): Promise<void> {
     try {
       server = await startServer({
         kind,
-        projectId: "demo-fireside-endurance",
+        projectId: "demo-firenook-endurance",
         outputDirectory: directory,
-        ...(kind === "fireside-disk"
-          ? { dataDirectory: resolve(outputDirectory, "state/fireside-soak") }
+        ...(kind === "firenook-disk"
+          ? { dataDirectory: resolve(outputDirectory, "state/firenook-soak") }
           : {}),
       });
       const result = await runSoak(manifest, server, kind, directory);
@@ -209,7 +209,7 @@ async function main(): Promise<void> {
     try {
       server = await startServer({
         kind: "java",
-        projectId: "demo-fireside-endurance",
+        projectId: "demo-firenook-endurance",
         outputDirectory: directory,
         ...(javaToolOptions === undefined ? {} : { javaToolOptions }),
       });
@@ -241,7 +241,7 @@ async function preflightHost(
   if (process.platform !== "linux") {
     throw new Error("the frozen endurance venue requires Linux");
   }
-  await access(resolve(repositoryRoot, "target/release/fireside"));
+  await access(resolve(repositoryRoot, "target/release/firenook"));
   await access(requiredEnvironment("FIRESTORE_EMULATOR_JAR"));
   const artifact = await stat(
     resolve(artifactDirectory, "all_namespaces/all_kinds/output-0"),

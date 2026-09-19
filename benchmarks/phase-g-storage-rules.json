@@ -100,8 +100,8 @@
       "pullRequest": 43,
       "candidateCommit": "cdabf62",
       "runs": [
-        "https://github.com/sanjevirau/fireside/actions/runs/35196947926",
-        "https://github.com/sanjevirau/fireside/actions/runs/35196250599"
+        "https://github.com/firenook-dev/firenook/actions/runs/35196947926",
+        "https://github.com/firenook-dev/firenook/actions/runs/35196250599"
       ],
       "jobs": [
         "Rust quality gate",
@@ -114,14 +114,14 @@
     },
     "consumerCheapGates": {
       "candidate": "0.1.0-local.ga472db6e3dce",
-      "integration": "bun test:fireside-integration 24/24",
-      "extensions": "bun test:fireside-extensions: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (matches next.6)",
+      "integration": "bun test:firenook-integration 24/24",
+      "extensions": "bun test:firenook-extensions: 16 custom + 3 extension backends, 24 admitted, 2 ignored by upstream (matches next.6)",
       "journeys": "Phase 5 browser journeys 1-9 pass on the packed candidate (see receipts.macJourneys)"
     },
     "macJourneys": {
       "candidate": "0.1.0-local.ga472db6e3dce",
-      "harness": "fireside (private) conformance/src/suite/run-phase5-browser-journeys.ts at c0faebd",
-      "stack": "the consumer development stack with external providers disabled, full-data dataset, Fireside default backend, no Java arguments on the suite command line",
+      "harness": "firenook (private) conformance/src/suite/run-phase5-browser-journeys.ts at c0faebd",
+      "stack": "the consumer development stack with external providers disabled, full-data dataset, Firenook default backend, no Java arguments on the suite command line",
       "passed": true,
       "journeys": [
         {
@@ -219,17 +219,17 @@
   },
   "decisions": {
     "rulesVersion1": {
-      "policy": "measured in G1; the official emulator loads v1 sources and denies list with the warning \"Permission denied. List operations are only allowed for rules_version='2'.\"; Fireside accepts v1 sources for firebase.storage only if G1 shows the emulator accepting them, and then reproduces the list denial; otherwise v1 sources are rejected with a diagnostic naming the line",
+      "policy": "measured in G1; the official emulator loads v1 sources and denies list with the warning \"Permission denied. List operations are only allowed for rules_version='2'.\"; Firenook accepts v1 sources for firebase.storage only if G1 shows the emulator accepting them, and then reproduces the list denial; otherwise v1 sources are rejected with a diagnostic naming the line",
       "source": "firebase-tools 15.22.0 lib/emulator/storage/rules/runtime.js StorageRulesetInstance.verify",
-      "settled": "emulator loads v1 sources, admits get/create and denies list with the warning; Fireside accepts v1 for firebase.storage and reproduces the list denial (emulator-programs.json method-rules-version-1)"
+      "settled": "emulator loads v1 sources, admits get/create and denies list with the warning; Firenook accepts v1 for firebase.storage and reproduces the list denial (emulator-programs.json method-rules-version-1)"
     },
     "uidDerivation": {
-      "policy": "measured in G1; the official emulator derives request.auth.uid from the user_id claim only (uid is null when only sub is present); the current Fireside jar bridge uses user_id ?? sub; Fireside follows the recording",
+      "policy": "measured in G1; the official emulator derives request.auth.uid from the user_id claim only (uid is null when only sub is present); the current Firenook jar bridge uses user_id ?? sub; Firenook follows the recording",
       "source": "firebase-tools 15.22.0 lib/emulator/storage/rules/runtime.js createAuthExpressionValue",
       "settled": "uid is the user_id claim only; a sub-only token has uid == null (auth-shapes/sub-only-uid-is-null)"
     },
     "adminOnlyRoutes": {
-      "policy": "measured in G1; the official emulator evaluates no rules for download-token creation/deletion, object copy, or any JSON API route (adminStorageLayer); Fireside follows the recording",
+      "policy": "measured in G1; the official emulator evaluates no rules for download-token creation/deletion, object copy, or any JSON API route (adminStorageLayer); Firenook follows the recording",
       "source": "firebase-tools 15.22.0 lib/emulator/storage/files.js and apis/gcloud.js",
       "settled": "create_token/delete_token are admin-only with 'Missing admin credentials.'; copy hard-codes owner; every JSON API route bypasses rules (bypass-owner-and-download-tokens, bypass-json-api)"
     },
@@ -240,7 +240,7 @@
     },
     "requestMethod": {
       "policy": "production defines request.method for every operation; the emulator omits it (Property method is undefined on object)",
-      "settled": "production wins: Fireside defines request.method (divergence request-method-undefined)"
+      "settled": "production wins: Firenook defines request.method (divergence request-method-undefined)"
     },
     "listMatching": {
       "policy": "the emulator matches list paths as prefix templates; production applies standard match semantics to list",
@@ -248,7 +248,7 @@
     },
     "setRulesFailure": {
       "policy": "the plan assumed a failed reload keeps the previous ruleset",
-      "settled": "the emulator drops the ruleset and serves 403 'Storage Emulator has no loaded ruleset.' for every v0 request including owner until a valid reload; Fireside reproduces this on setRules and keeps failing at startup for a bad ruleset"
+      "settled": "the emulator drops the ruleset and serves 403 'Storage Emulator has no loaded ruleset.' for every v0 request including owner until a valid reload; Firenook reproduces this on setRules and keeps failing at startup for a bad ruleset"
     }
   },
   "capture": {
@@ -344,7 +344,7 @@
       "what": "cloud-storage-rules-runtime-v1.1.3.jar download"
     },
     {
-      "where": "packages/cli/bin/fireside.mjs",
+      "where": "packages/cli/bin/firenook.mjs",
       "what": "--java option; 'Requires Node 24 and Java' help text"
     },
     {
@@ -397,7 +397,7 @@
       "namedStage": true,
       "steps": [
         "bun install",
-        "fireside setup",
+        "firenook setup",
         "first start",
         "upload denied by rules",
         "upload allowed by rules",
@@ -453,7 +453,7 @@
     {
       "id": "empty-path-segment-crashes-runtime",
       "behavior": "an object name with an empty segment crashes the rules runtime jar and the request never answers",
-      "policy": "Fireside drops empty segments from the rules path and always answers",
+      "policy": "Firenook drops empty segments from the rules path and always answers",
       "fixture": "conformance/fixtures/storage-rules-v1/emulator-programs.json"
     },
     {

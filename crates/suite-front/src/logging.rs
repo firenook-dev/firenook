@@ -246,7 +246,7 @@ async fn send<S: Sink<Message> + Unpin>(
         result=tokio::time::timeout(SEND_DEADLINE,output.send(message))=>if let Ok(result)=result {
             result.is_ok()
         } else {
-            eprintln!("fireside Logging diagnostics: client send exceeded 30 seconds; disconnecting");false
+            eprintln!("firenook Logging diagnostics: client send exceeded 30 seconds; disconnecting");false
         },
     }
 }

@@ -1,4 +1,4 @@
-//! Firestore REST v1 and emulator-control HTTP surfaces for fireside.
+//! Firestore REST v1 and emulator-control HTTP surfaces for firenook.
 
 #![forbid(unsafe_code)]
 
@@ -20,19 +20,19 @@ use axum::routing::get;
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use fireside_core_store::{
+use firenook_core_store::{
     CommitError, DatabaseName, Document, DocumentKey, FieldPath, FieldTransform, Fields,
     Precondition, Store, Timestamp, TransformOperation, Value, Write, validate_resource_id,
 };
-use fireside_export_format::{ExportedDocument, write_export};
-use fireside_functions_bridge::TriggerRegistry;
-use fireside_query_engine::{
+use firenook_export_format::{ExportedDocument, write_export};
+use firenook_functions_bridge::TriggerRegistry;
+use firenook_query_engine::{
     Aggregation, DatabaseEdition, Direction, DistanceMeasure, FieldFilter, FieldOperator,
     FieldPath as QueryFieldPath, Filter, Limit, Query as StructuredQuery, QueryPolicy, QueryScope,
     aggregate, execute,
 };
-use fireside_rules_runtime::RequestOperation;
-use fireside_rules_runtime::{Authorization, RulesRuntime, SnapshotAccess, evaluation_request};
+use firenook_rules_runtime::RequestOperation;
+use firenook_rules_runtime::{Authorization, RulesRuntime, SnapshotAccess, evaluation_request};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue, json};
 use time::OffsetDateTime;
@@ -47,7 +47,7 @@ const RUN_AGGREGATION_QUERY_ROUTE: &str =
 const TRIGGER_ROUTE: &str = "/emulator/v1/projects/{project}/triggers/{key}";
 const EVENTARC_ROUTE: &str = "/emulator/v1/projects/{project}/eventarcTrigger";
 const CLEAR_ROUTE: &str = "/emulator/v1/projects/{project}/databases/{database}/documents";
-/// `fireside firestore:delete <path>`: delete one document, a collection's
+/// `firenook firestore:delete <path>`: delete one document, a collection's
 /// documents (`mode=shallow`) or everything under a path (`mode=recursive`).
 const DELETE_PATH_ROUTE: &str =
     "/emulator/v1/projects/{project}/databases/{database}/documents/{*path}";
@@ -116,7 +116,7 @@ pub fn router_with_query_policy_memory_rules_and_triggers(
     rules: RulesRuntime,
     triggers: TriggerRegistry,
 ) -> Router {
-    let service = fireside_grpc_front::FirestoreService::new_with_query_policy_and_rules(
+    let service = firenook_grpc_front::FirestoreService::new_with_query_policy_and_rules(
         store.clone(),
         query_policy.clone(),
         rules.clone(),
@@ -138,7 +138,7 @@ pub fn router_with_shared_service(
     allocator_memory_reporter: Option<Arc<dyn AllocatorMemoryReporter>>,
     rules: RulesRuntime,
     triggers: TriggerRegistry,
-    service: fireside_grpc_front::FirestoreService,
+    service: firenook_grpc_front::FirestoreService,
 ) -> Router {
     Router::new()
         .route(
@@ -297,7 +297,7 @@ pub struct ProcessResidentMemoryUsage {
 pub struct DebugMemoryUsage {
     /// Logical state retained by the emulator.
     #[serde(flatten)]
-    pub store: fireside_core_store::StoreMemoryUsage,
+    pub store: firenook_core_store::StoreMemoryUsage,
     /// Serving allocator state when the binary provides a reporter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allocator: Option<AllocatorMemoryUsage>,
@@ -307,7 +307,7 @@ pub struct DebugMemoryUsage {
 
 #[derive(Clone)]
 struct RestState {
-    service: fireside_grpc_front::FirestoreService,
+    service: firenook_grpc_front::FirestoreService,
     store: Store,
     query_policy: QueryPolicy,
     rules: RulesRuntime,
@@ -1030,11 +1030,11 @@ fn authorize_query(
     database: &DatabaseName,
     query: &StructuredQuery,
     authorization: &Authorization,
-    snapshot: &fireside_core_store::Snapshot,
+    snapshot: &firenook_core_store::Snapshot,
 ) -> Result<(), RestError> {
     let candidate =
-        fireside_rules_runtime::query_candidate(database, query).map_err(RestError::invalid)?;
-    let query = fireside_rules_runtime::query_policy(query);
+        firenook_rules_runtime::query_candidate(database, query).map_err(RestError::invalid)?;
+    let query = firenook_rules_runtime::query_policy(query);
     let request = evaluation_request(
         RequestOperation::List,
         &candidate,
@@ -1061,7 +1061,7 @@ fn request_authorization(headers: &HeaderMap, project: &str) -> Result<Authoriza
         .map_err(|error| RestError::unauthenticated(error.to_string()))
 }
 
-fn require_allowed(verdict: fireside_rules_runtime::EvaluationResult) -> Result<(), RestError> {
+fn require_allowed(verdict: firenook_rules_runtime::EvaluationResult) -> Result<(), RestError> {
     if verdict.allowed {
         Ok(())
     } else {
@@ -1073,7 +1073,7 @@ fn require_allowed(verdict: fireside_rules_runtime::EvaluationResult) -> Result<
 }
 
 fn require_atomic_allowed(
-    verdict: fireside_rules_runtime::AtomicEvaluationResult,
+    verdict: firenook_rules_runtime::AtomicEvaluationResult,
 ) -> Result<(), RestError> {
     if verdict.allowed {
         return Ok(());
@@ -3040,7 +3040,7 @@ mod tests {
     #[tokio::test]
     async fn debug_memory_exposes_versioned_store_accounting() {
         let state = RestState {
-            service: fireside_grpc_front::FirestoreService::new(Store::default()),
+            service: firenook_grpc_front::FirestoreService::new(Store::default()),
             coverage_slots: Arc::new(tokio::sync::Semaphore::new(
                 coverage::MAXIMUM_IN_FLIGHT_REPORTS,
             )),

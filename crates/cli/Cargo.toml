@@ -1,5 +1,5 @@
 [package]
-name = "fireside"
+name = "firenook"
 description = "A clean-room local emulator suite grounded in production behavior"
 version.workspace = true
 edition.workspace = true
@@ -14,21 +14,21 @@ categories = ["command-line-utilities", "development-tools::testing"]
 [dependencies]
 axum.workspace = true
 clap.workspace = true
-fireside-auth-front = { path = "../auth-front" }
-fireside-pubsub-front = { path = "../pubsub-front" }
-fireside-capture-proxy = { path = "../capture-proxy" }
-fireside-core-store = { path = "../core-store" }
-fireside-export-format = { path = "../export-format" }
-fireside-extensions = { path = "../extensions" }
-fireside-functions-bridge = { path = "../functions-bridge" }
-fireside-functions-runtime = { path = "../functions-runtime" }
-fireside-grpc-front = { path = "../grpc-front" }
-fireside-query-engine = { path = "../query-engine" }
-fireside-rest-front = { path = "../rest-front" }
-fireside-rules-runtime = { path = "../rules-runtime" }
-fireside-suite-runtime = { path = "../suite-runtime" }
-fireside-suite-front = { path = "../suite-front" }
-fireside-webchannel-front = { path = "../webchannel-front" }
+firenook-auth-front = { path = "../auth-front" }
+firenook-pubsub-front = { path = "../pubsub-front" }
+firenook-capture-proxy = { path = "../capture-proxy" }
+firenook-core-store = { path = "../core-store" }
+firenook-export-format = { path = "../export-format" }
+firenook-extensions = { path = "../extensions" }
+firenook-functions-bridge = { path = "../functions-bridge" }
+firenook-functions-runtime = { path = "../functions-runtime" }
+firenook-grpc-front = { path = "../grpc-front" }
+firenook-query-engine = { path = "../query-engine" }
+firenook-rest-front = { path = "../rest-front" }
+firenook-rules-runtime = { path = "../rules-runtime" }
+firenook-suite-runtime = { path = "../suite-runtime" }
+firenook-suite-front = { path = "../suite-front" }
+firenook-webchannel-front = { path = "../webchannel-front" }
 mimalloc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

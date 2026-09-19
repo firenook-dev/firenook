@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const PROJECT_ID = "demo-fireside-phase0";
+const PROJECT_ID = "demo-firenook-phase0";
 const enterprise = process.argv.includes("--enterprise");
 
 async function main(): Promise<void> {

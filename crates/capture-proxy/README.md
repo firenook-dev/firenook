@@ -1,4 +1,4 @@
-# fireside capture proxy
+# firenook capture proxy
 
 Phase 0 defines the versioned, redaction-aware fixture schema used by the future
 recording proxy. Network interception and TLS support are intentionally not yet

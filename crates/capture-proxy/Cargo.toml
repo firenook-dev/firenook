@@ -1,5 +1,5 @@
 [package]
-name = "fireside-capture-proxy"
+name = "firenook-capture-proxy"
 description = "Streaming oracle capture proxy with redacted synthetic fixtures"
 version.workspace = true
 edition.workspace = true

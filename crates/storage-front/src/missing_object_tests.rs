@@ -1,7 +1,7 @@
 use super::*;
 use axum::body::to_bytes;
 use axum::http::Request;
-use fireside_functions_bridge::TriggerObserver;
+use firenook_functions_bridge::TriggerObserver;
 use tower::ServiceExt as _;
 
 #[tokio::test]
@@ -11,7 +11,7 @@ async fn missing_object_responses_match_the_official_route_contract() {
     ))
     .expect("official fixture");
     let root = std::env::temp_dir().join(format!(
-        "fireside-missing-object-{}-{}",
+        "firenook-missing-object-{}-{}",
         std::process::id(),
         now_rfc3339().replace(':', "-")
     ));

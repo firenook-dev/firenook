@@ -50,7 +50,7 @@ interface RestRunQueryResponse {
 test("REST v1 patches, reads, deletes, and reports missing documents", async () => {
   const configuration = resolveTarget(process.env);
   const runId = randomUUID();
-  const documentPath = `runs/${runId}/fireside_conformance/rest`;
+  const documentPath = `runs/${runId}/firenook_conformance/rest`;
   const baseUrl = configuration.host === undefined
     ? "https://firestore.googleapis.com"
     : `http://${configuration.host}`;
@@ -98,9 +98,9 @@ test("REST v1 commit, batchGet, and runQuery share document semantics", async ()
   const configuration = resolveTarget(process.env);
   const runId = randomUUID();
   const databaseRoot = `projects/${configuration.projectId}/databases/(default)`;
-  const documentPath = `runs/${runId}/fireside_conformance/rest-rpc`;
+  const documentPath = `runs/${runId}/firenook_conformance/rest-rpc`;
   const documentName = `${databaseRoot}/documents/${documentPath}`;
-  const missingName = `${databaseRoot}/documents/runs/${runId}/fireside_conformance/missing`;
+  const missingName = `${databaseRoot}/documents/runs/${runId}/firenook_conformance/missing`;
   const baseUrl = configuration.host === undefined
     ? "https://firestore.googleapis.com"
     : `http://${configuration.host}`;
@@ -154,7 +154,7 @@ test("REST v1 commit, batchGet, and runQuery share document semantics", async ()
     headers,
     body: JSON.stringify({
       structuredQuery: {
-        from: [{ collectionId: "fireside_conformance" }],
+        from: [{ collectionId: "firenook_conformance" }],
         where: {
           fieldFilter: {
             field: { fieldPath: "source" },
@@ -189,7 +189,7 @@ test("REST v1 commit applies update and document transforms", async () => {
   const configuration = resolveTarget(process.env);
   const runId = randomUUID();
   const databaseRoot = `projects/${configuration.projectId}/databases/(default)`;
-  const collectionPath = `runs/${runId}/fireside_conformance`;
+  const collectionPath = `runs/${runId}/firenook_conformance`;
   const updateName = `${databaseRoot}/documents/${collectionPath}/update-transforms`;
   const transformName = `${databaseRoot}/documents/${collectionPath}/document-transform`;
   const baseUrl = configuration.host === undefined
@@ -325,7 +325,7 @@ test("REST v1 preserves the production missing-index status", async () => {
   const configuration = resolveTarget(process.env);
   const runId = randomUUID();
   const databaseRoot = `projects/${configuration.projectId}/databases/(default)`;
-  const collectionPath = `runs/${runId}/fireside_conformance`;
+  const collectionPath = `runs/${runId}/firenook_conformance`;
   const documentNames = ["first", "second"].map(
     (id) => `${databaseRoot}/documents/${collectionPath}/${id}`,
   );
@@ -363,7 +363,7 @@ test("REST v1 preserves the production missing-index status", async () => {
         headers,
         body: JSON.stringify({
           structuredQuery: {
-            from: [{ collectionId: "fireside_conformance" }],
+            from: [{ collectionId: "firenook_conformance" }],
             where: {
               fieldFilter: {
                 field: { fieldPath: "strictGroup" },

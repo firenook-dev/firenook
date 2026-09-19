@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     Auth, ConstraintOperator as Op, DocumentAccess, DocumentAccessError, EmptyDocumentAccess,
     EvaluationRequest, FieldConstraint, Query, QueryFilter, QueryScope, RequestOperation, Resource,
     Timestamp, Value, compile,

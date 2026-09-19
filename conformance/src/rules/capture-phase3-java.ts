@@ -37,7 +37,7 @@ if (jarSha256 !== JAVA_JAR_SHA256) {
 }
 
 const temporaryDirectory = await mkdtemp(
-  join(tmpdir(), "fireside-phase3-rules-java-"),
+  join(tmpdir(), "firenook-phase3-rules-java-"),
 );
 const rulesPath = join(temporaryDirectory, "firestore.rules");
 const rulesSource = buildRulesSource();

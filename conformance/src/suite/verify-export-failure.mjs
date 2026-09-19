@@ -30,7 +30,7 @@ if(volume){
   assert.notEqual((await stat(volume)).dev,(await stat(output)).dev,'refuse to fill the host/output filesystem');
   const capacity=fs.blocks*fs.bsize;
   assert(capacity>=4*1024*1024&&capacity<=64*1024*1024,'fault volume must be a separate tiny 4–64 MiB filesystem');
-  faultRoot=join(volume,'fireside-export-fault');await mkdir(faultRoot);
+  faultRoot=join(volume,'firenook-export-fault');await mkdir(faultRoot);
   filesystem={type:fs.type,capacityBytes:capacity,availableBeforeBytes:fs.bavail*fs.bsize,separateFromWorkingState:!workingDisk};
 }
 const stateDirectory=workingDisk?join(faultRoot,'working'):join(output,'working');
@@ -48,7 +48,7 @@ for(const name of ['firestore','auth','storage','functions','pubsub','hub','ui',
   const listener=createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');ports[name]=listener.address().port;reservations.push(listener);
 }
 const env=Object.fromEntries(['HOME','USER','LOGNAME','LANG','TZ','PATH','JAVA_HOME'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]));
-Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),FIRESIDE_CONTROL_STDIN:'1'});
+Object.assign(env,{PATH:dirname(process.execPath)+':'+env.PATH,GOOGLE_APPLICATION_CREDENTIALS:join(output,'demo-adc.json'),CLOUDSDK_CONFIG:join(output,'gcloud'),FIRENOOK_CONTROL_STDIN:'1'});
 const args=['suite','--host','127.0.0.1','--project-id',project,'--project-dir',output,'--state-dir',stateDirectory,'--resume-state','--import',join(output,'seed'),
   '--storage-bucket','default='+bucket,'--firebase-tools-root',tools,'--node',process.execPath,
   '--ui-archive',join(cache,'ui-v1.15.0.zip')];
@@ -71,7 +71,7 @@ async function launch(name,extra=[]){
 async function stop(){
   const handle=active;
   if(handle.stopped){handle.child.kill('SIGCONT');handle.stopped=false;}
-  if(handle.child.exitCode===null&&handle.child.signalCode===null)handle.child.stdin.end('FIRESIDE_SHUTDOWN\n');
+  if(handle.child.exitCode===null&&handle.child.signalCode===null)handle.child.stdin.end('FIRENOOK_SHUTDOWN\n');
   const exit=await Promise.race([handle.finished,delay(45000,null,{ref:false})]);
   await writeFile(join(output,handle.name+'.log'),handle.log);assert(exit,'owned suite shutdown deadline; leave live process for diagnosis');active=null;
   return {exit,log:handle.log};
@@ -104,7 +104,7 @@ async function crashDuringExport(){
   record.acknowledgedAdditionalDocuments=4096;
   const handle=active;let staging;
   const watcher=watch(faultRoot,(_event,name)=>{
-    if(!staging&&name?.startsWith('.fireside-export-')&&!name.startsWith('.fireside-export-backup-')){
+    if(!staging&&name?.startsWith('.firenook-export-')&&!name.startsWith('.firenook-export-backup-')){
       staging=join(faultRoot,name);handle.stopped=handle.child.kill('SIGSTOP');
     }
   });

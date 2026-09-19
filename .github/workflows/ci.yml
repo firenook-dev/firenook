@@ -55,7 +55,7 @@ jobs:
         run: |
           if [ -n "$PUBLIC_POLICY_JSON" ]; then
             printf '%s' "$PUBLIC_POLICY_JSON" > "$RUNNER_TEMP/public-policy.json"
-            export FIRESIDE_PUBLIC_POLICY="$RUNNER_TEMP/public-policy.json"
+            export FIRENOOK_PUBLIC_POLICY="$RUNNER_TEMP/public-policy.json"
           fi
           range="${{ github.event.pull_request.base.sha || github.event.before }}..${{ github.sha }}"
           node scripts/check-independence.mjs --commits "$range"
@@ -127,116 +127,118 @@ jobs:
         run: node --test conformance/test/developer-coverage-browser.test.mjs
       - name: Prepare pinned official developer UI compatibility peers
         run: |
-          npm install --prefix "$RUNNER_TEMP/fireside-devtools" --ignore-scripts --no-audit --no-fund firebase-tools@15.22.0 firebase-functions@7.2.5 firebase-admin@13.10.0
-          node conformance/src/developer-tools/prepare-ui.mjs "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools"
+          npm install --prefix "$RUNNER_TEMP/firenook-devtools" --ignore-scripts --no-audit --no-fund firebase-tools@15.22.0 firebase-functions@7.2.5 firebase-admin@13.10.0
+          node conformance/src/developer-tools/prepare-ui.mjs "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-tools"
       - name: Verify complete synthetic suite data controls, diagnostics and shutdown
         run: >-
           node conformance/src/developer-tools/verify-native-ui.mjs
-          target/debug/fireside
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools"
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions"
+          target/debug/firenook
+          "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-tools"
+          "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-functions"
           "$HOME/.cache/firebase/emulators"
-          "$RUNNER_TEMP/fireside-developer-ui-evidence"
+          "$RUNNER_TEMP/firenook-developer-ui-evidence"
           --topic-reload
       - name: Verify retained native state and cleanup after failed export
         run: >-
           node conformance/src/suite/verify-export-failure.mjs
-          target/debug/fireside
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools"
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions"
+          target/debug/firenook
+          "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-tools"
+          "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-functions"
           "$HOME/.cache/firebase/emulators"
-          "$RUNNER_TEMP/fireside-export-failure-evidence"
+          "$RUNNER_TEMP/firenook-export-failure-evidence"
+      # The last engine published before the rename: the upgrade check below resumes
+      # its native state with the current engine (store files are adopted in place).
       - name: Install exact previous native engine without package scripts
-        run: npm install --prefix "$RUNNER_TEMP/fireside-previous-engine" --ignore-scripts --no-audit --no-fund @fireside-dev/linux-x64@0.1.0-next.3
+        run: npm install --prefix "$RUNNER_TEMP/firenook-previous-engine" --ignore-scripts --no-audit --no-fund @fireside-dev/linux-x64@0.1.0-next.3
       - name: Verify crash during incomplete export staging and native recovery
         run: >-
           node conformance/src/suite/verify-export-failure.mjs
-          target/debug/fireside "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools"
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions"
-          "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/fireside-interrupted-export-evidence"
+          target/debug/firenook "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-tools"
+          "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-functions"
+          "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/firenook-interrupted-export-evidence"
           --interrupt-export
       - name: Verify real ENOSPC on isolated export and native working filesystems
         run: |
           for mode in export working; do
             bash conformance/src/suite/with-fault-filesystem.sh \
-              target/debug/fireside "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools" \
-              "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions" \
-              "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/fireside-enospc-$mode-evidence" "$mode"
+              target/debug/firenook "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-tools" \
+              "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-functions" \
+              "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/firenook-enospc-$mode-evidence" "$mode"
           done
       - name: Verify previous native upgrade and portable rollback
         run: |
           node conformance/node_modules/playwright/cli.js install --with-deps chromium
-          ln -s "$GITHUB_WORKSPACE/conformance/node_modules/firebase" "$RUNNER_TEMP/fireside-devtools/node_modules/firebase"
+          ln -s "$GITHUB_WORKSPACE/conformance/node_modules/firebase" "$RUNNER_TEMP/firenook-devtools/node_modules/firebase"
           node conformance/src/suite/verify-native-resume.mjs \
-            target/debug/fireside "$RUNNER_TEMP/fireside-devtools" \
-            "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/fireside-native-upgrade-evidence" \
-            "$RUNNER_TEMP/fireside-previous-engine/node_modules/@fireside-dev/linux-x64/bin/fireside"
+            target/debug/firenook "$RUNNER_TEMP/firenook-devtools" \
+            "$HOME/.cache/firebase/emulators" "$RUNNER_TEMP/firenook-native-upgrade-evidence" \
+            "$RUNNER_TEMP/firenook-previous-engine/node_modules/@fireside-dev/linux-x64/bin/fireside"
       - name: Replay the Functions runtime and Extensions oracle corpus
         env:
-          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/fireside-devtools/node_modules/firebase-functions
-          FIRESIDE_OFFLINE: "1"
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_OFFLINE: "1"
         run: |
           NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
-            --binary ../target/debug/fireside \
+            --binary ../target/debug/firenook \
             --profiles main,v1-blocking,inspect,ext-missing-param \
-            --output "$RUNNER_TEMP/fireside-functions-runtime-replay.json"
+            --output "$RUNNER_TEMP/firenook-functions-runtime-replay.json"
       - name: Replay the Cloud Tasks oracle corpus against the suite
         env:
-          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/fireside-devtools/node_modules/firebase-functions
-          FIRESIDE_OFFLINE: "1"
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/firenook-devtools/node_modules/firebase-functions
+          FIRENOOK_OFFLINE: "1"
         run: |
           NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
-            --binary ../target/debug/fireside \
+            --binary ../target/debug/firenook \
             --profiles tasks \
             --fixture fixtures/tasks-v1/emulator-programs.json \
-            --output "$RUNNER_TEMP/fireside-tasks-replay.json"
+            --output "$RUNNER_TEMP/firenook-tasks-replay.json"
       - name: Replay the Auth oracle corpus against the standalone Auth service
         run: |
           npm run replay:auth --prefix conformance -- \
-            --binary ../target/debug/fireside \
-            --output "$RUNNER_TEMP/fireside-auth-replay.json"
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-auth-replay.json"
       - name: Replay the Pub/Sub oracle corpus over gRPC and HTTP/JSON
         run: |
           npm run replay:pubsub --prefix conformance -- \
-            --binary ../target/debug/fireside \
-            --output "$RUNNER_TEMP/fireside-pubsub-replay.json"
-      - name: Verify the pinned Pub/Sub client library against Fireside
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-pubsub-replay.json"
+      - name: Verify the pinned Pub/Sub client library against Firenook
         run: |
           npm run verify:pubsub:client --prefix conformance -- \
-            --binary ../target/debug/fireside \
-            --output "$RUNNER_TEMP/fireside-pubsub-client.json"
+            --binary ../target/debug/firenook \
+            --output "$RUNNER_TEMP/firenook-pubsub-client.json"
       - name: Verify suite start without Java on PATH
         run: >-
           node conformance/src/suite/verify-no-java.mjs
-          target/debug/fireside
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-tools"
-          "$RUNNER_TEMP/fireside-devtools/node_modules/firebase-functions"
+          target/debug/firenook
+          "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-tools"
+          "$RUNNER_TEMP/firenook-devtools/node_modules/firebase-functions"
           "$HOME/.cache/firebase/emulators"
-          "$RUNNER_TEMP/fireside-no-java-evidence"
+          "$RUNNER_TEMP/firenook-no-java-evidence"
       - name: Preserve synthetic developer UI evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: synthetic-developer-ui
           path: |
-            ${{ runner.temp }}/fireside-developer-ui-evidence/result.json
-            ${{ runner.temp }}/fireside-export-failure-evidence/result.json
-            ${{ runner.temp }}/fireside-interrupted-export-evidence/result.json
-            ${{ runner.temp }}/fireside-interrupted-export-evidence/*.log
-            ${{ runner.temp }}/fireside-enospc-*-evidence/result.json
-            ${{ runner.temp }}/fireside-enospc-*-evidence/*.log
-            ${{ runner.temp }}/fireside-enospc-*-evidence/fault.img
-            ${{ runner.temp }}/fireside-native-upgrade-evidence/result.json
-            ${{ runner.temp }}/fireside-native-upgrade-evidence/failure.json
-            ${{ runner.temp }}/fireside-developer-ui-evidence/failure.json
-            ${{ runner.temp }}/fireside-developer-ui-evidence/browser-failure.json
-            ${{ runner.temp }}/fireside-developer-ui-evidence/*.png
-            ${{ runner.temp }}/fireside-functions-runtime-replay.json
-            ${{ runner.temp }}/fireside-auth-replay.json
-            ${{ runner.temp }}/fireside-pubsub-replay.json
-            ${{ runner.temp }}/fireside-pubsub-client.json
-            ${{ runner.temp }}/fireside-no-java-evidence/result.json
-            ${{ runner.temp }}/fireside-no-java-evidence/suite.log
+            ${{ runner.temp }}/firenook-developer-ui-evidence/result.json
+            ${{ runner.temp }}/firenook-export-failure-evidence/result.json
+            ${{ runner.temp }}/firenook-interrupted-export-evidence/result.json
+            ${{ runner.temp }}/firenook-interrupted-export-evidence/*.log
+            ${{ runner.temp }}/firenook-enospc-*-evidence/result.json
+            ${{ runner.temp }}/firenook-enospc-*-evidence/*.log
+            ${{ runner.temp }}/firenook-enospc-*-evidence/fault.img
+            ${{ runner.temp }}/firenook-native-upgrade-evidence/result.json
+            ${{ runner.temp }}/firenook-native-upgrade-evidence/failure.json
+            ${{ runner.temp }}/firenook-developer-ui-evidence/failure.json
+            ${{ runner.temp }}/firenook-developer-ui-evidence/browser-failure.json
+            ${{ runner.temp }}/firenook-developer-ui-evidence/*.png
+            ${{ runner.temp }}/firenook-functions-runtime-replay.json
+            ${{ runner.temp }}/firenook-auth-replay.json
+            ${{ runner.temp }}/firenook-pubsub-replay.json
+            ${{ runner.temp }}/firenook-pubsub-client.json
+            ${{ runner.temp }}/firenook-no-java-evidence/result.json
+            ${{ runner.temp }}/firenook-no-java-evidence/suite.log
           if-no-files-found: ignore
       - name: Verify query rules oracle fixtures
         run: npm run test:rules:query-fixtures --prefix conformance
@@ -250,29 +252,29 @@ jobs:
         run: npm run test:webchannel:browser --prefix conformance
       - name: Run WebChannel browser demo in disk/WAL mode
         run: npm run test:webchannel:browser:disk --prefix conformance
-      - name: Run Fireside conformance
-        run: npm run test:fireside --prefix conformance
-      - name: Run Fireside disk-mode conformance
-        run: npm run test:fireside:disk --prefix conformance
-      - name: Run Fireside strict-index conformance
-        run: npm run test:fireside:strict --prefix conformance
-      - name: Run Fireside Enterprise pipeline conformance
-        run: npm run test:fireside:enterprise --prefix conformance
-      - name: Run Fireside Enterprise pipeline conformance in disk mode
-        run: npm run test:fireside:enterprise:disk --prefix conformance
+      - name: Run Firenook conformance
+        run: npm run test:firenook --prefix conformance
+      - name: Run Firenook disk-mode conformance
+        run: npm run test:firenook:disk --prefix conformance
+      - name: Run Firenook strict-index conformance
+        run: npm run test:firenook:strict --prefix conformance
+      - name: Run Firenook Enterprise pipeline conformance
+        run: npm run test:firenook:enterprise --prefix conformance
+      - name: Run Firenook Enterprise pipeline conformance in disk mode
+        run: npm run test:firenook:enterprise:disk --prefix conformance
       - name: Prove disk recovery across SIGKILL
         if: runner.os != 'Windows'
-        run: npm run test:fireside-disk-recovery --prefix conformance
-      - name: Import an official export into Fireside
-        run: npm run test:fireside-import --prefix conformance
+        run: npm run test:firenook-disk-recovery --prefix conformance
+      - name: Import an official export into Firenook
+        run: npm run test:firenook-import --prefix conformance
       - name: Download and test the official Java emulator
         run: npm run test:official --prefix conformance
       - name: Test the official Java emulator in Enterprise mode
         run: npm run test:official:enterprise --prefix conformance
-      - name: Re-import a Fireside-written export into Java
+      - name: Re-import a Firenook-written export into Java
         run: npm run test:official-export-import --prefix conformance
-      - name: Export through Fireside and import into Java
-        run: npm run test:fireside-export-java-import --prefix conformance
+      - name: Export through Firenook and import into Java
+        run: npm run test:firenook-export-java-import --prefix conformance
 
   firebase-js-sdk:
     name: Firebase JS SDK browser integration (${{ matrix.server_mode }}, client ${{ matrix.client_persistence }})
@@ -302,7 +304,7 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      - name: Install Fireside conformance dependencies
+      - name: Install Firenook conformance dependencies
         run: npm ci --prefix conformance
       - name: Install pinned Firebase JS SDK dependencies
         working-directory: .phase2/firebase-js-sdk

@@ -128,7 +128,7 @@ async fn cancellation_while_queued_never_starts_the_write() {
 #[tokio::test]
 async fn acknowledged_queued_disk_commit_and_stream_write_survive_reopen() {
     let directory = std::env::temp_dir().join(format!(
-        "fireside-grpc-write-queue-{}-{}",
+        "firenook-grpc-write-queue-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -152,7 +152,7 @@ async fn acknowledged_queued_disk_commit_and_stream_write_survive_reopen() {
     };
     {
         let store =
-            Store::open_disk(&directory, fireside_core_store::DiskOptions::default()).unwrap();
+            Store::open_disk(&directory, firenook_core_store::DiskOptions::default()).unwrap();
         assert!(store.is_disk_backed());
         let service = FirestoreService::new(store);
         assert!(service.disk_write_queue.is_some());
@@ -174,7 +174,7 @@ async fn acknowledged_queued_disk_commit_and_stream_write_survive_reopen() {
     }
     {
         let reopened =
-            Store::open_disk(&directory, fireside_core_store::DiskOptions::default()).unwrap();
+            Store::open_disk(&directory, firenook_core_store::DiskOptions::default()).unwrap();
         let snapshot = reopened.snapshot();
         for id in ["unary", "stream"] {
             let key = decode_document_name(&format!("{database}/documents/items/{id}")).unwrap();

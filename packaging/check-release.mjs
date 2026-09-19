@@ -5,14 +5,14 @@ import { manifest, release } from '../packages/cli/src/binary.mjs';
 import { recoveryReceipt, authorizeRecovery } from './release-recovery.mjs';
 
 assert.match(manifest.version,/^\d+\.\d+\.\d+(?:-(?:next|rc)\.\d+)?$/);
-assert.equal(manifest.name,'@fireside-dev/cli');
+assert.equal(manifest.name,'firenook');
 assert.equal(manifest.publishConfig.access,'public');
 assert.equal(manifest.scripts,undefined,'No dependency lifecycle scripts');
-assert.equal(manifest.repository.url,'git+https://github.com/sanjevirau/fireside.git');
+assert.equal(manifest.repository.url,'git+https://github.com/firenook-dev/firenook.git');
 assert.match(release.engineRevision,/^[a-f0-9]{40}$/);
 assert.ok(!Object.hasOwn(release, 'acceptanceReport'), 'Keep private acceptance outside the public package');
 assert.ok(!Object.hasOwn(release, 'acceptedBaselineRevision'), 'Keep private acceptance outside the public package');
-for (const key of Object.keys(release.platforms)) assert.equal(manifest.optionalDependencies[`@fireside-dev/${key}`],manifest.version);
+for (const key of Object.keys(release.platforms)) assert.equal(manifest.optionalDependencies[`@firenook/cli-${key}`],manifest.version);
 const workflow = readFileSync(new URL('../.github/workflows/release-npm.yml',import.meta.url),'utf8');
 assert.match(workflow,/id-token: write/);
 assert.match(workflow,/environment: npm-release/);

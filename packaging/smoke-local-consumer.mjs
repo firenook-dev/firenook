@@ -13,10 +13,10 @@ assert.match(registryBaseline, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]
 const artifacts = resolve(artifactArgument);
 const receipt = JSON.parse(readFileSync(join(artifacts,'artifacts.json')));
 assert.match(receipt.version,/-local\.g[a-f0-9]{12}$/);
-const consumer = mkdtempSync(join(tmpdir(),'fireside local override proof-'));
+const consumer = mkdtempSync(join(tmpdir(),'firenook local override proof-'));
 writeFileSync(join(consumer,'package.json'),JSON.stringify({private:true,devDependencies:{[manifest.name]:registryBaseline}},null,2)+'\n');
 const bun = args => packageManager('bun',args,{cwd:consumer,stdio:'inherit'});
-const cli = join(consumer,'node_modules/@fireside-dev/cli/bin/fireside.mjs');
+const cli = join(consumer,'node_modules/firenook/bin/firenook.mjs');
 const version = () => execFileSync(process.execPath,[cli,'--version'],{encoding:'utf8'}).trim();
 bun(['install','--ignore-scripts']);
 assert.ok(version().startsWith(registryBaseline+' '));

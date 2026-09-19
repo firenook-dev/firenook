@@ -1,6 +1,6 @@
 const { resolve } = require("node:path");
 
-module.exports = function configureFiresideFirebaseSdkGate(config) {
+module.exports = function configureFirenookFirebaseSdkGate(config) {
   const sdkDirectory = process.env.FIREBASE_JS_SDK_DIR;
   if (!sdkDirectory) {
     throw new Error("FIREBASE_JS_SDK_DIR is required");

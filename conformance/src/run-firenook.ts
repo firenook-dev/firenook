@@ -4,7 +4,7 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const PROJECT_ID = "demo-fireside-fireside";
+const PROJECT_ID = "demo-firenook-firenook";
 const HOST = "127.0.0.1";
 const BACKEND_TEST_FILES = [
   "test/ancestor-collection-group.test.ts",
@@ -34,12 +34,12 @@ const testFiles: readonly string[] = strictIndexes
     : BACKEND_TEST_FILES;
 
 const repositoryRoot = resolve(process.cwd(), "..");
-await buildFireside();
+await buildFirenook();
 const dataDirectory = diskMode
   ? await mkdtemp(join(tmpdir(), "fireside-conformance-disk-"))
   : undefined;
 const port = await reserveAvailablePort();
-const executable = process.platform === "win32" ? "fireside.exe" : "fireside";
+const executable = process.platform === "win32" ? "firenook.exe" : "firenook";
 const serverArguments = [
   "--host",
   HOST,
@@ -90,7 +90,7 @@ async function runTests(port: number, files: readonly string[]): Promise<void> {
         cwd: process.cwd(),
         env: {
           ...process.env,
-          CONFORMANCE_TARGET: "fireside",
+          CONFORMANCE_TARGET: "firenook",
           CONFORMANCE_STRICT_INDEXES: strictIndexes ? "1" : "0",
           FIRESTORE_EMULATOR_HOST: `${HOST}:${String(port)}`,
           GCLOUD_PROJECT: PROJECT_ID,
@@ -107,18 +107,18 @@ async function runTests(port: number, files: readonly string[]): Promise<void> {
       }
       reject(
         new Error(
-          `fireside conformance exited with code ${String(code)} and signal ${String(signal)}`,
+          `firenook conformance exited with code ${String(code)} and signal ${String(signal)}`,
         ),
       );
     });
   });
 }
 
-async function buildFireside(): Promise<void> {
+async function buildFirenook(): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(
       "cargo",
-      ["build", "--quiet", "--locked", "-p", "fireside"],
+      ["build", "--quiet", "--locked", "-p", "firenook"],
       {
         cwd: repositoryRoot,
         env: process.env,
@@ -169,14 +169,14 @@ async function waitUntilListening(
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null || server.signalCode !== null) {
-      throw new Error("fireside exited before its port became available");
+      throw new Error("firenook exited before its port became available");
     }
     if (await canConnect(port)) {
       return;
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
   }
-  throw new Error("timed out waiting for fireside to listen");
+  throw new Error("timed out waiting for firenook to listen");
 }
 
 async function canConnect(port: number): Promise<boolean> {

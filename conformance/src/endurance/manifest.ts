@@ -29,7 +29,7 @@ export interface EnduranceManifest {
       readonly smallPayloadBytes: number;
       readonly largeDocumentCount: number;
       readonly largeDocumentSizesBytes: readonly number[];
-      readonly maximumObservedFiresideRssBytes: number;
+      readonly maximumObservedFirenookRssBytes: number;
       readonly listenerDocumentCount: number;
       readonly listenerDocumentIndexes: readonly number[];
       readonly seedBatchSize: number;

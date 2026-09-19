@@ -23,7 +23,7 @@ export function recoveryReceipt() {
 export function validateRecoverySource(receipt, {run, jobs, artifacts}) {
   assert.equal(run.id, receipt.sourceRun);
   assert.equal(run.run_attempt, receipt.sourceAttempt, 'Original run was rerun; re-audit before recovery');
-  assert.equal(run.repository.full_name, 'sanjevirau/fireside');
+  assert.equal(run.repository.full_name, 'firenook-dev/firenook');
   assert.equal(run.path, '.github/workflows/release-npm.yml');
   assert.equal(run.event, 'workflow_dispatch');
   assert.equal(run.head_branch, 'main');
@@ -72,7 +72,7 @@ export function authorizeRecovery(receipt, tagged) {
   // engine, and do not create misleading notes for a changed product.
   git(['diff', '--exit-code', tagged, 'HEAD', '--', 'packages', 'crates', 'Cargo.toml',
     'Cargo.lock', 'rust-toolchain.toml', 'packaging/build-packages.mjs', 'packaging/CHANGELOG.md']);
-  const api = path => JSON.parse(execFileSync('gh', ['api', `repos/sanjevirau/fireside/${path}`], {encoding:'utf8',maxBuffer:10*1024*1024}));
+  const api = path => JSON.parse(execFileSync('gh', ['api', `repos/firenook-dev/firenook/${path}`], {encoding:'utf8',maxBuffer:10*1024*1024}));
   const run = api(`actions/runs/${receipt.sourceRun}`);
   const jobPage = api(`actions/runs/${receipt.sourceRun}/jobs?per_page=100`);
   const artifactPage = api(`actions/runs/${receipt.sourceRun}/artifacts?per_page=100`);

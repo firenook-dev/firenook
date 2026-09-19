@@ -1,6 +1,6 @@
-# Test Fireside changes in a consuming app before publication
+# Test Firenook changes in a consuming app before publication
 
-Keep product fixes and their oracle regressions in a Fireside feature branch.
+Keep product fixes and their oracle regressions in a Firenook feature branch.
 Commit the candidate, then use Node 24 and the pinned Rust toolchain:
 
 ```sh
@@ -18,8 +18,8 @@ package.json devDependencies to **both tarballs listed in artifacts.json**:
 
 ```json
 {
-  "@fireside-dev/cli": "file:/absolute/path/to/cli.tgz",
-  "@fireside-dev/darwin-arm64": "file:/absolute/path/to/native.tgz"
+  "firenook": "file:/absolute/path/to/cli.tgz",
+  "@firenook/cli-darwin-arm64": "file:/absolute/path/to/native.tgz"
 }
 ```
 
@@ -27,9 +27,9 @@ Use the actual host package name from the receipt. For a Bun consumer:
 
 ```sh
 bun install --ignore-scripts
-bun run fireside --version
-bun run fireside setup
-bun run fireside emulators:start --project demo-my-app
+bun run firenook --version
+bun run firenook setup
+bun run firenook emulators:start --project demo-my-app
 ```
 
 The filenames above are placeholders; use the exact generated paths.

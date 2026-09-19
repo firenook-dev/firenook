@@ -41,7 +41,7 @@ test("generated metadata write-race fixture freezes the observed CI contract", a
 });
 
 test("SDK generated metadata is pinned for a gate cell and restored exactly", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "fireside-sdk-metadata-"));
+  const directory = await mkdtemp(join(tmpdir(), "firenook-sdk-metadata-"));
   const appPath = join(directory, "app.json");
   const firestorePath = join(directory, "firestore.json");
   const dirtyApp = '{"typings":"./dist/app-public.d.ts"}\n';
@@ -74,7 +74,7 @@ test("SDK generated metadata is pinned for a gate cell and restored exactly", as
 });
 
 test("SDK metadata pin and restore never expose partial JSON to readers", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "fireside-sdk-metadata-race-"));
+  const directory = await mkdtemp(join(tmpdir(), "firenook-sdk-metadata-race-"));
   const metadataPath = join(directory, "package.json");
   const original = `${JSON.stringify({ payload: "o".repeat(2 * 1024 * 1024) })}\n`;
   const pinned = `${JSON.stringify({ payload: "p".repeat(2 * 1024 * 1024) })}\n`;

@@ -31,10 +31,10 @@ if (external) {
 const output = resolve(argument("--output")!);
 await mkdir(output, { recursive: true });
 assert.deepEqual(await readdir(output), [], "never overwrite a recorded capture");
-const temporary = await mkdtemp(join(tmpdir(), "fireside-map-capture-"));
+const temporary = await mkdtemp(join(tmpdir(), "firenook-map-capture-"));
 const port = await reservePort();
 const origin = external ?? `http://127.0.0.1:${port}`;
-const configuration = { name: external ? "fireside" : "java", projectId: serializationProject, host: new URL(origin).host } as const;
+const configuration = { name: external ? "firenook" : "java", projectId: serializationProject, host: new URL(origin).host } as const;
 const raw = createV1Firestore(configuration);
 const sdk = createFirestore(configuration);
 const parent = `projects/${serializationProject}/databases/(default)/documents`;
@@ -118,7 +118,7 @@ try {
     }
   } finally { await browser.close(); await new Promise<void>(done => server.close(() => done())); }
   await writeFile(join(output, "observations.json"), JSON.stringify({ cases: serializationCases, repeats: serializationRepeats, observations }, null, 2) + "\n");
-  await writeFile(join(output, "metadata.json"), JSON.stringify({ schemaVersion: 1, target: external ? "fireside" : "official-java-emulator", version: external ? argument("--candidate-version") : version, javaJarSha256: external ? null : hashes[version], capturedAt: startedAt, syntheticOnly: true, operations: 7, repeatedReads: observations.reduce((sum, item) => sum + item.reads.length, 0), nodeVersion: process.version, platform: process.platform, nativeSdk: "@google-cloud/firestore@9.0.0", browserSdk: "firebase@12.18.0", observationLevel: "exact decoded document-field JSON; no timestamp/envelope comparison", writesDuringReadGroups: 0 }, null, 2) + "\n");
+  await writeFile(join(output, "metadata.json"), JSON.stringify({ schemaVersion: 1, target: external ? "firenook" : "official-java-emulator", version: external ? argument("--candidate-version") : version, javaJarSha256: external ? null : hashes[version], capturedAt: startedAt, syntheticOnly: true, operations: 7, repeatedReads: observations.reduce((sum, item) => sum + item.reads.length, 0), nodeVersion: process.version, platform: process.platform, nativeSdk: "@google-cloud/firestore@9.0.0", browserSdk: "firebase@12.18.0", observationLevel: "exact decoded document-field JSON; no timestamp/envelope comparison", writesDuringReadGroups: 0 }, null, 2) + "\n");
 } finally {
   await sdk.terminate(); await raw.close();
   if (child && child.exitCode === null) { const exited = new Promise(done => child!.once("exit", done)); child.kill("SIGTERM"); await exited; }

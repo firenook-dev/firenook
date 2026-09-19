@@ -1,9 +1,9 @@
 // Phase H2 replay: runs the recorded Functions runtime programs against a
-// Fireside binary serving the same synthetic project and compares every
+// Firenook binary serving the same synthetic project and compares every
 // step with `fixtures/functions-runtime-v1/emulator-programs.json`.
 //
-//   node --import tsx src/functions-runtime/replay-fireside.ts \
-//     --binary ../target/release/fireside [--profiles main,v1-blocking]
+//   node --import tsx src/functions-runtime/replay-firenook.ts \
+//     --binary ../target/release/firenook [--profiles main,v1-blocking]
 //     [--programs a,b] [--output report.json] [--report-only]
 //
 // Requires FIREBASE_FUNCTIONS_7_2_ROOT, NODE24 and the cached UI archive
@@ -28,15 +28,15 @@ interface Divergence {
   /** JSON path inside the recorded step (`response.status`, `observations[0].env.PORT`, ...); a prefix matches every deeper path. */
   readonly path: string;
   readonly reason: string;
-  /** The Fireside value; `undefined` means "absent". */
-  readonly fireside?: unknown;
+  /** The Firenook value; `undefined` means "absent". */
+  readonly firenook?: unknown;
   /** When true only the presence of a difference is asserted (values vary). */
   readonly anyValue?: boolean;
 }
 
 /**
- * Differences Fireside adopts deliberately (see the fixture README). Each
- * entry is asserted: the replay fails when Fireside no longer differs in the
+ * Differences Firenook adopts deliberately (see the fixture README). Each
+ * entry is asserted: the replay fails when Firenook no longer differs in the
  * recorded way.
  */
 const DIVERGENCES: readonly Divergence[] = [
@@ -45,26 +45,26 @@ const DIVERGENCES: readonly Divergence[] = [
     program: "lifecycle-worker-crash",
     step: "crash-logs",
     path: "response.matched",
-    reason: "Fireside logs the worker exit it recovers from (\"functions worker exited; starting a new one\"); the official runtime's kill message has no such line",
-    fireside: "some",
+    reason: "Firenook logs the worker exit it recovers from (\"functions worker exited; starting a new one\"); the official runtime's kill message has no such line",
+    firenook: "some",
   },
   {
     profile: "main",
     program: "environment-dotenv-and-system",
     step: "env-logs",
     path: "response.matched",
-    reason: "the official emulator logs env loading at every lazy worker start (here after an earlier timeout killed the worker); Fireside loads env once per (re)load and keeps its worker",
-    fireside: "none",
+    reason: "the official emulator logs env loading at every lazy worker start (here after an earlier timeout killed the worker); Firenook loads env once per (re)load and keeps its worker",
+    firenook: "none",
   },
 ];
 
 /** Divergences that apply wherever a path pattern matches, asserted the same way. */
-const GLOBAL_DIVERGENCES: ReadonlyArray<{ readonly pattern: RegExp; readonly recorded: unknown; readonly fireside: unknown; readonly reason: string }> = [
+const GLOBAL_DIVERGENCES: ReadonlyArray<{ readonly pattern: RegExp; readonly recorded: unknown; readonly firenook: unknown; readonly reason: string }> = [
   {
     pattern: /(^|\.)request\.ip$|\.echo\.ip$/u,
     recorded: undefined,
-    fireside: "127.0.0.1",
-    reason: "the official worker is reached over a Unix socket, so Express sees no remote address; Fireside's worker listens on loopback TCP and reports 127.0.0.1",
+    firenook: "127.0.0.1",
+    reason: "the official worker is reached over a Unix socket, so Express sees no remote address; Firenook's worker listens on loopback TCP and reports 127.0.0.1",
   },
 ];
 
@@ -92,10 +92,10 @@ const IGNORED_STEP_PATHS: ReadonlyMap<string, readonly RegExp[]> = new Map([
   ["consumer-refs/registry-extensions-delivery/checkout-session-read", [/^response\.body\.fields\.error$/u]],
   // The official worker is restarted after the emulator aborts the
   // over-deadline request, so its per-process attempt counter restarts and
-  // the retry never overlaps the first invocation; Fireside keeps its worker.
+  // the retry never overlaps the first invocation; Firenook keeps its worker.
   ["tasks/tasks-deadline-and-limits/slow-deadline", [/^observations\[\d+\]\.(attempt|concurrent)$/u]],
   // The official log lines of the Tasks emulator and its worker have no
-  // counterpart wording in Fireside's log.
+  // counterpart wording in Firenook's log.
   ["tasks/tasks-admin-sdk/tasks-logs", [/^response\.matched$/u]],
 ]);
 
@@ -110,7 +110,7 @@ const IGNORED_PATHS: readonly RegExp[] = [
   /\.rawRequest\.headers\.connection$/u,
   /\.env\.PORT$/u,
   /^response\.elapsedMs$/u,
-  /^response\.(parallel\[\d+\]\.)?headers\.x-fireside-delivery$/u,
+  /^response\.(parallel\[\d+\]\.)?headers\.x-firenook-delivery$/u,
   // Derived from the body, which is compared precisely.
   /\.headers\.content-length$/u,
   /^response\.parallel\[\d+\]\.elapsedMs$/u,
@@ -129,7 +129,7 @@ const FOREIGN_ACTIONS: ReadonlySet<string> = new Set(["firestore", "firestore-co
 
 /**
  * Volatile fragments inside JSON-encoded string bodies (SSE frames, echoed
- * text): the Fireside worker's `req.ip` (see GLOBAL_DIVERGENCES) and the
+ * text): the Firenook worker's `req.ip` (see GLOBAL_DIVERGENCES) and the
  * hop-by-hop `connection` header the official proxy adds.
  */
 const EMBEDDED_VOLATILE = [/,?"ip":"127\.0\.0\.1"/gu, /,?\\?"connection\\?":\\?"keep-alive\\?"/gu];
@@ -148,7 +148,7 @@ const functionsPackage = JSON.parse(await readFile(join(functionsRoot, "package.
 const adminPackage = JSON.parse(await readFile(join(adminRoot, "package.json"), "utf8")) as { version: string };
 const uiArchive = join(process.env.HOME ?? "", ".cache/firebase/emulators/ui-v1.15.0.zip");
 const fixture = JSON.parse(await readFile(fixturePath, "utf8")) as { profiles: ReadonlyArray<{ id: string; programs: RecordedProgram[]; skipped?: string }> };
-const runRoot = await mkdtemp(join(tmpdir(), "fireside-phase-h-replay-"));
+const runRoot = await mkdtemp(join(tmpdir(), "firenook-phase-h-replay-"));
 const shortTmp = await mkdtemp("/tmp/fsphr-");
 process.stderr.write(`replay root ${runRoot}\n`);
 
@@ -209,7 +209,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
   await writeFile(join(projectDir, "demo-adc.json"), JSON.stringify({ type: "authorized_user", client_id: "demo", client_secret: "demo", refresh_token: "demo" }), "utf8");
   const logs: string[] = [];
   const target: Target = {
-    engine: "fireside",
+    engine: "firenook",
     projectId: PROJECT_ID,
     origins: {
       functions: `http://${HOST}:${ports.functions}`,
@@ -236,7 +236,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
     PHASE_H_OBSERVATIONS_PATH: observationsPath,
     GOOGLE_APPLICATION_CREDENTIALS: join(projectDir, "demo-adc.json"),
     CLOUDSDK_CONFIG: join(projectDir, "gcloud"),
-    FIRESIDE_CONTROL_STDIN: "1",
+    FIRENOOK_CONTROL_STDIN: "1",
     ...(process.env.RUST_BACKTRACE ? { RUST_BACKTRACE: process.env.RUST_BACKTRACE } : {}),
   });
   const suiteArgs = [
@@ -305,7 +305,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
   }
   if (!ready) {
     await writeFile(join(projectDir, "suite.log"), `${logs.join("\n")}\n`, "utf8");
-    throw new Error(`fireside did not become ready (exit ${String(exitCode)}):\n${logs.slice(-60).join("\n")}`);
+    throw new Error(`firenook did not become ready (exit ${String(exitCode)}):\n${logs.slice(-60).join("\n")}`);
   }
   const readyMs = Math.round(performance.now() - started);
   let matched = 0;
@@ -329,7 +329,7 @@ async function replayProfile(profile: Profile, recordedPrograms: readonly Record
       }
     }
   } finally {
-    child.stdin?.end("FIRESIDE_SHUTDOWN\n");
+    child.stdin?.end("FIRENOOK_SHUTDOWN\n");
     const result = await Promise.race([exited, new Promise<null>((resolvePromise) => setTimeout(() => resolvePromise(null), 30_000))]);
     if (result === null) child.kill("SIGKILL");
     if (pending.length > 0) logs.push(stripAnsi(pending));
@@ -365,20 +365,20 @@ function compareStep(profile: string, program: string, expected: RecordedProgram
     }
     const global = GLOBAL_DIVERGENCES.find((candidate) => candidate.pattern.test(entry.path));
     if (global) {
-      if (canonicalJson(entry.expected) === canonicalJson(global.recorded) && canonicalJson(entry.actual) === canonicalJson(global.fireside)) {
+      if (canonicalJson(entry.expected) === canonicalJson(global.recorded) && canonicalJson(entry.actual) === canonicalJson(global.firenook)) {
         asserted.push(entry.path);
         continue;
       }
-      mismatches.push({ path: `${entry.path} (global divergence expects ${short(global.fireside)})`, expected: entry.expected, actual: entry.actual });
+      mismatches.push({ path: `${entry.path} (global divergence expects ${short(global.firenook)})`, expected: entry.expected, actual: entry.actual });
       continue;
     }
     const divergence = divergences.find((candidate) => entry.path === candidate.path || entry.path.startsWith(`${candidate.path}.`) || entry.path.startsWith(`${candidate.path}[`));
     if (divergence) {
-      if (divergence.anyValue || canonicalJson(entry.actual) === canonicalJson(divergence.fireside)) {
+      if (divergence.anyValue || canonicalJson(entry.actual) === canonicalJson(divergence.firenook)) {
         asserted.push(divergence.path);
         continue;
       }
-      mismatches.push({ path: `${entry.path} (recorded divergence expects ${short(divergence.fireside)})`, expected: entry.expected, actual: entry.actual });
+      mismatches.push({ path: `${entry.path} (recorded divergence expects ${short(divergence.firenook)})`, expected: entry.expected, actual: entry.actual });
       continue;
     }
     mismatches.push(entry);
@@ -387,8 +387,8 @@ function compareStep(profile: string, program: string, expected: RecordedProgram
   for (const divergence of divergences) {
     if (!asserted.includes(divergence.path) && !mismatches.some((entry) => entry.path.startsWith(divergence.path))) {
       const actualValue = valueAt(actualView, divergence.path);
-      if (canonicalJson(actualValue) !== canonicalJson(divergence.fireside) && !divergence.anyValue) {
-        mismatches.push({ path: `${divergence.path} (recorded divergence not observed)`, expected: divergence.fireside, actual: actualValue });
+      if (canonicalJson(actualValue) !== canonicalJson(divergence.firenook) && !divergence.anyValue) {
+        mismatches.push({ path: `${divergence.path} (recorded divergence not observed)`, expected: divergence.firenook, actual: actualValue });
       }
     }
   }

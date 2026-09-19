@@ -7,15 +7,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const HOST = "127.0.0.1";
-const PROJECT_ID = "demo-fireside-disk-recovery";
+const PROJECT_ID = "demo-firenook-disk-recovery";
 const DATABASE_ROOT = `projects/${PROJECT_ID}/databases/(default)`;
 const COLLECTION = "kill_batches";
 const ROUNDS = 6;
 const MAX_BATCHES_PER_ROUND = 256;
 const repositoryRoot = resolve(process.cwd(), "..");
-const executableName = process.platform === "win32" ? "fireside.exe" : "fireside";
+const executableName = process.platform === "win32" ? "firenook.exe" : "firenook";
 const executable = join(repositoryRoot, "target", "debug", executableName);
-const dataDirectory = await mkdtemp(join(tmpdir(), "fireside-disk-recovery-"));
+const dataDirectory = await mkdtemp(join(tmpdir(), "firenook-disk-recovery-"));
 const attempted = new Set<string>();
 const acknowledged = new Set<string>();
 let server: ChildProcess | undefined;
@@ -25,7 +25,7 @@ if (process.platform === "win32") {
 }
 
 try {
-  await buildFireside();
+  await buildFirenook();
 
   for (let round = 0; round < ROUNDS; round += 1) {
     const running = await startServer();
@@ -193,9 +193,9 @@ async function startServer(): Promise<{ child: ChildProcess; baseUrl: string }> 
   return { child, baseUrl: `http://${HOST}:${String(port)}` };
 }
 
-async function buildFireside(): Promise<void> {
+async function buildFirenook(): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn("cargo", ["build", "--quiet", "--locked", "-p", "fireside"], {
+    const child = spawn("cargo", ["build", "--quiet", "--locked", "-p", "firenook"], {
       cwd: repositoryRoot,
       env: process.env,
       stdio: "inherit",
@@ -237,14 +237,14 @@ async function waitUntilListening(child: ChildProcess, port: number): Promise<vo
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null) {
-      throw new Error("fireside exited before its port became available");
+      throw new Error("firenook exited before its port became available");
     }
     if (await canConnect(port)) {
       return;
     }
     await delay(25);
   }
-  throw new Error("timed out waiting for fireside to listen");
+  throw new Error("timed out waiting for firenook to listen");
 }
 
 async function canConnect(port: number): Promise<boolean> {

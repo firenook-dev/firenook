@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     Auth, DocumentAccess, DocumentAccessError, EmptyDocumentAccess, EvaluationRequest, Query,
     RequestOperation, Resource, Timestamp, Value, compile,
 };
@@ -17,11 +17,11 @@ const JAVA_ACCESS: &str =
 
 #[derive(Default)]
 struct CoverageVisits(usize);
-impl fireside_rules_engine::CoverageObserver for CoverageVisits {
+impl firenook_rules_engine::CoverageObserver for CoverageVisits {
     fn observe(
         &mut self,
-        _: fireside_rules_engine::ExpressionKey,
-        _: fireside_rules_engine::ExpressionValue<'_>,
+        _: firenook_rules_engine::ExpressionKey,
+        _: firenook_rules_engine::ExpressionValue<'_>,
     ) {
         self.0 += 1;
     }

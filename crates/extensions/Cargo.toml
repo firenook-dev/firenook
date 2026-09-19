@@ -1,6 +1,6 @@
 [package]
-name = "fireside-extensions"
-description = "Firebase Extensions loader for the fireside emulator suite: manifest, parameters, registry resolution, source cache and trigger conversion"
+name = "firenook-extensions"
+description = "Firebase Extensions loader for the firenook emulator suite: manifest, parameters, registry resolution, source cache and trigger conversion"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-fireside-functions-runtime = { path = "../functions-runtime" }
+firenook-functions-runtime = { path = "../functions-runtime" }
 regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 semver = "1.0.28"

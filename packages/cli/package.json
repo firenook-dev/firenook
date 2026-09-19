@@ -1,21 +1,21 @@
 {
-  "name": "@fireside-dev/cli",
-  "version": "0.1.0-next.9",
-  "description": "Rust Firebase-compatible local emulator preview with persistent disk storage",
+  "name": "firenook",
+  "version": "0.2.0-next.1",
+  "description": "Firenook: a Rust Firebase-compatible local emulator suite with persistent disk storage",
   "type": "module",
-  "bin": {"fireside": "bin/fireside.mjs"},
+  "bin": {"firenook": "bin/firenook.mjs"},
   "exports": {"./binary": "./src/binary.mjs"},
-  "files": ["bin", "src", "release.json", "README.md", "LICENSE-MIT", "LICENSE-APACHE"],
+  "files": ["bin", "src", "release.json", "README.md", "LICENSE", "NOTICE"],
   "engines": {"node": ">=24 <25"},
-  "license": "MIT OR Apache-2.0",
-  "repository": {"type": "git", "url": "git+https://github.com/sanjevirau/fireside.git", "directory": "packages/cli"},
-  "bugs": {"url": "https://github.com/sanjevirau/fireside/issues"},
+  "license": "Apache-2.0",
+  "repository": {"type": "git", "url": "git+https://github.com/firenook-dev/firenook.git", "directory": "packages/cli"},
+  "bugs": {"url": "https://github.com/firenook-dev/firenook/issues"},
   "publishConfig": {"access": "public", "registry": "https://registry.npmjs.org/"},
   "optionalDependencies": {
-    "@fireside-dev/darwin-arm64": "0.1.0-next.9",
-    "@fireside-dev/darwin-x64": "0.1.0-next.9",
-    "@fireside-dev/linux-x64": "0.1.0-next.9",
-    "@fireside-dev/linux-arm64": "0.1.0-next.9",
-    "@fireside-dev/win32-x64": "0.1.0-next.9"
+    "@firenook/cli-darwin-arm64": "0.2.0-next.1",
+    "@firenook/cli-darwin-x64": "0.2.0-next.1",
+    "@firenook/cli-linux-x64": "0.2.0-next.1",
+    "@firenook/cli-linux-arm64": "0.2.0-next.1",
+    "@firenook/cli-win32-x64": "0.2.0-next.1"
   }
 }

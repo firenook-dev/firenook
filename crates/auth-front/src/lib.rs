@@ -24,7 +24,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use fireside_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
+use firenook_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 pub mod blocking;

@@ -10,7 +10,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{SuiteConfig, SuiteRuntimeError, failure};
 
-const LOCK: &str = ".fireside-suite.lock";
+const LOCK: &str = ".firenook-suite.lock";
 const RECEIPT: &str = "native-state.json";
 // Increment on incompatible native Firestore/Auth/Storage format changes. This
 // receipt is deliberately independent of compiler version and network ports.
@@ -239,9 +239,12 @@ fn validate_files(root: &Path) -> Result<(), SuiteRuntimeError> {
             )));
         }
     }
+    // State written before the rename keeps its data: the store files are
+    // renamed in place once, before the structural check.
+    firenook_core_store::adopt_legacy_files(&root.join("firestore")).map_err(io_error)?;
     for file in [
-        "firestore/fireside.redb",
-        "firestore/fireside.wal",
+        "firestore/firenook.redb",
+        "firestore/firenook.wal",
         "auth-state.json",
         "storage/metadata.json",
         "storage/metadata.redb",

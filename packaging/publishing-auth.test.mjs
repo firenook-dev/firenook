@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { authenticationFailure, verifyPublishingAuth, verifyMissingPublishingAuth } from './publishing-auth.mjs';
 
 const env = { GITHUB_ACTIONS: 'true', ACTIONS_ID_TOKEN_REQUEST_URL: 'synthetic-url', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'synthetic-identity' };
-const records = ['darwin-arm64', 'cli'].map(name => ({ name: `@fireside-dev/${name}`, path: `/synthetic/${name}.tgz` }));
+const records = [['@firenook/cli-darwin-arm64', 'darwin-arm64'], ['firenook', 'cli']].map(([name, file]) => ({ name, path: `/synthetic/${file}.tgz` }));
 const success = { status: 0, stdout: '', stderr: 'npm verbose oidc Successfully retrieved and set token\n' };
 function executor(reply, calls = []) {
   return (command, args, options) => {
@@ -45,7 +45,7 @@ test('wrong environment, externally supplied identity and unreviewed npm are rej
 });
 
 test('diagnostics expose only fixed reasons and HTTP status, never URLs, tokens or server bodies', () => {
-  const raw = 'npm http fetch POST 404 https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@fireside-dev%2fcli\n' +
+  const raw = 'npm http fetch POST 404 https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/firenook\n' +
     'npm verbose oidc Failed token exchange request with body message: synthetic-secret https://private.invalid npm_synthetic\n';
   assert.equal(authenticationFailure(raw), 'registry rejected OIDC exchange (HTTP 404)');
   assert.throws(() => verifyPublishingAuth(records, { env, run: executor({ status: 0, stderr: raw }) }), error => {

@@ -8,8 +8,8 @@ import { DEFAULT_PORTS, SERVICES, canonical, connectHost, contains, loadProject,
 
 export const EXPORTABLE = ['firestore', 'auth', 'storage'];
 export const METADATA_FILE = 'firebase-export-metadata.json';
-// FIRESIDE_LOCATOR_DIR lets tests point the wrapper at a private directory.
-export const locatorDirectory = () => process.env.FIRESIDE_LOCATOR_DIR || tmpdir();
+// FIRENOOK_LOCATOR_DIR lets tests point the wrapper at a private directory.
+export const locatorDirectory = () => process.env.FIRENOOK_LOCATOR_DIR || tmpdir();
 export const locatorPath = project => join(locatorDirectory(), `hub-${project}.json`);
 
 export function readLocator(project) {
@@ -48,7 +48,7 @@ export async function findHub(project, options = {}) {
     } catch (error) { failure ??= error; }
   }
   const stale = locator ? ` If no suite is running, delete the stale locator ${locatorPath(project.project)}.` : '';
-  throw new Error(`Did not find a running emulator hub for project ${project.project} (tried ${origins.join(', ')}): ${describe(failure)}. Start it with fireside emulators:start.${stale}`);
+  throw new Error(`Did not find a running emulator hub for project ${project.project} (tried ${origins.join(', ')}): ${describe(failure)}. Start it with firenook emulators:start.${stale}`);
 }
 
 // Services the running suite reports, or undefined when the hub cannot list them.
@@ -106,7 +106,7 @@ export async function exportEmulators(target, options, cwd = process.cwd(), log 
   log.error(`Found running emulator hub for project ${project.project} at ${origin}; exporting ${targets.join(', ')} to ${destination}`);
   // No Origin header: the hub refuses requests that carry one.
   const response = await fetch(`${origin}/_admin/export`, {method:'POST', headers:{'content-type':'application/json'},
-    body:JSON.stringify({path:destination, targets, initiatedBy:'fireside emulators:export'})});
+    body:JSON.stringify({path:destination, targets, initiatedBy:'firenook emulators:export'})});
   const text = await response.text();
   let message;
   try { message = JSON.parse(text)?.message; } catch { message = text; }
@@ -121,11 +121,11 @@ export async function exportEmulators(target, options, cwd = process.cwd(), log 
 const firestoreOrigin = (project, options) => locateService(project, 'firestore', options);
 
 // firestore:delete [path]: the official flag contract over the emulator's
-// DELETE routes. Fireside never prompts, so the destructive forms need --force.
+// DELETE routes. Firenook never prompts, so the destructive forms need --force.
 export async function firestoreDelete(path, options, argv = [], cwd = process.cwd(), log = console) {
   const project = resolveProject(options, cwd);
   const database = options.database || '(default)';
-  const rerun = `fireside firestore:delete ${argv.join(' ')} --force`.replace(/\s+/g, ' ');
+  const rerun = `firenook firestore:delete ${argv.join(' ')} --force`.replace(/\s+/g, ' ');
   const headers = {authorization:'Bearer owner'};
   const base = () => firestoreOrigin(project, options).then(origin => `${origin}/emulator/v1/projects/${encodeURIComponent(project.project)}/databases/${encodeURIComponent(database)}/documents`);
   const finish = async (response, result) => {

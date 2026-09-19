@@ -123,7 +123,7 @@ const allRssBytes = postWarmupRuns.flatMap((samples) => samples.map((sample) => 
 const analysis = {
   generatedAt: new Date().toISOString(),
   metric: "process RSS sampled every approximately 10 seconds",
-  population: "three controlled one-hour Fireside disk/WAL runs after the frozen 30-minute warm-up",
+  population: "three controlled one-hour Firenook disk/WAL runs after the frozen 30-minute warm-up",
   thresholdBytesPerHour: 1_048_576,
   combinedEnvelope: {
     minimumRssBytes: Math.min(...allRssBytes),

@@ -1,7 +1,7 @@
 use super::*;
 use axum::body::to_bytes;
 use axum::http::Request;
-use fireside_functions_bridge::TriggerObserver;
+use firenook_functions_bridge::TriggerObserver;
 use std::fmt::Write as _;
 use tower::ServiceExt as _;
 
@@ -12,7 +12,7 @@ async fn storage_content_encoding_replays_official_sdk_fixture_and_export_import
     ))
     .expect("official fixture");
     let root = std::env::temp_dir().join(format!(
-        "fireside-encoding-{}-{}",
+        "firenook-encoding-{}-{}",
         std::process::id(),
         now_rfc3339().replace(':', "-")
     ));

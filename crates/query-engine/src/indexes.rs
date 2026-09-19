@@ -506,7 +506,7 @@ impl Error for IndexConfigError {}
 
 #[cfg(test)]
 mod tests {
-    use fireside_core_store::Value;
+    use firenook_core_store::Value;
 
     use super::*;
     use crate::{FieldFilter, FieldPath, Filter};
@@ -531,7 +531,7 @@ mod tests {
       ],
       "fieldOverrides": [
         {
-          "collectionGroup": "fireside_conformance",
+          "collectionGroup": "firenook_conformance",
           "fieldPath": "runId",
           "indexes": [
             { "order": "ASCENDING", "queryScope": "COLLECTION" },
@@ -589,13 +589,13 @@ mod tests {
     fn collection_group_single_field_indexes_are_explicit() {
         let catalog = IndexCatalog::from_json(INDEXES).expect("catalog should parse");
         let query = Query::new(
-            StructuredQueryScope::collection_group("fireside_conformance").expect("valid scope"),
+            StructuredQueryScope::collection_group("firenook_conformance").expect("valid scope"),
         )
         .filter(equality("runId"));
         catalog.validate(&query).expect("override should match");
 
         let missing = Query::new(
-            StructuredQueryScope::collection_group("fireside_conformance").expect("valid scope"),
+            StructuredQueryScope::collection_group("firenook_conformance").expect("valid scope"),
         )
         .filter(equality("other"));
         assert!(matches!(

@@ -90,7 +90,7 @@ impl Worker {
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    if let Some(json) = line.strip_prefix("FIRESIDE_WORKER_READY ") {
+                    if let Some(json) = line.strip_prefix("FIRENOOK_WORKER_READY ") {
                         match serde_json::from_str::<ReadyLine>(json) {
                             Ok(ready) => {
                                 let _ = ready_sender.send(Ok(ready.port));
@@ -100,11 +100,11 @@ impl Worker {
                                     .send(Err(format!("invalid worker readiness line: {error}")));
                             }
                         }
-                    } else if let Some(json) = line.strip_prefix("FIRESIDE_WORKER_LOG ") {
+                    } else if let Some(json) = line.strip_prefix("FIRENOOK_WORKER_LOG ") {
                         if let Ok(entry) = serde_json::from_str::<LogLine>(json) {
                             log.record(LogEvent::new(&entry.level, &label, entry.message));
                         }
-                    } else if let Some(json) = line.strip_prefix("FIRESIDE_WORKER_FATAL ") {
+                    } else if let Some(json) = line.strip_prefix("FIRENOOK_WORKER_FATAL ") {
                         let message = serde_json::from_str::<FatalLine>(json)
                             .map_or_else(|_| json.to_owned(), |fatal| fatal.message);
                         log.record(LogEvent::new("ERROR", &label, message.clone()));

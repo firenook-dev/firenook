@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
 
-use fireside_core_store::{Document, DocumentKey, Fields, Value, fields_logical_bytes};
+use firenook_core_store::{Document, DocumentKey, Fields, Value, fields_logical_bytes};
 
 /// A document as visible through a target, including a possible projection.
 /// Disk views retain exact encoded values; emitted clones decode on demand.

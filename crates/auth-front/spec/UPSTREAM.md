@@ -12,7 +12,7 @@ copied without modification from:
 - license: MIT; see `LICENSE` in this directory
 
 The document is an interface description (paths, parameters, schemas and
-security schemes), not implementation code. Fireside embeds it verbatim so
+security schemes), not implementation code. Firenook embeds it verbatim so
 that routing, credential checks, request validation and the served
 `/emulator/openapi.json` follow the same contract as the official emulator.
 The emulator behaviour itself is implemented independently in `src/`.

@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use fireside_core_store::{
+use firenook_core_store::{
     DatabaseName, Document, DocumentKey, FieldPath, FieldTransform, Fields, Precondition,
     Timestamp, TransformOperation, Value, Write, validate_resource_id,
 };
-use fireside_query_engine::FieldPath as QueryFieldPath;
+use firenook_query_engine::FieldPath as QueryFieldPath;
 use pbjson_types::Timestamp as ProtoTimestamp;
 use tonic::Status;
 

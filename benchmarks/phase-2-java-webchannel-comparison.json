@@ -35,7 +35,7 @@
     "zeroSwapActivityRequired": true
   },
   "targets": {
-    "fireside": {
+    "firenook": {
       "mode": "memory",
       "build": "release",
       "allocatorOverridesAllowed": false,
@@ -66,10 +66,10 @@
       "Unicode documents"
     ],
     "targetBlockOrder": [
-      "fireside",
+      "firenook",
       "java",
       "java",
-      "fireside"
+      "firenook"
     ],
     "warmupRepetitionsPerBlock": 1,
     "measuredRepetitionsPerBlock": 3,
@@ -99,7 +99,7 @@
   "interpretation": {
     "productionCloudIsNotPerformanceTarget": true,
     "javaHasNoComparableDiskWalMode": true,
-    "compareFiresideMemoryToJavaDefaultOnly": true,
+    "compareFirenookMemoryToJavaDefaultOnly": true,
     "listenerDeliveryIncludesWriteAcknowledgementAndListenerObservation": true,
     "notMaximumThroughputBenchmark": true,
     "noPassFailPerformanceThreshold": true,
@@ -114,14 +114,14 @@
       "summary.json",
       "listener-delivery.csv",
       "reconnect.csv",
-      "runs/01-fireside.json",
+      "runs/01-firenook.json",
       "runs/02-java.json",
       "runs/03-java.json",
-      "runs/04-fireside.json",
-      "logs/01-fireside.log",
+      "runs/04-firenook.json",
+      "logs/01-firenook.log",
       "logs/02-java.log",
       "logs/03-java.log",
-      "logs/04-fireside.log",
+      "logs/04-firenook.log",
       "SHA256SUMS"
     ]
   },

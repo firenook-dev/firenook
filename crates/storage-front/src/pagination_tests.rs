@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use fireside_functions_bridge::{TriggerObserver, TriggerRegistry};
+use firenook_functions_bridge::{TriggerObserver, TriggerRegistry};
 use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use tower::ServiceExt as _;
@@ -215,7 +215,7 @@ fn fixture_names(observation: &JsonValue) -> Vec<&str> {
 
 fn test_root() -> PathBuf {
     std::env::temp_dir().join(format!(
-        "fireside-storage-pagination-{}-{}",
+        "firenook-storage-pagination-{}-{}",
         std::process::id(),
         OffsetDateTime::now_utc().unix_timestamp_nanos(),
     ))

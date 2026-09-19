@@ -1,3 +1,35 @@
+# 0.2.0-next.1 — Firenook: the project renamed, one license
+
+- The project is renamed from Fireside to Firenook; this is the first release
+  under the new name and the minor version moves because the command and the
+  package names change. `@fireside-dev/cli` becomes `firenook` (binary
+  `firenook`), the platform packages `@fireside-dev/<platform>` become
+  `@firenook/cli-<platform>`, every `FIRESIDE_*` environment variable becomes
+  `FIRENOOK_*` (`FIRENOOK_SHUTDOWN`, `FIRENOOK_CONTROL_STDIN`,
+  `FIRENOOK_OFFLINE`, `FIRENOOK_LOCATOR_DIR`, `FIRENOOK_FUNCTIONS_HOST_READY`,
+  `FIRENOOK_WORKER_*`, `FIRENOOK_DEFAULT_*`, `FIRENOOK_PUBLIC_POLICY`,
+  `FIRENOOK_PUBLICATION_POLICY`, …), the run directory `.fireside/runs` becomes
+  `.firenook/runs`, the MCP tools `fireside_*` become `firenook_*`, and
+  `fireside native …` becomes `firenook native …`. No alias of the old names
+  is kept. The hub locator file (`hub-<projectId>.json`), the default ports,
+  the `firebase.json` handling and the Emulator UI asset flow are unchanged.
+  Persisted suite state written by an earlier release is adopted in place:
+  the store files `fireside.redb`/`fireside.wal` are renamed to
+  `firenook.redb`/`firenook.wal` once, before the state is validated, so a
+  `--resume-state` directory keeps its data across the upgrade (CI resumes
+  the last engine published under the old name, `0.1.0-next.3`, with this
+  one).
+- One license: the MIT/Apache dual license is replaced by the Apache License
+  2.0 alone (`LICENSE`), with a `NOTICE` file and `TRADEMARKS.md` (forks and
+  modified builds are distributed under another name). Both files ship in
+  every package.
+- The repository moves to `github.com/firenook-dev/firenook`; GitHub redirects
+  the old URLs. Release history, banked benchmark results and the frozen
+  oracle corpora keep the identifiers they were recorded and digest-pinned
+  with (project ids such as `demo-fireside-*`), and
+  `scripts/check-independence.mjs` now fails on any other occurrence of the
+  former name.
+
 # 0.1.0-next.9 — Cloud Tasks emulator, every configuration shape, the CLI surface
 
 - Pin the engine to `7fb0c350078c94fc65a83a6f3c012a917779fbbd`, the qualified head of

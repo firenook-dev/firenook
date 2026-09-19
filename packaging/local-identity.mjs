@@ -5,7 +5,7 @@ export function localIdentity(manifest, release, revision, platform) {
   }
   const version = `${manifest.version.split('-')[0]}-local.g${revision.slice(0,12)}`;
   return {
-    manifest:{...manifest,version,private:true,optionalDependencies:{[`@fireside-dev/${platform}`]:version}},
+    manifest:{...manifest,version,private:true,optionalDependencies:{[`@firenook/cli-${platform}`]:version}},
     release:{...release,engineRevision:revision,platforms:{[platform]:release.platforms[platform]},
       localDevelopment:true},
   };

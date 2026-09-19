@@ -1,5 +1,5 @@
 //! Borrowed observer invariants; live oracle inputs, not invented policy cases.
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     CoverageNode, CoverageObserver, DocumentAccess, DocumentAccessError, EvaluationRequest,
     ExpressionKey, ExpressionValue, RequestOperation, Resource, Timestamp, Value, compile,
 };

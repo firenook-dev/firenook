@@ -1,8 +1,8 @@
 //! Isolated HTTP peer for the mandatory TypeScript Storage differential test.
 use std::path::PathBuf;
 
-use fireside_functions_bridge::{TriggerObserver, TriggerRegistry};
-use fireside_storage_front::{StorageConfig, StorageRuntime};
+use firenook_functions_bridge::{TriggerObserver, TriggerRegistry};
+use firenook_storage_front::{StorageConfig, StorageRuntime};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = StorageRuntime::start(
         StorageConfig {
             project: "demo-storage-encoding".to_owned(),
-            durability: fireside_storage_front::StorageDurability::default(),
+            durability: firenook_storage_front::StorageDurability::default(),
             origin: origin.clone(),
             data_dir: directory,
             rules: None,

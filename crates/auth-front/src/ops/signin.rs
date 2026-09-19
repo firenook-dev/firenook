@@ -94,7 +94,7 @@ pub async fn sign_in_with_password(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue,
     rt.scope(ctx, |scope| {
         let mut updates = outcome.updates.clone();
         updates.insert("lastLoginAt".to_owned(), json!(now_millis().to_string()));
-        // A legacy Fireside digest that just verified is rewritten in the
+        // A legacy Firenook digest that just verified is rewritten in the
         // official format so the next export is portable.
         let password = ctx.body_str("password").unwrap_or_default();
         if let Some(salt) = truthy_str(&user, "salt")

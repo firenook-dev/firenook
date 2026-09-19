@@ -54,7 +54,7 @@
     "openApiOperations": 103,
     "officialImplemented": 61,
     "officialNotImplemented": 42,
-    "firesideBefore": 23,
+    "firenookBefore": 23,
     "toAdd": 38,
     "officialImplementedOperations": [
       "emulator.projects.accounts.delete",
@@ -119,7 +119,7 @@
       "identitytoolkit.projects.tenants.get",
       "identitytoolkit.projects.tenants.patch"
     ],
-    "firesideBeforeOperations": [
+    "firenookBeforeOperations": [
       "emulator.projects.accounts.delete",
       "emulator.projects.config.get",
       "emulator.projects.config.update",
@@ -269,7 +269,7 @@
   },
   "gates": {
     "emulatorReplay": {
-      "test": "conformance/src/auth/replay-fireside.ts (npm run replay:auth -- --binary <fireside>); the replay shares normalize.ts with the capture so both sides normalize identically, and drives the binary's standalone `fireside auth` service over HTTP with the same functions stub",
+      "test": "conformance/src/auth/replay-firenook.ts (npm run replay:auth -- --binary <firenook>); the replay shares normalize.ts with the capture so both sides normalize identically, and drives the binary's standalone `firenook auth` service over HTTP with the same functions stub",
       "stepsMinimum": 500,
       "allowedUnexplainedStatusDivergences": 0,
       "allowedUnexplainedBodyDivergences": 0,
@@ -361,7 +361,7 @@
       "crate": "crates/auth-front",
       "operationsImplemented": "61/61 (every official implemented operation; the 42 official 501 answers keep their recorded body)",
       "contract": "bundled OpenAPI document crates/auth-front/spec/openapi.json (firebase-tools 15.22.0 apiSpec, MIT, provenance in spec/UPSTREAM.md) drives routing, credential checks, body/query validation and coercions, and is served at /emulator/openapi.json",
-      "standalone": "fireside auth --host --port --project-id [--state-file] [--functions-origin]"
+      "standalone": "firenook auth --host --port --project-id [--state-file] [--functions-origin]"
     },
     "i3": {
       "date": "2026-09-18",
@@ -370,7 +370,7 @@
     },
     "i4": {
       "date": "2026-09-18",
-      "replay": "npm run replay:auth -- --binary target/debug/fireside",
+      "replay": "npm run replay:auth -- --binary target/debug/firenook",
       "programs": 61,
       "steps": 1068,
       "valuesCompared": 17303,
@@ -378,8 +378,8 @@
       "namedDivergences": [
         "malformed-json/body-string error message prose: V8 vs serde (same status and shape)",
         "signin-function-text errors[0].reason: V8 vs serde parse error for a blocking function's non-JSON body",
-        "WARN log line of a 500: the official emulator appends a Node stack trace; Fireside logs the same first line",
-        "/emulator/auth/handler page bytes: Fireside's own picker; the accounts offered are compared exactly"
+        "WARN log line of a 500: the official emulator appends a Node stack trace; Firenook logs the same first line",
+        "/emulator/auth/handler page bytes: Firenook's own picker; the accounts offered are compared exactly"
       ],
       "runsIdentical": 3,
       "browserGate": "conformance/test/auth-popup.test.mjs (real SDK popup and redirect against the official fixture) green",

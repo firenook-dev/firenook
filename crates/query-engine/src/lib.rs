@@ -1,4 +1,4 @@
-//! Query evaluation for fireside.
+//! Query evaluation for firenook.
 //!
 //! Production behavior is captured in the differential harness before it is
 //! encoded here. The value comparator is backed by
@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use fireside_core_store::{Value, compare_resource_paths};
+use firenook_core_store::{Value, compare_resource_paths};
 
 mod indexes;
 mod query;
@@ -237,7 +237,7 @@ fn compare_maps(
 mod tests {
     use std::sync::Arc;
 
-    use fireside_core_store::Timestamp;
+    use firenook_core_store::Timestamp;
 
     use super::*;
 

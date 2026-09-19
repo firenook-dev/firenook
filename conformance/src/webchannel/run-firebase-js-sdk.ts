@@ -168,7 +168,7 @@ async function main(): Promise<void> {
 
     await runCommand(
       "cargo",
-      ["build", "--locked", "-p", "fireside"],
+      ["build", "--locked", "-p", "firenook"],
       repositoryRoot,
     );
 
@@ -178,10 +178,10 @@ async function main(): Promise<void> {
       );
     }
     const temporaryDirectory = await mkdtemp(
-      join(tmpdir(), "fireside-firebase-js-sdk-"),
+      join(tmpdir(), "firenook-firebase-js-sdk-"),
     );
     const executable =
-      process.platform === "win32" ? "fireside.exe" : "fireside";
+      process.platform === "win32" ? "firenook.exe" : "firenook";
     const serverArguments = [
       "firestore",
       "--host",
@@ -252,7 +252,7 @@ async function main(): Promise<void> {
       }
       const summary = {
         command:
-          "yarn --cwd integration/firestore karma start <fireside emulator-target config> --single-run",
+          "yarn --cwd integration/firestore karma start <firenook emulator-target config> --single-run",
         clientPersistence: arguments_.clientPersistence,
         completedTests: processPartitions.reduce(
           (total, partition) => total + partition.completedTests,
@@ -472,14 +472,14 @@ async function waitUntilListening(
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null || server.signalCode !== null) {
-      throw new Error("fireside exited before its port became available");
+      throw new Error("firenook exited before its port became available");
     }
     if (await canConnect(port)) {
       return;
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
   }
-  throw new Error("timed out waiting for fireside to listen");
+  throw new Error("timed out waiting for firenook to listen");
 }
 
 async function canConnect(port: number): Promise<boolean> {

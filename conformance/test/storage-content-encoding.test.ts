@@ -89,12 +89,12 @@ function decode(value: Bytes): Buffer {
   return body;
 }
 
-test("Fireside HTTP replays the official upload bytes and browser-decodes synthetic compressed JSON", { timeout: 600_000 }, async () => {
+test("Firenook HTTP replays the official upload bytes and browser-decodes synthetic compressed JSON", { timeout: 600_000 }, async () => {
   const repository = fileURLToPath(new URL("../../", import.meta.url));
-  await promisify(execFile)("cargo", ["build", "--locked", "-p", "fireside-storage-front", "--example", "encoding_fixture_server"], { cwd: repository });
+  await promisify(execFile)("cargo", ["build", "--locked", "-p", "firenook-storage-front", "--example", "encoding_fixture_server"], { cwd: repository });
   const cargoMetadata = await promisify(execFile)("cargo", ["metadata", "--no-deps", "--format-version", "1"], { cwd: repository });
   const targetDirectory = (JSON.parse(cargoMetadata.stdout) as { target_directory: string }).target_directory;
-  const scratch = await mkdtemp("/tmp/fireside-storage-http-replay-");
+  const scratch = await mkdtemp("/tmp/firenook-storage-http-replay-");
   const child = spawn(`${targetDirectory}/debug/examples/encoding_fixture_server`, [scratch], { stdio: ["ignore", "pipe", "pipe"] });
   const exited = once(child, "exit");
   try {

@@ -7,13 +7,13 @@ artifact_parent="${ENDURANCE_ARTIFACT_PARENT:-$repository_dir/endurance-artifact
 artifact_dir="$artifact_parent/phase1-import-2gib"
 
 cd "$repository_dir"
-cargo build --release --locked -p fireside
+cargo build --release --locked -p firenook
 npm ci --prefix conformance
 npm exec --prefix conformance -- firebase setup:emulators:firestore --non-interactive
 
 if [[ ! -d "$artifact_dir" ]]; then
   mkdir -p "$artifact_parent"
-  cargo run --release --locked -p fireside-export-format \
+  cargo run --release --locked -p firenook-export-format \
     --example generate_endurance_export -- \
     "$artifact_dir" 65536 32768
 fi

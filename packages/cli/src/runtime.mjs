@@ -14,7 +14,7 @@ export async function diagnose(options, cwd = process.cwd()) {
   const binary = binaryPath();
   // Functions run on the owned runtime with Node workers; Extensions are
   // resolved natively. Neither firebase-tools nor Java is consulted.
-  const files = await assetPaths().catch(error => { throw new Error(`${error.message}. Run fireside setup to provision the pinned public Emulator UI asset.`); });
+  const files = await assetPaths().catch(error => { throw new Error(`${error.message}. Run firenook setup to provision the pinned public Emulator UI asset.`); });
   const extensions = extensionsStatus(binary, project);
   return {binary, files, project, extensions, services:project.services, demo:project.demo, ui:project.ui,
     singleProjectMode:project.singleProjectMode, warnings:project.warnings, version:manifest.version, engineRevision:release.engineRevision};
@@ -45,7 +45,7 @@ export function vendorExtensions(binary, project, instances = []) {
 // firebase.json enables it explicitly.
 export function prepareLaunch(diagnostic, options, mode = 'start') {
   const p = diagnostic.project;
-  const parent = join(p.directory, '.fireside', 'runs');
+  const parent = join(p.directory, '.firenook', 'runs');
   mkdirSync(parent, {recursive:true});
   const run = mkdtempSync(join(parent, 'session-'));
   const state = p.state || join(run, 'state');
@@ -58,7 +58,7 @@ export function prepareLaunch(diagnostic, options, mode = 'start') {
   const ui = p.ui && (mode !== 'exec' || Boolean(options.ui) || p.uiExplicit);
   if (options.ui && !p.ui) console.error('note: --ui cannot enable the Emulator UI while firebase.json sets emulators.ui.enabled to false');
   const debug = Boolean(options.debug) || options['log-verbosity'] === 'DEBUG';
-  const debugLog = debug ? join(run, 'fireside-debug.log') : undefined;
+  const debugLog = debug ? join(run, 'firenook-debug.log') : undefined;
   const args = ['suite', '--project-dir', p.directory, '--config', p.config, '--firebase-rc', rc,
     '--project-id', p.project, '--host', p.host,
     '--node', process.execPath, '--ui-archive', diagnostic.files.ui, '--state-dir', state, '--minimum-functions', String(p.minimumFunctions)];
@@ -88,12 +88,12 @@ export function prepareLaunch(diagnostic, options, mode = 'start') {
   delete env.CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE;
   writeFileSync(join(run, 'launch.json'), JSON.stringify({version:manifest.version, engineRevision:release.engineRevision, args, state, exported:p.exported,
     services:p.services, ui, singleProjectMode:p.singleProjectMode, project:{id:p.project, demo:p.demo}, debugLog}, null, 2));
-  console.error(`Fireside ${manifest.version}; engine ${release.engineRevision}; disk/WAL state ${state}`);
+  console.error(`Firenook ${manifest.version}; engine ${release.engineRevision}; disk/WAL state ${state}`);
   console.error(`Services: ${p.services.join(', ')}; Emulator UI ${ui ? 'on' : 'off'}; host ${p.host}`);
   if (p.demo) console.error(`Demo project ${p.project}: no cloud service is contacted, but user Functions can still reach external providers; this CLI is not a network sandbox.`);
-  else console.error(`Fireside: real project id ${p.project}; every Functions worker is started with the emulator hosts and without Google credentials, but this CLI is not a network sandbox.`);
+  else console.error(`Firenook: real project id ${p.project}; every Functions worker is started with the emulator hosts and without Google credentials, but this CLI is not a network sandbox.`);
   if (debugLog) console.error(`Debug log: ${debugLog}`);
-  if (options['log-verbosity'] && options['log-verbosity'] !== 'DEBUG') console.error(`note: --log-verbosity ${options['log-verbosity']} is accepted for compatibility; Fireside prints its full log`);
+  if (options['log-verbosity'] && options['log-verbosity'] !== 'DEBUG') console.error(`note: --log-verbosity ${options['log-verbosity']} is accepted for compatibility; Firenook prints its full log`);
   console.error(`Working data and launch receipt are preserved in ${run}. No automatic deletion.`);
   return {binary:diagnostic.binary, args, env:nativeEnvironment(env), cwd:p.directory, run, ui, services:p.services, debugLog};
 }

@@ -2,7 +2,7 @@ use super::*;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use fireside_rules_runtime::request_history::{MAXIMUM_SUBSCRIBERS, RecordOutcome};
+use firenook_rules_runtime::request_history::{MAXIMUM_SUBSCRIBERS, RecordOutcome};
 use serde_json::Value;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -220,8 +220,8 @@ async fn kernel_backed_nonreader_releases_requests_replay_without_blocking_recor
 async fn actual_rest_rule_evaluations_arrive_on_the_requests_socket() {
     use axum::body::Body;
     use axum::http::Request;
-    use fireside_core_store::{Store, StoreOptions};
-    use fireside_rules_runtime::RulesRuntime;
+    use firenook_core_store::{Store, StoreOptions};
+    use firenook_rules_runtime::RulesRuntime;
     use tower::ServiceExt as _;
 
     let fixture: Value = serde_json::from_str(include_str!(
@@ -233,9 +233,9 @@ async fn actual_rest_rule_evaluations_arrive_on_the_requests_socket() {
     runtime
         .install_default(fixture["rules"].as_str().unwrap())
         .unwrap();
-    let application = fireside_rest_front::router_with_query_policy_memory_and_rules(
+    let application = firenook_rest_front::router_with_query_policy_memory_and_rules(
         Store::new(StoreOptions::default()),
-        fireside_query_engine::QueryPolicy::default(),
+        firenook_query_engine::QueryPolicy::default(),
         None,
         runtime,
     );
@@ -277,7 +277,7 @@ async fn actual_rest_rule_evaluations_arrive_on_the_requests_socket() {
             event["requestId"]
                 .as_str()
                 .unwrap()
-                .starts_with("fireside-")
+                .starts_with("firenook-")
         );
         if method == "GET" && document == "visible" {
             assert_eq!(

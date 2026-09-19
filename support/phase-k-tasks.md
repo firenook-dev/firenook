@@ -41,7 +41,7 @@ tab.
 with the official regex, fills in the official defaults, rejects
 `maxConcurrentDispatches > 5000` and answers `{"taskQueueConfig": …}` —
 then discards the configuration. Every other path answers 501
-`UNIMPLEMENTED`. Nothing in Fireside's Functions runtime registers a queue,
+`UNIMPLEMENTED`. Nothing in Firenook's Functions runtime registers a queue,
 so even that route is never exercised in a real run. Manifest parsing of
 `taskQueueTrigger` is complete (`functions-runtime/src/manifest.rs`) and the
 function is reachable over HTTP at the URL the dispatcher needs;
@@ -143,5 +143,5 @@ Exact-candidate CI, consumer gates, release `0.1.0-next.9`, docs.
 - The official queue corrupts its linked list when a task that already left
   the pending queue is deleted while others are pending. The corpus pins the
   observable part (200, `numberOfTasks: -1`, 404 on repeat, 409 on reuse);
-  Fireside reproduces that without the corruption, recorded as a decision in
+  Firenook reproduces that without the corruption, recorded as a decision in
   the gate.

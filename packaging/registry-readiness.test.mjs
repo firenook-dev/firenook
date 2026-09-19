@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { probeRegistry, waitForRegistry, publishVerifiedRelease, TransientRegistryRead } from './registry-readiness.mjs';
 
-const native = {name:'@fireside-dev/linux-x64',version:'0.1.0-next.0',integrity:'sha512-tested'};
-const cli = {...native,name:'@fireside-dev/cli'};
+const native = {name:'@firenook/cli-linux-x64',version:'0.1.0-next.0',integrity:'sha512-tested'};
+const cli = {...native,name:'firenook'};
 const version = record => ({name:record.name,version:record.version,dist:{integrity:record.integrity}});
 const index = record => ({versions:{[record.version]:version(record)},'dist-tags':{next:record.version}});
 const response = (status, body) => async () => ({status,json:async()=>body});
@@ -48,7 +48,7 @@ test('timeout preserves partial publication and integrity errors are not retried
 });
 
 test('native scans overlap, all native indexes precede CLI upload, resume skips accepted bytes', async () => {
-  const second={...native,name:'@fireside-dev/linux-arm64'};
+  const second={...native,name:'@firenook/cli-linux-arm64'};
   const events=[];
   const result=await publishVerifiedRelease([native,second,cli],{
     probe:async record=>record===native?version(record):null,

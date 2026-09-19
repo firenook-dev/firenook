@@ -355,7 +355,7 @@ pub fn handler(rt: &Runtime, query: &BTreeMap<String, String>) -> Response {
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        HANDLER.replace("__FIRESIDE_ACCOUNT_ITEMS__", &items),
+        HANDLER.replace("__FIRENOOK_ACCOUNT_ITEMS__", &items),
     )
         .into_response()
 }

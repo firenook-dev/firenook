@@ -1,6 +1,6 @@
 [package]
-name = "fireside-pubsub-front"
-description = "Pub/Sub-backed scheduler surface for the fireside emulator suite"
+name = "firenook-pubsub-front"
+description = "Pub/Sub-backed scheduler surface for the firenook emulator suite"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,7 +13,7 @@ publish = false
 apache-avro.workspace = true
 axum.workspace = true
 base64.workspace = true
-fireside-functions-bridge = { path = "../functions-bridge" }
+firenook-functions-bridge = { path = "../functions-bridge" }
 pbjson.workspace = true
 pbjson-types.workspace = true
 prost.workspace = true

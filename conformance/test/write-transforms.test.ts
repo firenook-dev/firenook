@@ -16,10 +16,10 @@ test("field transforms use the production commit semantics", async (context) => 
   const configuration = resolveTarget(process.env);
   const firestore = createFirestore(configuration);
   const document = firestore.doc(
-    `runs/${randomUUID()}/fireside_conformance/transforms`,
+    `runs/${randomUUID()}/firenook_conformance/transforms`,
   );
   const replacement = firestore.doc(
-    `runs/${randomUUID()}/fireside_conformance/replace-transforms`,
+    `runs/${randomUUID()}/firenook_conformance/replace-transforms`,
   );
 
   context.after(async () => {
@@ -100,9 +100,9 @@ test("array transforms use production numeric equality", async (context) => {
   const documentId = "numeric-equality";
   const parent = `projects/${configuration.projectId}/databases/(default)/documents/runs/${runId}`;
   const database = `projects/${configuration.projectId}/databases/(default)`;
-  const name = `${parent}/fireside_conformance/${documentId}`;
+  const name = `${parent}/firenook_conformance/${documentId}`;
   const document = firestore.doc(
-    `runs/${runId}/fireside_conformance/${documentId}`,
+    `runs/${runId}/firenook_conformance/${documentId}`,
   );
 
   context.after(async () => {
@@ -114,7 +114,7 @@ test("array transforms use production numeric equality", async (context) => {
 
   await rawFirestore.createDocument({
     parent,
-    collectionId: "fireside_conformance",
+    collectionId: "firenook_conformance",
     documentId,
     document: {
       fields: {
@@ -205,8 +205,8 @@ test("minimum and maximum transforms preserve production numeric types", async (
   const documentId = "numeric-bounds";
   const parent = `projects/${configuration.projectId}/databases/(default)/documents/runs/${runId}`;
   const database = `projects/${configuration.projectId}/databases/(default)`;
-  const name = `${parent}/fireside_conformance/${documentId}`;
-  const document = firestore.doc(`runs/${runId}/fireside_conformance/${documentId}`);
+  const name = `${parent}/firenook_conformance/${documentId}`;
+  const document = firestore.doc(`runs/${runId}/firenook_conformance/${documentId}`);
 
   context.after(async () => {
     await document.delete().catch(() => undefined);
@@ -217,7 +217,7 @@ test("minimum and maximum transforms preserve production numeric types", async (
 
   await rawFirestore.createDocument({
     parent,
-    collectionId: "fireside_conformance",
+    collectionId: "firenook_conformance",
     documentId,
     document: {
       fields: {

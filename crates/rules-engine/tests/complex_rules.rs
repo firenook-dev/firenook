@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     Auth, DocumentAccess, DocumentAccessError, EvaluationRequest, Query, RequestOperation,
     Resource, Ruleset, Timestamp, Value, compile,
 };

@@ -22,7 +22,7 @@ const VARIANTS = [
   "streaming",
   "buffering-proxy-auto-detection",
 ] as const;
-type Target = "fireside" | "java";
+type Target = "firenook" | "java";
 type Variant = (typeof VARIANTS)[number];
 
 interface ComparisonManifest {
@@ -132,7 +132,7 @@ async function main(): Promise<void> {
   const environment = await collectEnvironment(repositoryRoot, manifestText);
   validateEnvironment(environment, manifest);
   await writeJson(join(outputDirectory, "environment.json"), environment);
-  await runCommand("cargo", ["build", "--locked", "-p", "fireside", "--release"], {
+  await runCommand("cargo", ["build", "--locked", "-p", "firenook", "--release"], {
     cwd: repositoryRoot,
   });
 
@@ -226,7 +226,7 @@ async function main(): Promise<void> {
   );
 
   const targets = Object.fromEntries(
-    (["fireside", "java"] as const).map((target) => {
+    (["firenook", "java"] as const).map((target) => {
       const listener = Object.fromEntries(
         VARIANTS.map((variant) => {
           const values = listenerByTarget.get(`${target}:${variant}`) ?? [];
@@ -289,14 +289,14 @@ async function main(): Promise<void> {
     VARIANTS.map((variant) => [
       variant,
       {
-        listenerP50FiresideOverJava:
-          targets.fireside.listener[variant].p50 / targets.java.listener[variant].p50,
-        listenerP95FiresideOverJava:
-          targets.fireside.listener[variant].p95 / targets.java.listener[variant].p95,
-        listenerP99FiresideOverJava:
-          targets.fireside.listener[variant].p99 / targets.java.listener[variant].p99,
-        reconnectP50FiresideOverJava:
-          targets.fireside.reconnect[variant].p50 / targets.java.reconnect[variant].p50,
+        listenerP50FirenookOverJava:
+          targets.firenook.listener[variant].p50 / targets.java.listener[variant].p50,
+        listenerP95FirenookOverJava:
+          targets.firenook.listener[variant].p95 / targets.java.listener[variant].p95,
+        listenerP99FirenookOverJava:
+          targets.firenook.listener[variant].p99 / targets.java.listener[variant].p99,
+        reconnectP50FirenookOverJava:
+          targets.firenook.reconnect[variant].p50 / targets.java.reconnect[variant].p50,
       },
     ]),
   );
@@ -341,7 +341,7 @@ function validateManifest(manifest: ComparisonManifest): void {
   }
   if (
     JSON.stringify(manifest.workload.targetBlockOrder) !==
-    JSON.stringify(["fireside", "java", "java", "fireside"])
+    JSON.stringify(["firenook", "java", "java", "firenook"])
   ) {
     throw new Error("comparison target order must remain ABBA");
   }
@@ -389,7 +389,7 @@ async function assertProductSourceUnchanged(repositoryRoot: string): Promise<voi
   );
   if (result.exitCode !== 0) {
     throw new Error(
-      `Fireside product source differs from Phase 2 candidate ${PHASE2_PRODUCT_REVISION}`,
+      `Firenook product source differs from Phase 2 candidate ${PHASE2_PRODUCT_REVISION}`,
     );
   }
 }
@@ -514,17 +514,17 @@ function reportMarkdown(
   repositoryRoot: string,
 ): string {
   const rows = VARIANTS.map((variant) => {
-    const fireside = summary.targets.fireside.listener[variant];
+    const firenook = summary.targets.firenook.listener[variant];
     const java = summary.targets.java.listener[variant];
-    const ratio = summary.ratios[variant]?.listenerP99FiresideOverJava ?? Number.NaN;
-    return `| ${variant} | ${String(fireside.samples)} | ${fireside.p50.toFixed(3)} | ${fireside.p95.toFixed(3)} | ${fireside.p99.toFixed(3)} | ${java.p50.toFixed(3)} | ${java.p95.toFixed(3)} | ${java.p99.toFixed(3)} | ${ratio.toFixed(3)} |`;
+    const ratio = summary.ratios[variant]?.listenerP99FirenookOverJava ?? Number.NaN;
+    return `| ${variant} | ${String(firenook.samples)} | ${firenook.p50.toFixed(3)} | ${firenook.p95.toFixed(3)} | ${firenook.p99.toFixed(3)} | ${java.p50.toFixed(3)} | ${java.p95.toFixed(3)} | ${java.p99.toFixed(3)} | ${ratio.toFixed(3)} |`;
   });
   const reconnectRows = VARIANTS.map((variant) => {
-    const fireside = summary.targets.fireside.reconnect[variant];
+    const firenook = summary.targets.firenook.reconnect[variant];
     const java = summary.targets.java.reconnect[variant];
-    return `| ${variant} | ${String(fireside.samples)} | ${fireside.p50.toFixed(3)} | ${fireside.p99.toFixed(3)} | ${java.p50.toFixed(3)} | ${java.p99.toFixed(3)} |`;
+    return `| ${variant} | ${String(firenook.samples)} | ${firenook.p50.toFixed(3)} | ${firenook.p99.toFixed(3)} | ${java.p50.toFixed(3)} | ${java.p99.toFixed(3)} |`;
   });
-  const firesideRss = summary.targets.fireside.resources.peakRssBytes;
+  const firenookRss = summary.targets.firenook.resources.peakRssBytes;
   const javaRss = summary.targets.java.resources.peakRssBytes;
   return `# Phase 2 Java WebChannel comparison
 
@@ -537,7 +537,7 @@ Frozen comparison manifest SHA-256: \`${summary.manifestSha256}\`
 Evidence directory: [\`${evidenceRoot}\`](${relative(dirname(reportPath), resolve(repositoryRoot, evidenceRoot))})
 
 The same pinned vanilla Firebase JS SDK workload ran against the Phase 2
-Fireside release build and official Java emulator v1.22.0 on one host. The
+Firenook release build and official Java emulator v1.22.0 on one host. The
 target blocks ran in frozen ABBA order. Each block discarded one warm-up
 repetition and retained three measured repetitions, producing 600 listener
 samples and six reconnect samples per target and transport variant. This is a
@@ -547,15 +547,15 @@ post-pass comparison; it does not alter the immutable Phase 2 verdict.
 
 Times are milliseconds. The measurement starts immediately before a document
 write and ends after both write acknowledgement and the matching listener
-observation. A Fireside/Java ratio below 1 favors Fireside; above 1 favors Java.
+observation. A Firenook/Java ratio below 1 favors Firenook; above 1 favors Java.
 
-| Variant | Samples/target | Fireside p50 | Fireside p95 | Fireside p99 | Java p50 | Java p95 | Java p99 | p99 F/J ratio |
+| Variant | Samples/target | Firenook p50 | Firenook p95 | Firenook p99 | Java p50 | Java p95 | Java p99 | p99 F/J ratio |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 ${rows.join("\n")}
 
 ## Backchannel reconnect
 
-| Variant | Samples/target | Fireside p50 | Fireside p99 | Java p50 | Java p99 |
+| Variant | Samples/target | Firenook p50 | Firenook p99 | Java p50 | Java p99 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 ${reconnectRows.join("\n")}
 
@@ -563,14 +563,14 @@ ${reconnectRows.join("\n")}
 
 | Target | Peak sampled RSS |
 | --- | ---: |
-| Fireside release | ${(firesideRss / 1024 / 1024).toFixed(3)} MiB |
+| Firenook release | ${(firenookRss / 1024 / 1024).toFixed(3)} MiB |
 | Official Java v1.22.0 default | ${(javaRss / 1024 / 1024).toFixed(3)} MiB |
-| Java/Fireside ratio | ${(javaRss / firesideRss).toFixed(3)}x |
+| Java/Firenook ratio | ${(javaRss / firenookRss).toFixed(3)}x |
 
 ## Interpretation limits
 
 - This measures sequential acknowledged write-to-listener delivery, not maximum throughput.
-- Java has no comparable disk/WAL mode, so only Fireside memory mode is compared.
+- Java has no comparable disk/WAL mode, so only Firenook memory mode is compared.
 - Production Cloud Firestore remains the behavior oracle and is not a local performance target.
 - No JVM heap flag, allocator override, cache override, or performance threshold was added.
 - Raw samples, per-block results, logs, environment data, and SHA-256 checksums are preserved.

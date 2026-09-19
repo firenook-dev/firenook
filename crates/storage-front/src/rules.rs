@@ -1,4 +1,4 @@
-//! Native Storage Security Rules: rulesets compiled by `fireside-rules-engine`
+//! Native Storage Security Rules: rulesets compiled by `firenook-rules-engine`
 //! and evaluated in process with the request model recorded from the official
 //! emulator (`conformance/fixtures/storage-rules-v1`).
 
@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use fireside_rules_engine::{
+use firenook_rules_engine::{
     Auth, DocumentAccess, DocumentAccessError, EvaluationRequest, RequestOperation, Resource,
     Ruleset, StorageObject, Timestamp, Value, compile,
 };
@@ -280,7 +280,7 @@ fn compile_table(source: &RulesSource) -> Result<RulesetTable, StorageError> {
 
 /// `/b/{bucket}/o/{name}` with empty segments dropped: the official rules
 /// runtime crashes on an empty segment (storage-rules-v1
-/// `oracleCrashNotRecordedLive`); Fireside evaluates the remaining segments.
+/// `oracleCrashNotRecordedLive`); Firenook evaluates the remaining segments.
 pub(crate) fn rules_path(bucket: &str, name: &str) -> String {
     let mut path = format!("/b/{bucket}/o");
     for segment in name.split('/').filter(|segment| !segment.is_empty()) {

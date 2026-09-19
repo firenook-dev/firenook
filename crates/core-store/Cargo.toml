@@ -1,6 +1,6 @@
 [package]
-name = "fireside-core-store"
-description = "MVCC storage core for the fireside emulator suite"
+name = "firenook-core-store"
+description = "MVCC storage core for the firenook emulator suite"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

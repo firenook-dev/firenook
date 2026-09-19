@@ -1,14 +1,14 @@
-//! Bounded listen-target state and document-diff delivery for fireside.
+//! Bounded listen-target state and document-diff delivery for firenook.
 
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fireside_core_store::{
+use firenook_core_store::{
     Change, DatabaseName, DocumentKey, LogicalMemoryUsage, Revision, Snapshot,
     database_name_logical_bytes, document_key_logical_bytes,
 };
-use fireside_query_engine::{DatabaseEdition, Query, QueryError, QueryScope, execute_iter};
+use firenook_query_engine::{DatabaseEdition, Query, QueryError, QueryScope, execute_iter};
 
 #[cfg(test)]
 mod invalidation_tests;
@@ -285,8 +285,8 @@ fn evaluate(
 
 #[cfg(test)]
 mod tests {
-    use fireside_core_store::{Precondition, Store, Value, Write};
-    use fireside_query_engine::{Direction, FieldPath, QueryScope};
+    use firenook_core_store::{Precondition, Store, Value, Write};
+    use firenook_query_engine::{Direction, FieldPath, QueryScope};
 
     use super::*;
 

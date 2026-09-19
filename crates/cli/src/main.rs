@@ -12,23 +12,23 @@ use std::os::unix::process::CommandExt;
 use std::process::Command as ProcessCommand;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use fireside_core_store::{
+use firenook_core_store::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DatabaseName, DiskDurability,
     DiskOptions, DocumentKey, Precondition, Store, StoreOptions, Write,
 };
-use fireside_export_format::ExportReader;
-use fireside_functions_bridge::{DeliveryPolicy, DeliveryRuntime, TriggerRegistry};
-use fireside_grpc_front::FirestoreService;
-use fireside_query_engine::{DatabaseEdition as QueryDatabaseEdition, IndexCatalog, QueryPolicy};
-use fireside_rest_front::{
+use firenook_export_format::ExportReader;
+use firenook_functions_bridge::{DeliveryPolicy, DeliveryRuntime, TriggerRegistry};
+use firenook_grpc_front::FirestoreService;
+use firenook_query_engine::{DatabaseEdition as QueryDatabaseEdition, IndexCatalog, QueryPolicy};
+use firenook_rest_front::{
     AllocatorMemoryReporter, AllocatorMemoryUsage, router_with_shared_service as rest_router,
 };
-use fireside_rules_runtime::RulesRuntime;
-use fireside_suite_runtime::{
+use firenook_rules_runtime::RulesRuntime;
+use firenook_suite_runtime::{
     DEFAULT_FIRESTORE_DATABASE, FirestoreDatabaseConfig, ServiceSelection, StorageBucketConfig,
     StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
 };
-use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
+use firenook_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use serde::Deserialize;
 
 // Snapshot and protobuf churn repeatedly frees similarly sized allocations.
@@ -93,7 +93,7 @@ enum AllocatorBootstrapPlan {
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "fireside",
+    name = "firenook",
     version,
     about = "A clean-room local emulator suite grounded in production behavior"
 )]
@@ -130,7 +130,7 @@ struct PubsubArgs {
     #[arg(
         long = "project-id",
         alias = "project_id",
-        default_value = "demo-fireside"
+        default_value = "demo-firenook"
     )]
     project_id: String,
 }
@@ -145,7 +145,7 @@ struct AuthArgs {
     #[arg(
         long = "project-id",
         alias = "project_id",
-        default_value = "demo-fireside"
+        default_value = "demo-firenook"
     )]
     project_id: String,
     /// Persist accounts, codes and configuration in this JSON file.
@@ -233,7 +233,7 @@ enum CaptureTransport {
     WebSocket,
 }
 
-impl From<CaptureTransport> for fireside_capture_proxy::Transport {
+impl From<CaptureTransport> for firenook_capture_proxy::Transport {
     fn from(transport: CaptureTransport) -> Self {
         match transport {
             CaptureTransport::Http1 => Self::Http1,
@@ -369,7 +369,7 @@ struct SuiteArgs {
     #[arg(long = "inspect-functions", num_args = 0..=1, default_missing_value = "auto", value_name = "PORT")]
     inspect_functions: Option<String>,
     /// Never contact the Extensions registry: every extension ref must be
-    /// vendored in the project (`fireside ext:vendor`) or present in the
+    /// vendored in the project (`firenook ext:vendor`) or present in the
     /// shared cache with its registry sidecar.
     #[arg(long)]
     offline: bool,
@@ -440,7 +440,7 @@ fn main() -> ExitCode {
 fn extensions_inputs(
     arguments: &ExtensionsProjectArgs,
     offline: bool,
-) -> Result<fireside_suite_runtime::ExtensionsInputs, String> {
+) -> Result<firenook_suite_runtime::ExtensionsInputs, String> {
     let firebase_json = absolute_path(&arguments.config)?;
     let project_dir = firebase_json
         .parent()
@@ -451,7 +451,7 @@ fn extensions_inputs(
     } else {
         which_binary(&arguments.node).unwrap_or_else(|| arguments.node.clone())
     };
-    Ok(fireside_suite_runtime::ExtensionsInputs {
+    Ok(firenook_suite_runtime::ExtensionsInputs {
         project_id: arguments.project_id.clone(),
         project_dir,
         firebase_json,
@@ -491,14 +491,14 @@ fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let config = match fireside_suite_runtime::extensions_config_from(&inputs) {
+            let config = match firenook_suite_runtime::extensions_config_from(&inputs) {
                 Ok(config) => config,
                 Err(error) => {
                     eprintln!("extensions status failed: {error}");
                     return ExitCode::FAILURE;
                 }
             };
-            let report = fireside_extensions::status(&config);
+            let report = firenook_extensions::status(&config);
             match serde_json::to_string_pretty(&report) {
                 Ok(text) => {
                     println!("{text}");
@@ -518,26 +518,26 @@ fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let config = match fireside_suite_runtime::extensions_config_from(&inputs) {
+            let config = match firenook_suite_runtime::extensions_config_from(&inputs) {
                 Ok(config) => config,
                 Err(error) => {
                     eprintln!("extensions vendor failed: {error}");
                     return ExitCode::FAILURE;
                 }
             };
-            let log = fireside_functions_runtime::LogSink::stderr();
+            let log = firenook_functions_runtime::LogSink::stderr();
             let mut failed = false;
             for (instance_id, written) in &config.extensions {
                 if !vendor.instances.is_empty() && !vendor.instances.contains(instance_id) {
                     continue;
                 }
-                if fireside_extensions::refs::is_local_path(written) {
+                if firenook_extensions::refs::is_local_path(written) {
                     eprintln!(
-                        "fireside extensions: {instance_id} is a local extension ({written}); nothing to vendor"
+                        "firenook extensions: {instance_id} is a local extension ({written}); nothing to vendor"
                     );
                     continue;
                 }
-                match runtime.block_on(fireside_extensions::vendor(
+                match runtime.block_on(firenook_extensions::vendor(
                     &config,
                     instance_id,
                     written,
@@ -549,7 +549,7 @@ fn run_extensions_command(arguments: &ExtensionsArgs) -> ExitCode {
                     Err(error) => {
                         failed = true;
                         eprintln!(
-                            "fireside extensions: {instance_id} ({written}) could not be vendored: {error}"
+                            "firenook extensions: {instance_id} ({written}) could not be vendored: {error}"
                         );
                     }
                 }
@@ -691,7 +691,7 @@ fn run_suite_runtime(arguments: &SuiteArgs) -> ExitCode {
     match runtime.block_on(run_suite(config)) {
         Ok(outcome) => match serde_json::to_string(&outcome) {
             Ok(outcome) => {
-                eprintln!("fireside suite stopped cleanly: {outcome}");
+                eprintln!("firenook suite stopped cleanly: {outcome}");
                 ExitCode::SUCCESS
             }
             Err(error) => {
@@ -763,15 +763,15 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         firebase_json,
         inspect_functions: match arguments.inspect_functions.as_deref() {
             None => None,
-            Some("auto" | "true") => Some(fireside_suite_runtime::InspectConfig { port: None }),
-            Some(port) => Some(fireside_suite_runtime::InspectConfig {
+            Some("auto" | "true") => Some(firenook_suite_runtime::InspectConfig { port: None }),
+            Some(port) => Some(firenook_suite_runtime::InspectConfig {
                 port: Some(port.parse().map_err(|_| {
                     format!("--inspect-functions expects a TCP port, found {port}")
                 })?),
             }),
         },
         offline: arguments.offline
-            || std::env::var("FIRESIDE_OFFLINE")
+            || std::env::var("FIRENOOK_OFFLINE")
                 .is_ok_and(|value| matches!(value.as_str(), "1" | "true")),
         node: absolute_path(&arguments.node)?,
         ui_archive: absolute_path(&arguments.ui_archive)?,
@@ -798,7 +798,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
 /// paths resolved against the config directory. The official emulator
 /// answers `Cloud Firestore Emulator does not support multiple databases
 /// yet.` to an array with more than one entry and loads no rules at all;
-/// Fireside serves every database with its own rules. A database configured
+/// Firenook serves every database with its own rules. A database configured
 /// twice is a configuration error; an array without a `(default)` entry is
 /// allowed, as production allows a project with only named databases.
 fn resolve_firestore_databases(
@@ -867,7 +867,7 @@ fn resolve_storage_rules(
         }
         None => {
             return Err(
-                "Cannot start the Storage emulator without rules file specified in firebase.json: run 'fireside init' and set up your Storage configuration, or use a demo-* project ID for the default open rules".to_owned(),
+                "Cannot start the Storage emulator without rules file specified in firebase.json: run 'firenook init' and set up your Storage configuration, or use a demo-* project ID for the default open rules".to_owned(),
             );
         }
     };
@@ -992,10 +992,10 @@ fn run_capture_proxy_runtime(arguments: &CaptureProxyArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let config = fireside_capture_proxy::CaptureProxyConfig {
+    let config = firenook_capture_proxy::CaptureProxyConfig {
         listen_address,
         upstream,
-        metadata: fireside_capture_proxy::FixtureMetadata {
+        metadata: firenook_capture_proxy::FixtureMetadata {
             hypothesis: arguments.hypothesis.clone(),
             target: arguments.target.clone(),
             target_version: arguments.target_version.clone(),
@@ -1017,9 +1017,9 @@ fn run_capture_proxy_runtime(arguments: &CaptureProxyArgs) -> ExitCode {
     };
     eprintln!(
         "capture proxy listening on {listen_address}; fixture endpoint {}",
-        fireside_capture_proxy::CAPTURE_FIXTURE_PATH
+        firenook_capture_proxy::CAPTURE_FIXTURE_PATH
     );
-    match runtime.block_on(fireside_capture_proxy::serve(config)) {
+    match runtime.block_on(firenook_capture_proxy::serve(config)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("capture proxy failed: {error}");
@@ -1050,13 +1050,13 @@ async fn run_auth(arguments: &AuthArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let registry = fireside_functions_bridge::TriggerRegistry::default();
+    let registry = firenook_functions_bridge::TriggerRegistry::default();
     registry.set_background_enabled(arguments.functions_origin.is_some());
     let delivery = match arguments.functions_origin.as_deref() {
-        Some(origin) => match fireside_functions_bridge::DeliveryRuntime::start(
+        Some(origin) => match firenook_functions_bridge::DeliveryRuntime::start(
             registry.clone(),
             origin,
-            fireside_functions_bridge::DeliveryPolicy::default(),
+            firenook_functions_bridge::DeliveryPolicy::default(),
         ) {
             Ok(delivery) => Some(delivery),
             Err(error) => {
@@ -1070,10 +1070,10 @@ async fn run_auth(arguments: &AuthArgs) -> ExitCode {
         delivery.queue()
     } else {
         let (observer, _receiver) =
-            fireside_functions_bridge::TriggerObserver::channel(registry.clone());
+            firenook_functions_bridge::TriggerObserver::channel(registry.clone());
         observer.queue()
     };
-    let auth = match fireside_auth_front::AuthRuntime::new(
+    let auth = match firenook_auth_front::AuthRuntime::new(
         &arguments.project_id,
         queue,
         registry,
@@ -1139,14 +1139,14 @@ async fn run_pubsub(arguments: &PubsubArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let registry = fireside_functions_bridge::TriggerRegistry::default();
+    let registry = firenook_functions_bridge::TriggerRegistry::default();
     let (observer, _receiver) =
-        fireside_functions_bridge::TriggerObserver::channel(registry.clone());
-    let inventory = fireside_functions_bridge::FunctionsInventory {
+        firenook_functions_bridge::TriggerObserver::channel(registry.clone());
+    let inventory = firenook_functions_bridge::FunctionsInventory {
         generation: 0,
         backends: Vec::new(),
     };
-    let pubsub = fireside_pubsub_front::PubsubRuntime::new(
+    let pubsub = firenook_pubsub_front::PubsubRuntime::new(
         &arguments.project_id,
         &inventory,
         observer.queue(),
@@ -1382,12 +1382,12 @@ async fn run_firestore(
     let server = tonic::transport::Server::builder()
         .accept_http1(true)
         .add_routes(routes);
-    let result = if std::env::var_os("FIRESIDE_CONTROL_STDIN").as_deref()
+    let result = if std::env::var_os("FIRENOOK_CONTROL_STDIN").as_deref()
         == Some(std::ffi::OsStr::new("1"))
     {
         server
             .serve_with_shutdown(address, async {
-                if let Err(error) = fireside_suite_runtime::wait_for_shutdown().await {
+                if let Err(error) = firenook_suite_runtime::wait_for_shutdown().await {
                     eprintln!("Firestore shutdown control: {error}");
                 }
             })
@@ -1426,7 +1426,7 @@ fn open_seeded_store(arguments: &FirestoreArgs) -> Result<Store, String> {
         let count = seed_store_from_export(&store, path, arguments.project_id.as_deref())
             .map_err(|error| format!("Firestore import failed: {error}"))?;
         eprintln!(
-            "fireside imported {count} documents from {}",
+            "firenook imported {count} documents from {}",
             path.display()
         );
     }
@@ -1446,9 +1446,9 @@ async fn start_requests_listener(
         .await
         .map_err(|error| error.to_string())?;
     let application =
-        fireside_suite_front::requests_router(rules.request_history(), shutdown.clone());
+        firenook_suite_front::requests_router(rules.request_history(), shutdown.clone());
     Ok(Some(tokio::spawn(async move {
-        if let Err(error) = axum::serve(fireside_suite_runtime::no_delay(listener), application)
+        if let Err(error) = axum::serve(firenook_suite_runtime::no_delay(listener), application)
             .with_graceful_shutdown(async move {
                 let _ = shutdown.wait_for(|stopping| *stopping).await;
             })
@@ -1475,7 +1475,7 @@ fn report_firestore_configuration(
             Durability::PerCommit => "per-commit durability",
         };
         eprintln!(
-            "fireside Firestore persistence: {} ({journal}, {durability}, redb cache {} bytes)",
+            "firenook Firestore persistence: {} ({journal}, {durability}, redb cache {} bytes)",
             data_dir.display(),
             arguments
                 .redb_cache_size
@@ -1483,7 +1483,7 @@ fn report_firestore_configuration(
         );
     }
     eprintln!(
-        "fireside Firestore listening on {address} with {} runtime worker thread(s); mimalloc purge delay {} ms, decommit {}",
+        "firenook Firestore listening on {address} with {} runtime worker thread(s); mimalloc purge delay {} ms, decommit {}",
         arguments.worker_threads,
         allocator_config.purge_delay_milliseconds,
         allocator_config.purge_decommits,
@@ -1494,7 +1494,7 @@ async fn stop_functions_delivery(delivery: Option<DeliveryRuntime>) {
     if let Some(delivery) = delivery {
         let health = delivery.shutdown().await;
         eprintln!(
-            "fireside Functions delivery stopped: {} delivered, {} response-loss assumed delivered, {} duplicates suppressed, {} failed",
+            "firenook Functions delivery stopped: {} delivered, {} response-loss assumed delivered, {} duplicates suppressed, {} failed",
             health.delivered,
             health.assumed_delivered_after_response_loss,
             health.deduplicated,
@@ -1542,7 +1542,7 @@ fn start_functions_delivery(
     let runtime = DeliveryRuntime::start(triggers.clone(), &endpoint, DeliveryPolicy::default())
         .map_err(|error| error.to_string())?;
     store.add_commit_observer(runtime.observer());
-    eprintln!("fireside Functions background delivery: {endpoint}");
+    eprintln!("firenook Functions background delivery: {endpoint}");
     Ok(Some(runtime))
 }
 
@@ -1573,16 +1573,16 @@ fn open_store(arguments: &FirestoreArgs) -> Result<Store, String> {
 fn load_rules(path: Option<&std::path::Path>, diagnostics: bool) -> Result<RulesRuntime, String> {
     let rules = if diagnostics {
         eprintln!(
-            "fireside local diagnostics enabled: bounded request/coverage values may contain document data and decoded auth claims; do not publish consumer reports"
+            "firenook local diagnostics enabled: bounded request/coverage values may contain document data and decoded auth claims; do not publish consumer reports"
         );
         RulesRuntime::with_request_history(
-            fireside_rules_runtime::request_history::RequestHistory::default(),
+            firenook_rules_runtime::request_history::RequestHistory::default(),
         )
     } else {
         RulesRuntime::default()
     };
     let Some(path) = path else {
-        eprintln!("WARNING: fireside Security Rules are not configured; client access is open");
+        eprintln!("WARNING: firenook Security Rules are not configured; client access is open");
         return Ok(rules);
     };
     let source = std::fs::read_to_string(path).map_err(|error| {
@@ -1597,7 +1597,7 @@ fn load_rules(path: Option<&std::path::Path>, diagnostics: bool) -> Result<Rules
             path.display()
         )
     })?;
-    eprintln!("fireside Security Rules loaded from {}", path.display());
+    eprintln!("firenook Security Rules loaded from {}", path.display());
     Ok(rules)
 }
 
@@ -1670,7 +1670,7 @@ fn normalize_arguments(arguments: impl IntoIterator<Item = OsString>) -> Vec<OsS
     let mut arguments = arguments.into_iter();
     let executable = arguments
         .next()
-        .unwrap_or_else(|| OsString::from("fireside"));
+        .unwrap_or_else(|| OsString::from("firenook"));
     let remaining = arguments.collect::<Vec<_>>();
     let has_explicit_subcommand = remaining.first().is_some_and(|argument| {
         matches!(
@@ -1705,7 +1705,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode, header::CONTENT_TYPE};
-    use fireside_core_store::Value;
+    use firenook_core_store::Value;
     use std::fs;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1715,7 +1715,7 @@ mod tests {
 
     #[test]
     fn standalone_diagnostics_are_explicit_and_disabled_reports_are_not_empty_successes() {
-        let cli = Cli::try_parse_from(["fireside", "firestore"]).unwrap();
+        let cli = Cli::try_parse_from(["firenook", "firestore"]).unwrap();
         let Command::Firestore(arguments) = cli.command else {
             panic!("Firestore command");
         };
@@ -1724,9 +1724,9 @@ mod tests {
             load_rules(None, false)
                 .unwrap()
                 .coverage_json(&DatabaseName::new("demo-test", "(default)").unwrap()),
-            Err(fireside_rules_runtime::coverage::CoverageError::Disabled)
+            Err(firenook_rules_runtime::coverage::CoverageError::Disabled)
         );
-        let cli = Cli::try_parse_from(["fireside", "firestore", "--diagnostics"]).unwrap();
+        let cli = Cli::try_parse_from(["firenook", "firestore", "--diagnostics"]).unwrap();
         let Command::Firestore(arguments) = cli.command else {
             panic!("Firestore command");
         };
@@ -1735,7 +1735,7 @@ mod tests {
             load_rules(None, true)
                 .unwrap()
                 .coverage_json(&DatabaseName::new("demo-test", "(default)").unwrap()),
-            Err(fireside_rules_runtime::coverage::CoverageError::NoRules)
+            Err(firenook_rules_runtime::coverage::CoverageError::NoRules)
         );
     }
 
@@ -1796,7 +1796,7 @@ mod tests {
         fn new() -> Self {
             let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir()
-                .join(format!("fireside-cli-{}-{sequence}", std::process::id()));
+                .join(format!("firenook-cli-{}-{sequence}", std::process::id()));
             fs::create_dir_all(&path).expect("test directory should be created");
             Self(path)
         }
@@ -1814,7 +1814,7 @@ mod tests {
 
     #[test]
     fn parses_firestore_command() {
-        let cli = Cli::try_parse_from(["fireside", "firestore", "--port", "9090"])
+        let cli = Cli::try_parse_from(["firenook", "firestore", "--port", "9090"])
             .expect("command should parse");
         let Command::Firestore(arguments) = cli.command else {
             panic!("expected Firestore command");
@@ -1837,7 +1837,7 @@ mod tests {
     #[test]
     fn parses_capture_proxy_command() {
         let cli = Cli::try_parse_from([
-            "fireside",
+            "firenook",
             "capture-proxy",
             "--upstream",
             "http://127.0.0.1:8081",
@@ -1864,7 +1864,7 @@ mod tests {
     #[test]
     fn parses_complete_suite_command_and_storage_targets() {
         let options = [
-            "fireside",
+            "firenook",
             "suite",
             "--project-id",
             "demo-synthetic-app",
@@ -1968,7 +1968,7 @@ mod tests {
     #[test]
     fn jar_flags_are_normalized_to_the_firestore_command() {
         let arguments = normalize_arguments([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("--port"),
             OsString::from("9091"),
             OsString::from("--project_id"),
@@ -1991,7 +1991,7 @@ mod tests {
     #[test]
     fn enterprise_database_edition_is_preserved() {
         let arguments = normalize_arguments([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("--database-edition"),
             OsString::from("enterprise"),
         ]);
@@ -2005,7 +2005,7 @@ mod tests {
     #[test]
     fn strict_index_mode_is_preserved() {
         let arguments = normalize_arguments([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("--strict-indexes"),
         ]);
         let cli = Cli::try_parse_from(arguments).expect("strict indexes should parse");
@@ -2018,7 +2018,7 @@ mod tests {
     #[test]
     fn data_directory_enables_disk_mode_with_wal_by_default() {
         let arguments = normalize_arguments([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("--data-dir"),
             OsString::from("state"),
         ]);
@@ -2034,7 +2034,7 @@ mod tests {
     #[test]
     fn redb_cache_budget_is_an_explicit_disk_mode_override() {
         let arguments = normalize_arguments([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("--data-dir"),
             OsString::from("state"),
             OsString::from("--redb-cache-size"),
@@ -2050,7 +2050,7 @@ mod tests {
     #[test]
     fn redb_cache_budget_requires_disk_mode() {
         let arguments = normalize_arguments([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("--redb-cache-size"),
             OsString::from("67108864"),
         ]);
@@ -2064,7 +2064,7 @@ mod tests {
     #[test]
     fn no_wal_is_an_explicit_disk_mode_opt_out() {
         let arguments = normalize_arguments([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("--data-dir"),
             OsString::from("state"),
             OsString::from("--no-wal"),
@@ -2079,7 +2079,7 @@ mod tests {
     #[test]
     fn no_wal_requires_disk_mode() {
         let arguments =
-            normalize_arguments([OsString::from("fireside"), OsString::from("--no-wal")]);
+            normalize_arguments([OsString::from("firenook"), OsString::from("--no-wal")]);
         let error = Cli::try_parse_from(arguments).expect_err("memory mode has no WAL");
         assert_eq!(
             error.kind(),
@@ -2090,7 +2090,7 @@ mod tests {
     #[test]
     fn runtime_worker_threads_are_bounded_and_overridable() {
         assert!((1..=DEFAULT_MAX_WORKER_THREADS).contains(&default_worker_threads()));
-        let cli = Cli::try_parse_from(["fireside", "firestore", "--worker-threads", "2"])
+        let cli = Cli::try_parse_from(["firenook", "firestore", "--worker-threads", "2"])
             .expect("worker override should parse");
         let Command::Firestore(arguments) = cli.command else {
             panic!("expected Firestore command");
@@ -2100,7 +2100,7 @@ mod tests {
 
     #[test]
     fn zero_runtime_workers_fail_before_runtime_start() {
-        let cli = Cli::try_parse_from(["fireside", "firestore", "--worker-threads", "0"])
+        let cli = Cli::try_parse_from(["firenook", "firestore", "--worker-threads", "0"])
             .expect("numeric worker override should parse");
         let Command::Firestore(arguments) = cli.command else {
             panic!("expected Firestore command");
@@ -2121,7 +2121,7 @@ mod tests {
     fn disk_mode_store_survives_reopen_and_creates_default_wal() {
         let directory = TestDirectory::new();
         let cli = Cli::try_parse_from([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("firestore"),
             OsString::from("--data-dir"),
             directory.path().as_os_str().to_owned(),
@@ -2130,7 +2130,7 @@ mod tests {
         let Command::Firestore(arguments) = cli.command else {
             panic!("expected Firestore command");
         };
-        let database = DatabaseName::new("fireside-test", "(default)").unwrap();
+        let database = DatabaseName::new("firenook-test", "(default)").unwrap();
         let key = DocumentKey::new(database, "items/persisted").unwrap();
         {
             let store = open_store(&arguments).expect("disk store should open");
@@ -2149,15 +2149,15 @@ mod tests {
 
         let reopened = open_store(&arguments).expect("disk store should reopen");
         assert!(reopened.snapshot().get(&key).is_some());
-        assert!(directory.path().join("fireside.redb").is_file());
-        assert!(directory.path().join("fireside.wal").is_file());
+        assert!(directory.path().join("firenook.redb").is_file());
+        assert!(directory.path().join("firenook.wal").is_file());
     }
 
     #[test]
     fn no_wal_omits_the_journal_file() {
         let directory = TestDirectory::new();
         let cli = Cli::try_parse_from([
-            OsString::from("fireside"),
+            OsString::from("firenook"),
             OsString::from("firestore"),
             OsString::from("--data-dir"),
             directory.path().as_os_str().to_owned(),
@@ -2169,8 +2169,8 @@ mod tests {
         };
         drop(open_store(&arguments).expect("disk store should open"));
 
-        assert!(directory.path().join("fireside.redb").is_file());
-        assert!(!directory.path().join("fireside.wal").exists());
+        assert!(directory.path().join("firenook.redb").is_file());
+        assert!(!directory.path().join("firenook.wal").exists());
     }
 
     #[test]
@@ -2304,11 +2304,11 @@ mod tests {
         let count = seed_store_from_export(
             &store,
             std::path::Path::new(FIXTURE),
-            Some("demo-fireside-import-remap"),
+            Some("demo-firenook-import-remap"),
         )
         .expect("official artifact should import");
         assert_eq!(count, 4);
-        let database = DatabaseName::new("demo-fireside-import-remap", "(default)").unwrap();
+        let database = DatabaseName::new("demo-firenook-import-remap", "(default)").unwrap();
         let key = DocumentKey::new(database, "fireside_export_fixture/values").unwrap();
         let document = store
             .snapshot()

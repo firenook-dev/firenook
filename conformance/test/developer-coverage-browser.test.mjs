@@ -15,9 +15,9 @@ import { chromium } from 'playwright';
 test('native coverage JSON and HTML render actual counts, reload, errors and safe Unicode source', {timeout: 600000}, async () => {
   const root = fileURLToPath(new URL('../../', import.meta.url));
   const execute = promisify(execFile);
-  await execute('cargo', ['build', '--locked', '-p', 'fireside'], {cwd: root});
+  await execute('cargo', ['build', '--locked', '-p', 'firenook'], {cwd: root});
   const metadata = JSON.parse((await execute('cargo', ['metadata', '--no-deps', '--format-version', '1'], {cwd: root})).stdout);
-  const work = await mkdtemp(join(tmpdir(), 'fireside-coverage-browser-'));
+  const work = await mkdtemp(join(tmpdir(), 'firenook-coverage-browser-'));
   const fixture = JSON.parse(await readFile(new URL('../fixtures/developer-tools-coverage-v1/fixture.json', import.meta.url)));
   const captured = fixture.profiles.find(profile => profile.id === 'request');
   const source = captured.source + '\n// 中文 🚀 </script><img src=x onerror="window.injected=true">\n';
@@ -30,9 +30,9 @@ test('native coverage JSON and HTML render actual counts, reload, errors and saf
   const project = 'demo-fireside-coverage';
   const origin = `http://127.0.0.1:${port}`;
   const control = `${origin}/emulator/v1/projects/${project}`;
-  const peer = spawn(join(metadata.target_directory, 'debug', process.platform === 'win32' ? 'fireside.exe' : 'fireside'),
+  const peer = spawn(join(metadata.target_directory, 'debug', process.platform === 'win32' ? 'firenook.exe' : 'firenook'),
     ['firestore', '--host', '127.0.0.1', '--port', String(port), '--websocket-port', String(websocketPort), '--rules', join(work, 'firestore.rules')],
-    {cwd: work, env: {...process.env, FIRESIDE_CONTROL_STDIN: '1'}, stdio: ['pipe', 'pipe', 'pipe']});
+    {cwd: work, env: {...process.env, FIRENOOK_CONTROL_STDIN: '1'}, stdio: ['pipe', 'pipe', 'pipe']});
   const exited = once(peer, 'exit');
   let log = ''; for (const stream of [peer.stdout, peer.stderr]) stream.on('data', chunk => { log += chunk; });
   let browser;
@@ -108,7 +108,7 @@ test('native coverage JSON and HTML render actual counts, reload, errors and saf
   } finally {
     await browser?.close();
     await writeFile(join(work, 'server.log'), log);
-    if (peer.exitCode === null && peer.signalCode === null) peer.stdin.end('FIRESIDE_SHUTDOWN\n');
+    if (peer.exitCode === null && peer.signalCode === null) peer.stdin.end('FIRENOOK_SHUTDOWN\n');
     const result = await Promise.race([exited, delay(10000, null, {ref:false})]);
     if (!result && peer.exitCode === null && peer.signalCode === null) { peer.kill('SIGTERM'); await exited; }
     assert.ok(result, 'isolated peer must exit cleanly through its private shutdown pipe');

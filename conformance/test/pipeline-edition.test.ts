@@ -11,7 +11,7 @@ test("ExecutePipeline preserves the production database-edition gate", async () 
     await assert.rejects(
       firestore
         .pipeline()
-        .collection("fireside_pipeline_standard_probe")
+        .collection("firenook_pipeline_standard_probe")
         .limit(1)
         .execute(),
       (error: unknown) => grpcCode(error) === (configuration.name === "java" ? 3 : 9),

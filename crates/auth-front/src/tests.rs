@@ -1,5 +1,5 @@
 //! Crate-level checks; the behavioural gate is the corpus replay
-//! (`conformance/src/auth/replay-fireside.ts`).
+//! (`conformance/src/auth/replay-firenook.ts`).
 
 use std::collections::BTreeMap;
 
@@ -7,7 +7,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use fireside_functions_bridge::{TriggerObserver, TriggerRegistry};
+use firenook_functions_bridge::{TriggerObserver, TriggerRegistry};
 use serde_json::{Value as JsonValue, json};
 use tower::ServiceExt as _;
 
@@ -157,7 +157,7 @@ fn frozen_fixture_covers_every_official_operation() {
 // `<emulator-token-redacted>`, `{ "redacted": "emulator-jwt", "claims" }`)
 // are resolved from the live run.
 
-type Dispatches = tokio::sync::mpsc::UnboundedReceiver<fireside_functions_bridge::DispatchRequest>;
+type Dispatches = tokio::sync::mpsc::UnboundedReceiver<firenook_functions_bridge::DispatchRequest>;
 
 fn fixture_runtime(project: &str) -> (AuthRuntime, Dispatches) {
     let registry = TriggerRegistry::default();
@@ -386,7 +386,7 @@ async fn replay_observations(
             "{id}: content type"
         );
         if content_type.starts_with("text/html") {
-            // Fireside serves its own helper pages (named divergence).
+            // Firenook serves its own helper pages (named divergence).
             responses.push((id.to_owned(), JsonValue::Null));
             continue;
         }
@@ -607,7 +607,7 @@ async fn refresh_reuse_fixture_replays_for_every_flow() {
 #[tokio::test]
 async fn refresh_grant_survives_a_durable_restart() {
     let file = std::env::temp_dir().join(format!(
-        "fireside-auth-refresh-{}-{}.json",
+        "firenook-auth-refresh-{}-{}.json",
         std::process::id(),
         crate::util::now_millis()
     ));
@@ -716,7 +716,7 @@ async fn packaged_password_round_trip_and_legacy_digest_upgrade() {
 
     // A directory export re-imports and still signs in.
     let root = std::env::temp_dir().join(format!(
-        "fireside-password-{}-{}",
+        "firenook-password-{}-{}",
         std::process::id(),
         crate::util::now_millis()
     ));
@@ -733,7 +733,7 @@ async fn packaged_password_round_trip_and_legacy_digest_upgrade() {
     assert_eq!(status, 200);
     std::fs::remove_dir_all(root).expect("remove export");
 
-    // An early Fireside export's digest signs in and is upgraded in place.
+    // An early Firenook export's digest signs in and is upgraded in place.
     let salt = "synthetic-legacy-salt";
     let password = "synthetic-legacy-password";
     let (status, _) = call(

@@ -1,4 +1,4 @@
-//! Firebase Extensions for the fireside suite: `firebase.json` instances
+//! Firebase Extensions for the firenook suite: `firebase.json` instances
 //! become extra Functions backends with the official emulator's parameter,
 //! spec and trigger semantics (`ExtensionsEmulator`, `planner.want`,
 //! `toEmulatableBackend`), from local directories, the shared firebase-tools
@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use fireside_functions_runtime::{Definition, ExtensionBackend, LogEvent, LogSink, dotenv};
+use firenook_functions_runtime::{Definition, ExtensionBackend, LogEvent, LogSink, dotenv};
 use serde_json::{Map, Value};
 
 pub mod params;
@@ -314,7 +314,7 @@ async fn resolve_version(
     }
     if config.offline {
         return Err(ExtensionsError(format!(
-            "{written} is not pinned to a version and no vendored resolution exists; run `fireside ext:vendor` with network access or pin the version in firebase.json"
+            "{written} is not pinned to a version and no vendored resolution exists; run `firenook ext:vendor` with network access or pin the version in firebase.json"
         )));
     }
     client.resolve_version(reference).await
@@ -562,7 +562,7 @@ fn local_secrets(
                 path.display(),
                 missing
                     .iter()
-                    .map(|secret| format!("Fireside does not contact Secret Manager; {secret} must be provided locally"))
+                    .map(|secret| format!("Firenook does not contact Secret Manager; {secret} must be provided locally"))
                     .collect::<Vec<_>>()
                     .join("\n\t")
             ),
@@ -590,7 +590,7 @@ async fn ensure_registry_source(
     } else {
         if config.offline {
             return Err(ExtensionsError(format!(
-                "{version_ref} is not vendored under {} and not in the cache at {}; run `fireside ext:vendor` with network access",
+                "{version_ref} is not vendored under {} and not in the cache at {}; run `firenook ext:vendor` with network access",
                 vendored.display(),
                 cached.display()
             )));
@@ -616,7 +616,7 @@ async fn ensure_registry_source(
         Some(sidecar) => sidecar,
         None if config.offline => {
             return Err(ExtensionsError(format!(
-                "{version_ref} at {} has no {} sidecar; run `fireside ext:vendor` once with network access",
+                "{version_ref} at {} has no {} sidecar; run `firenook ext:vendor` once with network access",
                 directory.display(),
                 source::REGISTRY_SIDECAR
             )));
@@ -740,7 +740,7 @@ pub async fn vendor(
     Ok(target)
 }
 
-/// One instance's source state, as `fireside extensions status` and the
+/// One instance's source state, as `firenook extensions status` and the
 /// wrapper's `doctor` report it. Nothing is downloaded or contacted.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -826,7 +826,7 @@ pub fn status(config: &ExtensionsConfig) -> Vec<InstanceStatus> {
                     sidecar: false,
                     offline_ready: false,
                     params_found,
-                    note: Some("the version resolves through the registry; vendor it with `fireside ext:vendor` or pin it".to_owned()),
+                    note: Some("the version resolves through the registry; vendor it with `firenook ext:vendor` or pin it".to_owned()),
                 };
             };
             reference.version = Some(version.clone());

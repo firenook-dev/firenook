@@ -19,7 +19,7 @@ import { EMULATED_SERVICE_ACCOUNT, invokeFunction, matchParams, runInvoke, subst
 import { PROTOCOL_VERSIONS, TOOLS, createMcpServer, validateArguments } from '../packages/cli/src/mcp.mjs';
 import { decodeFields, decodeValue, encodeFields, encodeValue } from '../packages/cli/src/firestore-values.mjs';
 
-const cli = fileURLToPath(new URL('../packages/cli/bin/fireside.mjs', import.meta.url));
+const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs', import.meta.url));
 const options = {'storage-bucket':[], instance:[]};
 const log = () => { const out = [], err = []; return {out, err, log:(...a) => out.push(a.join(' ')), error:(...a) => err.push(a.join(' '))}; };
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -35,7 +35,7 @@ async function unusedPort() {
   return port;
 }
 function project(extra = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-commands-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-commands-'));
   const config = {firestore:{rules:'firestore.rules'}, storage:{rules:'storage.rules'}, functions:{source:'functions'},
     emulators:{firestore:{}, auth:{}, storage:{}, functions:{}, pubsub:{}, hub:{port:fake.deadPort}}, ...extra};
   writeFileSync(join(dir, 'firebase.json'), JSON.stringify(config));
@@ -139,27 +139,27 @@ before(async () => {
   fake.running = {firestore:{name:'firestore', host:'127.0.0.1', port:fake.port}, auth:{name:'auth', host:'127.0.0.1', port:fake.port}};
   fake.base = fake.running;
   fake.full = Object.fromEntries(['firestore', 'auth', 'storage', 'functions', 'pubsub', 'tasks', 'eventarc', 'hub'].map(name => [name, {name, host:'127.0.0.1', port:fake.port}]));
-  locatorDir = mkdtempSync(join(tmpdir(), 'fireside-locator-'));
-  process.env.FIRESIDE_LOCATOR_DIR = locatorDir;
+  locatorDir = mkdtempSync(join(tmpdir(), 'firenook-locator-'));
+  process.env.FIRENOOK_LOCATOR_DIR = locatorDir;
   writeFileSync(locatorPath('demo-fixture'), JSON.stringify({version:'15.22.0', origins:[fake.origin], pid:process.pid}));
 });
 after(async () => {
   await new Promise(resolve => fake.server.close(resolve));
-  delete process.env.FIRESIDE_LOCATOR_DIR;
+  delete process.env.FIRENOOK_LOCATOR_DIR;
   rmSync(locatorDir, {recursive:true, force:true});
 });
 const lastRequest = () => fake.requests[fake.requests.length - 1];
 
 test('emulators:export posts the running exportable targets without an Origin header', async () => {
   const {dir} = project();
-  const destination = join(dir, '..', `fireside-export-${process.pid}-a`);
+  const destination = join(dir, '..', `firenook-export-${process.pid}-a`);
   const output = log();
   assert.equal(await exportEmulators(destination, {...options, json:true}, dir, output), 0);
   const request = lastRequest();
   assert.equal(request.method, 'POST');
   assert.equal(request.url, '/_admin/export');
   assert.equal(request.headers.origin, undefined);
-  assert.deepEqual(request.body, {path:canonical(destination), targets:['firestore', 'auth'], initiatedBy:'fireside emulators:export'});
+  assert.deepEqual(request.body, {path:canonical(destination), targets:['firestore', 'auth'], initiatedBy:'firenook emulators:export'});
   assert.deepEqual(JSON.parse(output.out[0]), {path:canonical(destination), targets:['firestore', 'auth'], ok:true});
   assert.ok(existsSync(destination), 'the destination is created before the request');
   assert.match(output.err.join('\n'), /Found running emulator hub for project demo-fixture/);
@@ -173,11 +173,11 @@ test('emulators:export refuses the project tree and foreign non-empty directorie
   const {dir} = project();
   for (const target of [dir, join(dir, '..')]) await assert.rejects(exportEmulators(target, options, dir, log()), /must not be the project directory/);
   assert.equal(await exportEmulators(join(dir, 'inside'), options, dir, log()), 0, 'a subdirectory of the project is a valid destination');
-  const busy = mkdtempSync(join(tmpdir(), 'fireside-busy-'));
+  const busy = mkdtempSync(join(tmpdir(), 'firenook-busy-'));
   writeFileSync(join(busy, 'unrelated.txt'), 'keep');
   await assert.rejects(exportEmulators(busy, options, dir, log()), /re-run with --force/);
   assert.equal(await exportEmulators(busy, {...options, force:true}, dir, log()), 0);
-  const previous = mkdtempSync(join(tmpdir(), 'fireside-previous-'));
+  const previous = mkdtempSync(join(tmpdir(), 'firenook-previous-'));
   writeFileSync(join(previous, 'firebase-export-metadata.json'), '{}');
   assert.equal(await exportEmulators(previous, options, dir, log()), 0, 'an earlier export is overwritten without --force');
   writeFileSync(join(busy, 'file'), 'x');
@@ -187,12 +187,12 @@ test('emulators:export refuses the project tree and foreign non-empty directorie
 });
 test('emulators:export reports hub failures and a missing hub, and works from the locator alone', async () => {
   const {dir} = project();
-  const destination = join(dir, '..', `fireside-export-${process.pid}-b`);
+  const destination = join(dir, '..', `firenook-export-${process.pid}-b`);
   fake.exportStatus = 500;
   await assert.rejects(exportEmulators(destination, options, dir, log()), /Export request failed \(HTTP 500\): synthetic export failure/);
   fake.exportStatus = 200;
   // No firebase.json: the explicit project id and the locator file suffice.
-  const bare = mkdtempSync(join(tmpdir(), 'fireside-bare-'));
+  const bare = mkdtempSync(join(tmpdir(), 'firenook-bare-'));
   assert.equal(await exportEmulators(destination, {...options, project:'demo-fixture'}, bare, log()), 0);
   await assert.rejects(exportEmulators(destination, options, bare, log()), /No firebase\.json/);
   rmSync(destination, {recursive:true, force:true});
@@ -227,7 +227,7 @@ test('firestore:delete sends the official flag contract to the emulator routes',
   assert.equal(request.url, '/emulator/v1/projects/demo-fixture/databases/other/documents/users/alice?mode=recursive');
   assert.deepEqual(JSON.parse(output.out[1]), {path:'users/alice', mode:'recursive', deleted:3});
   await assert.rejects(firestoreDelete('users', options, [], dir, log()), /Must pass recursive or shallow option when deleting a collection/);
-  await assert.rejects(firestoreDelete('users', {...options, recursive:true}, ['users', '-r'], dir, log()), /without --force\. Re-run: fireside firestore:delete users -r --force/);
+  await assert.rejects(firestoreDelete('users', {...options, recursive:true}, ['users', '-r'], dir, log()), /without --force\. Re-run: firenook firestore:delete users -r --force/);
   await firestoreDelete('users', {...options, recursive:true, force:true}, [], dir, log());
   assert.equal(lastRequest().url, '/emulator/v1/projects/demo-fixture/databases/(default)/documents/users?mode=recursive');
   await firestoreDelete('users', {...options, shallow:true}, [], dir, log());
@@ -246,7 +246,7 @@ test('firestore:delete sends the official flag contract to the emulator routes',
   fake.running = running;
 });
 test('use edits .firebaserc aliases and the active default without touching other keys', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-use-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-use-'));
   writeFileSync(join(dir, '.firebaserc'), JSON.stringify({targets:{'demo-a':{storage:{main:['demo-a.appspot.com']}}}}));
   const rc = () => readJson(join(dir, '.firebaserc'));
   let output = log();
@@ -280,7 +280,7 @@ test('use edits .firebaserc aliases and the active default without touching othe
   use(undefined, {...options, json:true}, dir, output);
   assert.deepEqual(JSON.parse(output.out[0]), {path:join(dir, '.firebaserc'), projects:{ci:'demo-c'}, active:null});
   // A fresh directory gets a new file.
-  const fresh = mkdtempSync(join(tmpdir(), 'fireside-use-fresh-'));
+  const fresh = mkdtempSync(join(tmpdir(), 'firenook-use-fresh-'));
   use('demo-new', options, fresh, log());
   assert.deepEqual(readJson(join(fresh, '.firebaserc')), {projects:{default:'demo-new'}});
 });
@@ -294,7 +294,7 @@ test('target:apply and target:clear mirror the official .firebaserc target seman
   assert.deepEqual(rc.targets['demo-a'].storage, {second:['a.example.test', 'b.example.test']}, 'an emptied target disappears');
   assert.equal(clearTarget(rc, 'demo-a', 'storage', 'second'), true);
   assert.equal(clearTarget(rc, 'demo-a', 'storage', 'second'), false);
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-target-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-target-'));
   writeFileSync(join(dir, '.firebaserc'), JSON.stringify({projects:{default:'demo-a', prod:'demo-p'}}));
   const file = () => readJson(join(dir, '.firebaserc'));
   let output = log();
@@ -314,8 +314,8 @@ test('target:apply and target:clear mirror the official .firebaserc target seman
   output = log();
   targetClear(['storage', 'second'], options, dir, output);
   assert.match(output.out.join('\n'), /No action taken/);
-  assert.throws(() => targetApply(['database', 'main', 'x'], options, dir, log()), /not implemented by Fireside/);
-  assert.throws(() => targetApply(['hosting', 'main', 'x'], options, dir, log()), /not implemented by Fireside/);
+  assert.throws(() => targetApply(['database', 'main', 'x'], options, dir, log()), /not implemented by Firenook/);
+  assert.throws(() => targetApply(['hosting', 'main', 'x'], options, dir, log()), /not implemented by Firenook/);
   assert.throws(() => targetApply(['wat', 'main', 'x'], options, dir, log()), /Unrecognized target type wat/);
   assert.throws(() => targetApply(['storage', 'main'], options, dir, log()), /at least one resource/);
   assert.throws(() => targetClear(['storage'], options, dir, log()), /type and a target name/);
@@ -323,7 +323,7 @@ test('target:apply and target:clear mirror the official .firebaserc target seman
   assert.throws(() => targetApply(['storage', 'main', 'x'], options, dir, log()), /Must have an active project/);
 });
 test('init scaffolds a runnable demo project with the official defaults and never overwrites without --force', () => {
-  const root = mkdtempSync(join(tmpdir(), 'fireside-init-'));
+  const root = mkdtempSync(join(tmpdir(), 'firenook-init-'));
   const dir = join(root, 'My App'); mkdirSync(dir);
   writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');
   const output = log();
@@ -343,24 +343,24 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.deepEqual(pkg.dependencies, {'firebase-admin':'^13.0.0', 'firebase-functions':'^7.0.0'});
   assert.deepEqual(pkg.engines, {node:'24'});
   assert.match(readFileSync(join(dir, 'functions/index.js'), 'utf8'), /exports\.helloWorld = onRequest/);
-  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.fireside/\n*-debug.log\n');
+  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.firenook/\n*-debug.log\n');
   assert.equal(readFileSync(join(dir, 'functions/.gitignore'), 'utf8'), 'node_modules/\n*.local\n');
   assert.ok(!existsSync(join(dir, 'functions/node_modules')), 'nothing is installed');
-  assert.match(output.err.join('\n'), /Next steps:[\s\S]*cd functions && npm install[\s\S]*fireside setup[\s\S]*fireside emulators:start --project demo-my-app/);
+  assert.match(output.err.join('\n'), /Next steps:[\s\S]*cd functions && npm install[\s\S]*firenook setup[\s\S]*firenook emulators:start --project demo-my-app/);
   assert.equal(firestoreRules(new Date(Date.UTC(2026, 0, 15, 12))).includes('timestamp.date(2026, 2, 14)'), true);
-  assert.throws(() => scaffold(options, dir, log()), /exists; use fireside init --adopt/);
+  assert.throws(() => scaffold(options, dir, log()), /exists; use firenook init --adopt/);
   writeFileSync(join(dir, 'storage.rules'), 'custom');
   scaffold({...options, force:true, project:'demo-forced'}, dir, log());
   assert.equal(readFileSync(join(dir, 'storage.rules'), 'utf8').startsWith("rules_version = '2';"), true, '--force rewrites every scaffold file');
   assert.equal(readJson(join(dir, '.firebaserc')).projects.default, 'demo-forced');
-  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.fireside/\n*-debug.log\n', 'gitignore lines are never duplicated');
+  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules/\n.firenook/\n*-debug.log\n', 'gitignore lines are never duplicated');
   // The scaffold passes the launcher's own checks.
   const project = loadProject(options, dir);
   assert.deepEqual(project.services, ['firestore', 'auth', 'storage', 'functions', 'pubsub']);
   assert.equal(project.minimumFunctions, '1');
   assert.equal(project.ports.logging, 4500);
   // Without Functions, dry runs and JSON plans.
-  const lean = mkdtempSync(join(tmpdir(), 'fireside-init-lean-'));
+  const lean = mkdtempSync(join(tmpdir(), 'firenook-init-lean-'));
   const plan = log();
   scaffold({...options, 'no-functions':true, 'dry-run':true, json:true}, lean, plan);
   assert.ok(!existsSync(join(lean, 'firebase.json')));
@@ -373,19 +373,19 @@ test('init scaffolds a runnable demo project with the official defaults and neve
   assert.equal(leanConfig.functions, undefined);
   assert.deepEqual(Object.keys(leanConfig.emulators), ['auth', 'firestore', 'pubsub', 'storage', 'hub', 'logging', 'ui', 'singleProjectMode']);
   assert.equal(loadProject(options, lean).minimumFunctions, '0');
-  assert.throws(() => scaffold({...options, project:'Nope'}, mkdtempSync(join(tmpdir(), 'fireside-init-bad-')), log()), /Invalid project id/);
+  assert.throws(() => scaffold({...options, project:'Nope'}, mkdtempSync(join(tmpdir(), 'firenook-init-bad-')), log()), /Invalid project id/);
 });
 test('init --adopt lists skips, errors and additions, then applies only the additions', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-adopt-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-adopt-'));
   const original = {hosting:{public:'public'}, firestore:{rules:'firestore.rules', indexes:'firestore.indexes.json'}, functions:{source:'functions'},
     emulators:{hosting:{port:5000}, firestore:{port:8080}}};
   writeFileSync(join(dir, 'firebase.json'), JSON.stringify(original, null, 2));
   let output = log();
   assert.equal(adopt({...options, 'dry-run':true}, dir, output), 0);
   const text = output.err.join('\n');
-  assert.match(text, /skip\s+Fireside: firebase\.json configures the hosting emulator, which Fireside does not implement; skipping it/);
+  assert.match(text, /skip\s+Firenook: firebase\.json configures the hosting emulator, which Firenook does not implement; skipping it/);
   assert.match(text, /add\s+add emulators\.functions \{port: 5001\}/);
-  assert.match(text, /add\s+set \.firebaserc projects\.default = demo-fireside-adopt-\S+ \(create the file\)/);
+  assert.match(text, /add\s+set \.firebaserc projects\.default = demo-firenook-adopt-\S+ \(create the file\)/);
   assert.match(text, /add\s+write Firestore rules \(official init template\)/);
   assert.match(text, /add\s+write Firestore indexes/);
   assert.match(text, /Dry run: nothing was written/);
@@ -423,19 +423,19 @@ test('init --adopt lists skips, errors and additions, then applies only the addi
   assert.equal(readFileSync(join(dir, 'firebase.json'), 'utf8'), JSON.stringify(broken));
   writeFileSync(join(dir, 'firebase.json'), '{not json');
   assert.throws(() => adopt(options, dir, log()), /not valid JSON/);
-  assert.throws(() => adopt(options, mkdtempSync(join(tmpdir(), 'fireside-adopt-none-')), log()), /does not exist; run fireside init without --adopt/);
+  assert.throws(() => adopt(options, mkdtempSync(join(tmpdir(), 'firenook-adopt-none-')), log()), /does not exist; run firenook init without --adopt/);
 });
 // The fake hub lives in this process, so subprocesses that talk to it must
 // not block the event loop: spawn asynchronously.
 function runCli(args, cwd) {
-  const child = spawn(process.execPath, [cli, ...args], {cwd, env:{...process.env, FIRESIDE_LOCATOR_DIR:locatorDir}});
+  const child = spawn(process.execPath, [cli, ...args], {cwd, env:{...process.env, FIRENOOK_LOCATOR_DIR:locatorDir}});
   let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
   return once(child, 'close').then(([status]) => ({status, stdout, stderr}));
 }
 test('the command line dispatches the new commands without an installed engine', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-dispatch-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-dispatch-'));
   const run = (...args) => runCli(args, dir);
   assert.equal((await run('use', '--add', 'demo-dispatch')).status, 0);
   assert.deepEqual(readJson(join(dir, '.firebaserc')), {projects:{default:'demo-dispatch'}});
@@ -447,13 +447,13 @@ test('the command line dispatches the new commands without an installed engine',
   assert.equal(JSON.parse(plan.stdout).project, 'demo-dispatch', 'an existing .firebaserc default names the scaffold');
   assert.match((await run('emulators:export')).stderr, /exactly one destination directory/);
   assert.match((await run('emulators:export', 'a', 'b')).stderr, /exactly one destination directory/);
-  assert.match((await run('firestore:delete', 'users', '--import', 'x')).stderr, /--import is not an option of fireside firestore:delete/);
+  assert.match((await run('firestore:delete', 'users', '--import', 'x')).stderr, /--import is not an option of firenook firestore:delete/);
   assert.match((await run('use', 'a', 'b')).stderr, /at most one alias/);
   assert.match((await run('init', 'extra')).stderr, /Unexpected argument extra/);
   assert.match((await run('use', '--', 'x')).stderr, /Only emulators:exec accepts a command after --/);
   // export and delete reach the fake hub through the locator file.
   const {dir:configured} = project();
-  const destination = join(configured, '..', `fireside-export-${process.pid}-c`);
+  const destination = join(configured, '..', `firenook-export-${process.pid}-c`);
   const exported = await runCli(['emulators:export', destination, '--json'], configured);
   assert.equal(exported.status, 0, exported.stderr);
   assert.deepEqual(JSON.parse(exported.stdout).targets, ['firestore', 'auth']);
@@ -463,7 +463,7 @@ test('the command line dispatches the new commands without an installed engine',
   assert.deepEqual(JSON.parse(deleted.stdout), {path:'users', mode:'recursive', deleted:3});
   const refused = await runCli(['firestore:delete', 'users', '-r'], configured);
   assert.equal(refused.status, 1);
-  assert.match(refused.stderr, /Re-run: fireside firestore:delete users -r --force/);
+  assert.match(refused.stderr, /Re-run: firenook firestore:delete users -r --force/);
 });
 
 // --- functions:invoke ---------------------------------------------------------
@@ -476,7 +476,7 @@ const withSuite = async (running, body) => { fake.running = running; try { retur
 function delivery(requests) {
   const posts = requests.filter(request => request.path.startsWith('/functions/projects/demo-fixture/triggers/'));
   assert.equal(posts.length, 2, 'one probe, one delivery');
-  assert.match(posts[0].path, /\/triggers\/fireside-probe-[0-9a-f-]+$/);
+  assert.match(posts[0].path, /\/triggers\/firenook-probe-[0-9a-f-]+$/);
   assert.deepEqual(posts[0].body, {});
   return {key:decodeURIComponent(posts[1].path.slice('/functions/projects/demo-fixture/triggers/'.length)), body:posts[1].body, headers:posts[1].headers};
 }
@@ -553,7 +553,7 @@ test('functions:invoke --event-data resolves the trigger key from the route list
     await assert.rejects(runInvoke('addMessage', {...options, 'event-data':'{}'}, dir), /addMessage is an HTTPS callable function; call it with --data/);
     await assert.rejects(runInvoke('helloWorld', {...options, 'event-data':'{}'}, dir), /helloWorld is an HTTPS function; call it with --data/);
     await assert.rejects(runInvoke('beforeCreate', {...options, 'event-data':'{}'}, dir), /Auth blocking function/);
-    await assert.rejects(runInvoke('onRtdb', {...options, 'event-data':'{}'}, dir), /Realtime Database, which Fireside does not emulate/);
+    await assert.rejects(runInvoke('onRtdb', {...options, 'event-data':'{}'}, dir), /Realtime Database, which Firenook does not emulate/);
     await assert.rejects(runInvoke('onUserCreated', {...options, 'event-data':'{nope'}, dir), /--event-data must be JSON/);
     await assert.rejects(runInvoke('onUserCreated', {...options, 'event-data':'{}', params:'[1]'}, dir), /--params must be a JSON object/);
   });
@@ -778,23 +778,23 @@ test('path helpers and the Firestore value codec follow the shell encoder and ro
   assert.equal(decodeValue({doubleValue:'NaN'}), NaN);
 });
 
-// --- fireside mcp -------------------------------------------------------------
+// --- firenook mcp -------------------------------------------------------------
 const rpc = (id, method, params) => ({jsonrpc:'2.0', id, method, ...(params === undefined ? {} : {params})});
 const quiet = {log() {}, error() {}};
 const text = response => JSON.parse(response.result.content[0].text);
 test('the MCP server negotiates the protocol, lists its tools and validates calls without a running suite', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-mcp-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-mcp-'));
   const server = createMcpServer({...options, project:'demo-fixture'}, dir, quiet);
   const init = await server.handle(rpc(1, 'initialize', {protocolVersion:'2025-03-26', capabilities:{}, clientInfo:{name:'test', version:'0'}}));
   assert.equal(init.result.protocolVersion, '2025-03-26', 'a supported version is echoed');
   assert.deepEqual(init.result.capabilities, {tools:{}});
-  assert.equal(init.result.serverInfo.name, 'fireside');
+  assert.equal(init.result.serverInfo.name, 'firenook');
   assert.match(init.result.serverInfo.version, /^\d+\.\d+\.\d+/);
   assert.equal((await server.handle(rpc(2, 'initialize', {protocolVersion:'1999-01-01'}))).result.protocolVersion, PROTOCOL_VERSIONS[0], 'an unknown version gets the latest');
   assert.equal(await server.handle({jsonrpc:'2.0', method:'notifications/initialized'}), undefined, 'notifications get no response');
   assert.deepEqual(await server.handle(rpc(3, 'ping')), {jsonrpc:'2.0', id:3, result:{}});
   const list = await server.handle(rpc(4, 'tools/list'));
-  assert.deepEqual(list.result.tools.map(tool => tool.name), ['fireside_status', 'firestore_get', 'firestore_query', 'firestore_set', 'firestore_delete', 'firestore_list_collections',
+  assert.deepEqual(list.result.tools.map(tool => tool.name), ['firenook_status', 'firestore_get', 'firestore_query', 'firestore_set', 'firestore_delete', 'firestore_list_collections',
     'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes', 'storage_list', 'storage_get_metadata',
     'functions_list', 'functions_invoke', 'pubsub_publish', 'tasks_stats', 'emulators_export']);
   for (const tool of list.result.tools) {
@@ -804,7 +804,7 @@ test('the MCP server negotiates the protocol, lists its tools and validates call
   }
   assert.equal(TOOLS.length, list.result.tools.length);
   const only = createMcpServer({...options, project:'demo-fixture', only:'auth,tasks'}, dir, quiet);
-  assert.deepEqual((await only.handle(rpc(5, 'tools/list'))).result.tools.map(tool => tool.name), ['fireside_status', 'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes', 'tasks_stats', 'emulators_export']);
+  assert.deepEqual((await only.handle(rpc(5, 'tools/list'))).result.tools.map(tool => tool.name), ['firenook_status', 'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes', 'tasks_stats', 'emulators_export']);
   assert.throws(() => createMcpServer({...options, only:'wat'}, dir), /wat is not a tool group/);
   assert.equal((await server.handle(rpc(6, 'resources/list'))).error.code, -32601);
   assert.equal((await server.handle(rpc(7, 'tools/call', {name:'nope'}))).error.code, -32602);
@@ -816,7 +816,7 @@ test('the MCP server negotiates the protocol, lists its tools and validates call
   assert.equal(validateArguments({type:'object', properties:{}, required:[]}, {extra:1}), 'unknown argument extra');
   // A suite that is not running is a tool error, not a protocol error.
   const absent = createMcpServer({...options, project:'demo-absent'}, dir, quiet);
-  const status = await absent.handle(rpc(13, 'tools/call', {name:'fireside_status', arguments:{}}));
+  const status = await absent.handle(rpc(13, 'tools/call', {name:'firenook_status', arguments:{}}));
   assert.equal(status.result.isError, undefined);
   assert.equal(text(status).running, false);
   assert.match(text(status).error, /Did not find a running emulator hub for project demo-absent/);
@@ -825,14 +825,14 @@ test('the MCP server negotiates the protocol, lists its tools and validates call
   assert.match(text(get).error, /Did not find a running emulator hub for project demo-absent/);
   // No project at all.
   const none = createMcpServer(options, dir, quiet);
-  assert.match(text(await none.handle(rpc(15, 'tools/call', {name:'fireside_status', arguments:{}}))).error, /No firebase\.json/);
+  assert.match(text(await none.handle(rpc(15, 'tools/call', {name:'firenook_status', arguments:{}}))).error, /No firebase\.json/);
 });
 test('MCP tools reach the emulators through the hub listing with the owner token', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-mcp-tools-'));
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-mcp-tools-'));
   const server = createMcpServer({...options, project:'demo-fixture'}, dir, quiet);
   const callTool = async (name, args) => { const response = await server.handle(rpc(1, 'tools/call', {name, arguments:args})); assert.equal(response.result.isError, undefined, response.result.content[0].text); return text(response); };
   await withSuite(fake.full, async () => {
-    const status = await callTool('fireside_status', {});
+    const status = await callTool('firenook_status', {});
     assert.equal(status.running, true);
     assert.equal(status.hub.origin, fake.origin);
     assert.deepEqual(Object.keys(status.emulators), Object.keys(fake.full));
@@ -933,7 +933,7 @@ test('MCP tools reach the emulators through the hub listing with the owner token
     assert.deepEqual(published.messageIds, ['42']);
     assert.deepEqual(since(mark).find(request => request.path.endsWith(':publish')).body, {messages:[{data:Buffer.from('{"id":1}').toString('base64'), attributes:{k:'v'}}]});
     assert.deepEqual(await callTool('tasks_stats', {}), {'queue:demo-fixture-us-central1-processTask':{numberOfTasks:1, tasksRunning:0}});
-    const destination = join(dir, '..', `fireside-export-${process.pid}-mcp`);
+    const destination = join(dir, '..', `firenook-export-${process.pid}-mcp`);
     const exported = await callTool('emulators_export', {path:destination});
     assert.deepEqual(exported.targets, ['firestore', 'auth', 'storage']);
     assert.equal(exported.ok, true);
@@ -945,16 +945,16 @@ test('MCP tools reach the emulators through the hub listing with the owner token
     assert.match(text(missing).error, /did not start Auth/);
   });
 });
-test('fireside mcp over stdio writes only JSON-RPC lines to stdout', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'fireside-mcp-stdio-'));
+test('firenook mcp over stdio writes only JSON-RPC lines to stdout', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firenook-mcp-stdio-'));
   fake.running = fake.full;
   try {
-    const child = spawn(process.execPath, [cli, 'mcp', '--project', 'demo-fixture', '--only', 'firestore,functions'], {cwd:dir, env:{...process.env, FIRESIDE_LOCATOR_DIR:locatorDir}});
+    const child = spawn(process.execPath, [cli, 'mcp', '--project', 'demo-fixture', '--only', 'firestore,functions'], {cwd:dir, env:{...process.env, FIRENOOK_LOCATOR_DIR:locatorDir}});
     let stdout = '', stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     const lines = [rpc(1, 'initialize', {protocolVersion:'2025-06-18', capabilities:{}, clientInfo:{name:'test', version:'0'}}), {jsonrpc:'2.0', method:'notifications/initialized'},
-      rpc(2, 'tools/list'), rpc(3, 'tools/call', {name:'fireside_status', arguments:{}}), rpc(4, 'tools/call', {name:'firestore_get', arguments:{path:'users/alice'}}), 'not json', rpc(5, 'ping')];
+      rpc(2, 'tools/list'), rpc(3, 'tools/call', {name:'firenook_status', arguments:{}}), rpc(4, 'tools/call', {name:'firestore_get', arguments:{path:'users/alice'}}), 'not json', rpc(5, 'ping')];
     child.stdin.end(`${lines.map(line => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n')}\n`);
     const [status] = await once(child, 'close');
     assert.equal(status, 0, stderr);
@@ -968,6 +968,6 @@ test('fireside mcp over stdio writes only JSON-RPC lines to stdout', async () =>
     assert.deepEqual(byId[5].result, {});
     assert.deepEqual(byId.null, {jsonrpc:'2.0', id:null, error:{code:-32700, message:'Parse error'}});
     assert.equal(responses.length, 6);
-    assert.match(stderr, /fireside mcp .* tools over stdio for project demo-fixture; local emulators only/);
+    assert.match(stderr, /firenook mcp .* tools over stdio for project demo-fixture; local emulators only/);
   } finally { fake.running = fake.base; }
 });

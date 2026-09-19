@@ -1,15 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use fireside_core_store::{
+use firenook_core_store::{
     DatabaseName, DocumentKey, ListenerMemoryRegistration, Revision, RuntimeMemoryAccounting,
     Snapshot, SnapshotError, Store, Timestamp,
 };
-use fireside_query_engine::QueryPolicy;
-use fireside_rules_runtime::{
+use firenook_query_engine::QueryPolicy;
+use firenook_rules_runtime::{
     Authorization, RequestOperation, RulesQuery, RulesRuntime, SnapshotAccess, evaluation_request,
 };
-use fireside_watch_broker::{
+use firenook_watch_broker::{
     ChangeBatch, ChangeKind, TargetSpec, WatchChange, WatchDocument, WatchTarget,
 };
 use md5::{Digest as _, Md5};
@@ -504,8 +504,8 @@ fn resumed_target(
     database: DatabaseName,
     spec: TargetSpec,
     query_policy: &QueryPolicy,
-    baseline: &fireside_core_store::Snapshot,
-    snapshot: &fireside_core_store::Snapshot,
+    baseline: &firenook_core_store::Snapshot,
+    snapshot: &firenook_core_store::Snapshot,
     expected_count: Option<i32>,
 ) -> Result<(WatchTarget, ChangeBatch, InitialFilter), Status> {
     let (mut watch, _) =
@@ -542,9 +542,9 @@ fn decode_target_spec(
             };
             let query = decode_query(parent.as_deref(), query)?;
             let policy = TargetPolicy::Query {
-                candidate: fireside_rules_runtime::query_candidate(database, &query)
+                candidate: firenook_rules_runtime::query_candidate(database, &query)
                     .map_err(Status::invalid_argument)?,
-                query: fireside_rules_runtime::query_policy(&query),
+                query: firenook_rules_runtime::query_policy(&query),
             };
             Ok((TargetSpec::Query(Box::new(query)), policy))
         }
@@ -846,7 +846,7 @@ async fn send_target_change(
     change_type: TargetChangeType,
     target_ids: Vec<i32>,
     token: Option<Vec<u8>>,
-    read_time: Option<fireside_core_store::Timestamp>,
+    read_time: Option<firenook_core_store::Timestamp>,
 ) -> Result<(), Status> {
     send(
         sender,
@@ -899,18 +899,23 @@ async fn send(
 }
 
 fn resume_token(revision: Revision) -> Vec<u8> {
-    let mut token = b"fireside-resume-".to_vec();
+    let mut token = b"firenook-resume-".to_vec();
     token.extend_from_slice(&revision.get().to_be_bytes());
     token
 }
 
 fn decode_resume_token(token: &[u8]) -> Result<Revision, Status> {
-    const PREFIX: &[u8] = b"fireside-resume-";
+    const PREFIX: &[u8] = b"firenook-resume-";
+    // Tokens issued by releases up to 0.1.0-next.9 carry the project's former
+    // name and the same revision layout; a client that stays connected across
+    // an engine upgrade resumes with one of them.
+    const LEGACY_PREFIX: &[u8] = b"fireside-resume-";
     let revision = token
         .strip_prefix(PREFIX)
+        .or_else(|| token.strip_prefix(LEGACY_PREFIX))
         .and_then(|revision| <[u8; 8]>::try_from(revision).ok())
         .map(u64::from_be_bytes)
-        .ok_or_else(|| Status::invalid_argument("invalid fireside resume token"))?;
+        .ok_or_else(|| Status::invalid_argument("invalid firenook resume token"))?;
     Ok(Revision::from_u64(revision))
 }
 
@@ -923,13 +928,13 @@ fn resume_snapshot_status(error: SnapshotError) -> Status {
     }
 }
 
-fn now() -> fireside_core_store::Timestamp {
+fn now() -> firenook_core_store::Timestamp {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    fireside_core_store::Timestamp::new(
+    firenook_core_store::Timestamp::new(
         i64::try_from(duration.as_secs()).unwrap_or(i64::MAX),
         duration.subsec_nanos(),
     )
@@ -945,6 +950,18 @@ mod resume_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_tokens_from_before_the_rename_still_decode() {
+        let revision = Revision::from_u64(42);
+        let current = resume_token(revision);
+        assert!(current.starts_with(b"firenook-resume-"));
+        assert_eq!(decode_resume_token(&current).unwrap(), revision);
+        let mut legacy = b"fireside-resume-".to_vec();
+        legacy.extend_from_slice(&42u64.to_be_bytes());
+        assert_eq!(decode_resume_token(&legacy).unwrap(), revision);
+        assert!(decode_resume_token(b"other-resume-\0\0\0\0\0\0\0\x2a").is_err());
+    }
 
     #[test]
     fn bloom_dimensions_match_the_cloud_existence_filter_fixture() {

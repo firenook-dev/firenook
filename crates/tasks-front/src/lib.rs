@@ -1,4 +1,4 @@
-//! Cloud Tasks emulator for the fireside emulator suite.
+//! Cloud Tasks emulator for the firenook emulator suite.
 //!
 //! The oracle is firebase-tools 15.22.0's `TasksEmulator` (its Express app
 //! in `tasksEmulator.js` and the `TaskQueue`/`Queue` engine in

@@ -1,4 +1,4 @@
-# Fireside design
+# Firenook design
 
 This living specification describes generic product contracts. Application
 architecture, exports, routes, credentials and acceptance logs belong outside
@@ -162,7 +162,7 @@ errors can occur even in a successful HTTP operation. The JSON coverage endpoint
 returns positioned expression trees and value/count distributions; the HTML
 endpoint must actually render those data. UI mutation checks await persisted
 server state because the UI is optimistic. None of these observations claims the
-current Fireside preview implements the missing tracing/coverage surfaces.
+current Firenook preview implements the missing tracing/coverage surfaces.
 
 Before implementation, the Phase A manifest declares bounded debug history,
 subscriber queues and retention, slow-reader behavior, and paired overhead
@@ -225,7 +225,7 @@ The production suite runtime is not yet attached to this component.
 
 The component refuses upgrades with HTTP 503 if no producer is supplied, during
 shutdown or on contended admission, and HTTP 429 at four active clients. These
-explicit bounded-resource responses are Fireside safety behavior, not captured
+explicit bounded-resource responses are Firenook safety behavior, not captured
 claims about the jar. A new producer omission invalidates existing live feeds;
 overflow/omission closes them with code 1013 rather than silently continuing.
 Reconnect starts a new subscription boundary; it cannot recover omitted events.
@@ -270,7 +270,7 @@ for successful writes/reads, denied writes, missing-document evaluation errors
 and replay. This is not yet attached to the shipping CLI/suite. Before attachment,
 qualify the actual UI, remaining context gaps and overhead. Query summaries cover
 the ordinary collection/group fields described below, not every planner feature.
-Fireside's existing evaluator already
+Firenook's existing evaluator already
 receives current resources; the producer reports these without extra reads,
 whereas the jar's lazy context can show undefined for an unread resource. These
 differences remain explicit, not claims of complete Requests parity. The raw
@@ -353,13 +353,13 @@ source) reset counters, invalid reloads preserve them, and histories are
 isolated per database (each database evaluates its own ruleset, so the
 project report route covers `(default)` unless `?database=` names another).
 Namespace expressions are omitted from source layout. The new capture
-also records the jar rejecting a function parameter named `duration`; Fireside's
+also records the jar rejecting a function parameter named `duration`; Firenook's
 compiler currently accepts it. That is a tracked Phase C correction, not a
 claim of complete compiler compatibility.
 
 Coverage uses actual evaluator visits. Unlike the jar's preliminary/lazy planner,
 unvisited nodes have no values, and available resource values are not replaced
-with manufactured undefined visits. Runtime error cause text remains Fireside's
+with manufactured undefined visits. Runtime error cause text remains Firenook's
 actual message. Symbolic proof values are omitted visibly, not fabricated as
 concrete rows. Set membership is preserved, but serialized set order is not a
 compatibility guarantee. Fixture comparisons retain all members and duplicates
@@ -370,7 +370,7 @@ qualification: 16 MiB charged retained state, four database histories, ten-minut
 idle expiry, 128 distinct complete values per expression, 64 KiB per value and
 32 MiB per complete JSON report. Tree/index/source metadata is conservatively
 charged before admission. Contended operations do not wait for diagnostics;
-omissions and evictions appear explicitly in `firesideCoverage`. Complete values
+omissions and evictions appear explicitly in `firenookCoverage`. Complete values
 are serialized directly through capped writers; bytes use streaming base64.
 These bounds supplement the unchanged Requests/overhead contract, not replace
 it. HTTP integration must additionally bound in-flight responses and slow clients.
@@ -462,7 +462,7 @@ inject that internal authorization marker. Broader REST read-mask/transaction
 coverage and large-inventory listing efficiency remain separate work.
 
 The official jar hung on malformed string `pageSize` in repeated ten-second
-captures. Fireside returns structured INVALID_ARGUMENT instead of reproducing
+captures. Firenook returns structured INVALID_ARGUMENT instead of reproducing
 that hang. Tokens are server-specific opaque cursors, not byte-identical Java
 tokens. Generated read/create/update timestamps are not fixture identities.
 
@@ -494,7 +494,7 @@ documents through the official emulator.
 
 ## Native Storage rules
 
-`storage-front` compiles every configured ruleset with `fireside-rules-engine`
+`storage-front` compiles every configured ruleset with `firenook-rules-engine`
 (`service firebase.storage`) at startup and evaluates requests in process; no
 rules runtime child exists. The request model is the one recorded from the
 official emulator in `conformance/fixtures/storage-rules-v1`, with production
@@ -565,7 +565,7 @@ emulator), replayed by `npm run replay:functions:runtime`:
 - **Lifecycle**: a debounced source watcher reloads the codebase in place
   (existing keys keep their positions, new functions append), hub background
   controls bump the generation, and the readiness receipt
-  (`FIRESIDE_FUNCTIONS_HOST_READY`) carries the inventory fingerprint the
+  (`FIRENOOK_FUNCTIONS_HOST_READY`) carries the inventory fingerprint the
   suite verifies before announcing readiness.
 
 Deliberate divergences are asserted by the replay: the worker survives
@@ -595,11 +595,11 @@ Sources resolve in this order: a local path, `<project>/extensions/.sources/
 download from the registry's `sourceDownloadUri` followed by `npm install`
 and `npm run gcp-build`. The registry objects (`extension`,
 `extensionVersion`) are stored next to the source in
-`fireside-registry.json`, so a source that was fetched or vendored once
-starts with no network and no token; `--offline` (or `FIRESIDE_OFFLINE=1`)
+`firenook-registry.json`, so a source that was fetched or vendored once
+starts with no network and no token; `--offline` (or `FIRENOOK_OFFLINE=1`)
 makes any registry access a startup error. Registry calls use the Firebase
 CLI's own OAuth client with `FIREBASE_TOKEN` or the CLI's stored login;
-that credential never reaches a worker's environment. `fireside ext:vendor`
+that credential never reaches a worker's environment. `firenook ext:vendor`
 copies resolved sources into the project and records how unpinned refs
 resolved, which is the recommended path for CI.
 
@@ -615,7 +615,7 @@ retains all observed failures, the working-directory recovery path and an explic
 warning when Firestore was volatile. Failed export does not imply a portable
 backup exists; retained native disk state can be reopened independently. This
 follows the official CLI's continued shutdown after an export failure while
-deliberately retaining Fireside's nonzero failure status.
+deliberately retaining Firenook's nonzero failure status.
 
 ### Rules package identifiers in variable declarations
 
@@ -662,7 +662,7 @@ it does not establish full-service latency, RSS or startup improvements.
 
 The pinned Java REST GET adapter timed out on transaction query parameters and
 returned 400 for a valid readTime, while its gRPC transaction reads and REST JSON
-batch historical reads succeeded. Fireside deliberately provides finite native
+batch historical reads succeeded. Firenook deliberately provides finite native
 snapshot semantics for these GET selectors instead of reproducing that hang.
 This is a disclosed adapter deviation, not exact HTTP parity. Rolled-back and
 unknown transactions return a finite INVALID_ARGUMENT response; the official
@@ -684,7 +684,7 @@ marked it ignored, classifying why. It observes the single discovery owned by
 `connect()`, not a second execution of user code. An ignored record whose
 trigger shape upstream would have registered with one of this suite's remote
 peers (HTTP/task-queue, Firestore, Pub/Sub, Eventarc, Auth, Storage, alerts)
-means a registration with Fireside failed and fails with the handler
+means a registration with Firenook failed and fails with the handler
 identifier before READY. An ignored record that the pinned host itself cannot
 type is a different case: an event service outside the suite's profile, or a
 definition with no trigger at all, which is what firebase-tools 15.22.0
@@ -722,7 +722,7 @@ header set and caller-override order, the retry ladder with its backoff
 formula and the `maxAttempts` off-by-one, the execution count incremented on
 non-5xx failures only, the `dispatchDeadline` abort, and the controller's
 cadence (idle queues polled once a second, active queues continuously). The
-recorded contract, including the quirks Fireside reproduces on purpose
+recorded contract, including the quirks Firenook reproduces on purpose
 (leading slash on generated names, a negative count after deleting a
 dispatched task, `runningTasks` equal to the concurrency), is
 `conformance/fixtures/tasks-v1`; the official queue's linked-list corruption
@@ -772,9 +772,9 @@ upstream removal/disabled-handler behavior. The full synthetic native UI check
 adds a separate topic-reload scenario; private consumer runners are unchanged.
 Upstream `/backends` lists a new handler at registration, before the native
 routing refresh finishes; the official emulator creates the topic during that
-registration instead. A publish in that short window returns 404 on Fireside.
+registration instead. A publish in that short window returns 404 on Firenook.
 The coordinator therefore announces each completed refresh on stdout
-(`fireside functions routing refreshed: N registered functions`), and the
+(`firenook functions routing refreshed: N registered functions`), and the
 topic-reload check waits for that line rather than only for the upstream
 inventory. This is an ordering disclosure, not a delivery guarantee.
 

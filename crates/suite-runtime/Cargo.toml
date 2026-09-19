@@ -1,6 +1,6 @@
 [package]
-name = "fireside-suite-runtime"
-description = "Production lifecycle coordinator for the Fireside emulator suite"
+name = "firenook-suite-runtime"
+description = "Production lifecycle coordinator for the Firenook emulator suite"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,22 +10,22 @@ repository.workspace = true
 [dependencies]
 axum = { workspace = true, features = ["ws"] }
 futures-util.workspace = true
-fireside-auth-front = { path = "../auth-front" }
-fireside-core-store = { path = "../core-store" }
-fireside-export-format = { path = "../export-format" }
-fireside-functions-bridge = { path = "../functions-bridge" }
-fireside-extensions = { path = "../extensions" }
-fireside-functions-runtime = { path = "../functions-runtime" }
-fireside-grpc-front = { path = "../grpc-front" }
-fireside-pubsub-front = { path = "../pubsub-front" }
-fireside-tasks-front = { path = "../tasks-front" }
-fireside-query-engine = { path = "../query-engine" }
-fireside-rest-front = { path = "../rest-front" }
-fireside-rules-engine = { path = "../rules-engine" }
-fireside-rules-runtime = { path = "../rules-runtime" }
-fireside-storage-front = { path = "../storage-front" }
-fireside-suite-front = { path = "../suite-front" }
-fireside-webchannel-front = { path = "../webchannel-front" }
+firenook-auth-front = { path = "../auth-front" }
+firenook-core-store = { path = "../core-store" }
+firenook-export-format = { path = "../export-format" }
+firenook-functions-bridge = { path = "../functions-bridge" }
+firenook-extensions = { path = "../extensions" }
+firenook-functions-runtime = { path = "../functions-runtime" }
+firenook-grpc-front = { path = "../grpc-front" }
+firenook-pubsub-front = { path = "../pubsub-front" }
+firenook-tasks-front = { path = "../tasks-front" }
+firenook-query-engine = { path = "../query-engine" }
+firenook-rest-front = { path = "../rest-front" }
+firenook-rules-engine = { path = "../rules-engine" }
+firenook-rules-runtime = { path = "../rules-runtime" }
+firenook-storage-front = { path = "../storage-front" }
+firenook-suite-front = { path = "../suite-front" }
+firenook-webchannel-front = { path = "../webchannel-front" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,14 +1,14 @@
 // Phase J4: the pinned `@google-cloud/pubsub` client library against
-// Fireside's standalone service, with `PUBSUB_EMULATOR_HOST` set exactly as an
+// Firenook's standalone service, with `PUBSUB_EMULATOR_HOST` set exactly as an
 // application would: publish, `subscription.on('message')` (streaming pull),
 // ordering keys, push delivery to a local endpoint and an Avro schema.
 //
-//   node --import tsx src/pubsub/verify-client-library.ts --binary ../target/release/fireside [--output result.json]
+//   node --import tsx src/pubsub/verify-client-library.ts --binary ../target/release/firenook [--output result.json]
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 
-import { PushEndpoint, startFireside } from "./client.ts";
+import { PushEndpoint, startFirenook } from "./client.ts";
 
 // The client library's own type declarations do not pass the harness's
 // strict type check, so the pinned package is loaded untyped and driven
@@ -59,8 +59,8 @@ function parseArguments(argv: readonly string[]): { binary: string; output?: str
 }
 
 const args = parseArguments(process.argv.slice(2));
-const project = "fireside-client-check";
-const emulator = await startFireside(resolve(args.binary), project);
+const project = "firenook-client-check";
+const emulator = await startFirenook(resolve(args.binary), project);
 process.env.PUBSUB_EMULATOR_HOST = `127.0.0.1:${String(emulator.port)}`;
 process.env.PUBSUB_PROJECT_ID = project;
 const require = createRequire(import.meta.url);

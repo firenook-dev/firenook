@@ -333,7 +333,7 @@ impl Resolver<'_> {
             let expression = after[..end].trim();
             let Some(name) = expression.strip_prefix("params.").map(str::trim) else {
                 return Err(ManifestError(format!(
-                    "Unsupported parameter expression {{{{ {expression} }}}} in {text}: the Fireside runtime resolves plain params.NAME references only"
+                    "Unsupported parameter expression {{{{ {expression} }}}} in {text}: the Firenook runtime resolves plain params.NAME references only"
                 )));
             };
             if !name
@@ -341,7 +341,7 @@ impl Resolver<'_> {
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
             {
                 return Err(ManifestError(format!(
-                    "Unsupported parameter expression {{{{ {expression} }}}} in {text}: the Fireside runtime resolves plain params.NAME references only"
+                    "Unsupported parameter expression {{{{ {expression} }}}} in {text}: the Firenook runtime resolves plain params.NAME references only"
                 )));
             }
             out.push_str(&self.lookup(name)?);

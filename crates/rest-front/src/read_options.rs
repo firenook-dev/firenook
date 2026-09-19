@@ -3,7 +3,7 @@ use super::{
     AUTHORIZATION, DatabasePath, DocumentPath, HeaderMap, Json, JsonValue, Path, RestError,
     RestState, State, json, request_authorization,
 };
-use fireside_grpc_front::google::firestore::v1::{
+use firenook_grpc_front::google::firestore::v1::{
     BatchGetDocumentsRequest, BeginTransactionRequest, CommitRequest, GetDocumentRequest,
     RollbackRequest, firestore_server::Firestore,
 };

@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use fireside_rules_runtime::request_history::{
+use firenook_rules_runtime::request_history::{
     MAXIMUM_BYTES, RequestHistory, RequestSubscription, SEND_DEADLINE, SubscribeError,
 };
 use futures_util::{Sink, SinkExt as _, StreamExt as _};
@@ -92,7 +92,7 @@ async fn maintain(history: RequestHistory, mut shutdown: watch::Receiver<bool>) 
             _ = interval.tick() => {
                 if let Some(stats) = history.maintain()
                     && (stats.omitted_events != last_omitted || stats.disconnected_subscribers != last_disconnected) {
-                        eprintln!("fireside Requests diagnostics: {} omitted events, {} slow clients disconnected; retained history may be incomplete",
+                        eprintln!("firenook Requests diagnostics: {} omitted events, {} slow clients disconnected; retained history may be incomplete",
                             stats.omitted_events, stats.disconnected_subscribers);
                         last_omitted = stats.omitted_events;
                         last_disconnected = stats.disconnected_subscribers;
@@ -171,7 +171,7 @@ async fn bounded_send<S: Sink<Message> + Unpin>(
                 Ok(Ok(())) => true,
                 Ok(Err(_)) => false,
                 Err(_) => {
-                    eprintln!("fireside Requests diagnostics: client send exceeded 30 seconds; disconnecting");
+                    eprintln!("firenook Requests diagnostics: client send exceeded 30 seconds; disconnecting");
                     false
                 }
             }

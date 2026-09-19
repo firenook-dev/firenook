@@ -2,9 +2,9 @@
 import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
 
-const cliFiles = ['LICENSE-APACHE', 'LICENSE-MIT', 'README.md', 'package.json', 'release.json',
-  'bin/fireside.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/firestore-values.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs'];
-const licenses = ['LICENSE-APACHE', 'LICENSE-MIT'];
+const cliFiles = ['LICENSE', 'NOTICE', 'README.md', 'package.json', 'release.json',
+  'bin/firenook.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/firestore-values.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/invoke.mjs', 'src/mcp.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs'];
+const licenses = ['LICENSE', 'NOTICE'];
 
 function octal(bytes) {
   const value = bytes.toString('ascii').replace(/\0.*$/s, '').trim();
@@ -74,9 +74,9 @@ export function assertPublicText(bytes, label, policy = {forbiddenTerms: []}) {
 
 export function auditPublicPackage(bytes, expected, policy) {
   const entries = packageEntries(bytes);
-  const cli = expected.name === '@fireside-dev/cli';
-  assert.ok(cli || /^@fireside-dev\/(darwin|linux|win32)-(arm64|x64)$/.test(expected.name), 'Unexpected package name');
-  const executable = expected.name.includes('/win32-') ? 'bin/fireside.exe' : 'bin/fireside';
+  const cli = expected.name === 'firenook';
+  assert.ok(cli || /^@firenook\/cli-(darwin|linux|win32)-(arm64|x64)$/.test(expected.name), 'Unexpected package name');
+  const executable = expected.name.includes('-win32-') ? 'bin/firenook.exe' : 'bin/firenook';
   const allowed = cli ? cliFiles : [...licenses, 'package.json', 'receipt.json', executable];
   assert.ok(entries.size === allowed.length && allowed.every(path => entries.has(path)), 'Package file allowlist mismatch');
   for (const [path, content] of entries) assertPublicText(content, path, policy);

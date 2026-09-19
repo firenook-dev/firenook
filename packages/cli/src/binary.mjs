@@ -19,21 +19,21 @@ export function platformKey(platform = process.platform, arch = process.arch, re
 export function verifyBinary(directory, key) {
   const pkg = JSON.parse(readFileSync(join(directory, 'package.json')));
   const receipt = JSON.parse(readFileSync(join(directory, 'receipt.json')));
-  const binary = join(directory, 'bin', key.startsWith('win32-') ? 'fireside.exe' : 'fireside');
-  if (pkg.name !== `@fireside-dev/${key}` || pkg.version !== manifest.version ||
+  const binary = join(directory, 'bin', key.startsWith('win32-') ? 'firenook.exe' : 'firenook');
+  if (pkg.name !== `@firenook/cli-${key}` || pkg.version !== manifest.version ||
       receipt.engineRevision !== release.engineRevision || receipt.platform !== key ||
       receipt.version !== manifest.version || receipt.target !== release.platforms[key]) {
-    throw new Error('Fireside platform package identity mismatch; reinstall the pinned CLI and its optional dependencies.');
+    throw new Error('Firenook platform package identity mismatch; reinstall the pinned CLI and its optional dependencies.');
   }
   accessSync(binary, constants.X_OK);
-  if (sha256(readFileSync(binary)) !== receipt.sha256) throw new Error('Fireside binary checksum mismatch; refusing execution.');
+  if (sha256(readFileSync(binary)) !== receipt.sha256) throw new Error('Firenook binary checksum mismatch; refusing execution.');
   return binary;
 }
 
 export function binaryPath() {
   const key = platformKey();
   let file;
-  try { file = require.resolve(`@fireside-dev/${key}/package.json`); }
-  catch { throw new Error(`Missing @fireside-dev/${key}@${manifest.version}. Install with optional dependencies enabled. No postinstall script is needed.`); }
+  try { file = require.resolve(`@firenook/cli-${key}/package.json`); }
+  catch { throw new Error(`Missing @firenook/cli-${key}@${manifest.version}. Install with optional dependencies enabled. No postinstall script is needed.`); }
   return verifyBinary(dirname(file), key);
 }

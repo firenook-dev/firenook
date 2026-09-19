@@ -120,7 +120,7 @@ fn applications(enabled: bool) -> StaticApplications {
     };
     runtime.install_default("rules_version = '2'; service cloud.firestore { match /databases/{db}/documents/items/{id} { allow get: if request.method == 'get'; } }").unwrap();
     let history = runtime.request_history();
-    let rest = fireside_rest_front::router_with_query_policy_memory_rules_and_triggers(
+    let rest = firenook_rest_front::router_with_query_policy_memory_rules_and_triggers(
         Store::default(),
         QueryPolicy::default(),
         None,
@@ -157,7 +157,7 @@ fn test_config() -> SuiteConfig {
         state_dir: root.join("state"),
         resume_state: false,
         firestore_in_memory: true,
-        durability: fireside_core_store::DiskDurability::default(),
+        durability: firenook_core_store::DiskDurability::default(),
         diagnostics: true,
         firestore_databases: Vec::new(),
         storage_rules: StorageRulesConfig::OpenDefault,

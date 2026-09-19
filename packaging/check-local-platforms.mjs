@@ -17,7 +17,7 @@ export function checkLocalPlatforms(root, revision) {
     const receipt = JSON.parse(readFileSync(join(directory, 'artifacts.json')));
     assert.equal(receipt.platform, platform); assert.equal(receipt.version, expected.manifest.version);
     assert.equal(receipt.engineRevision, revision); assert.equal(receipt.packages.length, 2);
-    assert.deepEqual(receipt.packages.map(item => item.name).sort(), [manifest.name, `@fireside-dev/${platform}`].sort());
+    assert.deepEqual(receipt.packages.map(item => item.name).sort(), [manifest.name, `@firenook/cli-${platform}`].sort());
     for (const name of ['npm-smoke.json', 'bun-smoke.json', 'suite-smoke.json']) {
       const smoke = JSON.parse(readFileSync(join(directory, name)));
       assert.equal(smoke.passed, true); assert.equal(smoke.version, expected.manifest.version);
@@ -40,7 +40,7 @@ export function checkLocalPlatforms(root, revision) {
         const native = JSON.parse(entries.get('receipt.json'));
         assert.equal(native.platform, platform); assert.equal(native.target, release.platforms[platform]);
         assert.equal(native.version, expected.manifest.version);
-        const executable = platform.startsWith('win32') ? 'bin/fireside.exe' : 'bin/fireside';
+        const executable = platform.startsWith('win32') ? 'bin/firenook.exe' : 'bin/firenook';
         assert.equal(native.sha256, sha256(entries.get(executable)));
       }
     }

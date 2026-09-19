@@ -54,7 +54,7 @@ const dispatches: DispatchObservation[] = [];
 const dispatchWaiters: Array<() => void> = [];
 const functionsServer = createServer(handleFunctionDispatch);
 const temporaryDirectory = await mkdtemp(
-  join(tmpdir(), "fireside-phase4-firestore-trigger-oracle-"),
+  join(tmpdir(), "firenook-phase4-firestore-trigger-oracle-"),
 );
 const javaLogs: string[] = [];
 let javaProcess: ChildProcess | undefined;

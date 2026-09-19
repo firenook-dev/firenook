@@ -1,4 +1,4 @@
-use fireside_query_engine::{
+use firenook_query_engine::{
     Direction, FieldFilter, FieldOperator, FieldPath, Filter, Limit, Query, QueryDocument,
     QueryScope,
 };

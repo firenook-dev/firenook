@@ -52,8 +52,8 @@ admitted out of order after thread preemption. The regression first reproduced
 an expired entry retained behind a newer entry. Expiry now examines all of the
 at-most-256 entries while preserving replay order and exact byte accounting.
 The corrected candidate `382d739db83e06e9b8138f63fca9e0b62cba5af4` passed
-[all seven CI jobs](https://github.com/sanjevirau/fireside/actions/runs/34503417386)
-and was merged in [PR #4](https://github.com/sanjevirau/fireside/pull/4).
+[all seven CI jobs](https://github.com/firenook-dev/firenook/actions/runs/34503417386)
+and was merged in [PR #4](https://github.com/firenook-dev/firenook/pull/4).
 
 ## Third increment: Requests WebSocket transport component
 
@@ -74,8 +74,8 @@ qualification and paired-overhead measurements remain pending. Full exact-head
 seven-job CI is required before this increment can merge.
 
 The transport candidate `7b9d227d9c930860e76820053c8720475a1a74cd` passed
-[all seven CI jobs](https://github.com/sanjevirau/fireside/actions/runs/34506167515)
-and merged in [PR #5](https://github.com/sanjevirau/fireside/pull/5).
+[all seven CI jobs](https://github.com/firenook-dev/firenook/actions/runs/34506167515)
+and merged in [PR #5](https://github.com/firenook-dev/firenook/pull/5).
 
 ## Fourth increment: opt-in real evaluation producer
 
@@ -95,8 +95,8 @@ WebSocket test exercises allow, deny, error, current-resource details and replay
 Default runtime behavior and the installed CLI/suite remain unchanged.
 
 Candidate `6be718b38dee79ae4ee4ab92574686b2f74c638d` passed
-[all seven CI jobs](https://github.com/sanjevirau/fireside/actions/runs/34509706960)
-and merged in [PR #6](https://github.com/sanjevirau/fireside/pull/6).
+[all seven CI jobs](https://github.com/firenook-dev/firenook/actions/runs/34509706960)
+and merged in [PR #6](https://github.com/firenook-dev/firenook/pull/6).
 Before wiring the
 shipping suite, resolve query-domain rendering and transport-specific metadata
 (masks/transforms/read transactions); qualify browser rendering and diagnostic
@@ -127,8 +127,8 @@ reporting, collection/group queries and unchanged traced/untraced decisions.
 The targeted rules-runtime/gRPC/suite-front suite has 96 passing tests; nine
 generic fixture-integrity tests and strict targeted Clippy also pass locally.
 Candidate `049deda821f30d0ac7085762976816c54a07c25f` passed
-[all seven CI jobs](https://github.com/sanjevirau/fireside/actions/runs/34518150892)
-and merged in [PR #7](https://github.com/sanjevirau/fireside/pull/7).
+[all seven CI jobs](https://github.com/firenook-dev/firenook/actions/runs/34518150892)
+and merged in [PR #7](https://github.com/firenook-dev/firenook/pull/7).
 
 REST read masks and explicit read-transaction handling were found unqualified
 during source inspection. Track them for Phase C reproduction; the new debug
@@ -155,15 +155,15 @@ count differences. The targeted engine/runtime/gRPC/suite tests pass locally
 (126 test functions, including the existing 1,024-case expression corpus), along
 with thirteen developer-tool fixture checks and strict targeted Clippy.
 Candidate `71b136a0ed6751756714fbf5f1ade47996559f12` passed
-[all seven CI jobs](https://github.com/sanjevirau/fireside/actions/runs/34519562454)
-and merged in [PR #8](https://github.com/sanjevirau/fireside/pull/8).
+[all seven CI jobs](https://github.com/firenook-dev/firenook/actions/runs/34519562454)
+and merged in [PR #8](https://github.com/firenook-dev/firenook/pull/8).
 
 ## Seventh increment: live bounded coverage and map-difference correction
 
 Independent fixture commits `db0c5b6`, `cdbd0b8`, `667f10d` and `84cdc0c`
 extend the official-jar capture to 27 policies and preserve a reserved-namespace
 compile rejection. The capture identified reversed added/removed map-difference
-keys and duplicate affected keys in Fireside; the product correction follows the
+keys and duplicate affected keys in Firenook; the product correction follows the
 fixture and preserves every existing rules-corpus assertion.
 
 The opt-in runtime now counts actual dynamic expression visits and serializes
@@ -273,7 +273,7 @@ on a mocked sink. Exact-head CI and combined browser checks remain required.
 2. Retain the component TTL/slow-reader/source/value bounds regressions in CI;
    require the exact candidate's interface checks, not only prior fixture checks.
 3. Verify the supported UI controls, request details, discovery/status and logs
-   in a real browser against Fireside, fixing demonstrated gaps oracle-first.
+   in a real browser against Firenook, fixing demonstrated gaps oracle-first.
 4. Measure paired diagnostics overhead against every predeclared limit, then
    require exact-candidate CI and review. Prior baseline CI is not product CI.
 

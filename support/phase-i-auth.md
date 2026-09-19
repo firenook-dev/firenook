@@ -1,7 +1,7 @@
 # Phase I — Complete Authentication (`0.1.0-next.8`, together with Phase J)
 
 Written 2026-09-18 against `main` 10f3087 (published engine 0720434,
-`@fireside-dev/cli@0.1.0-next.8` not yet cut). It follows
+`firenook@0.1.0-next.8` not yet cut). It follows
 [Phase H](phase-h-functions-runtime.md) and ships with
 [Phase J](phase-j-pubsub.md) (Pub/Sub emulator) as `0.1.0-next.8`.
 
@@ -15,7 +15,7 @@ identical after normalization (`receipts.i1`). `crates/auth-front` is
 rewritten around the official `OpenAPI` document (routing, security,
 validation, coercions) with every operation ported one to one, blocking
 functions on every blocked method and multicasts on every lifecycle path;
-`fireside auth` runs it standalone for the replay. The replay
+`firenook auth` runs it standalone for the replay. The replay
 (`npm run replay:auth`) compares 17,303 values with 0 mismatches and four
 named divergences (`receipts.i4`), three runs identical; the real-SDK
 popup/redirect browser gate and the five earlier `firebase-suite-v1` Auth
@@ -62,10 +62,10 @@ Emulator UI is unchanged.
 `crates/auth-front` (2,390 lines) implements 24 routes. Measured against
 firebase-tools 15.22.0 (`lib/emulator/auth/apiSpec.js` + `operations.js`),
 the official emulator implements 61 of the 103 operations in its OpenAPI
-document (the other 42 answer `501`); Fireside implements 23 of those 61 plus
+document (the other 42 answer `501`); Firenook implements 23 of those 61 plus
 the popup handler and iframe pages.
 
-| Area | Fireside today | Official emulator | Gap |
+| Area | Firenook today | Official emulator | Gap |
 | --- | --- | --- | --- |
 | Password | `signUp` (email+password only), `signInWithPassword`, `createAuthUri` (password only) | also anonymous `signUp`, owner-privileged `signUp` fields, `createAuthUri` listing every provider, `resetPassword` | anonymous sign-in answers `400 MISSING_EMAIL` |
 | Federated | `signInWithIdp` for a fake profile, Google-shaped `federatedId` | any provider id, `idToken` linking, `needConfirmation` on email collision, `returnIdpCredential`, `pendingToken`, Apple/Twitter/GitHub/Microsoft/Facebook fields, OIDC/SAML pass-through | no linking, no collision handling, one provider verified |
@@ -113,7 +113,7 @@ README and asserted in the replay.
 
 - `benchmarks/phase-i-auth.json`: toolchain pins (Rust, Node 24, firebase-tools
   15.22.0 with the `lib/emulator/auth/*` source hashes, firebase 12.18.0),
-  the operation inventory above (61 official operations, the 23 Fireside has,
+  the operation inventory above (61 official operations, the 23 Firenook has,
   the 38 to add, the 42 that stay `501`), the named checks below with pass
   criteria, and the acceptance identities I5 fills in.
 
@@ -222,15 +222,15 @@ users:
 
 ### I4 — Replay (2–3 days)
 
-- `conformance/src/auth/replay-fireside.ts` replays every I1 program against
-  the binary's standalone `fireside auth` service (one fresh process per
+- `conformance/src/auth/replay-firenook.ts` replays every I1 program against
+  the binary's standalone `firenook auth` service (one fresh process per
   program, the same functions stub) using the capture's own `normalize.ts`,
   so both sides normalize identically; parity on status, headers, normalized
   body, log lines and functions calls, or a named divergence — an empty
   divergence list is the target. Rust unit tests keep the crate-level checks.
-- The SDK browser profile of I1 runs against Fireside in the existing browser
+- The SDK browser profile of I1 runs against Firenook in the existing browser
   integration job (four cells) for the flows the JS SDK drives.
-- The Emulator UI Auth tab against Fireside: list/edit/add/delete users,
+- The Emulator UI Auth tab against Firenook: list/edit/add/delete users,
   MFA rows, tenants, duplicate-emails toggle (manual check recorded).
 
 ### I5 — Qualification and release (shared with J5)
