@@ -139,10 +139,17 @@ async function main() {
     response.status(200).send();
     setTimeout(() => process.exit(0), 20);
   });
-  app.all("/favicon.ico|/robots.txt", (_request, response) => {
-    response.status(404).send();
-  });
-  app.all("/*", async (request, response) => {
+  // Express 4 (firebase-functions ≤ 7.2) and Express 5 (firebase-functions
+  // ≥ 7.3) resolve from the codebase; the official runtime's "/*" and
+  // "/favicon.ico|/robots.txt" patterns are path-to-regexp 0.x syntax that
+  // Express 5 rejects, so the same routes are declared in the syntax both
+  // accept.
+  for (const path of ["/favicon.ico", "/robots.txt"]) {
+    app.all(path, (_request, response) => {
+      response.status(404).send();
+    });
+  }
+  app.all(/.*/, async (request, response) => {
     const target = request.header("x-fireside-target") || process.env.FUNCTION_TARGET || "";
     const signature = request.header("x-fireside-signature") || process.env.FUNCTION_SIGNATURE_TYPE || "http";
     const service = request.header("x-fireside-service") || process.env.K_SERVICE || target;
