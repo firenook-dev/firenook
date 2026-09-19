@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-l-configuration",
+  "frozen": true,
+  "frozenAt": "2026-09-19T16:40:00+08:00",
+  "plan": "support/phase-l-configuration.md",
+  "baseline": {
+    "engineRevision": "2c1ceb3",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.8",
+    "publishedEngineRevision": "03000f0cc082c1b69f06c67b6a99a5417c840243",
+    "wrapperGate": "packages/cli/src/options.mjs loadProject: demo-* only, complete five-service profile only, storage array only, ui.enabled/singleProjectMode/firestore-array rejected, loopback only, unknown emulators.<name> a hard error",
+    "engineGate": "suite-runtime validate_config: demo-* only, minimum_functions > 0, every listener unconditional, SuiteDirectory requires ui/logging/auth/functions/pubsub, host doubles as listen and connect address, rules keyed by project, export hardcodes (default)"
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "node": "24.20.0",
+    "firebaseToolsReference": "15.22.0"
+  },
+  "oracles": {
+    "precedence": [
+      "firebase-tools-15.22.0 emulator/controller.js, commandUtils.js, constants.js, env.js, utils.js connectableHostname, auth/server.js singleProjectMode, storage/rules/config.js",
+      "fireside safety policy where the official CLI is silent (public bind warning)"
+    ],
+    "recorded": {
+      "onlyDerivation": "filterEmulatorTargets: a top-level section or an emulators.<name> entry configures an emulator; --only filters without dependency expansion; zero targets = 'No emulators to start'",
+      "demoStorageDefault": "no storage section on a demo project => templates/emulators/default_storage.rules (open) with the 'Detected demo project ID … default (open) rules configuration' line; a real project must configure rules",
+      "demoBanner": "Detected demo project ID \"<id>\", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.",
+      "realProjectWarning": "The following emulators are not running, calls to these services from the Functions emulator will affect production: <list> (only when functions runs and only for real ids)",
+      "hostPolicy": "0.0.0.0 and :: accepted without a warning; connectableHostname maps them to 127.0.0.1 / ::1 for the hub, the UI and every exported *_EMULATOR_HOST",
+      "uiDisabled": "ui.enabled false also stops the logging emulator; the hub is unaffected",
+      "singleProjectMode": "default true; the Auth emulator logs WARN 'Multiple projectIds are not recommended in single project mode…' and keeps serving; never an error",
+      "multipleDatabases": "the official Firestore emulator refuses a firestore array with more than one entry ('Cloud Firestore Emulator does not support multiple databases yet.') and then loads no rules"
+    }
+  },
+  "gates": {
+    "engine": {
+      "unit": "suite-runtime, suite-front, cli and rules-runtime tests; a two-service --no-ui real-id 0.0.0.0 suite starts, lists only its listeners in /emulators with loopback addresses, warns once per foreign project id, writes the debug log and stops cleanly",
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0
+    },
+    "wrapper": {
+      "unit": "packaging/cli.test.mjs: service derivation and --only errors, storage object form and absence, firestore arrays, ui/singleProjectMode flags, real ids with the warning, non-loopback hosts with the warning, --debug log path, exec --no-ui unless --ui"
+    },
+    "existingFixturesUnchanged": [
+      "firebase-suite-v1",
+      "functions-runtime-v1",
+      "auth-v1",
+      "pubsub-v1",
+      "storage-rules-v1"
+    ]
+  },
+  "acceptance": {
+    "release": "0.1.0-next.9",
+    "receipts": {}
+  },
+  "decisions": {
+    "resumeState": {
+      "policy": "--resume-state requires firestore, auth and storage (the native state receipt covers all three); subsets run with a fresh or in-memory state"
+    },
+    "publicBind": {
+      "policy": "a non-loopback --host is accepted and announced with one warning line; the official CLI prints nothing"
+    },
+    "realProjectIds": {
+      "policy": "accepted; the worker environment already sets every emulator host and strips GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_TOKEN and CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE and sets METADATA_SERVER_DETECTION=none; the launcher and the banner state that user code with explicit credentials can still reach the real project"
+    },
+    "multipleDatabases": {
+      "policy": "a differentiator, not parity: every named database is served with its own rules (database-specific, then the project-wide hot-reload ruleset, then the default) and exported; the official emulator refuses the configuration"
+    }
+  },
+  "receipts": {}
+}

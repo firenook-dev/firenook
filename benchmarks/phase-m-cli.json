@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-m-cli",
+  "frozen": true,
+  "frozenAt": "2026-09-19T16:40:00+08:00",
+  "plan": "support/phase-m-cli.md",
+  "baseline": {
+    "engineRevision": "2c1ceb3",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.8",
+    "commandsBefore": [
+      "setup",
+      "doctor",
+      "emulators:start",
+      "emulators:exec (argv after --)",
+      "ext:vendor",
+      "functions:invoke (HTTPS/callable only)",
+      "binary-path",
+      "native"
+    ]
+  },
+  "toolchain": {
+    "node": "24.20.0",
+    "firebaseToolsReference": "15.22.0"
+  },
+  "oracles": {
+    "precedence": [
+      "firebase-tools-15.22.0 commands/{emulators-export,use,target-apply,target-clear,firestore-delete,init}.js, lib/rc.js, emulator/controller.js exportEmulatorData, bin/cli.js --debug, init/features/* templates, emulator/functionsEmulatorShell.js envelopes, lib/mcp emulator-facing tools",
+      "fireside's model where the official command depends on a login, a cloud project or a second Functions runtime"
+    ],
+    "recorded": {
+      "export": "the CLI reads <tmpdir>/hub-<project>.json, GETs the hub root, refuses a non-empty destination that is not an export unless --force, POSTs /_admin/export {path, initiatedBy, targets}; the hub process writes, moves and cleans",
+      "use": "every form is behind requireAuth and setNewActive calls the projects API",
+      "targets": "target:apply/clear only need the config; lib/rc.js applyTarget removes the resource from any other target of the type first",
+      "firestoreDelete": "requirePermissions forces a login even against the emulator; deletes run as runQuery + commit batches of 250 over ordinary REST",
+      "init": "per-feature auth is skipped for demo-* ids; firestore/storage features write the locked templates without a project; functions scaffolding runs npm install",
+      "functionsShell": "starts a second Functions emulator on port 5000 and injects background events in-process into a worker; there is no functions:invoke command in firebase-tools",
+      "debug": "firebase-debug.log in the cwd on every invocation, unlinked on a clean exit unless DEBUG is set; downloadable emulators write <name>-debug.log truncated per start",
+      "exec": "emulators:exec takes one shell string run through the shell"
+    }
+  },
+  "gates": {
+    "wrapper": {
+      "unit": "packaging/cli.test.mjs (+ packaging/cli-commands.test.mjs when present): every new command against fake binaries, a fake hub/Firestore/Auth server and temporary projects",
+      "publishedFileList": "packaging/public-artifacts.mjs and packaging/local-platforms.test.mjs enumerate every published CLI file"
+    },
+    "engine": {
+      "firestoreDeleteRoute": "rest-front test path_scoped_delete_selects_documents_shallowly_or_recursively",
+      "debugLog": "suite-runtime writes <run>/fireside-debug.log through LoggingRuntime::set_file_sink"
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "packagingTestsRequired": true
+    }
+  },
+  "acceptance": {
+    "release": "0.1.0-next.9",
+    "receipts": {}
+  },
+  "decisions": {
+    "functionsShell": {
+      "policy": "not provided; Fireside never starts a second Functions runtime; functions:invoke --event-data delivers a background event to the running suite instead"
+    },
+    "mcp": {
+      "policy": "a dependency-free stdio JSON-RPC server with the emulator-facing tools only; no cloud-management tools, no telemetry"
+    },
+    "debugLog": {
+      "policy": "always written under the run directory when --debug is given, never deleted by the CLI; one file with an emulator label per record instead of per-emulator files"
+    },
+    "execShellString": {
+      "policy": "a single positional script without -- runs through the platform shell like the official CLI, with a note; the -- argv form stays free of shell interpretation"
+    },
+    "firestoreDeleteForce": {
+      "policy": "recursive collection deletes and --all-collections require --force (the official CLI prompts; Fireside is non-interactive)"
+    }
+  },
+  "receipts": {}
+}
