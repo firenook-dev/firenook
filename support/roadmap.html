@@ -215,7 +215,7 @@
 // with a receipt, "planned" only when a support/phase-*.md exists.
 const DATA = {
   updated: "2026-09-19",
-  engine: "published 0.1.0-next.8 (engine 03000f0cc082, Phases I + J, release run 35372788758, 2026-09-19) · previous 0.1.0-next.7 (engine 0720434e3de7, Phases G + H, 2026-09-18)",
+  engine: "candidate 0.1.0-next.9 (Phases K + L + M, qualification in progress) · published 0.1.0-next.8 (engine 03000f0cc082, Phases I + J, release run 35372788758, 2026-09-19) · previous 0.1.0-next.7 (engine 0720434e3de7, Phases G + H, 2026-09-18)",
   // dependency status: required | optional | asset | gone
   dependencies: [
   {
@@ -422,6 +422,51 @@ const DATA = {
         true
       ]
     ]
+  },
+  {
+    "letter": "K",
+    "title": "Cloud Tasks emulator",
+    "status": "qualified",
+    "release": "next.9",
+    "desc": "The official Cloud Tasks emulator on the Tasks port: queue registration for every onTaskDispatched export, enqueue, delete and /queueStats as firebase-tools 15.22.0 serves them, and its dispatcher — token bucket, dispatch slots, the X-CloudTasks headers, the retry ladder and backoff formula, execution count on non-5xx failures, the dispatch deadline, the idle/active poll cadence; corpus recorded with the Phase H harness first.",
+    "receipt": "support/phase-k-tasks.md · benchmarks/phase-k-tasks.json (K0 frozen, K1–K3 receipts) · conformance/fixtures/tasks-v1 (6 programs / 61 steps / 39 handler observations) · replay 61/61, 0 mismatches, no divergences, three runs identical · Phase H corpus 271/271 with the Tasks emulator mounted · crates/tasks-front",
+    "steps": [
+      ["K0", true],
+      ["K1", true],
+      ["K2", true],
+      ["K3", true],
+      ["K5", false]
+    ]
+  },
+  {
+    "letter": "L",
+    "title": "Configuration shapes",
+    "status": "qualified",
+    "release": "next.9",
+    "desc": "Every firebase.json / .firebaserc / launch shape a generic project brings, as the official CLI reads them: service subsets (--only, projects without Functions or Storage), any project id with the official banners, any listen host with loopback connect addresses and a public-bind warning, ui.enabled: false (with the logging listener, as officially), singleProjectMode, multiple Firestore databases with per-database rules and export, storage object form and absence, missing .firebaserc.",
+    "receipt": "support/phase-l-configuration.md · benchmarks/phase-l-configuration.json · suite-runtime service selection, connect_host, startup banners, project-scope warning, debug log · rules per database · packaging/cli.test.mjs derivation and flag tests",
+    "steps": [
+      ["L1", true],
+      ["L2", true],
+      ["L3", true],
+      ["L4", true],
+      ["L5", false]
+    ]
+  },
+  {
+    "letter": "M",
+    "title": "CLI surface",
+    "status": "qualified",
+    "release": "next.9",
+    "desc": "Every command row except the terminal launch experience: emulators:export on a running suite, init and init --adopt, use, target:apply / target:clear, firestore:delete (path-scoped emulator route), functions:invoke --event-data with the official shell's envelopes, a dependency-free mcp server, --debug log files, the official compatibility flags and the exec shell-string form; functions:shell deliberately not provided.",
+    "receipt": "support/phase-m-cli.md · benchmarks/phase-m-cli.json · packaging/cli.test.mjs + cli-commands.test.mjs (92 tests) · rest-front path-scoped delete test",
+    "steps": [
+      ["M1", true],
+      ["M2", true],
+      ["M3", true],
+      ["M4", true],
+      ["M5", false]
+    ]
   }
 ],
   // status: done | partial | qualified | planned | missing | absent
@@ -429,8 +474,8 @@ const DATA = {
   {
     "name": "Firestore",
     "status": "done",
-    "note": "gRPC/REST/WebChannel, rules, realtime, disk/WAL, official export",
-    "remaining": "Multiple named databases; Enterprise edition; strict composite-index validation is a nice-to-have",
+    "note": "gRPC/REST/WebChannel, rules, realtime, disk/WAL, official export; named databases with per-database rules (next.9)",
+    "remaining": "Enterprise edition; strict composite-index validation is a nice-to-have",
     "size": "days–weeks"
   },
   {
@@ -491,10 +536,10 @@ const DATA = {
   },
   {
     "name": "Cloud Tasks",
-    "status": "partial",
-    "note": "Queue registration accepted; dispatch returns 501",
-    "remaining": "Task enqueue and dispatch to onTaskDispatched",
-    "size": "1–2 weeks"
+    "status": "qualified",
+    "note": "Phase K, next.9 candidate: the official four routes, a queue per onTaskDispatched export, the dispatcher (token bucket, slots, X-CloudTasks headers, retry ladder, dispatch deadline), /queueStats; 61-step corpus replays 0 mismatches",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "Emulator Hub",
@@ -513,8 +558,8 @@ const DATA = {
   {
     "name": "Logging emulator",
     "status": "done",
-    "note": "Bounded logging delivery and child output",
-    "remaining": "Debug log files (firebase-debug.log style) if wanted",
+    "note": "Bounded replay + WebSocket; --debug writes every record to the run's fireside-debug.log (next.9)",
+    "remaining": "—",
     "size": "days"
   },
   {
@@ -577,31 +622,31 @@ const DATA = {
   },
   {
     "name": "emulators:export (running suite)",
-    "status": "partial",
-    "note": "Hub endpoint only",
-    "remaining": "Command wrapper",
-    "size": "hours"
+    "status": "qualified",
+    "note": "Locator, hub check, destination guard, /_admin/export (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "init",
-    "status": "missing",
-    "note": "",
-    "remaining": "Scaffold firebase.json/.firebaserc/rules/indexes/functions with Fireside-shaped config; --adopt for existing projects",
-    "size": "days"
+    "status": "qualified",
+    "note": "Non-interactive scaffold with the official templates; --adopt diagnoses and completes an existing project (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "use / target:apply / target:clear",
-    "status": "missing",
-    "note": "",
-    "remaining": "Local .firebaserc edits",
-    "size": "hours"
+    "status": "qualified",
+    "note": "Pure .firebaserc edits, no login (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "firestore:delete against the emulator",
-    "status": "missing",
-    "note": "",
-    "remaining": "Via Fireside REST",
-    "size": "hours"
+    "status": "qualified",
+    "note": "Path-scoped emulator route (recursive/shallow) and whole-database clear; no login (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "--inspect-functions",
@@ -612,10 +657,10 @@ const DATA = {
   },
   {
     "name": "functions:shell / functions:invoke",
-    "status": "partial",
-    "note": "functions:invoke NAME [--data JSON] [--region] [--method] against the running suite; no REPL",
-    "remaining": "Interactive REPL (functions:shell) if wanted",
-    "size": "days"
+    "status": "qualified",
+    "note": "functions:invoke calls HTTPS/callable functions and injects background events with the official shell's envelopes; the REPL is deliberately not provided (no second Functions runtime)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "ext:vendor (offline extensions)",
@@ -633,17 +678,17 @@ const DATA = {
   },
   {
     "name": "mcp (local MCP server)",
-    "status": "missing",
-    "note": "",
-    "remaining": "Emulator/data tools over MCP",
-    "size": "1 week"
+    "status": "qualified",
+    "note": "Dependency-free stdio server: status, Firestore, Auth, Storage, Functions, Pub/Sub, Tasks, export (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "--debug / debug log files",
-    "status": "missing",
-    "note": "",
-    "remaining": "firebase-debug.log-style files beside the logging port",
-    "size": "days"
+    "status": "qualified",
+    "note": "One fireside-debug.log per run under .fireside/runs, never deleted (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "Startup banner and status table",
@@ -656,24 +701,24 @@ const DATA = {
   config: [
   {
     "name": "--only subset / project without Functions or Storage",
-    "status": "missing",
-    "note": "Rejected: complete profile only",
-    "remaining": "Services start independently",
-    "size": "days"
+    "status": "qualified",
+    "note": "Official service derivation, --only filter, every listener/runtime conditional (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "Non-demo project id",
-    "status": "missing",
-    "note": "demo-* only",
-    "remaining": "Accept any id; Functions still credential-isolated",
-    "size": "days"
+    "status": "qualified",
+    "note": "Accepted with the official banners; workers get the emulator hosts and no credentials (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "host 0.0.0.0 (Docker, CI, LAN devices)",
-    "status": "missing",
-    "note": "Loopback only",
-    "remaining": "Bind policy + docs",
-    "size": "days"
+    "status": "qualified",
+    "note": "Wildcard bind with loopback connect addresses and one warning (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "\"storage\": { \"rules\": … } object form",
@@ -684,17 +729,17 @@ const DATA = {
   },
   {
     "name": "Multiple Firestore databases",
-    "status": "missing",
-    "note": "",
-    "remaining": "Named databases in store, gRPC/REST and export",
-    "size": "1–2 weeks"
+    "status": "qualified",
+    "note": "firestore arrays, rules per database, every database exported (the official emulator refuses this) (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "ui.enabled: false / singleProjectMode: false",
-    "status": "missing",
-    "note": "",
-    "remaining": "Honour both flags",
-    "size": "hours–days"
+    "status": "qualified",
+    "note": "Both honoured; the UI flag also drops the logging listener as officially (next.9 candidate)",
+    "remaining": "—",
+    "size": "—"
   },
   {
     "name": "Multiple Functions codebases",
@@ -713,24 +758,14 @@ const DATA = {
 ],
   backlog: [
   {
-    "item": "Config/subset gaps + init + the trivial commands",
-    "why": "Every public first-run hits one of these; days of work; no engine risk",
-    "size": "1–2 weeks"
-  },
-  {
-    "item": "Terminal launch experience",
-    "why": "First impression; keeps the 'All emulators ready' contract",
-    "size": "1 week"
-  },
-  {
-    "item": "Own Emulator UI",
-    "why": "Removes the last Google asset and fireside setup; fixes the inherited HTTPS data-browser defect",
+    "item": "Own Emulator UI (Phase N, next.10)",
+    "why": "Removes the last Google asset and fireside setup; fixes the inherited HTTPS data-browser defect; the only remaining partial service row",
     "size": "4–6 weeks"
   },
   {
-    "item": "Cloud Tasks delivery",
-    "why": "Turns the last 501 into a working service; small wire surface (Eventarc landed with H)",
-    "size": "1–2 weeks"
+    "item": "Terminal launch experience (with Phase N)",
+    "why": "First impression; keeps the 'All emulators ready' contract; the only remaining CLI row",
+    "size": "1 week"
   },
   {
     "item": "App Check",
@@ -741,11 +776,6 @@ const DATA = {
     "item": "Hosting emulator",
     "why": "Bounded static-server work; common in non-Next.js projects",
     "size": "1–2 weeks"
-  },
-  {
-    "item": "Multiple Firestore databases",
-    "why": "Needed by a minority; moderate engine work",
-    "size": "2–3 weeks"
   },
   {
     "item": "Realtime Database",
