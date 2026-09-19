@@ -18,6 +18,7 @@ members = [
   "crates/storage-front",
   "crates/suite-front",
   "crates/suite-runtime",
+  "crates/tasks-front",
   "crates/watch-broker",
   "crates/webchannel-front",
 ]

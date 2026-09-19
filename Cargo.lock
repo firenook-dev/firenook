@@ -903,6 +903,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "fireside-tasks-front"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "fireside-functions-bridge",
+ "flate2",
+ "indexmap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "fireside-watch-broker"
 version = "0.0.1"
 dependencies = [
