@@ -257,15 +257,24 @@ function expandPath(context: RunContext, path: string): string {
 }
 
 function expandTemplates(context: RunContext, value: string): string {
-  return value.replace(/\{\{jwt:([a-z]+)\}\}/g, (_, name: string) => tokenFor(name, context.target.projectId)).replaceAll("{{project}}", context.target.projectId);
+  return value
+    .replace(/\{\{jwt:([a-z]+)\}\}/g, (_, name: string) => tokenFor(name, context.target.projectId))
+    .replace(/\{\{origin:([a-z]+)\}\}/g, (_, name: string) => {
+      const origin = context.target.origins[name as keyof TargetOrigins];
+      if (!origin) throw new Error(`no ${name} origin for this target`);
+      return origin;
+    })
+    .replaceAll("{{project}}", context.target.projectId);
 }
 
 async function httpAction(context: RunContext, action: Extract<Action, { kind: "http" }>): Promise<RecordedResponse> {
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(action.headers ?? {})) headers[key] = expandTemplates(context, value);
   if (action.auth?.startsWith("@")) headers.authorization = `Bearer ${tokenFor(action.auth.slice(1), context.target.projectId)}`;
+  const origin = action.origin === "tasks" ? context.target.origins.tasks : context.target.origins.functions;
+  if (!origin) throw new Error(`no ${action.origin ?? "functions"} origin for this target`);
   return fetchRecorded(
-    context.target.origins.functions + expandPath(context, action.path),
+    origin + expandPath(context, action.path),
     { method: action.method, headers, body: action.body === undefined ? undefined : templateBody(context, action.body) },
     action.clientTimeoutMs,
   );

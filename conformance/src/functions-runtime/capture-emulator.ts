@@ -27,6 +27,9 @@ const outputRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtu
 
 const requestedProfiles = process.argv.slice(2).filter((argument) => !argument.startsWith("--"));
 const programFilter = (process.argv.find((argument) => argument.startsWith("--programs=")) ?? "").slice("--programs=".length).split(",").filter(Boolean);
+// `--output=<file>` writes the recording elsewhere (a separate fixture set such
+// as `fixtures/tasks-v1`, which holds only the `tasks` profile).
+const outputOverride = (process.argv.find((argument) => argument.startsWith("--output=")) ?? "").slice("--output=".length);
 const packageRoot = requireEnv("FIREBASE_TOOLS_15_22_ROOT");
 const functionsRoot = requireEnv("FIREBASE_FUNCTIONS_7_2_ROOT");
 const node24 = requireEnv("NODE24");
@@ -71,7 +74,7 @@ for (const profile of PROFILES) {
 
 const fixture = {
   schemaVersion: 1,
-  name: "functions-runtime-v1/emulator-programs",
+  name: outputOverride ? outputOverride.replace(/^.*fixtures\//u, "").replace(/\.json$/u, "") : "functions-runtime-v1/emulator-programs",
   target: "official-firebase-tools-functions-and-extensions-emulator",
   targetVersion: FIREBASE_TOOLS_VERSION,
   sdkVersions: { "firebase-functions": functionsPackage.version, "firebase-admin": adminPackage.version },
@@ -96,7 +99,8 @@ const fixture = {
 const finalized = finalizeFixture(fixture as typeof fixture & { profiles: typeof recordings });
 await mkdir(outputRoot, { recursive: true });
 const requested = requestedProfiles.length > 0;
-const outputPath = join(outputRoot, requested ? `emulator-programs.${requestedProfiles.join("+")}.json` : "emulator-programs.json");
+const outputPath = outputOverride ? resolve(outputOverride) : join(outputRoot, requested ? `emulator-programs.${requestedProfiles.join("+")}.json` : "emulator-programs.json");
+await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(finalized, null, 2)}\n`, "utf8");
 process.stderr.write(`\nrecorded ${finalized.profileCount} profiles, ${finalized.programCount} programs, ${finalized.stepCount} steps, ${finalized.observationCount} observations → ${outputPath}\n`);
 await rm(shortTmp, { recursive: true, force: true });

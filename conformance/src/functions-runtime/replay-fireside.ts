@@ -129,8 +129,8 @@ function stripEmbeddedVolatile(text: string): string {
   return EMBEDDED_VOLATILE.reduce((current, pattern) => current.replace(pattern, ""), text);
 }
 
-const fixturePath = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/functions-runtime-v1/emulator-programs.json");
 const args = parseArguments(process.argv.slice(2));
+const fixturePath = args.fixture ? resolve(args.fixture) : resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/functions-runtime-v1/emulator-programs.json");
 const binary = resolve(args.binary);
 const functionsRoot = requireEnv("FIREBASE_FUNCTIONS_7_2_ROOT");
 const node24 = requireEnv("NODE24");
@@ -448,11 +448,12 @@ async function reserveOne(): Promise<number> {
   return ports.hub;
 }
 
-function parseArguments(values: readonly string[]): { binary: string; profiles: string[]; programs: string[]; output: string | undefined; reportOnly: boolean } {
+function parseArguments(values: readonly string[]): { binary: string; profiles: string[]; programs: string[]; output: string | undefined; fixture: string | undefined; reportOnly: boolean } {
   let binary = "";
   let profiles = ["main"];
   let programs: string[] = [];
   let output: string | undefined;
+  let fixture: string | undefined;
   let reportOnly = false;
   for (let index = 0; index < values.length; index += 1) {
     const key = values[index];
@@ -473,12 +474,15 @@ function parseArguments(values: readonly string[]): { binary: string; profiles: 
     } else if (key === "--output" && value) {
       output = value;
       index += 1;
+    } else if (key === "--fixture" && value) {
+      fixture = value;
+      index += 1;
     } else {
       throw new Error(`unknown argument ${String(key)}`);
     }
   }
   if (!binary) throw new Error("--binary is required");
-  return { binary, profiles, programs, output, reportOnly };
+  return { binary, profiles, programs, output, fixture, reportOnly };
 }
 
 function requireEnv(name: string): string {

@@ -20,6 +20,7 @@ import {
   SECONDARY_ENV_FILES,
   SECOND_BUCKET,
   STATIC_MANIFEST,
+  TASKS_PROGRAMS,
   CONSUMER_REFS_ENV_FILES,
   CONSUMER_REFS_PROGRAMS,
   V1_BLOCKING_PROGRAMS,
@@ -29,6 +30,7 @@ import {
   extensionSource,
   primarySource,
   secondarySource,
+  tasksSource,
   v1BlockingSource,
   yamlSource,
   type Program,
@@ -69,6 +71,12 @@ export const PROFILES: readonly Profile[] = [
         .map(([name, content]) => [name, content.split("\n").filter((line) => !line.startsWith("BUCKET=")).join("\n")]),
     ),
     expectStartupFailure: true,
+  },
+  {
+    id: "tasks",
+    description: "Phase K: the primary codebase replaced by task-queue handlers with distinct retry and rate configurations plus Admin SDK enqueue/delete handlers; programs drive the Tasks emulator port directly (fixture tasks-v1).",
+    programs: TASKS_PROGRAMS,
+    primary: tasksSource,
   },
   {
     id: "consumer-refs",
