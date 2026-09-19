@@ -16,7 +16,7 @@ export const DEFAULT_PORTS = {firestore:8080, auth:9099, storage:9199, functions
 export const LOOPBACK = ['localhost', '127.0.0.1', '::1', '[::1]'];
 export const VERBOSITIES = ['DEBUG', 'INFO', 'QUIET', 'SILENT', 'WARN', 'ERROR'];
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database']);
 const durabilities = new Set(['write-behind', 'per-commit']);
 const switches = new Set(['resume-state', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions']);
 // Optional-value options: a bare flag or --name=value.

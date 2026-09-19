@@ -78,7 +78,9 @@ fireside emulators:export DIR [--force] [--only firestore,auth,storage]
 fireside firestore:delete PATH (-r | --shallow) [-f] [--database ID]
 fireside firestore:delete --all-collections -f [--database ID]
 fireside functions:invoke NAME [--data JSON] [--region R] [--method M]
+fireside functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON] [--event-type T]
 fireside ext:vendor [--instance ID]...
+fireside mcp [--project ID] [--only firestore,auth,storage,functions,pubsub,tasks]
 fireside binary-path | native ARGS...
 ```
 
@@ -121,8 +123,10 @@ appends every suite log record to
 the launch banner and recorded in `launch.json`.
 
 Not provided: `functions:shell` (Fireside never starts a second Functions
-runtime; call functions on the running suite with `functions:invoke`), and
-every deploy/login command (never intercepted). `mcp` arrives separately.
+runtime; call functions on the running suite with `functions:invoke`, which
+also injects the background events the shell would), and every deploy/login
+command (never intercepted). `fireside mcp` serves the running suite to an
+agent; see [Model Context Protocol](#model-context-protocol).
 
 ## Configuration
 
@@ -172,9 +176,39 @@ fireside emulators:start --project demo-my-app --inspect-functions        # debu
 fireside emulators:start --project demo-my-app --inspect-functions=9333   # one codebase, explicit port
 fireside functions:invoke helloWorld --project demo-my-app                # GET-less POST to the HTTPS route
 fireside functions:invoke addMessage --project demo-my-app --data '{"text":"hi"}'   # callable body {"data": ...}
+fireside functions:invoke onUserWritten --project demo-my-app --resource users/alice \
+  --event-data '{"before":{"plan":"free"},"after":{"plan":"pro"}}'        # a Firestore document event
 fireside ext:vendor --project demo-my-app                                 # copy registry Extensions into the project
 fireside emulators:start --project demo-my-app --offline                  # never contact the Extensions registry
 ```
+
+`functions:invoke` finds the running suite through the hub locator (so a
+suite started on other ports is found) and, without `--event-data`, sends a
+plain request (`--method`, default `POST`) or a callable body (`--data`) to the
+function's HTTPS route. With `--event-data` it reads the loaded functions
+(`GET /backends`), selects the named one (`--region` when a name is deployed
+in several regions), builds the event exactly as the official `functions:shell`
+does (`createLegacyEvent` for first-generation functions, a structured
+`application/json` CloudEvent for second-generation ones) and posts it to the
+suite's trigger route, which hands it unchanged to the codebase worker. The
+delivery status and body are printed; `--json` prints the whole record
+including the envelope. HTTPS/callable functions refuse `--event-data` (use
+`--data`); Auth blocking functions are driven by the Auth emulator; Realtime
+Database functions are not emulated.
+
+| Trigger | `--event-data` | Notes |
+| --- | --- | --- |
+| Firestore (v1 `document.*`, v2 `google.cloud.firestore.document.v1.*`) | `{"before": {...}, "after": {...}}` as plain JSON fields (a bare object is the created/deleted document) | `--resource users/alice` names the document; wildcards are read back into `params`, or `--params '{"uid":"alice"}'` fills the trigger pattern. Values are encoded like the shell (`integerValue`, `mapValue`, ...) with `{"$timestamp"}`, `{"$ref"}`, `{"$geo"}` and `{"$bytes"}` sentinels for the types JSON lacks; each document value also carries its `name`, which the SDK uses for `snapshot.ref`. |
+| Storage (v1 `google.storage.object.*`, v2 `google.cloud.storage.object.v1.*`) | the object metadata; `name` is required, `bucket` defaults to the trigger's bucket, `contentType`, `size`, `generation`, `metageneration`, timestamps, `id`, `selfLink` and `mediaLink` are defaulted | v1 events carry `resource: projects/_/buckets/<bucket>/objects/<name>`. |
+| Pub/Sub (v1 `google.pubsub.topic.publish`, v2 `messagePublished`) | `{"data": <string or JSON>, "attributes": {...}, "orderingKey": "..."}` (string data is sent as given, other JSON as its text; both base64 on the wire) | Published through the Pub/Sub emulator when it runs, so every subscriber sees the message; otherwise the shell envelope goes straight to the trigger. |
+| Auth v1 (`user.create`, `user.delete`) | a UserRecord (`uid` and `metadata` timestamps are defaulted) | `resource` defaults to `projects/<id>`. |
+| Schedule | ignored (`{}`) | v2: an empty CloudEvent with Cloud Scheduler's `X-CloudScheduler-*` headers; v1: the legacy event on the `firebase-schedule-<name>` topic. |
+| Eventarc custom (`onCustomEventPublished`) | the CloudEvent `data` | `--event-type` overrides the type; the channel is part of the trigger key. |
+| Task queue (`onTaskDispatched`) | the task payload, enqueued as `{"data": ...}` | Sent to the Cloud Tasks emulator (`POST .../queues/<name>/tasks`) with the Admin SDK's request, so retries and rate limits apply. |
+
+`--auth '{"uid": "...", "token": {...}}'` (or `{"admin": true}`) fills the
+legacy event's `auth` as the shell's `constructAuth` does; first-generation
+events default to `{"admin": false}` like the shell.
 
 `firebase.json` `extensions` instances run like the official emulator: a
 local path is read from disk; a registry ref (`publisher/name@version`) is
@@ -199,6 +233,46 @@ a startup error. `fireside doctor` lists every instance with its source and
 whether it starts offline. Dynamic (in-code) extensions, Python/Dart runtimes
 and the registry's `latest-approved` listing rules beyond version resolution
 are not supported.
+
+## Model Context Protocol
+
+```sh
+fireside mcp --project demo-my-app                       # stdio server for the running suite
+fireside mcp --project demo-my-app --only firestore,auth  # a subset of the tool groups
+```
+
+`fireside mcp` is a dependency-free MCP server over stdio (newline-delimited
+JSON-RPC 2.0; protocol `2025-06-18`, and `2025-03-26`/`2024-11-05` clients are
+accepted) that gives a coding agent the running local suite: `initialize`,
+`ping`, `tools/list` and `tools/call`, capabilities `{"tools": {}}`. Register
+it with the agent's MCP configuration, for example:
+
+```json
+{"mcpServers": {"fireside": {"command": "npx", "args": ["fireside", "mcp", "--project", "demo-my-app"]}}}
+```
+
+Every tool resolves the suite through the hub locator on each call (falling
+back to the project's configured ports), so a suite restarted on other ports
+is found, and returns a clear error while nothing runs. Results are JSON text;
+Firestore documents are plain JSON with the `{"$timestamp"}`, `{"$ref"}`,
+`{"$geo"}` and `{"$bytes"}` sentinels, so a document read back can be written
+again without losing types. Emulator routes are called with the owner token
+the Admin SDK uses, never through Security Rules. Stdout carries only JSON-RPC
+lines; diagnostics go to stderr.
+
+| Tool | Does |
+| --- | --- |
+| `fireside_status` | hub locator, hub status, the `/emulators` listing and the CLI version |
+| `firestore_get`, `firestore_query`, `firestore_set`, `firestore_delete`, `firestore_list_collections` | read a document, run a structured query (`where`, `orderBy`, `limit`), write (replace or `merge`), delete (document or collection, `recursive`), list collection ids |
+| `auth_list_users`, `auth_get_user`, `auth_create_user`, `auth_delete_user`, `auth_oob_codes`, `auth_verification_codes` | accounts and the pending email/SMS codes the emulator holds instead of sending them |
+| `storage_list`, `storage_get_metadata` | objects and folder prefixes under a prefix; one object's metadata |
+| `functions_list`, `functions_invoke` | the loaded functions with their trigger kind and URL; `functions:invoke` as a tool (`data` for HTTPS/callable, `eventData` and `resource` for background events) |
+| `pubsub_publish`, `tasks_stats`, `emulators_export` | publish through the Pub/Sub emulator, Cloud Tasks queue statistics, `emulators:export` |
+
+Nothing is sent anywhere but the local emulators: the server holds no
+credentials, contacts no cloud service and never reaches outside the machine.
+Treat what an agent writes through it as you would any emulator data: synthetic
+only.
 
 ## State and tests
 
