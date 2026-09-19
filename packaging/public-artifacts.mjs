@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
 
 const cliFiles = ['LICENSE-APACHE', 'LICENSE-MIT', 'README.md', 'package.json', 'release.json',
-  'bin/fireside.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/runtime.mjs'];
+  'bin/fireside.mjs', 'src/assets.mjs', 'src/binary.mjs', 'src/hub.mjs', 'src/init.mjs', 'src/options.mjs', 'src/processes.mjs', 'src/rc.mjs', 'src/runtime.mjs'];
 const licenses = ['LICENSE-APACHE', 'LICENSE-MIT'];
 
 function octal(bytes) {
