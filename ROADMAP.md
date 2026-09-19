@@ -471,7 +471,8 @@ resume tokens issued before it; no emulator behaviour changed.
   have no stable version yet).
 - [x] Fresh-machine installs from the registry: macOS arm64 (this checkout's
   host), Linux x64, macOS arm64 and Windows x64 on GitHub-hosted machines
-  (`npm i -D firenook`, `firenook init`, `emulators:exec` on the scaffold);
+  (`npm i -D firenook`, `firenook init`, `firenook setup`, `emulators:exec` on
+  the scaffold; `npm audit signatures` verifies the attestations);
   the native-upgrade verifier resumed state written by the last old-name
   engine (`0.1.0-next.3`) under this one.
 - [ ] Deprecation of the six packages published under the former name waits
