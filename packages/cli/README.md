@@ -80,6 +80,7 @@ fireside firestore:delete --all-collections -f [--database ID]
 fireside functions:invoke NAME [--data JSON] [--region R] [--method M]
 fireside functions:invoke NAME --event-data JSON [--resource PATH] [--params JSON] [--auth JSON] [--event-type T]
 fireside ext:vendor [--instance ID]...
+fireside mcp [--project ID] [--only firestore,auth,storage,functions,pubsub,tasks]
 fireside binary-path | native ARGS...
 ```
 
@@ -124,7 +125,8 @@ the launch banner and recorded in `launch.json`.
 Not provided: `functions:shell` (Fireside never starts a second Functions
 runtime; call functions on the running suite with `functions:invoke`, which
 also injects the background events the shell would), and every deploy/login
-command (never intercepted). `mcp` arrives separately.
+command (never intercepted). `fireside mcp` serves the running suite to an
+agent; see [Model Context Protocol](#model-context-protocol).
 
 ## Configuration
 
@@ -231,6 +233,46 @@ a startup error. `fireside doctor` lists every instance with its source and
 whether it starts offline. Dynamic (in-code) extensions, Python/Dart runtimes
 and the registry's `latest-approved` listing rules beyond version resolution
 are not supported.
+
+## Model Context Protocol
+
+```sh
+fireside mcp --project demo-my-app                       # stdio server for the running suite
+fireside mcp --project demo-my-app --only firestore,auth  # a subset of the tool groups
+```
+
+`fireside mcp` is a dependency-free MCP server over stdio (newline-delimited
+JSON-RPC 2.0; protocol `2025-06-18`, and `2025-03-26`/`2024-11-05` clients are
+accepted) that gives a coding agent the running local suite: `initialize`,
+`ping`, `tools/list` and `tools/call`, capabilities `{"tools": {}}`. Register
+it with the agent's MCP configuration, for example:
+
+```json
+{"mcpServers": {"fireside": {"command": "npx", "args": ["fireside", "mcp", "--project", "demo-my-app"]}}}
+```
+
+Every tool resolves the suite through the hub locator on each call (falling
+back to the project's configured ports), so a suite restarted on other ports
+is found, and returns a clear error while nothing runs. Results are JSON text;
+Firestore documents are plain JSON with the `{"$timestamp"}`, `{"$ref"}`,
+`{"$geo"}` and `{"$bytes"}` sentinels, so a document read back can be written
+again without losing types. Emulator routes are called with the owner token
+the Admin SDK uses, never through Security Rules. Stdout carries only JSON-RPC
+lines; diagnostics go to stderr.
+
+| Tool | Does |
+| --- | --- |
+| `fireside_status` | hub locator, hub status, the `/emulators` listing and the CLI version |
+| `firestore_get`, `firestore_query`, `firestore_set`, `firestore_delete`, `firestore_list_collections` | read a document, run a structured query (`where`, `orderBy`, `limit`), write (replace or `merge`), delete (document or collection, `recursive`), list collection ids |
+| `auth_list_users`, `auth_get_user`, `auth_create_user`, `auth_delete_user`, `auth_oob_codes`, `auth_verification_codes` | accounts and the pending email/SMS codes the emulator holds instead of sending them |
+| `storage_list`, `storage_get_metadata` | objects and folder prefixes under a prefix; one object's metadata |
+| `functions_list`, `functions_invoke` | the loaded functions with their trigger kind and URL; `functions:invoke` as a tool (`data` for HTTPS/callable, `eventData` and `resource` for background events) |
+| `pubsub_publish`, `tasks_stats`, `emulators_export` | publish through the Pub/Sub emulator, Cloud Tasks queue statistics, `emulators:export` |
+
+Nothing is sent anywhere but the local emulators: the server holds no
+credentials, contacts no cloud service and never reaches outside the machine.
+Treat what an agent writes through it as you would any emulator data: synthetic
+only.
 
 ## State and tests
 

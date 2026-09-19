@@ -7,6 +7,7 @@ import { diagnose, prepareLaunch, supervise, vendorExtensions } from '../src/run
 import { nativeEnvironment, requestNativeStop } from '../src/processes.mjs';
 import { exportEmulators, firestoreDelete } from '../src/hub.mjs';
 import { invokeFunction } from '../src/invoke.mjs';
+import { serveMcp } from '../src/mcp.mjs';
 import { targetApply, targetClear, use } from '../src/rc.mjs';
 import { adopt, scaffold } from '../src/init.mjs';
 
@@ -33,6 +34,7 @@ Emulators
                                                           Inject a background event (Firestore, Storage,
                                                           Pub/Sub, Auth, schedule, Eventarc, task queue)
   fireside ext:vendor [--instance ID]...                  Copy registry Extensions into the project
+  fireside mcp [--project ID] [--only firestore,auth,...] Model Context Protocol server over stdio
 
 Advanced
   fireside binary-path                                    Verified packaged native binary location
@@ -65,6 +67,7 @@ const accepted = {
   'target:apply':common, 'target:clear':common,
   init:[...common, 'adopt', 'dry-run', 'force', 'functions', 'no-functions'],
   'functions:invoke':[...common, 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'hub-port'],
+  mcp:[...common, 'only', 'hub-port'],
 };
 function checkOptions(action, options) {
   for (const [name, value] of Object.entries(options)) {
@@ -128,6 +131,7 @@ async function main() {
   if (action === 'target:apply') return targetApply(positionals, options);
   if (action === 'target:clear') return targetClear(positionals, options);
   if (action === 'init') { noPositionals(action, positionals); return options.adopt ? adopt(options) : scaffold(options); }
+  if (action === 'mcp') { noPositionals(action, positionals); return serveMcp(options); }
   const testCommand = action === 'emulators:exec' ? execCommand(action, parsed) : noPositionals(action, positionals);
   const diagnostic = await diagnose(options);
   if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return 0; }

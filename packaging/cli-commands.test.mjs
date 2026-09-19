@@ -16,6 +16,7 @@ import { exportEmulators, firestoreDelete, locatorPath } from '../packages/cli/s
 import { applyTarget, clearTarget, targetApply, targetClear, use } from '../packages/cli/src/rc.mjs';
 import { INIT_PORTS, adopt, firestoreRules, scaffold } from '../packages/cli/src/init.mjs';
 import { EMULATED_SERVICE_ACCOUNT, invokeFunction, matchParams, runInvoke, substituteParams } from '../packages/cli/src/invoke.mjs';
+import { PROTOCOL_VERSIONS, TOOLS, createMcpServer, validateArguments } from '../packages/cli/src/mcp.mjs';
 import { decodeFields, decodeValue, encodeFields, encodeValue } from '../packages/cli/src/firestore-values.mjs';
 
 const cli = fileURLToPath(new URL('../packages/cli/bin/fireside.mjs', import.meta.url));
@@ -777,3 +778,196 @@ test('path helpers and the Firestore value codec follow the shell encoder and ro
   assert.equal(decodeValue({doubleValue:'NaN'}), NaN);
 });
 
+// --- fireside mcp -------------------------------------------------------------
+const rpc = (id, method, params) => ({jsonrpc:'2.0', id, method, ...(params === undefined ? {} : {params})});
+const quiet = {log() {}, error() {}};
+const text = response => JSON.parse(response.result.content[0].text);
+test('the MCP server negotiates the protocol, lists its tools and validates calls without a running suite', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fireside-mcp-'));
+  const server = createMcpServer({...options, project:'demo-fixture'}, dir, quiet);
+  const init = await server.handle(rpc(1, 'initialize', {protocolVersion:'2025-03-26', capabilities:{}, clientInfo:{name:'test', version:'0'}}));
+  assert.equal(init.result.protocolVersion, '2025-03-26', 'a supported version is echoed');
+  assert.deepEqual(init.result.capabilities, {tools:{}});
+  assert.equal(init.result.serverInfo.name, 'fireside');
+  assert.match(init.result.serverInfo.version, /^\d+\.\d+\.\d+/);
+  assert.equal((await server.handle(rpc(2, 'initialize', {protocolVersion:'1999-01-01'}))).result.protocolVersion, PROTOCOL_VERSIONS[0], 'an unknown version gets the latest');
+  assert.equal(await server.handle({jsonrpc:'2.0', method:'notifications/initialized'}), undefined, 'notifications get no response');
+  assert.deepEqual(await server.handle(rpc(3, 'ping')), {jsonrpc:'2.0', id:3, result:{}});
+  const list = await server.handle(rpc(4, 'tools/list'));
+  assert.deepEqual(list.result.tools.map(tool => tool.name), ['fireside_status', 'firestore_get', 'firestore_query', 'firestore_set', 'firestore_delete', 'firestore_list_collections',
+    'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes', 'storage_list', 'storage_get_metadata',
+    'functions_list', 'functions_invoke', 'pubsub_publish', 'tasks_stats', 'emulators_export']);
+  for (const tool of list.result.tools) {
+    assert.ok(tool.description.length > 20 && !tool.description.includes('\n'), `${tool.name} has a one-line description`);
+    assert.equal(tool.inputSchema.type, 'object');
+    assert.ok(Array.isArray(tool.inputSchema.required));
+  }
+  assert.equal(TOOLS.length, list.result.tools.length);
+  const only = createMcpServer({...options, project:'demo-fixture', only:'auth,tasks'}, dir, quiet);
+  assert.deepEqual((await only.handle(rpc(5, 'tools/list'))).result.tools.map(tool => tool.name), ['fireside_status', 'auth_list_users', 'auth_get_user', 'auth_create_user', 'auth_delete_user', 'auth_oob_codes', 'auth_verification_codes', 'tasks_stats', 'emulators_export']);
+  assert.throws(() => createMcpServer({...options, only:'wat'}, dir), /wat is not a tool group/);
+  assert.equal((await server.handle(rpc(6, 'resources/list'))).error.code, -32601);
+  assert.equal((await server.handle(rpc(7, 'tools/call', {name:'nope'}))).error.code, -32602);
+  assert.equal((await server.handle(rpc(8, 'tools/call', {name:'firestore_get', arguments:{}}))).error.message, 'Invalid arguments for firestore_get: missing required argument path');
+  assert.equal((await server.handle(rpc(9, 'tools/call', {name:'firestore_get', arguments:{path:1}}))).error.message, 'Invalid arguments for firestore_get: path must be a string');
+  assert.equal((await server.handle(rpc(10, 'tools/call', {name:'firestore_query', arguments:{collection:'users', where:[{field:'a', op:'~', value:1}]}}))).error.message, 'Invalid arguments for firestore_query: where[0]: op must be one of ==, !=, <, <=, >, >=, array-contains, array-contains-any, in, not-in');
+  assert.equal((await server.handle(rpc(11, 'tools/call', {name:'auth_list_users', arguments:{maxResults:0}}))).error.code, -32602);
+  assert.equal((await server.handle({jsonrpc:'1.0', id:12, method:'ping'})).error.code, -32600);
+  assert.equal(validateArguments({type:'object', properties:{}, required:[]}, {extra:1}), 'unknown argument extra');
+  // A suite that is not running is a tool error, not a protocol error.
+  const absent = createMcpServer({...options, project:'demo-absent'}, dir, quiet);
+  const status = await absent.handle(rpc(13, 'tools/call', {name:'fireside_status', arguments:{}}));
+  assert.equal(status.result.isError, undefined);
+  assert.equal(text(status).running, false);
+  assert.match(text(status).error, /Did not find a running emulator hub for project demo-absent/);
+  const get = await absent.handle(rpc(14, 'tools/call', {name:'firestore_get', arguments:{path:'users/alice'}}));
+  assert.equal(get.result.isError, true);
+  assert.match(text(get).error, /Did not find a running emulator hub for project demo-absent/);
+  // No project at all.
+  const none = createMcpServer(options, dir, quiet);
+  assert.match(text(await none.handle(rpc(15, 'tools/call', {name:'fireside_status', arguments:{}}))).error, /No firebase\.json/);
+});
+test('MCP tools reach the emulators through the hub listing with the owner token', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fireside-mcp-tools-'));
+  const server = createMcpServer({...options, project:'demo-fixture'}, dir, quiet);
+  const callTool = async (name, args) => { const response = await server.handle(rpc(1, 'tools/call', {name, arguments:args})); assert.equal(response.result.isError, undefined, response.result.content[0].text); return text(response); };
+  await withSuite(fake.full, async () => {
+    const status = await callTool('fireside_status', {});
+    assert.equal(status.running, true);
+    assert.equal(status.hub.origin, fake.origin);
+    assert.deepEqual(Object.keys(status.emulators), Object.keys(fake.full));
+    assert.equal(status.locator.contents.origins[0], fake.origin);
+    let mark = fake.requests.length;
+    const alice = await callTool('firestore_get', {path:'/users/alice'});
+    assert.equal(since(mark)[since(mark).length - 1].headers.authorization, 'Bearer owner');
+    assert.equal(alice.exists, true);
+    assert.equal(alice.path, 'users/alice');
+    assert.deepEqual(alice.data.friend, {$ref:'users/bob'});
+    assert.equal(alice.data.age, 41);
+    assert.deepEqual(await callTool('firestore_get', {path:'users/nobody', database:'other'}), {path:'users/nobody', exists:false});
+    mark = fake.requests.length;
+    const query = await callTool('firestore_query', {collection:'users/alice/posts', where:[{field:'age', op:'>=', value:18}, {field:'tag', op:'in', value:['a']}], orderBy:[{field:'age', direction:'desc'}], limit:5});
+    const run = since(mark).find(request => request.path.endsWith(':runQuery'));
+    assert.equal(run.path, '/v1/projects/demo-fixture/databases/(default)/documents/users/alice:runQuery');
+    assert.deepEqual(run.body, {structuredQuery:{from:[{collectionId:'posts'}], limit:5, where:{compositeFilter:{op:'AND', filters:[{fieldFilter:{field:{fieldPath:'age'}, op:'GREATER_THAN_OR_EQUAL', value:{integerValue:18}}}, {fieldFilter:{field:{fieldPath:'tag'}, op:'IN', value:{arrayValue:{values:[{stringValue:'a'}]}}}}]}}, orderBy:[{field:{fieldPath:'age'}, direction:'DESCENDING'}]}});
+    assert.equal(query.count, 1);
+    assert.equal(query.documents[0].data.name, 'Alice');
+    mark = fake.requests.length;
+    await callTool('firestore_query', {collection:'users', where:[{field:'name', op:'==', value:'Alice'}]});
+    assert.deepEqual(since(mark).find(request => request.path.endsWith(':runQuery')).body.structuredQuery.where, {fieldFilter:{field:{fieldPath:'name'}, op:'EQUAL', value:{stringValue:'Alice'}}});
+    mark = fake.requests.length;
+    const set = await callTool('firestore_set', {path:'users/carol', data:{name:'Carol', 'first name':'C'}, merge:true});
+    const patch = since(mark).find(request => request.method === 'PATCH');
+    assert.equal(patch.path, '/v1/projects/demo-fixture/databases/(default)/documents/users/carol');
+    assert.match(patch.url, /\?updateMask\.fieldPaths=name&updateMask\.fieldPaths=%60first%20name%60$/);
+    assert.deepEqual(patch.body, {fields:{name:{stringValue:'Carol'}, 'first name':{stringValue:'C'}}});
+    assert.deepEqual(set.data, {name:'Carol', 'first name':'C'});
+    mark = fake.requests.length;
+    await callTool('firestore_set', {path:'users/carol', data:{name:'Carol'}});
+    assert.equal(since(mark).find(request => request.method === 'PATCH').url, '/v1/projects/demo-fixture/databases/(default)/documents/users/carol', 'no mask replaces the document');
+    mark = fake.requests.length;
+    assert.deepEqual(await callTool('firestore_delete', {path:'users/carol', recursive:true}), {path:'users/carol', mode:'recursive', deleted:3});
+    assert.equal(since(mark).find(request => request.method === 'DELETE').url, '/emulator/v1/projects/demo-fixture/databases/(default)/documents/users/carol?mode=recursive');
+    mark = fake.requests.length;
+    assert.deepEqual(await callTool('firestore_list_collections', {}), {path:null, collectionIds:['posts', 'settings']});
+    assert.equal(since(mark).find(request => request.path.endsWith(':listCollectionIds')).path, '/v1/projects/demo-fixture/databases/(default)/documents:listCollectionIds');
+    await callTool('firestore_list_collections', {path:'users/alice'});
+    assert.equal(fake.requests[fake.requests.length - 1].path, '/v1/projects/demo-fixture/databases/(default)/documents/users/alice:listCollectionIds');
+    // Auth.
+    mark = fake.requests.length;
+    const users = await callTool('auth_list_users', {maxResults:2});
+    const batch = since(mark).find(request => request.path.endsWith(':batchGet'));
+    assert.equal(batch.method, 'GET');
+    assert.deepEqual(batch.query, {maxResults:'2'});
+    assert.equal(batch.headers.authorization, 'Bearer owner');
+    assert.equal(users.count, 2);
+    assert.deepEqual(users.users[0], {uid:'alice', email:'alice@example.test', emailVerified:true, phoneNumber:null, displayName:'Alice', photoUrl:null, disabled:false, customClaims:{admin:true}, tenantId:null,
+      providers:[{providerId:'password', rawId:'alice@example.test', email:'alice@example.test', displayName:null}], mfa:[], createdAt:'2023-11-14T22:13:20.000Z', lastLoginAt:'2023-11-14T22:13:21.000Z'});
+    assert.equal(users.users[1].disabled, true);
+    mark = fake.requests.length;
+    assert.equal((await callTool('auth_get_user', {email:'alice@example.test'})).user.uid, 'alice');
+    assert.deepEqual(since(mark).find(request => request.path.endsWith(':lookup')).body, {email:['alice@example.test']});
+    assert.deepEqual(await callTool('auth_get_user', {uid:'zed'}), {found:false});
+    mark = fake.requests.length;
+    const created = await callTool('auth_create_user', {uid:'dan', email:'dan@example.test', password:'synthetic-pass', emailVerified:true});
+    const signup = since(mark).find(request => request.path.endsWith('/accounts'));
+    assert.equal(signup.method, 'POST');
+    assert.deepEqual(signup.body, {localId:'dan', email:'dan@example.test', password:'synthetic-pass', emailVerified:true});
+    assert.equal(created.uid, 'dan');
+    mark = fake.requests.length;
+    assert.deepEqual(await callTool('auth_delete_user', {uid:'dan'}), {uid:'dan', deleted:true});
+    assert.deepEqual(since(mark).find(request => request.path.endsWith(':delete')).body, {localId:'dan'});
+    assert.equal((await callTool('auth_oob_codes', {})).oobCodes[0].oobCode, 'code-1');
+    assert.equal((await callTool('auth_verification_codes', {})).verificationCodes[0].code, '123456');
+    // Storage.
+    mark = fake.requests.length;
+    const listed = await callTool('storage_list', {prefix:'uploads'});
+    const listing = since(mark).find(request => request.path === '/v0/b/demo-fixture.appspot.com/o');
+    assert.deepEqual(listing.query, {prefix:'uploads/', delimiter:'/', maxResults:'100'});
+    assert.equal(listing.headers.authorization, 'Bearer owner');
+    assert.deepEqual(listed.prefixes, ['uploads/2026/']);
+    assert.equal(listed.items[0].name, 'uploads/a.png');
+    assert.equal((await callTool('storage_get_metadata', {path:'uploads/a.png'})).contentType, 'image/png');
+    assert.deepEqual(await callTool('storage_get_metadata', {bucket:'demo-fixture.appspot.com', path:'missing.txt'}), {bucket:'demo-fixture.appspot.com', path:'missing.txt', exists:false});
+    // Functions.
+    const functions = await callTool('functions_list', {});
+    assert.equal(functions.count, DEFINITIONS.length);
+    const byName = Object.fromEntries(functions.functions.map(item => [`${item.name}@${item.region}`, item]));
+    assert.deepEqual(byName['addMessage@us-central1'], {name:'addMessage', region:'us-central1', platform:'gcfv2', entryPoint:'addMessage', codebase:'default', kind:'callable', url:`${fake.origin}/demo-fixture/us-central1/addMessage`});
+    assert.equal(byName['onUserDoc@europe-west1'].kind, 'firestore');
+    assert.equal(byName['nightly@us-central1'].schedule, 'every 24 hours');
+    assert.equal(byName['onOrderPlaced@us-central1'].channel, 'projects/demo-fixture/locations/us-central1/channels/firebase');
+    assert.equal(byName['processTask@us-central1'].kind, 'taskQueue');
+    mark = fake.requests.length;
+    const invoked = await callTool('functions_invoke', {name:'onUserCreated', eventData:{name:'Eve'}, resource:'users/eve'});
+    assert.equal(invoked.transport, 'functions');
+    assert.equal(invoked.key, 'us-central1-onUserCreated-3');
+    assert.equal(delivery(since(mark)).body.document, 'users/eve');
+    assert.deepEqual((await callTool('functions_invoke', {name:'addMessage', data:{text:'hi'}})).body, {result:{echo:'POST'}});
+    const refused = await server.handle(rpc(2, 'tools/call', {name:'functions_invoke', arguments:{name:'helloWorld', eventData:{}}}));
+    assert.equal(refused.result.isError, true);
+    assert.match(text(refused).error, /HTTPS function/);
+    // Pub/Sub, Tasks, export.
+    mark = fake.requests.length;
+    const published = await callTool('pubsub_publish', {topic:'projects/demo-fixture/topics/orders', data:{id:1}, attributes:{k:'v'}});
+    assert.deepEqual(published.messageIds, ['42']);
+    assert.deepEqual(since(mark).find(request => request.path.endsWith(':publish')).body, {messages:[{data:Buffer.from('{"id":1}').toString('base64'), attributes:{k:'v'}}]});
+    assert.deepEqual(await callTool('tasks_stats', {}), {'queue:demo-fixture-us-central1-processTask':{numberOfTasks:1, tasksRunning:0}});
+    const destination = join(dir, '..', `fireside-export-${process.pid}-mcp`);
+    const exported = await callTool('emulators_export', {path:destination});
+    assert.deepEqual(exported.targets, ['firestore', 'auth', 'storage']);
+    assert.equal(exported.ok, true);
+    rmSync(destination, {recursive:true, force:true});
+  });
+  await withSuite({firestore:fake.base.firestore}, async () => {
+    const missing = await server.handle(rpc(3, 'tools/call', {name:'auth_list_users', arguments:{}}));
+    assert.equal(missing.result.isError, true);
+    assert.match(text(missing).error, /did not start Auth/);
+  });
+});
+test('fireside mcp over stdio writes only JSON-RPC lines to stdout', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fireside-mcp-stdio-'));
+  fake.running = fake.full;
+  try {
+    const child = spawn(process.execPath, [cli, 'mcp', '--project', 'demo-fixture', '--only', 'firestore,functions'], {cwd:dir, env:{...process.env, FIRESIDE_LOCATOR_DIR:locatorDir}});
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    const lines = [rpc(1, 'initialize', {protocolVersion:'2025-06-18', capabilities:{}, clientInfo:{name:'test', version:'0'}}), {jsonrpc:'2.0', method:'notifications/initialized'},
+      rpc(2, 'tools/list'), rpc(3, 'tools/call', {name:'fireside_status', arguments:{}}), rpc(4, 'tools/call', {name:'firestore_get', arguments:{path:'users/alice'}}), 'not json', rpc(5, 'ping')];
+    child.stdin.end(`${lines.map(line => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n')}\n`);
+    const [status] = await once(child, 'close');
+    assert.equal(status, 0, stderr);
+    const responses = stdout.split('\n').filter(Boolean).map(line => JSON.parse(line));
+    assert.ok(responses.every(response => response.jsonrpc === '2.0' && ('result' in response || 'error' in response)), 'every stdout line is a JSON-RPC response');
+    const byId = Object.fromEntries(responses.map(response => [response.id, response]));
+    assert.equal(byId[1].result.protocolVersion, '2025-06-18');
+    assert.equal(byId[2].result.tools.length, 9, 'status, five Firestore tools, two Functions tools and export');
+    assert.equal(text(byId[3]).running, true);
+    assert.equal(text(byId[4]).data.name, 'Alice');
+    assert.deepEqual(byId[5].result, {});
+    assert.deepEqual(byId.null, {jsonrpc:'2.0', id:null, error:{code:-32700, message:'Parse error'}});
+    assert.equal(responses.length, 6);
+    assert.match(stderr, /fireside mcp .* tools over stdio for project demo-fixture; local emulators only/);
+  } finally { fake.running = fake.base; }
+});
