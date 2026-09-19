@@ -1,3 +1,94 @@
+# 0.1.0-next.9 — Cloud Tasks emulator, every configuration shape, the CLI surface
+
+- Pin the engine to `7fb0c350078c94fc65a83a6f3c012a917779fbbd`, the qualified head of
+  [PR #55](https://github.com/sanjevirau/fireside/pull/55) (Phases K, L and
+  M) on the next.8 engine. This exact revision passed CI
+  ([run 35437156565](https://github.com/sanjevirau/fireside/actions/runs/35437156565))
+  and the five-platform packed-install matrix
+  ([run 35437156569](https://github.com/sanjevirau/fireside/actions/runs/35437156569)),
+  and a local candidate built from it passed a representative private
+  consumer's extensions, integration and installed-launcher gates and its
+  nine browser journeys on the full-data stack, plus an end-to-end run of
+  every new command on a project scaffolded by `fireside init`; see
+  `support/phase-k-tasks.md`, `support/phase-l-configuration.md`,
+  `support/phase-m-cli.md` and the `receipts` blocks of the three gate
+  files under `benchmarks/`. The per-release-line two-hour soak stands from
+  next.6 and next.7.
+- Cloud Tasks is a full emulator (Phase K). The Tasks port serves the four
+  routes of the official emulator — queue registration, enqueue, delete and
+  `/queueStats` — with its Express-shaped answers, registers a queue for
+  every `onTaskDispatched` export at readiness and after each reload with the
+  function's URL as the default target, and dispatches exactly as
+  `taskQueue.js` does: a token bucket per queue that starts empty and refills
+  once a second, dispatch slots sized by `maxConcurrentDispatches`, the
+  `X-CloudTasks-QueueName`/`TaskName`/`TaskRetryCount`/`TaskExecutionCount`/
+  `TaskETA` headers with the caller's headers overriding them and
+  `TaskPreviousResponse` from the second attempt, the retry ladder with its
+  backoff formula and the `maxAttempts` off-by-one, the execution count
+  incremented on non-5xx failures only, the `dispatchDeadline` abort, and
+  the controller's cadence (idle queues polled once a second, active queues
+  continuously). `getFunctions().taskQueue().enqueue()` and `.delete()` from
+  a function or an app with `CLOUD_TASKS_EMULATOR_HOST` set reach the
+  handler as on the official suite. The corpus recorded from firebase-tools
+  15.22.0 (6 programs, 61 steps, 39 handler observations in
+  `conformance/fixtures/tasks-v1`) replays with 0 mismatches and no named
+  divergence, three runs identical; the Functions runtime corpus replays
+  unchanged with the emulator mounted. Not done because the official
+  emulator does not do it either: `scheduleTime` as a delay, OIDC tokens on
+  dispatch, queue pause/resume/purge, task listing, the Cloud Tasks v2 API,
+  persistence, a UI tab.
+- Every configuration shape of the tracker starts (Phase L). A service
+  starts when `firebase.json` configures it, exactly as the official
+  `filterEmulatorTargets` decides, and `--only` narrows the set; a project
+  without Functions or Storage runs (Eventarc and Tasks follow Functions,
+  the requests WebSocket follows Firestore, the UI and logging listeners
+  follow `emulators.ui.enabled`, the hub always runs). Any project id is
+  accepted: a `demo-*` id prints the official demo line, a real id prints
+  the official "will affect production" warning for services not running,
+  and the suite never contacts Firebase either way (every worker gets the
+  emulator hosts and no Google credentials; user code with explicit
+  credentials can still reach the real project). Any listen host is bound;
+  a wildcard is announced to clients as the loopback address as the official
+  `connectableHostname` does, and a non-loopback bind prints one warning
+  because the emulators have no authentication. `emulators.singleProjectMode`
+  (default true) warns once per foreign project id with the official Auth
+  wording. `firestore` may list several databases, each with its own rules
+  (a project-wide hot reload replaces every database's rules, as
+  officially); every database is exported and imported. The storage section
+  may be the `{rules}` object, the target array, or absent (demo projects
+  get the official open default rules); `.firebaserc` may be absent;
+  `emulators.database/hosting/dataconnect/apphosting` entries are skipped
+  with a warning instead of refused. The rules parser now accepts
+  `allow read, write;` without a condition and `rules_version='2'` without
+  a semicolon, both written by the official templates. The Functions worker
+  declares its routes in Express 4 and 5 syntax (firebase-functions 7.3 and
+  later ship Express 5) and sees a gcloud directory under the suite state
+  holding a synthetic credential, so the Admin SDK's task-queue client never
+  probes the Compute Engine metadata server.
+- The CLI carries every command row except the terminal launch experience
+  (Phase M): `emulators:export` on a running suite through the official hub
+  locator, `init` (non-interactive, official rules and index templates, a
+  JavaScript codebase) and `init --adopt` (diagnoses an existing
+  `firebase.json` and adds what Fireside needs), `use`, `target:apply` /
+  `target:clear` (pure `.firebaserc` edits, no login), `firestore:delete`
+  (a new path-scoped emulator route; recursive and whole-database deletes
+  need `--force`), `functions:invoke --event-data` (the official shell's
+  envelopes for Firestore, Storage, Pub/Sub, Auth, schedules, Eventarc custom
+  events and task queues, posted to the running suite), `mcp` (a
+  dependency-free stdio Model Context Protocol server with status,
+  Firestore, Auth, Storage, Functions, Pub/Sub, Tasks and export tools),
+  `--debug` (one `fireside-debug.log` per run under `.fireside/runs`, never
+  deleted), the official `-P`/`-c`/`--json`/`--non-interactive`/
+  `--log-verbosity`/`--ui`/`--force` flags, and `emulators:exec "<script>"`
+  run through the shell as the official CLI does (the `--` argv form stays
+  free of shell interpretation). `emulators:exec` keeps the Emulator UI off
+  unless `--ui` is given, as officially. `functions:shell` is deliberately
+  not provided: Fireside never starts a second Functions runtime. The
+  default auxiliary ports are now the official ones (logging 4500, Eventarc
+  9299, Tasks 9499) when `firebase.json` names none.
+- Left for `0.1.0-next.10`: the own Emulator UI and the terminal launch
+  experience (banner and status table).
+
 # 0.1.0-next.8 — complete Authentication and a full Pub/Sub emulator
 
 - Pin the engine to `03000f0cc082c1b69f06c67b6a99a5417c840243`, the qualified
