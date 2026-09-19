@@ -196,10 +196,33 @@
       "syntheticEndToEnd": "a fresh project scaffolded by `fireside init` with firebase-functions 7.4.0 (Express 5) on the packed candidate: helloWorld over HTTP, functions:invoke for an HTTPS function, a Firestore document event and a task-queue payload, getFunctions().taskQueue().enqueue() from a function reaching the handler, /queueStats, firestore:delete (document, shallow refused without -r, recursive with -f), emulators:export, use, target:apply, a second Firestore database (rules line per database, reads on both), fireside mcp (19 tools: status, query, cross-database get, auth_create_user, functions_list, tasks_stats), init --adopt on a hosting-bearing firebase.json (skip + additions), a real project id on --host 0.0.0.0 with the official banners and loopback connect addresses",
       "pairedAcceptance": "the per-release-line 2 h soak stands from next.6/next.7; the consumer gates and journeys above ran on this candidate",
       "pending": [
-        "exact-candidate CI on the feature PR head",
         "release PR, tag, release workflow, registry verification",
         "consumer pin bump with the extensions gate on the installed package"
-      ]
+      ],
+      "exactCandidateCi": {
+        "headSha": "7fb0c350078c94fc65a83a6f3c012a917779fbbd",
+        "conclusion": "success",
+        "runs": {
+          "CI": 35437156565,
+          "Installable packages": 35437156569
+        },
+        "jobs": [
+          "Rust quality gate",
+          "Public fixture and package checks",
+          "Differential harness",
+          "Firebase JS SDK browser integration (memory, client memory)",
+          "Firebase JS SDK browser integration (memory, client persistence)",
+          "Firebase JS SDK browser integration (disk-wal, client memory)",
+          "Firebase JS SDK browser integration (disk-wal, client persistence)",
+          "Packed install (linux-x64)",
+          "Packed install (linux-arm64)",
+          "Packed install (darwin-arm64)",
+          "Packed install (darwin-x64)",
+          "Packed install (win32-x64)",
+          "verify"
+        ],
+        "note": "the Cloud Tasks replay, the Functions runtime corpus, the Auth and Pub/Sub replays and the Pub/Sub client-library check run inside the Differential harness job; the engine sources at this head equal ed21d02 (docs-only commits after it)"
+      }
     }
   }
 }
