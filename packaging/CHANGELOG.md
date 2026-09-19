@@ -1,5 +1,20 @@
 # 0.2.0-next.1 — Firenook: the project renamed, one license
 
+- Pin the engine to `9d6925115e12e49524b9991f5924d112eb14ffd1`, the qualified head of
+  [PR #58](https://github.com/firenook-dev/firenook/pull/58) (the rename) on the
+  next.9 engine. This exact revision passed CI
+  ([run 35445747233](https://github.com/firenook-dev/firenook/actions/runs/35445747233))
+  and the five-platform packed-install matrix
+  ([run 35445747328](https://github.com/firenook-dev/firenook/actions/runs/35445747328));
+  a local candidate built from it passed the packed npm and Bun installs and
+  the complete-suite smoke, and the native-upgrade verifier resumed state
+  written by the last engine published under the old name
+  (`0.1.0-next.3`) with it: import, in-place adoption, reopen, both browser
+  listen modes, portable rollback. Every oracle corpus replays unchanged
+  (Functions/Extensions 271/271, Cloud Tasks 61/61, Auth 1068 steps with 0
+  mismatches, Pub/Sub 916 steps with 0 mismatches). The engine is the
+  0.1.0-next.9 engine plus the rename, the store-file adoption and the
+  legacy resume-token decoding; no emulator behaviour changed.
 - The project is renamed from Fireside to Firenook; this is the first release
   under the new name and the minor version moves because the command and the
   package names change. `@fireside-dev/cli` becomes `firenook` (binary
