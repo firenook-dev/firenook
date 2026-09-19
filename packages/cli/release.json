@@ -1,5 +1,5 @@
 {
-  "engineRevision": "7fb0c350078c94fc65a83a6f3c012a917779fbbd",
+  "engineRevision": "9d6925115e12e49524b9991f5924d112eb14ffd1",
   "rustToolchain": "1.98.0",
   "platforms": {
     "darwin-arm64": "aarch64-apple-darwin",
