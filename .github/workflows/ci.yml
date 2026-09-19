@@ -72,6 +72,7 @@ jobs:
           npm run test:functions-runtime-fixtures --prefix conformance
           npm run test:auth-fixtures --prefix conformance
           npm run test:pubsub-fixtures --prefix conformance
+          npm run test:tasks-fixtures --prefix conformance
           npm run test:rules:query-fixtures --prefix conformance
           npm run test:serialization:fixtures --prefix conformance
           npm run test:developer-tools-fixtures --prefix conformance
@@ -179,6 +180,16 @@ jobs:
             --binary ../target/debug/fireside \
             --profiles main,v1-blocking,inspect,ext-missing-param \
             --output "$RUNNER_TEMP/fireside-functions-runtime-replay.json"
+      - name: Replay the Cloud Tasks oracle corpus against the suite
+        env:
+          FIREBASE_FUNCTIONS_7_2_ROOT: ${{ runner.temp }}/fireside-devtools/node_modules/firebase-functions
+          FIRESIDE_OFFLINE: "1"
+        run: |
+          NODE24="$(command -v node)" npm run replay:functions:runtime --prefix conformance -- \
+            --binary ../target/debug/fireside \
+            --profiles tasks \
+            --fixture fixtures/tasks-v1/emulator-programs.json \
+            --output "$RUNNER_TEMP/fireside-tasks-replay.json"
       - name: Replay the Auth oracle corpus against the standalone Auth service
         run: |
           npm run replay:auth --prefix conformance -- \

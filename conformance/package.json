@@ -84,7 +84,8 @@
     "capture:pubsub:emulator": "node --import tsx src/pubsub/capture-emulator.ts",
     "replay:pubsub": "node --import tsx src/pubsub/replay-fireside.ts",
     "verify:pubsub:client": "node --import tsx src/pubsub/verify-client-library.ts",
-    "test:pubsub-fixtures": "node --test test/pubsub-fixtures.test.mjs"
+    "test:pubsub-fixtures": "node --test test/pubsub-fixtures.test.mjs",
+    "test:tasks-fixtures": "node --test test/tasks-fixtures.test.mjs"
   },
   "devDependencies": {
     "@google-cloud/firestore": "9.0.0",

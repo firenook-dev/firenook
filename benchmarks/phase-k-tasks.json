@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "name": "phase-k-tasks",
+  "frozen": true,
+  "frozenAt": "2026-09-19T16:40:00+08:00",
+  "plan": "support/phase-k-tasks.md",
+  "baseline": {
+    "engineRevision": "2c1ceb3",
+    "publishedPackage": "@fireside-dev/cli@0.1.0-next.8",
+    "publishedEngineRevision": "03000f0cc082c1b69f06c67b6a99a5417c840243",
+    "tasksSurfaceBefore": "one registration route on the Tasks port (crates/suite-runtime/src/auxiliary.rs) that validates and discards the queue config; enqueue, delete and /queueStats answer 501 UNIMPLEMENTED; nothing ever registers a queue"
+  },
+  "toolchain": {
+    "rust": "1.98.0",
+    "node": "24.20.0",
+    "npm": "12.0.2",
+    "firebaseToolsOracle": "15.22.0",
+    "firebaseToolsTasksEmulatorSourceSha256": {
+      "lib/emulator/tasksEmulator.js": "c7fb0fa76f8c2135da5cbcb3c6274868c9816d618f9753f65870fa8b9024bedd",
+      "lib/emulator/taskQueue.js": "1f34b9678dabf608f62d76896f41d305325ede0b1de2d62b98a805e3e92fa55a"
+    },
+    "firebaseFunctionsSdk": "7.2.5",
+    "firebaseAdminSdk": "13.10.0",
+    "javaForOracleOnly": true
+  },
+  "oracles": {
+    "precedence": [
+      "firebase-tools-15.22.0-tasks-emulator (with its Functions emulator and the Admin SDK task-queue client)",
+      "cloud-tasks-api-reference-naming-only"
+    ],
+    "ownership": {
+      "routesStatusesBodies": "firebase-tools-15.22.0 tasksEmulator.js",
+      "dispatchHeadersRetryBackoffDeadline": "firebase-tools-15.22.0 taskQueue.js",
+      "queueRegistrationFromDiscovery": "firebase-tools-15.22.0 functionsEmulator.js addTaskQueueTrigger",
+      "adminSdkWireShape": "firebase-admin 13.10.0 functions-api-client-internal.js under CLOUD_TASKS_EMULATOR_HOST"
+    },
+    "classificationRule": "the official emulator wins; a divergence is allowed only for a documented emulator defect (a corrupting or nondeterministic path) where a safe behaviour is followed instead, named in the fixture README and asserted in the replay"
+  },
+  "inventory": {
+    "routes": [
+      "POST /projects/{project}/locations/{location}/queues/{queue}",
+      "POST /projects/{project}/locations/{location}/queues/{queue}/tasks",
+      "DELETE /projects/{project}/locations/{location}/queues/{queue}/tasks/{id}",
+      "GET /queueStats"
+    ],
+    "dispatch": [
+      "token bucket per queue (maxDispatchesPerSecond, one-second refill, empty at start)",
+      "dispatch slots = maxConcurrentDispatches",
+      "X-CloudTasks-QueueName/TaskName/TaskRetryCount/TaskExecutionCount/TaskETA/TaskPreviousResponse",
+      "caller httpRequest.headers override",
+      "retry ladder with maxAttempts, maxRetrySeconds, maxBackoffSeconds, maxDoublings, minBackoffSeconds",
+      "execution count incremented on non-5xx failures only",
+      "dispatchDeadline abort (default 60 s)",
+      "defaultUri for an empty httpRequest.url"
+    ],
+    "notInScope": [
+      "scheduleTime as a delay (the official emulator ignores it)",
+      "OIDC / Authorization on dispatch (the SDK skips verification under the emulator)",
+      "queue pause/resume/purge, task list/get, the Cloud Tasks v2 API surface",
+      "persistence or export (the official emulator has none)",
+      "an Emulator UI tab (the official UI has none)"
+    ]
+  },
+  "capture": {
+    "requiredBeforeProductImplementation": true,
+    "root": "conformance/fixtures/tasks-v1",
+    "fixtureSchemaVersion": 1,
+    "emulatorPrograms": {
+      "tool": "conformance/src/functions-runtime/capture-emulator.ts (profile tasks, --output)",
+      "plan": "conformance/src/functions-runtime/plan.ts (TASKS_PROGRAMS, tasksSource)",
+      "script": "capture:functions:runtime -- tasks --output=fixtures/tasks-v1/emulator-programs.json",
+      "minimumPrograms": 6,
+      "minimumSteps": 60,
+      "minimumObservations": 39,
+      "minimumDispatchObservations": 29,
+      "normalizedFields": [
+        "origins and hosts",
+        "auto-generated task ids",
+        "X-CloudTasks-TaskETA and scheduledTime",
+        "pids, elapsed times, startedAt",
+        "attempt counter of the dispatch-deadline program (per worker)",
+        "queueStats windows tasksAdded/completedLastMin/failedTasks"
+      ]
+    },
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "SHA256SUMS"
+    ],
+    "requiredCategories": [
+      "tasks-registration",
+      "tasks-dispatch",
+      "tasks-delete",
+      "tasks-admin-sdk"
+    ],
+    "fixturesFrozen": true,
+    "frozenProfileCount": 1,
+    "frozenProgramCount": 6,
+    "frozenStepCount": 62,
+    "frozenFixtureSha256": {
+      "README.md": "63fc73971324a5a455e93854f103ec49b3ec6ebf4724f4ab4410d0985a14b6e3",
+      "emulator-programs.json": "4e5ae760aa850032714436e6499c8f28ae83dbbd27345ed2abc8215a85b275e4"
+    },
+    "fixturesFrozenAt": "2026-09-19T16:40:00+08:00"
+  },
+  "gates": {
+    "emulatorReplay": {
+      "test": "conformance/src/functions-runtime/replay-fireside.ts --profiles tasks --fixture fixtures/tasks-v1/emulator-programs.json (npm run replay:functions:runtime); the same runner and normalization as the capture, against the Fireside suite serving the same synthetic project",
+      "stepsMinimum": 60,
+      "allowedUnexplainedStatusDivergences": 0,
+      "allowedUnexplainedBodyDivergences": 0,
+      "recordedDivergencesMustBeAssertedNotSkipped": true,
+      "timingSteps": "retry, deadline and rate programs replay against the real clock; the corpus records counts and header values, not durations"
+    },
+    "unit": {
+      "crate": "crates/tasks-front",
+      "coverage": "every route status/body from the corpus, the dispatch header set, the retry ladder, the deadline abort, the concurrency and rate limits, discovery from an inventory"
+    },
+    "functionsDelivery": {
+      "existingFixturesUnchanged": [
+        "functions-runtime-v1",
+        "functions-readiness-v1"
+      ]
+    },
+    "regression": {
+      "rustFmtRequired": true,
+      "clippyWarningsAllowed": 0,
+      "rustTestsRequired": true,
+      "typescriptCheckRequired": true
+    }
+  },
+  "acceptance": {
+    "consumerGates": [
+      "consumer integration gate",
+      "consumer extensions gate",
+      "consumer installed-launcher smoke"
+    ],
+    "release": "0.1.0-next.9",
+    "receipts": {}
+  },
+  "decisions": {
+    "queueRegistry": {
+      "policy": "queues are registered in-process from the Functions inventory at readiness and after every reload (replacing the config, never deleting a queue), and the registration route stays available for callers; the official emulator's queue id is the bare function name and its location the region"
+    },
+    "dequeuedTaskDeletion": {
+      "policy": "deleting a task that already left the pending queue answers 200 and decrements the count exactly as the official emulator does (the corpus pins numberOfTasks: -1), but Fireside never re-dispatches or corrupts its queue as the official linked list does when other tasks are pending"
+    },
+    "persistence": {
+      "policy": "in-memory like the official emulator; no export"
+    }
+  },
+  "receipts": {
+    "k1": {
+      "date": "2026-09-19",
+      "fixture": "conformance/fixtures/tasks-v1/emulator-programs.json",
+      "programs": 6,
+      "steps": 62,
+      "observations": 39,
+      "oracle": "firebase-tools 15.22.0 emulators:start --only auth,functions,firestore,storage,pubsub,eventarc,tasks,extensions on the Phase H synthetic project with the tasks primary codebase; firebase-functions 7.2.5, firebase-admin 13.10.0, Java 25 for the Firestore emulator",
+      "readinessMilliseconds": 34397
+    }
+  }
+}
