@@ -103,6 +103,51 @@ async fn actual_http_reports_cover_reload_evaluation_and_explicit_unavailability
 }
 
 #[tokio::test]
+async fn project_report_covers_the_default_database_unless_another_is_named() {
+    let rules = RulesRuntime::with_request_history(RequestHistory::default());
+    rules.install_default(SOURCE).unwrap();
+    let other_source = SOURCE.replace("== 'get'", "!= 'get'");
+    rules
+        .install_database(
+            &fireside_core_store::DatabaseName::new(PROJECT, "other").unwrap(),
+            &other_source,
+        )
+        .unwrap();
+    let app = application(rules);
+    for database in ["(default)", "other"] {
+        let read = app
+            .clone()
+            .oneshot(
+                Request::get(format!(
+                    "/v1/projects/{PROJECT}/databases/{database}/documents/items/one"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            read.status(),
+            if database == "other" {
+                StatusCode::FORBIDDEN
+            } else {
+                StatusCode::NOT_FOUND
+            }
+        );
+    }
+    let default = body(get(&app, "ruleCoverage").await).await;
+    assert_eq!(default["rules"]["files"][0]["content"], SOURCE);
+    assert_eq!(default["report"][0]["values"][0]["count"], 1);
+    let other = body(get(&app, "ruleCoverage?database=other").await).await;
+    assert_eq!(other["rules"]["files"][0]["content"], other_source);
+    assert_eq!(other["report"][0]["values"][0]["count"], 1);
+    assert_eq!(
+        get(&app, "ruleCoverage?database=a/b").await.status(),
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
 async fn report_budget_survives_handler_return_body_collection_and_frame_clones() {
     let rules = RulesRuntime::with_request_history(RequestHistory::default());
     rules.install_default(SOURCE).unwrap();

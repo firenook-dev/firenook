@@ -25,8 +25,8 @@ use fireside_rest_front::{
 };
 use fireside_rules_runtime::RulesRuntime;
 use fireside_suite_runtime::{
-    ServiceSelection, StorageBucketConfig, StorageRulesConfig, SuiteConfig, SuitePorts,
-    run as run_suite,
+    DEFAULT_FIRESTORE_DATABASE, FirestoreDatabaseConfig, ServiceSelection, StorageBucketConfig,
+    StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
 };
 use fireside_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use serde::Deserialize;
@@ -582,34 +582,12 @@ enum FirebaseFirestoreSection {
 }
 
 impl FirebaseFirestoreSection {
-    /// The entry for `(default)` (an entry without `database` counts), and
-    /// the other named databases.
-    fn split(
-        &self,
-    ) -> (
-        Option<&FirebaseFirestoreConfig>,
-        Vec<&FirebaseFirestoreConfig>,
-    ) {
+    /// Every configured database in `firebase.json` order; the single form
+    /// and an entry without `database` describe `(default)`.
+    fn entries(&self) -> &[FirebaseFirestoreConfig] {
         match self {
-            Self::Single(config) => (Some(config), Vec::new()),
-            Self::Databases(configs) => {
-                let default = configs.iter().find(|config| {
-                    config
-                        .database
-                        .as_deref()
-                        .is_none_or(|database| database == "(default)")
-                });
-                let others = configs
-                    .iter()
-                    .filter(|config| {
-                        config
-                            .database
-                            .as_deref()
-                            .is_some_and(|database| database != "(default)")
-                    })
-                    .collect();
-                (default, others)
-            }
+            Self::Single(config) => std::slice::from_ref(config),
+            Self::Databases(configs) => configs,
         }
     }
 }
@@ -757,7 +735,8 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         &storage_overrides,
         services.storage,
     )?;
-    let firestore = default_firestore_config(raw_config.firestore.as_ref());
+    let firestore_databases =
+        resolve_firestore_databases(&config_dir, raw_config.firestore.as_ref())?;
     let ports = resolve_suite_ports(arguments, &raw_config.emulators);
     let ui_enabled = !arguments.no_ui
         && raw_config
@@ -801,12 +780,7 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
         firestore_in_memory: arguments.firestore_memory,
         durability: arguments.durability.disk(),
         diagnostics: !arguments.no_diagnostics,
-        firestore_rules: firestore
-            .and_then(|config| config.rules.as_ref())
-            .map(|path| project_path(&config_dir, path)),
-        firestore_indexes: firestore
-            .and_then(|config| config.indexes.as_ref())
-            .map(|path| project_path(&config_dir, path)),
+        firestore_databases,
         storage_rules,
         default_bucket,
         import: arguments.import.as_deref().map(absolute_path).transpose()?,
@@ -820,29 +794,49 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
     })
 }
 
-/// The `(default)` database's rules/indexes entry; other named databases are
-/// announced.
-fn default_firestore_config(
+/// Every `firestore` entry of `firebase.json` with its rules and indexes
+/// paths resolved against the config directory. The official emulator
+/// answers `Cloud Firestore Emulator does not support multiple databases
+/// yet.` to an array with more than one entry and loads no rules at all;
+/// Fireside serves every database with its own rules. A database configured
+/// twice is a configuration error; an array without a `(default)` entry is
+/// allowed, as production allows a project with only named databases.
+fn resolve_firestore_databases(
+    config_dir: &std::path::Path,
     section: Option<&FirebaseFirestoreSection>,
-) -> Option<&FirebaseFirestoreConfig> {
-    let (firestore, other_databases) =
-        section.map_or((None, Vec::new()), FirebaseFirestoreSection::split);
-    if !other_databases.is_empty() {
-        // The official emulator answers `Cloud Firestore Emulator does not
-        // support multiple databases yet.` and loads no rules at all;
-        // Fireside serves every database and applies the `(default)` entry's
-        // rules and indexes to it until per-database rules land.
-        eprintln!(
-            "fireside firestore: firebase.json configures {} additional Firestore database(s) ({}); the (default) entry's rules and indexes govern every database",
-            other_databases.len(),
-            other_databases
-                .iter()
-                .filter_map(|config| config.database.as_deref())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+) -> Result<Vec<FirestoreDatabaseConfig>, String> {
+    let mut databases = Vec::new();
+    for entry in section.map_or(&[][..], FirebaseFirestoreSection::entries) {
+        let database_id = entry
+            .database
+            .clone()
+            .unwrap_or_else(|| DEFAULT_FIRESTORE_DATABASE.to_owned());
+        if database_id.is_empty() || database_id.contains('/') {
+            return Err(format!(
+                "firebase.json names an invalid Firestore database: {database_id:?}"
+            ));
+        }
+        if databases
+            .iter()
+            .any(|known: &FirestoreDatabaseConfig| known.database_id == database_id)
+        {
+            return Err(format!(
+                "firebase.json configures Firestore database \"{database_id}\" more than once"
+            ));
+        }
+        databases.push(FirestoreDatabaseConfig {
+            database_id,
+            rules: entry
+                .rules
+                .as_ref()
+                .map(|path| project_path(config_dir, path)),
+            indexes: entry
+                .indexes
+                .as_ref()
+                .map(|path| project_path(config_dir, path)),
+        });
     }
-    firestore
+    Ok(databases)
 }
 
 fn resolve_storage_rules(
@@ -1727,7 +1721,9 @@ mod tests {
         };
         assert!(!arguments.diagnostics);
         assert_eq!(
-            load_rules(None, false).unwrap().coverage_json("demo-test"),
+            load_rules(None, false)
+                .unwrap()
+                .coverage_json(&DatabaseName::new("demo-test", "(default)").unwrap()),
             Err(fireside_rules_runtime::coverage::CoverageError::Disabled)
         );
         let cli = Cli::try_parse_from(["fireside", "firestore", "--diagnostics"]).unwrap();
@@ -1736,7 +1732,9 @@ mod tests {
         };
         assert!(arguments.diagnostics);
         assert_eq!(
-            load_rules(None, true).unwrap().coverage_json("demo-test"),
+            load_rules(None, true)
+                .unwrap()
+                .coverage_json(&DatabaseName::new("demo-test", "(default)").unwrap()),
             Err(fireside_rules_runtime::coverage::CoverageError::NoRules)
         );
     }
@@ -2204,6 +2202,89 @@ mod tests {
             targets.storage,
             Some(FirebaseStorageSection::Targets(ref entries)) if entries.len() == 1
         ));
+    }
+
+    #[test]
+    fn firestore_section_resolves_every_database_with_its_own_rules_and_indexes() {
+        let config_dir = std::path::Path::new("/project");
+        let single: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" } }"#,
+        )
+        .expect("single database config");
+        assert_eq!(
+            resolve_firestore_databases(config_dir, single.firestore.as_ref())
+                .expect("single database"),
+            vec![FirestoreDatabaseConfig::default_database(
+                Some(PathBuf::from("/project/firestore.rules")),
+                Some(PathBuf::from("/project/firestore.indexes.json")),
+            )]
+        );
+        assert!(
+            resolve_firestore_databases(config_dir, None)
+                .expect("no section")
+                .is_empty()
+        );
+
+        let databases: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "firestore": [
+                { "rules": "firestore.rules" },
+                { "database": "other", "rules": "other.rules", "indexes": "other.indexes.json" },
+                { "database": "bare" }
+            ] }"#,
+        )
+        .expect("database list config");
+        assert_eq!(
+            resolve_firestore_databases(config_dir, databases.firestore.as_ref())
+                .expect("database list"),
+            vec![
+                FirestoreDatabaseConfig::default_database(
+                    Some(PathBuf::from("/project/firestore.rules")),
+                    None,
+                ),
+                FirestoreDatabaseConfig {
+                    database_id: "other".to_owned(),
+                    rules: Some(PathBuf::from("/project/other.rules")),
+                    indexes: Some(PathBuf::from("/project/other.indexes.json")),
+                },
+                FirestoreDatabaseConfig {
+                    database_id: "bare".to_owned(),
+                    rules: None,
+                    indexes: None,
+                },
+            ]
+        );
+
+        // Only named databases is allowed; the same database twice is not.
+        let named_only: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "firestore": [{ "database": "other", "rules": "other.rules" }] }"#,
+        )
+        .expect("named-only config");
+        assert_eq!(
+            resolve_firestore_databases(config_dir, named_only.firestore.as_ref())
+                .expect("named databases only")
+                .len(),
+            1
+        );
+        let repeated: FirebaseProjectConfig = serde_json::from_str(
+            r#"{ "firestore": [
+                { "rules": "firestore.rules" },
+                { "database": "(default)", "rules": "again.rules" }
+            ] }"#,
+        )
+        .expect("repeated config");
+        assert_eq!(
+            resolve_firestore_databases(config_dir, repeated.firestore.as_ref())
+                .expect_err("repeated default"),
+            "firebase.json configures Firestore database \"(default)\" more than once"
+        );
+        let invalid: FirebaseProjectConfig =
+            serde_json::from_str(r#"{ "firestore": [{ "database": "a/b" }] }"#)
+                .expect("invalid config");
+        assert!(
+            resolve_firestore_databases(config_dir, invalid.firestore.as_ref())
+                .expect_err("invalid database id")
+                .contains("invalid Firestore database")
+        );
     }
 
     #[test]

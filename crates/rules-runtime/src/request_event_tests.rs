@@ -1,6 +1,6 @@
 use super::*;
 use crate::{Authorization, RulesRuntime, SnapshotAccess};
-use fireside_core_store::{Store, StoreOptions};
+use fireside_core_store::{DatabaseName, Store, StoreOptions};
 use serde_json::{Value as Json, json};
 
 const PROJECT: &str = "demo-fireside-request-values";
@@ -9,6 +9,9 @@ const ALLOW: &str = "rules_version = '2'; service cloud.firestore { match /datab
 
 fn request(operation: RequestOperation) -> EvaluationRequest {
     EvaluationRequest::new(operation, PATH, Timestamp::new(1_577_934_245, 123_456_000))
+}
+fn database() -> DatabaseName {
+    DatabaseName::new(PROJECT, "(default)").unwrap()
 }
 fn access() -> SnapshotAccess {
     SnapshotAccess::current(Store::new(StoreOptions::default()).snapshot(), PROJECT)
@@ -108,10 +111,10 @@ async fn real_runtime_emits_allow_deny_error_once_and_preserves_all_accounting()
         traced.install_project(PROJECT, &source).unwrap();
         plain.install_project(PROJECT, &source).unwrap();
         let req = request(RequestOperation::Get);
-        let actual = traced.evaluate(PROJECT, &Authorization::Client(None), &req, &access());
+        let actual = traced.evaluate(&database(), &Authorization::Client(None), &req, &access());
         assert_eq!(
             actual,
-            plain.evaluate(PROJECT, &Authorization::Client(None), &req, &access())
+            plain.evaluate(&database(), &Authorization::Client(None), &req, &access())
         );
         let events = next(&history).await;
         let event = events.as_array().unwrap().last().unwrap();
@@ -136,18 +139,18 @@ async fn owner_and_open_mode_do_not_fabricate_rule_evaluations() {
     let req = request(RequestOperation::Get);
     assert!(
         runtime
-            .evaluate(PROJECT, &Authorization::Client(None), &req, &access())
+            .evaluate(&database(), &Authorization::Client(None), &req, &access())
             .allowed
     );
     runtime.install_default(ALLOW).unwrap();
     assert!(
         runtime
-            .evaluate(PROJECT, &Authorization::Owner, &req, &access())
+            .evaluate(&database(), &Authorization::Owner, &req, &access())
             .allowed
     );
     assert!(
         runtime
-            .evaluate_atomic(PROJECT, &Authorization::Owner, &[req], &access())
+            .evaluate_atomic(&database(), &Authorization::Owner, &[req], &access())
             .allowed
     );
     assert_eq!(next(&history).await, json!([]));
@@ -170,10 +173,10 @@ async fn atomic_batch_is_evaluated_once_and_events_keep_operation_order() {
     ];
     let auth = Authorization::Client(None);
     let access = access();
-    let result = traced.evaluate_atomic(PROJECT, &auth, &requests, &access);
+    let result = traced.evaluate_atomic(&database(), &auth, &requests, &access);
     assert_eq!(
         result,
-        plain.evaluate_atomic(PROJECT, &auth, &requests, &access)
+        plain.evaluate_atomic(&database(), &auth, &requests, &access)
     );
     assert!(result.allowed);
     assert_eq!(result.document_accesses, 1);
@@ -187,7 +190,11 @@ async fn atomic_batch_is_evaluated_once_and_events_keep_operation_order() {
             json!({"boolValue":true})
         );
     }
-    assert!(traced.evaluate_atomic(PROJECT, &auth, &[], &access).allowed);
+    assert!(
+        traced
+            .evaluate_atomic(&database(), &auth, &[], &access)
+            .allowed
+    );
     assert_eq!(next(&history).await.as_array().unwrap().len(), 2);
 }
 
@@ -204,7 +211,7 @@ async fn overflow_does_not_change_the_verdict_or_leave_a_partial_event() {
             Value::String("x".repeat(crate::request_history::MAXIMUM_BYTES)),
         )]),
     ));
-    let result = runtime.evaluate(PROJECT, &Authorization::Client(None), &req, &access());
+    let result = runtime.evaluate(&database(), &Authorization::Client(None), &req, &access());
     assert!(result.allowed);
     assert_eq!(next(&history).await, json!([]));
     assert_eq!(history.maintain().unwrap().omitted_events, 1);
@@ -220,7 +227,7 @@ async fn truncated_allow_trace_is_reported_as_an_omission_not_a_complete_event()
     );
     runtime.install_default(&source).unwrap();
     let result = runtime.evaluate(
-        PROJECT,
+        &database(),
         &Authorization::Client(None),
         &request(RequestOperation::Get),
         &access(),
@@ -240,9 +247,17 @@ async fn parsed_auth_is_reported_without_the_original_bearer_and_reload_is_snaps
         uid: Some("synthetic-reader".into()),
         token: BTreeMap::from([("role".into(), Value::String("reader".into()))]),
     }));
-    assert!(runtime.evaluate(PROJECT, &auth, &req, &access()).allowed);
+    assert!(
+        runtime
+            .evaluate(&database(), &auth, &req, &access())
+            .allowed
+    );
     assert!(runtime.install_project(PROJECT, "broken").is_err());
-    assert!(runtime.evaluate(PROJECT, &auth, &req, &access()).allowed);
+    assert!(
+        runtime
+            .evaluate(&database(), &auth, &req, &access())
+            .allowed
+    );
     let events = next(&history).await;
     assert_eq!(events[0]["rulesReleaseKey"], events[1]["rulesReleaseKey"]);
     assert_eq!(
@@ -283,7 +298,7 @@ async fn query_domains_and_options_match_the_captured_root_nested_and_group_cont
         }
         assert!(
             runtime
-                .evaluate(PROJECT, &Authorization::Client(None), &req, &access())
+                .evaluate(&database(), &Authorization::Client(None), &req, &access())
                 .allowed
         );
         let events = next(&history).await;
@@ -303,7 +318,7 @@ async fn query_domains_and_options_match_the_captured_root_nested_and_group_cont
 #[tokio::test]
 async fn write_preview_preserves_captured_masks_transforms_and_escaped_field_names() {
     use fireside_core_store::{
-        DatabaseName, DocumentKey, FieldPath, FieldTransform, Precondition, TransformOperation,
+        DocumentKey, FieldPath, FieldTransform, Precondition, TransformOperation,
     };
 
     let fixture = metadata_fixture();
@@ -355,7 +370,7 @@ async fn write_preview_preserves_captured_masks_transforms_and_escaped_field_nam
         }];
         let result = runtime
             .evaluate_writes(
-                PROJECT,
+                &database(),
                 &Authorization::Client(None),
                 &writes,
                 &snapshot,
@@ -366,7 +381,7 @@ async fn write_preview_preserves_captured_masks_transforms_and_escaped_field_nam
             result,
             plain
                 .evaluate_writes(
-                    PROJECT,
+                    &database(),
                     &Authorization::Client(None),
                     &writes,
                     &snapshot,
@@ -404,7 +419,7 @@ async fn read_batches_are_not_mislabeled_as_read_write_transactions() {
     {
         let auth = Authorization::Client(None);
         let result = runtime.evaluate_atomic_with_read_transaction(
-            PROJECT,
+            &database(),
             &auth,
             &requests,
             &access(),
@@ -412,7 +427,7 @@ async fn read_batches_are_not_mislabeled_as_read_write_transactions() {
         );
         assert_eq!(
             result,
-            plain.evaluate_atomic(PROJECT, &auth, &requests, &access())
+            plain.evaluate_atomic(&database(), &auth, &requests, &access())
         );
         let events = next(&history).await;
         assert_eq!(
@@ -425,7 +440,7 @@ async fn read_batches_are_not_mislabeled_as_read_write_transactions() {
 #[test]
 fn replacement_transform_and_empty_mask_metadata_match_the_additional_live_capture() {
     use fireside_core_store::{
-        DatabaseName, DocumentKey, FieldPath, FieldTransform, Precondition, TransformOperation,
+        DocumentKey, FieldPath, FieldTransform, Precondition, TransformOperation,
     };
 
     let fixture = metadata_fixture();
@@ -474,7 +489,7 @@ async fn missing_query_domain_omits_diagnostics_without_changing_authorization()
     assert!(
         runtime
             .evaluate(
-                PROJECT,
+                &database(),
                 &Authorization::Client(None),
                 &request(RequestOperation::List),
                 &access()

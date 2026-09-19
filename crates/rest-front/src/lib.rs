@@ -515,7 +515,7 @@ async fn patch_document(
     let verdict = state
         .rules
         .evaluate_writes(
-            &project,
+            key.database(),
             &authorization,
             std::slice::from_ref(&write),
             &snapshot,
@@ -545,6 +545,7 @@ async fn delete_document(
     let project = path.project.clone();
     let key = document_key(path)?;
     let authorization = request_authorization(&headers, &project)?;
+    let database = key.database().clone();
     let write = Write::Delete {
         key,
         precondition: decode_precondition(&parameters)?,
@@ -554,7 +555,7 @@ async fn delete_document(
     let verdict = state
         .rules
         .evaluate_writes(
-            &project,
+            &database,
             &authorization,
             std::slice::from_ref(&write),
             &snapshot,
@@ -838,7 +839,7 @@ async fn commit(
     let verdict = state
         .rules
         .evaluate_writes(
-            &project,
+            &database,
             &authorization,
             &writes,
             &snapshot,
@@ -1043,7 +1044,7 @@ fn authorize_query(
         query,
     );
     require_allowed(state.rules.evaluate(
-        database.project_id(),
+        database,
         authorization,
         &request,
         &SnapshotAccess::current(snapshot.clone(), database.project_id()),
@@ -2201,12 +2202,11 @@ mod tests {
     #[tokio::test]
     async fn security_rules_hot_reload_is_atomic() {
         let runtime = RulesRuntime::default();
+        let database = DatabaseName::new("demo-hot-reload", "(default)").expect("database");
         runtime
             .install_project("demo-hot-reload", &test_rules("true"))
             .expect("initial rules");
-        let previous = runtime
-            .rules_for("demo-hot-reload")
-            .expect("initial ruleset");
+        let previous = runtime.rules_for(&database).expect("initial ruleset");
         let application = router_with_query_policy_memory_and_rules(
             Store::default(),
             QueryPolicy::default(),
@@ -2226,9 +2226,7 @@ mod tests {
             .await
             .expect("valid reload response");
         assert_eq!(valid.status(), StatusCode::OK);
-        let installed = runtime
-            .rules_for("demo-hot-reload")
-            .expect("replacement ruleset");
+        let installed = runtime.rules_for(&database).expect("replacement ruleset");
         assert!(!Arc::ptr_eq(&previous, &installed));
 
         let invalid = application
@@ -2244,9 +2242,129 @@ mod tests {
         assert!(Arc::ptr_eq(
             &installed,
             &runtime
-                .rules_for("demo-hot-reload")
+                .rules_for(&database)
                 .expect("previous rules retained")
         ));
+    }
+
+    const MULTI_DATABASE_PROJECT: &str = "demo-multi-db";
+
+    /// One project with `items/one` in `(default)`, `other` and `third`;
+    /// `(default)` denies everything and `other` allows everything through
+    /// their own rulesets, `third` has none.
+    fn multi_database_application() -> (Router, RulesRuntime) {
+        let store = Store::default();
+        let writes = ["(default)", "other", "third"]
+            .into_iter()
+            .map(|id| Write::Create {
+                key: DocumentKey::new(
+                    DatabaseName::new(MULTI_DATABASE_PROJECT, id).expect("database"),
+                    "items/one",
+                )
+                .expect("key"),
+                fields: Fields::from([("db".to_owned(), Value::String(id.into()))]),
+            })
+            .collect::<Vec<_>>();
+        store.commit(&writes).expect("seed");
+        let runtime = RulesRuntime::default();
+        for (id, condition) in [("(default)", "false"), ("other", "true")] {
+            runtime
+                .install_database(
+                    &DatabaseName::new(MULTI_DATABASE_PROJECT, id).expect("database"),
+                    &test_rules(condition),
+                )
+                .expect("database rules");
+        }
+        let application = router_with_query_policy_memory_and_rules(
+            store,
+            QueryPolicy::default(),
+            None,
+            runtime.clone(),
+        );
+        (application, runtime)
+    }
+
+    /// Status of `GET items/one` (or `PATCH` with a body) on each database of
+    /// the multi-database project, in `(default)`, `other`, `third` order.
+    async fn multi_database_statuses(application: &Router, method: Method) -> Vec<StatusCode> {
+        let mut statuses = Vec::new();
+        for id in ["(default)", "other", "third"] {
+            let uri =
+                format!("/v1/projects/{MULTI_DATABASE_PROJECT}/databases/{id}/documents/items/one");
+            let request = if method == Method::PATCH {
+                Request::patch(uri)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"fields":{"touched":{"booleanValue":true}}}).to_string(),
+                    ))
+            } else {
+                Request::get(uri).body(Body::empty())
+            }
+            .expect("request");
+            statuses.push(response_status(application, request).await);
+        }
+        statuses
+    }
+
+    /// Each database evaluates its own ruleset: the ruleset installed for
+    /// `other` governs `/databases/other/documents` while `(default)` keeps
+    /// its own, and a database without one is open, as without any rules.
+    #[tokio::test]
+    async fn security_rules_are_resolved_per_database() {
+        let (application, _) = multi_database_application();
+        assert_eq!(
+            multi_database_statuses(&application, Method::GET).await,
+            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::OK]
+        );
+        assert_eq!(
+            multi_database_statuses(&application, Method::PATCH).await,
+            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::OK]
+        );
+    }
+
+    /// Database-specific rules beat the project-wide hot reload, which beats
+    /// the startup default: the reload governs only `third`, and the default
+    /// only a project without rulesets of its own.
+    #[tokio::test]
+    async fn project_wide_hot_reload_governs_only_databases_without_their_own_rules() {
+        let (application, runtime) = multi_database_application();
+        let reload = application
+            .clone()
+            .oneshot(
+                Request::put(format!(
+                    "/emulator/v1/projects/{MULTI_DATABASE_PROJECT}:securityRules"
+                ))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"source": test_rules("false")}).to_string(),
+                ))
+                .expect("reload request"),
+            )
+            .await
+            .expect("reload response");
+        assert_eq!(reload.status(), StatusCode::OK);
+        assert_eq!(
+            multi_database_statuses(&application, Method::GET).await,
+            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::FORBIDDEN]
+        );
+
+        runtime
+            .install_default(&test_rules("false"))
+            .expect("default rules");
+        assert_eq!(
+            multi_database_statuses(&application, Method::GET).await,
+            [StatusCode::FORBIDDEN, StatusCode::OK, StatusCode::FORBIDDEN]
+        );
+        assert_eq!(
+            response_status(
+                &application,
+                Request::get("/v1/projects/demo-elsewhere/databases/(default)/documents/items/one")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[tokio::test]

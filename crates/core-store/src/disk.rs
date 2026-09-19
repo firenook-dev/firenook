@@ -451,6 +451,62 @@ impl DiskSnapshot {
             .map(|(key, document)| (key, document.into_document()))
             .collect()
     }
+
+    /// Databases of `project` with at least one visible document. Stored keys
+    /// are `[project][database][path]` with length-prefixed identifiers, so
+    /// each stored database costs one seek: the scan jumps to the successor
+    /// of the database prefix it just found. The overlay can add a database
+    /// (a restored document) or empty one (a pending deletion), so every
+    /// candidate is confirmed against the merged view.
+    pub(crate) fn databases(&self, project: &str) -> Vec<DatabaseName> {
+        let mut candidates = self
+            .overlay
+            .iter()
+            .filter(|(key, document)| document.is_some() && key.database().project_id() == project)
+            .map(|(key, _)| key.database().clone())
+            .collect::<BTreeSet<_>>();
+        if let Ok(table) = self.transaction.open_table(DOCUMENTS) {
+            candidates.extend(stored_databases(&table, project));
+        }
+        candidates
+            .into_iter()
+            .filter(|database| self.iter_documents(database).next().is_some())
+            .collect()
+    }
+}
+
+fn stored_databases(
+    table: &ReadOnlyTable<&'static [u8], &'static [u8]>,
+    project: &str,
+) -> Vec<DatabaseName> {
+    let mut databases = Vec::new();
+    let Ok(mut lower) = project_prefix(project) else {
+        return databases;
+    };
+    let Some(upper) = prefix_successor(&lower) else {
+        return databases;
+    };
+    while lower < upper {
+        let Ok(mut range) = table.range::<&[u8]>(lower.as_slice()..upper.as_slice()) else {
+            break;
+        };
+        let Some(Ok((encoded, _))) = range.next() else {
+            break;
+        };
+        let Ok(key) = decode_document_key(encoded.value()) else {
+            break;
+        };
+        let database = key.database().clone();
+        let Some(next) = database_prefix(&database)
+            .ok()
+            .and_then(|prefix| prefix_successor(&prefix))
+        else {
+            break;
+        };
+        databases.push(database);
+        lower = next;
+    }
+    databases
 }
 
 pub(crate) struct DiskDocumentIterator {
@@ -1282,6 +1338,12 @@ fn decode_document_key(bytes: &[u8]) -> Result<DocumentKey, DiskError> {
     let database = DatabaseName::new(project_id, database_id)
         .map_err(|error| DiskError::Corrupt(error.to_string()))?;
     DocumentKey::new(database, path).map_err(|error| DiskError::Corrupt(error.to_string()))
+}
+
+fn project_prefix(project: &str) -> Result<Vec<u8>, DiskError> {
+    let mut encoded = Vec::with_capacity(4_usize.saturating_add(project.len()));
+    push_length_prefixed(&mut encoded, project)?;
+    Ok(encoded)
 }
 
 fn database_prefix(database: &DatabaseName) -> Result<Vec<u8>, DiskError> {

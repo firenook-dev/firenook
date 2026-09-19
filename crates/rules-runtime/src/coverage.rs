@@ -13,13 +13,14 @@ use request_event::coverage_value::{Observed, Position};
 use serde::Serialize;
 use serde_json::value::RawValue;
 
-/// Maximum charged coverage retention across every project in one runtime.
+/// Maximum charged coverage retention across every database in one runtime.
 pub const MAXIMUM_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum size of one complete typed value; oversize values are omitted visibly.
 pub const MAXIMUM_VALUE_BYTES: usize = 64 * 1024;
 /// Maximum distinct results retained for one expression.
 pub const MAXIMUM_VALUES_PER_EXPRESSION: usize = 128;
-/// Concurrent retained project histories; oldest idle history is evicted.
+/// Concurrent retained histories, one per database; the oldest idle history
+/// is evicted. The report keeps its `evictedProjects` field name.
 pub const MAXIMUM_PROJECTS: usize = 4;
 /// Idle retention, matching the diagnostic history's ten-minute window.
 pub const MAXIMUM_IDLE_AGE: Duration = Duration::from_secs(600);
@@ -31,7 +32,7 @@ pub const MAXIMUM_REPORT_BYTES: usize = 32 * 1024 * 1024;
 pub enum CoverageError {
     /// Diagnostic recording is disabled.
     Disabled,
-    /// No policy source is installed for this project.
+    /// No policy source is installed for this database.
     NoRules,
     /// Another diagnostic request owns the nonblocking state lock.
     Busy,
@@ -52,7 +53,8 @@ struct State {
     evicted_projects: usize,
 }
 struct Entry {
-    project: String,
+    /// The database this history belongs to (`projects/{p}/databases/{d}`).
+    scope: String,
     rules: Arc<Ruleset>,
     tree: Vec<CoverageNode>,
     records: BTreeMap<ExpressionKey, Record>,
@@ -75,12 +77,12 @@ impl State {
         self.entries.iter().map(|e| e.charged_bytes).sum()
     }
 
-    fn ensure(&mut self, project: &str, rules: &Arc<Ruleset>) -> Result<usize, CoverageError> {
+    fn ensure(&mut self, scope: &str, rules: &Arc<Ruleset>) -> Result<usize, CoverageError> {
         let before = self.entries.len();
         self.entries
             .retain(|entry| entry.updated.elapsed() <= MAXIMUM_IDLE_AGE);
         self.evicted_projects += before - self.entries.len();
-        if let Some(index) = self.entries.iter().position(|e| e.project == project) {
+        if let Some(index) = self.entries.iter().position(|e| e.scope == scope) {
             if Arc::ptr_eq(&self.entries[index].rules, rules) {
                 self.entries[index].updated = Instant::now();
                 return Ok(index);
@@ -106,7 +108,7 @@ impl State {
             .expressions
             .saturating_mul(512)
             .saturating_add(rules.source().len())
-            .saturating_add(project.len())
+            .saturating_add(scope.len())
             .saturating_add(1024);
         if charge > MAXIMUM_BYTES.saturating_sub(self.charged_bytes()) {
             return Err(CoverageError::Capacity);
@@ -115,7 +117,7 @@ impl State {
         let mut records = BTreeMap::new();
         index_nodes(&tree, &mut records);
         self.entries.push_back(Entry {
-            project: project.into(),
+            scope: scope.into(),
             rules: rules.clone(),
             tree,
             records,
@@ -143,7 +145,7 @@ fn index_nodes(nodes: &[CoverageNode], records: &mut BTreeMap<ExpressionKey, Rec
 impl CoverageStore {
     pub(crate) fn session<'a>(
         &'a self,
-        project: &str,
+        scope: &str,
         rules: &Arc<Ruleset>,
         context: AtomicContext<'a>,
     ) -> Option<Session<'a>> {
@@ -151,7 +153,7 @@ impl CoverageStore {
             self.omitted_operations.fetch_add(1, Ordering::Relaxed);
             return None;
         };
-        let Ok(index) = state.ensure(project, rules) else {
+        let Ok(index) = state.ensure(scope, rules) else {
             self.omitted_operations.fetch_add(1, Ordering::Relaxed);
             return None;
         };
@@ -166,11 +168,11 @@ impl CoverageStore {
 
     pub(crate) fn report(
         &self,
-        project: &str,
+        scope: &str,
         rules: &Arc<Ruleset>,
     ) -> Result<Vec<u8>, CoverageError> {
         let mut state = self.state.try_lock().map_err(|_| CoverageError::Busy)?;
-        let index = state.ensure(project, rules)?;
+        let index = state.ensure(scope, rules)?;
         let entry = &state.entries[index];
         let mut writer = CappedWriter::new(MAXIMUM_REPORT_BYTES);
         serde_json::to_writer(

@@ -33,7 +33,23 @@ pub use fireside_rules_engine::{
 /// Owner/admin bypass token used by the emulator control plane and backend SDKs.
 pub const OWNER_BEARER_TOKEN: &str = "Bearer owner";
 
-/// Atomically replaceable rulesets, independently scoped by project.
+/// Atomically replaceable rulesets, resolved per database.
+///
+/// Production Firestore deploys Security Rules per database, so a lookup for
+/// `projects/{project}/databases/{database}` resolves, in order:
+///
+/// 1. the ruleset installed for that exact database
+///    ([`install_database`](Self::install_database), the suite's
+///    `firebase.json` entries);
+/// 2. the project-wide ruleset ([`install_project`](Self::install_project)),
+///    which the emulator's `PUT /emulator/v1/projects/{project}:securityRules`
+///    hot-reload route installs — that route stays project-wide, as the
+///    official route is;
+/// 3. the startup default ([`install_default`](Self::install_default)).
+///
+/// A database-specific ruleset therefore beats a project-wide one, which
+/// beats the default. No ruleset at any level is the emulator's explicit
+/// open-with-warning mode.
 #[derive(Clone, Default)]
 pub struct RulesRuntime {
     state: Arc<RwLock<RuntimeState>>,
@@ -46,6 +62,7 @@ pub struct RulesRuntime {
 struct RuntimeState {
     default: Option<Arc<InstalledRules>>,
     projects: BTreeMap<String, Arc<InstalledRules>>,
+    databases: BTreeMap<DatabaseName, Arc<InstalledRules>>,
 }
 
 struct InstalledRules {
@@ -83,16 +100,17 @@ impl RulesRuntime {
             .map(request_event::RequestRecorder::history)
     }
 
-    /// Compiles and installs the startup ruleset used by projects without a
-    /// later project-specific hot reload.
+    /// Compiles and installs the startup ruleset used by databases without a
+    /// ruleset of their own or a later project-wide hot reload.
     pub fn install_default(&self, source: &str) -> Result<(), LoadError> {
         let rules = InstalledRules::compile(source)?;
         write_lock(&self.state).default = Some(rules);
         Ok(())
     }
 
-    /// Compiles then atomically replaces one project's active ruleset. A
-    /// failed compilation leaves the previous ruleset untouched.
+    /// Compiles then atomically replaces one project's project-wide ruleset,
+    /// the hot-reload route's level. A failed compilation leaves the previous
+    /// ruleset untouched.
     pub fn install_project(&self, project: &str, source: &str) -> Result<(), LoadError> {
         let rules = InstalledRules::compile(source)?;
         write_lock(&self.state)
@@ -101,37 +119,52 @@ impl RulesRuntime {
         Ok(())
     }
 
-    /// Returns the immutable ruleset active for a project, or `None` for the
+    /// Compiles then atomically replaces the ruleset of one database, which
+    /// takes precedence over the project-wide and default rulesets. A failed
+    /// compilation leaves the previous ruleset untouched.
+    pub fn install_database(&self, database: &DatabaseName, source: &str) -> Result<(), LoadError> {
+        let rules = InstalledRules::compile(source)?;
+        write_lock(&self.state)
+            .databases
+            .insert(database.clone(), rules);
+        Ok(())
+    }
+
+    /// Returns the immutable ruleset active for a database, or `None` for the
     /// emulator's explicit open-with-warning mode.
     #[must_use]
-    pub fn rules_for(&self, project: &str) -> Option<Arc<Ruleset>> {
-        self.installed_for(project)
+    pub fn rules_for(&self, database: &DatabaseName) -> Option<Arc<Ruleset>> {
+        self.installed_for(database)
             .map(|installed| installed.rules.clone())
     }
 
-    /// Serialize the active project's bounded coverage without evaluating rules.
+    /// Serialize one database's bounded coverage without evaluating rules.
     /// Disabled, missing-source and contended diagnostics are explicit failures.
     ///
     /// # Errors
     /// Returns the relevant diagnostic error rather than a healthy empty report.
-    pub fn coverage_json(&self, project: &str) -> Result<Vec<u8>, coverage::CoverageError> {
+    pub fn coverage_json(
+        &self,
+        database: &DatabaseName,
+    ) -> Result<Vec<u8>, coverage::CoverageError> {
         let coverage = self
             .coverage
             .as_ref()
             .ok_or(coverage::CoverageError::Disabled)?;
         let installed = self
-            .installed_for(project)
+            .installed_for(database)
             .ok_or(coverage::CoverageError::NoRules)?;
-        coverage.report(project, &installed.rules)
+        coverage.report(&database.to_string(), &installed.rules)
     }
 
-    fn installed_for(&self, project: &str) -> Option<Arc<InstalledRules>> {
+    fn installed_for(&self, database: &DatabaseName) -> Option<Arc<InstalledRules>> {
         let state = read_lock(&self.state);
         state
-            .projects
-            .get(project)
+            .databases
+            .get(database)
+            .or_else(|| state.projects.get(database.project_id()))
+            .or(state.default.as_ref())
             .cloned()
-            .or_else(|| state.default.clone())
     }
 
     /// Serializes policy evaluation and installation of a store write across
@@ -146,12 +179,12 @@ impl RulesRuntime {
     #[must_use]
     pub fn evaluate(
         &self,
-        project: &str,
+        database: &DatabaseName,
         authorization: &Authorization,
         request: &EvaluationRequest,
         access: &SnapshotAccess,
     ) -> EvaluationResult {
-        self.evaluate_with_read_transaction(project, authorization, request, access, false)
+        self.evaluate_with_read_transaction(database, authorization, request, access, false)
     }
 
     /// Evaluates once with the resolved transaction mode for diagnostic reads.
@@ -159,13 +192,13 @@ impl RulesRuntime {
     #[must_use]
     pub fn evaluate_with_read_transaction(
         &self,
-        project: &str,
+        database: &DatabaseName,
         authorization: &Authorization,
         request: &EvaluationRequest,
         access: &SnapshotAccess,
         in_read_write_transaction: bool,
     ) -> EvaluationResult {
-        let Some(installed) = self.installed_for(project) else {
+        let Some(installed) = self.installed_for(database) else {
             return allowed_result();
         };
         if authorization.is_owner() {
@@ -178,7 +211,7 @@ impl RulesRuntime {
         };
         let mut coverage = self.coverage.as_ref().and_then(|coverage| {
             coverage.session(
-                project,
+                &database.to_string(),
                 &installed.rules,
                 AtomicContext {
                     in_read_write_transaction,
@@ -194,7 +227,7 @@ impl RulesRuntime {
         };
         drop(coverage);
         recorder.record(
-            project,
+            database.project_id(),
             &installed,
             &request,
             &result,
@@ -211,12 +244,12 @@ impl RulesRuntime {
     #[must_use]
     pub fn evaluate_atomic(
         &self,
-        project: &str,
+        database: &DatabaseName,
         authorization: &Authorization,
         requests: &[EvaluationRequest],
         access: &SnapshotAccess,
     ) -> fireside_rules_engine::AtomicEvaluationResult {
-        self.evaluate_atomic_with_read_transaction(project, authorization, requests, access, false)
+        self.evaluate_atomic_with_read_transaction(database, authorization, requests, access, false)
     }
 
     /// Shared-accounting read batch with its resolved transaction mode. A batch
@@ -224,14 +257,14 @@ impl RulesRuntime {
     #[must_use]
     pub fn evaluate_atomic_with_read_transaction(
         &self,
-        project: &str,
+        database: &DatabaseName,
         authorization: &Authorization,
         requests: &[EvaluationRequest],
         access: &SnapshotAccess,
         in_read_write_transaction: bool,
     ) -> AtomicEvaluationResult {
         self.evaluate_atomic_context(
-            project,
+            database,
             authorization,
             requests,
             access,
@@ -244,13 +277,13 @@ impl RulesRuntime {
 
     fn evaluate_atomic_context(
         &self,
-        project: &str,
+        database: &DatabaseName,
         authorization: &Authorization,
         requests: &[EvaluationRequest],
         access: &SnapshotAccess,
         context: AtomicContext<'_>,
     ) -> AtomicEvaluationResult {
-        let Some(installed) = self.installed_for(project) else {
+        let Some(installed) = self.installed_for(database) else {
             return fireside_rules_engine::AtomicEvaluationResult {
                 allowed: true,
                 operations: requests.iter().map(|_| allowed_result()).collect(),
@@ -277,10 +310,9 @@ impl RulesRuntime {
         let Some(recorder) = &self.recorder else {
             return installed.rules.evaluate_atomic(&requests, access);
         };
-        let mut coverage = self
-            .coverage
-            .as_ref()
-            .and_then(|coverage| coverage.session(project, &installed.rules, context));
+        let mut coverage = self.coverage.as_ref().and_then(|coverage| {
+            coverage.session(&database.to_string(), &installed.rules, context)
+        });
         let (result, traces) = match coverage.as_mut() {
             Some(observer) => installed
                 .rules
@@ -297,7 +329,7 @@ impl RulesRuntime {
             .enumerate()
         {
             recorder.record(
-                project,
+                database.project_id(),
                 &installed,
                 request,
                 operation,
@@ -315,7 +347,7 @@ impl RulesRuntime {
     /// complete non-mutating post-write preview.
     pub fn evaluate_writes(
         &self,
-        project: &str,
+        database: &DatabaseName,
         authorization: &Authorization,
         writes: &[Write],
         snapshot: &Snapshot,
@@ -333,7 +365,7 @@ impl RulesRuntime {
         let access = SnapshotAccess {
             snapshot: snapshot.clone(),
             preview: Some(preview.clone()),
-            project: project.to_owned(),
+            project: database.project_id().to_owned(),
         };
         let requests = writes
             .iter()
@@ -352,7 +384,7 @@ impl RulesRuntime {
             })
             .collect::<Vec<_>>();
         Ok(self.evaluate_atomic_context(
-            project,
+            database,
             authorization,
             &requests,
             &access,
@@ -784,16 +816,126 @@ mod tests {
 
     const PROJECT: &str = "demo-rules";
 
+    fn database(id: &str) -> DatabaseName {
+        DatabaseName::new(PROJECT, id).expect("database")
+    }
+
     #[test]
     fn invalid_reload_keeps_the_previous_ruleset() {
         let runtime = RulesRuntime::default();
         runtime
             .install_project(PROJECT, rules("true"))
             .expect("valid rules");
-        let before = runtime.rules_for(PROJECT).expect("installed rules");
+        let before = runtime
+            .rules_for(&database("(default)"))
+            .expect("installed rules");
         assert!(runtime.install_project(PROJECT, "broken").is_err());
-        let after = runtime.rules_for(PROJECT).expect("previous rules");
+        let after = runtime
+            .rules_for(&database("(default)"))
+            .expect("previous rules");
         assert!(Arc::ptr_eq(&before, &after));
+    }
+
+    #[test]
+    fn database_rules_beat_project_rules_which_beat_the_default() {
+        let runtime = RulesRuntime::default();
+        let other = database("other");
+        let default = database("(default)");
+        let foreign = DatabaseName::new("demo-elsewhere", "other").expect("database");
+        assert!(runtime.rules_for(&other).is_none());
+
+        runtime.install_default(rules("true")).expect("default");
+        let installed_default = runtime.rules_for(&other).expect("default rules");
+        assert!(Arc::ptr_eq(
+            &installed_default,
+            &runtime.rules_for(&default).expect("default rules")
+        ));
+
+        runtime
+            .install_project(PROJECT, rules("false"))
+            .expect("project");
+        let project_wide = runtime.rules_for(&other).expect("project rules");
+        assert!(!Arc::ptr_eq(&project_wide, &installed_default));
+        assert!(Arc::ptr_eq(
+            &project_wide,
+            &runtime.rules_for(&default).expect("project rules")
+        ));
+        assert!(Arc::ptr_eq(
+            &installed_default,
+            &runtime.rules_for(&foreign).expect("default rules")
+        ));
+
+        runtime
+            .install_database(&other, rules("true"))
+            .expect("database");
+        let database_specific = runtime.rules_for(&other).expect("database rules");
+        assert!(!Arc::ptr_eq(&database_specific, &project_wide));
+        assert!(Arc::ptr_eq(
+            &project_wide,
+            &runtime.rules_for(&default).expect("project rules")
+        ));
+        // A later project-wide reload does not displace the database's own rules.
+        runtime
+            .install_project(PROJECT, rules("false"))
+            .expect("project again");
+        assert!(Arc::ptr_eq(
+            &database_specific,
+            &runtime.rules_for(&other).expect("database rules")
+        ));
+        assert!(runtime.install_database(&other, "broken").is_err());
+        assert!(Arc::ptr_eq(
+            &database_specific,
+            &runtime.rules_for(&other).expect("database rules")
+        ));
+    }
+
+    #[test]
+    fn evaluation_resolves_the_ruleset_of_the_requested_database() {
+        let runtime = RulesRuntime::default();
+        runtime.install_default(rules("false")).expect("default");
+        runtime
+            .install_database(&database("other"), rules("true"))
+            .expect("database");
+        let store = Store::new(StoreOptions::default());
+        let access = SnapshotAccess::current(store.snapshot(), PROJECT);
+        let authorization = Authorization::Client(None);
+        for (database, path, allowed) in [
+            (
+                database("other"),
+                "/databases/other/documents/items/one",
+                true,
+            ),
+            (
+                database("(default)"),
+                "/databases/(default)/documents/items/one",
+                false,
+            ),
+        ] {
+            let request = EvaluationRequest::new(
+                RequestOperation::Get,
+                path,
+                Timestamp::new(1_788_200_100, 0),
+            );
+            assert_eq!(
+                runtime
+                    .evaluate(&database, &authorization, &request, &access)
+                    .allowed,
+                allowed,
+                "{database}"
+            );
+            assert_eq!(
+                runtime
+                    .evaluate_atomic(
+                        &database,
+                        &authorization,
+                        std::slice::from_ref(&request),
+                        &access
+                    )
+                    .allowed,
+                allowed,
+                "{database}"
+            );
+        }
     }
 
     #[test]
@@ -864,6 +1006,9 @@ mod tests {
         match condition {
             "true" => {
                 "rules_version = '2'; service cloud.firestore { match /databases/{database}/documents { match /{document=**} { allow read, write: if true; } } }"
+            }
+            "false" => {
+                "rules_version = '2'; service cloud.firestore { match /databases/{database}/documents { match /{document=**} { allow read, write: if false; } } }"
             }
             _ => unreachable!(),
         }

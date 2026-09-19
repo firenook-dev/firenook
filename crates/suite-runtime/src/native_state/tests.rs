@@ -37,9 +37,8 @@ impl Case {
             state_dir: root.join("state"),
             resume_state: true,
             firestore_in_memory: false,
-            firestore_rules: None,
             diagnostics: false,
-            firestore_indexes: None,
+            firestore_databases: Vec::new(),
             storage_rules: StorageRulesConfig::PerBucket(vec![StorageBucketConfig {
                 bucket: "demo-bucket".into(),
                 rules: root.clone(),

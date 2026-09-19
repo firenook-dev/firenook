@@ -218,6 +218,33 @@ pub enum StorageRulesConfig {
 /// The official `templates/emulators/default_storage.rules`.
 pub const DEFAULT_OPEN_STORAGE_RULES: &str = "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read, write;\n    }\n  }\n}\n";
 
+/// The `(default)` Firestore database id.
+pub const DEFAULT_FIRESTORE_DATABASE: &str = "(default)";
+
+/// One Firestore database's `firebase.json` entry: `firestore: { rules,
+/// indexes }` describes `(default)`; `firestore: [{ database, rules, indexes
+/// }, …]` describes one database per entry (an entry without `database` is
+/// `(default)`). Production Firestore deploys rules per database, and so does
+/// the suite; the official emulator refuses more than one database.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirestoreDatabaseConfig {
+    pub database_id: String,
+    pub rules: Option<PathBuf>,
+    pub indexes: Option<PathBuf>,
+}
+
+impl FirestoreDatabaseConfig {
+    /// The entry for `(default)`.
+    #[must_use]
+    pub fn default_database(rules: Option<PathBuf>, indexes: Option<PathBuf>) -> Self {
+        Self {
+            database_id: DEFAULT_FIRESTORE_DATABASE.to_owned(),
+            rules,
+            indexes,
+        }
+    }
+}
+
 /// Complete suite startup settings resolved by the CLI.
 #[derive(Debug, Clone)]
 // Independent launch switches, each mapped from one CLI flag.
@@ -254,8 +281,10 @@ pub struct SuiteConfig {
     pub durability: DiskDurability,
     /// Bounded local Requests and coverage; may retain decoded document/auth values.
     pub diagnostics: bool,
-    pub firestore_rules: Option<PathBuf>,
-    pub firestore_indexes: Option<PathBuf>,
+    /// The `firestore` section of `firebase.json`, one entry per database.
+    /// Empty when the section is absent: every database is then served
+    /// without rules (open, with the startup warning).
+    pub firestore_databases: Vec<FirestoreDatabaseConfig>,
     pub storage_rules: StorageRulesConfig,
     pub default_bucket: String,
     pub import: Option<PathBuf>,
@@ -1169,13 +1198,27 @@ fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
     .map_err(|error| failure(format!("Firestore state failed to open: {error}")))
 }
 
+/// Validates every configured index file; the suite enforces none of them,
+/// as the official local emulator does not.
 fn query_policy(config: &SuiteConfig) -> Result<QueryPolicy, SuiteRuntimeError> {
-    let Some(path) = &config.firestore_indexes else {
-        return Ok(QueryPolicy::new(DatabaseEdition::Standard));
-    };
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| failure(format!("failed to read Firestore indexes: {error}")))?;
-    suite_query_policy(Some(&source))
+    for database in &config.firestore_databases {
+        let Some(path) = &database.indexes else {
+            continue;
+        };
+        let source = std::fs::read_to_string(path).map_err(|error| {
+            failure(format!(
+                "failed to read Firestore indexes for database \"{}\": {error}",
+                database.database_id
+            ))
+        })?;
+        suite_query_policy(Some(&source)).map_err(|error| {
+            failure(format!(
+                "database \"{}\": {}",
+                database.database_id, error.0
+            ))
+        })?;
+    }
+    suite_query_policy(None)
 }
 
 fn suite_query_policy(indexes: Option<&str>) -> Result<QueryPolicy, SuiteRuntimeError> {
@@ -1189,6 +1232,9 @@ fn suite_query_policy(indexes: Option<&str>) -> Result<QueryPolicy, SuiteRuntime
     Ok(QueryPolicy::new(DatabaseEdition::Standard))
 }
 
+/// Installs each configured database's rules under its own database id, so
+/// `projects/{p}/databases/{id}` evaluates its own ruleset; the project-wide
+/// hot-reload route then governs only databases without an entry.
 fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeError> {
     let runtime = if config.diagnostics {
         eprintln!(
@@ -1198,14 +1244,54 @@ fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeErr
     } else {
         RulesRuntime::default()
     };
-    if let Some(path) = &config.firestore_rules {
-        let source = std::fs::read_to_string(path)
-            .map_err(|error| failure(format!("failed to read Firestore rules: {error}")))?;
-        runtime
-            .install_default(&source)
-            .map_err(|error| failure(format!("invalid Firestore rules: {error}")))?;
-    }
+    install_firestore_rules(&runtime, &config.project_id, &config.firestore_databases)?;
     Ok(runtime)
+}
+
+fn install_firestore_rules(
+    runtime: &RulesRuntime,
+    project: &str,
+    databases: &[FirestoreDatabaseConfig],
+) -> Result<(), SuiteRuntimeError> {
+    let mut seen = BTreeSet::new();
+    for entry in databases {
+        if !seen.insert(entry.database_id.as_str()) {
+            return Err(failure(format!(
+                "firebase.json configures Firestore database \"{}\" more than once",
+                entry.database_id
+            )));
+        }
+        let database = DatabaseName::new(project, entry.database_id.as_str()).map_err(|error| {
+            failure(format!(
+                "firebase.json names an invalid Firestore database: {error}"
+            ))
+        })?;
+        let Some(path) = &entry.rules else {
+            continue;
+        };
+        let source = std::fs::read_to_string(path).map_err(|error| {
+            failure(format!(
+                "failed to read Firestore rules for database \"{}\" from {}: {error}",
+                entry.database_id,
+                path.display()
+            ))
+        })?;
+        runtime
+            .install_database(&database, &source)
+            .map_err(|error| {
+                failure(format!(
+                    "invalid Firestore rules for database \"{}\" in {}: {error}",
+                    entry.database_id,
+                    path.display()
+                ))
+            })?;
+        println!(
+            "fireside firestore: database \"{}\" rules {}",
+            entry.database_id,
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 /// Latest committed Cloud Firestore state for `firestore.get` /
@@ -1976,14 +2062,7 @@ async fn export_suite(
     let mut metadata = serde_json::Map::new();
     metadata.insert("version".to_owned(), json!(EXPORT_VERSION));
     if wants("firestore") && config.services.firestore {
-        let database = DatabaseName::new(config.project_id.as_str(), "(default)")
-            .map_err(|error| failure(error.to_string()))?;
-        let snapshot = store.snapshot();
-        let documents = snapshot
-            .iter_documents(&database)
-            .map(|(key, document)| ExportedDocument::new(key, document.fields().clone()));
-        let written = write_export(staging.join("firestore_export"), documents)
-            .map_err(|error| failure(format!("Firestore export failed: {error}")))?;
+        let written = export_firestore(store, &config.project_id, &staging)?;
         let metadata_file = relative_export_path(&staging, written.overall_metadata_path())?;
         metadata.insert(
             "firestore".to_owned(),
@@ -2034,6 +2113,25 @@ async fn export_suite(
             .map_err(|error| failure(format!("failed to remove replaced export: {error}")))?;
     }
     Ok(())
+}
+
+/// Writes every database of the project into the one `firestore_export`
+/// directory. The entity format carries each document's database id
+/// (`(default)` as absent, as the official export does), so an import
+/// restores every database, not only `(default)`.
+fn export_firestore(
+    store: &Store,
+    project: &str,
+    staging: &Path,
+) -> Result<fireside_export_format::WrittenExport, SuiteRuntimeError> {
+    let snapshot = store.snapshot();
+    let documents = snapshot
+        .databases(project)
+        .into_iter()
+        .flat_map(|database| snapshot.iter_documents(&database))
+        .map(|(key, document)| ExportedDocument::new(key, document.fields().clone()));
+    write_export(staging.join("firestore_export"), documents)
+        .map_err(|error| failure(format!("Firestore export failed: {error}")))
 }
 
 fn absolute_destination(path: &Path) -> Result<PathBuf, SuiteRuntimeError> {
@@ -2100,6 +2198,164 @@ mod tests {
             .validate(&query)
             .expect("the official suite does not enforce production indexes");
         assert!(suite_query_policy(Some("not-json")).is_err());
+    }
+
+    #[test]
+    fn export_writes_every_database_of_the_project_and_import_restores_them() {
+        let unique = format!(
+            "fireside-suite-export-databases-{}-{}",
+            std::process::id(),
+            OffsetDateTime::now_utc().unix_timestamp_nanos()
+        );
+        let staging = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&staging).expect("staging should exist");
+        let project = "demo-export-databases";
+        let default = DatabaseName::new(project, "(default)").expect("database");
+        let other = DatabaseName::new(project, "other").expect("database");
+        let foreign = DatabaseName::new("demo-elsewhere", "other").expect("database");
+        let store = Store::default();
+        let fields = |value: i64| {
+            fireside_core_store::Fields::from([(
+                "value".to_owned(),
+                fireside_core_store::Value::Integer(value),
+            )])
+        };
+        store
+            .commit(&[
+                Write::Create {
+                    key: DocumentKey::new(default.clone(), "items/one").expect("key"),
+                    fields: fields(1),
+                },
+                Write::Create {
+                    key: DocumentKey::new(other.clone(), "items/one").expect("key"),
+                    fields: fields(2),
+                },
+                Write::Create {
+                    key: DocumentKey::new(other.clone(), "nested/doc/items/two").expect("key"),
+                    fields: fields(3),
+                },
+                Write::Create {
+                    key: DocumentKey::new(foreign, "items/one").expect("key"),
+                    fields: fields(4),
+                },
+            ])
+            .expect("seed");
+
+        let written = export_firestore(&store, project, &staging).expect("export");
+        assert_eq!(written.entity_count(), 3);
+        let mut exported = ExportReader::open(written.overall_metadata_path())
+            .expect("export should open")
+            .map(|document| document.expect("entity").into_parts())
+            .collect::<Vec<_>>();
+        exported.sort_by(|(left, _), (right, _)| left.cmp(right));
+        assert_eq!(
+            exported,
+            vec![
+                (
+                    DocumentKey::new(default.clone(), "items/one").expect("key"),
+                    fields(1)
+                ),
+                (
+                    DocumentKey::new(other.clone(), "items/one").expect("key"),
+                    fields(2)
+                ),
+                (
+                    DocumentKey::new(other.clone(), "nested/doc/items/two").expect("key"),
+                    fields(3)
+                ),
+            ]
+        );
+
+        let restored = Store::default();
+        let count = seed_store(&restored, written.overall_metadata_path(), project)
+            .expect("import should restore every database");
+        assert_eq!(count, 3);
+        let snapshot = restored.snapshot();
+        assert_eq!(
+            snapshot.databases(project),
+            vec![default.clone(), other.clone()]
+        );
+        assert_eq!(
+            snapshot
+                .get(&DocumentKey::new(other, "nested/doc/items/two").expect("key"))
+                .expect("restored document")
+                .fields(),
+            &fields(3)
+        );
+        assert_eq!(snapshot.documents(&default).len(), 1);
+        std::fs::remove_dir_all(&staging).expect("test directory should clean up");
+    }
+
+    #[test]
+    fn firestore_rules_are_installed_per_configured_database() {
+        let unique = format!(
+            "fireside-suite-rules-databases-{}-{}",
+            std::process::id(),
+            OffsetDateTime::now_utc().unix_timestamp_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&root).expect("root should exist");
+        let allow = root.join("allow.rules");
+        let deny = root.join("deny.rules");
+        std::fs::write(&allow, "rules_version = '2'; service cloud.firestore { match /databases/{db}/documents/{doc=**} { allow read, write: if true; } }").expect("rules");
+        std::fs::write(&deny, "rules_version = '2'; service cloud.firestore { match /databases/{db}/documents/{doc=**} { allow read, write: if false; } }").expect("rules");
+        let project = "demo-rules-databases";
+        let entry = |id: &str, rules: &Path| FirestoreDatabaseConfig {
+            database_id: id.to_owned(),
+            rules: Some(rules.to_owned()),
+            indexes: None,
+        };
+
+        let runtime = RulesRuntime::default();
+        install_firestore_rules(
+            &runtime,
+            project,
+            &[entry("(default)", &deny), entry("other", &allow)],
+        )
+        .expect("two databases");
+        let access = SnapshotAccess::current(Store::default().snapshot(), project);
+        for (id, allowed) in [("(default)", false), ("other", true), ("third", true)] {
+            let database = DatabaseName::new(project, id).expect("database");
+            let request = fireside_rules_engine::EvaluationRequest::new(
+                fireside_rules_runtime::RequestOperation::Get,
+                format!("/databases/{id}/documents/items/one"),
+                fireside_rules_engine::Timestamp::new(0, 0),
+            );
+            assert_eq!(
+                runtime
+                    .evaluate(
+                        &database,
+                        &fireside_rules_runtime::Authorization::Client(None),
+                        &request,
+                        &access,
+                    )
+                    .allowed,
+                allowed,
+                "{id}"
+            );
+        }
+
+        // Only named databases is a valid configuration; a repeated one is not.
+        install_firestore_rules(&RulesRuntime::default(), project, &[entry("other", &allow)])
+            .expect("named databases only");
+        let repeated = install_firestore_rules(
+            &RulesRuntime::default(),
+            project,
+            &[entry("other", &allow), entry("other", &deny)],
+        )
+        .expect_err("repeated database");
+        assert!(
+            repeated.to_string().contains("\"other\" more than once"),
+            "{repeated}"
+        );
+        let missing = install_firestore_rules(
+            &RulesRuntime::default(),
+            project,
+            &[entry("other", &root.join("missing.rules"))],
+        )
+        .expect_err("missing rules file");
+        assert!(missing.to_string().contains("\"other\""), "{missing}");
+        std::fs::remove_dir_all(&root).expect("test directory should clean up");
     }
 
     #[cfg(unix)]

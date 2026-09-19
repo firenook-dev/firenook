@@ -4,7 +4,7 @@ Fireside is not yet a universal Firebase Emulator Suite replacement.
 
 | Surface | Current preview | Not claimed |
 | --- | --- | --- |
-| Firestore | Native/Admin and browser SDK paths, rules, realtime targets, disk/WAL, official-format import/export | Every production feature, edition or arbitrary client version |
+| Firestore | Native/Admin and browser SDK paths, rules, realtime targets, disk/WAL, official-format import/export, named databases with per-database rules | Every production feature, edition or arbitrary client version |
 | Auth | Every operation the official Auth emulator implements (61), replayed from a 1068-step oracle corpus with parity: password, anonymous, custom token, email link, phone, fake IdP (Google/Apple/SAML/OIDC-shaped credentials), account update/delete, OOB and phone codes, session cookies, tenants, SMS MFA, passkeys, Admin batch create/get/delete/query, project and tenant configuration, emulator inspection routes, legacy `relyingparty` routes, blocking functions and lifecycle triggers, official-format export/import, the local popup/redirect helper pages | Anything the official emulator itself answers with 501 (IdP/SAML/OIDC provider configuration, `initializeAuth`, IAM on tenants, Game Center, reCAPTCHA enforcement, TOTP MFA); real email/SMS delivery; production token verification |
 | Storage | Captured Firebase/GCS paths, metadata, gzip, pagination, single-file and multi-bucket rules, export/import; Security Rules evaluated natively (no Java) with the recorded official request model and production expression semantics, including `firestore.get`/`exists` and `/internal/setRules` | All GCS features; the official emulator's prefix-template `list` matching and missing `request.method` (production semantics are followed and recorded as divergences) |
 | Functions | Fireside runtime with one Node worker per codebase: discovery through the pinned SDK control API or `functions.yaml`, HTTP/callable/streaming, Firestore/Storage/Auth/Pub/Sub/Eventarc/schedule triggers, blocking Auth functions, dotenv/secret files, reload, background controls, `--inspect-functions`; Extensions resolved and run by Fireside with the recorded parameter, spec and trigger semantics from local, vendored, cached or registry sources | Pure Rust JavaScript execution, a network sandbox, Python/Dart runtimes, dynamic (in-code) extensions, Secret Manager access |
@@ -23,6 +23,18 @@ and named channels and delivers to `onCustomEventPublished` handlers. The
 auxiliary Cloud Tasks port supports host startup registration only: dispatch
 routes return HTTP 501 `UNIMPLEMENTED`, and registration is not a promise of
 delivery.
+
+Fireside serves every Firestore database named on the wire
+(`projects/{project}/databases/{database}`), applies rules per database and
+exports every database of the project into the one `firestore_export`, which
+an import restores in full. A `firebase.json` `firestore` array lists one
+entry per database (`database`, `rules`, `indexes`; an entry without
+`database` is `(default)`, and a project may list only named databases); each
+entry's rules govern that database alone, while the project-wide
+`PUT /emulator/v1/projects/{project}:securityRules` hot reload governs only
+databases without an entry. The official emulator refuses more than one
+database (`Cloud Firestore Emulator does not support multiple databases yet.`)
+and then loads no rules at all.
 
 The package supports only its enumerated native targets after their exact
 candidate checks pass. Linux musl, Windows ARM64/32-bit, network-filesystem
