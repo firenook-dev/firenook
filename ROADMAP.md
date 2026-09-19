@@ -450,3 +450,30 @@ the gate is `benchmarks/phase-m-cli.json`.
 - [x] M4 — `mcp` (2026-09-19: dependency-free stdio server with status,
   Firestore, Auth, Storage, Functions, Pub/Sub, Tasks and export tools).
 - [x] M5 — Qualified and published as `0.1.0-next.9` on 2026-09-19 (tag `npm-v0.1.0-next.9` on e9c58e0, release run 35440801335, registry integrity equal to the release assets, `next` → next.9, `latest` untouched) (same candidate and gates as K5).
+
+## Rename to Firenook (`0.2.0-next.1`)
+
+The project took its new name, Firenook, on 2026-09-19; `0.1.0-next.9`
+is the last release under the former name and `0.2.0-next.1` the first under the
+new one (see the `0.2.0-next.1` entry of `packaging/CHANGELOG.md` and the
+README's migration note). The engine is the next.9 engine plus the rename, the
+in-place adoption of store files written before it and the decoding of listen
+resume tokens issued before it; no emulator behaviour changed.
+
+- [x] Rename PR [#58](https://github.com/firenook-dev/firenook/pull/58) merged
+  (head 9d69251: CI 35445747233, packed installs 35445747328); repositories
+  transferred to `firenook-dev/firenook` (and the private harness repository
+  alongside it) with the release environment, secret and runner intact.
+- [x] Published as `firenook@0.2.0-next.1` with `@firenook/cli-<platform>`
+  ×5 on 2026-09-19 (tag `npm-v0.2.0-next.1` on 630779b, release run 35449320572,
+  registry integrity equal to the release assets and provenance attestations
+  for all six packages, `next` and `latest` → 0.2.0-next.1 since the packages
+  have no stable version yet).
+- [x] Fresh-machine installs from the registry: macOS arm64 (this checkout's
+  host), Linux x64, macOS arm64 and Windows x64 on GitHub-hosted machines
+  (`npm i -D firenook`, `firenook init`, `firenook setup`, `emulators:exec` on
+  the scaffold; `npm audit signatures` verifies the attestations);
+  the native-upgrade verifier resumed state written by the last old-name
+  engine (`0.1.0-next.3`) under this one.
+- [ ] Deprecation of the six packages published under the former name waits
+  for the consumer's pin swap and gates on `0.2.0-next.1`.
