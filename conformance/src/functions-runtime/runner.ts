@@ -72,8 +72,10 @@ const VOLATILE_HEADERS = new Set(["date", "etag", "connection", "keep-alive", "x
 const TIME_KEYS = new Set([
   "time", "timestamp", "createTime", "updateTime", "readTime", "timeCreated", "updated", "publishTime", "publishtime",
   "lastLoginAt", "createdAt", "lastRefreshAt", "validSince", "creationTime", "lastSignInTime", "lastRefreshTime",
-  "iat", "exp", "auth_time", "scheduleTime", "startedAt", "finishedAt", "date",
+  "iat", "exp", "auth_time", "scheduleTime", "scheduledTime", "startedAt", "finishedAt", "date",
 ]);
+// Cloud Tasks: auto-generated task ids are random integers and the ETA header is a clock value.
+const TASK_ID_SUFFIX = /\/tasks\/\d{10,}$/u;
 const ID_KEYS = new Set(["eventId", "id", "messageId", "localId", "uid", "kind", "user_id", "sub", "traceId", "jobName"]);
 const TOKEN_KEYS = new Set(["idToken", "refreshToken", "passwordHash", "salt", "accessToken", "rawUserInfo", "oauthAccessToken"]);
 const VOLATILE_NUMBER_KEYS = new Set(["generation", "metageneration", "expiresIn", "size", "elapsedMs"]);
@@ -146,13 +148,15 @@ async function runStep(context: RunContext, step: Step): Promise<RecordedStep> {
       break;
     case "http-parallel": {
       const started = performance.now();
+      const parallelOrigin = action.origin === "tasks" ? target.origins.tasks : target.origins.functions;
+      if (!parallelOrigin) throw new Error(`no ${action.origin ?? "functions"} origin for this target`);
       const results = await Promise.all(
         action.requests.map(async (request) => {
           if (request.delayMs) await delay(request.delayMs);
           const startedAt = performance.now() - started;
           const result = await fetchRecorded(
-            target.origins.functions + expandPath(context, request.path),
-            { method: request.method, headers: {}, body: request.body },
+            parallelOrigin + expandPath(context, request.path),
+            { method: request.method, headers: {}, body: request.body === undefined ? undefined : templateBody(context, request.body) },
             action.clientTimeoutMs,
           );
           return { startedAtMs: Math.round(startedAt), ...result };
@@ -568,6 +572,9 @@ export function normalizeForTarget(target: Target, value: unknown): unknown {
 function normalizeValue(target: Target, dynamicIds: ReadonlyMap<string, string>, value: unknown, key: string | undefined): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") {
+    if (key === "x-cloudtasks-tasketa") return "{{time}}";
+    if (key === "x-cloudtasks-taskname" && /^\d+$/u.test(value)) return "{{id}}";
+    if (TASK_ID_SUFFIX.test(value)) return normalizeString(target, value.replace(TASK_ID_SUFFIX, "/tasks/{{id}}"), dynamicIds);
     if (key !== undefined && TOKEN_KEYS.has(key)) return "{{token}}";
     if (key !== undefined && HASH_KEYS.has(key)) return "{{hash}}";
     if (key !== undefined && TIME_KEYS.has(key) && (RFC3339.test(value) || /^\d{9,13}$/.test(value) || /^\d{4}-\d{2}-\d{2}T/.test(value))) return "{{time}}";

@@ -54,6 +54,8 @@ export type Action =
     }
   | {
       readonly kind: "http-parallel";
+      /** Which emulator answers: the Functions origin unless `tasks` is named. */
+      readonly origin?: "functions" | "tasks";
       /** Requests started together; `delayMs` staggers a request after the first. */
       readonly requests: ReadonlyArray<{ readonly method: "GET" | "POST"; readonly path: string; readonly body?: StepBody; readonly delayMs?: number }>;
       readonly clientTimeoutMs?: number;
@@ -1608,9 +1610,10 @@ export const TASKS_PROGRAMS: readonly Program[] = [
       tasksStep("serial-a", "POST", `${queuePath("taskSerial")}/tasks`, { task: task({ order: "a" }, { name: taskName("taskSerial", "serial-a") }) }, { expect: 0, timeoutMs: 0 }),
       tasksStep("serial-b", "POST", `${queuePath("taskSerial")}/tasks`, { task: task({ order: "b" }, { name: taskName("taskSerial", "serial-b") }) }, { expect: 0, timeoutMs: 0 }),
       tasksStep("serial-c", "POST", `${queuePath("taskSerial")}/tasks`, { task: task({ order: "c" }, { name: taskName("taskSerial", "serial-c") }) }, { expect: 3, timeoutMs: 10000 }),
-      tasksStep("rate-a", "POST", `${queuePath("taskRate")}/tasks`, { task: task({ order: "a" }, { name: taskName("taskRate", "rate-a") }) }, { expect: 0, timeoutMs: 0 }),
-      tasksStep("rate-b", "POST", `${queuePath("taskRate")}/tasks`, { task: task({ order: "b" }, { name: taskName("taskRate", "rate-b") }) }, { expect: 0, timeoutMs: 0 }),
-      tasksStep("rate-c", "POST", `${queuePath("taskRate")}/tasks`, { task: task({ order: "c" }, { name: taskName("taskRate", "rate-c") }) }, { expect: 3, timeoutMs: 10000 }),
+      // Three tasks enqueued together on a one-per-second queue: the official
+      // controller's idle poll (up to a second) makes per-step observation
+      // windows a race, so the whole ladder is one step.
+      step("rate-abc", { kind: "http-parallel", origin: "tasks", requests: ["a", "b", "c"].map((order) => ({ method: "POST" as const, path: `${queuePath("taskRate")}/tasks`, body: json({ task: task({ order }, { name: taskName("taskRate", `rate-${order}`) }) }) })) }, { expect: 3, timeoutMs: 10000 }),
       tasksStep("stats-after-limits", "GET", "/queueStats"),
     ],
   },
@@ -1642,6 +1645,8 @@ export const TASKS_PROGRAMS: readonly Program[] = [
       step("admin-enqueue-unknown-queue", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "noSuchQueue", data: {} }) }, { expect: ["enqueueViaAdmin"], timeoutMs: 8000 }),
       step("admin-enqueue-alt-region", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "taskAlt", region: ALT_REGION, data: { via: "alt" }, opts: { id: "admin-alt-1" } }) }, { expect: ["enqueueViaAdmin", "taskAlt"], timeoutMs: 8000 }),
       step("admin-enqueue-pending", { kind: "http", method: "POST", path: httpPath(REGION, "enqueueViaAdmin"), body: json({ queue: "manual-defaults", data: { via: "pending" }, opts: { id: "admin-pending-1" } }) }, { expect: ["enqueueViaAdmin"], timeoutMs: 8000 }),
+      // Let the controller's idle poll dispatch the task (its target is unreachable) before deleting it.
+      step("admin-pending-settles", { kind: "wait", ms: 1500 }),
       step("admin-delete-pending", { kind: "http", method: "POST", path: httpPath(REGION, "deleteViaAdmin"), body: json({ queue: "manual-defaults", id: "admin-pending-1" }) }, { expect: ["deleteViaAdmin"], timeoutMs: 8000 }),
       step("admin-delete-unknown", { kind: "http", method: "POST", path: httpPath(REGION, "deleteViaAdmin"), body: json({ queue: "manual-defaults", id: "never-existed" }) }, { expect: ["deleteViaAdmin"], timeoutMs: 8000 }),
       step("admin-delete-unknown-queue", { kind: "http", method: "POST", path: httpPath(REGION, "deleteViaAdmin"), body: json({ queue: "noSuchQueue", id: "x" }) }, { expect: ["deleteViaAdmin"], timeoutMs: 8000 }),

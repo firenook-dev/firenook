@@ -8,7 +8,7 @@
     "firebase-admin": "13.10.0"
   },
   "node": "v24.20.0",
-  "recordedAt": "2026-09-19T08:26:19.907Z",
+  "recordedAt": "2026-09-19T09:22:00.582Z",
   "transport": "http",
   "hypothesis": "The official Functions emulator's HTTP contract (routes, statuses, bodies, callable envelopes, CORS), the envelopes and environment handlers observe for every supported trigger, its lifecycle behaviour and its Extensions resolution define what the owned Fireside runtime must reproduce; divergences are recorded in the fixture invariants, never adopted silently.",
   "projectId": "demo-fireside-functions-oracle",
@@ -32,7 +32,7 @@
       "id": "tasks",
       "description": "Phase K: the primary codebase replaced by task-queue handlers with distinct retry and rate configurations plus Admin SDK enqueue/delete handlers; programs drive the Tasks emulator port directly (fixture tasks-v1).",
       "readiness": {
-        "milliseconds": 34397,
+        "milliseconds": 33397,
         "logs": [
           "emulators: Starting emulators: auth, functions, firestore, pubsub, storage, eventarc, tasks, extensions",
           "emulators: Detected demo project ID \"demo-fireside-functions-oracle\", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.",
@@ -41,7 +41,7 @@
           "functions: Application Default Credentials detected. Non-emulated services will access production using these credentials. Be careful!",
           "firestore: Firestore Emulator logging to firestore-debug.log",
           "firestore: Firestore Emulator was started in standard edition.",
-          "firestore: Firestore Emulator UI websocket is running on 50758.",
+          "firestore: Firestore Emulator UI websocket is running on 55066.",
           "pubsub: Pub/Sub Emulator logging to pubsub-debug.log",
           "Unexpected rules runtime error: WARNING: A terminally deprecated method in sun.misc.Unsafe has been called",
           "WARNING: sun.misc.Unsafe::arrayBaseOffset has been called by com.google.protobuf.UnsafeUtil$MemoryAccessor (file:{{home}}/.cache/firebase/emulators/cloud-storage-rules-runtime-v1.1.3.jar)",
@@ -62,7 +62,7 @@
           "functions: Watching \"{{projectDir}}/functions/primary\" for Cloud Functions...",
           "functions: Using node@24 from host.",
           "functions: Loaded environment variables from .env, .env.demo-fireside-functions-oracle, .env.local.",
-          "Serving at port 8166",
+          "Serving at port 8057",
           "",
           "Function 'httpFn' is missing a trigger in extension.yaml. Please add one, as triggers defined in code are ignored.",
           "Function 'queueFn' is missing a trigger in extension.yaml. Please add one, as triggers defined in code are ignored.",
@@ -85,7 +85,7 @@
           "functions: Watching \"{{projectDir}}/functions/secondary\" for Cloud Functions...",
           "functions: Using node@24 from host.",
           "functions: Loaded environment variables from .env.",
-          "Serving at port 8887",
+          "Serving at port 8449",
           "",
           "Function 'httpFn' is missing a trigger in extension.yaml. Please add one, as triggers defined in code are ignored.",
           "Function 'queueFn' is missing a trigger in extension.yaml. Please add one, as triggers defined in code are ignored.",
@@ -99,7 +99,7 @@
           "functions[europe-west1-v1Region]: http function initialized ({{origin:functions}}/demo-fireside-functions-oracle/europe-west1/v1Region).",
           "functions: Watching \"{{projectDir}}/functions/esm\" for Cloud Functions...",
           "functions: Using node@24 from host.",
-          "Serving at port 8241",
+          "Serving at port 8998",
           "",
           "Function 'httpFn' is missing a trigger in extension.yaml. Please add one, as triggers defined in code are ignored.",
           "Function 'queueFn' is missing a trigger in extension.yaml. Please add one, as triggers defined in code are ignored.",
@@ -114,7 +114,7 @@
           "functions[us-central1-yamlEvent]: firestore function initialized.",
           "functions: Watching \"{{projectDir}}/functions/broken-load\" for Cloud Functions...",
           "functions: Using node@24 from host.",
-          "Serving at port 8583",
+          "Serving at port 8212",
           "",
           "Error: synthetic load failure: this codebase refuses to load",
           "    at Object.<anonymous> ({{projectDir}}/functions/broken-load/index.js:3:7)",
@@ -156,8 +156,8 @@
           "├────────────────┼─────────────────┤",
           "│ Extensions     │ {{host:functions}} │",
           "└────────────────┴─────────────────┘",
-          "  Emulator Hub host: 127.0.0.1 port: 50763",
-          "  Other reserved ports: 50764, 50758",
+          "  Emulator Hub host: 127.0.0.1 port: 55071",
+          "  Other reserved ports: 55072, 55066",
           "┌─────────────────────────┬─────────────────┐",
           "│ Extension Instance Name │ Extension Ref   │",
           "├─────────────────────────┼─────────────────┤",
@@ -2231,7 +2231,7 @@
                     "id": "job-named-1",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -2244,7 +2244,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskDefault",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "job-named-1",
                       "x-cloudtasks-taskretrycount": "0",
@@ -2305,7 +2305,7 @@
                         "Content-Type": "application/json"
                       }
                     },
-                    "name": "/projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskDefault/tasks/5116797719252446"
+                    "name": "/projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskDefault/tasks/{{id}}"
                   }
                 },
                 "elapsedMs": "{{number}}"
@@ -2362,7 +2362,7 @@
                     "id": "{{id}}",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -2375,9 +2375,9 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskDefault",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
-                      "x-cloudtasks-taskname": "5116797719252446",
+                      "x-cloudtasks-taskname": "{{id}}",
                       "x-cloudtasks-taskretrycount": "0",
                       "authorizationPresent": false
                     }
@@ -2584,7 +2584,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskDefault",
-                      "x-cloudtasks-tasketa": "2030-01-01T00:00:00.000Z",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "job-scheduled",
                       "x-cloudtasks-taskretrycount": "0",
@@ -2707,7 +2707,7 @@
                     "id": "job-headers",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -2720,7 +2720,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "caller-override",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "job-headers",
                       "x-cloudtasks-taskretrycount": "0",
@@ -2834,7 +2834,7 @@
                     "id": "job-explicit-url",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -2847,7 +2847,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskDefault",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "job-explicit-url",
                       "x-cloudtasks-taskretrycount": "0",
@@ -2966,7 +2966,7 @@
                     "id": "job-alt",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -2979,7 +2979,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-europe-west1-taskAlt",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "job-alt",
                       "x-cloudtasks-taskretrycount": "0",
@@ -3321,7 +3321,7 @@
                     "id": "retry-500",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -3334,7 +3334,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-500",
                       "x-cloudtasks-taskretrycount": "0",
@@ -3397,7 +3397,7 @@
                     "id": "retry-500",
                     "retryCount": 1,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": 500,
                     "retryReason": {
                       "$undefined": true
@@ -3408,7 +3408,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-500",
                       "x-cloudtasks-taskpreviousresponse": "500",
@@ -3530,7 +3530,7 @@
                     "id": "retry-400",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -3543,7 +3543,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-400",
                       "x-cloudtasks-taskretrycount": "0",
@@ -3606,7 +3606,7 @@
                     "id": "retry-400",
                     "retryCount": 1,
                     "executionCount": 1,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": 400,
                     "retryReason": {
                       "$undefined": true
@@ -3617,7 +3617,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "1",
                       "x-cloudtasks-taskname": "retry-400",
                       "x-cloudtasks-taskpreviousresponse": "400",
@@ -3739,7 +3739,7 @@
                     "id": "retry-exhausted",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -3752,7 +3752,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-exhausted",
                       "x-cloudtasks-taskretrycount": "0",
@@ -3815,7 +3815,7 @@
                     "id": "retry-exhausted",
                     "retryCount": 1,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": 500,
                     "retryReason": {
                       "$undefined": true
@@ -3826,7 +3826,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-exhausted",
                       "x-cloudtasks-taskpreviousresponse": "500",
@@ -3890,7 +3890,7 @@
                     "id": "retry-exhausted",
                     "retryCount": 2,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": 500,
                     "retryReason": {
                       "$undefined": true
@@ -3901,7 +3901,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-exhausted",
                       "x-cloudtasks-taskpreviousresponse": "500",
@@ -3965,7 +3965,7 @@
                     "id": "retry-exhausted",
                     "retryCount": 3,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": 500,
                     "retryReason": {
                       "$undefined": true
@@ -3976,7 +3976,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-exhausted",
                       "x-cloudtasks-taskpreviousresponse": "500",
@@ -4098,7 +4098,7 @@
                     "id": "retry-twice",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -4111,7 +4111,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-twice",
                       "x-cloudtasks-taskretrycount": "0",
@@ -4174,7 +4174,7 @@
                     "id": "retry-twice",
                     "retryCount": 1,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": 503,
                     "retryReason": {
                       "$undefined": true
@@ -4185,7 +4185,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-twice",
                       "x-cloudtasks-taskpreviousresponse": "503",
@@ -4249,7 +4249,7 @@
                     "id": "retry-twice",
                     "retryCount": 2,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": 503,
                     "retryReason": {
                       "$undefined": true
@@ -4260,7 +4260,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRetry",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "retry-twice",
                       "x-cloudtasks-taskpreviousresponse": "503",
@@ -4510,7 +4510,7 @@
                     "id": "slow-1",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -4523,7 +4523,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskSlow",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "slow-1",
                       "x-cloudtasks-taskretrycount": "0",
@@ -4585,7 +4585,7 @@
                     "id": "slow-1",
                     "retryCount": 1,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -4598,7 +4598,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskSlow",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "slow-1",
                       "x-cloudtasks-taskretrycount": "1",
@@ -4829,7 +4829,7 @@
                     "id": "serial-a",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -4842,7 +4842,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskSerial",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "serial-a",
                       "x-cloudtasks-taskretrycount": "0",
@@ -4904,7 +4904,7 @@
                     "id": "serial-b",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -4917,7 +4917,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskSerial",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "serial-b",
                       "x-cloudtasks-taskretrycount": "0",
@@ -4979,7 +4979,7 @@
                     "id": "serial-c",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -4992,7 +4992,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskSerial",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "serial-c",
                       "x-cloudtasks-taskretrycount": "0",
@@ -5006,170 +5006,169 @@
               ]
             },
             {
-              "id": "rate-a",
+              "id": "rate-abc",
               "action": {
-                "kind": "http",
+                "kind": "http-parallel",
                 "origin": "tasks",
-                "method": "POST",
-                "path": "/projects/{{project}}/locations/us-central1/queues/taskRate/tasks",
-                "body": {
-                  "kind": "json",
-                  "json": {
-                    "task": {
-                      "httpRequest": {
-                        "url": "",
-                        "oidcToken": {
-                          "serviceAccountEmail": "emulated-service-acct@email.com"
-                        },
-                        "body": "eyJkYXRhIjp7Im9yZGVyIjoiYSJ9fQ==",
-                        "headers": {
-                          "Content-Type": "application/json"
+                "requests": [
+                  {
+                    "method": "POST",
+                    "path": "/projects/{{project}}/locations/us-central1/queues/taskRate/tasks",
+                    "body": {
+                      "kind": "json",
+                      "json": {
+                        "task": {
+                          "httpRequest": {
+                            "url": "",
+                            "oidcToken": {
+                              "serviceAccountEmail": "emulated-service-acct@email.com"
+                            },
+                            "body": "eyJkYXRhIjp7Im9yZGVyIjoiYSJ9fQ==",
+                            "headers": {
+                              "Content-Type": "application/json"
+                            }
+                          },
+                          "name": "projects/{{project}}/locations/us-central1/queues/taskRate/tasks/rate-a"
                         }
-                      },
-                      "name": "projects/{{project}}/locations/us-central1/queues/taskRate/tasks/rate-a"
+                      }
+                    }
+                  },
+                  {
+                    "method": "POST",
+                    "path": "/projects/{{project}}/locations/us-central1/queues/taskRate/tasks",
+                    "body": {
+                      "kind": "json",
+                      "json": {
+                        "task": {
+                          "httpRequest": {
+                            "url": "",
+                            "oidcToken": {
+                              "serviceAccountEmail": "emulated-service-acct@email.com"
+                            },
+                            "body": "eyJkYXRhIjp7Im9yZGVyIjoiYiJ9fQ==",
+                            "headers": {
+                              "Content-Type": "application/json"
+                            }
+                          },
+                          "name": "projects/{{project}}/locations/us-central1/queues/taskRate/tasks/rate-b"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "method": "POST",
+                    "path": "/projects/{{project}}/locations/us-central1/queues/taskRate/tasks",
+                    "body": {
+                      "kind": "json",
+                      "json": {
+                        "task": {
+                          "httpRequest": {
+                            "url": "",
+                            "oidcToken": {
+                              "serviceAccountEmail": "emulated-service-acct@email.com"
+                            },
+                            "body": "eyJkYXRhIjp7Im9yZGVyIjoiYyJ9fQ==",
+                            "headers": {
+                              "Content-Type": "application/json"
+                            }
+                          },
+                          "name": "projects/{{project}}/locations/us-central1/queues/taskRate/tasks/rate-c"
+                        }
+                      }
                     }
                   }
-                }
+                ]
               },
               "response": {
-                "status": 200,
-                "headers": {
-                  "content-length": "355",
-                  "content-type": "application/json; charset=utf-8",
-                  "x-powered-by": "Express"
-                },
-                "body": {
-                  "task": {
-                    "httpRequest": {
-                      "url": "{{origin:functions}}/demo-fireside-functions-oracle/us-central1/taskRate",
-                      "oidcToken": {
-                        "serviceAccountEmail": "emulated-service-acct@email.com"
-                      },
-                      "body": {
-                        "data": {
-                          "order": "a"
-                        }
-                      },
-                      "headers": {
-                        "Content-Type": "application/json"
-                      }
+                "parallel": [
+                  {
+                    "startedAtMs": 0,
+                    "status": 200,
+                    "headers": {
+                      "content-length": "355",
+                      "content-type": "application/json; charset=utf-8",
+                      "x-powered-by": "Express"
                     },
-                    "name": "projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskRate/tasks/rate-a"
-                  }
-                },
-                "elapsedMs": "{{number}}"
-              },
-              "observations": []
-            },
-            {
-              "id": "rate-b",
-              "action": {
-                "kind": "http",
-                "origin": "tasks",
-                "method": "POST",
-                "path": "/projects/{{project}}/locations/us-central1/queues/taskRate/tasks",
-                "body": {
-                  "kind": "json",
-                  "json": {
-                    "task": {
-                      "httpRequest": {
-                        "url": "",
-                        "oidcToken": {
-                          "serviceAccountEmail": "emulated-service-acct@email.com"
+                    "body": {
+                      "task": {
+                        "httpRequest": {
+                          "url": "{{origin:functions}}/demo-fireside-functions-oracle/us-central1/taskRate",
+                          "oidcToken": {
+                            "serviceAccountEmail": "emulated-service-acct@email.com"
+                          },
+                          "body": {
+                            "data": {
+                              "order": "a"
+                            }
+                          },
+                          "headers": {
+                            "Content-Type": "application/json"
+                          }
                         },
-                        "body": "eyJkYXRhIjp7Im9yZGVyIjoiYiJ9fQ==",
-                        "headers": {
-                          "Content-Type": "application/json"
-                        }
-                      },
-                      "name": "projects/{{project}}/locations/us-central1/queues/taskRate/tasks/rate-b"
-                    }
-                  }
-                }
-              },
-              "response": {
-                "status": 200,
-                "headers": {
-                  "content-length": "355",
-                  "content-type": "application/json; charset=utf-8",
-                  "x-powered-by": "Express"
-                },
-                "body": {
-                  "task": {
-                    "httpRequest": {
-                      "url": "{{origin:functions}}/demo-fireside-functions-oracle/us-central1/taskRate",
-                      "oidcToken": {
-                        "serviceAccountEmail": "emulated-service-acct@email.com"
-                      },
-                      "body": {
-                        "data": {
-                          "order": "b"
-                        }
-                      },
-                      "headers": {
-                        "Content-Type": "application/json"
+                        "name": "projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskRate/tasks/rate-a"
                       }
                     },
-                    "name": "projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskRate/tasks/rate-b"
-                  }
-                },
-                "elapsedMs": "{{number}}"
-              },
-              "observations": []
-            },
-            {
-              "id": "rate-c",
-              "action": {
-                "kind": "http",
-                "origin": "tasks",
-                "method": "POST",
-                "path": "/projects/{{project}}/locations/us-central1/queues/taskRate/tasks",
-                "body": {
-                  "kind": "json",
-                  "json": {
-                    "task": {
-                      "httpRequest": {
-                        "url": "",
-                        "oidcToken": {
-                          "serviceAccountEmail": "emulated-service-acct@email.com"
+                    "elapsedMs": "{{number}}"
+                  },
+                  {
+                    "startedAtMs": 0,
+                    "status": 200,
+                    "headers": {
+                      "content-length": "355",
+                      "content-type": "application/json; charset=utf-8",
+                      "x-powered-by": "Express"
+                    },
+                    "body": {
+                      "task": {
+                        "httpRequest": {
+                          "url": "{{origin:functions}}/demo-fireside-functions-oracle/us-central1/taskRate",
+                          "oidcToken": {
+                            "serviceAccountEmail": "emulated-service-acct@email.com"
+                          },
+                          "body": {
+                            "data": {
+                              "order": "b"
+                            }
+                          },
+                          "headers": {
+                            "Content-Type": "application/json"
+                          }
                         },
-                        "body": "eyJkYXRhIjp7Im9yZGVyIjoiYyJ9fQ==",
-                        "headers": {
-                          "Content-Type": "application/json"
-                        }
-                      },
-                      "name": "projects/{{project}}/locations/us-central1/queues/taskRate/tasks/rate-c"
-                    }
-                  }
-                }
-              },
-              "response": {
-                "status": 200,
-                "headers": {
-                  "content-length": "355",
-                  "content-type": "application/json; charset=utf-8",
-                  "x-powered-by": "Express"
-                },
-                "body": {
-                  "task": {
-                    "httpRequest": {
-                      "url": "{{origin:functions}}/demo-fireside-functions-oracle/us-central1/taskRate",
-                      "oidcToken": {
-                        "serviceAccountEmail": "emulated-service-acct@email.com"
-                      },
-                      "body": {
-                        "data": {
-                          "order": "c"
-                        }
-                      },
-                      "headers": {
-                        "Content-Type": "application/json"
+                        "name": "projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskRate/tasks/rate-b"
                       }
                     },
-                    "name": "projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskRate/tasks/rate-c"
+                    "elapsedMs": "{{number}}"
+                  },
+                  {
+                    "startedAtMs": 1,
+                    "status": 200,
+                    "headers": {
+                      "content-length": "355",
+                      "content-type": "application/json; charset=utf-8",
+                      "x-powered-by": "Express"
+                    },
+                    "body": {
+                      "task": {
+                        "httpRequest": {
+                          "url": "{{origin:functions}}/demo-fireside-functions-oracle/us-central1/taskRate",
+                          "oidcToken": {
+                            "serviceAccountEmail": "emulated-service-acct@email.com"
+                          },
+                          "body": {
+                            "data": {
+                              "order": "c"
+                            }
+                          },
+                          "headers": {
+                            "Content-Type": "application/json"
+                          }
+                        },
+                        "name": "projects/demo-fireside-functions-oracle/locations/us-central1/queues/taskRate/tasks/rate-c"
+                      }
+                    },
+                    "elapsedMs": "{{number}}"
                   }
-                },
-                "elapsedMs": "{{number}}"
+                ]
               },
               "observations": [
                 {
@@ -5223,7 +5222,7 @@
                     "id": "rate-a",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -5236,7 +5235,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRate",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "rate-a",
                       "x-cloudtasks-taskretrycount": "0",
@@ -5298,7 +5297,7 @@
                     "id": "rate-b",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -5311,7 +5310,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRate",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "rate-b",
                       "x-cloudtasks-taskretrycount": "0",
@@ -5373,7 +5372,7 @@
                     "id": "rate-c",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -5386,7 +5385,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskRate",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "rate-c",
                       "x-cloudtasks-taskretrycount": "0",
@@ -6138,7 +6137,7 @@
                     "id": "{{id}}",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -6151,9 +6150,9 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskDefault",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
-                      "x-cloudtasks-taskname": "5014336246167674",
+                      "x-cloudtasks-taskname": "{{id}}",
                       "x-cloudtasks-taskretrycount": "0",
                       "authorizationPresent": false
                     }
@@ -6320,7 +6319,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskDefault",
-                      "x-cloudtasks-tasketa": "2026-09-19T08:26:13.235Z",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "admin-opt-1",
                       "x-cloudtasks-taskretrycount": "0",
@@ -6559,7 +6558,7 @@
                     "id": "admin-uri-1",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -6572,7 +6571,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-us-central1-taskDefault",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "admin-uri-1",
                       "x-cloudtasks-taskretrycount": "0",
@@ -6804,7 +6803,7 @@
                     "id": "admin-alt-1",
                     "retryCount": 0,
                     "executionCount": 0,
-                    "scheduledTime": "{{number}}",
+                    "scheduledTime": "{{time}}",
                     "previousResponse": {
                       "$undefined": true
                     },
@@ -6817,7 +6816,7 @@
                     "headers": {
                       "content-type": "application/json",
                       "x-cloudtasks-queuename": "queue:demo-fireside-functions-oracle-europe-west1-taskAlt",
-                      "x-cloudtasks-tasketa": "{{number}}",
+                      "x-cloudtasks-tasketa": "{{time}}",
                       "x-cloudtasks-taskexecutioncount": "0",
                       "x-cloudtasks-taskname": "admin-alt-1",
                       "x-cloudtasks-taskretrycount": "0",
@@ -6913,6 +6912,17 @@
                   "ok": true
                 }
               ]
+            },
+            {
+              "id": "admin-pending-settles",
+              "action": {
+                "kind": "wait",
+                "ms": 1500
+              },
+              "response": {
+                "waitedMs": 1500
+              },
+              "observations": []
             },
             {
               "id": "admin-delete-pending",
@@ -7320,7 +7330,7 @@
   ],
   "profileCount": 1,
   "programCount": 6,
-  "stepCount": 62,
+  "stepCount": 61,
   "observationCount": 39,
   "categories": {
     "tasks-registration": 1,

@@ -21,7 +21,12 @@ pub type LogSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// The dispatch resolution; the official loop runs on a zero timeout while
 /// any queue is active and sleeps a second when none is.
-const TICK: Duration = Duration::from_millis(25);
+/// The official controller re-arms `listen()` immediately while any queue is
+/// active and only every second while every queue is idle, so a task
+/// enqueued on an idle emulator waits up to a second (the corpus records
+/// that pause). These are the two cadences.
+const ACTIVE_TICK: Duration = Duration::from_millis(5);
+const IDLE_TICK: Duration = Duration::from_millis(1000);
 
 /// `node-fetch`'s default headers on a request without them.
 const NODE_FETCH_USER_AGENT: &str = "node-fetch/1.0 (+https://github.com/bitinn/node-fetch)";
@@ -235,8 +240,10 @@ impl TasksRuntime {
 
     /// Runs one tick synchronously: token refill, dispatch and processing
     /// of every active queue; the requests it produces are sent.
-    pub(crate) fn tick(&self) {
-        let runs = {
+    /// Returns whether any queue was active when the tick started (the
+    /// official `listen()` decides its next delay from that).
+    pub(crate) fn tick(&self) -> bool {
+        let (runs, active) = {
             let mut state = lock(&self.inner.state);
             let now = Instant::now();
             let now_ms = now_millis();
@@ -245,14 +252,16 @@ impl TasksRuntime {
                 next_dispatch,
             } = &mut *state;
             let mut runs = Vec::new();
+            let mut active = false;
             for queue in queues.values_mut() {
                 queue.refill_tokens(now);
                 if queue.is_active() {
+                    active = true;
                     queue.dispatch_tasks(now, next_dispatch);
                     runs.extend(queue.process(now, now_ms));
                 }
             }
-            runs
+            (runs, active)
         };
         for run in runs {
             let runtime = self.clone();
@@ -260,6 +269,7 @@ impl TasksRuntime {
                 tokio::spawn(async move { runtime.run(run).await });
             }
         }
+        active
     }
 
     #[cfg(test)]
@@ -281,9 +291,14 @@ impl TasksRuntime {
         };
         let runtime = self.clone();
         *slot = Some(handle.spawn(async move {
+            let mut delay = IDLE_TICK;
             loop {
-                tokio::time::sleep(TICK).await;
-                runtime.tick();
+                tokio::time::sleep(delay).await;
+                delay = if runtime.tick() {
+                    ACTIVE_TICK
+                } else {
+                    IDLE_TICK
+                };
             }
         }));
     }

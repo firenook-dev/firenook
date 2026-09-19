@@ -58,7 +58,7 @@ test('the tasks profile meets the frozen minimums, covers every route and stores
   for (const program of profile.programs) {
     assert.equal(program.failure, undefined, `${program.id} recorded without a harness failure`);
     for (const step of program.steps) {
-      if (step.action?.origin === 'tasks') {
+      if (step.action?.origin === 'tasks' && step.action.kind === 'http') {
         const path = step.action.path.replace(/\/projects\/[^/]+\/locations\/[^/]+\/queues\/[^/]+/u, '/queues/{q}').replace(/\/tasks\/[^/]+$/u, '/tasks/{id}');
         routes.add(`${step.action.method} ${path}`);
         statuses.add(step.response.status);

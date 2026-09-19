@@ -90,6 +90,13 @@ const IGNORED_STEP_PATHS: ReadonlyMap<string, readonly RegExp[]> = new Map([
   // document; whether that lands before this read depends on how fast the
   // Auth lookup fails.
   ["consumer-refs/registry-extensions-delivery/checkout-session-read", [/^response\.body\.fields\.error$/u]],
+  // The official worker is restarted after the emulator aborts the
+  // over-deadline request, so its per-process attempt counter restarts and
+  // the retry never overlaps the first invocation; Fireside keeps its worker.
+  ["tasks/tasks-deadline-and-limits/slow-deadline", [/^observations\[\d+\]\.(attempt|concurrent)$/u]],
+  // The official log lines of the Tasks emulator and its worker have no
+  // counterpart wording in Fireside's log.
+  ["tasks/tasks-admin-sdk/tasks-logs", [/^response\.matched$/u]],
 ]);
 
 /** Recorded fields that vary between runs or engines without a contract. */
@@ -109,6 +116,8 @@ const IGNORED_PATHS: readonly RegExp[] = [
   /^response\.parallel\[\d+\]\.elapsedMs$/u,
   /^response\.parallel\[\d+\]\.startedAtMs$/u,
   /^logs$/u,
+  // /queueStats windows (five-minute and one-minute counts) depend on the pace of the run.
+  /^response\.body\.queue:[^.]+\.(tasksAdded|completedLastMin|failedTasks)$/u,
 ];
 
 /**

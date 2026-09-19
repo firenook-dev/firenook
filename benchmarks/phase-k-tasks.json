@@ -75,11 +75,10 @@
       "minimumDispatchObservations": 29,
       "normalizedFields": [
         "origins and hosts",
-        "auto-generated task ids",
+        "auto-generated task ids in names and X-CloudTasks-TaskName",
         "X-CloudTasks-TaskETA and scheduledTime",
         "pids, elapsed times, startedAt",
-        "attempt counter of the dispatch-deadline program (per worker)",
-        "queueStats windows tasksAdded/completedLastMin/failedTasks"
+        "replay-ignored: attempt and concurrent of the dispatch-deadline program (per worker), queueStats windows tasksAdded/completedLastMin/failedTasks, the final log step's matched count"
       ]
     },
     "requiredFixtures": [
@@ -96,12 +95,12 @@
     "fixturesFrozen": true,
     "frozenProfileCount": 1,
     "frozenProgramCount": 6,
-    "frozenStepCount": 62,
+    "frozenStepCount": 61,
     "frozenFixtureSha256": {
-      "README.md": "63fc73971324a5a455e93854f103ec49b3ec6ebf4724f4ab4410d0985a14b6e3",
-      "emulator-programs.json": "4e5ae760aa850032714436e6499c8f28ae83dbbd27345ed2abc8215a85b275e4"
+      "README.md": "88f8406585398a1a5d66a236b6a8d3e67c8afc6cfabbaddc4e9e52d34d60a009",
+      "emulator-programs.json": "66f6a5b5164a920d55311eed16f3e64add7140985becd2e3127a3baa5f871078"
     },
-    "fixturesFrozenAt": "2026-09-19T16:40:00+08:00"
+    "fixturesFrozenAt": "2026-09-19T17:35:00+08:00"
   },
   "gates": {
     "emulatorReplay": {
@@ -154,10 +153,36 @@
       "date": "2026-09-19",
       "fixture": "conformance/fixtures/tasks-v1/emulator-programs.json",
       "programs": 6,
-      "steps": 62,
+      "steps": 61,
       "observations": 39,
       "oracle": "firebase-tools 15.22.0 emulators:start --only auth,functions,firestore,storage,pubsub,eventarc,tasks,extensions on the Phase H synthetic project with the tasks primary codebase; firebase-functions 7.2.5, firebase-admin 13.10.0, Java 25 for the Firestore emulator",
+      "recordings": "three recordings; the third (after the rate-limited tasks were enqueued together and a wait was inserted before deleting a dispatched task, both to remove the controller's one-second idle-poll phase from the outcome) is the frozen one",
       "readinessMilliseconds": 34397
+    },
+    "k2": {
+      "date": "2026-09-19",
+      "crate": "crates/tasks-front",
+      "tests": "28 unit tests (routes, Express error pages, dispatch headers, retry ladder, deadline abort, concurrency and rate limits, discovery) + 14 functions-bridge tests",
+      "quirksReproduced": [
+        "leading slash on auto-generated names",
+        "maxAttempts off-by-one",
+        "negative count after deleting a dequeued task",
+        "ETA number or string",
+        "runningTasks = maxConcurrentDispatches",
+        "one-second idle poll, continuous while active",
+        "execution count on non-5xx only",
+        "caller headers override"
+      ]
+    },
+    "k3": {
+      "date": "2026-09-19",
+      "replay": "npm run replay:functions:runtime -- --binary target/debug/fireside --profiles tasks --fixture fixtures/tasks-v1/emulator-programs.json",
+      "steps": 61,
+      "matched": 61,
+      "mismatches": 0,
+      "namedDivergences": [],
+      "runsIdentical": 3,
+      "functionsCorpus": "functions-runtime corpus replay 271/271 (profiles main, v1-blocking, inspect, ext-missing-param) with the Tasks emulator mounted"
     }
   }
 }
