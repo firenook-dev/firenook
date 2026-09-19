@@ -497,6 +497,7 @@ fn spawn_functions_servers(
 // startup order this function documents.
 #[allow(clippy::too_many_lines)]
 pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError> {
+    let config = without_absent_functions(config)?;
     validate_config(&config)?;
     // Keep the OS lock alive through every service's shutdown. It is released
     // automatically on process death, without deleting/replacing the lock inode.
@@ -964,6 +965,34 @@ async fn finish_suite(
         storage_bytes,
         delivery,
     })
+}
+
+/// A selection that names Functions while `firebase.json` configures no
+/// `functions` codebase and no `extensions` instance runs without the
+/// Functions emulator (the official suite also has nothing to serve then),
+/// announced once.
+fn without_absent_functions(mut config: SuiteConfig) -> Result<SuiteConfig, SuiteRuntimeError> {
+    if !config.services.functions {
+        return Ok(config);
+    }
+    let firebase_json: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&config.firebase_json)
+            .map_err(|error| failure(format!("failed to read firebase.json: {error}")))?,
+    )
+    .map_err(|error| failure(format!("invalid firebase.json: {error}")))?;
+    let codebases = codebases_from_config(&firebase_json, &config.project_dir);
+    let extensions = firebase_json
+        .get("extensions")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|instances| !instances.is_empty());
+    if codebases.is_empty() && !extensions {
+        eprintln!(
+            "fireside: firebase.json configures no Functions codebase and no Extensions; the Functions emulator (with Eventarc and Tasks) is not started"
+        );
+        config.services.functions = false;
+        config.minimum_functions = 0;
+    }
+    Ok(config)
 }
 
 fn validate_config(config: &SuiteConfig) -> Result<(), SuiteRuntimeError> {

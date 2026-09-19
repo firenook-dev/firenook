@@ -254,9 +254,16 @@ impl Parser {
                 break;
             }
         }
-        self.expect(&TokenKind::Colon, "':' after allow methods")?;
-        self.expect_identifier("if")?;
-        let condition = self.expression(0)?;
+        // `allow read, write;` (no condition) is an unconditional grant: the
+        // official `templates/emulators/default_storage.rules` and the
+        // Firebase rules reference both use it.
+        let condition = if self.consume(&TokenKind::Colon) {
+            self.expect_identifier("if")?;
+            self.expression(0)?
+        } else {
+            let end = self.previous_end();
+            Expr::new(ExprKind::Bool(true), end, end)
+        };
         // The official rules runtime accepts an allow without a trailing
         // semicolon when it is the last declaration of its block
         // (storage-rules-v1 set-rules-missing-semicolon-accepted).
@@ -746,6 +753,16 @@ mod tests {
         assert_eq!(program.match_count(), 2);
         assert_eq!(program.allow_count(), 1);
         assert_eq!(program.function_count(), 1);
+    }
+
+    #[test]
+    fn unconditional_allow_is_an_implicit_true() {
+        // The official emulator's default_storage.rules for demo projects.
+        let source = "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /{allPaths=**} {\n      allow read, write;\n    }\n  }\n}\n";
+        let program = parse(source).expect("an allow without a condition parses");
+        assert_eq!(program.allow_count(), 1);
+        assert!(crate::compile(source).is_ok());
+        assert!(parse("service cloud.firestore { match /x/{y} { allow read: ; } }").is_err());
     }
 
     #[test]
