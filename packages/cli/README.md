@@ -1,9 +1,10 @@
 # Fireside CLI — local emulator preview
 
-Prebuilt Rust local emulator, with the same Firebase client/Admin SDKs. This is
-a preview of a **complete-suite local configuration**: Firestore, Auth,
-Storage, Functions, Pub/Sub and supporting hub/UI services. It is not a
-universal replacement for every Firebase product or arbitrary service subsets.
+Prebuilt Rust local emulator, with the same Firebase client/Admin SDKs. It
+serves Firestore, Auth, Storage, Functions and Pub/Sub (any subset, selected
+by `firebase.json` and `--only`) with the supporting hub, Eventarc, Tasks,
+logging and Emulator UI listeners. Realtime Database, Hosting, App Hosting and
+Data Connect are not provided.
 
 Install the scoped package, not the unrelated unscoped `fireside` package.
 The following exact-version command is for this `0.1.0-next.8` preview package
@@ -13,6 +14,8 @@ the root project README for the currently published version.
 ```sh
 npm install --save-dev --save-exact @fireside-dev/cli@0.1.0-next.8
 npx fireside setup
+npx fireside init                      # new project: firebase.json, rules, a Functions codebase
+npx fireside init --adopt              # existing project: check it, add what Fireside needs
 npx fireside doctor --project demo-my-app
 npx fireside emulators:start --project demo-my-app
 ```
@@ -41,20 +44,126 @@ platform binary. Lock the version in your project. No automatic upgrades.
 - `setup` explicitly downloads the pinned public Emulator UI asset and verifies
   size/SHA-256. Ordinary installation/start does not download it. `doctor` is
   read-only and names missing dependencies.
-- Existing `firebase.json` configures all five service emulators; `.firebaserc`
-  aliases/Storage targets and existing rules/index paths are reused. Storage is
-  currently the native suite's array-of-targets format, not every Firebase CLI
-  configuration shape. No app SDK replacement is needed.
-- Use a `demo-*` project. No cloud login or deployment commands. Functions are
-  user code and can still call external APIs; this is not a network sandbox.
+- The existing `firebase.json`, `.firebaserc` (aliases, Storage targets) and
+  rules/index files are read as the official CLI reads them; see
+  [Configuration](#configuration). No app SDK replacement is needed.
+- Any lowercase project id is accepted. A `demo-*` id never reaches cloud
+  services; a real id starts every Functions worker with the emulator hosts and
+  without Google credentials, but this CLI is not a network sandbox: Functions
+  are user code and can still call external APIs. No cloud login or deployment
+  command exists.
 - Use synthetic credentials only. Like the official Auth emulator, exported
   password hashes use a reversible development format, not secure production
   password storage. Never commit real credentials or emulator user exports.
-- Unsupported services, subsets, multi-project configurations, public bind
-  addresses and UI-disable requests fail before launch. Windows ARM64/32-bit,
-  Linux musl/Alpine and arbitrary partial suites are not claimed supported.
+- Fireside never prompts: destructive commands need `--force`, and
+  `--non-interactive` is accepted as a no-op. Windows ARM64/32-bit and Linux
+  musl/Alpine are not claimed supported.
 - `fireside native ...` exposes the existing advanced native CLI explicitly.
   It does not receive the adapter's project, state or credential safeguards.
+
+## Commands
+
+```sh
+fireside init [--force] [--dry-run] [--no-functions] [--project ID]   # scaffold a project
+fireside init --adopt [--dry-run] [--json]        # adapt an existing firebase.json
+fireside use [alias|projectId] [--add ID [--alias NAME]] [--unalias NAME] [--clear]
+fireside target:apply storage NAME BUCKET...      # .firebaserc Storage targets
+fireside target:clear storage NAME
+fireside setup                                    # verified Emulator UI asset
+fireside doctor [options]                         # read-only checks, JSON
+fireside emulators:start [options]
+fireside emulators:exec [options] "npm test"      # script through the shell
+fireside emulators:exec [options] -- CMD ARGS...  # argv command, no shell
+fireside emulators:export DIR [--force] [--only firestore,auth,storage]
+fireside firestore:delete PATH (-r | --shallow) [-f] [--database ID]
+fireside firestore:delete --all-collections -f [--database ID]
+fireside functions:invoke NAME [--data JSON] [--region R] [--method M]
+fireside ext:vendor [--instance ID]...
+fireside binary-path | native ARGS...
+```
+
+`init` writes `firebase.json` (Firestore, Storage in the `{rules}` form, a
+JavaScript Functions codebase unless `--no-functions`, every emulator on the
+official default port, `ui.enabled: true`, `singleProjectMode: true`),
+`.firebaserc` with `demo-<directory name>` (or `--project`), the official
+Firestore/Storage rules and indexes templates, `functions/package.json` and
+`functions/index.js`, and appends `.fireside/` and `*-debug.log` to
+`.gitignore`. Nothing is installed; it refuses to overwrite `firebase.json`
+without `--force`. `init --adopt` runs the launcher's own checks over an
+existing project and prints a plan: errors Fireside cannot accept, official
+services it skips, and additions it can make (missing `emulators` entries for
+configured services, a missing `.firebaserc` default, referenced rules files
+that do not exist). Without `--dry-run`/`--json` the additions are applied by
+editing the parsed JSON, never rewriting other keys; errors leave every file
+untouched and exit 1.
+
+`use`, `target:apply` and `target:clear` are pure `.firebaserc` edits: no
+network, no login. `use <alias|id>` records `projects.default`, `--add`
+records an alias, `--unalias`/`--clear` remove one. Only `storage` targets
+exist for Fireside (`database`/`hosting` are refused).
+
+`emulators:export` finds the running suite through the same locator file the
+official CLI writes (`<tmpdir>/hub-<projectId>.json`, then the configured hub
+port), refuses the project directory or an ancestor, refuses a foreign
+non-empty directory without `--force` (an earlier export is replaced), and
+asks the hub to export the running exportable services. `firestore:delete`
+speaks to the running Firestore emulator: a document path deletes that
+document (`-r` also its subcollections), a collection path needs `-r` or
+`--shallow`, `--all-collections` clears the database; `-r` on a collection and
+`--all-collections` need `--force`. Both print JSON with `--json`.
+
+Common options: `-P`/`--project`, `-c`/`--config`, `--json`, `--debug`,
+`--log-verbosity LEVEL` (`DEBUG` behaves like `--debug`; the other levels are
+accepted for compatibility and Fireside prints its full log),
+`--non-interactive`. `--debug` passes `--debug-log` to the engine, which
+appends every suite log record to
+`<project>/.fireside/runs/session-*/fireside-debug.log`; the path is printed in
+the launch banner and recorded in `launch.json`.
+
+Not provided: `functions:shell` (Fireside never starts a second Functions
+runtime; call functions on the running suite with `functions:invoke`), and
+every deploy/login command (never intercepted). `mcp` arrives separately.
+
+## Configuration
+
+- **Services.** A service starts when `firebase.json` has its top-level
+  section (`firestore`, `storage`, `functions`; `extensions` counts as
+  functions) or an `emulators.<name>` entry (Auth and Pub/Sub have no section,
+  so they need the entry), exactly like the official `filterEmulatorTargets`.
+  `--only` narrows the list with the official names; `extensions` maps to
+  functions, `eventarc`/`tasks`/`hub`/`ui`/`logging` follow their parent, and
+  `database`/`hosting`/`dataconnect`/`apphosting` are refused as not
+  implemented. Nothing configured means `No emulators to start, run fireside
+  init to get started.`
+- **Skipped services.** `emulators.database`, `.hosting`, `.dataconnect` and
+  `.apphosting` entries are skipped with a warning; unknown keys are errors.
+- **Storage** accepts the `{rules}` object, the array of `{target, rules}`
+  entries (with `.firebaserc` targets or `--storage-bucket target=bucket`), or
+  no section at all (open default rules for the project bucket).
+- **Firestore** accepts the object form or an array of `{database, rules,
+  indexes}` entries (one entry may omit `database` for `(default)`); the
+  engine serves every listed database.
+- **Functions** need `--minimum-functions` at `1` only when a codebase or
+  extensions are configured and selected; otherwise the CLI passes `0`, and
+  the engine drops Functions (with Eventarc and Tasks) with a notice when
+  `firebase.json` has no `functions` codebase and no `extensions`.
+- **UI.** `emulators.ui.enabled: false` disables the Emulator UI (and the
+  logging listener, as in the official suite); `--ui` cannot re-enable it.
+  `emulators:exec` keeps the UI off unless `--ui` is given or `ui.enabled` is
+  explicitly `true`; `emulators:start` keeps it on unless disabled.
+  `emulators.singleProjectMode` (default `true`) is passed through.
+- **Host.** `--host` or `emulators.<name>.host` binds every listener; clients
+  are pointed at the connectable address (`0.0.0.0` → `127.0.0.1`, `::` →
+  `::1`). A non-loopback host prints a warning: the emulators have no
+  authentication, so every service, the data and arbitrary Functions execution
+  are reachable from any device that can reach that host. Per-service hosts
+  that differ from the chosen host and are not loopback are errors.
+- **Ports** come from `emulators.<name>.port`, `emulators.firestore.websocketPort`
+  and the `--*-port` overrides, falling back to the official defaults
+  (Firestore 8080, Auth 9099, Storage 9199, Functions 5001, Pub/Sub 8085, hub
+  4400, UI 4000, logging 4500, Eventarc 9299, Tasks 9499, Firestore WebSocket
+  9150); every port is passed to the engine explicitly and they must be
+  distinct.
 
 ## Functions and Extensions
 
@@ -98,12 +207,15 @@ fireside emulators:start --project demo-my-app --import ./seed --export-on-exit 
 fireside emulators:exec --project demo-my-app -- node ./integration-test.mjs
 ```
 
-CLI options follow the pinned Firebase source contract where supported. Test
-commands are arguments after `--`, not implicitly executed by a shell. Use
-`-- sh -c '...'` deliberately when needed. The command starts only after native
-suite readiness; the CLI waits for export/shutdown and propagates failures.
-On Windows, invoke native programs directly (`-- node test.mjs`); for `.cmd`
-scripts use an explicit command interpreter (`-- cmd.exe /c npm test`). The
+CLI options follow the pinned Firebase source contract where supported. A
+test command is either an argv list after `--` (spawned directly, no shell) or
+one quoted script string (`fireside emulators:exec "npm test"`), which runs
+through the platform shell exactly as the official `emulators:exec` does; the
+CLI says so on stderr. Two or more bare arguments without `--` are refused with
+the rewritten command. The command starts only after native suite readiness;
+the CLI waits for export/shutdown and propagates failures. On Windows, invoke
+native programs directly (`-- node test.mjs`); for `.cmd` scripts use the
+script form or an explicit interpreter (`-- cmd.exe /c npm test`). The
 launcher uses a private control pipe for graceful native export/shutdown rather
 than treating Unix signals as portable. Paths containing spaces are supported.
 
