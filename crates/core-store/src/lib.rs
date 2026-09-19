@@ -1307,6 +1307,23 @@ impl Snapshot {
         }
     }
 
+    /// The databases of one project that hold at least one document in this
+    /// snapshot, in name order. A database is not a stored object: it exists
+    /// exactly while it has documents, so an emptied database disappears.
+    #[must_use]
+    pub fn databases(&self, project: &str) -> Vec<DatabaseName> {
+        match &self.documents {
+            SnapshotDocuments::Memory { documents, .. } => documents
+                .keys()
+                .filter(|key| key.database().project_id() == project)
+                .map(|key| key.database().clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+            SnapshotDocuments::Disk(documents) => documents.databases(project),
+        }
+    }
+
     /// Previews an atomic write set at `request_time` without changing the
     /// store. The result is suitable for Security Rules `request.resource`
     /// and `getAfter()` evaluation.
@@ -2728,6 +2745,93 @@ mod tests {
             );
             assert_eq!(store.revision().get(), 2);
             assert_eq!(store.snapshot().documents(&database("(default)")).len(), 2);
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn snapshots_enumerate_the_databases_holding_documents_on_both_backends() {
+        let directory = std::env::temp_dir().join(format!(
+            "fireside-core-store-databases-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        for store in [Store::default(), disk] {
+            let other_project =
+                DatabaseName::new("fireside-other-project", "(default)").expect("database");
+            assert!(store.snapshot().databases("fireside-test").is_empty());
+            let seeded = store
+                .commit(&[
+                    Write::Create {
+                        key: key(&database("(default)"), "items/one"),
+                        fields: fields(Value::Integer(1)),
+                    },
+                    Write::Create {
+                        key: key(&database("(default)"), "items/two"),
+                        fields: fields(Value::Integer(2)),
+                    },
+                    Write::Create {
+                        key: key(&database("zeta"), "items/one"),
+                        fields: fields(Value::Integer(3)),
+                    },
+                    Write::Create {
+                        key: key(&database("other"), "nested/doc/items/one"),
+                        fields: fields(Value::Integer(4)),
+                    },
+                    Write::Create {
+                        key: key(&other_project, "items/one"),
+                        fields: fields(Value::Integer(5)),
+                    },
+                ])
+                .expect("seed");
+            assert_eq!(
+                store.snapshot().databases("fireside-test"),
+                vec![database("(default)"), database("other"), database("zeta")]
+            );
+            assert_eq!(
+                store.snapshot().databases("fireside-other-project"),
+                vec![other_project]
+            );
+            assert!(store.snapshot().databases("fireside-tes").is_empty());
+            assert!(store.snapshot().databases("fireside-test-2").is_empty());
+
+            let emptied = store
+                .commit(&[Write::Delete {
+                    key: key(&database("other"), "nested/doc/items/one"),
+                    precondition: Precondition::None,
+                }])
+                .expect("delete");
+            assert_eq!(
+                store.snapshot().databases("fireside-test"),
+                vec![database("(default)"), database("zeta")]
+            );
+            // Historical views merge the reverse overlay: the deleted document
+            // restores `other`, and before the seed no database existed.
+            assert_eq!(
+                store
+                    .snapshot_at(seeded.revision)
+                    .expect("seeded revision")
+                    .databases("fireside-test"),
+                vec![database("(default)"), database("other"), database("zeta")]
+            );
+            assert_eq!(
+                store
+                    .snapshot_at(emptied.revision)
+                    .expect("emptied revision")
+                    .databases("fireside-test"),
+                vec![database("(default)"), database("zeta")]
+            );
+            assert!(
+                store
+                    .snapshot_at(Revision::from_u64(0))
+                    .expect("initial revision")
+                    .databases("fireside-test")
+                    .is_empty()
+            );
         }
         let _ = std::fs::remove_dir_all(&directory);
     }
