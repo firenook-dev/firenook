@@ -675,11 +675,15 @@ name = "firenook-console-front"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "firenook-core-store",
  "firenook-suite-front",
+ "futures-util",
  "rust-embed",
  "serde",
  "serde_json",
+ "time",
  "tokio",
+ "tokio-stream",
  "tower",
  "ts-rs",
 ]
