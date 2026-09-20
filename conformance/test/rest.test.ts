@@ -185,6 +185,132 @@ test("REST v1 commit, batchGet, and runQuery share document semantics", async ()
   assert.equal(deleted.status, 200);
 });
 
+test("REST v1 runQuery honors select projections and count aggregations", async () => {
+  const configuration = resolveTarget(process.env);
+  const runId = randomUUID();
+  const databaseRoot = `projects/${configuration.projectId}/databases/(default)`;
+  const parentPath = `runs/${runId}`;
+  const baseUrl = configuration.host === undefined
+    ? "https://firestore.googleapis.com"
+    : `http://${configuration.host}`;
+  const documentsUrl = `${baseUrl}/v1/${databaseRoot}/documents`;
+  const headers = {
+    ...await authorizationHeaders(configuration.host === undefined),
+    "content-type": "application/json",
+  };
+  const names = ["a", "b", "c"].map((id) =>
+    `${databaseRoot}/documents/${parentPath}/firenook_conformance/${id}`
+  );
+
+  const committed = await fetch(`${documentsUrl}:commit`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      writes: names.map((name, index) => ({
+        update: {
+          name,
+          fields: {
+            rank: { integerValue: String(index) },
+            label: { stringValue: `label ${index}` },
+            even: { booleanValue: index % 2 === 0 },
+          },
+        },
+      })),
+    }),
+  });
+  assert.equal(committed.status, 200);
+
+  try {
+    // `select` limits the returned fields; selecting only `__name__` returns
+    // the document identity without any field.
+    const selected = await fetch(`${documentsUrl}/${parentPath}:runQuery`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: "firenook_conformance" }],
+          select: { fields: [{ fieldPath: "label" }] },
+          orderBy: [{ field: { fieldPath: "__name__" } }],
+        },
+      }),
+    });
+    assert.equal(selected.status, 200);
+    const selectedResponses = await json<readonly RestRunQueryResponse[]>(selected);
+    assert.deepEqual(
+      selectedResponses.map((response) => response.document?.name),
+      names,
+    );
+    assert.deepEqual(
+      selectedResponses.map((response) => Object.keys(response.document?.fields ?? {})),
+      [["label"], ["label"], ["label"]],
+    );
+    assert.equal(selectedResponses[0]?.document?.fields?.label?.stringValue, "label 0");
+
+    const nameOnly = await fetch(`${documentsUrl}/${parentPath}:runQuery`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: "firenook_conformance" }],
+          select: { fields: [{ fieldPath: "__name__" }] },
+          limit: 1,
+        },
+      }),
+    });
+    assert.equal(nameOnly.status, 200);
+    const nameOnlyResponses = await json<readonly RestRunQueryResponse[]>(nameOnly);
+    assert.equal(nameOnlyResponses.length, 1);
+    assert.equal(nameOnlyResponses[0]?.document?.name, names[0]);
+    assert.deepEqual(Object.keys(nameOnlyResponses[0]?.document?.fields ?? {}), []);
+
+    // A count without filters, with a filter, and bounded with `upTo`.
+    const count = async (structuredQuery: unknown, aggregation: unknown) => {
+      const response = await fetch(`${documentsUrl}/${parentPath}:runAggregationQuery`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          structuredAggregationQuery: {
+            structuredQuery,
+            aggregations: [{ ...(aggregation as object), alias: "n" }],
+          },
+        }),
+      });
+      assert.equal(response.status, 200);
+      const [first] = await json<readonly { result?: { aggregateFields?: Record<string, RestValue> } }[]>(response);
+      return first?.result?.aggregateFields?.n?.integerValue;
+    };
+    assert.equal(await count({ from: [{ collectionId: "firenook_conformance" }] }, { count: {} }), "3");
+    assert.equal(
+      await count(
+        {
+          from: [{ collectionId: "firenook_conformance" }],
+          where: {
+            fieldFilter: { field: { fieldPath: "even" }, op: "EQUAL", value: { booleanValue: true } },
+          },
+        },
+        { count: {} },
+      ),
+      "2",
+    );
+    assert.equal(
+      await count({ from: [{ collectionId: "firenook_conformance" }] }, { count: { upTo: "2" } }),
+      "2",
+    );
+    assert.equal(
+      await count({ from: [{ collectionId: "firenook_conformance" }], offset: 1 }, { count: {} }),
+      "2",
+    );
+    assert.equal(
+      await count({ from: [{ collectionId: "firenook_conformance" }], limit: 1 }, { count: {} }),
+      "1",
+    );
+  } finally {
+    await Promise.all(
+      names.map((name) => fetch(`${baseUrl}/v1/${name}`, { method: "DELETE", headers })),
+    );
+  }
+});
+
 test("REST v1 commit applies update and document transforms", async () => {
   const configuration = resolveTarget(process.env);
   const runId = randomUUID();

@@ -29,7 +29,7 @@ use firenook_functions_bridge::TriggerRegistry;
 use firenook_query_engine::{
     Aggregation, DatabaseEdition, Direction, DistanceMeasure, FieldFilter, FieldOperator,
     FieldPath as QueryFieldPath, Filter, Limit, Query as StructuredQuery, QueryPolicy, QueryScope,
-    aggregate, execute,
+    aggregate, count, execute,
 };
 use firenook_rules_runtime::RequestOperation;
 use firenook_rules_runtime::{Authorization, RulesRuntime, SnapshotAccess, evaluation_request};
@@ -692,16 +692,22 @@ async fn clear_database(
 ) -> Result<Json<JsonValue>, RestError> {
     let database = database_name(path)?;
     loop {
-        let writes = state
-            .store
-            .snapshot()
-            .iter_documents(&database)
-            .take(500)
-            .map(|(key, _)| Write::Delete {
-                key,
-                precondition: Precondition::None,
-            })
-            .collect::<Vec<_>>();
+        // Keys only: clearing a database never needs a document body.
+        let writes = {
+            let snapshot = state.store.snapshot();
+            let mut cursor = snapshot.key_cursor(&database, "");
+            let mut writes = Vec::with_capacity(500);
+            while writes.len() < 500 {
+                let Some(key) = cursor.next() else {
+                    break;
+                };
+                writes.push(Write::Delete {
+                    key,
+                    precondition: Precondition::None,
+                });
+            }
+            writes
+        };
         if writes.is_empty() {
             break;
         }
@@ -791,17 +797,34 @@ async fn delete_path(
     let (mode, is_document) = delete_selection(&path, query.mode.as_deref())?;
     let mut deleted = 0_u64;
     loop {
-        let writes = state
-            .store
-            .snapshot()
-            .iter_documents(&database)
-            .filter(|(key, _)| delete_selects(key.path(), &path, mode, is_document))
-            .take(500)
-            .map(|(key, _)| Write::Delete {
-                key,
-                precondition: Precondition::None,
-            })
-            .collect::<Vec<_>>();
+        // Only keys at or below the path are walked, never the whole
+        // database; bodies are not read. Each batch takes a fresh snapshot
+        // so deleted keys do not reappear.
+        let writes = {
+            let snapshot = state.store.snapshot();
+            let mut selected = Vec::with_capacity(500);
+            if let Ok(key) = DocumentKey::new(database.clone(), path.as_str())
+                && snapshot.get(&key).is_some()
+            {
+                selected.push(key);
+            }
+            let mut cursor = snapshot.key_cursor(&database, &format!("{path}/"));
+            while selected.len() < 500 {
+                let Some(key) = cursor.next() else {
+                    break;
+                };
+                if delete_selects(key.path(), &path, mode, is_document) {
+                    selected.push(key);
+                }
+            }
+            selected
+                .into_iter()
+                .map(|key| Write::Delete {
+                    key,
+                    precondition: Precondition::None,
+                })
+                .collect::<Vec<_>>()
+        };
         if writes.is_empty() {
             break;
         }
@@ -908,9 +931,10 @@ async fn run_query_at_root(
         &body,
         &request_authorization(&headers, &project)?,
     )
+    .await
 }
 
-fn run_query_at_parent(
+async fn run_query_at_parent(
     State(state): State<RestState>,
     Path(path): Path<DocumentPath>,
     headers: &HeaderMap,
@@ -922,11 +946,11 @@ fn run_query_at_parent(
         .map_err(|error| RestError::invalid(error.to_string()))?;
     if let Some(parent) = path.document.strip_suffix(":runQuery") {
         validate_parent(parent)?;
-        return run_query(&state, &database, Some(parent), &body, &authorization);
+        return run_query(&state, &database, Some(parent), &body, &authorization).await;
     }
     if let Some(parent) = path.document.strip_suffix(":runAggregationQuery") {
         validate_parent(parent)?;
-        return run_aggregation_query(&state, &database, Some(parent), &body, &authorization);
+        return run_aggregation_query(&state, &database, Some(parent), &body, &authorization).await;
     }
     Err(RestError::not_found("unknown REST document operation"))
 }
@@ -945,9 +969,66 @@ async fn run_aggregation_query_at_root(
         &body,
         &request_authorization(&headers, &project)?,
     )
+    .await
 }
 
-fn run_query(
+/// Executes and serializes a query on the shared read pool: a REST result
+/// set is one JSON body, so its whole cost leaves the async workers.
+async fn run_query(
+    state: &RestState,
+    database: &DatabaseName,
+    parent: Option<&str>,
+    body: &JsonValue,
+    authorization: &Authorization,
+) -> Result<Json<JsonValue>, RestError> {
+    let state = state.clone();
+    let database = database.clone();
+    let parent = parent.map(str::to_owned);
+    let body = body.clone();
+    let authorization = authorization.clone();
+    let service = state.service.clone();
+    service
+        .run_read(move || {
+            Ok(run_query_blocking(
+                &state,
+                &database,
+                parent.as_deref(),
+                &body,
+                &authorization,
+            ))
+        })
+        .await
+        .map_err(|status| RestError::internal(status.message().to_owned()))?
+}
+
+async fn run_aggregation_query(
+    state: &RestState,
+    database: &DatabaseName,
+    parent: Option<&str>,
+    body: &JsonValue,
+    authorization: &Authorization,
+) -> Result<Json<JsonValue>, RestError> {
+    let state = state.clone();
+    let database = database.clone();
+    let parent = parent.map(str::to_owned);
+    let body = body.clone();
+    let authorization = authorization.clone();
+    let service = state.service.clone();
+    service
+        .run_read(move || {
+            Ok(run_aggregation_query_blocking(
+                &state,
+                &database,
+                parent.as_deref(),
+                &body,
+                &authorization,
+            ))
+        })
+        .await
+        .map_err(|status| RestError::internal(status.message().to_owned()))?
+}
+
+fn run_query_blocking(
     state: &RestState,
     database: &DatabaseName,
     parent: Option<&str>,
@@ -988,7 +1069,7 @@ fn run_query(
     Ok(Json(JsonValue::Array(responses)))
 }
 
-fn run_aggregation_query(
+fn run_aggregation_query_blocking(
     state: &RestState,
     database: &DatabaseName,
     parent: Option<&str>,
@@ -1010,10 +1091,31 @@ fn run_aggregation_query(
         .map_err(|error| RestError::streaming_failed_precondition(error.to_string()))?;
     let (operations, count_bounds) = decode_aggregations(aggregation_query)?;
     let snapshot = state.store.snapshot();
-    let documents = execute(&snapshot, database, &query, state.query_policy.edition())
-        .map_err(|error| RestError::invalid(error.to_string()))?;
+    // A count needs no document payloads: it is answered from the lazy scan
+    // (or the store's indexes) exactly as the gRPC service answers it. Every
+    // other aggregation materializes the result set.
+    let mut fields = if operations
+        .iter()
+        .all(|operation| matches!(operation, Aggregation::Count { .. }))
+    {
+        let matched = count(&snapshot, database, &query, state.query_policy.edition())
+            .map_err(|error| RestError::invalid(error.to_string()))?;
+        let mut fields = firenook_core_store::Fields::new();
+        for operation in &operations {
+            if let Aggregation::Count { alias } = operation {
+                fields.insert(
+                    alias.clone(),
+                    Value::Integer(i64::try_from(matched).unwrap_or(i64::MAX)),
+                );
+            }
+        }
+        fields
+    } else {
+        let documents = execute(&snapshot, database, &query, state.query_policy.edition())
+            .map_err(|error| RestError::invalid(error.to_string()))?;
+        aggregate(&documents, &operations)
+    };
     authorize_query(state, database, &query, authorization, &snapshot)?;
-    let mut fields = aggregate(&documents, &operations);
     for (alias, bound) in count_bounds {
         if let Some(Value::Integer(count)) = fields.get_mut(&alias) {
             *count = (*count).min(i64::try_from(bound).unwrap_or(i64::MAX));
@@ -1245,6 +1347,33 @@ fn decode_query(
         query = query.limit(Limit::First(
             usize::try_from(limit).map_err(|_| RestError::invalid("query limit is too large"))?,
         ));
+    }
+    if let Some(projection) = structured.get("select") {
+        // The same projection the gRPC codec applies: `select.fields[]` limits
+        // the returned fields; an empty list selects nothing.
+        let fields = projection
+            .as_object()
+            .and_then(|projection| projection.get("fields"))
+            .map(|fields| {
+                fields
+                    .as_array()
+                    .ok_or_else(|| RestError::invalid("select fields must be an array"))
+            })
+            .transpose()?
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|field| {
+                field
+                    .as_object()
+                    .and_then(|field| field.get("fieldPath"))
+                    .and_then(JsonValue::as_str)
+                    .ok_or_else(|| RestError::invalid("select field requires a fieldPath"))
+                    .and_then(decode_query_field)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !fields.is_empty() {
+            query = query.select(fields);
+        }
     }
     if let Some(nearest) = structured.get("findNearest") {
         query = decode_nearest(query, nearest)?;
@@ -2683,6 +2812,207 @@ mod tests {
         );
         assert!(response[0].get("readTime").is_some());
         assert!(response[0].get("done").is_none());
+    }
+
+    async fn post_json(store: Store, path: &str, body: JsonValue) -> (StatusCode, JsonValue) {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request should build");
+        let response = router(store)
+            .oneshot(request)
+            .await
+            .expect("REST router should respond");
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response should be readable");
+        (
+            status,
+            serde_json::from_slice(&body).expect("response should be JSON"),
+        )
+    }
+
+    fn seeded_store(database: &DatabaseName, count: usize) -> Store {
+        let store = Store::default();
+        let writes = (0..count)
+            .map(|index| Write::Set {
+                key: DocumentKey::new(database.clone(), format!("items/item-{index:03}"))
+                    .expect("key"),
+                fields: Fields::from([
+                    (
+                        "index".to_owned(),
+                        Value::Integer(i64::try_from(index).expect("small index")),
+                    ),
+                    (
+                        "label".to_owned(),
+                        Value::String(format!("label {index}").into()),
+                    ),
+                    ("even".to_owned(), Value::Boolean(index % 2 == 0)),
+                ]),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            })
+            .collect::<Vec<_>>();
+        store.commit(&writes).expect("seed");
+        store
+    }
+
+    #[tokio::test]
+    async fn clearing_a_database_removes_every_document_in_batches() {
+        let database = DatabaseName::new("demo-clear", "(default)").expect("database");
+        let store = seeded_store(&database, 1_203);
+        store
+            .commit(&[Write::Set {
+                key: DocumentKey::new(database.clone(), "items/item-000/notes/deep").expect("key"),
+                fields: Fields::new(),
+                transforms: Vec::new(),
+                precondition: Precondition::None,
+            }])
+            .expect("nested");
+        let request = Request::builder()
+            .method(Method::DELETE)
+            .uri("/emulator/v1/projects/demo-clear/databases/(default)/documents")
+            .body(Body::empty())
+            .expect("request should build");
+        let response = router(store.clone())
+            .oneshot(request)
+            .await
+            .expect("REST router should respond");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(store.snapshot().documents(&database).len(), 0);
+    }
+
+    #[tokio::test]
+    async fn run_query_honors_select_projections_like_the_grpc_codec() {
+        let database = DatabaseName::new("demo-select", "(default)").expect("database");
+        let base = "/v1/projects/demo-select/databases/(default)/documents";
+        let (status, response) = post_json(
+            seeded_store(&database, 3),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "select": {"fields": [{"fieldPath": "label"}]},
+                    "orderBy": [{"field": {"fieldPath": "__name__"}}],
+                    "limit": 2
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let documents = response.as_array().expect("array");
+        assert_eq!(documents.len(), 2);
+        assert_eq!(
+            documents[0]["document"]["fields"],
+            json!({"label": {"stringValue": "label 0"}}),
+            "only the selected field is returned"
+        );
+        assert!(documents[0]["document"].get("createTime").is_some());
+
+        // Selecting `__name__` alone returns documents without fields.
+        let (status, response) = post_json(
+            seeded_store(&database, 2),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "select": {"fields": [{"fieldPath": "__name__"}]}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response[0]["document"]["fields"], json!({}));
+        assert_eq!(
+            response[0]["document"]["name"],
+            "projects/demo-select/databases/(default)/documents/items/item-000"
+        );
+
+        let (status, _) = post_json(
+            seeded_store(&database, 1),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "select": {"fields": [{"nope": "label"}]}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn count_aggregations_use_the_lazy_count_path_and_keep_their_semantics() {
+        let database = DatabaseName::new("demo-count", "(default)").expect("database");
+        let base = "/v1/projects/demo-count/databases/(default)/documents";
+        let count_of = |query: JsonValue, aggregations: JsonValue| {
+            let database = database.clone();
+            async move {
+                let (status, response) = post_json(
+                    seeded_store(&database, 7),
+                    &format!("{base}:runAggregationQuery"),
+                    json!({"structuredAggregationQuery": {
+                        "structuredQuery": query,
+                        "aggregations": aggregations
+                    }}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "{response}");
+                response[0]["result"]["aggregateFields"].clone()
+            }
+        };
+        let plain = count_of(
+            json!({"from": [{"collectionId": "items"}]}),
+            json!([{"count": {}, "alias": "n"}]),
+        )
+        .await;
+        assert_eq!(plain["n"]["integerValue"], "7");
+        let bounded = count_of(
+            json!({"from": [{"collectionId": "items"}]}),
+            json!([{"count": {"upTo": "3"}, "alias": "n"}]),
+        )
+        .await;
+        assert_eq!(bounded["n"]["integerValue"], "3");
+        let offset = count_of(
+            json!({"from": [{"collectionId": "items"}], "offset": 5, "limit": 10}),
+            json!([{"count": {}, "alias": "n"}]),
+        )
+        .await;
+        assert_eq!(offset["n"]["integerValue"], "2");
+        let filtered = count_of(
+            json!({"from": [{"collectionId": "items"}], "where": {"fieldFilter": {
+                "field": {"fieldPath": "even"}, "op": "EQUAL", "value": {"booleanValue": true}
+            }}}),
+            json!([{"count": {}, "alias": "n"}]),
+        )
+        .await;
+        assert_eq!(filtered["n"]["integerValue"], "4");
+        let group = count_of(
+            json!({"from": [{"collectionId": "items", "allDescendants": true}]}),
+            json!([{"count": {}, "alias": "n"}]),
+        )
+        .await;
+        assert_eq!(group["n"]["integerValue"], "7");
+        let mixed = count_of(
+            json!({"from": [{"collectionId": "items"}]}),
+            json!([
+                {"count": {}, "alias": "n"},
+                {"sum": {"field": {"fieldPath": "index"}}, "alias": "total"}
+            ]),
+        )
+        .await;
+        assert_eq!(mixed["n"]["integerValue"], "7");
+        assert_eq!(mixed["total"]["integerValue"], "21");
+        let empty = count_of(
+            json!({"from": [{"collectionId": "nothing"}]}),
+            json!([{"count": {}, "alias": "n"}]),
+        )
+        .await;
+        assert_eq!(empty["n"]["integerValue"], "0");
     }
 
     #[tokio::test]

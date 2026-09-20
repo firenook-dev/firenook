@@ -76,11 +76,17 @@ async fn upgrade(State(state): State<RequestsState>, websocket: WebSocketUpgrade
         .on_upgrade(move |socket| session(socket, subscription, state.shutdown))
 }
 
+/// Minimum spacing between two loss reports. Under load the counters change
+/// every second; one summarized line a minute keeps the log readable while
+/// still making diagnostic loss explicit.
+const REPORT_INTERVAL: Duration = Duration::from_secs(60);
+
 async fn maintain(history: RequestHistory, mut shutdown: watch::Receiver<bool>) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_omitted = 0;
     let mut last_disconnected = 0;
+    let mut last_report: Option<tokio::time::Instant> = None;
     loop {
         if *shutdown.borrow() {
             return;
@@ -91,11 +97,14 @@ async fn maintain(history: RequestHistory, mut shutdown: watch::Receiver<bool>) 
             }
             _ = interval.tick() => {
                 if let Some(stats) = history.maintain()
-                    && (stats.omitted_events != last_omitted || stats.disconnected_subscribers != last_disconnected) {
-                        eprintln!("firenook Requests diagnostics: {} omitted events, {} slow clients disconnected; retained history may be incomplete",
-                            stats.omitted_events, stats.disconnected_subscribers);
+                    && (stats.omitted_events != last_omitted || stats.disconnected_subscribers != last_disconnected)
+                    && last_report.is_none_or(|reported| reported.elapsed() >= REPORT_INTERVAL) {
+                        eprintln!("firenook Requests diagnostics: {} omitted events ({} busy, {} oversized, {} invalid; {} since the last report), {} slow clients disconnected; retained history may be incomplete",
+                            stats.omitted_events, stats.omitted_busy, stats.omitted_oversized, stats.omitted_invalid,
+                            stats.omitted_events.saturating_sub(last_omitted), stats.disconnected_subscribers);
                         last_omitted = stats.omitted_events;
                         last_disconnected = stats.disconnected_subscribers;
+                        last_report = Some(tokio::time::Instant::now());
                 }
             }
         }

@@ -819,3 +819,97 @@ async fn picker_lists_only_the_provider_accounts_and_escapes_profile_values() {
     assert_eq!(claims["name"], name);
     assert_eq!(claims["email"], "google@example.test");
 }
+
+#[tokio::test]
+async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
+    let directory = std::env::temp_dir().join(format!(
+        "firenook-auth-persist-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let state_file = directory.join("auth-state.json");
+    let registry = TriggerRegistry::default();
+    let (observer, _receiver) = TriggerObserver::channel(registry.clone());
+    let runtime = AuthRuntime::new(
+        "demo-auth",
+        observer.queue(),
+        registry,
+        Some(state_file.clone()),
+    )
+    .expect("runtime");
+    let modified = || {
+        std::fs::metadata(&state_file)
+            .ok()
+            .map(|m| (m.len(), m.modified().ok()))
+    };
+
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
+        &json!({ "email": "reader@example.com", "password": "password1", "returnSecureToken": true }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let after_signup = modified().expect("sign-up persists the state");
+    let id_token = body["idToken"].as_str().expect("id token").to_owned();
+    let local_id = body["localId"].as_str().expect("local id").to_owned();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    // Read-only operations: lookup by token, admin lookup, batchGet, query.
+    for (uri, request) in [
+        (
+            "/identitytoolkit.googleapis.com/v1/accounts:lookup?key=fake",
+            json!({ "idToken": id_token }),
+        ),
+        (
+            "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:lookup",
+            json!({ "localId": [local_id] }),
+        ),
+        (
+            "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:query",
+            json!({}),
+        ),
+        (
+            "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:query",
+            json!({ "returnUserInfo": false }),
+        ),
+    ] {
+        let (status, body) = call(&runtime, Method::POST, uri, &request).await;
+        assert_eq!(status, 200, "{uri}: {body}");
+    }
+    let (status, _) = call(
+        &runtime,
+        Method::GET,
+        "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchGet?maxResults=10",
+        &JsonValue::Null,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        modified().expect("state file"),
+        after_signup,
+        "reads must not rewrite the state file"
+    );
+
+    // A mutation persists again.
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:update?key=fake",
+        &json!({ "idToken": id_token, "displayName": "Reader" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_ne!(modified().expect("state file"), after_signup);
+    let persisted: JsonValue =
+        serde_json::from_slice(&std::fs::read(&state_file).expect("state bytes")).expect("json");
+    assert_eq!(
+        persisted["projects"]["demo-auth"]["users"][&local_id]["displayName"],
+        "Reader"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}

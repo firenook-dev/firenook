@@ -481,6 +481,9 @@ pub fn count(
     query: &Query,
     edition: DatabaseEdition,
 ) -> Result<u64, QueryError> {
+    if let Some(count) = count_from_indexes(snapshot, database, query)? {
+        return Ok(count);
+    }
     let mut iterator = execute_iter(snapshot, database, query, edition)?;
     let count = match &mut iterator.inner {
         QueryDocumentIteratorInner::Streaming(streaming) => {
@@ -495,6 +498,147 @@ pub fn count(
         }
     };
     Ok(count)
+}
+
+/// A count that no filter, cursor or field order narrows is the size of the
+/// query scope, which the store's indexes answer without touching any
+/// document; `offset` and `limit` still apply.
+fn count_from_indexes(
+    snapshot: &Snapshot,
+    database: &DatabaseName,
+    query: &Query,
+) -> Result<Option<u64>, QueryError> {
+    let orders = normalized_orders(query)?;
+    let name_ordered = orders.as_slice()
+        == [Order {
+            path: FieldPath::DocumentId,
+            direction: Direction::Ascending,
+        }];
+    if !name_ordered
+        || query.filter.is_some()
+        || query.start.is_some()
+        || query.end.is_some()
+        || query.nearest.is_some()
+        || matches!(query.limit, Some(Limit::Last(_)))
+    {
+        return Ok(None);
+    }
+    let scoped = match &query.scope {
+        QueryScope::Collection(collection_path) => {
+            snapshot.count_collection(database, collection_path)
+        }
+        QueryScope::CollectionGroup(collection_id) => {
+            snapshot.count_collection_group(database, collection_id, query.ancestor.as_deref())
+        }
+    };
+    let after_offset = scoped.saturating_sub(query.offset);
+    let limited = match query.limit {
+        Some(Limit::First(limit)) => after_offset.min(limit),
+        Some(Limit::Last(_)) | None => after_offset,
+    };
+    Ok(Some(u64::try_from(limited).unwrap_or(u64::MAX)))
+}
+
+/// Precomputed per-document facts a listener keeps so a change can be
+/// applied to its view without re-running the query: the document's sort
+/// key under the query's normalized order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderKey(Vec<Option<Value>>);
+
+/// A query's sort order and shape as a listener needs them to maintain a
+/// view incrementally.
+pub struct IncrementalQuery {
+    query: Query,
+    orders: Vec<Order>,
+    edition: DatabaseEdition,
+}
+
+impl IncrementalQuery {
+    /// Prepares `query` for incremental maintenance; `None` when the query's
+    /// shape needs full re-evaluation on every change (offsets, limit-to-last
+    /// windows and nearest-neighbor ranking).
+    pub fn new(query: &Query, edition: DatabaseEdition) -> Result<Option<Self>, QueryError> {
+        if query.offset > 0
+            || query.nearest.is_some()
+            || matches!(query.limit, Some(Limit::Last(_)))
+        {
+            return Ok(None);
+        }
+        let orders = normalized_orders(query)?;
+        Ok(Some(Self {
+            query: query.clone(),
+            orders,
+            edition,
+        }))
+    }
+
+    /// The `limit` window size, if the query has one.
+    #[must_use]
+    pub const fn window(&self) -> Option<usize> {
+        match self.query.limit {
+            Some(Limit::First(limit)) => Some(limit),
+            Some(Limit::Last(_)) | None => None,
+        }
+    }
+
+    /// Whether the query's scope contains `key` at all.
+    #[must_use]
+    pub fn in_scope(&self, key: &DocumentKey) -> bool {
+        key_in_scope(key, &self.query)
+    }
+
+    /// Whether a stored document is a result of the query (scope, filters,
+    /// order-field presence and cursors), ignoring the limit window.
+    #[must_use]
+    pub fn matches(&self, key: &DocumentKey, document: &Arc<Document>) -> bool {
+        key_in_scope(key, &self.query)
+            && candidate_matches(
+                &self.query,
+                &self.orders,
+                self.edition,
+                key,
+                &LazyDocument::Decoded(Arc::clone(document)),
+            )
+    }
+
+    /// The document's sort key; only meaningful for a matching document.
+    #[must_use]
+    pub fn order_key(&self, key: &DocumentKey, document: &Arc<Document>) -> OrderKey {
+        OrderKey(order_values(
+            key,
+            &LazyDocument::Decoded(Arc::clone(document)),
+            &self.orders,
+        ))
+    }
+
+    /// Compares two results by the query's order, ties broken by key.
+    #[must_use]
+    pub fn compare(
+        &self,
+        left_key: &DocumentKey,
+        left: &OrderKey,
+        right_key: &DocumentKey,
+        right: &OrderKey,
+    ) -> Ordering {
+        compare_order_values(
+            left_key,
+            &left.0,
+            right_key,
+            &right.0,
+            &self.orders,
+            self.edition,
+        )
+    }
+
+    /// The fields visible through the query's projection, or `None` when the
+    /// whole document is visible.
+    #[must_use]
+    pub fn project(&self, document: &Document) -> Option<Fields> {
+        self.query
+            .projection
+            .as_ref()
+            .map(|projection| project(document.fields(), projection))
+    }
 }
 
 /// Creates a lazy result iterator for a structured query.

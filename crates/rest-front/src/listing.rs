@@ -104,7 +104,7 @@ pub(super) async fn post_document_operation(
         return ids(&state, &path.project, parent, headers, &body).await;
     }
     let value = serde_json::from_slice(&body).map_err(|e| RestError::invalid(e.to_string()))?;
-    run_query_at_parent(State(state), Path(path), &headers, Json(value))
+    run_query_at_parent(State(state), Path(path), &headers, Json(value)).await
 }
 
 async fn ids(

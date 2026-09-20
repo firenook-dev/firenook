@@ -205,6 +205,16 @@ impl DocumentKey {
         Ok(Self { database, path })
     }
 
+    /// A key that skips path validation. It only ever serves as a range
+    /// bound (a prefix such as `users/` is not a document path) and is never
+    /// stored or returned.
+    pub(crate) fn unchecked(database: DatabaseName, path: impl Into<Arc<str>>) -> Self {
+        Self {
+            database,
+            path: path.into(),
+        }
+    }
+
     /// Owning database.
     #[must_use]
     pub const fn database(&self) -> &DatabaseName {
@@ -1197,6 +1207,173 @@ impl Snapshot {
         }
     }
 
+    /// The number of direct documents in `collection_path`, from the
+    /// collection index alone: no document body is read or copied.
+    #[must_use]
+    pub fn count_collection(&self, database: &DatabaseName, collection_path: &str) -> usize {
+        match &self.documents {
+            SnapshotDocuments::Memory { collections, .. } => collections
+                .get(&CollectionKey {
+                    database: database.clone(),
+                    collection_path: Arc::from(collection_path),
+                })
+                .map_or(0, OrdSet::len),
+            SnapshotDocuments::Disk(documents) => {
+                documents.count_scope(database, Some(collection_path), None, None)
+            }
+        }
+    }
+
+    /// The number of documents in the collection group `collection_id`,
+    /// optionally below `ancestor`, from the group index alone.
+    #[must_use]
+    pub fn count_collection_group(
+        &self,
+        database: &DatabaseName,
+        collection_id: &str,
+        ancestor: Option<&str>,
+    ) -> usize {
+        match &self.documents {
+            SnapshotDocuments::Memory {
+                collection_groups, ..
+            } => collection_groups
+                .get(&CollectionGroupKey {
+                    database: database.clone(),
+                    collection_id: Arc::from(collection_id),
+                })
+                .map_or(0, |keys| match ancestor {
+                    None => keys.len(),
+                    Some(ancestor) => keys
+                        .iter()
+                        .filter(|key| {
+                            key.path()
+                                .strip_prefix(ancestor)
+                                .and_then(|suffix| suffix.strip_prefix('/'))
+                                .is_some_and(|descendant| descendant.split('/').count() >= 2)
+                        })
+                        .count(),
+                }),
+            SnapshotDocuments::Disk(documents) => {
+                documents.count_scope(database, None, Some(collection_id), ancestor)
+            }
+        }
+    }
+
+    /// Key-only cursor over the documents whose path starts with `prefix`,
+    /// in byte order, without touching document bodies. See [`KeyCursor`].
+    #[must_use]
+    pub fn key_cursor(&self, database: &DatabaseName, prefix: &str) -> KeyCursor {
+        match &self.documents {
+            SnapshotDocuments::Memory { documents, .. } => KeyCursor(KeyCursorInner::Memory {
+                documents: documents.clone(),
+                database: database.clone(),
+                prefix: prefix.to_owned(),
+                position: Some(DocumentKey::unchecked(database.clone(), prefix)),
+            }),
+            SnapshotDocuments::Disk(documents) => KeyCursor(KeyCursorInner::Disk(Box::new(
+                documents.key_cursor(database, prefix),
+            ))),
+        }
+    }
+
+    /// The ids of the collections directly under `parent` (a document path)
+    /// or under the database root, in byte order. A collection is listed
+    /// when any document exists anywhere below it, as `ListCollectionIds`
+    /// defines it. Each collection costs one subtree skip, not one visit per
+    /// document.
+    #[must_use]
+    pub fn direct_collection_ids(
+        &self,
+        database: &DatabaseName,
+        parent: Option<&str>,
+    ) -> BTreeSet<String> {
+        let prefix = parent.map_or_else(String::new, |parent| format!("{parent}/"));
+        let mut cursor = self.key_cursor(database, &prefix);
+        let mut ids = BTreeSet::new();
+        while let Some(key) = cursor.next() {
+            let rest = &key.path()[prefix.len()..];
+            let Some(id) = rest.split('/').next().filter(|id| !id.is_empty()) else {
+                continue;
+            };
+            let collection_path = format!("{prefix}{id}/");
+            ids.insert(id.to_owned());
+            cursor.seek(&successor_path(&collection_path));
+        }
+        ids
+    }
+
+    /// The direct child documents of `parent` (a document path, or the
+    /// database root) in `collection_id`, or in every collection when it is
+    /// `None`. Each child is reported once with whether it exists: a child
+    /// that does not exist but has documents below it is a *missing*
+    /// document, as `ListDocuments.show_missing` defines it. Keys come in
+    /// byte order; the caller applies resource ordering. Each child costs
+    /// one subtree skip, so the scan is proportional to the children, not
+    /// to the database.
+    #[must_use]
+    pub fn direct_children(
+        &self,
+        database: &DatabaseName,
+        parent: Option<&str>,
+        collection_id: Option<&str>,
+    ) -> Vec<(DocumentKey, bool)> {
+        let mut prefix = parent.map_or_else(String::new, |parent| format!("{parent}/"));
+        if let Some(collection_id) = collection_id {
+            prefix.push_str(collection_id);
+            prefix.push('/');
+        }
+        // A named collection lists `{id}`; an unnamed listing lists
+        // `{collection}/{id}` below the parent.
+        let depth = if collection_id.is_some() { 1 } else { 2 };
+        let mut cursor = self.key_cursor(database, &prefix);
+        let mut children: BTreeMap<String, bool> = BTreeMap::new();
+        while let Some(key) = cursor.next() {
+            let rest = &key.path()[prefix.len()..];
+            let mut segments = rest.splitn(depth + 1, '/');
+            let mut child = String::with_capacity(rest.len());
+            let mut complete = true;
+            for index in 0..depth {
+                match segments.next() {
+                    Some(segment) if !segment.is_empty() => {
+                        if index > 0 {
+                            child.push('/');
+                        }
+                        child.push_str(segment);
+                    }
+                    _ => {
+                        complete = false;
+                        break;
+                    }
+                }
+            }
+            if !complete {
+                continue;
+            }
+            if segments.next().is_none() {
+                // The child itself. Its subtree, if any, sorts after every
+                // sibling whose id extends this one with a byte below `/`
+                // (`abc-2` lies between `abc` and `abc/…`), so the walk goes
+                // on normally and the subtree is skipped when it is reached.
+                children.insert(child, true);
+            } else {
+                // A key below the child: the child is missing unless it was
+                // already seen, and everything below it is skipped in one
+                // seek, which is safe because the walk is inside the subtree.
+                let child_path = format!("{prefix}{child}");
+                children.entry(child).or_insert(false);
+                cursor.seek(&successor_path(&format!("{child_path}/")));
+            }
+        }
+        children
+            .into_iter()
+            .filter_map(|(child, present)| {
+                DocumentKey::new(database.clone(), format!("{prefix}{child}"))
+                    .ok()
+                    .map(|key| (key, present))
+            })
+            .collect()
+    }
+
     /// Iterates owned documents from one named database in key order.
     #[must_use]
     pub fn iter_documents(&self, database: &DatabaseName) -> SnapshotDocumentIterator {
@@ -1364,6 +1541,86 @@ impl Snapshot {
 }
 
 /// Owned iterator over one immutable snapshot selection.
+/// Walks document keys under one path prefix in byte order without decoding
+/// or copying document bodies. `seek` repositions the walk forward, so a
+/// caller can skip a whole subtree in one step.
+pub struct KeyCursor(KeyCursorInner);
+
+enum KeyCursorInner {
+    Memory {
+        documents: OrdMap<DocumentKey, Arc<Document>>,
+        database: DatabaseName,
+        prefix: String,
+        /// Next inclusive lower bound; `None` once exhausted.
+        position: Option<DocumentKey>,
+    },
+    Disk(Box<disk::DiskKeyCursor>),
+}
+
+impl KeyCursor {
+    /// The next key at or after the current position, or `None` once the
+    /// prefix is exhausted.
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Option<DocumentKey> {
+        match &mut self.0 {
+            KeyCursorInner::Memory {
+                documents,
+                database,
+                prefix,
+                position,
+            } => {
+                let lower = position.take()?;
+                let found = documents
+                    .range(lower..)
+                    .next()
+                    .map(|(key, _)| key.clone())
+                    .filter(|key| {
+                        key.database() == database && key.path().starts_with(prefix.as_str())
+                    });
+                if let Some(key) = &found {
+                    // The next call starts strictly after this key.
+                    let mut after = key.path().to_owned();
+                    after.push('\0');
+                    *position = Some(DocumentKey::unchecked(database.clone(), after));
+                }
+                found
+            }
+            KeyCursorInner::Disk(cursor) => cursor.next(),
+        }
+    }
+
+    /// Repositions the walk at the first key whose path is at or after
+    /// `path` in byte order. `path` must extend the cursor's prefix; an
+    /// earlier position is never revisited.
+    pub fn seek(&mut self, path: &str) {
+        match &mut self.0 {
+            KeyCursorInner::Memory {
+                database, position, ..
+            } => {
+                if let Some(current) = position
+                    && current.path().as_bytes() < path.as_bytes()
+                {
+                    *position = Some(DocumentKey::unchecked(database.clone(), path));
+                }
+            }
+            KeyCursorInner::Disk(cursor) => cursor.seek(path),
+        }
+    }
+}
+
+/// The smallest path that sorts after every path starting with `prefix`
+/// (`users/` becomes `users0`), used to skip a subtree in one seek.
+fn successor_path(prefix: &str) -> String {
+    let mut bytes = prefix.as_bytes().to_vec();
+    while let Some(last) = bytes.pop() {
+        if last != u8::MAX {
+            bytes.push(last + 1);
+            break;
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_default()
+}
+
 pub struct SnapshotDocumentIterator {
     inner: SnapshotDocumentIteratorInner,
 }
@@ -2745,6 +3002,194 @@ mod tests {
             );
             assert_eq!(store.revision().get(), 2);
             assert_eq!(store.snapshot().documents(&database("(default)")).len(), 2);
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    fn temporary_directory(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "firenook-core-store-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    fn create(database: &DatabaseName, path: &str) -> Write {
+        Write::Create {
+            key: key(database, path),
+            fields: fields(Value::Integer(1)),
+        }
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn direct_children_and_collection_ids_skip_subtrees_and_honor_the_overlay_on_both_backends() {
+        let directory = temporary_directory("children");
+        let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        for store in [Store::default(), disk] {
+            let db = database("(default)");
+            // `abc-2` sorts between `abc` and `abc/...` in byte order, and
+            // `users-archive` between `users` and `users/...`: a subtree skip
+            // must never jump over such siblings.
+            store
+                .commit(&[
+                    create(&db, "users/abc"),
+                    create(&db, "users/abc/posts/p1"),
+                    create(&db, "users/abc/posts/p1/comments/c1"),
+                    create(&db, "users/abc-2"),
+                    create(&db, "users/abc-2/posts/p2"),
+                    create(&db, "users/ghost/posts/p3"),
+                    create(&db, "users/ghost/posts/p3/replies/r1"),
+                    create(&db, "users/zed"),
+                    create(&db, "users-archive/old"),
+                    create(&db, "usersX/x"),
+                    create(&db, "teams/t1"),
+                ])
+                .expect("seed");
+            let snapshot = store.snapshot();
+            assert_eq!(
+                snapshot
+                    .direct_collection_ids(&db, None)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                ["teams", "users", "users-archive", "usersX"]
+            );
+            assert_eq!(
+                snapshot
+                    .direct_collection_ids(&db, Some("users/abc"))
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                ["posts"]
+            );
+            assert_eq!(
+                snapshot
+                    .direct_collection_ids(&db, Some("users/ghost"))
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                ["posts"],
+                "a missing parent still has collections"
+            );
+            assert!(
+                snapshot
+                    .direct_collection_ids(&db, Some("users/zed"))
+                    .is_empty()
+            );
+            let children = |parent: Option<&str>, collection: Option<&str>| {
+                snapshot
+                    .direct_children(&db, parent, collection)
+                    .into_iter()
+                    .map(|(key, present)| (key.path().to_owned(), present))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                children(None, Some("users")),
+                [
+                    ("users/abc".to_owned(), true),
+                    ("users/abc-2".to_owned(), true),
+                    ("users/ghost".to_owned(), false),
+                    ("users/zed".to_owned(), true),
+                ]
+            );
+            assert_eq!(
+                children(Some("users/abc"), Some("posts")),
+                [("users/abc/posts/p1".to_owned(), true)]
+            );
+            assert_eq!(
+                children(Some("users/abc"), None),
+                [("users/abc/posts/p1".to_owned(), true)],
+                "an unnamed listing reports collection/id children"
+            );
+            assert_eq!(
+                children(Some("users/ghost"), None),
+                [("users/ghost/posts/p3".to_owned(), true)]
+            );
+            assert!(children(None, Some("nothing")).is_empty());
+
+            // Deleting the only document under a subtree removes it from the
+            // listing; overlay-only state (a snapshot taken right after the
+            // commit, before the disk flush) must agree with disk state.
+            store
+                .commit(&[
+                    Write::Delete {
+                        key: key(&db, "users/zed"),
+                        precondition: Precondition::None,
+                    },
+                    Write::Delete {
+                        key: key(&db, "users/abc-2/posts/p2"),
+                        precondition: Precondition::None,
+                    },
+                    create(&db, "users/abc-2/notes/n1"),
+                    create(&db, "vendors/v1"),
+                ])
+                .expect("mutate");
+            let after = store.snapshot();
+            assert_eq!(
+                after
+                    .direct_children(&db, None, Some("users"))
+                    .into_iter()
+                    .map(|(key, present)| (key.path().to_owned(), present))
+                    .collect::<Vec<_>>(),
+                [
+                    ("users/abc".to_owned(), true),
+                    ("users/abc-2".to_owned(), true),
+                    ("users/ghost".to_owned(), false),
+                ]
+            );
+            assert_eq!(
+                after
+                    .direct_collection_ids(&db, Some("users/abc-2"))
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                ["notes"]
+            );
+            assert_eq!(
+                after
+                    .direct_collection_ids(&db, None)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                ["teams", "users", "users-archive", "usersX", "vendors"]
+            );
+            // The historical snapshot still sees the earlier state.
+            assert_eq!(
+                snapshot
+                    .direct_collection_ids(&db, Some("users/abc-2"))
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                ["posts"]
+            );
+
+            // Index-only counts agree with the documents actually present,
+            // before and after the overlay-only mutation.
+            assert_eq!(snapshot.count_collection(&db, "users"), 3);
+            assert_eq!(after.count_collection(&db, "users"), 2);
+            assert_eq!(after.count_collection(&db, "users/abc-2/posts"), 0);
+            assert_eq!(after.count_collection(&db, "users/abc-2/notes"), 1);
+            assert_eq!(after.count_collection(&db, "vendors"), 1);
+            assert_eq!(after.count_collection(&db, "absent"), 0);
+            assert_eq!(snapshot.count_collection_group(&db, "posts", None), 3);
+            assert_eq!(after.count_collection_group(&db, "posts", None), 2);
+            assert_eq!(
+                after.count_collection_group(&db, "posts", Some("users/abc")),
+                1
+            );
+            assert_eq!(
+                after.count_collection_group(&db, "posts", Some("users/ghost")),
+                1
+            );
+            assert_eq!(
+                after.count_collection_group(&db, "posts", Some("teams/t1")),
+                0
+            );
+            for (collection, expected) in [("users", 2), ("vendors", 1), ("absent", 0)] {
+                assert_eq!(
+                    after.iter_collection(&db, collection).count(),
+                    expected,
+                    "{collection}: index count must match the document iterator"
+                );
+            }
         }
         let _ = std::fs::remove_dir_all(&directory);
     }

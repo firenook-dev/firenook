@@ -110,6 +110,10 @@ pub struct ProjectState {
     pending_local_ids: BTreeSet<String>,
     #[serde(skip)]
     pub events: Vec<(Lifecycle, UserRecord)>,
+    /// Bumped by every persisted-state mutation, so a request that only read
+    /// the state is not written back to disk. Never serialized.
+    #[serde(skip)]
+    mutations: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +129,16 @@ pub struct UpdateOptions<'a> {
 }
 
 impl ProjectState {
+    /// How many persisted-state mutations this project has seen.
+    #[must_use]
+    pub const fn mutations(&self) -> u64 {
+        self.mutations
+    }
+
+    fn mutated(&mut self) {
+        self.mutations = self.mutations.wrapping_add(1);
+    }
+
     /// Rebuilds the derived indexes after loading persisted records.
     pub fn rebuild_indexes(&mut self) {
         self.local_id_for_email.clear();
@@ -183,6 +197,7 @@ impl ProjectState {
             let local_id = random_id(28);
             if !self.users.contains_key(&local_id) && !self.pending_local_ids.contains(&local_id) {
                 self.pending_local_ids.insert(local_id.clone());
+                self.mutated();
                 return local_id;
             }
         }
@@ -194,6 +209,7 @@ impl ProjectState {
         local_id: &str,
         props: &UserRecord,
     ) -> Result<Option<UserRecord>, ApiError> {
+        self.mutated();
         if self.users.contains_key(local_id) {
             return Ok(None);
         }
@@ -220,6 +236,7 @@ impl ProjectState {
         local_id: &str,
         props: &UserRecord,
     ) -> Result<UserRecord, ApiError> {
+        self.mutated();
         if let Some(before) = self.users.get(local_id).cloned() {
             self.remove_user_from_index(&before);
         }
@@ -249,6 +266,7 @@ impl ProjectState {
 
     /// `deleteUser`: removes the record and dispatches `delete`.
     pub fn delete_user(&mut self, user: &UserRecord) {
+        self.mutated();
         let local_id = str_field(user, "localId").unwrap_or_default().to_owned();
         self.users.remove(&local_id);
         self.remove_user_from_index(user);
@@ -263,6 +281,7 @@ impl ProjectState {
         fields: &UserRecord,
         options: UpdateOptions<'_>,
     ) -> Result<UserRecord, ApiError> {
+        self.mutated();
         let mut upsert_providers = options.upsert_providers;
         let mut delete_providers: Vec<String> = options
             .delete_providers
@@ -558,6 +577,7 @@ impl ProjectState {
         request_type: &str,
         link: impl FnOnce(&str) -> String,
     ) -> OobRecord {
+        self.mutated();
         let code = random_base64url(54);
         let record = OobRecord {
             email: email.to_owned(),
@@ -576,6 +596,7 @@ impl ProjectState {
     }
 
     pub fn delete_oob_code(&mut self, code: &str) {
+        self.mutated();
         self.oobs.remove(code);
     }
 
@@ -585,6 +606,7 @@ impl ProjectState {
     }
 
     pub fn create_verification_code(&mut self, phone: &str) -> VerificationRecord {
+        self.mutated();
         let session = random_base64url(226);
         let record = VerificationRecord {
             code: random_digits(6),
@@ -601,6 +623,7 @@ impl ProjectState {
     }
 
     pub fn delete_verification_code(&mut self, session: &str) {
+        self.mutated();
         self.verification_codes.remove(session);
     }
 
@@ -610,6 +633,7 @@ impl ProjectState {
     }
 
     pub fn create_temporary_proof(&mut self, phone: &str) -> TemporaryProof {
+        self.mutated();
         let record = TemporaryProof {
             phone_number: phone.to_owned(),
             temporary_proof: random_base64url(119),
@@ -630,6 +654,7 @@ impl ProjectState {
 
     /// `deleteAllAccounts`: users and their indexes; codes stay.
     pub fn delete_all_accounts(&mut self) {
+        self.mutated();
         self.users.clear();
         self.local_id_for_email.clear();
         self.local_id_for_phone.clear();
@@ -764,6 +789,9 @@ pub struct AgentState {
     pub config: JsonMap<String, JsonValue>,
     #[serde(default)]
     pub tenants: BTreeMap<String, TenantState>,
+    /// Configuration and tenant mutations; see [`ProjectState::mutations`].
+    #[serde(skip)]
+    mutations: u64,
 }
 
 impl Default for AgentState {
@@ -772,11 +800,26 @@ impl Default for AgentState {
             project: ProjectState::default(),
             config: default_config(),
             tenants: BTreeMap::new(),
+            mutations: 0,
         }
     }
 }
 
 impl AgentState {
+    /// Every persisted-state mutation below this project: its own
+    /// configuration and tenants, its accounts and each tenant's accounts.
+    #[must_use]
+    pub fn mutations(&self) -> u64 {
+        self.tenants.values().fold(
+            self.mutations.wrapping_add(self.project.mutations()),
+            |total, tenant| total.wrapping_add(tenant.project.mutations()),
+        )
+    }
+
+    fn mutated(&mut self) {
+        self.mutations = self.mutations.wrapping_add(1);
+    }
+
     pub fn rebuild_indexes(&mut self) {
         self.project.rebuild_indexes();
         for tenant in self.tenants.values_mut() {
@@ -811,6 +854,7 @@ impl AgentState {
         if self.tenants.contains_key(tenant_id) {
             return None;
         }
+        self.mutated();
         config.insert(
             "name".to_owned(),
             json!(format!("projects/{project_id}/tenants/{tenant_id}")),
@@ -832,6 +876,7 @@ impl AgentState {
         config: &JsonMap<String, JsonValue>,
         project_id: &str,
     ) -> JsonMap<String, JsonValue> {
+        self.mutated();
         loop {
             let tenant_id = random_id(28);
             if let Some(created) =
@@ -897,6 +942,7 @@ impl AgentState {
         update: &JsonMap<String, JsonValue>,
         update_mask: Option<&str>,
     ) -> JsonMap<String, JsonValue> {
+        self.mutated();
         match update_mask {
             None => {
                 let allow_duplicates = truthy(
@@ -1006,6 +1052,9 @@ pub struct AuthData {
     pub version: u32,
     #[serde(default)]
     pub projects: BTreeMap<String, AgentState>,
+    /// Project creations; see [`ProjectState::mutations`].
+    #[serde(skip)]
+    mutations: u64,
 }
 
 impl AuthData {
@@ -1015,8 +1064,21 @@ impl AuthData {
         }
     }
 
+    /// A value that changes whenever the persisted state changed. Two
+    /// readings that agree mean nothing needs to be written back; the
+    /// counters are never serialized and restart at zero on load.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.projects.values().fold(self.mutations, |total, agent| {
+            total.wrapping_add(agent.mutations())
+        })
+    }
+
     /// The agent project, created on first reference like `getProjectStateById`.
     pub fn agent(&mut self, project_id: &str) -> &mut AgentState {
+        if !self.projects.contains_key(project_id) {
+            self.mutations = self.mutations.wrapping_add(1);
+        }
         self.projects.entry(project_id.to_owned()).or_default()
     }
 
@@ -1137,12 +1199,15 @@ impl<'a> Scope<'a> {
             && let Some(state) = self.agent.tenants.get_mut(tenant)
         {
             state.config = config;
+            self.agent.mutated();
         }
     }
 
     pub fn delete_tenant(&mut self) {
-        if let Some(tenant) = &self.tenant_id {
-            self.agent.tenants.remove(tenant);
+        if let Some(tenant) = &self.tenant_id
+            && self.agent.tenants.remove(tenant).is_some()
+        {
+            self.agent.mutated();
         }
     }
 

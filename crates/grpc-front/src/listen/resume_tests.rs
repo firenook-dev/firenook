@@ -442,6 +442,7 @@ async fn reset_and_invalid_resume_are_target_local_and_other_targets_remain_live
         sender: &sender,
         query_policy: &query_policy,
         rules: &rules,
+        reads: &ReadPool::default(),
         authorization: &AuthorizationSource::Owner,
     };
     let mut targets = BTreeMap::new();
@@ -470,7 +471,7 @@ async fn reset_and_invalid_resume_are_target_local_and_other_targets_remain_live
 
     set(store, "other/target", 1);
     set(store, "quiet/target", 1);
-    refresh_targets(store, &rules, &sender, &mut targets)
+    refresh_targets(store, &rules, &ReadPool::default(), &sender, &mut targets)
         .await
         .expect("both targets remain live");
     let responses = drain(&mut receiver);
@@ -506,7 +507,7 @@ async fn reset_and_invalid_resume_are_target_local_and_other_targets_remain_live
         assert_eq!(targets.keys().copied().collect::<Vec<_>>(), [7, TARGET_ID]);
     }
     set(store, "other/target", 2);
-    refresh_targets(store, &rules, &sender, &mut targets)
+    refresh_targets(store, &rules, &ReadPool::default(), &sender, &mut targets)
         .await
         .expect("unrelated target still updates");
     assert!(
@@ -544,6 +545,7 @@ async fn unauthorized_expired_resume_only_removes_its_target_without_replay() {
         sender: &sender,
         query_policy: &query_policy,
         rules: &rules,
+        reads: &ReadPool::default(),
         authorization: &AuthorizationSource::Owner,
     };
     let mut targets = BTreeMap::new();
@@ -591,7 +593,7 @@ async fn unauthorized_expired_resume_only_removes_its_target_without_replay() {
     assert_eq!(targets.keys().copied().collect::<Vec<_>>(), [7]);
 
     set(store, "other/target", 1);
-    refresh_targets(store, &rules, &sender, &mut targets)
+    refresh_targets(store, &rules, &ReadPool::default(), &sender, &mut targets)
         .await
         .expect("existing authorized target remains live");
     let responses = drain(&mut receiver);

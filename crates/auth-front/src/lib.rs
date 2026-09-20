@@ -99,6 +99,9 @@ impl std::error::Error for AuthError {}
 struct Inner {
     default_project: String,
     data: Mutex<AuthData>,
+    /// Serializes state-file writes issued outside the data lock, so two
+    /// requests cannot publish their snapshots out of order.
+    state_write: Mutex<()>,
     state_file: Option<PathBuf>,
     queue: DispatchQueue,
     background: TriggerRegistry,
@@ -131,6 +134,7 @@ impl AuthRuntime {
             inner: Arc::new(Inner {
                 default_project: project.to_owned(),
                 data: Mutex::new(data),
+                state_write: Mutex::new(()),
                 state_file,
                 queue,
                 background,
@@ -356,16 +360,31 @@ impl Runtime {
         ctx: &Ctx,
         body: impl FnOnce(&mut Scope<'_>) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
-        let (result, events) = {
+        // The state is serialized under the lock only when the request
+        // changed it, and the file is written after the lock is released, so
+        // a lookup never rewrites the state and a write never stalls readers
+        // on disk I/O.
+        let (result, events, encoded) = {
             let mut data = lock(&self.inner.data);
+            let before = data.generation();
             let mut scope = Scope::new(&mut data, &ctx.project_id, ctx.tenant_id.as_deref());
             let result = body(&mut scope);
             let events = data.take_events();
-            if let Err(error) = self.persist(&data) {
-                return Err(ApiError::unknown(error.0, "persist"));
-            }
-            (result, events)
+            let encoded = if data.generation() == before {
+                None
+            } else {
+                match self.encode_state(&data) {
+                    Ok(encoded) => encoded,
+                    Err(error) => return Err(ApiError::unknown(error.0, "persist")),
+                }
+            };
+            (result, events, encoded)
         };
+        if let Some(encoded) = encoded
+            && let Err(error) = self.write_state(&encoded)
+        {
+            return Err(ApiError::unknown(error.0, "persist"));
+        }
         for (project_id, kind, user) in events {
             self.dispatch_lifecycle(&project_id, kind, &user);
         }
@@ -424,8 +443,28 @@ impl Runtime {
     }
 
     fn persist(&self, data: &AuthData) -> Result<(), AuthError> {
+        match self.encode_state(data)? {
+            Some(encoded) => self.write_state(&encoded),
+            None => Ok(()),
+        }
+    }
+
+    /// The state's on-disk bytes, or `None` when persistence is disabled.
+    fn encode_state(&self, data: &AuthData) -> Result<Option<Vec<u8>>, AuthError> {
         match &self.inner.state_file {
-            Some(path) => write_atomic(path, data),
+            Some(_) => serde_json::to_vec_pretty(data)
+                .map(Some)
+                .map_err(|error| AuthError(format!("failed to serialize Auth state: {error}"))),
+            None => Ok(None),
+        }
+    }
+
+    fn write_state(&self, encoded: &[u8]) -> Result<(), AuthError> {
+        match &self.inner.state_file {
+            Some(path) => {
+                let _guard = lock(&self.inner.state_write);
+                write_atomic_bytes(path, encoded)
+            }
             None => Ok(()),
         }
     }
@@ -1104,10 +1143,8 @@ fn load_state(path: &FilePath) -> Result<AuthData, AuthError> {
             .map_err(|error| AuthError(format!("invalid Auth state: {error}")));
     }
     // The next.7 layout: `projects.<id>.{users, config}` with a flat config.
-    let mut data = AuthData {
-        version: 2,
-        projects: BTreeMap::new(),
-    };
+    let mut data = AuthData::default();
+    data.version = 2;
     for (project_id, project) in value
         .get("projects")
         .and_then(JsonValue::as_object)
@@ -1156,13 +1193,17 @@ fn load_state(path: &FilePath) -> Result<AuthData, AuthError> {
 }
 
 fn write_atomic(path: &FilePath, value: &impl serde::Serialize) -> Result<(), AuthError> {
+    let bytes = serde_json::to_vec_pretty(value)
+        .map_err(|error| AuthError(format!("failed to serialize Auth state: {error}")))?;
+    write_atomic_bytes(path, &bytes)
+}
+
+fn write_atomic_bytes(path: &FilePath, bytes: &[u8]) -> Result<(), AuthError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
             AuthError(format!("failed to create Auth state directory: {error}"))
         })?;
     }
-    let bytes = serde_json::to_vec_pretty(value)
-        .map_err(|error| AuthError(format!("failed to serialize Auth state: {error}")))?;
     let temporary = path.with_extension("tmp");
     std::fs::write(&temporary, bytes)
         .map_err(|error| AuthError(format!("failed to write Auth state: {error}")))?;

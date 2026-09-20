@@ -13,7 +13,7 @@ use firenook_watch_broker::{
     ChangeBatch, ChangeKind, TargetSpec, WatchChange, WatchDocument, WatchTarget,
 };
 use md5::{Digest as _, Md5};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::{Stream, StreamExt as _};
@@ -36,10 +36,11 @@ use crate::google::firestore::v1::{
 use crate::google::rpc;
 use crate::query_codec::{decode_query, query_status};
 use crate::service::{
-    AuthorizationSource, ResponseStream, require_atomic_rules_allowed, require_rules_allowed,
+    AuthorizationSource, ReadPool, ResponseStream, require_atomic_rules_allowed,
+    require_rules_allowed,
 };
 
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const POLL_INTERVAL: Duration = Duration::from_millis(1_000);
 const RESPONSE_BUFFER: usize = 128;
 
 enum ResumePoint {
@@ -87,6 +88,7 @@ struct ListenContext<'a> {
     sender: &'a mpsc::Sender<Result<ListenResponse, Status>>,
     query_policy: &'a QueryPolicy,
     rules: &'a RulesRuntime,
+    reads: &'a ReadPool,
     authorization: &'a AuthorizationSource,
 }
 
@@ -98,10 +100,13 @@ struct TargetInitialization {
     expected_count: Option<i32>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn stream<S>(
     store: Store,
     query_policy: QueryPolicy,
     rules: RulesRuntime,
+    reads: ReadPool,
+    commits: watch::Receiver<u64>,
     authorization: AuthorizationSource,
     memory_accounting: RuntimeMemoryAccounting,
     input: S,
@@ -114,6 +119,8 @@ where
         store,
         query_policy,
         rules,
+        reads,
+        commits,
         authorization,
         memory_accounting,
         input,
@@ -122,10 +129,13 @@ where
     Box::pin(ReceiverStream::new(receiver))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run<S>(
     store: Store,
     query_policy: QueryPolicy,
     rules: RulesRuntime,
+    reads: ReadPool,
+    mut commits: watch::Receiver<u64>,
     authorization: AuthorizationSource,
     memory_accounting: RuntimeMemoryAccounting,
     mut input: S,
@@ -136,8 +146,11 @@ async fn run<S>(
     let mut targets = BTreeMap::<i32, ActiveTarget>::new();
     let memory_registration = memory_accounting.register_listener_stream();
     let mut next_assigned_id = 1;
+    // Streams wake on commits; the slow poll only guards against a missed
+    // notification.
     let mut poll = interval(POLL_INTERVAL);
     poll.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    commits.mark_unchanged();
 
     loop {
         tokio::select! {
@@ -149,6 +162,7 @@ async fn run<S>(
                             sender: &sender,
                             query_policy: &query_policy,
                             rules: &rules,
+                            reads: &reads,
                             authorization: &authorization,
                         };
                         if let Err(error) = handle_request(
@@ -169,8 +183,19 @@ async fn run<S>(
                     }
                 }
             }
+            changed = commits.changed(), if !targets.is_empty() => {
+                if changed.is_err() {
+                    break;
+                }
+                commits.mark_unchanged();
+                if let Err(error) = refresh_targets(&store, &rules, &reads, &sender, &mut targets).await {
+                    let _ = sender.send(Err(error)).await;
+                    break;
+                }
+                record_target_memory(&memory_registration, &targets);
+            }
             _ = poll.tick(), if !targets.is_empty() => {
-                if let Err(error) = refresh_targets(&store, &rules, &sender, &mut targets).await {
+                if let Err(error) = refresh_targets(&store, &rules, &reads, &sender, &mut targets).await {
                     let _ = sender.send(Err(error)).await;
                     break;
                 }
@@ -229,6 +254,7 @@ async fn handle_request(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn add_target(
     context: &ListenContext<'_>,
     targets: &mut BTreeMap<i32, ActiveTarget>,
@@ -295,18 +321,32 @@ async fn add_target(
         send_target_error(context.sender, id, error.code(), error.message()).await?;
         return Ok(());
     }
-    let initial = match initialize_target(
-        context.store,
-        context.query_policy,
-        &snapshot,
-        TargetInitialization {
+    // The first evaluation of a target is the largest read a listener makes;
+    // it runs on the read pool like any other query.
+    let initial = {
+        let store = context.store.clone();
+        let query_policy = context.query_policy.clone();
+        let snapshot = snapshot.clone();
+        let initialization = TargetInitialization {
             id,
             database,
             spec,
             resume_point,
             expected_count,
-        },
-    ) {
+        };
+        context
+            .reads
+            .run(move || {
+                Ok(initialize_target(
+                    &store,
+                    &query_policy,
+                    &snapshot,
+                    initialization,
+                ))
+            })
+            .await?
+    };
+    let initial = match initial {
         Ok(initial) => initial,
         Err(error) => {
             send_target_error(context.sender, id, error.code(), error.message()).await?;
@@ -320,6 +360,7 @@ async fn add_target(
         context.store,
         &snapshot,
         context.rules,
+        context.reads,
         context.sender,
         targets,
     )
@@ -626,11 +667,12 @@ fn authorize_target(
 async fn refresh_targets(
     store: &Store,
     rules: &RulesRuntime,
+    reads: &ReadPool,
     sender: &mpsc::Sender<Result<ListenResponse, Status>>,
     targets: &mut BTreeMap<i32, ActiveTarget>,
 ) -> Result<(), Status> {
     let snapshot = store.snapshot();
-    if refresh_targets_at_snapshot(store, &snapshot, rules, sender, targets).await? {
+    if refresh_targets_at_snapshot(store, &snapshot, rules, reads, sender, targets).await? {
         send_target_change(
             sender,
             TargetChangeType::NoChange,
@@ -643,12 +685,20 @@ async fn refresh_targets(
     Ok(())
 }
 
+/// One target's outcome from a refresh: its deltas, or the rules error that
+/// removes it from the stream.
+enum TargetRefresh {
+    Changes(ChangeBatch),
+    Denied(Status),
+}
+
 // Emit target-local deltas/removals only. The caller owns the checkpoint, so
 // adding a target cannot accidentally certify a second, later snapshot.
 async fn refresh_targets_at_snapshot(
     store: &Store,
     snapshot: &Snapshot,
     rules: &RulesRuntime,
+    reads: &ReadPool,
     sender: &mpsc::Sender<Result<ListenResponse, Status>>,
     targets: &mut BTreeMap<i32, ActiveTarget>,
 ) -> Result<bool, Status> {
@@ -666,30 +716,53 @@ async fn refresh_targets_at_snapshot(
         .map(|target| target.watch.revision())
         .min()
         .and_then(|after| store.changes_since(after).ok());
+    // Rules checks and re-evaluations run on the read pool; the stream task
+    // only sends what they produced. The targets are lent to the pool and
+    // handed back; a failed refresh ends the stream anyway.
+    let mut lent = std::mem::take(targets);
+    let rules = rules.clone();
+    let snapshot_for_refresh = snapshot.clone();
+    let (lent, outcomes) = reads
+        .run(move || {
+            let mut outcomes = Vec::new();
+            for target in lent.values_mut() {
+                if target.watch.revision() >= snapshot_for_refresh.revision() {
+                    continue;
+                }
+                let id = target.watch.id();
+                if let Err(error) = authorize_target(
+                    &rules,
+                    &target.authorization,
+                    &target.policy,
+                    &snapshot_for_refresh,
+                ) {
+                    outcomes.push((id, TargetRefresh::Denied(error)));
+                    continue;
+                }
+                let batch = target
+                    .watch
+                    .refresh_with_changes(&snapshot_for_refresh, history.as_deref())
+                    .map_err(|error| query_status(&error))?;
+                outcomes.push((id, TargetRefresh::Changes(batch)));
+            }
+            Ok((lent, outcomes))
+        })
+        .await?;
+    *targets = lent;
     let mut changed = false;
-    let mut denied = Vec::new();
-    for target in targets.values_mut() {
-        if target.watch.revision() >= snapshot.revision() {
-            continue;
+    for (id, outcome) in outcomes {
+        match outcome {
+            TargetRefresh::Denied(error) => {
+                send_target_error(sender, id, error.code(), error.message()).await?;
+                targets.remove(&id);
+            }
+            TargetRefresh::Changes(batch) => {
+                for change in batch.changes {
+                    changed = true;
+                    send_document_change(sender, id, change).await?;
+                }
+            }
         }
-        let id = target.watch.id();
-        if let Err(error) = authorize_target(rules, &target.authorization, &target.policy, snapshot)
-        {
-            send_target_error(sender, id, error.code(), error.message()).await?;
-            denied.push(id);
-            continue;
-        }
-        let batch = target
-            .watch
-            .refresh_with_changes(snapshot, history.as_deref())
-            .map_err(|error| query_status(&error))?;
-        for change in batch.changes {
-            changed = true;
-            send_document_change(sender, id, change).await?;
-        }
-    }
-    for id in denied {
-        targets.remove(&id);
     }
     Ok(changed)
 }
