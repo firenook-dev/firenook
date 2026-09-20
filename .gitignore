@@ -20,8 +20,7 @@
 *.swp
 *.tmp
 /console/node_modules/
-/console/dist/*
-!/console/dist/.gitkeep
+/console/dist/
 /console/test-results/
 /console/playwright-report/
 /crates/console-front/bindings/

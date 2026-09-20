@@ -20,12 +20,11 @@ use serde::Serialize;
 use serde_json::json;
 use ts_rs::TS;
 
-/// Built console assets. `console/dist/.gitkeep` keeps the folder present in
-/// a checkout without a build; the router then answers with a build-needed
-/// page instead of a broken shell.
+/// Built console assets. `build.rs` guarantees the folder exists, so a
+/// checkout without a console build still compiles and the router answers
+/// with a build-needed page instead of a broken shell.
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../console/dist"]
-#[exclude = ".gitkeep"]
 #[exclude = ".vite/*"]
 struct Assets;
 
