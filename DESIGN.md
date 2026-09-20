@@ -20,6 +20,7 @@ this repository. A passing fixture is evidence for its recorded scope only.
 | pubsub-front | Pub/Sub broker (leases, redelivery, dead-lettering, ordering keys, filters, seek/snapshots, push, Avro schemas) behind the `google.pubsub.v1` gRPC services and the HTTP/JSON transcoder on one port; function delivery and `onSchedule` ticks |
 | tasks-front | Cloud Tasks emulator: queue registry (one queue per `onTaskDispatched` export, plus caller registration), the official four routes with Express-shaped answers, the dispatcher (token bucket, dispatch slots, `X-CloudTasks-*` headers, retry ladder, dispatch deadline) and `/queueStats` |
 | suite-front | Hub/UI/control adapters |
+| console-front | The Console API and the embedded console (the emulator's own client-only UI, built from `console/`), mounted under `/console` on the UI port |
 | capture-proxy | Synthetic oracle traffic capture with credential redaction; not an application gateway |
 | npm CLI | Platform selection, dependency/asset checks, configuration validation and state ownership |
 

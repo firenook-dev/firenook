@@ -15,6 +15,7 @@ const git = args => execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim();
 if (git(['status','--porcelain','--untracked-files=no'])) throw new Error('Commit tracked source changes before building a traceable local candidate');
 const revision = git(['rev-parse','HEAD']);
 const key = platformKey();
+execFileSync(process.execPath,[join(root,'packaging/build-console.mjs')],{cwd:root,stdio:'inherit'});
 execFileSync('cargo',['build','--locked','--release','--bin','firenook'],{cwd:root,stdio:'inherit'});
 if (git(['rev-parse','HEAD'])!==revision || git(['status','--porcelain','--untracked-files=no'])) {
   throw new Error('Source changed during build; refusing to attribute this binary to the starting commit');

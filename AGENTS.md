@@ -78,3 +78,6 @@ runner.
   release checks.
 - `benchmarks/` — frozen gate receipts per phase; `support/` — phase plans and
   status; `DESIGN.md`, `COMPATIBILITY.md`, `ROADMAP.md` — the product record.
+- `console/` — the emulator's own UI (client-only React app embedded by
+  `crates/console-front`); rules in `console/AGENTS.md` and the
+  `firenook-console` and `kumo-design` skills under `.claude/skills/`.

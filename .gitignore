@@ -19,3 +19,9 @@
 .DS_Store
 *.swp
 *.tmp
+/console/node_modules/
+/console/dist/*
+!/console/dist/.gitkeep
+/console/test-results/
+/console/playwright-report/
+/crates/console-front/bindings/

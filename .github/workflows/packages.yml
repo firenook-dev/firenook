@@ -64,6 +64,8 @@ jobs:
         with:
           ref: ${{ steps.engine.outputs.revision }}
           path: accepted-engine
+      - name: Build the console the engine embeds
+        run: node accepted-engine/packaging/build-console.mjs
       - name: Clean locked native build
         env:
           TOOLCHAIN: ${{ steps.engine.outputs.toolchain }}

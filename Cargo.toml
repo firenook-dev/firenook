@@ -4,6 +4,7 @@ members = [
   "crates/capture-proxy",
   "crates/auth-front",
   "crates/cli",
+  "crates/console-front",
   "crates/core-store",
   "crates/export-format",
   "crates/extensions",
@@ -56,8 +57,10 @@ prost = "0.14.4"
 prost-types = "0.14.4"
 indexmap = { version = "2.14.0", features = ["serde"] }
 protox = "0.9.1"
+rust-embed = { version = "8.12.0", features = ["interpolate-folder-path", "include-exclude", "mime-guess"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["http2", "rustls-tls-webpki-roots", "stream"] }
 tonic = "0.14.6"
+ts-rs = { version = "12.0.1", features = ["serde-compat"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tokio-stream = "0.1.19"
