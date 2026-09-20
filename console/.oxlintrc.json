@@ -12,10 +12,12 @@
   },
   "rules": {
     "react/react-in-jsx-scope": "off",
-    "no-console": "warn"
+    "no-console": "warn",
+    "no-underscore-dangle": ["off"]
   },
   "ignorePatterns": [
     "dist/",
+    ".design-system/",
     "node_modules/",
     "src/routeTree.gen.ts",
     "src/api/generated/",

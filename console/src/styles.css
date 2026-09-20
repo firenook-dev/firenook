@@ -1,11 +1,12 @@
 /*
  * Order matters: Kumo's stylesheet registers its theme tokens before Tailwind
- * compiles, and the @source line lets Tailwind see the classes inside Kumo's
- * compiled components.
+ * compiles, the @source line lets Tailwind see the classes inside Kumo's
+ * compiled components, and Firenook's theme comes last so its tokens win.
  */
 @source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
 @import '@cloudflare/kumo/styles/tailwind';
 @import 'tailwindcss';
+@import './theme.css';
 
 html,
 body,

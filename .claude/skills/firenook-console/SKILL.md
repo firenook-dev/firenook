@@ -65,7 +65,16 @@ Follow the `kumo-design` skill (vendored Kumo rules) and `console/AGENTS.md`.
 Semantic tokens only (`bg-kumo-base`, `text-kumo-subtle`, `ring-kumo-line`),
 14 px content text, sentence-case headings, `font-semibold` not `font-bold`,
 no colour transitions on hover, dialogs always mounted and toggled with
-`open`. Component docs: `npx @cloudflare/kumo doc <Component>`. TanStack docs:
+`open`. Firenook's identity lives in `src/theme.css` alone: the ember accent
+(`--color-kumo-brand` and the link colour) and the IBM Plex type pair,
+self-hosted from `public/fonts`. The accent is reserved for the primary
+action, active navigation and links; switches use `variant="neutral"` (Kumo's
+default switch is hard-coded blue) so they match the checkbox.
+
+The component library the design tool works from is `design-system/`
+(`npm run design-system` renders every card through a real browser into
+`.design-system/bundle`, `npm run design-system:dev` serves the cards). Add a
+card there for every new pattern before it is designed with. Component docs: `npx @cloudflare/kumo doc <Component>`. TanStack docs:
 `npx @tanstack/cli search-docs "<query>"` / `npx @tanstack/cli doc <library> <path>`.
 
 ## Repository rules that apply here too

@@ -24,3 +24,4 @@
 /console/test-results/
 /console/playwright-report/
 /crates/console-front/bindings/
+/console/.design-system/
