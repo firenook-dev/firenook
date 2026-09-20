@@ -146,7 +146,11 @@ export async function seedFirestore(origin, project, database = '(default)') {
     verified: v.b(true),
     tags: v.arr([v.s('vip'), v.s('beta')]),
     address: v.map({ city: v.s('London'), country: v.s('GB'), geo: v.geo(51.5074, -0.1278) }),
-    settings: v.map({ theme: v.s('dark'), digest: v.b(true), limits: v.map({ projects: v.i(50) }) }),
+    settings: v.map({
+      theme: v.s('dark'),
+      digest: v.b(true),
+      limits: v.map({ projects: v.i(50) }),
+    }),
     bio: v.s('The first programmer.'),
   })
 
