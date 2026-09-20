@@ -519,10 +519,22 @@ served until every section has landed.
   route with Rust-generated TypeScript types; unit, end-to-end (real engine)
   and bundle-budget checks in CI; the console is built before every engine
   build.
-- [ ] Console API contract and live channel (one multiplexed socket, deltas
-  per scope, bounded like the Requests feed).
-- [ ] Firestore workbench: path bar, grid with inferred columns, query
-  builder, inspector, bulk actions, view-as-user over the rules engine.
+- [x] Same-origin data services under the console: the Firestore REST front,
+  the Requests feed and the Auth application mount under `/console/api/v1`,
+  so the console works wherever its page loads from (a proxy, an HTTPS
+  alias) and never needs the service ports from the browser.
+- [x] Live channel: a server-sent event stream fed by the store's commit
+  observers carries every commit's document paths; the console invalidates
+  by scope and flashes the rows on screen. Nothing polls.
+- [x] Firestore workbench: path bar as a command line with completion and
+  index counts, grid with inferred typed columns (mixed types flagged),
+  cursor-paged and virtualized, the SDK query chain as text with the live
+  count, view-as-user over the rules engine with the Requests drawer and the
+  deciding rule lines, inspector with typed editors and JSON, add and delete
+  (recursive), copy as code (Web, Admin, Flutter, REST). Found and fixed on
+  the way: the REST front ignored `startAt`/`endAt` cursors.
+- [ ] Firestore follow-ups: explain (composite-index warning), import/export
+  from the page, undo within the change-log window, rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

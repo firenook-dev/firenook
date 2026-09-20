@@ -23,7 +23,7 @@ export function LiveDot({ state = 'live', changes }: { state?: LiveState; change
         <span className={`relative inline-flex size-2 rounded-full ${colour}`} />
       </span>
       {label}
-      {changes ? ` · ${changes} changes` : ''}
+      {changes ? ` · ${changes} ${changes === 1 ? 'change' : 'changes'}` : ''}
     </span>
   )
 }

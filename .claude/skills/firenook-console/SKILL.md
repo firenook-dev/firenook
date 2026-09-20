@@ -77,6 +77,32 @@ The component library the design tool works from is `design-system/`
 card there for every new pattern before it is designed with. Component docs: `npx @cloudflare/kumo doc <Component>`. TanStack docs:
 `npx @tanstack/cli search-docs "<query>"` / `npx @tanstack/cli doc <library> <path>`.
 
+## Firestore workbench (built, `src/firestore/`)
+
+- Data path: the browser talks Firestore REST to the console's own origin
+  (`/console/api/v1/firestore/v1/...`, a second `rest-front` router on the
+  same service), Identity Toolkit at `/console/api/v1/auth/...` and the
+  Requests websocket at `/console/api/v1/firestore/requests`. Never reach
+  the service ports from the browser.
+- Live: `GET /console/api/v1/firestore/changes?database=` is an SSE stream
+  from the store's commit observer (`ChangeFeed` in
+  `crates/console-front/src/firestore.rs`); `src/firestore/live.ts`
+  invalidates TanStack Query scopes and flashes rows. Payloads are paths
+  only, never documents.
+- Identity: `Authorization: Bearer owner` bypasses rules; "view as" mints
+  an unsigned `alg: none` emulator token for an Auth user
+  (`src/firestore/view-as.ts`), so rules run exactly as for the app.
+- View state is the URL (`path`, `q`, `group`, `as`, `doc`, `tab`);
+  selection and focus are Zustand; queries are keyed
+  `['fs', db, kind, scope, ...]` so the channel can target them.
+- Query text is the SDK chain (`where(...).orderBy(...).limit(n)`), parsed
+  and printed by `src/firestore/query.ts`; cursors are exact because
+  `__name__` is always the last order.
+- Seed a synthetic project for development: `npm run seed -- <ui-origin>
+  <project>` (`scripts/seed-firestore.mjs`; the e2e global setup uses it;
+  the synthetic engine's rules deny listing `users` to clients so "view as"
+  has denials to show).
+
 ## Repository rules that apply here too
 
 The independence rule (AGENTS.md) covers fixtures, seeds, screenshots and

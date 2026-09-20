@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "budget": "node scripts/bundle-budget.mjs",
+    "seed": "node scripts/seed-firestore.mjs",
     "design-system": "node scripts/design-system/build.mjs",
     "design-system:dev": "vite --config design-system/vite.config.ts"
   },
