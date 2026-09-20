@@ -11,6 +11,7 @@ repository.workspace = true
 axum = { workspace = true, features = ["ws"] }
 futures-util.workspace = true
 firenook-auth-front = { path = "../auth-front" }
+firenook-console-front = { path = "../console-front" }
 firenook-core-store = { path = "../core-store" }
 firenook-export-format = { path = "../export-format" }
 firenook-functions-bridge = { path = "../functions-bridge" }

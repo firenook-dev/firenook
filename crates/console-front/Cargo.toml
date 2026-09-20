@@ -1,0 +1,23 @@
+[package]
+name = "firenook-console-front"
+description = "The Firenook console: the emulator's own UI, embedded in the binary, and its Console API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum.workspace = true
+firenook-suite-front = { path = "../suite-front" }
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ts-rs.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tower = { version = "0.5.3", features = ["util"] }
+
+[lints]
+workspace = true

@@ -148,6 +148,11 @@ impl SuiteDirectory {
         &self.project
     }
 
+    /// Every advertised service in name order.
+    pub fn services(&self) -> impl Iterator<Item = &ServiceInfo> {
+        self.services.values()
+    }
+
     /// Emulator map using the captured firebase-tools representation.
     #[must_use]
     pub fn wire_services(&self) -> JsonValue {

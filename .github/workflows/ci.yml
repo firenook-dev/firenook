@@ -17,9 +17,18 @@ jobs:
   rust:
     name: Rust quality gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Build the console the engine embeds
+        run: |
+          npm install --global npm@12.0.2
+          node packaging/build-console.mjs
       - name: Install latest stable Rust components
         run: |
           rustup update stable --no-self-update
@@ -32,6 +41,54 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Run Rust tests
         run: cargo test --workspace --all-targets --all-features
+      - name: Verify the committed Console API bindings match the Rust types
+        run: git diff --exit-code -- console/src/api/generated
+
+  console:
+    name: Console checks and browser journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Install current npm and the pinned console dependencies
+        run: |
+          npm install --global npm@12.0.2
+          npm ci --prefix console
+      - name: Type-check, lint, format, unit tests, build and budget
+        run: |
+          npm run check --prefix console
+          npm run lint --prefix console
+          npm run format:check --prefix console
+          npm run test --prefix console
+          npm run build --prefix console
+          npm run budget --prefix console
+      - name: Install latest stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+      - name: Build the engine the browser journey runs against
+        run: cargo build --locked --bin firenook
+      - name: Provision the pinned Emulator UI asset the UI port still requires
+        run: node -e 'import("./packages/cli/src/assets.mjs").then(m => m.setupAssets())'
+      - name: Install Chromium for Playwright
+        working-directory: console
+        run: npx playwright install --with-deps chromium
+      - name: Run the console browser journey against the real engine
+        working-directory: console
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: failure()
+        with:
+          name: console-playwright-report
+          path: |
+            console/playwright-report
+            console/test-results
 
   public-contracts:
     name: Public fixture and package checks

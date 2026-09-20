@@ -34,3 +34,17 @@ translated, or used to derive implementation code:
 Google, Google Cloud, Firestore, and Firebase are trademarks of Google LLC.
 Their names are used only to describe compatibility targets. This project is
 not affiliated with or endorsed by Google.
+
+Third-party software bundled into the engine binary by the console
+(`console/`, built output embedded by `crates/console-front`), each under
+its own license, unmodified:
+
+- @cloudflare/kumo (MIT) and its design rules vendored as the
+  `kumo-design` skill under `.claude/skills/` (MIT, license text alongside)
+- @base-ui/react (MIT)
+- @phosphor-icons/react (MIT)
+- react, react-dom (MIT)
+- @tanstack/react-router, react-query, react-table, react-virtual, react-form (MIT)
+- tailwindcss (MIT)
+- zustand (MIT)
+- zod (MIT)

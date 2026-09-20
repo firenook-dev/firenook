@@ -12,8 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
+use axum::response::Redirect;
+use axum::routing::get;
 use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
+use firenook_console_front::{CONSOLE_PATH, console_router};
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
     Write, document_key_logical_bytes, fields_logical_bytes,
@@ -775,6 +778,31 @@ async fn prepare_native_suite(
     Ok((guard, prepared))
 }
 
+/// The UI port's application: the official Emulator UI at the root and the
+/// console under [`CONSOLE_PATH`], which shares the port so that its assets
+/// and API are same-origin with the page that loads them. The console's
+/// canonical address has no trailing slash; the slashed form is not claimed
+/// by `nest` and would otherwise fall through to the official UI's index.
+async fn ui_application(
+    config: &SuiteConfig,
+    directory: SuiteDirectory,
+    client_directory: PathBuf,
+) -> Result<Router, SuiteRuntimeError> {
+    let official = ui_router(UiConfig {
+        directory: directory.clone(),
+        archive: config.ui_archive.clone(),
+        client_directory,
+    })
+    .await
+    .map_err(|error| failure(format!("UI failed to start: {error}")))?;
+    Ok(official
+        .route(
+            concat!("/console", "/"),
+            get(|| async { Redirect::permanent(CONSOLE_PATH) }),
+        )
+        .nest(CONSOLE_PATH, console_router(directory)))
+}
+
 async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRuntimeError> {
     tokio::fs::create_dir_all(&config.state_dir)
         .await
@@ -852,15 +880,7 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     })
     .map_err(|error| failure(format!("Hub failed to start: {error}")))?;
     let ui = match ui_client {
-        Some(client_directory) => Some(
-            ui_router(UiConfig {
-                directory,
-                archive: config.ui_archive.clone(),
-                client_directory,
-            })
-            .await
-            .map_err(|error| failure(format!("UI failed to start: {error}")))?,
-        ),
+        Some(client_directory) => Some(ui_application(config, directory, client_directory).await?),
         None => None,
     };
     Ok(PreparedSuite {

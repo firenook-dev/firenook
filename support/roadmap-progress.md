@@ -98,6 +98,7 @@ checks on its exact combined candidate instead of substituting older binaries.
 | Unchanged decisions and overhead | Traced/untraced rules corpora; rotated nine-run overhead driver asserting every result and final state, with all samples retained |
 | Rename | Renamed to Firenook and published as `firenook@0.2.0-next.1` (2026-09-19): PR #58, repositories moved to `firenook-dev`, release run 35449320572, registry integrity and provenance verified, fresh-machine installs on three platforms | Consumer pin swap and gates on the installed package; then deprecate the former packages |
 | Read path (unreleased) | `support/read-path-audit.md`: key cursor, index-only counts, read pool, REST `select`, Auth persist-on-change, commit-notified incremental listeners; 49 workspace suites, conformance 37/37 on official/memory/disk, Auth replay 0 mismatches, developer-machine before/after table | Acceptance-host lanes, then publication as `0.2.0-next.2` |
+| Console (unreleased) | `console/` + `crates/console-front`: stack, shell, palette, overview, Console API status route with generated types; crate tests, Vitest, Playwright against a real engine, bundle budget | Live channel, Firestore workbench, Auth, the other sections, parity checklist |
 
 The public preview compatibility document continues to describe the installed
 release. Merged but unpublished source improvements must not be presented as
