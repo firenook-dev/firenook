@@ -31,6 +31,8 @@ test('client routes deep-link through the engine and navigate in place', async (
 
 test('the command palette opens from the keyboard and jumps to a section', async ({ page }) => {
   await page.goto(`${origin()}/console`)
+  // The shortcut is a window listener the shell installs after mount.
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
   await page.keyboard.press('ControlOrMeta+k')
   const input = page.getByTestId('palette-input')
   await expect(input).toBeVisible()
