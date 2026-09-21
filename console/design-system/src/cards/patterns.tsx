@@ -33,7 +33,6 @@ import {
   PhoneIcon,
   PlusIcon,
   ShieldCheckIcon,
-  SidebarSimpleIcon,
   SquareHalfIcon,
   TrashIcon,
   XIcon,
@@ -177,10 +176,7 @@ function Shell() {
                 ))}
               </Sidebar.Content>
               <Sidebar.Footer>
-                <span className="flex h-8.5 min-w-0 flex-1 items-center gap-3 rounded-lg px-[7px] text-sm text-kumo-subtle">
-                  <SidebarSimpleIcon size={16} className="shrink-0" />
-                  <span className="truncate">Collapse</span>
-                </span>
+                <Sidebar.Trigger />
               </Sidebar.Footer>
             </Sidebar>
           </Sidebar.Provider>

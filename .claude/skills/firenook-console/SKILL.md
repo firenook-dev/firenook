@@ -35,9 +35,9 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 
 - Primary navigation is Kumo's `Sidebar`, expanded or collapsed
   (`useLayout.navOpen`, localStorage), always `peekable`: collapsed, the
-  labels slide out over the page on hover, as on kumo-ui.com. The toggle at
-  the foot of the nav uses `useSidebar().toggleSidebar`; `[` flips it; ⌘K
-  offers it under "Layout". Only the navigation sits inside
+  labels slide out over the page on hover, as on kumo-ui.com. The foot of
+  the nav is Kumo's own `Sidebar.Trigger` (icon only, in a tooltip); `[`
+  flips it; ⌘K offers it under "Layout". Only the navigation sits inside
   `Sidebar.Provider`, and the provider's wrapper is `z-30 w-auto shrink-0`
   so the fixed peek overlays the content. (Kumo 2.14's context memo omits
   `peekable`, so never flip that prop at runtime; it is constant here.) The

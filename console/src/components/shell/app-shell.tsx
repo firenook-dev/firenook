@@ -16,7 +16,7 @@ import {
   TooltipProvider,
   useSidebar,
 } from '@cloudflare/kumo'
-import { CommandIcon, GaugeIcon, SidebarSimpleIcon, SquareHalfIcon } from '@phosphor-icons/react'
+import { CommandIcon, GaugeIcon, SquareHalfIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type { CSSProperties, ReactNode } from 'react'
@@ -182,28 +182,14 @@ function Navigation() {
   )
 }
 
-/** Collapse or expand, at the foot of the nav; collapsed, the nav peeks on hover. */
+/** Kumo's own trigger at the foot of the nav; collapsed, the nav peeks on hover. */
 function NavToggle() {
-  const { open, toggleSidebar } = useSidebar()
+  const { open } = useSidebar()
   return (
     <Tooltip
       content={open ? 'Collapse the sidebar ([)' : 'Expand the sidebar ([)'}
       side="right"
-      render={
-        <button
-          type="button"
-          className="flex h-8.5 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-[7px] text-sm text-kumo-subtle outline-none hover:bg-(--sidebar-active-bg) hover:text-kumo-default focus-visible:bg-(--sidebar-active-bg) group-data-[state=collapsed]/sidebar:flex-none"
-          aria-label={open ? 'Collapse the sidebar' : 'Expand the sidebar'}
-          aria-expanded={open}
-          onClick={toggleSidebar}
-          data-testid="nav-toggle"
-        >
-          <SidebarSimpleIcon size={16} className="shrink-0" />
-          <span className="truncate text-left group-data-[state=collapsed]/sidebar:hidden">
-            {open ? 'Collapse' : 'Expand'}
-          </span>
-        </button>
-      }
+      render={<Sidebar.Trigger data-testid="nav-toggle" />}
     />
   )
 }
