@@ -18,7 +18,6 @@ import {
   ArrowSquareOutIcon,
   BracketsCurlyIcon,
   CaretRightIcon,
-  CheckIcon,
   CommandIcon,
   CopyIcon,
   DatabaseIcon,
@@ -180,8 +179,7 @@ function Shell() {
               <Sidebar.Footer>
                 <span className="flex h-8.5 min-w-0 flex-1 items-center gap-3 rounded-lg px-[7px] text-sm text-kumo-subtle">
                   <SidebarSimpleIcon size={16} className="shrink-0" />
-                  <span className="truncate">Sidebar</span>
-                  <span className="ml-auto text-[12px] text-kumo-inactive">Expanded</span>
+                  <span className="truncate">Collapse</span>
                 </span>
               </Sidebar.Footer>
             </Sidebar>
@@ -270,39 +268,17 @@ function Shell() {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_224px] gap-4">
-          <Text variant="secondary" size="sm">
-            The navigation is Kumo's sidebar: expanded by default, collapsed to icons with tooltips,
-            or collapsed until hovered, when the labels slide out over the page without moving it.
-            The control at its foot offers the three;{' '}
-            <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">
-              [
-            </kbd>{' '}
-            flips between expanded and collapsed. The panel beside the content is the section's own
-            column: Firestore fills it with the database, a filter and the schema tree; the button
-            above it and{' '}
-            <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">
-              t
-            </kbd>{' '}
-            hide and show it. Sections without a panel take the full width.
-          </Text>
-          <div className="grid content-start gap-0.5 rounded-lg bg-kumo-elevated p-1 text-sm shadow-md ring ring-kumo-line">
-            <span className="px-2 py-1.5 font-semibold">Sidebar</span>
-            {[
-              ['Expanded', 'Icons and labels', true],
-              ['Collapsed', 'Icons only, labels on hover', false],
-              ['Expand on hover', 'Icons; the labels slide out over the page', false],
-            ].map(([label, hint, current]) => (
-              <span key={String(label)} className="flex items-center gap-3 rounded-md px-2 py-1.5">
-                <span className="grid gap-0.5">
-                  <span>{label}</span>
-                  <span className="text-[12px] text-kumo-subtle">{hint}</span>
-                </span>
-                {current ? <CheckIcon size={16} className="ml-auto text-kumo-brand" /> : null}
-              </span>
-            ))}
-          </div>
-        </div>
+        <Text variant="secondary" size="sm">
+          The navigation is Kumo's sidebar, expanded or collapsed to icons; collapsed, the labels
+          slide out over the page while the pointer is on it and go back when it leaves. The control
+          at its foot and{' '}
+          <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">[</kbd>{' '}
+          flip it, and the choice is kept per browser. The panel beside the content is the section's
+          own column: Firestore fills it with the database, a filter and the schema tree; the button
+          above it and{' '}
+          <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">t</kbd>{' '}
+          hide and show it. Sections without a panel take the full width.
+        </Text>
       </div>
     </TooltipProvider>
   )
@@ -1195,7 +1171,7 @@ defineCards([
     group: 'Patterns',
     name: 'App shell',
     subtitle:
-      'Navigation expanded, collapsed or on hover; the section panel beside the content; project and engine in the bar',
+      'Navigation expanded or collapsed with peek on hover; the section panel beside the content; project and engine in the bar',
     width: 1280,
     surface: 'canvas',
     render: () => <Shell />,

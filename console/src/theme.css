@@ -1,16 +1,18 @@
 /*
- * Firenook's identity on top of Kumo: one accent and one type pair. Every
- * other token is Kumo's, so components keep their tested light and dark
- * behaviour. Change the accent here and nowhere else. The @font-face rules
- * live in fonts.css so the component library can ship the same faces from
- * its own path.
+ * Firenook's identity on top of Kumo: one accent and one type pair. Inter
+ * is the face Kumo's own documentation renders in, so every component
+ * looks exactly as Kumo designed it; IBM Plex Mono carries paths, ids,
+ * values and code. Every other token is Kumo's, so components keep their
+ * tested light and dark behaviour. Change the accent here and nowhere else.
+ * The @font-face rules live in fonts.css so the component library can ship
+ * the same faces from its own path.
  *
  * Accent "ember": oklch(0.55 0.19 35). White text on it and the colour as
  * text on white both measure 5.3:1; the hover step is darker still.
  */
 
 @theme {
-  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --default-font-family: var(--font-sans);
   --default-mono-font-family: var(--font-mono);

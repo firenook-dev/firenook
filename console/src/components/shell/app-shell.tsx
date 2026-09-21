@@ -1,20 +1,20 @@
 // The shell: primary navigation on the left, the bar with the project and
 // the engine on top, and beneath it two columns: the section panel (the
 // column a section can fill through `SectionPanel`) and the content. The
-// navigation shows expanded, collapsed to icons, or collapsed until hovered;
-// the person picks from the control at its foot, `[` flips it, `t` hides and
-// shows the panel.
+// navigation is expanded or collapsed to icons; collapsed, it slides its
+// labels out over the page while the pointer is on it. The control at its
+// foot and `[` flip it; `t` hides and shows the panel.
 
 import {
   Badge,
   Button,
-  DropdownMenu,
   InlineCopyText,
   Sidebar,
   Text,
   Toasty,
   Tooltip,
   TooltipProvider,
+  useSidebar,
 } from '@cloudflare/kumo'
 import { CommandIcon, GaugeIcon, SidebarSimpleIcon, SquareHalfIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
@@ -22,7 +22,7 @@ import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type { CSSProperties, ReactNode } from 'react'
 import { useEffect } from 'react'
 import { statusQuery } from '@/api/queries'
-import { NAV_MODES, type NavMode, useLayout } from '@/lib/layout'
+import { useLayout } from '@/lib/layout'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
 import { CommandPalette } from './command-palette'
@@ -41,8 +41,8 @@ const NAV_WIDTH: CSSProperties = { '--sidebar-width': '14rem' } as CSSProperties
 
 export function AppShell({ children }: { children: ReactNode }) {
   const togglePalette = useConsoleUi((state) => state.togglePalette)
-  const navMode = useLayout((state) => state.navMode)
-  const setNavMode = useLayout((state) => state.setNavMode)
+  const navOpen = useLayout((state) => state.navOpen)
+  const setNavOpen = useLayout((state) => state.setNavOpen)
   const toggleNav = useLayout((state) => state.toggleNav)
   const togglePanel = useLayout((state) => state.togglePanel)
   const panel = useLayout((state) => state.panel)
@@ -77,15 +77,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     <Toasty>
       <TooltipProvider>
         <div className="flex h-full">
-          {/* Only the navigation lives inside Kumo's provider: its context
-              memo misses `peekable`, so the switch between collapsed and
-              hover remounts the navigation (the key) and nothing else. The
+          {/* Only the navigation lives inside Kumo's provider, and the
               wrapper sits above the content so a peek overlays it. */}
           <Sidebar.Provider
-            key={navMode === 'hover' ? 'hover' : 'fixed'}
-            open={navMode === 'expanded'}
-            onOpenChange={(open) => setNavMode(open ? 'expanded' : 'collapsed')}
-            peekable={navMode === 'hover'}
+            open={navOpen}
+            onOpenChange={setNavOpen}
+            peekable
             collapsible="icon"
             className="z-30 h-full w-auto shrink-0"
             style={NAV_WIDTH}
@@ -179,68 +176,35 @@ function Navigation() {
         ))}
       </Sidebar.Content>
       <Sidebar.Footer>
-        <NavModeControl />
+        <NavToggle />
       </Sidebar.Footer>
     </Sidebar>
   )
 }
 
-/** Expanded, collapsed, or expand on hover: a menu at the foot of the nav. */
-function NavModeControl() {
-  const navMode = useLayout((state) => state.navMode)
-  const setNavMode = useLayout((state) => state.setNavMode)
-  const current = NAV_MODES.find((mode) => mode.value === navMode)?.label ?? 'Expanded'
+/** Collapse or expand, at the foot of the nav; collapsed, the nav peeks on hover. */
+function NavToggle() {
+  const { open, toggleSidebar } = useSidebar()
   return (
-    <DropdownMenu>
-      <Tooltip
-        content={`Sidebar: ${current.toLowerCase()} ([ flips it)`}
-        side="right"
-        render={
-          <DropdownMenu.Trigger
-            render={
-              <button
-                type="button"
-                className="flex h-8.5 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-[7px] text-sm text-kumo-subtle outline-none hover:bg-(--sidebar-active-bg) hover:text-kumo-default focus-visible:bg-(--sidebar-active-bg) group-data-[state=collapsed]/sidebar:flex-none"
-                aria-label="Sidebar"
-                data-testid="nav-mode"
-              >
-                <SidebarSimpleIcon size={16} className="shrink-0" />
-                <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left group-data-[state=collapsed]/sidebar:hidden">
-                  <span className="truncate">Sidebar</span>
-                  <span className="ml-auto truncate text-[12px] text-kumo-inactive">{current}</span>
-                </span>
-              </button>
-            }
-          />
-        }
-      />
-      <DropdownMenu.Content align="start" side="top" className="min-w-56">
-        <DropdownMenu.Group>
-          <DropdownMenu.Label>Sidebar</DropdownMenu.Label>
-          <DropdownMenu.RadioGroup
-            value={navMode}
-            onValueChange={(value) => setNavMode(value as NavMode)}
-          >
-            {NAV_MODES.map((mode) => (
-              <DropdownMenu.RadioItem
-                key={mode.value}
-                value={mode.value}
-                closeOnClick
-                data-testid={`nav-mode-${mode.value}`}
-              >
-                <span className="flex flex-1 items-center gap-3">
-                  <span className="grid gap-0.5">
-                    <span>{mode.label}</span>
-                    <span className="text-[12px] text-kumo-subtle">{mode.hint}</span>
-                  </span>
-                  <DropdownMenu.RadioItemIndicator className="text-kumo-brand" />
-                </span>
-              </DropdownMenu.RadioItem>
-            ))}
-          </DropdownMenu.RadioGroup>
-        </DropdownMenu.Group>
-      </DropdownMenu.Content>
-    </DropdownMenu>
+    <Tooltip
+      content={open ? 'Collapse the sidebar ([)' : 'Expand the sidebar ([)'}
+      side="right"
+      render={
+        <button
+          type="button"
+          className="flex h-8.5 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-[7px] text-sm text-kumo-subtle outline-none hover:bg-(--sidebar-active-bg) hover:text-kumo-default focus-visible:bg-(--sidebar-active-bg) group-data-[state=collapsed]/sidebar:flex-none"
+          aria-label={open ? 'Collapse the sidebar' : 'Expand the sidebar'}
+          aria-expanded={open}
+          onClick={toggleSidebar}
+          data-testid="nav-toggle"
+        >
+          <SidebarSimpleIcon size={16} className="shrink-0" />
+          <span className="truncate text-left group-data-[state=collapsed]/sidebar:hidden">
+            {open ? 'Collapse' : 'Expand'}
+          </span>
+        </button>
+      }
+    />
   )
 }
 

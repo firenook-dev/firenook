@@ -33,14 +33,15 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 
 ## The shell (`src/components/shell/`)
 
-- Primary navigation is Kumo's `Sidebar` in three modes (`useLayout.navMode`):
-  `expanded` (default), `collapsed` (icons, tooltips) and `hover` (Kumo's
-  `peekable`: the labels slide out over the page). The control at the foot
-  of the nav is a `DropdownMenu.RadioGroup`; `[` flips expanded/collapsed;
-  ⌘K lists the three under "Layout". Only the navigation sits inside
-  `Sidebar.Provider`: Kumo 2.14's context memo omits `peekable`, so the
-  provider is keyed on hover-vs-not and remounts the nav alone when that
-  switches; its wrapper is `z-30` so a peek overlays the content.
+- Primary navigation is Kumo's `Sidebar`, expanded or collapsed
+  (`useLayout.navOpen`, localStorage), always `peekable`: collapsed, the
+  labels slide out over the page on hover, as on kumo-ui.com. The toggle at
+  the foot of the nav uses `useSidebar().toggleSidebar`; `[` flips it; ⌘K
+  offers it under "Layout". Only the navigation sits inside
+  `Sidebar.Provider`, and the provider's wrapper is `z-30 w-auto shrink-0`
+  so the fixed peek overlays the content. (Kumo 2.14's context memo omits
+  `peekable`, so never flip that prop at runtime; it is constant here.) The
+  expanded width is 14rem through `--sidebar-width` on the provider.
 - The section panel is a second column beside the content (`PANEL_WIDTH`,
   264 px). A section fills it by rendering `<SectionPanel label="…">` (a
   portal into the shell's slot, so the section's providers reach it). The
@@ -87,7 +88,8 @@ Semantic tokens only (`bg-kumo-base`, `text-kumo-subtle`, `ring-kumo-line`),
 14 px content text, sentence-case headings, `font-semibold` not `font-bold`,
 no colour transitions on hover, dialogs always mounted and toggled with
 `open`. Firenook's identity lives in `src/theme.css` alone: the ember accent
-(`--color-kumo-brand` and the link colour) and the IBM Plex type pair,
+(`--color-kumo-brand` and the link colour) and the type pair (Inter for
+the interface, the face Kumo's docs render in; IBM Plex Mono for data),
 self-hosted from `public/fonts`. The accent is reserved for the primary
 action, active navigation and links; switches use `variant="neutral"` (Kumo's
 default switch is hard-coded blue) so they match the checkbox.

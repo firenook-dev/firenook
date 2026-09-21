@@ -98,7 +98,7 @@ defineCards([
         </Section>
         <Section
           title="Type"
-          note="IBM Plex Sans for the interface, IBM Plex Mono for paths, ids, values and code. Both self-hosted; no CDN call from a local tool."
+          note="Inter for the interface, the face Kumo's own documentation renders in, so every component looks as Kumo designed it; IBM Plex Mono for paths, ids, values and code. Both self-hosted; no CDN call from a local tool."
         >
           <Row label="Sans">
             <span className="text-[20px] leading-tight text-kumo-strong">

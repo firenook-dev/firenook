@@ -1,26 +1,20 @@
-// The shell's layout: how the primary navigation shows (expanded, collapsed
-// to icons, or collapsed until hovered) and whether the section panel, the
-// second column a section can fill beside its content, is on screen. Both
-// choices are remembered per browser; what a section puts in the panel is
-// ephemeral and comes from the section itself through `SectionPanel`.
+// The shell's layout: whether the primary navigation is expanded (a
+// collapsed one keeps its icons and slides the labels out on hover) and
+// whether the section panel, the second column a section can fill beside
+// its content, is on screen. Both choices are remembered per browser; what
+// a section puts in the panel is ephemeral and comes from the section
+// itself through `SectionPanel`.
 
 import { create } from 'zustand'
-
-export type NavMode = 'expanded' | 'collapsed' | 'hover'
-
-export const NAV_MODES: ReadonlyArray<{ value: NavMode; label: string; hint: string }> = [
-  { value: 'expanded', label: 'Expanded', hint: 'Icons and labels' },
-  { value: 'collapsed', label: 'Collapsed', hint: 'Icons only, labels on hover' },
-  { value: 'hover', label: 'Expand on hover', hint: 'Icons; the labels slide out over the page' },
-]
 
 const NAV_KEY = 'firenook.console.nav'
 const PANEL_KEY = 'firenook.console.panel'
 
 interface LayoutState {
-  navMode: NavMode
-  setNavMode: (mode: NavMode) => void
-  /** `[` flips between expanded and collapsed; hover counts as collapsed. */
+  /** Whether the navigation shows its labels; collapsed, it peeks on hover. */
+  navOpen: boolean
+  setNavOpen: (open: boolean) => void
+  /** `[` flips it. */
   toggleNav: () => void
   /** Whether the section panel shows when a section provides one. */
   panelOpen: boolean
@@ -50,22 +44,22 @@ function write(key: string, value: string) {
   }
 }
 
-function loadNavMode(): NavMode {
+/** Open unless the person closed it; an older stored mode counts as closed. */
+function loadNavOpen(): boolean {
   const stored = read(NAV_KEY)
-  return stored === 'collapsed' || stored === 'hover' ? stored : 'expanded'
+  return stored !== 'closed' && stored !== 'collapsed' && stored !== 'hover'
 }
 
 export const useLayout = create<LayoutState>((set) => ({
-  navMode: loadNavMode(),
-  setNavMode: (navMode) => {
-    write(NAV_KEY, navMode)
-    set({ navMode })
+  navOpen: loadNavOpen(),
+  setNavOpen: (navOpen) => {
+    write(NAV_KEY, navOpen ? 'open' : 'closed')
+    set({ navOpen })
   },
   toggleNav: () =>
     set((state) => {
-      const navMode: NavMode = state.navMode === 'expanded' ? 'collapsed' : 'expanded'
-      write(NAV_KEY, navMode)
-      return { navMode }
+      write(NAV_KEY, state.navOpen ? 'closed' : 'open')
+      return { navOpen: !state.navOpen }
     }),
   panelOpen: read(PANEL_KEY) !== 'closed',
   setPanelOpen: (panelOpen) => {

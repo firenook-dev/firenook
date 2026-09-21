@@ -13,7 +13,7 @@ import {
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { NAV_MODES, useLayout } from '@/lib/layout'
+import { useLayout } from '@/lib/layout'
 import { SECTIONS } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
 
@@ -23,8 +23,8 @@ export function CommandPalette() {
   const providers = usePaletteProviders((state) => state.providers)
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
-  const navMode = useLayout((state) => state.navMode)
-  const setNavMode = useLayout((state) => state.setNavMode)
+  const navOpen = useLayout((state) => state.navOpen)
+  const toggleNav = useLayout((state) => state.toggleNav)
   const panel = useLayout((state) => state.panel)
   const panelOpen = useLayout((state) => state.panelOpen)
   const togglePanel = useLayout((state) => state.togglePanel)
@@ -56,16 +56,18 @@ export function CommandPalette() {
     ]
   }, [navigate])
 
-  // How the shell is laid out: the navigation's mode and the section panel.
+  // How the shell is laid out: the navigation and the section panel.
   const layout = useMemo<PaletteItem[]>(() => {
-    const items: PaletteItem[] = NAV_MODES.map((mode) => ({
-      id: `layout:nav:${mode.value}`,
-      title: `Sidebar: ${mode.label.toLowerCase()}`,
-      description: mode.value === navMode ? 'current' : mode.hint,
-      keywords: 'navigation layout collapse expand hover',
-      icon: <SidebarSimpleIcon size={16} />,
-      run: () => setNavMode(mode.value),
-    }))
+    const items: PaletteItem[] = [
+      {
+        id: 'layout:nav',
+        title: navOpen ? 'Collapse the sidebar' : 'Expand the sidebar',
+        description: navOpen ? 'icons only; hover to peek · [' : 'icons and labels · [',
+        keywords: 'navigation layout sidebar collapse expand',
+        icon: <SidebarSimpleIcon size={16} />,
+        run: toggleNav,
+      },
+    ]
     if (panel.present)
       items.push({
         id: 'layout:panel',
@@ -76,7 +78,7 @@ export function CommandPalette() {
         run: togglePanel,
       })
     return items
-  }, [navMode, setNavMode, panel, panelOpen, togglePanel])
+  }, [navOpen, toggleNav, panel, panelOpen, togglePanel])
 
   // What the page on screen contributes comes first; the sections and the
   // layout always follow.

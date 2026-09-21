@@ -551,10 +551,10 @@ served until every section has landed.
   row's subcollections in their own column, the path bar shows a pattern's
   `*`, the root landing describes each collection's shape, and ⌘K finds
   any pattern by name.
-- [x] The shell's layout: the navigation shows expanded, collapsed to icons
-  or collapsed until hovered (chosen at its foot, flipped with `[`, kept
-  per browser), and every section can fill a panel column beside its
-  content. Firestore fills it with the database, a filter and the schema
+- [x] The shell's layout: the navigation is expanded or collapsed to icons
+  (flipped at its foot or with `[`, kept per browser), a collapsed one
+  slides its labels out on hover, and every section can fill a panel
+  column beside its content. Firestore fills it with the database, a filter and the schema
   tree, open only along the current path, so a database with dozens of
   roots and hundreds of thousands of documents reads at a glance; the
   workbench runs edge to edge under its own toolbar, and `t` hides the
