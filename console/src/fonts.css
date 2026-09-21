@@ -1,10 +1,14 @@
 /*
  * The self-hosted faces the theme names. The console serves them from its
- * own origin under /console/fonts; nothing is fetched from a CDN.
+ * own origin under /console/fonts; nothing is fetched from a CDN. The sans
+ * face is registered as InterVariable (the name Inter's own variable build
+ * uses) rather than Inter, so a stylesheet arriving later with a face named
+ * Inter (the TanStack devtools inject one in development, without a
+ * unicode-range, and the last declared face wins) cannot replace it.
  */
 
 @font-face {
-  font-family: 'Inter';
+  font-family: 'InterVariable';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;

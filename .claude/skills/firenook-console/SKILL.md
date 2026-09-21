@@ -90,7 +90,14 @@ no colour transitions on hover, dialogs always mounted and toggled with
 `open`. Firenook's identity lives in `src/theme.css` alone: the ember accent
 (`--color-kumo-brand` and the link colour) and the type pair (Inter for
 the interface, the face Kumo's docs render in; IBM Plex Mono for data),
-self-hosted from `public/fonts`. The accent is reserved for the primary
+self-hosted from `public/fonts`. The sans face is registered as
+`InterVariable`, not `Inter`: the TanStack devtools inject a document-level
+`@font-face` named Inter in dev builds, and the last declared face wins, so
+a face named Inter would render the devtools' build on the dev server.
+`theme.css` also sets what kumo-ui.com sets on its body and Kumo's
+stylesheet does not: `-webkit-font-smoothing: antialiased` and Inter's
+`calt, cv02, cv03, cv04`; without them macOS renders every weight heavier
+than Kumo's docs show. The accent is reserved for the primary
 action, active navigation and links; switches use `variant="neutral"` (Kumo's
 default switch is hard-coded blue) so they match the checkbox.
 
