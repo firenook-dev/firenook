@@ -102,6 +102,35 @@ card there for every new pattern before it is designed with. Component docs: `np
   <project>` (`scripts/seed-firestore.mjs`; the e2e global setup uses it;
   the synthetic engine's rules deny listing `users` to clients so "view as"
   has denials to show).
+- Creating: every path into the create dialog is a `CreateRequest` on the
+  `useCreateDialog` store (`src/firestore/create.ts`): `document` (with an
+  optional `template` to duplicate or `id` for a missing ancestor),
+  `collection` (its first document creates it; `parent` empty = root) and
+  `import` (object keyed by id, array or NDJSON, batches of 200 `set`s). An
+  explicit id uses a `create` write (`currentDocument.exists: false`); the
+  engine answers 412, shown as "already exists". `FieldsPanel` in
+  `field-editor.tsx` is the typed rows + JSON view shared by the inspector
+  and the dialog; `draftsFromJson` keeps timestamp/reference types when the
+  text is unchanged.
+- Grid interactions: `HeaderMenu` writes `orderBy` into the query (the header
+  shows the arrow) and composes `where("field", "==", )` into the query line
+  through `useQueryLine.compose` (caret placed before `)`); hidden columns
+  live in `useColumns`, reset per collection. Inline editing
+  (`InlineCellEditor`) is for string/number/boolean/timestamp/null/unset
+  cells; a click that would open the inspector over the clicked cell waits
+  `DOUBLE_CLICK_MS` so a double-click can edit instead. Columns keep their
+  width (a trailing filler `<col>` takes the slack) so nothing moves when
+  the inspector opens. Reference cells and reference fields *peek*
+  (`selectDocument`) rather than navigate; the inspector shows "open in
+  grid" when the document is outside the current collection.
+- ⌘K is the shell's palette; pages contribute through
+  `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
+  Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
+  path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
+  project+database), collections and its actions.
+- Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
+  `CommandPalette.Results`/`Items` render functions must return keyed
+  elements; a `Tooltip` inside a `<button>` nests buttons (use `title`).
 
 ## Repository rules that apply here too
 

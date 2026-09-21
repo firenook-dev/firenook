@@ -2,18 +2,23 @@
 // document is open. Query line and Requests drawer appear when summoned.
 // Everything on screen is live from the engine's change feed.
 
-import { Badge, Button, Select, Text, Tooltip } from '@cloudflare/kumo'
-import { PlusIcon, TrashIcon } from '@phosphor-icons/react'
+import { Badge, Button, Select, Text } from '@cloudflare/kumo'
+import { TrashIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
 import { LiveDot } from '@/components/kit'
+import { useCreateDialog } from '../create'
 import { useLive, useLiveChanges } from '../live'
-import { isEmptyQuery } from '../query'
+import { useFirestorePalette } from '../palette'
+import { resetColumns, useQueryLine } from '../query-line-store'
+import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
-import { AddDocumentDialog, DeleteDialog } from './dialogs'
+import { CreateDialog } from './create-dialog'
+import { DeleteDialog } from './delete-dialog'
 import { Grid } from './grid'
 import { Inspector } from './inspector'
+import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
 import { QueryLine } from './query-line'
 import { RequestsDrawer } from './requests-drawer'
@@ -51,21 +56,36 @@ function WorkbenchBody() {
   const queryClient = useQueryClient()
   const status = useQuery(statusQuery)
   useLiveChanges(queryClient, workbench.database)
+  useFirestorePalette()
   const live = useLive((state) => state.status)
   const commits = useLive((state) => state.commits)
   const checked = useSelection((state) => state.checked)
   const clearSelection = useSelection((state) => state.clear)
-  const [queryOpenState, setQueryOpen] = useState(false)
-  // An active query always shows its line.
-  const queryOpen = queryOpenState || !isEmptyQuery(workbench.query)
+  const openQuery = useQueryLine((state) => state.setOpen)
+  const openCreate = useCreateDialog((state) => state.open)
   const [requestsOpen, setRequestsOpen] = useState(false)
-  // Each opening of the add dialog is a fresh form; 0 is closed.
-  const [addSession, setAddSession] = useState(0)
   const [deleting, setDeleting] = useState<string[]>([])
 
-  // The selection belongs to one collection.
+  // The selection and hidden columns belong to one collection.
   const selectionScope = `${workbench.database}|${workbench.collectionPath}|${workbench.group}`
-  useEffect(() => resetSelection(selectionScope), [selectionScope])
+  useEffect(() => {
+    resetSelection(selectionScope)
+    resetColumns(selectionScope)
+  }, [selectionScope])
+
+  // Where you have been, for the root landing and ⌘K.
+  const loadRecents = useRecents((state) => state.load)
+  const recordRecent = useRecents((state) => state.record)
+  useEffect(
+    () => loadRecents(recentsKey(workbench.project, workbench.database)),
+    [loadRecents, workbench.project, workbench.database],
+  )
+  useEffect(() => {
+    if (workbench.collectionPath) recordRecent(workbench.collectionPath, 'collection')
+  }, [recordRecent, workbench.collectionPath])
+  useEffect(() => {
+    if (workbench.selectedDocument) recordRecent(workbench.selectedDocument, 'document')
+  }, [recordRecent, workbench.selectedDocument])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -77,28 +97,24 @@ function WorkbenchBody() {
         if (event.key === 'Escape') (target as HTMLElement).blur()
         return
       }
-      if (event.key === 'f' && !event.metaKey && !event.ctrlKey && workbench.collectionPath) {
+      if (event.metaKey || event.ctrlKey) return
+      if (event.key === 'f' && workbench.collectionPath) {
         event.preventDefault()
-        setQueryOpen(true)
+        openQuery(true)
       } else if (event.key === 'Escape') {
         if (workbench.selectedDocument) workbench.selectDocument(undefined)
         else if (checked.size > 0) clearSelection()
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && checked.size > 0) {
         event.preventDefault()
         setDeleting([...checked])
-      } else if (
-        event.key === 'n' &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        workbench.collectionPath
-      ) {
+      } else if (event.key === 'n' && workbench.collectionPath) {
         event.preventDefault()
-        setAddSession((session) => session + 1)
+        openCreate({ kind: 'document', collection: workbench.collectionPath })
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench, checked, clearSelection])
+  }, [workbench, checked, clearSelection, openQuery, openCreate])
 
   const firestoreRunning = status.data?.services.some((service) => service.name === 'firestore')
   const databases = {
@@ -150,35 +166,21 @@ function WorkbenchBody() {
               Delete {checked.size}
             </Button>
           )}
-          {workbench.collectionPath && (
-            <Tooltip
-              content="Add a document (n)"
-              render={
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon={<PlusIcon />}
-                  onClick={() => setAddSession((session) => session + 1)}
-                >
-                  Add document
-                </Button>
-              }
-            />
-          )}
+          <NewMenu />
         </div>
       </div>
       <PathBar />
-      {workbench.collectionPath && <QueryLine open={queryOpen} setOpen={setQueryOpen} />}
+      {workbench.collectionPath && <QueryLine />}
       <div className="flex min-h-0 flex-1 gap-3">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <Grid onAddDocument={() => setAddSession((session) => session + 1)} />
+          <Grid />
         </div>
         {workbench.selectedDocument && (
           <Inspector path={workbench.selectedDocument} onDelete={(path) => setDeleting([path])} />
         )}
       </div>
       <RequestsDrawer open={requestsOpen} setOpen={setRequestsOpen} />
-      <AddDocumentDialog session={addSession} onClose={() => setAddSession(0)} />
+      <CreateDialog />
       <DeleteDialog paths={deleting} onOpenChange={(open) => !open && setDeleting([])} />
     </div>
   )

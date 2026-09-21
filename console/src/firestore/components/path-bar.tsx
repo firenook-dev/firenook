@@ -3,9 +3,10 @@
 // collection on the way. `/` focuses it from anywhere on the page.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { CopyIcon, DatabaseIcon, StackIcon } from '@phosphor-icons/react'
+import { CopyIcon, DatabaseIcon, FolderPlusIcon, StackIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
+import { useCreateDialog, validateId } from '../create'
 import { EMPTY_QUERY } from '../query'
 import { collectionsQuery, countQueryOptions } from '../queries'
 import { formatNumber } from '../value'
@@ -13,6 +14,7 @@ import { useWorkbench } from './workbench-context'
 
 export function PathBar() {
   const workbench = useWorkbench()
+  const openCreate = useCreateDialog((state) => state.open)
   const [editing, setEditing] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -44,6 +46,14 @@ export function PathBar() {
   function commit(value: string) {
     setEditing(null)
     workbench.setPath(value)
+  }
+
+  // A collection segment that matches nothing can be created on the spot.
+  const creatable = editing !== null ? creatableCollection(suggestions.data, editing) : undefined
+  function create() {
+    if (!creatable) return
+    setEditing(null)
+    openCreate({ kind: 'collection', parent: creatable.parent, id: creatable.id })
   }
 
   return (
@@ -86,7 +96,10 @@ export function PathBar() {
             value={editing}
             onChange={(event) => setEditing(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && creatable) {
+                event.preventDefault()
+                create()
+              } else if (event.key === 'Enter') {
                 event.preventDefault()
                 commit(editing)
               } else if (event.key === 'Escape') {
@@ -115,8 +128,31 @@ export function PathBar() {
             aria-label="Path"
             data-testid="path-input"
           />
-          {suggestions.data && matching(suggestions.data, editing).length > 0 && (
-            <ul className="absolute top-full left-0 z-20 mt-1 max-h-64 w-72 overflow-auto rounded-lg bg-kumo-elevated p-1 shadow-md ring ring-kumo-line">
+          {suggestions.data && (matching(suggestions.data, editing).length > 0 || creatable) && (
+            <ul className="absolute top-full left-0 z-20 mt-1 max-h-64 w-max min-w-80 max-w-[40rem] overflow-auto rounded-lg bg-kumo-elevated p-1 shadow-md ring ring-kumo-line">
+              {creatable && (
+                <li>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[0.9em] hover:bg-kumo-tint"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={create}
+                    data-testid="path-create-collection"
+                  >
+                    <FolderPlusIcon size={14} className="shrink-0 text-kumo-subtle" />
+                    <span className="min-w-0 flex-1 truncate">
+                      Create collection{' '}
+                      <span className="font-mono">
+                        {creatable.parent ? `${creatable.parent}/` : ''}
+                        {creatable.id}
+                      </span>
+                    </span>
+                    <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
+                      ⌘↵
+                    </kbd>
+                  </button>
+                </li>
+              )}
               {matching(suggestions.data, editing).map((id) => {
                 const parent = parentDocumentOf(editing)
                 const full = parent ? `${parent}/${id}` : id
@@ -180,6 +216,19 @@ function parentDocumentOf(typed: string): string {
   const segments = typed.replace(/^\/+/, '').split('/')
   segments.pop()
   return segments.length % 2 === 0 ? segments.join('/') : segments.slice(0, -1).join('/')
+}
+
+/** The collection the typed path would create, when its last segment exists nowhere yet. */
+function creatableCollection(
+  ids: string[] | undefined,
+  typed: string,
+): { parent: string; id: string } | undefined {
+  if (!ids) return undefined
+  const segments = typed.replace(/^\/+/, '').split('/')
+  if (segments.length % 2 === 0) return undefined
+  const id = segments.at(-1) ?? ''
+  if (validateId(id, 'collection') || ids.includes(id)) return undefined
+  return { parent: parentDocumentOf(typed), id }
 }
 
 function matching(ids: string[] | undefined, typed: string): string[] {

@@ -352,18 +352,30 @@ export function parseEditorText(
   }
 }
 
+export interface FromJsonOptions {
+  /** Promote ISO 8601 strings to timestamps, the way an import usually wants. */
+  timestamps?: boolean | undefined
+}
+
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/
+
 /** Plain JSON → typed values, inferring the Firestore type the way the SDK would. */
-export function fromJson(input: unknown): FsValue {
+export function fromJson(input: unknown, options: FromJsonOptions = {}): FsValue {
   if (input === null || input === undefined) return { type: 'null' }
-  if (typeof input === 'string') return { type: 'string', value: input }
+  if (typeof input === 'string') {
+    if (options.timestamps && ISO_TIMESTAMP.test(input) && !Number.isNaN(Date.parse(input)))
+      return { type: 'timestamp', value: new Date(input).toISOString() }
+    return { type: 'string', value: input }
+  }
   if (typeof input === 'number')
     return { type: 'number', value: input, integer: Number.isInteger(input) }
   if (typeof input === 'boolean') return { type: 'boolean', value: input }
-  if (Array.isArray(input)) return { type: 'array', items: input.map(fromJson) }
+  if (Array.isArray(input))
+    return { type: 'array', items: input.map((item) => fromJson(item, options)) }
   if (typeof input === 'object') {
     const fields: Record<string, FsValue> = {}
     for (const [key, value] of Object.entries(input as Record<string, unknown>))
-      fields[key] = fromJson(value)
+      fields[key] = fromJson(value, options)
     return { type: 'map', fields }
   }
   return { type: 'string', value: String(input) }

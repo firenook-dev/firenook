@@ -32,7 +32,7 @@ test('client routes deep-link through the engine and navigate in place', async (
 test('the command palette opens from the keyboard and jumps to a section', async ({ page }) => {
   await page.goto(`${origin()}/console`)
   await page.keyboard.press('ControlOrMeta+k')
-  const input = page.getByPlaceholder('Jump to a section…')
+  const input = page.getByTestId('palette-input')
   await expect(input).toBeVisible()
   await input.fill('tasks')
   await page.keyboard.press('Enter')

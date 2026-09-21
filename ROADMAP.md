@@ -533,8 +533,15 @@ served until every section has landed.
   deciding rule lines, inspector with typed editors and JSON, add and delete
   (recursive), copy as code (Web, Admin, Flutter, REST). Found and fixed on
   the way: the REST front ignored `startAt`/`endAt` cursors.
-- [ ] Firestore follow-ups: explain (composite-index warning), import/export
-  from the page, undo within the change-log window, rules editor.
+- [x] Creating and shaping: one `New` menu that follows the context (document,
+  root collection, subcollection under the open document, duplicate, JSON
+  import), typed fields from the first document, the inspector grows
+  subcollections in place, the path bar offers to create what does not
+  exist, column headers sort, filter and hide, scalar cells edit in place,
+  reference cells peek at their target beside the grid, and ⌘K carries the
+  page's collections, recent paths and actions.
+- [ ] Firestore follow-ups: explain (composite-index warning), export from
+  the page, undo within the change-log window, rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

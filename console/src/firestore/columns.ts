@@ -21,7 +21,7 @@ const WIDTHS: Record<FirestoreValueType, number> = {
   string: 200,
   number: 120,
   boolean: 96,
-  timestamp: 200,
+  timestamp: 236,
   reference: 220,
   geopoint: 160,
   map: 140,

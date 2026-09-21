@@ -7,16 +7,23 @@ import { FunnelIcon, PlayIcon, XIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { type WorkbenchQuery, isEmptyQuery, printLiteral, printQuery } from '../query'
+import { useQueryLine } from '../query-line-store'
 import { countQueryOptions } from '../queries'
 import { formatNumber } from '../value'
 import { CodePopover } from './code-popover'
 import { ViewAsPicker } from './view-as-picker'
 import { useWorkbench } from './workbench-context'
 
-export function QueryLine({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
+export function QueryLine() {
   const workbench = useWorkbench()
+  const openState = useQueryLine((state) => state.open)
+  const setOpen = useQueryLine((state) => state.setOpen)
+  const prefill = useQueryLine((state) => state.prefill)
+  // An active query always shows its line.
+  const open = openState || !isEmptyQuery(workbench.query)
   const [draft, setDraft] = useState(workbench.queryText)
   const [base, setBase] = useState(workbench.queryText)
+  const [seenPrefill, setSeenPrefill] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // A new query in the URL replaces the draft (derived during render).
@@ -24,9 +31,22 @@ export function QueryLine({ open, setOpen }: { open: boolean; setOpen: (open: bo
     setBase(workbench.queryText)
     setDraft(workbench.queryText)
   }
+  // Text composed elsewhere (a column header) replaces it too.
+  if (prefill && prefill.session !== seenPrefill) {
+    setSeenPrefill(prefill.session)
+    setDraft(prefill.text)
+  }
   useEffect(() => {
     if (open) inputRef.current?.focus()
   }, [open])
+  // ...with the caret where the composer wanted it.
+  useEffect(() => {
+    const input = inputRef.current
+    const current = useQueryLine.getState().prefill
+    if (!input || !current || current.session !== seenPrefill) return
+    input.focus()
+    input.setSelectionRange(current.caret, current.caret)
+  }, [seenPrefill])
 
   const count = useQuery({
     ...countQueryOptions(

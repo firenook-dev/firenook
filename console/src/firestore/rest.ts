@@ -174,6 +174,8 @@ export async function listMissingDocuments(
 export interface WriteOperation {
   /** Create or replace the document with exactly these fields. */
   set?: { path: string; fields: Record<string, RestValue> }
+  /** Create the document; the commit fails when one is already there. */
+  create?: { path: string; fields: Record<string, RestValue> }
   /** Update these fields (dotted paths in `mask`), leaving the rest. */
   update?: { path: string; fields: Record<string, RestValue>; mask: string[]; exists?: boolean }
   delete?: string
@@ -188,6 +190,11 @@ export async function commit(
   const writes = operations.map((operation) => {
     if (operation.set)
       return { update: { name: `${root}/${operation.set.path}`, fields: operation.set.fields } }
+    if (operation.create)
+      return {
+        update: { name: `${root}/${operation.create.path}`, fields: operation.create.fields },
+        currentDocument: { exists: false },
+      }
     if (operation.update)
       return {
         update: { name: `${root}/${operation.update.path}`, fields: operation.update.fields },

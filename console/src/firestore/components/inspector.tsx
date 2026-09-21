@@ -7,32 +7,40 @@ import {
   Button,
   InlineCopyText,
   Popover,
-  Tabs,
   Text,
+  Tooltip,
   useKumoToastManager,
 } from '@cloudflare/kumo'
-import { CodeIcon, FolderIcon, PlusIcon, TrashIcon, XIcon } from '@phosphor-icons/react'
+import {
+  ArrowSquareOutIcon,
+  CodeIcon,
+  CopyIcon,
+  FolderIcon,
+  PlusIcon,
+  TrashIcon,
+  XIcon,
+} from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { statusQuery } from '@/api/queries'
 import { useMemo, useState } from 'react'
+import { useCreateDialog } from '../create'
 import { type CodeTarget, EMPTY_QUERY, documentAsCode } from '../query'
 import { collectionsQuery, countQueryOptions, documentQuery } from '../queries'
 import { type WriteOperation, commit, documentRoot } from '../rest'
 import {
-  type FirestoreValueType,
   type FsDocument,
   type FsValue,
   type RestValue,
-  editorText,
   encodeValue,
-  fieldsToJson,
-  fromJson,
   parseEditorText,
   relativeTime,
 } from '../value'
 import { CodeBlock, firestoreOrigin } from './code-popover'
-import { type FieldDraft, FieldEditor, draftFor } from './field-editor'
+import { type FieldDraft, FieldsPanel, draftsFrom, toJsonValue } from './field-editor'
 import { useWorkbench } from './workbench-context'
+
+/** The inspector's width plus the gap before it, px; the grid uses it to know what it covers. */
+export const INSPECTOR_WIDTH = 420 + 12
 
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
@@ -57,6 +65,22 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
           <span title={`Updated ${document.data.updateTime}`}>
             <Badge variant="neutral">{relativeTime(document.data.updateTime)}</Badge>
           </span>
+        )}
+        {parentCollection(path) !== workbench.collectionPath && (
+          <Tooltip
+            content={`Open ${parentCollection(path)} in the grid`}
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={<ArrowSquareOutIcon />}
+                aria-label="Open this document's collection in the grid"
+                onClick={() => workbench.setPath(path)}
+                data-testid="open-in-grid"
+              />
+            }
+          />
         )}
         <Button
           variant="ghost"
@@ -90,7 +114,9 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
 }
 
 function MissingDocument({ path, subcollections }: { path: string; subcollections: string[] }) {
-  const workbench = useWorkbench()
+  const openCreate = useCreateDialog((state) => state.open)
+  const collection = parentCollection(path)
+  const id = path.split('/').at(-1) ?? path
   return (
     <div className="grid gap-3 p-4">
       <Text variant="heading" as="h3">
@@ -101,31 +127,60 @@ function MissingDocument({ path, subcollections }: { path: string; subcollection
           ? 'Nothing was ever written at this path, but it has subcollections; Firestore shows it in italics for the same reason.'
           : 'Nothing was ever written at this path.'}
       </Text>
-      {subcollections.length > 0 && <Subcollections parent={path} ids={subcollections} />}
-      <div>
+      <div className="flex flex-wrap gap-2">
         <Button
           variant="secondary"
           size="sm"
           icon={<PlusIcon />}
-          onClick={() => workbench.navigate({ doc: path })}
+          onClick={() => openCreate({ kind: 'document', collection, id })}
         >
-          Create it
+          Create the document
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<FolderIcon />}
+          onClick={() => openCreate({ kind: 'collection', parent: path })}
+        >
+          Add a subcollection
         </Button>
       </div>
+      <Subcollections parent={path} ids={subcollections} />
     </div>
   )
 }
 
 function Subcollections({ parent, ids }: { parent: string; ids: string[] }) {
   const workbench = useWorkbench()
-  if (ids.length === 0) return null
+  const openCreate = useCreateDialog((state) => state.open)
   return (
-    <div className="shrink-0 border-t border-kumo-line px-3 py-2">
-      <div className="mb-1">
+    <div className="shrink-0 border-t border-kumo-line px-3 py-2" data-testid="subcollections">
+      <div className="mb-1 flex items-center">
         <Text variant="secondary" size="sm" as="p">
-          Subcollections
+          Subcollections{ids.length > 0 ? ` · ${ids.length}` : ''}
         </Text>
+        <span className="ml-auto">
+          <Tooltip
+            content="Add a subcollection under this document"
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                shape="square"
+                icon={<PlusIcon />}
+                aria-label="Add a subcollection"
+                onClick={() => openCreate({ kind: 'collection', parent })}
+                data-testid="add-subcollection"
+              />
+            }
+          />
+        </span>
       </div>
+      {ids.length === 0 && (
+        <Text variant="secondary" size="sm">
+          None yet.
+        </Text>
+      )}
       <ul className="grid gap-0.5">
         {ids.map((id) => (
           <li key={id}>
@@ -155,12 +210,6 @@ function SubcollectionCount({ path }: { path: string }) {
   )
 }
 
-function draftsFrom(document: FsDocument): FieldDraft[] {
-  return Object.entries(document.fields).map(([name, value]) =>
-    draftFor(name, value.type, editorText(value)),
-  )
-}
-
 function DocumentEditor({
   document,
   onDelete,
@@ -172,11 +221,9 @@ function DocumentEditor({
   const queryClient = useQueryClient()
   const toasts = useKumoToastManager()
   const status = useQuery(statusQuery)
+  const openCreate = useCreateDialog((state) => state.open)
   const [drafts, setDrafts] = useState<FieldDraft[]>(() => draftsFrom(document))
   const [removed, setRemoved] = useState<string[]>([])
-  const [json, setJson] = useState(() => JSON.stringify(fieldsToJson(document.fields), null, 2))
-  const [jsonError, setJsonError] = useState<string | undefined>()
-  const [newField, setNewField] = useState('')
   const [codeTarget, setCodeTarget] = useState<CodeTarget>('web')
 
   const dirty = removed.length > 0 || drafts.some((draft) => draft.dirty)
@@ -219,44 +266,6 @@ function DocumentEditor({
     },
   })
 
-  const applyJson = () => {
-    try {
-      const parsed: unknown = JSON.parse(json)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-        throw new Error('The document must be a JSON object')
-      const value = fromJson(parsed)
-      if (value.type !== 'map') throw new Error('The document must be a JSON object')
-      const current = new Map(drafts.map((draft) => [draft.name, draft]))
-      const next: FieldDraft[] = Object.entries(value.fields).map(([name, item]) => {
-        const existing = current.get(name)
-        // A stored type survives when JSON cannot express it (timestamps,
-        // references) and the text is unchanged.
-        const type: FirestoreValueType =
-          existing && editorText(item) === existing.text ? existing.type : item.type
-        const text = editorText(item)
-        const changed = !existing || existing.text !== text || existing.type !== type
-        return { name, type, text, dirty: changed, added: !existing }
-      })
-      const gone = drafts
-        .filter((draft) => !(draft.name in value.fields))
-        .map((draft) => draft.name)
-      setDrafts(next)
-      setRemoved((previous) => [...new Set([...previous, ...gone])])
-      setJsonError(undefined)
-      workbench.setTab('fields')
-    } catch (error) {
-      setJsonError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  const addField = () => {
-    const name = newField.trim()
-    if (!name || drafts.some((draft) => draft.name === name)) return
-    setDrafts([...drafts, { ...draftFor(name, 'string', ''), dirty: true, added: true }])
-    setRemoved((previous) => previous.filter((item) => item !== name))
-    setNewField('')
-  }
-
   const forCode = useMemo(() => {
     const plain: Record<string, unknown> = {}
     const rest: Record<string, RestValue> = {}
@@ -271,91 +280,19 @@ function DocumentEditor({
 
   return (
     <>
-      <div className="shrink-0 border-b border-kumo-line px-3 py-2">
-        <Tabs
-          size="sm"
-          variant="segmented"
-          value={workbench.tab}
-          onValueChange={(value) => workbench.setTab(value as 'fields' | 'json')}
-          tabs={[
-            { value: 'fields', label: `Fields · ${drafts.length}` },
-            { value: 'json', label: 'JSON' },
-          ]}
-        />
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {workbench.tab === 'fields' ? (
-          <div className="grid gap-0.5 p-2">
-            {drafts.map((draft, index) => (
-              <FieldEditor
-                key={draft.name}
-                draft={draft}
-                onChange={(next) => setDrafts(drafts.map((item, i) => (i === index ? next : item)))}
-                onRemove={() => {
-                  setDrafts(drafts.filter((_, i) => i !== index))
-                  if (!draft.added) setRemoved((previous) => [...previous, draft.name])
-                }}
-                onOpenReference={(path) => workbench.setPath(path)}
-              />
-            ))}
-            {removed.length > 0 && (
-              <div className="px-2 py-1">
-                <Text variant="secondary" size="sm">
-                  Removing {removed.join(', ')} on save
-                </Text>
-              </div>
-            )}
-            <div className="flex items-center gap-1 px-2 pt-2">
-              <input
-                value={newField}
-                onChange={(event) => setNewField(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    addField()
-                  }
-                }}
-                placeholder="New field name"
-                spellCheck={false}
-                className="h-7 min-w-0 flex-1 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line outline-none placeholder:font-sans placeholder:text-kumo-inactive focus:ring-kumo-focus"
-                aria-label="New field name"
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<PlusIcon />}
-                onClick={addField}
-                disabled={!newField.trim()}
-              >
-                Add field
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="grid gap-2 p-3">
-            <textarea
-              value={json}
-              onChange={(event) => setJson(event.target.value)}
-              spellCheck={false}
-              className="min-h-64 w-full resize-y rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
-              aria-label="Document JSON"
-            />
-            {jsonError && (
-              <Text variant="error" size="sm">
-                {jsonError}
-              </Text>
-            )}
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={applyJson}>
-                Apply to fields
-              </Button>
-              <Text variant="secondary" size="sm">
-                Timestamps and references keep their type when unchanged.
-              </Text>
-            </div>
-          </div>
-        )}
-      </div>
+      <FieldsPanel
+        drafts={drafts}
+        onDraftsChange={(next) => {
+          setDrafts(next)
+          // A field brought back by JSON is no longer removed.
+          setRemoved((previous) => previous.filter((name) => !next.some((d) => d.name === name)))
+        }}
+        removed={removed}
+        onRemoved={(names) => setRemoved((previous) => [...new Set([...previous, ...names])])}
+        tab={workbench.tab}
+        onTabChange={workbench.setTab}
+        onOpenReference={(path) => workbench.selectDocument(path)}
+      />
       <footer className="flex h-12 shrink-0 items-center gap-2 border-t border-kumo-line px-3">
         <Button
           variant="primary"
@@ -399,6 +336,26 @@ function DocumentEditor({
               />
             </Popover.Content>
           </Popover>
+          <Tooltip
+            content="New document with these fields"
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={<CopyIcon />}
+                aria-label="Duplicate this document"
+                onClick={() =>
+                  openCreate({
+                    kind: 'document',
+                    collection: document.collection,
+                    template: document,
+                  })
+                }
+                data-testid="duplicate-document"
+              />
+            }
+          />
           <Button
             variant="secondary-destructive"
             size="sm"
@@ -418,13 +375,6 @@ function quote(name: string): string {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `\`${name.replace(/`/g, '\\`')}\``
 }
 
-function toJsonValue(value: FsValue): unknown {
-  switch (value.type) {
-    case 'timestamp':
-      return value.value
-    case 'reference':
-      return value.path
-    default:
-      return fieldsToJson({ v: value }).v
-  }
+function parentCollection(path: string): string {
+  return path.split('/').slice(0, -1).join('/')
 }

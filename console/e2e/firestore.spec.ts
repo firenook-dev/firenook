@@ -97,10 +97,11 @@ test('documents are added and deleted from the workbench', async ({ page }) => {
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   await page.keyboard.press('n')
   await page.getByTestId('new-document-id').fill('t_journey')
-  await page
-    .getByTestId('new-document-json')
-    .fill('{"name": "Journey", "seats": 2, "tags": ["e2e"]}')
-  await page.getByRole('dialog').getByRole('button', { name: 'Add document' }).click()
+  await page.getByRole('dialog').getByRole('tab', { name: 'JSON' }).click()
+  await page.getByTestId('document-json').fill('{"name": "Journey", "seats": 2, "tags": ["e2e"]}')
+  await page.getByRole('button', { name: 'Apply to fields' }).click()
+  await expect(page.getByRole('dialog')).toContainText('Fields · 3')
+  await page.getByTestId('create-submit').click()
   await expect(page).toHaveURL(/doc=teams%2Ft_journey/)
   await expect(page.getByTestId('inspector')).toContainText('teams/t_journey')
   await expect(page.getByTestId('grid-row').filter({ hasText: 't_journey' })).toBeVisible()
@@ -132,4 +133,124 @@ test('the path bar completes collections and shows missing ancestors', async ({ 
   await ghost.click()
   await expect(page.getByTestId('inspector')).toContainText('No document here')
   await expect(page.getByTestId('inspector')).toContainText('members')
+})
+
+test('the New menu creates a typed root collection, and a subcollection grows from the inspector', async ({
+  page,
+}) => {
+  await page.goto(`${origin()}/console/firestore?path=teams`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.getByTestId('new-menu').click()
+  await page.getByTestId('new-root-collection').click()
+  await page.getByTestId('new-collection-id').fill('invoices')
+  await page.getByTestId('new-document-id').fill('inv_001')
+  await page.getByTestId('new-field-name').fill('total')
+  await page.getByTestId('new-field-name').press('Enter')
+  await page.getByRole('button', { name: 'total type: string' }).click()
+  await page.getByRole('menuitemradio', { name: 'number' }).click()
+  await page.getByLabel('total value').fill('120')
+  await page.getByTestId('create-submit').click()
+  await expect(page).toHaveURL(/path=invoices&doc=invoices%2Finv_001/)
+  await expect(page.getByTestId('path-bar')).toContainText('invoices')
+  await expect(page.getByRole('table').locator('thead')).toContainText('number')
+  const stored = await page.request.get(`${documents()}/invoices/inv_001`, { headers: owner })
+  const body = (await stored.json()) as { fields: Record<string, unknown> }
+  expect(body.fields.total).toEqual({ integerValue: '120' })
+  expect(body.fields.createdAt).toHaveProperty('timestampValue')
+
+  // The inspector's subcollections section grows the tree from here.
+  await expect(page.getByTestId('subcollections')).toContainText('None yet')
+  await page.getByTestId('add-subcollection').click()
+  await page.getByTestId('new-collection-id').fill('lines')
+  await page.getByTestId('create-submit').click()
+  await expect(page).toHaveURL(/path=invoices%2Finv_001%2Flines/)
+  await expect(page.getByTestId('path-bar')).toContainText('lines')
+
+  // An explicit id that already exists is refused, not overwritten.
+  await page.goto(`${origin()}/console/firestore?path=invoices`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.keyboard.press('n')
+  await page.getByTestId('new-document-id').fill('inv_001')
+  await page.getByTestId('create-submit').click()
+  await expect(page.getByRole('dialog')).toContainText('invoices/inv_001 already exists')
+})
+
+test('column headers sort, filter and hide; a scalar cell edits in place', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=events`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.getByTestId('column-type').click()
+  await page.getByRole('menuitem', { name: 'Sort descending' }).click()
+  await expect(page).toHaveURL(/q=orderBy%28%22type%22%2C\+%22desc%22%29/)
+  await page.getByTestId('column-type').click()
+  await page.getByRole('menuitem', { name: 'Filter by type' }).click()
+  const input = page.getByTestId('query-input')
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('orderBy("type", "desc").where("type", "==", )')
+  await input.fill('where("type", "==", "payment.failed")')
+  await input.press('Enter')
+  await expect(page.getByText('type == "payment.failed"')).toBeVisible()
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  const before = await page.getByTestId('grid-row').count()
+  expect(before).toBeGreaterThan(0)
+
+  // Double-clicking the cell edits it where it is; the row leaves the filter.
+  const cell = page.getByTestId('grid-row').first().locator('td').nth(5)
+  const id = (await page.getByTestId('grid-row').first().locator('td').nth(1).innerText()).trim()
+  await cell.dblclick()
+  const editor = page.getByTestId('inline-cell-editor')
+  await expect(editor).toBeFocused()
+  await editor.fill('payment.retried')
+  await editor.press('Enter')
+  await expect(page.getByTestId('grid-row')).toHaveCount(before - 1)
+  const stored = await page.request.get(`${documents()}/events/${id}`, { headers: owner })
+  const body = (await stored.json()) as { fields: Record<string, unknown> }
+  expect(body.fields.type).toEqual({ stringValue: 'payment.retried' })
+
+  await page.getByTestId('column-payload').click()
+  await page.getByRole('menuitem', { name: 'Hide column' }).click()
+  await expect(page.getByRole('table').locator('thead')).not.toContainText('payload')
+  await page.getByTestId('show-all-columns').click()
+  await expect(page.getByRole('table').locator('thead')).toContainText('payload')
+})
+
+test('JSON imports as typed documents, and the palette jumps anywhere', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=teams`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.getByTestId('new-menu').click()
+  await page.getByTestId('new-import').click()
+  await page
+    .getByTestId('import-json')
+    .fill('{"t_import": {"name": "Imported", "since": "2026-09-20T09:00:00Z"}}')
+  await expect(page.getByTestId('import-preview')).toContainText('1 document')
+  await page.getByTestId('import-submit').click()
+  await expect(page.getByText('1 document imported')).toBeVisible()
+  const stored = await page.request.get(`${documents()}/teams/t_import`, { headers: owner })
+  const body = (await stored.json()) as { fields: Record<string, unknown> }
+  expect(body.fields.since).toEqual({ timestampValue: '2026-09-20T09:00:00Z' })
+
+  // A reference cell peeks at its target without leaving the grid.
+  await page.goto(`${origin()}/console/firestore?path=events`)
+  await page.getByTestId('grid-row').first().locator('td').nth(2).locator('button').click()
+  await expect(page).toHaveURL(/path=events&doc=users%2F/)
+  await expect(page.getByTestId('inspector')).toContainText('users/')
+  await page.getByTestId('open-in-grid').click()
+  await expect(page).toHaveURL(/path=users&doc=users%2F/)
+
+  // ⌘K: the page's collections and recents join the console palette.
+  await page.keyboard.press('ControlOrMeta+k')
+  const palette = page.getByTestId('palette-input')
+  await palette.fill('prod')
+  await page.getByRole('option', { name: /^products/ }).click()
+  await expect(page).toHaveURL(/path=products/)
+  await page.keyboard.press('ControlOrMeta+k')
+  await palette.fill('teams/t_real')
+  await page.getByRole('option', { name: /Open this document/ }).click()
+  await expect(page).toHaveURL(/path=teams&doc=teams%2Ft_real/)
+
+  // The path bar offers to create what does not exist yet.
+  await page.getByRole('button', { name: 'Edit the path' }).click()
+  await page.getByTestId('path-input').fill('teams/t_real/notes')
+  await page.getByTestId('path-create-collection').click()
+  await expect(page.getByRole('dialog')).toContainText('New subcollection under teams/t_real')
+  await expect(page.getByTestId('new-collection-id')).toHaveValue('notes')
 })

@@ -2,35 +2,60 @@
 // loaded, every header carries its type, every cell is exact. Rows are
 // virtualized; changed rows flash; the keyboard moves through them.
 
-import { Badge, Button, Empty, Table, Text, Tooltip } from '@cloudflare/kumo'
-import { DatabaseIcon, LockKeyIcon, PlusIcon, WarningIcon } from '@phosphor-icons/react'
+import { Button, Empty, Table, Text } from '@cloudflare/kumo'
+import {
+  ClockCounterClockwiseIcon,
+  DatabaseIcon,
+  FileIcon,
+  FolderPlusIcon,
+  LockKeyIcon,
+  PlusIcon,
+  WarningIcon,
+} from '@phosphor-icons/react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { TypeBadge } from '@/components/kit'
-import { type InferredColumn, inferColumns } from '../columns'
+import { inferColumns } from '../columns'
+import { useCreateDialog } from '../create'
 import { useLive } from '../live'
 import { EMPTY_QUERY } from '../query'
+import { useColumns } from '../query-line-store'
 import {
   collectionsQuery,
   countQueryOptions,
   missingDocumentsQuery,
   pageQueryOptions,
 } from '../queries'
+import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
 import { useSelection } from '../selection'
 import type { FsDocument } from '../value'
 import { IdCell, ValueCell } from './cells'
+import { HeaderMenu } from './header-menu'
+import { InlineCellEditor, inlineEditable } from './inline-cell-editor'
+import { INSPECTOR_WIDTH } from './inspector'
 import { useWorkbench } from './workbench-context'
 
 const ROW_HEIGHT = 36
 const ID_WIDTH = 220
+/** How long a click waits for its double, when opening at once would hide the cell. */
+const DOUBLE_CLICK_MS = 260
 /** Collections up to this size are walked for missing ancestor documents. */
 const MISSING_SCAN_LIMIT = 5_000
 
-export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
+export function Grid() {
   'use no memo' // the virtualizer hands out functions the compiler cannot memoize safely
   const workbench = useWorkbench()
+  const openCreate = useCreateDialog((state) => state.open)
+  const hidden = useColumns((state) => state.hidden)
+  const showAll = useColumns((state) => state.showAll)
+  // The cell being edited in place, if any.
+  const [editing, setEditing] = useState<{ path: string; field: string } | null>(null)
+  // A click that would open the inspector over the clicked cell waits for a
+  // possible second click, so a double-click can edit the cell instead.
+  const pendingOpen = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(pendingOpen.current), [])
   const page = useInfiniteQuery({
     ...pageQueryOptions(
       workbench.scope,
@@ -62,7 +87,12 @@ export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
     return [...loaded, ...missing.data]
   }, [page.data, missing.data, workbench.queryText, workbench.group])
 
-  const columns = useMemo(() => inferColumns(documents), [documents])
+  const allColumns = useMemo(() => inferColumns(documents), [documents])
+  const columns = useMemo(
+    () => allColumns.filter((column) => !hidden.has(column.field)),
+    [allColumns, hidden],
+  )
+  const hiddenCount = allColumns.length - columns.length
   const scrollRef = useRef<HTMLDivElement>(null)
   // oxlint-disable-next-line react/incompatible-library -- the directive above opts this component out of the compiler
   const virtualizer = useVirtualizer({
@@ -150,13 +180,30 @@ export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
           description={
             workbench.queryText
               ? 'Loosen a clause, or check the field names and types against the collection.'
-              : 'Write one from your app, or add a document here.'
+              : 'A collection exists once it has a document. Write one from your app, add one here, or import JSON.'
           }
           contents={
             workbench.queryText ? undefined : (
-              <Button variant="primary" icon={<PlusIcon />} onClick={onAddDocument}>
-                Add document
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="primary"
+                  icon={<PlusIcon />}
+                  onClick={() =>
+                    openCreate({ kind: 'document', collection: workbench.collectionPath })
+                  }
+                  data-testid="empty-add-document"
+                >
+                  Add document
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    openCreate({ kind: 'import', collection: workbench.collectionPath })
+                  }
+                >
+                  Import JSON
+                </Button>
+              </div>
             )
           }
         />
@@ -184,6 +231,8 @@ export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
             {columns.map((column) => (
               <col key={column.field} style={{ width: column.width }} />
             ))}
+            {/* Slack goes here, so columns keep their width when the inspector opens. */}
+            <col />
           </colgroup>
           <Table.Header variant="compact" className="sticky top-0 z-10 bg-kumo-elevated">
             <Table.Row>
@@ -197,19 +246,25 @@ export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
                 className="border-b border-kumo-line"
               />
               <Table.Head className="border-b border-kumo-line">
-                <HeaderLabel field={workbench.group ? 'path' : 'id'} type="doc" />
+                <span className="flex items-center gap-1.5">
+                  <span className="font-mono text-[12px] font-medium text-kumo-default">
+                    {workbench.group ? 'path' : 'id'}
+                  </span>
+                  <TypeBadge type="doc" />
+                </span>
               </Table.Head>
               {columns.map((column) => (
-                <Table.Head key={column.field} className="border-b border-kumo-line">
-                  <HeaderLabel field={column.field} type={column.type} column={column} />
+                <Table.Head key={column.field} className="border-b border-kumo-line !px-1">
+                  <HeaderMenu column={column} />
                 </Table.Head>
               ))}
+              <Table.Head className="border-b border-kumo-line" aria-hidden />
             </Table.Row>
           </Table.Header>
           <Table.Body className="[&_td]:h-9 [&_td]:py-0">
             {top > 0 && (
               <tr aria-hidden>
-                <td colSpan={columns.length + 2} style={{ height: top, padding: 0, border: 0 }} />
+                <td colSpan={columns.length + 3} style={{ height: top, padding: 0, border: 0 }} />
               </tr>
             )}
             {items.map((item) => {
@@ -229,9 +284,25 @@ export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
                       ? 'bg-kumo-tint [&>td:first-child]:shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
                       : ''
                   } ${flash ? (flash.kind === 'deleted' ? 'row-flash-deleted' : 'row-flash') : ''}`}
-                  onClick={() => {
+                  onClick={(event) => {
                     focus(document.path)
-                    workbench.selectDocument(document.path)
+                    const cell = (event.target as HTMLElement).closest('td')
+                    const grid = scrollRef.current
+                    const covered =
+                      !workbench.selectedDocument &&
+                      cell !== null &&
+                      grid !== null &&
+                      cell.getBoundingClientRect().right >
+                        grid.getBoundingClientRect().right - INSPECTOR_WIDTH
+                    if (!covered) {
+                      workbench.selectDocument(document.path)
+                      return
+                    }
+                    window.clearTimeout(pendingOpen.current)
+                    pendingOpen.current = window.setTimeout(
+                      () => workbench.selectDocument(document.path),
+                      DOUBLE_CLICK_MS,
+                    )
                   }}
                   data-testid="grid-row"
                 >
@@ -263,30 +334,49 @@ export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
                       column.mixed !== undefined &&
                       value !== undefined &&
                       value.type !== column.type
+                    const isEditing =
+                      editing?.path === document.path && editing.field === column.field
                     return (
                       <Table.Cell
                         key={column.field}
-                        className={odd ? 'bg-kumo-warning-tint' : undefined}
+                        className={`${odd ? 'bg-kumo-warning-tint' : ''} ${isEditing ? '!px-1' : ''}`}
                         title={
                           odd
                             ? `${value.type}, where most documents have ${column.type}`
                             : undefined
                         }
+                        onDoubleClick={(event) => {
+                          if (document.missing || !inlineEditable(value)) return
+                          event.preventDefault()
+                          event.stopPropagation()
+                          window.clearTimeout(pendingOpen.current)
+                          setEditing({ path: document.path, field: column.field })
+                        }}
                       >
-                        <ValueCell
-                          value={value}
-                          onOpenReference={(path) => workbench.setPath(path)}
-                        />
+                        {isEditing ? (
+                          <InlineCellEditor
+                            document={document}
+                            field={column.field}
+                            value={value}
+                            onDone={() => setEditing(null)}
+                          />
+                        ) : (
+                          <ValueCell
+                            value={value}
+                            onOpenReference={(path) => workbench.selectDocument(path)}
+                          />
+                        )}
                       </Table.Cell>
                     )
                   })}
+                  <Table.Cell aria-hidden />
                 </Table.Row>
               )
             })}
             {bottom > 0 && (
               <tr aria-hidden>
                 <td
-                  colSpan={columns.length + 2}
+                  colSpan={columns.length + 3}
                   style={{ height: bottom, padding: 0, border: 0 }}
                 />
               </tr>
@@ -300,42 +390,10 @@ export function Grid({ onAddDocument }: { onAddDocument: () => void }) {
         fetching={page.isFetchingNextPage}
         elapsedMs={page.data?.pages[0]?.elapsedMs ?? 0}
         onLoadMore={() => void page.fetchNextPage()}
+        hiddenCount={hiddenCount}
+        onShowAll={showAll}
       />
     </div>
-  )
-}
-
-function HeaderLabel({
-  field,
-  type,
-  column,
-}: {
-  field: string
-  type: Parameters<typeof TypeBadge>[0]['type']
-  column?: InferredColumn
-}) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span className="truncate font-mono text-[12px] font-medium text-kumo-default" title={field}>
-        {field}
-      </span>
-      {column?.mixed ? (
-        <Tooltip
-          content={`Mixed types: ${Object.entries(column.mixed)
-            .map(([name, count]) => `${name} ×${count}`)
-            .join(', ')}`}
-          render={
-            <span className="flex items-center">
-              <Badge variant="warning" appearance="dot" className="text-[10px]">
-                {type}
-              </Badge>
-            </span>
-          }
-        />
-      ) : (
-        <TypeBadge type={type} />
-      )}
-    </span>
   )
 }
 
@@ -345,12 +403,16 @@ function GridFooter({
   fetching,
   elapsedMs,
   onLoadMore,
+  hiddenCount,
+  onShowAll,
 }: {
   loaded: number
   hasMore: boolean
   fetching: boolean
   elapsedMs: number
   onLoadMore: () => void
+  hiddenCount: number
+  onShowAll: () => void
 }) {
   const checked = useSelection((state) => state.checked)
   return (
@@ -366,6 +428,11 @@ function GridFooter({
       {hasMore && (
         <Button variant="ghost" size="xs" onClick={onLoadMore} loading={fetching}>
           Load more
+        </Button>
+      )}
+      {hiddenCount > 0 && (
+        <Button variant="ghost" size="xs" onClick={onShowAll} data-testid="show-all-columns">
+          {hiddenCount} hidden column{hiddenCount === 1 ? '' : 's'} · show all
         </Button>
       )}
       {checked.size > 0 && (
@@ -421,20 +488,58 @@ function describe(workbench: ReturnType<typeof useWorkbench>): string {
 
 function RootLanding() {
   const workbench = useWorkbench()
+  const openCreate = useCreateDialog((state) => state.open)
+  const recents = useRecents((state) => state.items)
   const collections = useQuery(collectionsQuery(workbench.ownerScope, ''))
   return (
     <div className="grid gap-4 overflow-auto py-2">
       <Text variant="secondary">
         Root collections in <span className="font-mono text-[0.9em]">{workbench.database}</span>.
-        Pick one, or press{' '}
+        Pick one, press{' '}
         <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">/</kbd>{' '}
-        and type a path.
+        and type a path, or{' '}
+        <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">⌘K</kbd>{' '}
+        to search.
       </Text>
+      {recents.length > 0 && (
+        <div className="grid gap-1.5" data-testid="recents">
+          <span className="flex items-center gap-1.5 text-[12px] text-kumo-subtle">
+            <ClockCounterClockwiseIcon size={14} /> Recent
+          </span>
+          <ul className="flex flex-wrap gap-1.5">
+            {recents.map((recent) => (
+              <li key={recent.path}>
+                <button
+                  type="button"
+                  onClick={() => workbench.setPath(recent.path)}
+                  className="flex h-7 items-center gap-1.5 rounded-md bg-kumo-base px-2 font-mono text-[12px] ring ring-kumo-hairline hover:bg-kumo-tint"
+                >
+                  {recent.kind === 'document' ? (
+                    <FileIcon size={12} className="text-kumo-subtle" />
+                  ) : (
+                    <DatabaseIcon size={12} className="text-kumo-subtle" />
+                  )}
+                  {recent.path}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {collections.data?.length === 0 && (
         <Empty
           icon={<DatabaseIcon size={48} className="text-kumo-inactive" />}
           title="This database is empty"
-          description="Write a document from your app, import a dataset, or add one here."
+          description="Write a document from your app, import a dataset, or create the first collection here."
+          contents={
+            <Button
+              variant="primary"
+              icon={<FolderPlusIcon />}
+              onClick={() => openCreate({ kind: 'collection', parent: '' })}
+            >
+              New collection
+            </Button>
+          }
         />
       )}
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
@@ -451,6 +556,19 @@ function RootLanding() {
             </button>
           </li>
         ))}
+        {collections.data && collections.data.length > 0 && (
+          <li>
+            <button
+              type="button"
+              onClick={() => openCreate({ kind: 'collection', parent: '' })}
+              className="flex h-11 w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-3 text-left text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+              data-testid="root-new-collection"
+            >
+              <FolderPlusIcon size={16} />
+              <span className="text-[0.9em]">New collection</span>
+            </button>
+          </li>
+        )}
       </ul>
     </div>
   )
