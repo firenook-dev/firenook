@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { type WorkbenchQuery, isEmptyQuery, printLiteral, printQuery } from '../query'
 import { useQueryLine } from '../query-line-store'
 import { countQueryOptions } from '../queries'
+import { findNode, schemaQuery } from '../schema'
 import { formatNumber } from '../value'
 import { CodePopover } from './code-popover'
 import { ViewAsPicker } from './view-as-picker'
@@ -48,6 +49,9 @@ export function QueryLine() {
     input.setSelectionRange(current.caret, current.caret)
   }, [seenPrefill])
 
+  // An unfiltered pattern is counted by the schema tree, which already has
+  // the exact figure; counting the group index again would walk every entry.
+  const fromSchema = workbench.isPattern && !workbench.queryText
   const count = useQuery({
     ...countQueryOptions(
       workbench.scope,
@@ -55,8 +59,15 @@ export function QueryLine() {
       workbench.group,
       workbench.query,
     ),
-    enabled: Boolean(workbench.collectionPath) && !workbench.queryError,
+    enabled: Boolean(workbench.collectionPath) && !workbench.queryError && !fromSchema,
   })
+  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: fromSchema })
+  const known = fromSchema ? findNode(schema.data, workbench.collectionPath) : undefined
+  const total = known
+    ? { count: known.documents, elapsedMs: undefined }
+    : count.data
+      ? { count: count.data.count, elapsedMs: count.data.elapsedMs }
+      : undefined
 
   const run = () => workbench.setQueryText(draft)
   const remove = (patch: (query: WorkbenchQuery) => WorkbenchQuery) =>
@@ -129,18 +140,19 @@ export function QueryLine() {
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {workbench.collectionPath && !workbench.queryError && (
             <Text variant="secondary" size="sm" as="span" data-testid="match-count">
-              {count.data ? (
+              {total ? (
                 <>
                   <span className="font-mono text-[0.95em] text-kumo-default tabular-nums">
-                    {formatNumber(count.data.count)}
+                    {formatNumber(total.count)}
                   </span>{' '}
-                  {count.data.count === 1 ? 'document' : 'documents'}
+                  {total.count === 1 ? 'document' : 'documents'}
                   <span className="text-kumo-inactive">
-                    {' '}
-                    · count {Math.max(1, Math.round(count.data.elapsedMs))} ms
+                    {total.elapsedMs === undefined
+                      ? ' · from the schema'
+                      : ` · count ${Math.max(1, Math.round(total.elapsedMs))} ms`}
                   </span>
                 </>
-              ) : count.isError ? (
+              ) : count.isError || schema.isError ? (
                 <span className="text-kumo-danger">count unavailable</span>
               ) : (
                 '…'

@@ -70,7 +70,7 @@ export function SchemaRail() {
           />
         </span>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-1.5">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1.5">
         {schema.isPending && (
           <div className="animate-pulse px-1.5 py-2">
             <Text variant="secondary" size="sm">
@@ -93,7 +93,11 @@ export function SchemaRail() {
           </div>
         )}
         {schema.data && schema.data.collections.length > 0 && (
-          <ul role="tree" aria-label="Collections" className="grid gap-px">
+          <ul
+            role="tree"
+            aria-label="Collections"
+            className="grid grid-cols-[minmax(0,1fr)] gap-px"
+          >
             {schema.data.collections.map((root) => (
               <TreeNode
                 key={root.pattern}
@@ -140,7 +144,11 @@ function TreeNode({
       ? ''
       : ` in ${formatNumber(node.parents)} ${node.parents === 1 ? 'parent' : 'parents'}`
   return (
-    <li role="treeitem" aria-expanded={node.children.length > 0 ? expanded : undefined}>
+    <li
+      role="treeitem"
+      className="min-w-0"
+      aria-expanded={node.children.length > 0 ? expanded : undefined}
+    >
       <div
         ref={ref}
         className={`group flex h-7 items-center rounded-md pr-1.5 ${
@@ -203,7 +211,7 @@ function TreeNode({
         </button>
       </div>
       {expanded && (
-        <ul role="group" className="grid gap-px">
+        <ul role="group" className="grid grid-cols-[minmax(0,1fr)] gap-px">
           {node.children.map((child) => (
             <TreeNode
               key={child.pattern}

@@ -7,15 +7,21 @@ import { ArrowSquareInIcon } from '@phosphor-icons/react'
 import { type FsValue, displayValue, formatNumber, relativeTime } from '../value'
 
 export function IdCell({ id, missing }: { id: string; missing?: boolean | undefined }) {
+  // A whole path (a group's row) keeps its own id in view and lets the
+  // parent part give way; a bare id simply truncates.
+  const slash = id.lastIndexOf('/')
+  const parent = slash === -1 ? '' : id.slice(0, slash + 1)
+  const own = slash === -1 ? id : id.slice(slash + 1)
   return (
-    <span className={`flex min-w-0 items-center gap-1 ${missing ? 'italic text-kumo-subtle' : ''}`}>
-      <InlineCopyText
-        value={id}
-        variant="mono"
-        className="max-w-full truncate text-[0.9em]"
-        title={id}
-      >
-        {id}
+    <span
+      className={`flex min-w-0 items-center ${missing ? 'italic text-kumo-subtle' : ''}`}
+      title={id}
+    >
+      {parent && (
+        <span className="min-w-0 truncate font-mono text-[0.9em] text-kumo-subtle">{parent}</span>
+      )}
+      <InlineCopyText value={id} variant="mono" className="shrink-0 text-[0.9em]" title={id}>
+        {own}
       </InlineCopyText>
     </span>
   )
