@@ -1,19 +1,21 @@
-// The Firestore workbench: path line, grid, and the inspector when a
-// document is open. Query line and Requests drawer appear when summoned.
-// Everything on screen is live from the engine's change feed.
+// The Firestore workbench fills the content column edge to edge: the
+// schema panel in the shell's panel slot, a toolbar with the path and the
+// actions, the query line when summoned, then the grid with the inspector
+// beside it when a document is open. Everything on screen is live from the
+// engine's change feed.
 
-import { Badge, Button, Select, Text } from '@cloudflare/kumo'
+import { Button, Text } from '@cloudflare/kumo'
 import { TrashIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
 import { LiveDot } from '@/components/kit'
+import { Page } from '@/components/shell/page'
 import { useCreateDialog } from '../create'
 import { useLive, useLiveChanges } from '../live'
 import { useFirestorePalette } from '../palette'
 import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
-import { useSchemaRail } from '../schema'
 import { resetSelection, useSelection } from '../selection'
 import { CreateDialog } from './create-dialog'
 import { DeleteDialog } from './delete-dialog'
@@ -23,27 +25,22 @@ import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
 import { QueryLine } from './query-line'
 import { RequestsDrawer } from './requests-drawer'
-import { SchemaRail } from './schema-rail'
-import {
-  DEFAULT_DATABASE,
-  WorkbenchProvider,
-  useWorkbench,
-  useWorkbenchState,
-} from './workbench-context'
+import { SchemaPanel } from './schema-panel'
+import { WorkbenchProvider, useWorkbench, useWorkbenchState } from './workbench-context'
 
 export function FirestoreWorkbench() {
   const workbench = useWorkbenchState()
   const status = useQuery(statusQuery)
   if (!workbench) {
     return (
-      <div className="grid gap-1.5">
+      <Page className="grid gap-1.5">
         <Text variant="heading" size="lg" as="h1">
           Firestore
         </Text>
         <Text variant="secondary">
           {status.isError ? 'The engine is unreachable.' : 'Connecting to the engine…'}
         </Text>
-      </div>
+      </Page>
     )
   }
   return (
@@ -56,7 +53,6 @@ export function FirestoreWorkbench() {
 function WorkbenchBody() {
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
-  const status = useQuery(statusQuery)
   useLiveChanges(queryClient, workbench.database)
   useFirestorePalette()
   const live = useLive((state) => state.status)
@@ -65,8 +61,6 @@ function WorkbenchBody() {
   const clearSelection = useSelection((state) => state.clear)
   const openQuery = useQueryLine((state) => state.setOpen)
   const openCreate = useCreateDialog((state) => state.open)
-  const railOpen = useSchemaRail((state) => state.open)
-  const toggleRail = useSchemaRail((state) => state.toggle)
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [deleting, setDeleting] = useState<string[]>([])
 
@@ -114,72 +108,44 @@ function WorkbenchBody() {
       } else if (event.key === 'n' && workbench.collectionPath && !workbench.isPattern) {
         event.preventDefault()
         openCreate({ kind: 'document', collection: workbench.collectionPath })
-      } else if (event.key === 't') {
-        event.preventDefault()
-        toggleRail()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench, checked, clearSelection, openQuery, openCreate, toggleRail])
-
-  const firestoreRunning = status.data?.services.some((service) => service.name === 'firestore')
-  const databases = {
-    [DEFAULT_DATABASE]: DEFAULT_DATABASE,
-    ...(workbench.database !== DEFAULT_DATABASE
-      ? { [workbench.database]: workbench.database }
-      : {}),
-  }
+  }, [workbench, checked, clearSelection, openQuery, openCreate])
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="firestore-workbench">
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Text variant="heading" size="lg" as="h1">
-            Firestore
-          </Text>
-          {status.data &&
-            (firestoreRunning ? (
-              <Badge variant="success" appearance="dot">
-                running
-              </Badge>
-            ) : (
-              <Badge variant="neutral" appearance="dot">
-                not running
-              </Badge>
-            ))}
-        </div>
-        <Select
-          size="sm"
-          value={workbench.database}
-          onValueChange={(value) => workbench.setDatabase(String(value))}
-          items={databases}
-          aria-label="Database"
-          className="w-40"
+    <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">
+      <h1 className="sr-only">Firestore</h1>
+      <SchemaPanel />
+      <div
+        className="flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3"
+        data-testid="toolbar"
+      >
+        <PathBar />
+        <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+        <LiveDot
+          state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
+          changes={commits}
         />
-        <div className="ml-auto flex items-center gap-2">
-          <LiveDot
-            state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
-            changes={commits}
-          />
-          {checked.size > 0 && (
-            <Button
-              variant="secondary-destructive"
-              size="sm"
-              icon={<TrashIcon />}
-              onClick={() => setDeleting([...checked])}
-              data-testid="delete-selected"
-            >
-              Delete {checked.size}
-            </Button>
-          )}
+        {checked.size > 0 && (
+          <Button
+            variant="secondary-destructive"
+            size="sm"
+            icon={<TrashIcon />}
+            onClick={() => setDeleting([...checked])}
+            data-testid="delete-selected"
+            className="ml-1"
+          >
+            Delete {checked.size}
+          </Button>
+        )}
+        <span className="ml-1">
           <NewMenu />
-        </div>
+        </span>
       </div>
-      <PathBar />
       {workbench.collectionPath && <QueryLine />}
-      <div className="flex min-h-0 flex-1 gap-3">
-        {railOpen && <SchemaRail />}
+      <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Grid />
         </div>

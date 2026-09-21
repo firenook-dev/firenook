@@ -44,12 +44,16 @@ export const usePaletteProviders = create<PaletteState>((set) => ({
     }),
 }))
 
-/** Case-insensitive match on the title and keywords; everything matches an empty query. */
+/**
+ * Case-insensitive match: every word of the query appears somewhere in the
+ * title, the breadcrumbs or the keywords, so `sidebar expanded` finds
+ * "Sidebar: expanded". Everything matches an empty query.
+ */
 export function matchesQuery(item: PaletteItem, query: string): boolean {
-  const needle = query.trim().toLowerCase()
-  return (
-    needle === '' ||
-    item.title.toLowerCase().includes(needle) ||
-    (item.keywords ?? '').toLowerCase().includes(needle)
-  )
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return true
+  const haystack = [item.title, ...(item.breadcrumbs ?? []), item.keywords ?? '']
+    .join(' ')
+    .toLowerCase()
+  return words.every((word) => haystack.includes(word))
 }

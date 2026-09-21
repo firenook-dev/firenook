@@ -180,7 +180,7 @@ export function Grid() {
   if (page.isError) return <QueryFailure error={page.error} />
   if (page.isPending)
     return (
-      <div className="flex h-40 items-center justify-center rounded-lg bg-kumo-base ring ring-kumo-line">
+      <div className="flex h-40 items-center justify-center">
         <Text variant="secondary">Loading {workbench.collectionPath}…</Text>
       </div>
     )
@@ -245,7 +245,7 @@ export function Grid() {
   const span = columns.length + 3 + (subcolumn ? 1 : 0)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-lg bg-kumo-base ring ring-kumo-line">
+    <div className="flex min-h-0 flex-1 flex-col bg-kumo-base">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto" data-testid="grid-scroll">
         <Table
           layout="fixed"
@@ -540,7 +540,7 @@ function RootLanding() {
   const shapes = new Map((schema.data?.collections ?? []).map((node) => [node.id, node]))
   const anyNested = [...shapes.values()].some((node) => node.children.length > 0)
   return (
-    <div className="grid gap-4 overflow-auto py-2">
+    <div className="grid content-start gap-4 overflow-auto px-5 py-4">
       <Text variant="secondary">
         Root collections in <span className="font-mono text-[0.9em]">{workbench.database}</span>.
         Pick one, press{' '}

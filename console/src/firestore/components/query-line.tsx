@@ -75,7 +75,10 @@ export function QueryLine() {
 
   const active = !isEmptyQuery(workbench.query)
   return (
-    <div className="grid gap-2" data-testid="query-line">
+    <div
+      className="grid shrink-0 gap-1.5 border-b border-kumo-line bg-kumo-base px-3 py-1.5"
+      data-testid="query-line"
+    >
       <div className="flex min-h-8 items-center gap-2">
         {open ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">

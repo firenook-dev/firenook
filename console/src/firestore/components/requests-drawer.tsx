@@ -31,7 +31,7 @@ export function RequestsDrawer({
 
   return (
     <section
-      className={`flex shrink-0 flex-col rounded-lg bg-kumo-base ring ring-kumo-line ${open ? 'h-72' : 'h-9'}`}
+      className={`flex shrink-0 flex-col border-t border-kumo-line bg-kumo-base ${open ? 'h-72' : 'h-9'}`}
       data-testid="requests-drawer"
     >
       <button

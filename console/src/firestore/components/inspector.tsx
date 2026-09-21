@@ -49,7 +49,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
 
   return (
     <aside
-      className="flex min-h-0 w-[420px] shrink-0 flex-col rounded-lg bg-kumo-base ring ring-kumo-line"
+      className="flex min-h-0 w-[420px] shrink-0 flex-col border-l border-kumo-line bg-kumo-base"
       data-testid="inspector"
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-1 pl-3">

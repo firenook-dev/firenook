@@ -545,13 +545,20 @@ served until every section has landed.
   (collection patterns such as `users/*/orders/*/items` with document and
   parent counts, one key-only walk on first use, exact from then on through
   the commit observer) and serves it at `/console/api/v1/firestore/schema`.
-  The console draws it as a rail beside the grid: a root opens as a grid, a
-  nested pattern opens as the collection group it names, the row for the
-  current shape is marked and the footer says how many parents carry it.
-  The grid names each row's subcollections in their own column, the path
-  bar shows a pattern's `*` and what lives below the current collection,
-  the root landing describes each collection's shape, and ⌘K finds any
-  pattern by name.
+  The console draws it as a tree: a root opens as a grid, a nested pattern
+  opens as the collection group it names, the row for the current shape is
+  marked and the foot says how many parents carry it. The grid names each
+  row's subcollections in their own column, the path bar shows a pattern's
+  `*`, the root landing describes each collection's shape, and ⌘K finds
+  any pattern by name.
+- [x] The shell's layout: the navigation shows expanded, collapsed to icons
+  or collapsed until hovered (chosen at its foot, flipped with `[`, kept
+  per browser), and every section can fill a panel column beside its
+  content. Firestore fills it with the database, a filter and the schema
+  tree, open only along the current path, so a database with dozens of
+  roots and hundreds of thousands of documents reads at a glance; the
+  workbench runs edge to edge under its own toolbar, and `t` hides the
+  panel.
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
   the page, undo within the change-log window, rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,

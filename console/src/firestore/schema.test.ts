@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   type SchemaSnapshot,
+  ancestorsOf,
   childrenOf,
   describeChildren,
+  filterSchema,
   findNode,
   flattenSchema,
+  isExpanded,
   isPattern,
   patternOf,
   siblingsById,
+  useSchemaTree,
 } from './schema'
 
 const items = {
@@ -65,6 +69,11 @@ describe('patterns', () => {
     expect(isPattern('users/u1/orders')).toBe(false)
     expect(isPattern('')).toBe(false)
   })
+
+  it('lists the ancestors of a pattern, nearest last', () => {
+    expect(ancestorsOf('users/*/orders/*/items')).toEqual(['users', 'users/*/orders'])
+    expect(ancestorsOf('users')).toEqual([])
+  })
 })
 
 describe('the tree', () => {
@@ -107,5 +116,55 @@ describe('the tree', () => {
         })),
       }),
     ).toBe('a · b · c · d · +1')
+  })
+})
+
+describe('the panel', () => {
+  it('keeps the matching ids and the ancestors that lead to them', () => {
+    expect(filterSchema(schema, '')).toBeUndefined()
+    expect(filterSchema(schema, '   ')).toBeUndefined()
+    expect([...(filterSchema(schema, 'ITEM') ?? [])]).toEqual([
+      'users/*/orders/*/items',
+      'users',
+      'users/*/orders',
+    ])
+    expect([...(filterSchema(schema, 'orders') ?? [])].toSorted()).toEqual([
+      'shops',
+      'shops/*/orders',
+      'users',
+      'users/*/orders',
+    ])
+    expect(filterSchema(schema, 'nothing')?.size).toBe(0)
+  })
+
+  it('opens the path to where you are, everything while filtering, and what was toggled', () => {
+    const closed = { expanded: new Set<string>(), collapsed: new Set<string>() }
+    expect(isExpanded(closed, 'users', 'users', false)).toBe(true)
+    expect(isExpanded(closed, 'users', 'users/*/orders', false)).toBe(true)
+    expect(isExpanded(closed, 'users/*/orders', 'users', false)).toBe(false)
+    expect(isExpanded(closed, 'shops', 'users', false)).toBe(false)
+    expect(isExpanded(closed, 'shops', 'users', true)).toBe(true)
+    const toggled = { expanded: new Set(['shops']), collapsed: new Set(['users']) }
+    expect(isExpanded(toggled, 'shops', 'users', false)).toBe(true)
+    expect(isExpanded(toggled, 'users', 'users', false)).toBe(false)
+  })
+
+  it('remembers toggles until the path leads through a collapsed node again', () => {
+    const store = useSchemaTree.getState()
+    store.toggleNode('users', true)
+    expect(useSchemaTree.getState().collapsed.has('users')).toBe(true)
+    store.toggleNode('shops', false)
+    expect(useSchemaTree.getState().expanded.has('shops')).toBe(true)
+    store.toggleNode('shops', true)
+    expect(useSchemaTree.getState().expanded.has('shops')).toBe(false)
+    expect(useSchemaTree.getState().collapsed.has('shops')).toBe(true)
+    // Landing at users/*/orders/*/items uncollapses users on the way there.
+    store.reveal('users/*/orders/*/items')
+    expect(useSchemaTree.getState().collapsed.has('users')).toBe(false)
+    expect(useSchemaTree.getState().collapsed.has('shops')).toBe(true)
+    // Nothing to reveal leaves the state untouched.
+    const before = useSchemaTree.getState()
+    store.reveal('events')
+    expect(useSchemaTree.getState()).toBe(before)
   })
 })

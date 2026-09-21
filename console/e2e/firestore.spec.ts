@@ -168,31 +168,46 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   }
   const users = tree.collections.find((node) => node.id === 'users')
   expect(users).toBeDefined()
-  const orders = users?.children.find((node) => node.id === 'orders')
-  expect(orders?.pattern).toBe('users/*/orders')
-  expect(orders?.parents).toBeGreaterThan(0)
-  expect(orders?.children.map((node) => node.pattern)).toEqual(['users/*/orders/*/items'])
+  const ordersNode = users?.children.find((node) => node.id === 'orders')
+  expect(ordersNode?.pattern).toBe('users/*/orders')
+  expect(ordersNode?.parents).toBeGreaterThan(0)
+  expect(ordersNode?.children.map((node) => node.pattern)).toEqual(['users/*/orders/*/items'])
 
   await page.goto(`${origin()}/console/firestore?path=users`)
-  const rail = page.getByTestId('schema-rail')
-  await expect(rail).toBeVisible()
+  const panel = page.getByTestId('section-panel')
+  await expect(panel).toBeVisible()
   await expect(
-    rail.getByTestId('schema-node').filter({ hasText: 'users' }).first(),
+    panel.getByTestId('schema-node').filter({ hasText: 'users' }).first(),
   ).toHaveAttribute('aria-current', 'location')
-  // The tree is expanded: the three levels under users are all on screen.
-  const items = rail.locator('[data-pattern="users/*/orders/*/items"]')
-  await expect(items).toBeVisible()
-  await expect(rail.getByTestId('schema-summary')).toContainText('users')
-  // The path bar says what lives below users, from the same tree.
-  await expect(page.getByTestId('path-below')).toContainText('orders')
+  // Only the path to where you are is open: orders shows under users, but
+  // what lies under orders waits behind its caret.
+  const orders = panel.locator('[data-pattern="users/*/orders"]')
+  const items = panel.locator('[data-pattern="users/*/orders/*/items"]')
+  await expect(orders).toBeVisible()
+  await expect(items).toHaveCount(0)
+  await expect(panel.locator('[data-pattern="products/*/reviews"]')).toHaveCount(0)
+  await expect(panel.getByTestId('schema-summary')).toContainText('users')
 
-  // A nested pattern opens as the collection group, with the full path per row.
-  await rail.locator('[data-pattern="users/*/orders"]').getByTestId('schema-node-open').click()
+  // The filter narrows the tree to matching ids and the way to them.
+  await panel.getByTestId('schema-filter').fill('item')
+  await expect(items).toBeVisible()
+  await expect(panel.locator('[data-pattern="users/*/sessions"]')).toHaveCount(0)
+  await expect(panel.locator('[data-pattern="products"]')).toHaveCount(0)
+  await panel.getByTestId('schema-filter').press('Escape')
+  await expect(panel.getByTestId('schema-filter')).toHaveValue('')
+  await expect(items).toHaveCount(0)
+
+  // A nested pattern opens as the collection group, with the full path per
+  // row, and what lies under it opens in the tree.
+  await orders.getByTestId('schema-node-open').click()
   await expect(page).toHaveURL(/path=users%2F\*%2Forders&group=true/)
   await expect(page.getByTestId('path-bar')).toContainText('*')
   await expect(page.getByTestId('grid-row').first()).toContainText(/users\/[^/]+\/orders\//)
-  await expect(rail.getByTestId('schema-summary')).toContainText(`${orders?.documents} documents`)
-  await expect(rail.getByTestId('schema-summary')).toContainText(`in ${orders?.parents} of`)
+  await expect(items).toBeVisible()
+  await expect(panel.getByTestId('schema-summary')).toContainText(
+    `${ordersNode?.documents} documents`,
+  )
+  await expect(panel.getByTestId('schema-summary')).toContainText(`in ${ordersNode?.parents} of`)
   // Nothing can be created at a pattern.
   await page.getByTestId('new-menu').click()
   await expect(page.getByTestId('new-root-collection')).toBeVisible()
@@ -200,13 +215,14 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await page.keyboard.press('Escape')
   await expect(page.getByRole('menu')).toHaveCount(0)
 
-  // Collapsing a node hides its children; the rail hides with t and comes back.
-  await rail.locator('[data-pattern="users/*/orders"]').getByTestId('schema-node-toggle').click()
+  // Collapsing a node hides its children; the panel hides with t and comes
+  // back from the bar above it.
+  await orders.getByTestId('schema-node-toggle').click()
   await expect(items).toHaveCount(0)
   await page.keyboard.press('t')
-  await expect(rail).toHaveCount(0)
-  await page.getByTestId('schema-rail-toggle').click()
-  await expect(page.getByTestId('schema-rail')).toBeVisible()
+  await expect(panel).toBeHidden()
+  await page.getByTestId('panel-toggle').click()
+  await expect(panel).toBeVisible()
 
   // The tree follows the data: a new subcollection appears with its count
   // and goes when its last document goes.
@@ -216,7 +232,7 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
     data: { writes: [{ update: { name: note, fields: { text: { stringValue: 'hello' } } } }] },
   })
   expect(created.ok()).toBeTruthy()
-  const notes = page.getByTestId('schema-rail').locator('[data-pattern="users/*/notes"]')
+  const notes = panel.locator('[data-pattern="users/*/notes"]')
   await expect(notes).toContainText('1')
   const deleted = await page.request.post(`${documents()}:commit`, {
     headers: owner,

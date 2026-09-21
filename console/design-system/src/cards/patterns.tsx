@@ -15,10 +15,10 @@ import {
   TooltipProvider,
 } from '@cloudflare/kumo'
 import {
-  ArrowElbowDownRightIcon,
   ArrowSquareOutIcon,
   BracketsCurlyIcon,
   CaretRightIcon,
+  CheckIcon,
   CommandIcon,
   CopyIcon,
   DatabaseIcon,
@@ -29,12 +29,14 @@ import {
   GoogleLogoIcon,
   KeyIcon,
   LockSimpleIcon,
+  MagnifyingGlassIcon,
   PasswordIcon,
   PhoneIcon,
   PlusIcon,
   ShieldCheckIcon,
+  SidebarSimpleIcon,
+  SquareHalfIcon,
   TrashIcon,
-  TreeStructureIcon,
   XIcon,
 } from '@phosphor-icons/react'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
@@ -55,50 +57,139 @@ function LiveDot({ changes }: { changes?: number }) {
   )
 }
 
+const SHELL_SHAPE = [
+  { id: 'events', depth: 0, count: '40' },
+  { id: 'products', depth: 0, count: '60', below: 1 },
+  { id: 'teams', depth: 0, count: '1', below: 1 },
+  { id: 'users', depth: 0, count: '211,260', open: true },
+  { id: 'orders', depth: 1, count: '12,340', current: true, open: true },
+  { id: 'items', depth: 2, count: '30,100' },
+  { id: 'sessions', depth: 1, count: '6,020' },
+] as const
+
+function SchemaTreeRows({ rows }: { rows: typeof SHELL_SHAPE }) {
+  return (
+    <ul className="grid gap-px p-1.5">
+      {rows.map((node) => (
+        <li key={`${node.depth}-${node.id}`}>
+          <div
+            className={`flex h-7 items-center rounded-md pr-1.5 ${
+              'current' in node && node.current
+                ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
+                : ''
+            }`}
+          >
+            {Array.from({ length: node.depth }, (_, level) => (
+              <span key={level} className="relative h-full w-[14px] shrink-0">
+                <span className="absolute top-0 bottom-0 left-[9px] border-l border-kumo-hairline" />
+              </span>
+            ))}
+            <span className="flex size-5 shrink-0 items-center justify-center text-kumo-subtle">
+              {'open' in node && node.open ? (
+                <CaretRightIcon size={11} weight="bold" className="rotate-90" />
+              ) : 'below' in node ? (
+                <CaretRightIcon size={11} weight="bold" />
+              ) : null}
+            </span>
+            {node.depth === 0 ? (
+              <DatabaseIcon size={13} className="shrink-0 text-kumo-subtle" />
+            ) : (
+              <FolderIcon size={13} className="shrink-0 text-kumo-subtle" />
+            )}
+            <span className="ml-1.5 min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-default">
+              {node.id}
+            </span>
+            {'below' in node && (
+              <span className="mr-1.5 font-mono text-[10px] text-kumo-inactive tabular-nums">
+                +{node.below}
+              </span>
+            )}
+            <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+              {node.count}
+            </span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function PanelHead() {
+  return (
+    <div className="grid shrink-0 gap-1.5 border-b border-kumo-line p-2">
+      <Select
+        size="sm"
+        value="(default)"
+        items={{ '(default)': '(default)' }}
+        className="w-full font-mono"
+        aria-label="Database"
+      />
+      <div className="flex h-7 items-center gap-1.5 rounded-md bg-kumo-control px-2 text-xs text-kumo-inactive ring ring-kumo-line">
+        <MagnifyingGlassIcon size={14} />
+        Filter collections
+      </div>
+    </div>
+  )
+}
+
 function Shell() {
   return (
     <TooltipProvider>
-      <div className="flex h-[720px] w-full overflow-hidden rounded-lg ring ring-kumo-hairline">
-        <Sidebar.Provider contained defaultOpen className="h-full min-h-0!">
-          <Sidebar>
-            <Sidebar.Header>
-              <div className="flex items-center gap-2 px-2 py-1">
-                <span className="flex size-6 items-center justify-center rounded-md bg-kumo-brand text-white">
-                  <GaugeIcon size={14} weight="bold" />
-                </span>
-                <Text bold>Firenook</Text>
-                <Text variant="secondary">console</Text>
-              </div>
-            </Sidebar.Header>
-            <Sidebar.Content>
-              <Sidebar.Group>
-                <Sidebar.Menu>
-                  <Sidebar.MenuButton icon={GaugeIcon}>Overview</Sidebar.MenuButton>
-                </Sidebar.Menu>
-              </Sidebar.Group>
-              {AREAS.map((area) => (
-                <Sidebar.Group key={area}>
-                  <Sidebar.GroupLabel>{AREA_LABELS[area]}</Sidebar.GroupLabel>
+      <div className="grid gap-4">
+        <div className="flex h-[640px] w-full overflow-hidden rounded-lg ring ring-kumo-hairline">
+          <Sidebar.Provider contained defaultOpen className="h-full w-auto shrink-0 min-h-0!">
+            <Sidebar>
+              <Sidebar.Header>
+                <div className="flex items-center gap-2 px-2 py-1">
+                  <span className="flex size-6 items-center justify-center rounded-md bg-kumo-brand text-white">
+                    <GaugeIcon size={14} weight="bold" />
+                  </span>
+                  <Text bold>Firenook</Text>
+                  <Text variant="secondary">console</Text>
+                </div>
+              </Sidebar.Header>
+              <Sidebar.Content>
+                <Sidebar.Group>
                   <Sidebar.Menu>
-                    {SECTIONS.filter((section) => section.area === area).map((section) => (
-                      <Sidebar.MenuButton
-                        key={section.to}
-                        icon={section.icon}
-                        active={section.to === '/firestore'}
-                      >
-                        {section.label}
-                      </Sidebar.MenuButton>
-                    ))}
+                    <Sidebar.MenuButton icon={GaugeIcon}>Overview</Sidebar.MenuButton>
                   </Sidebar.Menu>
                 </Sidebar.Group>
-              ))}
-            </Sidebar.Content>
-            <Sidebar.Footer>
-              <Sidebar.Trigger />
-            </Sidebar.Footer>
-          </Sidebar>
+                {AREAS.map((area) => (
+                  <Sidebar.Group key={area}>
+                    <Sidebar.GroupLabel>{AREA_LABELS[area]}</Sidebar.GroupLabel>
+                    <Sidebar.Menu>
+                      {SECTIONS.filter((section) => section.area === area).map((section) => (
+                        <Sidebar.MenuButton
+                          key={section.to}
+                          icon={section.icon}
+                          active={section.to === '/firestore'}
+                        >
+                          {section.label}
+                        </Sidebar.MenuButton>
+                      ))}
+                    </Sidebar.Menu>
+                  </Sidebar.Group>
+                ))}
+              </Sidebar.Content>
+              <Sidebar.Footer>
+                <span className="flex h-8.5 min-w-0 flex-1 items-center gap-3 rounded-lg px-[7px] text-sm text-kumo-subtle">
+                  <SidebarSimpleIcon size={16} className="shrink-0" />
+                  <span className="truncate">Sidebar</span>
+                  <span className="ml-auto text-[12px] text-kumo-inactive">Expanded</span>
+                </span>
+              </Sidebar.Footer>
+            </Sidebar>
+          </Sidebar.Provider>
           <div className="flex min-w-0 flex-1 flex-col bg-kumo-canvas">
-            <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base px-4">
+            <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-4 pl-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={<SquareHalfIcon />}
+                aria-label="Hide the schema panel"
+                className="text-kumo-default"
+              />
               <div className="flex min-w-0 items-center gap-2">
                 <Text variant="secondary" size="sm">
                   Project
@@ -121,21 +212,91 @@ function Shell() {
                 </Button>
               </div>
             </header>
-            <main className="min-h-0 flex-1 overflow-auto px-6 py-5">
-              <div className="grid gap-1.5">
-                <div className="flex items-center gap-2">
-                  <Text variant="heading" size="lg" as="h1">
-                    Firestore
-                  </Text>
-                  <Badge variant="success" appearance="dot">
-                    running
-                  </Badge>
+            <div className="flex min-h-0 flex-1">
+              <aside className="flex w-[264px] shrink-0 flex-col border-r border-kumo-line bg-kumo-base">
+                <PanelHead />
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <SchemaTreeRows rows={SHELL_SHAPE} />
                 </div>
-                <Text variant="secondary">Content area. Sections render here at full width.</Text>
-              </div>
-            </main>
+                <div className="grid shrink-0 gap-0.5 border-t border-kumo-line px-3 py-1.5">
+                  <span className="font-mono text-[11px] text-kumo-subtle">users/*/orders</span>
+                  <span className="text-[12px] text-kumo-default tabular-nums">
+                    12,340 documents{' '}
+                    <span className="text-kumo-subtle">
+                      in 4,100 of 211,260 <span className="font-mono text-[11px]">users</span>
+                    </span>
+                  </span>
+                </div>
+              </aside>
+              <main className="flex min-w-0 flex-1 flex-col">
+                <div className="flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3">
+                  <PathSegment label="(default)" />
+                  <span className="px-0.5 text-kumo-inactive">/</span>
+                  <PathSegment label="users" count="211,260" />
+                  <span className="px-0.5 text-kumo-inactive">/</span>
+                  <span className="px-1.5 font-mono text-[13px] text-kumo-inactive">*</span>
+                  <span className="px-0.5 text-kumo-inactive">/</span>
+                  <PathSegment label="orders" count="12,340" current />
+                  <span className="ml-auto flex items-center gap-1">
+                    <Button variant="primary" size="sm">
+                      group
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      shape="square"
+                      icon={<CopyIcon />}
+                      aria-label="Copy the path"
+                    />
+                    <span className="mx-1.5 h-5 w-px bg-kumo-line" />
+                    <LiveDot />
+                    <Button variant="primary" size="sm" icon={<PlusIcon />} className="ml-1">
+                      New
+                    </Button>
+                  </span>
+                </div>
+                <div className="flex flex-1 items-center justify-center bg-kumo-base">
+                  <Text variant="secondary">
+                    The grid, edge to edge; the inspector opens beside it.
+                  </Text>
+                </div>
+              </main>
+            </div>
           </div>
-        </Sidebar.Provider>
+        </div>
+        <div className="grid grid-cols-[minmax(0,1fr)_224px] gap-4">
+          <Text variant="secondary" size="sm">
+            The navigation is Kumo's sidebar: expanded by default, collapsed to icons with tooltips,
+            or collapsed until hovered, when the labels slide out over the page without moving it.
+            The control at its foot offers the three;{' '}
+            <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">
+              [
+            </kbd>{' '}
+            flips between expanded and collapsed. The panel beside the content is the section's own
+            column: Firestore fills it with the database, a filter and the schema tree; the button
+            above it and{' '}
+            <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">
+              t
+            </kbd>{' '}
+            hide and show it. Sections without a panel take the full width.
+          </Text>
+          <div className="grid content-start gap-0.5 rounded-lg bg-kumo-elevated p-1 text-sm shadow-md ring ring-kumo-line">
+            <span className="px-2 py-1.5 font-semibold">Sidebar</span>
+            {[
+              ['Expanded', 'Icons and labels', true],
+              ['Collapsed', 'Icons only, labels on hover', false],
+              ['Expand on hover', 'Icons; the labels slide out over the page', false],
+            ].map(([label, hint, current]) => (
+              <span key={String(label)} className="flex items-center gap-3 rounded-md px-2 py-1.5">
+                <span className="grid gap-0.5">
+                  <span>{label}</span>
+                  <span className="text-[12px] text-kumo-subtle">{hint}</span>
+                </span>
+                {current ? <CheckIcon size={16} className="ml-auto text-kumo-brand" /> : null}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </TooltipProvider>
   )
@@ -915,87 +1076,34 @@ function StatusVocabulary() {
   )
 }
 
-const SHAPE = [
-  { id: 'events', depth: 0, count: '40' },
-  { id: 'products', depth: 0, count: '60', open: true },
-  { id: 'reviews', depth: 1, count: '40' },
-  { id: 'teams', depth: 0, count: '1', open: true },
-  { id: 'channels', depth: 1, count: '2', open: true },
-  { id: 'messages', depth: 2, count: '9' },
-  { id: 'members', depth: 1, count: '3' },
-  { id: 'users', depth: 0, count: '211,260', open: true },
-  { id: 'orders', depth: 1, count: '12,340', open: true, current: true },
-  { id: 'items', depth: 2, count: '30,100' },
-  { id: 'sessions', depth: 1, count: '6,020' },
-] as const
-
 function SchemaTree() {
   return (
     <Stack>
       <Section
-        title="Schema rail"
-        note="The shape of the database as a tree: root collections, the subcollections under their documents, and so on down, each with its live count from the engine's schema index. A root opens as a grid; a nested pattern opens as the collection group it names, so every order in every user is one click. The row for where you are carries the brand bar; the footer says what that shape holds and how many parents carry it."
+        title="Schema panel"
+        note="The Firestore panel: the database, a filter, and the shape of the database as a tree of patterns with live counts from the engine's schema index. Only the path to where you are is open; a closed root shows how many subcollections wait below it, and the filter keeps matching ids with the way to them. A root opens as a grid; a nested pattern opens as the collection group it names, so every order in every user is one click. The row for where you are carries the brand bar; the foot says what that shape holds and how many parents carry it."
       >
         <div className="flex gap-3">
-          <div className="flex h-[420px] w-[264px] shrink-0 flex-col rounded-lg bg-kumo-base ring ring-kumo-line">
-            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line px-3">
-              <TreeStructureIcon size={16} className="text-kumo-subtle" />
-              <span className="text-sm font-semibold text-kumo-default">Schema</span>
-              <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
-                259,872 docs
-              </span>
+          <div className="flex h-[400px] w-[264px] shrink-0 flex-col overflow-hidden rounded-lg bg-kumo-base ring ring-kumo-line">
+            <PanelHead />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <SchemaTreeRows rows={SHELL_SHAPE} />
             </div>
-            <ul className="grid flex-1 gap-px overflow-hidden p-1.5">
-              {SHAPE.map((node) => (
-                <li key={`${node.depth}-${node.id}`}>
-                  <div
-                    className={`flex h-7 items-center rounded-md pr-1.5 ${
-                      'current' in node && node.current
-                        ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
-                        : ''
-                    }`}
-                  >
-                    {Array.from({ length: node.depth }, (_, level) => (
-                      <span key={level} className="relative h-full w-[14px] shrink-0">
-                        <span className="absolute top-0 bottom-0 left-[9px] border-l border-kumo-hairline" />
-                      </span>
-                    ))}
-                    <span className="flex size-5 shrink-0 items-center justify-center text-kumo-subtle">
-                      {'open' in node && node.open ? (
-                        <CaretRightIcon size={11} weight="bold" className="rotate-90" />
-                      ) : null}
-                    </span>
-                    {node.depth === 0 ? (
-                      <DatabaseIcon size={13} className="shrink-0 text-kumo-subtle" />
-                    ) : (
-                      <FolderIcon size={13} className="shrink-0 text-kumo-subtle" />
-                    )}
-                    <span className="ml-1.5 min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-default">
-                      {node.id}
-                    </span>
-                    <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
-                      {node.count}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <div className="grid shrink-0 gap-0.5 border-t border-kumo-line px-3 py-2">
+            <div className="grid shrink-0 gap-0.5 border-t border-kumo-line px-3 py-1.5">
               <span className="font-mono text-[11px] text-kumo-subtle">users/*/orders</span>
-              <span className="text-[13px] text-kumo-default tabular-nums">
+              <span className="text-[12px] text-kumo-default tabular-nums">
                 12,340 documents{' '}
                 <span className="text-kumo-subtle">
-                  in 4,100 of 211,260 <span className="font-mono text-[12px]">users</span>
+                  in 4,100 of 211,260 <span className="font-mono text-[11px]">users</span>
                 </span>
               </span>
               <span className="text-[12px] text-kumo-subtle">
-                Each holds <span className="font-mono text-[11px] text-kumo-default">items</span>
+                The group also covers <span className="font-mono text-[11px]">shops/*/orders</span>
               </span>
             </div>
           </div>
           <div className="grid flex-1 content-start gap-3">
             <div className="flex h-11 items-center gap-1 rounded-lg bg-kumo-base px-3 ring ring-kumo-line">
-              <TreeStructureIcon size={16} className="text-kumo-default" />
               <PathSegment label="(default)" />
               <span className="px-0.5 text-kumo-inactive">/</span>
               <PathSegment label="users" count="211,260" />
@@ -1003,20 +1111,14 @@ function SchemaTree() {
               <span className="px-1.5 font-mono text-[13px] text-kumo-inactive">*</span>
               <span className="px-0.5 text-kumo-inactive">/</span>
               <PathSegment label="orders" count="12,340" current />
-              <span className="ml-2 flex items-center gap-1">
-                <ArrowElbowDownRightIcon size={12} className="text-kumo-inactive" />
-                <span className="flex h-5 items-center gap-1 rounded bg-kumo-tint px-1.5 font-mono text-[11px] text-kumo-subtle">
-                  items <span className="text-kumo-inactive">30,100</span>
-                </span>
-              </span>
               <span className="ml-auto">
                 <Badge variant="outline">group</Badge>
               </span>
             </div>
             <Text variant="secondary" size="sm">
-              The path bar reads the same tree: a pattern shows its <code>*</code> for any document,
-              each collection segment carries its count, and what lives below the current collection
-              follows as chips that open their group.
+              The path bar reads the same tree: a pattern shows its <code>*</code> for any document
+              and each collection segment carries its count. What lives below the current collection
+              is open in the panel.
             </Text>
             <LayerCard className="p-0">
               <Table>
@@ -1086,7 +1188,8 @@ defineCards([
     id: 'app-shell',
     group: 'Patterns',
     name: 'App shell',
-    subtitle: 'Sidebar by area, project and engine in the bar, content at full width',
+    subtitle:
+      'Navigation expanded, collapsed or on hover; the section panel beside the content; project and engine in the bar',
     width: 1280,
     surface: 'canvas',
     render: () => <Shell />,
@@ -1113,9 +1216,9 @@ defineCards([
   {
     id: 'schema-tree',
     group: 'Patterns',
-    name: 'Schema rail and subcollections',
+    name: 'Schema panel and subcollections',
     subtitle:
-      'The database as a tree of patterns with live counts, pattern paths in the path bar, named subcollection chips per row',
+      'The database as a tree of patterns with live counts, open along your path, filterable; pattern paths in the path bar; named subcollection chips per row',
     width: 1100,
     surface: 'canvas',
     render: () => <SchemaTree />,

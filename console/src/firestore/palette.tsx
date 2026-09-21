@@ -1,7 +1,7 @@
 // What Firestore contributes to ⌘K while the workbench is on screen: any
 // typed path, recent paths, every collection in the schema tree (a nested
 // one opens as its group), the subcollections of the open document, and
-// the workbench's own actions.
+// the workbench's own actions. The panel's toggle is the shell's.
 
 import {
   ArrowRightIcon,
@@ -13,7 +13,6 @@ import {
   FolderSimplePlusIcon,
   FunnelIcon,
   HouseIcon,
-  TreeStructureIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
@@ -30,7 +29,7 @@ import { useCreateDialog } from './create'
 import { useQueryLine } from './query-line-store'
 import { collectionsQuery } from './queries'
 import { useRecents } from './recents'
-import { flattenSchema, schemaQuery, useSchemaRail } from './schema'
+import { flattenSchema, schemaQuery } from './schema'
 
 export function useFirestorePalette() {
   const workbench = useWorkbench()
@@ -40,8 +39,6 @@ export function useFirestorePalette() {
   const openCreate = useCreateDialog((state) => state.open)
   const openQuery = useQueryLine((state) => state.setOpen)
   const recents = useRecents((state) => state.items)
-  const railOpen = useSchemaRail((state) => state.open)
-  const toggleRail = useSchemaRail((state) => state.toggle)
   const selected = workbench.selectedDocument
   const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
   const schema = useQuery({ ...schemaQuery(workbench.database), enabled: paletteOpen })
@@ -144,22 +141,13 @@ export function useFirestorePalette() {
         icon: <FolderSimplePlusIcon size={16} />,
         run: () => openCreate({ kind: 'collection', parent: selected }),
       })
-    actions.push(
-      {
-        id: 'fs:new-collection',
-        title: 'New root collection',
-        keywords: 'add create',
-        icon: <FolderPlusIcon size={16} />,
-        run: () => openCreate({ kind: 'collection', parent: '' }),
-      },
-      {
-        id: 'fs:schema',
-        title: railOpen ? 'Hide the schema tree' : 'Show the schema tree',
-        keywords: 'structure subcollections shape',
-        icon: <TreeStructureIcon size={16} />,
-        run: toggleRail,
-      },
-    )
+    actions.push({
+      id: 'fs:new-collection',
+      title: 'New root collection',
+      keywords: 'add create',
+      icon: <FolderPlusIcon size={16} />,
+      run: () => openCreate({ kind: 'collection', parent: '' }),
+    })
     if (workbench.path)
       actions.push({
         id: 'fs:root',
@@ -196,18 +184,7 @@ export function useFirestorePalette() {
         })
       return groups
     }
-  }, [
-    workbench,
-    roots.data,
-    schema.data,
-    under.data,
-    recents,
-    selected,
-    openCreate,
-    openQuery,
-    railOpen,
-    toggleRail,
-  ])
+  }, [workbench, roots.data, schema.data, under.data, recents, selected, openCreate, openQuery])
 
   useEffect(() => {
     register('firestore', provider)

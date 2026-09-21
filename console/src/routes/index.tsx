@@ -3,6 +3,7 @@ import { useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { statusQuery } from '@/api/queries'
 import { ServiceTable } from '@/components/service-table'
+import { Page } from '@/components/shell/page'
 import { SECTIONS } from '@/lib/services'
 
 export const Route = createFileRoute('/')({
@@ -14,7 +15,7 @@ function Overview() {
   const { data } = useSuspenseQuery(statusQuery)
   const running = new Set(data.services.map((service) => service.name))
   return (
-    <div className="grid gap-8">
+    <Page className="grid gap-8">
       <div className="grid gap-1.5">
         <Text variant="heading" size="lg" as="h1">
           Overview
@@ -77,6 +78,6 @@ function Overview() {
           })}
         </div>
       </section>
-    </div>
+    </Page>
   )
 }

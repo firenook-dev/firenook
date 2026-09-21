@@ -24,9 +24,48 @@ test('client routes deep-link through the engine and navigate in place', async (
   await expect(page.getByText('running', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'Firestore' }).click()
   await expect(page).toHaveURL(/\/console\/firestore$/)
-  await expect(page.getByRole('heading', { name: 'Firestore', level: 1 })).toBeVisible()
+  // The workbench fills the content column; its heading is for readers.
+  await expect(page.getByRole('heading', { name: 'Firestore', level: 1 })).toBeAttached()
+  await expect(page.getByTestId('path-bar')).toBeVisible()
   await page.goto(`${origin()}/console/tasks`)
   await expect(page.getByText('not running', { exact: true })).toBeVisible()
+})
+
+test('the navigation shows expanded, collapsed or on hover, and remembers it', async ({ page }) => {
+  await page.goto(`${origin()}/console/auth`)
+  const nav = page.locator('aside[data-sidebar="sidebar"]')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+  await expect(page.getByTestId('nav-mode')).toContainText('Expanded')
+
+  // Collapsed: icons only, and the choice survives a reload.
+  await page.getByTestId('nav-mode').click()
+  await page.getByTestId('nav-mode-collapsed').click()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // Expand on hover: the labels slide out over the page while the pointer
+  // is on the rail, and go back when it leaves.
+  await page.getByTestId('nav-mode').click()
+  await page.getByTestId('nav-mode-hover').click()
+  await page.getByRole('heading', { name: 'Authentication', level: 1 }).hover()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+  await nav.locator('[data-sidebar="peek-zone"]').hover()
+  await expect(nav).toHaveAttribute('data-state', 'peeking')
+  await expect(nav.getByRole('link', { name: 'Functions' })).toBeVisible()
+  await page.getByRole('heading', { name: 'Authentication', level: 1 }).hover()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // `[` flips between expanded and collapsed; ⌘K offers the same choices.
+  await page.keyboard.press('[')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+  await page.keyboard.press('[')
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('palette-input').fill('sidebar expanded')
+  await page.keyboard.press('Enter')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
 })
 
 test('the command palette opens from the keyboard and jumps to a section', async ({ page }) => {

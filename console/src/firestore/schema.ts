@@ -98,51 +98,86 @@ export function describeChildren(node: SchemaNode, limit = 4): string {
   return `${parts.slice(0, limit).join(' · ')} · +${parts.length - limit}`
 }
 
-const RAIL_KEY = 'firenook.console.firestore.schema-rail'
+/** The ancestors of a pattern, nearest last: `users/*\/orders/*\/items` → `users`, `users/*\/orders`. */
+export function ancestorsOf(pattern: string): string[] {
+  const ids = pattern.split('/*/')
+  return ids.slice(0, -1).map((_, index) => ids.slice(0, index + 1).join('/*/'))
+}
 
-interface SchemaRailState {
-  /** Whether the schema rail is on screen; remembered per browser. */
-  open: boolean
-  /** Patterns the person collapsed; everything else stays expanded. */
+/**
+ * The patterns a filter keeps: every node whose id contains the text, with
+ * the ancestors that lead to it. Undefined when there is no filter, so the
+ * tree shows everything.
+ */
+export function filterSchema(
+  schema: SchemaSnapshot | undefined,
+  text: string,
+): Set<string> | undefined {
+  const needle = text.trim().toLowerCase()
+  if (!needle) return undefined
+  const kept = new Set<string>()
+  for (const { node } of flattenSchema(schema)) {
+    if (!node.id.toLowerCase().includes(needle)) continue
+    kept.add(node.pattern)
+    for (const ancestor of ancestorsOf(node.pattern)) kept.add(ancestor)
+  }
+  return kept
+}
+
+interface SchemaTreeState {
+  /** Patterns the person opened that would otherwise be closed. */
+  expanded: Set<string>
+  /** Patterns the person closed that would otherwise be open. */
   collapsed: Set<string>
-  setOpen: (open: boolean) => void
-  toggle: () => void
-  toggleNode: (pattern: string) => void
+  /** Text narrowing the tree to matching ids. */
+  filter: string
+  toggleNode: (pattern: string, open: boolean) => void
+  /** Clears any explicit collapse along a path, so where you are is on screen. */
+  reveal: (pattern: string) => void
+  setFilter: (filter: string) => void
 }
 
-function loadOpen(): boolean {
-  try {
-    return localStorage.getItem(RAIL_KEY) !== 'closed'
-  } catch {
-    return true
-  }
-}
-
-function saveOpen(open: boolean) {
-  try {
-    localStorage.setItem(RAIL_KEY, open ? 'open' : 'closed')
-  } catch {
-    // A browser that refuses storage simply starts open next time.
-  }
-}
-
-export const useSchemaRail = create<SchemaRailState>((set) => ({
-  open: loadOpen(),
+export const useSchemaTree = create<SchemaTreeState>((set) => ({
+  expanded: new Set(),
   collapsed: new Set(),
-  setOpen: (open) => {
-    saveOpen(open)
-    set({ open })
-  },
-  toggle: () =>
+  filter: '',
+  toggleNode: (pattern, open) =>
     set((state) => {
-      saveOpen(!state.open)
-      return { open: !state.open }
-    }),
-  toggleNode: (pattern) =>
-    set((state) => {
+      const expanded = new Set(state.expanded)
       const collapsed = new Set(state.collapsed)
-      if (collapsed.has(pattern)) collapsed.delete(pattern)
-      else collapsed.add(pattern)
+      if (open) {
+        expanded.delete(pattern)
+        collapsed.add(pattern)
+      } else {
+        collapsed.delete(pattern)
+        expanded.add(pattern)
+      }
+      return { expanded, collapsed }
+    }),
+  reveal: (pattern) =>
+    set((state) => {
+      const along = [...ancestorsOf(pattern), pattern]
+      if (!along.some((ancestor) => state.collapsed.has(ancestor))) return state
+      const collapsed = new Set(state.collapsed)
+      for (const ancestor of along) collapsed.delete(ancestor)
       return { collapsed }
     }),
+  setFilter: (filter) => set({ filter }),
 }))
+
+/**
+ * Whether a node shows its children: open along the path to where you are,
+ * open everywhere while a filter narrows the tree, otherwise as the person
+ * left it, and closed until then.
+ */
+export function isExpanded(
+  state: Pick<SchemaTreeState, 'expanded' | 'collapsed'>,
+  pattern: string,
+  current: string,
+  filtering: boolean,
+): boolean {
+  if (filtering) return true
+  if (state.collapsed.has(pattern)) return false
+  if (state.expanded.has(pattern)) return true
+  return current === pattern || current.startsWith(`${pattern}/*/`)
+}

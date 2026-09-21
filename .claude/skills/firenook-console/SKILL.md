@@ -27,8 +27,29 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
    from the console channel and patch or invalidate by scope.
 2. View state: the URL, through Router search params (path, filters, order,
    selection, tab). Every view is a shareable link.
-3. Ephemeral UI state: `src/lib/store.ts` (Zustand): palette, layout, socket
-   status, selection sets.
+3. Ephemeral UI state: `src/lib/store.ts` (Zustand): palette, socket status,
+   selection sets. Layout choices that should survive a reload live in
+   `src/lib/layout.ts` (localStorage per browser).
+
+## The shell (`src/components/shell/`)
+
+- Primary navigation is Kumo's `Sidebar` in three modes (`useLayout.navMode`):
+  `expanded` (default), `collapsed` (icons, tooltips) and `hover` (Kumo's
+  `peekable`: the labels slide out over the page). The control at the foot
+  of the nav is a `DropdownMenu.RadioGroup`; `[` flips expanded/collapsed;
+  ⌘K lists the three under "Layout". Only the navigation sits inside
+  `Sidebar.Provider`: Kumo 2.14's context memo omits `peekable`, so the
+  provider is keyed on hover-vs-not and remounts the nav alone when that
+  switches; its wrapper is `z-30` so a peek overlays the content.
+- The section panel is a second column beside the content (`PANEL_WIDTH`,
+  264 px). A section fills it by rendering `<SectionPanel label="…">` (a
+  portal into the shell's slot, so the section's providers reach it). The
+  shell shows the slot only while a section fills it; the button at the
+  left of the top bar and `t` hide and show it (`useLayout.panelOpen`,
+  remembered). Sections without a panel get the full width.
+- The content column has no padding of its own. Document-like pages wrap
+  themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
+  it edge to edge with their own toolbar and borders.
 
 ## Speed rules, enforced
 
@@ -123,20 +144,26 @@ card there for every new pattern before it is designed with. Component docs: `np
   the inspector opens. Reference cells and reference fields *peek*
   (`selectDocument`) rather than navigate; the inspector shows "open in
   grid" when the document is outside the current collection.
-- The schema tree: `GET /console/api/v1/firestore/schema?database=` is the
+- The schema panel: `GET /console/api/v1/firestore/schema?database=` is the
   engine's schema index (`SchemaIndex` in `crates/console-front/src/schema.rs`:
   patterns like `users/*/orders` with `documents` and `parents` counts, one
   key-only snapshot walk on the first request per database, then exact
   through the commit observer; process-local, never persisted). The console
   side is `src/firestore/schema.ts` (`schemaQuery`, `patternOf`, `findNode`,
-  `childrenOf`, the `useSchemaRail` store) and `components/schema-rail.tsx`.
-  A *pattern path* in the URL (`path=users/*/orders`) is the collection
-  group of its last id: `workbench.isPattern` is true, `group` is forced,
-  `setPath` of a pattern opens it as a group, and nothing can be created
-  there (New menu, `n`, the empty state all check `isPattern`). The path bar
-  renders `*` segments as inert, counts a pattern segment from the schema
-  and shows what lives below the current collection (`Below`). The live
-  channel invalidates `['fs', db, 'schema']` on any create or delete.
+  `childrenOf`, `filterSchema`, `isExpanded`, the `useSchemaTree` store) and
+  `components/schema-panel.tsx`, which fills the shell's section panel with
+  the database picker, a filter and the tree. Only the path to the current
+  collection is open by default; `toggleNode` records explicit opens and
+  closes, `reveal` clears closes along a newly opened path, a closed node
+  shows `+N` subcollections below it, and the filter keeps matching ids with
+  their ancestors (everything open while filtering). A *pattern path* in the
+  URL (`path=users/*/orders`) is the collection group of its last id:
+  `workbench.isPattern` is true, `group` is forced, `setPath` of a pattern
+  opens it as a group, and nothing can be created there (New menu, `n`, the
+  empty state all check `isPattern`). The path bar is the left half of the
+  workbench toolbar; it renders `*` segments as inert and counts a pattern
+  segment from the schema. The live channel invalidates
+  `['fs', db, 'schema']` on any create or delete.
 - Subcollections in the grid: `SubcollectionsCell` is its own column (shown
   when the schema knows subcollections under this collection, or a missing
   ancestor is loaded; `subcollectionsWidth` sizes it from the known ids).
@@ -150,7 +177,9 @@ card there for every new pattern before it is designed with. Component docs: `np
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
   path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
   project+database), every pattern of the schema tree (a nested one opens
-  as its group) and its actions, including the schema rail toggle (`t`).
+  as its group) and its actions; the panel toggle (`t`) and the nav modes
+  are the shell's "Layout" group. `matchesQuery` is word-wise: every word
+  of the query must appear in the title, breadcrumbs or keywords.
 - Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
   `CommandPalette.Results`/`Items` render functions must return keyed
   elements; a `Tooltip` inside a `<button>` nests buttons (use `title`);

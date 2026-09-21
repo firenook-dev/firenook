@@ -1,5 +1,10 @@
 import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
-import { ArrowSquareOutIcon, GaugeIcon } from '@phosphor-icons/react'
+import {
+  ArrowSquareOutIcon,
+  GaugeIcon,
+  SidebarSimpleIcon,
+  SquareHalfIcon,
+} from '@phosphor-icons/react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import {
@@ -8,8 +13,9 @@ import {
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { useConsoleUi } from '@/lib/store'
+import { NAV_MODES, useLayout } from '@/lib/layout'
 import { SECTIONS } from '@/lib/services'
+import { useConsoleUi } from '@/lib/store'
 
 export function CommandPalette() {
   const open = useConsoleUi((state) => state.paletteOpen)
@@ -17,6 +23,11 @@ export function CommandPalette() {
   const providers = usePaletteProviders((state) => state.providers)
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
+  const navMode = useLayout((state) => state.navMode)
+  const setNavMode = useLayout((state) => state.setNavMode)
+  const panel = useLayout((state) => state.panel)
+  const panelOpen = useLayout((state) => state.panelOpen)
+  const togglePanel = useLayout((state) => state.togglePanel)
 
   const sections = useMemo<PaletteItem[]>(() => {
     const go = (to: string) => () => void navigate({ to })
@@ -45,14 +56,39 @@ export function CommandPalette() {
     ]
   }, [navigate])
 
-  // What the page on screen contributes comes first; the sections always follow.
+  // How the shell is laid out: the navigation's mode and the section panel.
+  const layout = useMemo<PaletteItem[]>(() => {
+    const items: PaletteItem[] = NAV_MODES.map((mode) => ({
+      id: `layout:nav:${mode.value}`,
+      title: `Sidebar: ${mode.label.toLowerCase()}`,
+      description: mode.value === navMode ? 'current' : mode.hint,
+      keywords: 'navigation layout collapse expand hover',
+      icon: <SidebarSimpleIcon size={16} />,
+      run: () => setNavMode(mode.value),
+    }))
+    if (panel.present)
+      items.push({
+        id: 'layout:panel',
+        title: `${panelOpen ? 'Hide' : 'Show'} the ${panel.label.toLowerCase()} panel`,
+        description: 'the column beside the content · t',
+        keywords: 'layout tree schema rail sidebar',
+        icon: <SquareHalfIcon size={16} />,
+        run: togglePanel,
+      })
+    return items
+  }, [navMode, setNavMode, panel, panelOpen, togglePanel])
+
+  // What the page on screen contributes comes first; the sections and the
+  // layout always follow.
   const groups = useMemo<PaletteGroup[]>(() => {
     const contributed = Object.values(providers).flatMap((provider) => provider(search))
-    const matching = sections.filter((item) => matchesQuery(item, search))
-    return [...contributed, { label: 'Sections', items: matching }].filter(
-      (group) => group.items.length > 0,
-    )
-  }, [providers, search, sections])
+    const filter = (items: PaletteItem[]) => items.filter((item) => matchesQuery(item, search))
+    return [
+      ...contributed,
+      { label: 'Sections', items: filter(sections) },
+      { label: 'Layout', items: filter(layout) },
+    ].filter((group) => group.items.length > 0)
+  }, [providers, search, sections, layout])
 
   const choose = (item: PaletteItem) => {
     setOpen(false)
