@@ -381,3 +381,50 @@ test('JSON imports as typed documents, and the palette jumps anywhere', async ({
   await expect(page.getByRole('dialog')).toContainText('New subcollection under teams/t_real')
   await expect(page.getByTestId('new-collection-id')).toHaveValue('notes')
 })
+
+test('a database a client writes to joins the picker and opens on its own', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore`)
+  const panel = page.getByTestId('section-panel')
+  const picker = panel.getByTestId('database-select').getByRole('combobox')
+  await expect(picker).toContainText('(default)')
+  await expect(panel.locator('[data-pattern="users"]')).toBeVisible()
+
+  // An app that opens `getFirestore(app, 'analytics')` and writes brings the
+  // database into being; nothing in firebase.json declares it.
+  const analytics = `projects/${project()}/databases/analytics/documents`
+  const written = await page.request.post(
+    `${origin()}/console/api/v1/firestore/v1/${analytics}:commit`,
+    {
+      headers: owner,
+      data: {
+        writes: [
+          {
+            update: {
+              name: `${analytics}/events/e_first`,
+              fields: { kind: { stringValue: 'pageview' } },
+            },
+          },
+        ],
+      },
+    },
+  )
+  expect(written.ok()).toBeTruthy()
+
+  // Opening the picker asks the engine again, so the new database is there.
+  await picker.click()
+  await page.getByRole('option', { name: 'analytics' }).click()
+  await expect(page).toHaveURL(/db=analytics/)
+  await expect(picker).toContainText('analytics')
+  await expect(panel.locator('[data-pattern="events"]')).toBeVisible()
+  await expect(panel.locator('[data-pattern="users"]')).toHaveCount(0)
+  await expect(panel.getByTestId('schema-summary')).toContainText('1 root collection · 1 document')
+  await panel.locator('[data-pattern="events"]').getByTestId('schema-node-open').click()
+  await expect(page).toHaveURL(/db=analytics.*path=events|path=events.*db=analytics/)
+  await expect(page.getByTestId('grid-row').first()).toContainText('e_first')
+
+  // Back to the default database, which the URL leaves unnamed.
+  await picker.click()
+  await page.getByRole('option', { name: '(default)' }).click()
+  await expect(page).not.toHaveURL(/db=/)
+  await expect(panel.locator('[data-pattern="users"]')).toBeVisible()
+})

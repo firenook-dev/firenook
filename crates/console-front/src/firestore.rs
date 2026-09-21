@@ -25,6 +25,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use ts_rs::TS;
 
+use crate::databases::DatabaseCatalog;
 use crate::schema::SchemaIndex;
 
 /// Commits retained for a slow console before it is told to resync.
@@ -39,6 +40,8 @@ pub struct FirestoreConsole {
     pub changes: ChangeFeed,
     /// The schema index, already registered with the store.
     pub schema: SchemaIndex,
+    /// The project's databases, declared and written.
+    pub databases: DatabaseCatalog,
     /// The Requests diagnostics feed (`/requests` upgrades to a websocket),
     /// when the Firestore front records evaluations.
     pub requests: Option<Router>,
@@ -254,13 +257,14 @@ fn json_event(name: &str, data: &impl Serialize) -> Event {
 }
 
 /// The console's Firestore routes: the change feed, the schema index, the
-/// Requests feed and the REST front, mounted together under
-/// `/api/v1/firestore`.
+/// database list, the Requests feed and the REST front, mounted together
+/// under `/api/v1/firestore`.
 pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
     let mut router = console
         .changes
         .router(console.shutdown)
-        .merge(console.schema.router());
+        .merge(console.schema.router())
+        .merge(console.databases.router());
     if let Some(requests) = console.requests {
         router = router.merge(requests);
     }

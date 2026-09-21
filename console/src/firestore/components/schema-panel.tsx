@@ -1,5 +1,6 @@
-// The Firestore panel: the database to look at, a filter, and the shape of
-// the database as a tree. Root collections, the subcollections that live
+// The Firestore panel: the database to look at (every one the project
+// declares or a client has written to), a filter, and the shape of the
+// database as a tree. Root collections, the subcollections that live
 // under their documents, and so on down, each with its live count. Only the
 // path to where you are is open; everything else waits behind its caret or
 // the filter. A root opens as a grid; a nested pattern opens as the
@@ -18,6 +19,7 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { SectionPanel } from '@/components/shell/section-panel'
+import { databaseItems, databasesQuery } from '../databases'
 import {
   type SchemaNode,
   type SchemaSnapshot,
@@ -46,12 +48,7 @@ export function SchemaPanel() {
   const kept = filterSchema(schema.data, filter)
   const node = findNode(schema.data, current)
   const roots = (schema.data?.collections ?? []).filter((root) => !kept || kept.has(root.pattern))
-  const databases = {
-    [DEFAULT_DATABASE]: DEFAULT_DATABASE,
-    ...(workbench.database !== DEFAULT_DATABASE
-      ? { [workbench.database]: workbench.database }
-      : {}),
-  }
+  const databases = useQuery(databasesQuery)
 
   return (
     <SectionPanel label="Schema">
@@ -61,7 +58,12 @@ export function SchemaPanel() {
             size="sm"
             value={workbench.database}
             onValueChange={(value) => workbench.setDatabase(String(value))}
-            items={databases}
+            // Opening the picker asks again, so a database a client created
+            // since the panel mounted is in the list.
+            onOpenChange={(open) => {
+              if (open) void databases.refetch()
+            }}
+            items={databaseItems(databases.data, workbench.database, DEFAULT_DATABASE)}
             aria-label="Database"
             className="w-full font-mono"
           />

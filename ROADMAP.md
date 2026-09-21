@@ -559,6 +559,11 @@ served until every section has landed.
   roots and hundreds of thousands of documents reads at a glance; the
   workbench runs edge to edge under its own toolbar, and `t` hides the
   panel.
+- [x] Every database of the project: `/console/api/v1/firestore/databases`
+  lists `(default)`, every database `firebase.json` declares and every one
+  a client has written to (the store seeks once per database), and the
+  panel's picker offers them, asking again each time it opens. Picking one
+  switches the tree, the path bar and the grid to that database alone.
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
   the page, undo within the change-log window, rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,

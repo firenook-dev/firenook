@@ -8,6 +8,7 @@
 //! `/console` on the Emulator UI port; every asset and API call is
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
+mod databases;
 mod firestore;
 mod schema;
 
@@ -23,6 +24,7 @@ use serde::Serialize;
 use serde_json::json;
 use ts_rs::TS;
 
+pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
 pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
 };
@@ -262,6 +264,7 @@ mod tests {
         ChangeBatch::export_all(&config).expect("TypeScript bindings written");
         ChangeHello::export_all(&config).expect("TypeScript bindings written");
         SchemaSnapshot::export_all(&config).expect("TypeScript bindings written");
+        DatabaseList::export_all(&config).expect("TypeScript bindings written");
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(

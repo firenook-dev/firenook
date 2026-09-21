@@ -161,7 +161,16 @@ card there for every new pattern before it is designed with. Component docs: `np
   side is `src/firestore/schema.ts` (`schemaQuery`, `patternOf`, `findNode`,
   `childrenOf`, `filterSchema`, `isExpanded`, the `useSchemaTree` store) and
   `components/schema-panel.tsx`, which fills the shell's section panel with
-  the database picker, a filter and the tree. Only the path to the current
+  the database picker, a filter and the tree. The picker is fed by
+  `GET /console/api/v1/firestore/databases` (`DatabaseCatalog` in
+  `crates/console-front/src/databases.rs`: `(default)` always, every id
+  `firebase.json` declares and every database holding a document, from
+  `Store::databases`, which seeks once per database), through
+  `src/firestore/databases.ts` (`databasesQuery`, own key outside the `fs`
+  keys; `databaseItems` keeps the database on screen in the list even when
+  the engine does not list it). The picker refetches on open, so a database
+  a client just created appears without a reload. `?db=` names the database
+  in the URL and is dropped for `(default)`. Only the path to the current
   collection is open by default; `toggleNode` records explicit opens and
   closes, `reveal` clears closes along a newly opened path, a closed node
   shows `+N` subcollections below it, and the filter keeps matching ids with
