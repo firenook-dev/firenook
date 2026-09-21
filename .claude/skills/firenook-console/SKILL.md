@@ -27,8 +27,30 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
    from the console channel and patch or invalidate by scope.
 2. View state: the URL, through Router search params (path, filters, order,
    selection, tab). Every view is a shareable link.
-3. Ephemeral UI state: `src/lib/store.ts` (Zustand): palette, layout, socket
-   status, selection sets.
+3. Ephemeral UI state: `src/lib/store.ts` (Zustand): palette, socket status,
+   selection sets. Layout choices that should survive a reload live in
+   `src/lib/layout.ts` (localStorage per browser).
+
+## The shell (`src/components/shell/`)
+
+- Primary navigation is Kumo's `Sidebar`, expanded or collapsed
+  (`useLayout.navOpen`, localStorage), always `peekable`: collapsed, the
+  labels slide out over the page on hover, as on kumo-ui.com. The foot of
+  the nav is Kumo's own `Sidebar.Trigger` (icon only, in a tooltip); `[`
+  flips it; ⌘K offers it under "Layout". Only the navigation sits inside
+  `Sidebar.Provider`, and the provider's wrapper is `z-30 w-auto shrink-0`
+  so the fixed peek overlays the content. (Kumo 2.14's context memo omits
+  `peekable`, so never flip that prop at runtime; it is constant here.) The
+  expanded width is 14rem through `--sidebar-width` on the provider.
+- The section panel is a second column beside the content (`PANEL_WIDTH`,
+  264 px). A section fills it by rendering `<SectionPanel label="…">` (a
+  portal into the shell's slot, so the section's providers reach it). The
+  shell shows the slot only while a section fills it; the button at the
+  left of the top bar and `t` hide and show it (`useLayout.panelOpen`,
+  remembered). Sections without a panel get the full width.
+- The content column has no padding of its own. Document-like pages wrap
+  themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
+  it edge to edge with their own toolbar and borders.
 
 ## Speed rules, enforced
 
@@ -65,8 +87,123 @@ Follow the `kumo-design` skill (vendored Kumo rules) and `console/AGENTS.md`.
 Semantic tokens only (`bg-kumo-base`, `text-kumo-subtle`, `ring-kumo-line`),
 14 px content text, sentence-case headings, `font-semibold` not `font-bold`,
 no colour transitions on hover, dialogs always mounted and toggled with
-`open`. Component docs: `npx @cloudflare/kumo doc <Component>`. TanStack docs:
+`open`. Firenook's identity lives in `src/theme.css` alone: the ember accent
+(`--color-kumo-brand` and the link colour) and the type pair (Inter for
+the interface, the face Kumo's docs render in; IBM Plex Mono for data),
+self-hosted from `public/fonts`. The sans face is registered as
+`InterVariable`, not `Inter`: the TanStack devtools inject a document-level
+`@font-face` named Inter in dev builds, and the last declared face wins, so
+a face named Inter would render the devtools' build on the dev server.
+`theme.css` also sets what kumo-ui.com sets on its body and Kumo's
+stylesheet does not: `-webkit-font-smoothing: antialiased` and Inter's
+`calt, cv02, cv03, cv04`; without them macOS renders every weight heavier
+than Kumo's docs show. The accent is reserved for the primary
+action, active navigation and links; switches use `variant="neutral"` (Kumo's
+default switch is hard-coded blue) so they match the checkbox.
+
+The component library the design tool works from is `design-system/`
+(`npm run design-system` renders every card through a real browser into
+`.design-system/bundle`, `npm run design-system:dev` serves the cards). Add a
+card there for every new pattern before it is designed with. Component docs: `npx @cloudflare/kumo doc <Component>`. TanStack docs:
 `npx @tanstack/cli search-docs "<query>"` / `npx @tanstack/cli doc <library> <path>`.
+
+## Firestore workbench (built, `src/firestore/`)
+
+- Data path: the browser talks Firestore REST to the console's own origin
+  (`/console/api/v1/firestore/v1/...`, a second `rest-front` router on the
+  same service), Identity Toolkit at `/console/api/v1/auth/...` and the
+  Requests websocket at `/console/api/v1/firestore/requests`. Never reach
+  the service ports from the browser.
+- Live: `GET /console/api/v1/firestore/changes?database=` is an SSE stream
+  from the store's commit observer (`ChangeFeed` in
+  `crates/console-front/src/firestore.rs`); `src/firestore/live.ts`
+  invalidates TanStack Query scopes and flashes rows. Payloads are paths
+  only, never documents.
+- Identity: `Authorization: Bearer owner` bypasses rules; "view as" mints
+  an unsigned `alg: none` emulator token for an Auth user
+  (`src/firestore/view-as.ts`), so rules run exactly as for the app.
+- View state is the URL (`path`, `q`, `group`, `as`, `doc`, `tab`);
+  selection and focus are Zustand; queries are keyed
+  `['fs', db, kind, scope, ...]` so the channel can target them.
+- Query text is the SDK chain (`where(...).orderBy(...).limit(n)`), parsed
+  and printed by `src/firestore/query.ts`; cursors are exact because
+  `__name__` is always the last order.
+- Seed a synthetic project for development: `npm run seed -- <ui-origin>
+  <project>` (`scripts/seed-firestore.mjs`; the e2e global setup uses it;
+  the synthetic engine's rules deny listing `users` to clients so "view as"
+  has denials to show).
+- Creating: every path into the create dialog is a `CreateRequest` on the
+  `useCreateDialog` store (`src/firestore/create.ts`): `document` (with an
+  optional `template` to duplicate or `id` for a missing ancestor),
+  `collection` (its first document creates it; `parent` empty = root) and
+  `import` (object keyed by id, array or NDJSON, batches of 200 `set`s). An
+  explicit id uses a `create` write (`currentDocument.exists: false`); the
+  engine answers 412, shown as "already exists". `FieldsPanel` in
+  `field-editor.tsx` is the typed rows + JSON view shared by the inspector
+  and the dialog; `draftsFromJson` keeps timestamp/reference types when the
+  text is unchanged.
+- Grid interactions: `HeaderMenu` writes `orderBy` into the query (the header
+  shows the arrow) and composes `where("field", "==", )` into the query line
+  through `useQueryLine.compose` (caret placed before `)`); hidden columns
+  live in `useColumns`, reset per collection. Inline editing
+  (`InlineCellEditor`) is for string/number/boolean/timestamp/null/unset
+  cells; a click that would open the inspector over the clicked cell waits
+  `DOUBLE_CLICK_MS` so a double-click can edit instead. Columns keep their
+  width (a trailing filler `<col>` takes the slack) so nothing moves when
+  the inspector opens. Reference cells and reference fields *peek*
+  (`selectDocument`) rather than navigate; the inspector shows "open in
+  grid" when the document is outside the current collection.
+- The schema panel: `GET /console/api/v1/firestore/schema?database=` is the
+  engine's schema index (`SchemaIndex` in `crates/console-front/src/schema.rs`:
+  patterns like `users/*/orders` with `documents` and `parents` counts, one
+  key-only snapshot walk on the first request per database, then exact
+  through the commit observer; process-local, never persisted). The console
+  side is `src/firestore/schema.ts` (`schemaQuery`, `patternOf`, `findNode`,
+  `childrenOf`, `filterSchema`, `isExpanded`, the `useSchemaTree` store) and
+  `components/schema-panel.tsx`, which fills the shell's section panel with
+  the database picker, a filter and the tree. The picker is fed by
+  `GET /console/api/v1/firestore/databases` (`DatabaseCatalog` in
+  `crates/console-front/src/databases.rs`: `(default)` always, every id
+  `firebase.json` declares and every database holding a document, from
+  `Store::databases`, which seeks once per database), through
+  `src/firestore/databases.ts` (`databasesQuery`, own key outside the `fs`
+  keys; `databaseItems` keeps the database on screen in the list even when
+  the engine does not list it). The picker refetches on open, so a database
+  a client just created appears without a reload. `?db=` names the database
+  in the URL and is dropped for `(default)`. Only the path to the current
+  collection is open by default; `toggleNode` records explicit opens and
+  closes, `reveal` clears closes along a newly opened path, a closed node
+  shows `+N` subcollections below it, and the filter keeps matching ids with
+  their ancestors (everything open while filtering). A *pattern path* in the
+  URL (`path=users/*/orders`) is the collection group of its last id:
+  `workbench.isPattern` is true, `group` is forced, `setPath` of a pattern
+  opens it as a group, and nothing can be created there (New menu, `n`, the
+  empty state all check `isPattern`). The path bar is the left half of the
+  workbench toolbar; it renders `*` segments as inert and counts a pattern
+  segment from the schema. The live channel invalidates
+  `['fs', db, 'schema']` on any create or delete.
+- Subcollections in the grid: `SubcollectionsCell` is its own column (shown
+  when the schema knows subcollections under this collection, or a missing
+  ancestor is loaded; `subcollectionsWidth` sizes it from the known ids).
+  Each rendered row asks `listCollectionIds` (virtualized, cached 60 s,
+  invalidated by the live channel) and renders named chips that navigate,
+  with a menu past three; the seed nests three levels
+  (`users/{u}/orders/{o}/items/{i}`, `teams/t_real/channels/{c}/messages/{m}`,
+  `products/{p}/reviews/{r}`).
+- ⌘K is the shell's palette; pages contribute through
+  `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
+  Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
+  path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
+  project+database), every pattern of the schema tree (a nested one opens
+  as its group) and its actions; the panel toggle (`t`) and the nav modes
+  are the shell's "Layout" group. `matchesQuery` is word-wise: every word
+  of the query must appear in the title, breadcrumbs or keywords.
+- Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
+  `CommandPalette.Results`/`Items` render functions must return keyed
+  elements; a `Tooltip` inside a `<button>` nests buttons (use `title`);
+  `Text` takes no `className` (wrap it). A Rust doc comment on a `ts-rs`
+  type must not contain `*/` (it ends the generated JSDoc early), so
+  patterns are described in words there.
 
 ## Repository rules that apply here too
 

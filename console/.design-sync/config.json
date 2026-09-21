@@ -1,0 +1,125 @@
+{
+  "projectId": "1974c612-d11a-4008-b042-bb4bf3ab1fa7",
+  "pkg": "@firenook/kit",
+  "globalName": "Firenook",
+  "shape": "package",
+  "buildCmd": "node design-system/kit/scripts/build.mjs",
+  "srcDir": "../../src/components/kit",
+  "cssEntry": "dist/kit.css",
+  "extraFonts": ["src/fonts.css"],
+  "docsDir": "docs",
+  "componentSrcMap": {
+    "CloudflareLogo": null,
+    "PoweredByCloudflare": null,
+    "Chart": null,
+    "ChartLegend": null,
+    "ChartPalette": null,
+    "BubbleMap": null,
+    "ChoroplethMap": null,
+    "GlobeMap": null,
+    "SankeyChart": null,
+    "TimeseriesChart": null,
+    "BannerVariant": null,
+    "LinkProvider": null,
+    "KumoLocaleProvider": null,
+    "KumoPortalProvider": null,
+    "ToastProvider": null,
+    "TooltipProvider": null,
+    "SidebarProvider": null,
+    "SidebarRoot": null,
+    "SidebarContent": null,
+    "SidebarFooter": null,
+    "SidebarGroup": null,
+    "SidebarGroupLabel": null,
+    "SidebarHeader": null,
+    "SidebarLoading": null,
+    "SidebarMenu": null,
+    "SidebarMenuBadge": null,
+    "SidebarMenuButton": null,
+    "SidebarMenuChevron": null,
+    "SidebarMenuItem": null,
+    "SidebarMenuSub": null,
+    "SidebarMenuSubButton": null,
+    "SidebarMenuSubItem": null,
+    "SidebarRail": null,
+    "SidebarResizeHandle": null,
+    "SidebarSeparator": null,
+    "SidebarSlidingView": null,
+    "SidebarSlidingViews": null,
+    "SidebarTrigger": null,
+    "SidebarCollapsible": null,
+    "SidebarCollapsibleContent": null,
+    "SidebarCollapsibleTrigger": null,
+    "DialogRoot": null,
+    "DialogClose": null,
+    "DialogDescription": null,
+    "DialogTitle": null,
+    "DialogTrigger": null,
+    "GridItem": null,
+    "RadioGroup": null,
+    "Textarea": null,
+    "SidebarCollapsibleType": null
+  },
+  "guidelinesGlob": ["guides/**/*.md"],
+  "overrides": {
+    "Dialog": {
+      "cardMode": "single",
+      "viewport": "720x420"
+    },
+    "CommandPalette": {
+      "cardMode": "single",
+      "viewport": "720x480"
+    },
+    "Popover": {
+      "cardMode": "single",
+      "viewport": "520x360"
+    },
+    "DropdownMenu": {
+      "cardMode": "single",
+      "viewport": "520x360"
+    },
+    "Tooltip": {
+      "cardMode": "single",
+      "viewport": "420x200"
+    },
+    "Toast": {
+      "cardMode": "single",
+      "viewport": "560x420"
+    },
+    "Table": {
+      "cardMode": "column"
+    },
+    "Sidebar": {
+      "cardMode": "column"
+    },
+    "Toolbar": {
+      "cardMode": "column"
+    },
+    "Pagination": {
+      "cardMode": "column"
+    },
+    "Banner": {
+      "cardMode": "column"
+    },
+    "Tabs": {
+      "cardMode": "column"
+    },
+    "Breadcrumbs": {
+      "cardMode": "column"
+    },
+    "Button": {
+      "cardMode": "column"
+    },
+    "Code": {
+      "cardMode": "column"
+    },
+    "Text": {
+      "cardMode": "column"
+    },
+    "Meter": {
+      "cardMode": "single",
+      "primaryStory": "Buffer"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

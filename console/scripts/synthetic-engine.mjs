@@ -73,9 +73,32 @@ export async function startEngine(options = {}) {
     }),
   )
   writeFileSync(join(directory, '.firebaserc'), JSON.stringify({ projects: { default: project } }))
+  // Rules shaped like a real app's, so "view as" has denials to show: a user
+  // reads their own document and everything under it, products are public,
+  // and nothing else is reachable from a client.
   writeFileSync(
     join(directory, 'firestore.rules'),
-    "rules_version = '2'; service cloud.firestore { match /databases/{database}/documents { match /{document=**} { allow read, write: if true; } } }",
+    [
+      "rules_version = '2';",
+      'service cloud.firestore {',
+      '  match /databases/{database}/documents {',
+      '    match /users/{uid} {',
+      '      allow read: if request.auth != null && request.auth.uid == uid;',
+      '      allow write: if false;',
+      '      match /{document=**} {',
+      '        allow read: if request.auth != null && request.auth.uid == uid;',
+      '      }',
+      '    }',
+      '    match /products/{product} {',
+      '      allow read: if true;',
+      '    }',
+      '    match /{document=**} {',
+      '      allow read, write: if false;',
+      '    }',
+      '  }',
+      '}',
+      '',
+    ].join('\n'),
   )
   mkdirSync(join(directory, 'state'))
 

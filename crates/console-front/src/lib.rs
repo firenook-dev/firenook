@@ -8,6 +8,10 @@
 //! `/console` on the Emulator UI port; every asset and API call is
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
+mod databases;
+mod firestore;
+mod schema;
+
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
@@ -19,6 +23,12 @@ use rust_embed::{Embed, EmbeddedFile};
 use serde::Serialize;
 use serde_json::json;
 use ts_rs::TS;
+
+pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
+pub use firestore::{
+    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
+};
+pub use schema::{SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot};
 
 /// Built console assets. `build.rs` guarantees the folder exists, so a
 /// checkout without a console build still compiles and the router answers
@@ -99,14 +109,49 @@ struct ConsoleState {
     directory: SuiteDirectory,
 }
 
+/// What the suite hands the console.
+pub struct ConsoleServices {
+    /// The running suite's directory.
+    pub directory: SuiteDirectory,
+    /// Firestore, when the suite runs it.
+    pub firestore: Option<FirestoreConsole>,
+    /// The Auth emulator's HTTP application, when the suite runs it, so the
+    /// console reaches Identity Toolkit same-origin under `/api/v1/auth`.
+    pub auth: Option<Router>,
+}
+
+impl ConsoleServices {
+    /// A console with the directory alone (no data services).
+    #[must_use]
+    pub fn new(directory: SuiteDirectory) -> Self {
+        Self {
+            directory,
+            firestore: None,
+            auth: None,
+        }
+    }
+}
+
 /// The console router: the Console API under `/api/v1` and the embedded
 /// application for every other path. Mount it under [`CONSOLE_PATH`].
-pub fn console_router(directory: SuiteDirectory) -> Router {
+pub fn console_router(services: ConsoleServices) -> Router {
+    let mut api = Router::new()
+        .route("/status", get(status))
+        .with_state(ConsoleState {
+            directory: services.directory,
+        });
+    if let Some(firestore) = services.firestore {
+        api = api.nest("/firestore", firestore::firestore_router(firestore));
+    }
+    if let Some(auth) = services.auth {
+        // The Auth application is one fallback handler, so it mounts as a
+        // service: every path under the prefix reaches it, prefix stripped.
+        api = api.nest_service("/auth", auth);
+    }
     Router::new()
-        .route("/api/v1/status", get(status))
+        .nest("/api/v1", api)
         .route("/api/{*rest}", any(unknown_api))
         .fallback(asset)
-        .with_state(ConsoleState { directory })
 }
 
 async fn status(State(state): State<ConsoleState>) -> Json<ConsoleStatus> {
@@ -195,7 +240,7 @@ mod tests {
     }
 
     async fn call(uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-        let response = console_router(directory())
+        let response = console_router(ConsoleServices::new(directory()))
             .oneshot(Request::get(uri).body(Body::empty()).expect("request"))
             .await
             .expect("response");
@@ -216,6 +261,10 @@ mod tests {
         );
         let config = ts_rs::Config::new().with_out_dir(out);
         ConsoleStatus::export_all(&config).expect("TypeScript bindings written");
+        ChangeBatch::export_all(&config).expect("TypeScript bindings written");
+        ChangeHello::export_all(&config).expect("TypeScript bindings written");
+        SchemaSnapshot::export_all(&config).expect("TypeScript bindings written");
+        DatabaseList::export_all(&config).expect("TypeScript bindings written");
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(

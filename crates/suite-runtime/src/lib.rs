@@ -16,7 +16,10 @@ use axum::response::Redirect;
 use axum::routing::get;
 use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
-use firenook_console_front::{CONSOLE_PATH, console_router};
+use firenook_console_front::{
+    CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, SchemaIndex,
+    console_router,
+};
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
     Write, document_key_logical_bytes, fields_logical_bytes,
@@ -438,12 +441,31 @@ struct PreparedSuite {
     auth: Option<Arc<AuthRuntime>>,
     storage: Option<Arc<StorageRuntime>>,
     firestore: Option<tonic::service::Routes>,
+    /// The console's own Firestore surface, sharing the service above.
+    console_firestore: Option<ConsoleFirestoreParts>,
     request_history: Option<RequestHistory>,
     logging: LoggingRuntime,
     hub: HubRuntime,
+    directory: SuiteDirectory,
     ui: Option<Router>,
     export_receiver: mpsc::Receiver<ExportCommand>,
     background_receiver: mpsc::UnboundedReceiver<BackgroundRequest>,
+}
+
+/// The console's Firestore pieces before the Requests feed exists (it needs
+/// the shutdown signal, which `run` creates).
+struct ConsoleFirestoreParts {
+    rest: Router,
+    changes: ChangeFeed,
+    schema: SchemaIndex,
+    databases: DatabaseCatalog,
+}
+
+/// What `prepare_firestore` builds when Firestore is selected.
+struct FirestoreParts {
+    routes: tonic::service::Routes,
+    console: ConsoleFirestoreParts,
+    request_history: Option<RequestHistory>,
 }
 
 struct ShutdownSuite {
@@ -541,9 +563,11 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         auth,
         storage,
         firestore,
+        console_firestore,
         request_history,
         logging,
         hub,
+        directory,
         ui,
         export_receiver,
         background_receiver,
@@ -551,12 +575,34 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let mut listeners = bind_listeners(&config).await?;
     let (shutdown, _) = watch::channel(false);
     let (server_failure, mut failed_server) = mpsc::unbounded_channel();
+    // One Requests feed serves both the Firestore websocket port and the
+    // console; a second instance would run a second history maintainer.
+    let requests = firestore
+        .is_some()
+        .then(|| requests_router(request_history, shutdown.subscribe()));
+    let ui = ui.map(|official| {
+        official.nest(
+            CONSOLE_PATH,
+            console_router(ConsoleServices {
+                directory,
+                firestore: console_firestore.map(|parts| FirestoreConsole {
+                    rest: parts.rest,
+                    changes: parts.changes,
+                    schema: parts.schema,
+                    databases: parts.databases,
+                    requests: requests.clone(),
+                    shutdown: shutdown.subscribe(),
+                }),
+                auth: auth.as_ref().map(|auth| auth.application()),
+            }),
+        )
+    });
     let mut servers = spawn_static_servers(
         &config,
         &mut listeners,
         StaticApplications {
             firestore,
-            request_history,
+            requests,
             auth: auth.as_ref().map(|auth| auth.application()),
             storage: storage.as_ref().map(|storage| storage.application()),
             hub: hub.application(),
@@ -780,7 +826,8 @@ async fn prepare_native_suite(
 
 /// The UI port's application: the official Emulator UI at the root and the
 /// console under [`CONSOLE_PATH`], which shares the port so that its assets
-/// and API are same-origin with the page that loads them. The console's
+/// and API are same-origin with the page that loads them; `run` mounts the
+/// console once every service it shows exists. The console's
 /// canonical address has no trailing slash; the slashed form is not claimed
 /// by `nest` and would otherwise fall through to the official UI's index.
 async fn ui_application(
@@ -788,6 +835,7 @@ async fn ui_application(
     directory: SuiteDirectory,
     client_directory: PathBuf,
 ) -> Result<Router, SuiteRuntimeError> {
+    // The directory is what the official UI's `/api/config` advertises.
     let official = ui_router(UiConfig {
         directory: directory.clone(),
         archive: config.ui_archive.clone(),
@@ -795,12 +843,10 @@ async fn ui_application(
     })
     .await
     .map_err(|error| failure(format!("UI failed to start: {error}")))?;
-    Ok(official
-        .route(
-            concat!("/console", "/"),
-            get(|| async { Redirect::permanent(CONSOLE_PATH) }),
-        )
-        .nest(CONSOLE_PATH, console_router(directory)))
+    Ok(official.route(
+        concat!("/console", "/"),
+        get(|| async { Redirect::permanent(CONSOLE_PATH) }),
+    ))
 }
 
 async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRuntimeError> {
@@ -846,8 +892,15 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     };
     import_suite(config, &store, auth.as_deref(), storage.as_deref()).await?;
 
-    let (firestore_routes, request_history) =
-        prepare_firestore(config, &store, &triggers, &logging)?;
+    let (firestore_routes, console_firestore, request_history) =
+        match prepare_firestore(config, &store, &triggers, &logging)? {
+            Some(parts) => (
+                Some(parts.routes),
+                Some(parts.console),
+                parts.request_history,
+            ),
+            None => (None, None, None),
+        };
 
     // Auth's operational lines (OOB links, verification codes, server
     // errors) reach the console and the Emulator UI log like the official
@@ -880,7 +933,9 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     })
     .map_err(|error| failure(format!("Hub failed to start: {error}")))?;
     let ui = match ui_client {
-        Some(client_directory) => Some(ui_application(config, directory, client_directory).await?),
+        Some(client_directory) => {
+            Some(ui_application(config, directory.clone(), client_directory).await?)
+        }
         None => None,
     };
     Ok(PreparedSuite {
@@ -890,9 +945,11 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         auth,
         storage,
         firestore: firestore_routes,
+        console_firestore,
         request_history,
         logging,
         hub,
+        directory,
         ui,
         export_receiver,
         background_receiver,
@@ -924,15 +981,16 @@ fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeE
     Ok(logging)
 }
 
-/// The Firestore port's gRPC, REST and `WebChannel` routes, when selected.
+/// The Firestore port's gRPC, REST and `WebChannel` routes, when selected,
+/// with the console's own REST instance and change feed on the same service.
 fn prepare_firestore(
     config: &SuiteConfig,
     store: &Store,
     triggers: &TriggerRegistry,
     logging: &LoggingRuntime,
-) -> Result<(Option<tonic::service::Routes>, Option<RequestHistory>), SuiteRuntimeError> {
+) -> Result<Option<FirestoreParts>, SuiteRuntimeError> {
     if !config.services.firestore {
-        return Ok((None, None));
+        return Ok(None);
     }
     let query_policy = query_policy(config)?;
     let firestore_rules = firestore_rules(config)?;
@@ -944,18 +1002,39 @@ fn prepare_firestore(
     );
     let firestore_http = rest_router(
         store.clone(),
-        query_policy,
+        query_policy.clone(),
         None,
-        firestore_rules,
+        firestore_rules.clone(),
         triggers.clone(),
         service.clone(),
     )
     .merge(webchannel_router(FirestoreBackend::new(service.clone())));
     let firestore_http = project_scope::apply(firestore_http, config, logging);
-    Ok((
-        Some(tonic::service::Routes::from(firestore_http).add_service(service.into_server())),
+    let console = ConsoleFirestoreParts {
+        rest: rest_router(
+            store.clone(),
+            query_policy,
+            None,
+            firestore_rules,
+            triggers.clone(),
+            service.clone(),
+        ),
+        changes: ChangeFeed::attach(store),
+        schema: SchemaIndex::attach(store, &config.project_id),
+        databases: DatabaseCatalog::new(
+            store,
+            &config.project_id,
+            config
+                .firestore_databases
+                .iter()
+                .map(|database| database.database_id.clone()),
+        ),
+    };
+    Ok(Some(FirestoreParts {
+        routes: tonic::service::Routes::from(firestore_http).add_service(service.into_server()),
+        console,
         request_history,
-    ))
+    }))
 }
 
 async fn finish_suite(
@@ -1508,7 +1587,7 @@ struct ListenerSet(std::collections::BTreeMap<&'static str, TcpListener>);
 
 struct StaticApplications {
     firestore: Option<tonic::service::Routes>,
-    request_history: Option<RequestHistory>,
+    requests: Option<Router>,
     auth: Option<Router>,
     storage: Option<Router>,
     hub: Router,
@@ -1562,7 +1641,9 @@ fn spawn_static_servers(
         servers.push(spawn_axum(
             "firestore.websocket",
             listeners.take("firestore.websocket")?,
-            requests_router(applications.request_history, shutdown.subscribe()),
+            applications
+                .requests
+                .unwrap_or_else(|| requests_router(None, shutdown.subscribe())),
             shutdown.subscribe(),
             failed.clone(),
         ));

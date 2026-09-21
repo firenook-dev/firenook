@@ -1,11 +1,13 @@
 /*
  * Order matters: Kumo's stylesheet registers its theme tokens before Tailwind
- * compiles, and the @source line lets Tailwind see the classes inside Kumo's
- * compiled components.
+ * compiles, the @source line lets Tailwind see the classes inside Kumo's
+ * compiled components, and Firenook's theme comes last so its tokens win.
  */
 @source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
 @import '@cloudflare/kumo/styles/tailwind';
 @import 'tailwindcss';
+@import './fonts.css';
+@import './theme.css';
 
 html,
 body,
@@ -15,4 +17,37 @@ body,
 
 body {
   margin: 0;
+}
+
+/* A row the live channel just touched settles from the success tint (or the
+   danger tint for a delete) back to the surface; no colour transitions on
+   hover, but a change that just happened deserves a moment. */
+@keyframes row-flash {
+  from {
+    background-color: var(--color-kumo-success-tint);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+@keyframes row-flash-deleted {
+  from {
+    background-color: var(--color-kumo-danger-tint);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.row-flash > td {
+  animation: row-flash 1.6s ease-out;
+}
+.row-flash-deleted > td {
+  animation: row-flash-deleted 1.6s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .row-flash > td,
+  .row-flash-deleted > td {
+    animation: none;
+    background-color: var(--color-kumo-tint);
+  }
 }

@@ -519,10 +519,53 @@ served until every section has landed.
   route with Rust-generated TypeScript types; unit, end-to-end (real engine)
   and bundle-budget checks in CI; the console is built before every engine
   build.
-- [ ] Console API contract and live channel (one multiplexed socket, deltas
-  per scope, bounded like the Requests feed).
-- [ ] Firestore workbench: path bar, grid with inferred columns, query
-  builder, inspector, bulk actions, view-as-user over the rules engine.
+- [x] Same-origin data services under the console: the Firestore REST front,
+  the Requests feed and the Auth application mount under `/console/api/v1`,
+  so the console works wherever its page loads from (a proxy, an HTTPS
+  alias) and never needs the service ports from the browser.
+- [x] Live channel: a server-sent event stream fed by the store's commit
+  observers carries every commit's document paths; the console invalidates
+  by scope and flashes the rows on screen. Nothing polls.
+- [x] Firestore workbench: path bar as a command line with completion and
+  index counts, grid with inferred typed columns (mixed types flagged),
+  cursor-paged and virtualized, the SDK query chain as text with the live
+  count, view-as-user over the rules engine with the Requests drawer and the
+  deciding rule lines, inspector with typed editors and JSON, add and delete
+  (recursive), copy as code (Web, Admin, Flutter, REST). Found and fixed on
+  the way: the REST front ignored `startAt`/`endAt` cursors.
+- [x] Creating and shaping: one `New` menu that follows the context (document,
+  root collection, subcollection under the open document, duplicate, JSON
+  import), typed fields from the first document, the inspector grows
+  subcollections in place, the path bar offers to create what does not
+  exist, column headers sort, filter and hide, scalar cells edit in place,
+  reference cells peek at their target beside the grid, every row shows
+  its subcollections and jumps into them, and ⌘K carries the page's
+  collections, recent paths and actions.
+- [x] The shape of the data: the engine keeps a schema index per database
+  (collection patterns such as `users/*/orders/*/items` with document and
+  parent counts, one key-only walk on first use, exact from then on through
+  the commit observer) and serves it at `/console/api/v1/firestore/schema`.
+  The console draws it as a tree: a root opens as a grid, a nested pattern
+  opens as the collection group it names, the row for the current shape is
+  marked and the foot says how many parents carry it. The grid names each
+  row's subcollections in their own column, the path bar shows a pattern's
+  `*`, the root landing describes each collection's shape, and ⌘K finds
+  any pattern by name.
+- [x] The shell's layout: the navigation is expanded or collapsed to icons
+  (flipped at its foot or with `[`, kept per browser), a collapsed one
+  slides its labels out on hover, and every section can fill a panel
+  column beside its content. Firestore fills it with the database, a filter and the schema
+  tree, open only along the current path, so a database with dozens of
+  roots and hundreds of thousands of documents reads at a glance; the
+  workbench runs edge to edge under its own toolbar, and `t` hides the
+  panel.
+- [x] Every database of the project: `/console/api/v1/firestore/databases`
+  lists `(default)`, every database `firebase.json` declares and every one
+  a client has written to (the store seeks once per database), and the
+  panel's picker offers them, asking again each time it opens. Picking one
+  switches the tree, the path bar and the grid to that database alone.
+- [ ] Firestore follow-ups: explain (composite-index warning), export from
+  the page, undo within the change-log window, rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

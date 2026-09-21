@@ -1317,26 +1317,25 @@ fn decode_query(
     }
     if let Some(orders) = structured.get("orderBy").and_then(JsonValue::as_array) {
         for order in orders {
-            let order = order
-                .as_object()
-                .ok_or_else(|| RestError::invalid("orderBy entry must be an object"))?;
-            let field = order
-                .get("field")
-                .and_then(JsonValue::as_object)
-                .and_then(|field| field.get("fieldPath"))
-                .and_then(JsonValue::as_str)
-                .ok_or_else(|| RestError::invalid("orderBy fieldPath is required"))?;
-            let direction = match order
-                .get("direction")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("ASCENDING")
-            {
-                "ASCENDING" => Direction::Ascending,
-                "DESCENDING" => Direction::Descending,
-                _ => return Err(RestError::invalid("invalid orderBy direction")),
-            };
-            query = query.order_by(decode_query_field(field)?, direction);
+            let (field, direction) = decode_order(order)?;
+            query = query.order_by(field, direction);
         }
+    }
+    if let Some(cursor) = structured.get("startAt") {
+        let (values, before) = decode_cursor(cursor, "startAt")?;
+        query = if before {
+            query.start_at(values)
+        } else {
+            query.start_after(values)
+        };
+    }
+    if let Some(cursor) = structured.get("endAt") {
+        let (values, before) = decode_cursor(cursor, "endAt")?;
+        query = if before {
+            query.end_before(values)
+        } else {
+            query.end_at(values)
+        };
     }
     if let Some(offset) = structured.get("offset").and_then(JsonValue::as_u64) {
         query = query.offset(
@@ -1379,6 +1378,53 @@ fn decode_query(
         query = decode_nearest(query, nearest)?;
     }
     Ok(query)
+}
+
+fn decode_order(order: &JsonValue) -> Result<(QueryFieldPath, Direction), RestError> {
+    let order = order
+        .as_object()
+        .ok_or_else(|| RestError::invalid("orderBy entry must be an object"))?;
+    let field = order
+        .get("field")
+        .and_then(JsonValue::as_object)
+        .and_then(|field| field.get("fieldPath"))
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| RestError::invalid("orderBy fieldPath is required"))?;
+    let direction = match order
+        .get("direction")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("ASCENDING")
+    {
+        "ASCENDING" => Direction::Ascending,
+        "DESCENDING" => Direction::Descending,
+        _ => return Err(RestError::invalid("invalid orderBy direction")),
+    };
+    Ok((decode_query_field(field)?, direction))
+}
+
+/// A REST `Cursor`: the sort-key values in order and whether the position is
+/// before them (`startAt`/`endBefore`) or after (`startAfter`/`endAt`).
+fn decode_cursor(value: &JsonValue, name: &str) -> Result<(Vec<Value>, bool), RestError> {
+    let cursor = value
+        .as_object()
+        .ok_or_else(|| RestError::invalid(format!("{name} must be an object")))?;
+    let values = cursor
+        .get("values")
+        .map(|values| {
+            values
+                .as_array()
+                .ok_or_else(|| RestError::invalid(format!("{name} values must be an array")))
+        })
+        .transpose()?
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(decode_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let before = cursor
+        .get("before")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
+    Ok((values, before))
 }
 
 fn decode_nearest(query: StructuredQuery, value: &JsonValue) -> Result<StructuredQuery, RestError> {
@@ -2938,6 +2984,71 @@ mod tests {
                 "structuredQuery": {
                     "from": [{"collectionId": "items"}],
                     "select": {"fields": [{"nope": "label"}]}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn run_query_applies_start_and_end_cursors_like_the_grpc_codec() {
+        let database = DatabaseName::new("demo-cursor", "(default)").expect("database");
+        let base = "/v1/projects/demo-cursor/databases/(default)/documents";
+        let name = |index: usize| {
+            format!("projects/demo-cursor/databases/(default)/documents/items/item-{index:03}")
+        };
+        let ids = |response: &JsonValue| -> Vec<String> {
+            response
+                .as_array()
+                .expect("array")
+                .iter()
+                .filter_map(|row| row["document"]["name"].as_str())
+                .map(|full| full.rsplit('/').next().expect("id").to_owned())
+                .collect()
+        };
+
+        // `before: false` on startAt is the SDK's startAfter: the next page.
+        let (status, response) = post_json(
+            seeded_store(&database, 6),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "orderBy": [{"field": {"fieldPath": "__name__"}}],
+                    "startAt": {"values": [{"referenceValue": name(1)}], "before": false},
+                    "limit": 2
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(ids(&response), ["item-002", "item-003"]);
+
+        // `before: true` includes the cursor document itself.
+        let (status, response) = post_json(
+            seeded_store(&database, 6),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "orderBy": [{"field": {"fieldPath": "__name__"}, "direction": "DESCENDING"}],
+                    "startAt": {"values": [{"referenceValue": name(4)}], "before": true},
+                    "endAt": {"values": [{"referenceValue": name(2)}], "before": true},
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(ids(&response), ["item-004", "item-003"]);
+
+        let (status, _) = post_json(
+            seeded_store(&database, 1),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "startAt": {"values": "nope"}
                 }
             }),
         )

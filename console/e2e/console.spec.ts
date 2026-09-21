@@ -24,15 +24,51 @@ test('client routes deep-link through the engine and navigate in place', async (
   await expect(page.getByText('running', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'Firestore' }).click()
   await expect(page).toHaveURL(/\/console\/firestore$/)
-  await expect(page.getByRole('heading', { name: 'Firestore', level: 1 })).toBeVisible()
+  // The workbench fills the content column; its heading is for readers.
+  await expect(page.getByRole('heading', { name: 'Firestore', level: 1 })).toBeAttached()
+  await expect(page.getByTestId('path-bar')).toBeVisible()
   await page.goto(`${origin()}/console/tasks`)
   await expect(page.getByText('not running', { exact: true })).toBeVisible()
 })
 
+test('the navigation collapses to icons that peek on hover, and remembers it', async ({ page }) => {
+  await page.goto(`${origin()}/console/auth`)
+  const nav = page.locator('aside[data-sidebar="sidebar"]')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+  await expect(page.getByTestId('nav-toggle')).toHaveAttribute('aria-expanded', 'true')
+
+  // Collapsed: icons only, and the choice survives a reload.
+  await page.getByTestId('nav-toggle').click()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // Collapsed, the labels slide out over the page while the pointer is on
+  // the rail, and go back when it leaves.
+  await nav.locator('[data-sidebar="peek-zone"]').hover()
+  await expect(nav).toHaveAttribute('data-state', 'peeking')
+  await expect(nav.getByRole('link', { name: 'Functions' })).toBeVisible()
+  await page.getByRole('heading', { name: 'Authentication', level: 1 }).hover()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // `[` flips it; ⌘K offers the same.
+  await page.keyboard.press('[')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+  await page.keyboard.press('[')
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('palette-input').fill('expand sidebar')
+  await page.keyboard.press('Enter')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+})
+
 test('the command palette opens from the keyboard and jumps to a section', async ({ page }) => {
   await page.goto(`${origin()}/console`)
+  // The shortcut is a window listener the shell installs after mount.
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
   await page.keyboard.press('ControlOrMeta+k')
-  const input = page.getByPlaceholder('Jump to a section…')
+  const input = page.getByTestId('palette-input')
   await expect(input).toBeVisible()
   await input.fill('tasks')
   await page.keyboard.press('Enter')

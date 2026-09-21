@@ -16,7 +16,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "budget": "node scripts/bundle-budget.mjs"
+    "budget": "node scripts/bundle-budget.mjs",
+    "seed": "node scripts/seed-firestore.mjs",
+    "design-system": "node scripts/design-system/build.mjs",
+    "design-system:dev": "vite --config design-system/vite.config.ts"
   },
   "dependencies": {
     "@cloudflare/kumo": "2.14.0",
@@ -33,6 +36,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@tailwindcss/cli": "4.3.3",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/react-devtools": "0.10.12",
     "@tanstack/react-query-devtools": "5.103.1",

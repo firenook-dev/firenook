@@ -1,90 +1,137 @@
 import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
-import { ArrowSquareOutIcon, GaugeIcon, type Icon } from '@phosphor-icons/react'
+import {
+  ArrowSquareOutIcon,
+  GaugeIcon,
+  SidebarSimpleIcon,
+  SquareHalfIcon,
+} from '@phosphor-icons/react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
-import { useConsoleUi } from '@/lib/store'
+import {
+  type PaletteGroup,
+  type PaletteItem,
+  matchesQuery,
+  usePaletteProviders,
+} from '@/lib/palette'
+import { useLayout } from '@/lib/layout'
 import { SECTIONS } from '@/lib/services'
-
-interface Command {
-  id: string
-  title: string
-  keywords: string
-  icon: Icon
-  run: () => void
-}
+import { useConsoleUi } from '@/lib/store'
 
 export function CommandPalette() {
   const open = useConsoleUi((state) => state.paletteOpen)
   const setOpen = useConsoleUi((state) => state.setPaletteOpen)
+  const providers = usePaletteProviders((state) => state.providers)
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
+  const navOpen = useLayout((state) => state.navOpen)
+  const toggleNav = useLayout((state) => state.toggleNav)
+  const panel = useLayout((state) => state.panel)
+  const panelOpen = useLayout((state) => state.panelOpen)
+  const togglePanel = useLayout((state) => state.togglePanel)
 
-  const commands = useMemo<Command[]>(() => {
-    const go = (to: string) => () => {
-      setOpen(false)
-      void navigate({ to })
-    }
+  const sections = useMemo<PaletteItem[]>(() => {
+    const go = (to: string) => () => void navigate({ to })
     return [
       {
         id: 'overview',
         title: 'Overview',
         keywords: 'home status services',
-        icon: GaugeIcon,
+        icon: <GaugeIcon size={16} />,
         run: go('/'),
       },
       ...SECTIONS.map((section) => ({
         id: section.to,
         title: section.label,
         keywords: section.services.join(' '),
-        icon: section.icon,
+        icon: <section.icon size={16} />,
         run: go(section.to),
       })),
       {
         id: 'legacy-ui',
         title: 'Open the Google Emulator UI',
         keywords: 'legacy official firebase',
-        icon: ArrowSquareOutIcon,
-        run: () => {
-          setOpen(false)
-          window.open('/', '_blank', 'noopener')
-        },
+        icon: <ArrowSquareOutIcon size={16} />,
+        run: () => window.open('/', '_blank', 'noopener'),
       },
     ]
-  }, [navigate, setOpen])
+  }, [navigate])
 
-  const query = search.trim().toLowerCase()
-  const items = query
-    ? commands.filter((command) =>
-        `${command.title} ${command.keywords}`.toLowerCase().includes(query),
-      )
-    : commands
+  // How the shell is laid out: the navigation and the section panel.
+  const layout = useMemo<PaletteItem[]>(() => {
+    const items: PaletteItem[] = [
+      {
+        id: 'layout:nav',
+        title: navOpen ? 'Collapse the sidebar' : 'Expand the sidebar',
+        description: navOpen ? 'icons only; hover to peek · [' : 'icons and labels · [',
+        keywords: 'navigation layout sidebar collapse expand',
+        icon: <SidebarSimpleIcon size={16} />,
+        run: toggleNav,
+      },
+    ]
+    if (panel.present)
+      items.push({
+        id: 'layout:panel',
+        title: `${panelOpen ? 'Hide' : 'Show'} the ${panel.label.toLowerCase()} panel`,
+        description: 'the column beside the content · t',
+        keywords: 'layout tree schema rail sidebar',
+        icon: <SquareHalfIcon size={16} />,
+        run: togglePanel,
+      })
+    return items
+  }, [navOpen, toggleNav, panel, panelOpen, togglePanel])
+
+  // What the page on screen contributes comes first; the sections and the
+  // layout always follow.
+  const groups = useMemo<PaletteGroup[]>(() => {
+    const contributed = Object.values(providers).flatMap((provider) => provider(search))
+    const filter = (items: PaletteItem[]) => items.filter((item) => matchesQuery(item, search))
+    return [
+      ...contributed,
+      { label: 'Sections', items: filter(sections) },
+      { label: 'Layout', items: filter(layout) },
+    ].filter((group) => group.items.length > 0)
+  }, [providers, search, sections, layout])
+
+  const choose = (item: PaletteItem) => {
+    setOpen(false)
+    setSearch('')
+    item.run()
+  }
 
   return (
-    <KumoCommandPalette.Root
+    <KumoCommandPalette.Root<PaletteGroup, PaletteItem>
       open={open}
       onOpenChange={(next) => {
         setOpen(next)
         if (!next) setSearch('')
       }}
-      items={items}
+      items={groups}
       value={search}
       onValueChange={setSearch}
-      itemToStringValue={(command) => command.title}
-      onSelect={(command) => command.run()}
-      getSelectableItems={(all) => all}
+      itemToStringValue={(group) => group.label}
+      onSelect={choose}
+      getSelectableItems={(all) => all.flatMap((group) => group.items)}
     >
-      <KumoCommandPalette.Input placeholder="Jump to a section…" />
+      <KumoCommandPalette.Input placeholder="Jump anywhere…" data-testid="palette-input" />
       <KumoCommandPalette.List>
         <KumoCommandPalette.Results>
-          {(command: Command) => (
-            <KumoCommandPalette.Item key={command.id} value={command} onClick={command.run}>
-              <span className="flex items-center gap-3">
-                <span className="h-lh flex items-center text-kumo-subtle">
-                  <command.icon size={16} />
-                </span>
-                <span>{command.title}</span>
-              </span>
-            </KumoCommandPalette.Item>
+          {(group: PaletteGroup) => (
+            <KumoCommandPalette.Group key={group.label} items={group.items}>
+              <KumoCommandPalette.GroupLabel>{group.label}</KumoCommandPalette.GroupLabel>
+              <KumoCommandPalette.Items>
+                {(item: PaletteItem) => (
+                  <KumoCommandPalette.ResultItem
+                    key={item.id}
+                    title={item.title}
+                    {...(item.breadcrumbs ? { breadcrumbs: item.breadcrumbs } : {})}
+                    {...(item.description ? { description: item.description } : {})}
+                    icon={item.icon}
+                    value={item}
+                    onClick={() => choose(item)}
+                  />
+                )}
+              </KumoCommandPalette.Items>
+            </KumoCommandPalette.Group>
           )}
         </KumoCommandPalette.Results>
         <KumoCommandPalette.Empty>Nothing matches</KumoCommandPalette.Empty>
