@@ -3,18 +3,27 @@
 // collection on the way. `/` focuses it from anywhere on the page.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { CopyIcon, DatabaseIcon, FolderPlusIcon, StackIcon } from '@phosphor-icons/react'
+import {
+  ArrowElbowDownRightIcon,
+  CopyIcon,
+  FolderPlusIcon,
+  StackIcon,
+  TreeStructureIcon,
+} from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useCreateDialog, validateId } from '../create'
 import { EMPTY_QUERY } from '../query'
 import { collectionsQuery, countQueryOptions } from '../queries'
+import { childrenOf, findNode, isPattern, schemaQuery, useSchemaRail } from '../schema'
 import { formatNumber } from '../value'
 import { useWorkbench } from './workbench-context'
 
 export function PathBar() {
   const workbench = useWorkbench()
   const openCreate = useCreateDialog((state) => state.open)
+  const railOpen = useSchemaRail((state) => state.open)
+  const toggleRail = useSchemaRail((state) => state.toggle)
   const [editing, setEditing] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -61,15 +70,41 @@ export function PathBar() {
       className="flex h-11 items-center gap-1 rounded-lg bg-kumo-base pr-2 pl-3 ring ring-kumo-line"
       data-testid="path-bar"
     >
-      <span className="flex h-lh items-center text-kumo-subtle">
-        <DatabaseIcon size={16} />
-      </span>
+      <Tooltip
+        content={railOpen ? 'Hide the schema (t)' : 'Show the schema (t)'}
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={<TreeStructureIcon />}
+            aria-label={railOpen ? 'Hide the schema' : 'Show the schema'}
+            aria-pressed={railOpen}
+            onClick={toggleRail}
+            className={railOpen ? 'text-kumo-default' : 'text-kumo-subtle'}
+            data-testid="schema-rail-toggle"
+          />
+        }
+      />
       {editing === null ? (
         <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
           <PathSegment label={workbench.database} onClick={() => workbench.setPath('')} first />
           {segments.map((segment, index) => {
             const path = segments.slice(0, index + 1).join('/')
             const isCollection = index % 2 === 0
+            // The `*` of a pattern stands for any document; it goes nowhere.
+            if (segment === '*')
+              return (
+                <span key={path} className="flex shrink-0 items-center">
+                  <span className="px-0.5 text-kumo-inactive">/</span>
+                  <span
+                    className="px-1.5 font-mono text-[0.9em] text-kumo-inactive"
+                    title="Any document"
+                  >
+                    *
+                  </span>
+                </span>
+              )
             return (
               <PathSegment
                 key={path}
@@ -80,6 +115,7 @@ export function PathBar() {
               />
             )
           })}
+          {workbench.collectionPath && <Below path={workbench.collectionPath} />}
           <button
             type="button"
             className="ml-1 h-7 min-w-24 flex-1 cursor-text rounded-md px-2 text-left font-mono text-[0.9em] text-kumo-inactive hover:bg-kumo-tint"
@@ -176,13 +212,25 @@ export function PathBar() {
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {workbench.collectionPath && (
           <Tooltip
-            content="Query every collection with this id, at any depth"
+            content={
+              workbench.isPattern
+                ? `Every ${workbench.collectionPath.split('/').at(-1) ?? ''} under the pattern; click to go back to ${
+                    workbench.collectionPath.split('/')[0] ?? ''
+                  }`
+                : 'Query every collection with this id, at any depth'
+            }
             render={
               <Button
                 variant={workbench.group ? 'primary' : 'ghost'}
                 size="sm"
                 icon={<StackIcon />}
-                onClick={() => workbench.setGroup(!workbench.group)}
+                onClick={() =>
+                  // A pattern is nothing but its group; leaving it lands on
+                  // the root collection the pattern starts from.
+                  workbench.isPattern
+                    ? workbench.setPath(workbench.collectionPath.split('/')[0] ?? '')
+                    : workbench.setGroup(!workbench.group)
+                }
                 aria-pressed={workbench.group}
                 aria-label="Toggle collection group"
               >
@@ -273,11 +321,55 @@ function PathSegment({
 
 function CollectionCount({ path }: { path: string }) {
   const workbench = useWorkbench()
-  const count = useQuery(countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY))
-  if (count.data === undefined) return null
+  const pattern = isPattern(path)
+  // A concrete collection is counted from the index; a pattern's count is
+  // what the schema tree keeps for it.
+  const count = useQuery({
+    ...countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY),
+    enabled: !pattern,
+  })
+  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: pattern })
+  const value = pattern ? findNode(schema.data, path)?.documents : count.data?.count
+  if (value === undefined) return null
+  return <span className="text-[11px] text-kumo-subtle tabular-nums">{formatNumber(value)}</span>
+}
+
+/** What lives under the documents here, from the schema: each opens its group. */
+function Below({ path }: { path: string }) {
+  const workbench = useWorkbench()
+  const schema = useQuery(schemaQuery(workbench.database))
+  const children = childrenOf(schema.data, path)
+  if (children.length === 0) return null
+  const shown = children.slice(0, 4)
+  const more = children.length - shown.length
   return (
-    <span className="text-[11px] text-kumo-subtle tabular-nums">
-      {formatNumber(count.data.count)}
+    <span className="ml-2 flex shrink-0 items-center gap-1" data-testid="path-below">
+      <ArrowElbowDownRightIcon size={12} className="text-kumo-inactive" />
+      {shown.map((child) => (
+        <button
+          key={child.pattern}
+          type="button"
+          onClick={() => workbench.setPath(child.pattern)}
+          className="flex h-5 items-center gap-1 rounded bg-kumo-tint px-1.5 font-mono text-[11px] text-kumo-subtle hover:bg-kumo-elevated hover:text-kumo-default"
+          title={`${child.pattern} · ${formatNumber(child.documents)} ${
+            child.documents === 1 ? 'document' : 'documents'
+          }${child.parents === null ? '' : ` in ${formatNumber(child.parents)} parents`}`}
+          data-testid="path-below-link"
+        >
+          {child.id}
+          <span className="text-kumo-inactive tabular-nums">{formatNumber(child.documents)}</span>
+        </button>
+      ))}
+      {more > 0 && (
+        <button
+          type="button"
+          onClick={() => useSchemaRail.getState().setOpen(true)}
+          className="h-5 rounded px-1 font-mono text-[11px] text-kumo-subtle hover:bg-kumo-tint"
+          title="Open the schema tree"
+        >
+          +{more}
+        </button>
+      )}
     </span>
   )
 }

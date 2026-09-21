@@ -13,6 +13,7 @@ import { useLive, useLiveChanges } from '../live'
 import { useFirestorePalette } from '../palette'
 import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
+import { useSchemaRail } from '../schema'
 import { resetSelection, useSelection } from '../selection'
 import { CreateDialog } from './create-dialog'
 import { DeleteDialog } from './delete-dialog'
@@ -22,6 +23,7 @@ import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
 import { QueryLine } from './query-line'
 import { RequestsDrawer } from './requests-drawer'
+import { SchemaRail } from './schema-rail'
 import {
   DEFAULT_DATABASE,
   WorkbenchProvider,
@@ -63,6 +65,8 @@ function WorkbenchBody() {
   const clearSelection = useSelection((state) => state.clear)
   const openQuery = useQueryLine((state) => state.setOpen)
   const openCreate = useCreateDialog((state) => state.open)
+  const railOpen = useSchemaRail((state) => state.open)
+  const toggleRail = useSchemaRail((state) => state.toggle)
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [deleting, setDeleting] = useState<string[]>([])
 
@@ -107,14 +111,17 @@ function WorkbenchBody() {
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && checked.size > 0) {
         event.preventDefault()
         setDeleting([...checked])
-      } else if (event.key === 'n' && workbench.collectionPath) {
+      } else if (event.key === 'n' && workbench.collectionPath && !workbench.isPattern) {
         event.preventDefault()
         openCreate({ kind: 'document', collection: workbench.collectionPath })
+      } else if (event.key === 't') {
+        event.preventDefault()
+        toggleRail()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench, checked, clearSelection, openQuery, openCreate])
+  }, [workbench, checked, clearSelection, openQuery, openCreate, toggleRail])
 
   const firestoreRunning = status.data?.services.some((service) => service.name === 'firestore')
   const databases = {
@@ -172,6 +179,7 @@ function WorkbenchBody() {
       <PathBar />
       {workbench.collectionPath && <QueryLine />}
       <div className="flex min-h-0 flex-1 gap-3">
+        {railOpen && <SchemaRail />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Grid />
         </div>

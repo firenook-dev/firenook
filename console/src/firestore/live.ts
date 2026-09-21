@@ -83,7 +83,7 @@ export function scopesTouched(batch: ChangeBatch): {
  * Opens the change stream for `database` while the workbench is mounted and
  * invalidates by scope. Page queries for a touched collection refetch; the
  * document query for a touched document refetches; a create or delete also
- * refreshes counts and collection lists.
+ * refreshes counts, collection lists and the schema tree.
  */
 export function useLiveChanges(queryClient: QueryClient, database: string) {
   useEffect(() => {
@@ -124,6 +124,7 @@ export function useLiveChanges(queryClient: QueryClient, database: string) {
         }
         if (kind === 'doc') return documents.has(scope)
         if (kind === 'collections') return structural && (scope === '' || parents.has(scope))
+        if (kind === 'schema') return structural
         return false
       })
     }

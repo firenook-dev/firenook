@@ -9,6 +9,7 @@
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
 mod firestore;
+mod schema;
 
 use axum::Json;
 use axum::Router;
@@ -25,6 +26,7 @@ use ts_rs::TS;
 pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
 };
+pub use schema::{SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot};
 
 /// Built console assets. `build.rs` guarantees the folder exists, so a
 /// checkout without a console build still compiles and the router answers
@@ -259,6 +261,7 @@ mod tests {
         ConsoleStatus::export_all(&config).expect("TypeScript bindings written");
         ChangeBatch::export_all(&config).expect("TypeScript bindings written");
         ChangeHello::export_all(&config).expect("TypeScript bindings written");
+        SchemaSnapshot::export_all(&config).expect("TypeScript bindings written");
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(

@@ -1,16 +1,19 @@
 // What Firestore contributes to ⌘K while the workbench is on screen: any
-// typed path, recent paths, root collections and the subcollections of the
-// open document, and the workbench's own actions.
+// typed path, recent paths, every collection in the schema tree (a nested
+// one opens as its group), the subcollections of the open document, and
+// the workbench's own actions.
 
 import {
   ArrowRightIcon,
   ClockCounterClockwiseIcon,
   DatabaseIcon,
   FileIcon,
+  FolderIcon,
   FolderPlusIcon,
   FolderSimplePlusIcon,
   FunnelIcon,
   HouseIcon,
+  TreeStructureIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
@@ -27,6 +30,7 @@ import { useCreateDialog } from './create'
 import { useQueryLine } from './query-line-store'
 import { collectionsQuery } from './queries'
 import { useRecents } from './recents'
+import { flattenSchema, schemaQuery, useSchemaRail } from './schema'
 
 export function useFirestorePalette() {
   const workbench = useWorkbench()
@@ -36,8 +40,11 @@ export function useFirestorePalette() {
   const openCreate = useCreateDialog((state) => state.open)
   const openQuery = useQueryLine((state) => state.setOpen)
   const recents = useRecents((state) => state.items)
+  const railOpen = useSchemaRail((state) => state.open)
+  const toggleRail = useSchemaRail((state) => state.toggle)
   const selected = workbench.selectedDocument
   const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
+  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: paletteOpen })
   const under = useQuery({
     ...collectionsQuery(workbench.ownerScope, selected ?? ''),
     enabled: paletteOpen && Boolean(selected),
@@ -45,7 +52,16 @@ export function useFirestorePalette() {
 
   const provider = useMemo(() => {
     const go = (path: string) => () => workbench.setPath(path)
-    const known = new Set([...(roots.data ?? []), ...recents.map((recent) => recent.path)])
+    // The schema tree lists every shape; the plain root list stands in
+    // until it has answered.
+    const shapes = flattenSchema(schema.data)
+    const known = new Set([
+      ...(roots.data ?? []),
+      ...shapes.map((entry) => entry.node.pattern),
+      ...recents.map((recent) => recent.path),
+    ])
+    const plural = (count: number, word: string) =>
+      `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`
     const collections: PaletteItem[] = [
       ...(selected
         ? (under.data ?? []).map<PaletteItem>((id) => ({
@@ -57,12 +73,28 @@ export function useFirestorePalette() {
             run: go(`${selected}/${id}`),
           }))
         : []),
-      ...(roots.data ?? []).map<PaletteItem>((id) => ({
-        id: `root:${id}`,
-        title: id,
-        icon: <DatabaseIcon size={16} />,
-        run: go(id),
-      })),
+      ...(schema.data
+        ? shapes.map<PaletteItem>(({ node, depth, parent }) => {
+            const item: PaletteItem = {
+              id: `shape:${node.pattern}`,
+              title: node.id,
+              description:
+                depth === 0
+                  ? plural(node.documents, 'document')
+                  : `${plural(node.documents, 'document')} across every ${parent?.id ?? 'parent'}`,
+              keywords: node.pattern,
+              icon: depth === 0 ? <DatabaseIcon size={16} /> : <FolderIcon size={16} />,
+              run: go(node.pattern),
+            }
+            if (parent) item.breadcrumbs = [parent.pattern]
+            return item
+          })
+        : (roots.data ?? []).map<PaletteItem>((id) => ({
+            id: `root:${id}`,
+            title: id,
+            icon: <DatabaseIcon size={16} />,
+            run: go(id),
+          }))),
     ]
     const recentItems = recents.map<PaletteItem>((recent) => ({
       id: `recent:${recent.path}`,
@@ -112,13 +144,22 @@ export function useFirestorePalette() {
         icon: <FolderSimplePlusIcon size={16} />,
         run: () => openCreate({ kind: 'collection', parent: selected }),
       })
-    actions.push({
-      id: 'fs:new-collection',
-      title: 'New root collection',
-      keywords: 'add create',
-      icon: <FolderPlusIcon size={16} />,
-      run: () => openCreate({ kind: 'collection', parent: '' }),
-    })
+    actions.push(
+      {
+        id: 'fs:new-collection',
+        title: 'New root collection',
+        keywords: 'add create',
+        icon: <FolderPlusIcon size={16} />,
+        run: () => openCreate({ kind: 'collection', parent: '' }),
+      },
+      {
+        id: 'fs:schema',
+        title: railOpen ? 'Hide the schema tree' : 'Show the schema tree',
+        keywords: 'structure subcollections shape',
+        icon: <TreeStructureIcon size={16} />,
+        run: toggleRail,
+      },
+    )
     if (workbench.path)
       actions.push({
         id: 'fs:root',
@@ -155,7 +196,18 @@ export function useFirestorePalette() {
         })
       return groups
     }
-  }, [workbench, roots.data, under.data, recents, selected, openCreate, openQuery])
+  }, [
+    workbench,
+    roots.data,
+    schema.data,
+    under.data,
+    recents,
+    selected,
+    openCreate,
+    openQuery,
+    railOpen,
+    toggleRail,
+  ])
 
   useEffect(() => {
     register('firestore', provider)

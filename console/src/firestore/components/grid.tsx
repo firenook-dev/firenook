@@ -7,6 +7,7 @@ import {
   ClockCounterClockwiseIcon,
   DatabaseIcon,
   FileIcon,
+  FolderIcon,
   FolderPlusIcon,
   LockKeyIcon,
   PlusIcon,
@@ -29,17 +30,20 @@ import {
 } from '../queries'
 import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
+import { childrenOf, describeChildren, schemaQuery } from '../schema'
 import { useSelection } from '../selection'
-import type { FsDocument } from '../value'
+import { type FsDocument, formatNumber } from '../value'
 import { IdCell, ValueCell } from './cells'
 import { HeaderMenu } from './header-menu'
 import { InlineCellEditor, inlineEditable } from './inline-cell-editor'
 import { INSPECTOR_WIDTH } from './inspector'
-import { SubcollectionsChip } from './subcollections-chip'
+import { SubcollectionsCell, subcollectionsWidth } from './subcollections-cell'
 import { useWorkbench } from './workbench-context'
 
 const ROW_HEIGHT = 36
 const ID_WIDTH = 220
+/** A group shows whole paths in the first column, so it gets more room. */
+const PATH_WIDTH = 340
 /** How long a click waits for its double, when opening at once would hide the cell. */
 const DOUBLE_CLICK_MS = 260
 /** Collections up to this size are walked for missing ancestor documents. */
@@ -80,6 +84,14 @@ export function Grid() {
       total.data.count <= MISSING_SCAN_LIMIT,
   })
 
+  // The schema says which subcollections these documents can have; that
+  // decides whether the grid has a subcollections column and how wide.
+  const schema = useQuery(schemaQuery(workbench.database))
+  const known = useMemo(
+    () => childrenOf(schema.data, workbench.collectionPath),
+    [schema.data, workbench.collectionPath],
+  )
+
   const documents = useMemo(() => {
     const loaded = page.data?.pages.flatMap((item) => item.documents) ?? []
     // Missing ancestors only exist to hold subcollections; they belong in
@@ -89,6 +101,10 @@ export function Grid() {
   }, [page.data, missing.data, workbench.queryText, workbench.group])
 
   const allColumns = useMemo(() => inferColumns(documents), [documents])
+  // A missing ancestor exists only because of its subcollections, so it
+  // always earns the column, even before the schema answers.
+  const subcolumn = known.length > 0 || documents.some((document) => document.missing)
+  const subWidth = subcollectionsWidth(known)
   const columns = useMemo(
     () => allColumns.filter((column) => !hidden.has(column.field)),
     [allColumns, hidden],
@@ -176,15 +192,19 @@ export function Grid() {
           title={
             workbench.queryText
               ? 'No documents match this query'
-              : `No documents in ${workbench.collectionPath}`
+              : workbench.isPattern
+                ? `No documents at ${workbench.collectionPath}`
+                : `No documents in ${workbench.collectionPath}`
           }
           description={
             workbench.queryText
               ? 'Loosen a clause, or check the field names and types against the collection.'
-              : 'A collection exists once it has a document. Write one from your app, add one here, or import JSON.'
+              : workbench.isPattern
+                ? 'The collections matching this pattern hold only subcollections; the schema tree shows what is below.'
+                : 'A collection exists once it has a document. Write one from your app, add one here, or import JSON.'
           }
           contents={
-            workbench.queryText ? undefined : (
+            workbench.queryText || workbench.isPattern ? undefined : (
               <div className="flex gap-2">
                 <Button
                   variant="primary"
@@ -216,7 +236,13 @@ export function Grid() {
   const someChecked = documents.some((document) => checked.has(document.path))
   const top = items[0]?.start ?? 0
   const bottom = virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0)
-  const width = 44 + ID_WIDTH + columns.reduce((sum, column) => sum + column.width, 0)
+  const idWidth = workbench.group ? PATH_WIDTH : ID_WIDTH
+  const width =
+    44 +
+    idWidth +
+    (subcolumn ? subWidth : 0) +
+    columns.reduce((sum, column) => sum + column.width, 0)
+  const span = columns.length + 3 + (subcolumn ? 1 : 0)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-lg bg-kumo-base ring ring-kumo-line">
@@ -228,7 +254,8 @@ export function Grid() {
         >
           <colgroup>
             <col style={{ width: 44 }} />
-            <col style={{ width: ID_WIDTH }} />
+            <col style={{ width: idWidth }} />
+            {subcolumn && <col style={{ width: subWidth }} />}
             {columns.map((column) => (
               <col key={column.field} style={{ width: column.width }} />
             ))}
@@ -254,6 +281,21 @@ export function Grid() {
                   <TypeBadge type="doc" />
                 </span>
               </Table.Head>
+              {subcolumn && (
+                <Table.Head className="border-b border-kumo-line" data-testid="subcollections-head">
+                  <span
+                    className="flex items-center gap-1.5 text-kumo-subtle"
+                    title={
+                      known.length > 0
+                        ? `Documents here can hold ${known.map((node) => node.id).join(', ')}`
+                        : 'Subcollections'
+                    }
+                  >
+                    <FolderIcon size={13} />
+                    <span className="font-mono text-[12px] font-medium">subcollections</span>
+                  </span>
+                </Table.Head>
+              )}
               {columns.map((column) => (
                 <Table.Head key={column.field} className="border-b border-kumo-line !px-1">
                   <HeaderMenu column={column} />
@@ -265,7 +307,7 @@ export function Grid() {
           <Table.Body className="[&_td]:h-9 [&_td]:py-0">
             {top > 0 && (
               <tr aria-hidden>
-                <td colSpan={columns.length + 3} style={{ height: top, padding: 0, border: 0 }} />
+                <td colSpan={span} style={{ height: top, padding: 0, border: 0 }} />
               </tr>
             )}
             {items.map((item) => {
@@ -326,11 +368,13 @@ export function Grid() {
                         id={workbench.group ? document.path : document.id}
                         missing={document.missing}
                       />
-                      <span className="ml-auto flex shrink-0 items-center">
-                        <SubcollectionsChip path={document.path} />
-                      </span>
                     </span>
                   </Table.Cell>
+                  {subcolumn && (
+                    <Table.Cell className="!px-2">
+                      <SubcollectionsCell path={document.path} known={known} />
+                    </Table.Cell>
+                  )}
                   {columns.map((column) => {
                     const value = document.fields[column.field]
                     // A value whose type differs from the column's is the odd one out.
@@ -379,10 +423,7 @@ export function Grid() {
             })}
             {bottom > 0 && (
               <tr aria-hidden>
-                <td
-                  colSpan={columns.length + 3}
-                  style={{ height: bottom, padding: 0, border: 0 }}
-                />
+                <td colSpan={span} style={{ height: bottom, padding: 0, border: 0 }} />
               </tr>
             )}
           </Table.Body>
@@ -495,6 +536,9 @@ function RootLanding() {
   const openCreate = useCreateDialog((state) => state.open)
   const recents = useRecents((state) => state.items)
   const collections = useQuery(collectionsQuery(workbench.ownerScope, ''))
+  const schema = useQuery(schemaQuery(workbench.database))
+  const shapes = new Map((schema.data?.collections ?? []).map((node) => [node.id, node]))
+  const anyNested = [...shapes.values()].some((node) => node.children.length > 0)
   return (
     <div className="grid gap-4 overflow-auto py-2">
       <Text variant="secondary">
@@ -547,25 +591,58 @@ function RootLanding() {
         />
       )}
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
-        {(collections.data ?? []).map((id) => (
-          <li key={id}>
-            <button
-              type="button"
-              onClick={() => workbench.setPath(id)}
-              className="flex h-11 w-full items-center gap-2 rounded-lg bg-kumo-base px-3 text-left ring ring-kumo-hairline hover:bg-kumo-tint"
-            >
-              <DatabaseIcon size={16} className="text-kumo-subtle" />
-              <span className="min-w-0 flex-1 truncate font-mono text-[0.9em]">{id}</span>
-              <RootCount path={id} />
-            </button>
-          </li>
-        ))}
+        {(collections.data ?? []).map((id) => {
+          const shape = shapes.get(id)
+          return (
+            <li key={id}>
+              <button
+                type="button"
+                onClick={() => workbench.setPath(id)}
+                className={`flex w-full items-center gap-2 rounded-lg bg-kumo-base px-3 text-left ring ring-kumo-hairline hover:bg-kumo-tint ${
+                  anyNested ? 'h-14' : 'h-11'
+                }`}
+                data-testid="root-collection"
+              >
+                <DatabaseIcon size={16} className="shrink-0 text-kumo-subtle" />
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <span className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[0.9em]">{id}</span>
+                    {shape ? (
+                      <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+                        {formatNumber(shape.documents)}
+                      </span>
+                    ) : (
+                      <RootCount path={id} />
+                    )}
+                  </span>
+                  {anyNested && (
+                    <span
+                      className="truncate font-mono text-[11px] text-kumo-subtle"
+                      title={shape ? describeChildren(shape, 20) : undefined}
+                    >
+                      {shape && shape.children.length > 0 ? (
+                        <span className="flex items-center gap-1">
+                          <FolderIcon size={11} className="shrink-0" />
+                          <span className="truncate">{describeChildren(shape)}</span>
+                        </span>
+                      ) : (
+                        <span className="text-kumo-inactive">no subcollections</span>
+                      )}
+                    </span>
+                  )}
+                </span>
+              </button>
+            </li>
+          )
+        })}
         {collections.data && collections.data.length > 0 && (
           <li>
             <button
               type="button"
               onClick={() => openCreate({ kind: 'collection', parent: '' })}
-              className="flex h-11 w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-3 text-left text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+              className={`flex w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-3 text-left text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default ${
+                anyNested ? 'h-14' : 'h-11'
+              }`}
               data-testid="root-new-collection"
             >
               <FolderPlusIcon size={16} />

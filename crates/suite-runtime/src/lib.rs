@@ -17,7 +17,7 @@ use axum::routing::get;
 use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
-    CONSOLE_PATH, ChangeFeed, ConsoleServices, FirestoreConsole, console_router,
+    CONSOLE_PATH, ChangeFeed, ConsoleServices, FirestoreConsole, SchemaIndex, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -456,6 +456,7 @@ struct PreparedSuite {
 struct ConsoleFirestoreParts {
     rest: Router,
     changes: ChangeFeed,
+    schema: SchemaIndex,
 }
 
 /// What `prepare_firestore` builds when Firestore is selected.
@@ -585,6 +586,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                 firestore: console_firestore.map(|parts| FirestoreConsole {
                     rest: parts.rest,
                     changes: parts.changes,
+                    schema: parts.schema,
                     requests: requests.clone(),
                 }),
                 auth: auth.as_ref().map(|auth| auth.application()),
@@ -1014,6 +1016,7 @@ fn prepare_firestore(
             service.clone(),
         ),
         changes: ChangeFeed::attach(store),
+        schema: SchemaIndex::attach(store, &config.project_id),
     };
     Ok(Some(FirestoreParts {
         routes: tonic::service::Routes::from(firestore_http).add_service(service.into_server()),

@@ -21,6 +21,8 @@ import { useWorkbench } from './workbench-context'
 export function NewMenu() {
   const workbench = useWorkbench()
   const open = useCreateDialog((state) => state.open)
+  // A pattern (`users/*\/orders`) names many collections; nothing is created there.
+  const collection = workbench.isPattern ? '' : workbench.collectionPath
   const selected = workbench.selectedDocument
   const document = useQuery({
     ...documentQuery(workbench.scope, selected ?? ''),
@@ -30,9 +32,7 @@ export function NewMenu() {
   return (
     <DropdownMenu>
       <Tooltip
-        content={
-          workbench.collectionPath ? 'New document (n), collection or import' : 'New collection'
-        }
+        content={collection ? 'New document (n), collection or import' : 'New collection'}
         render={
           <DropdownMenu.Trigger
             render={
@@ -47,14 +47,10 @@ export function NewMenu() {
         }
       />
       <DropdownMenu.Content align="end">
-        {workbench.collectionPath && (
-          <DropdownMenu.Item
-            icon={FileIcon}
-            onClick={() => open({ kind: 'document', collection: workbench.collectionPath })}
-          >
+        {collection && (
+          <DropdownMenu.Item icon={FileIcon} onClick={() => open({ kind: 'document', collection })}>
             <span className="flex flex-1 items-center gap-3">
-              Document in{' '}
-              <span className="font-mono text-[12px]">{lastSegment(workbench.collectionPath)}</span>
+              Document in <span className="font-mono text-[12px]">{lastSegment(collection)}</span>
               <DropdownMenu.Shortcut>n</DropdownMenu.Shortcut>
             </span>
           </DropdownMenu.Item>
@@ -93,13 +89,13 @@ export function NewMenu() {
         >
           Root collection
         </DropdownMenu.Item>
-        {workbench.collectionPath && (
+        {collection && (
           <DropdownMenu.Item
             icon={UploadSimpleIcon}
-            onClick={() => open({ kind: 'import', collection: workbench.collectionPath })}
+            onClick={() => open({ kind: 'import', collection })}
             data-testid="new-import"
           >
-            Import JSON into {lastSegment(workbench.collectionPath)}
+            Import JSON into {lastSegment(collection)}
           </DropdownMenu.Item>
         )}
       </DropdownMenu.Content>

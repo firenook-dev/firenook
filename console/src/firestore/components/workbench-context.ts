@@ -9,6 +9,7 @@ import { statusQuery } from '@/api/queries'
 import type { FirestoreSearch } from '@/routes/firestore'
 import { EMPTY_QUERY, QueryParseError, type WorkbenchQuery, parseQuery, printQuery } from '../query'
 import type { FirestoreScope } from '../rest'
+import { isPattern } from '../schema'
 import { type ViewAs, authorizationFor, parseViewAs, serializeViewAs } from '../view-as'
 
 export const DEFAULT_DATABASE = '(default)'
@@ -26,6 +27,12 @@ export interface Workbench {
   isCollection: boolean
   /** The collection the grid shows, or empty at the root. */
   collectionPath: string
+  /**
+   * Whether `path` is a pattern from the schema tree (`users/*\/orders`):
+   * every collection with that id under every document of the parent,
+   * shown as the collection group. Nothing can be created at a pattern.
+   */
+  isPattern: boolean
   group: boolean
   queryText: string
   query: WorkbenchQuery
@@ -83,6 +90,7 @@ export function useWorkbenchState(): Workbench | null {
     const segments = path ? path.split('/') : []
     const isCollection = segments.length % 2 === 1
     const collectionPath = isCollection ? path : ''
+    const pattern = isPattern(path)
     const queryText = search.q ?? ''
     let query = EMPTY_QUERY
     let queryError: string | undefined
@@ -112,7 +120,9 @@ export function useWorkbenchState(): Workbench | null {
       path,
       isCollection,
       collectionPath,
-      group: Boolean(search.group),
+      isPattern: pattern,
+      // A pattern is only ever the group of collections it names.
+      group: Boolean(search.group) || pattern,
       queryText,
       query,
       queryError,
@@ -131,6 +141,9 @@ export function useWorkbenchState(): Workbench | null {
             q: undefined,
             group: undefined,
           })
+        // A pattern from the schema tree opens as its collection group.
+        else if (isPattern(normalized))
+          navigate({ path: normalized, doc: undefined, q: undefined, group: true })
         else navigate({ path: normalized, doc: undefined, q: undefined, group: undefined })
       },
       setQuery: (next) => navigate({ q: printQuery(next) || undefined }),

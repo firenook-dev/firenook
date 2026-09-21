@@ -123,19 +123,40 @@ card there for every new pattern before it is designed with. Component docs: `np
   the inspector opens. Reference cells and reference fields *peek*
   (`selectDocument`) rather than navigate; the inspector shows "open in
   grid" when the document is outside the current collection.
-- Subcollections in the grid: `SubcollectionsChip` after the id asks
-  `listCollectionIds` for each *rendered* row only (virtualized, cached 60 s,
-  invalidated by the live channel) and jumps into the subcollection from a
-  menu; the seed nests three levels (`users/{u}/orders/{o}/items/{i}`,
-  `teams/t_real/channels/{c}/messages/{m}`, `products/{p}/reviews/{r}`).
+- The schema tree: `GET /console/api/v1/firestore/schema?database=` is the
+  engine's schema index (`SchemaIndex` in `crates/console-front/src/schema.rs`:
+  patterns like `users/*/orders` with `documents` and `parents` counts, one
+  key-only snapshot walk on the first request per database, then exact
+  through the commit observer; process-local, never persisted). The console
+  side is `src/firestore/schema.ts` (`schemaQuery`, `patternOf`, `findNode`,
+  `childrenOf`, the `useSchemaRail` store) and `components/schema-rail.tsx`.
+  A *pattern path* in the URL (`path=users/*/orders`) is the collection
+  group of its last id: `workbench.isPattern` is true, `group` is forced,
+  `setPath` of a pattern opens it as a group, and nothing can be created
+  there (New menu, `n`, the empty state all check `isPattern`). The path bar
+  renders `*` segments as inert, counts a pattern segment from the schema
+  and shows what lives below the current collection (`Below`). The live
+  channel invalidates `['fs', db, 'schema']` on any create or delete.
+- Subcollections in the grid: `SubcollectionsCell` is its own column (shown
+  when the schema knows subcollections under this collection, or a missing
+  ancestor is loaded; `subcollectionsWidth` sizes it from the known ids).
+  Each rendered row asks `listCollectionIds` (virtualized, cached 60 s,
+  invalidated by the live channel) and renders named chips that navigate,
+  with a menu past three; the seed nests three levels
+  (`users/{u}/orders/{o}/items/{i}`, `teams/t_real/channels/{c}/messages/{m}`,
+  `products/{p}/reviews/{r}`).
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
   path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
-  project+database), collections and its actions.
+  project+database), every pattern of the schema tree (a nested one opens
+  as its group) and its actions, including the schema rail toggle (`t`).
 - Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
   `CommandPalette.Results`/`Items` render functions must return keyed
-  elements; a `Tooltip` inside a `<button>` nests buttons (use `title`).
+  elements; a `Tooltip` inside a `<button>` nests buttons (use `title`);
+  `Text` takes no `className` (wrap it). A Rust doc comment on a `ts-rs`
+  type must not contain `*/` (it ends the generated JSDoc early), so
+  patterns are described in words there.
 
 ## Repository rules that apply here too
 

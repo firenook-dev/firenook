@@ -120,32 +120,115 @@ test('rows show their subcollections and the tree walks three levels deep', asyn
   await page.goto(
     `${origin()}/console/firestore?path=users&q=${encodeURIComponent('where("email", "==", "ada@example.test")')}`,
   )
+  // The schema says users can hold orders and sessions, so the grid has
+  // a subcollections column, and Ada's row names hers.
+  await expect(page.getByTestId('subcollections-head')).toBeVisible()
   const ada = page.getByTestId('grid-row').filter({ hasText: 'u_k65eq' })
-  await expect(ada.getByTestId('subcollections-chip')).toHaveText('2')
-  await ada.getByTestId('subcollections-chip').click()
-  await expect(page.getByRole('menuitem', { name: /orders/ })).toBeVisible()
-  await page.getByRole('menuitem', { name: /orders/ }).click()
+  await expect(ada.getByTestId('subcollection-link')).toHaveCount(2)
+  await expect(ada.getByTestId('subcollection-link').first()).toContainText('orders')
+  await ada.getByTestId('subcollection-link').filter({ hasText: 'orders' }).click()
   await expect(page).toHaveURL(/path=users%2Fu_k65eq%2Forders$/)
   await expect(page.getByTestId('path-bar')).toContainText('orders')
   // Every order carries its items as a subcollection of its own.
   const order = page.getByTestId('grid-row').first()
-  await expect(order.getByTestId('subcollections-chip')).toHaveText('1')
-  await order.getByTestId('subcollections-chip').click()
-  await page.getByRole('menuitem', { name: /items/ }).click()
+  await expect(order.getByTestId('subcollection-link')).toHaveText(/items/)
+  await order.getByTestId('subcollection-link').click()
   await expect(page).toHaveURL(/path=users%2Fu_k65eq%2Forders%2F[^%]+%2Fitems$/)
   await expect(page.getByRole('table').locator('thead')).toContainText('sku')
-  // A user without subcollections has no chip.
+  // A user without subcollections has no chips.
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await expect(page.getByTestId('subcollections-chip').first()).toBeVisible()
   const chips = await page.getByTestId('subcollections-chip').count()
   const rows = await page.getByTestId('grid-row').count()
   expect(chips).toBeGreaterThan(0)
   expect(chips).toBeLessThan(rows)
 })
 
+test('the schema tree shows the shape and opens a nested pattern as its group', async ({
+  page,
+}) => {
+  const schema = await page.request.get(
+    `${origin()}/console/api/v1/firestore/schema?database=(default)`,
+  )
+  expect(schema.status()).toBe(200)
+  const tree = (await schema.json()) as {
+    documents: number
+    collections: Array<{
+      id: string
+      documents: number
+      children: Array<{
+        id: string
+        pattern: string
+        documents: number
+        parents: number | null
+        children: Array<{ id: string; pattern: string }>
+      }>
+    }>
+  }
+  const users = tree.collections.find((node) => node.id === 'users')
+  expect(users).toBeDefined()
+  const orders = users?.children.find((node) => node.id === 'orders')
+  expect(orders?.pattern).toBe('users/*/orders')
+  expect(orders?.parents).toBeGreaterThan(0)
+  expect(orders?.children.map((node) => node.pattern)).toEqual(['users/*/orders/*/items'])
+
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  const rail = page.getByTestId('schema-rail')
+  await expect(rail).toBeVisible()
+  await expect(
+    rail.getByTestId('schema-node').filter({ hasText: 'users' }).first(),
+  ).toHaveAttribute('aria-current', 'location')
+  // The tree is expanded: the three levels under users are all on screen.
+  const items = rail.locator('[data-pattern="users/*/orders/*/items"]')
+  await expect(items).toBeVisible()
+  await expect(rail.getByTestId('schema-summary')).toContainText('users')
+  // The path bar says what lives below users, from the same tree.
+  await expect(page.getByTestId('path-below')).toContainText('orders')
+
+  // A nested pattern opens as the collection group, with the full path per row.
+  await rail.locator('[data-pattern="users/*/orders"]').getByTestId('schema-node-open').click()
+  await expect(page).toHaveURL(/path=users%2F\*%2Forders&group=true/)
+  await expect(page.getByTestId('path-bar')).toContainText('*')
+  await expect(page.getByTestId('grid-row').first()).toContainText(/users\/[^/]+\/orders\//)
+  await expect(rail.getByTestId('schema-summary')).toContainText(`${orders?.documents} documents`)
+  await expect(rail.getByTestId('schema-summary')).toContainText(`in ${orders?.parents} of`)
+  // Nothing can be created at a pattern.
+  await page.getByTestId('new-menu').click()
+  await expect(page.getByTestId('new-root-collection')).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: /Document in/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+
+  // Collapsing a node hides its children; the rail hides with t and comes back.
+  await rail.locator('[data-pattern="users/*/orders"]').getByTestId('schema-node-toggle').click()
+  await expect(items).toHaveCount(0)
+  await page.keyboard.press('t')
+  await expect(rail).toHaveCount(0)
+  await page.getByTestId('schema-rail-toggle').click()
+  await expect(page.getByTestId('schema-rail')).toBeVisible()
+
+  // The tree follows the data: a new subcollection appears with its count
+  // and goes when its last document goes.
+  const note = `projects/${project()}/databases/(default)/documents/users/u_k65eq/notes/n_1`
+  const created = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: { writes: [{ update: { name: note, fields: { text: { stringValue: 'hello' } } } }] },
+  })
+  expect(created.ok()).toBeTruthy()
+  const notes = page.getByTestId('schema-rail').locator('[data-pattern="users/*/notes"]')
+  await expect(notes).toContainText('1')
+  const deleted = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: { writes: [{ delete: note }] },
+  })
+  expect(deleted.ok()).toBeTruthy()
+  await expect(notes).toHaveCount(0)
+})
+
 test('the path bar completes collections and shows missing ancestors', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore`)
-  await expect(page.getByRole('button', { name: /^users/ })).toBeVisible()
+  await expect(page.getByTestId('root-collection').filter({ hasText: 'users' })).toBeVisible()
   await page.keyboard.press('/')
   const input = page.getByTestId('path-input')
   await input.fill('users/u_k65eq/ord')
@@ -268,7 +351,7 @@ test('JSON imports as typed documents, and the palette jumps anywhere', async ({
   await page.keyboard.press('ControlOrMeta+k')
   const palette = page.getByTestId('palette-input')
   await palette.fill('prod')
-  await page.getByRole('option', { name: /^products/ }).click()
+  await page.getByRole('option', { name: /^products — / }).click()
   await expect(page).toHaveURL(/path=products/)
   await page.keyboard.press('ControlOrMeta+k')
   await palette.fill('teams/t_real')

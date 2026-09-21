@@ -541,6 +541,17 @@ served until every section has landed.
   reference cells peek at their target beside the grid, every row shows
   its subcollections and jumps into them, and ⌘K carries the page's
   collections, recent paths and actions.
+- [x] The shape of the data: the engine keeps a schema index per database
+  (collection patterns such as `users/*/orders/*/items` with document and
+  parent counts, one key-only walk on first use, exact from then on through
+  the commit observer) and serves it at `/console/api/v1/firestore/schema`.
+  The console draws it as a rail beside the grid: a root opens as a grid, a
+  nested pattern opens as the collection group it names, the row for the
+  current shape is marked and the footer says how many parents carry it.
+  The grid names each row's subcollections in their own column, the path
+  bar shows a pattern's `*` and what lives below the current collection,
+  the root landing describes each collection's shape, and ⌘K finds any
+  pattern by name.
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
   the page, undo within the change-log window, rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,

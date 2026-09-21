@@ -15,12 +15,14 @@ import {
   TooltipProvider,
 } from '@cloudflare/kumo'
 import {
+  ArrowElbowDownRightIcon,
   ArrowSquareOutIcon,
   BracketsCurlyIcon,
   CaretRightIcon,
   CommandIcon,
   CopyIcon,
   DatabaseIcon,
+  FolderIcon,
   EnvelopeSimpleIcon,
   FunnelSimpleIcon,
   GaugeIcon,
@@ -32,6 +34,7 @@ import {
   PlusIcon,
   ShieldCheckIcon,
   TrashIcon,
+  TreeStructureIcon,
   XIcon,
 } from '@phosphor-icons/react'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
@@ -912,6 +915,172 @@ function StatusVocabulary() {
   )
 }
 
+const SHAPE = [
+  { id: 'events', depth: 0, count: '40' },
+  { id: 'products', depth: 0, count: '60', open: true },
+  { id: 'reviews', depth: 1, count: '40' },
+  { id: 'teams', depth: 0, count: '1', open: true },
+  { id: 'channels', depth: 1, count: '2', open: true },
+  { id: 'messages', depth: 2, count: '9' },
+  { id: 'members', depth: 1, count: '3' },
+  { id: 'users', depth: 0, count: '211,260', open: true },
+  { id: 'orders', depth: 1, count: '12,340', open: true, current: true },
+  { id: 'items', depth: 2, count: '30,100' },
+  { id: 'sessions', depth: 1, count: '6,020' },
+] as const
+
+function SchemaTree() {
+  return (
+    <Stack>
+      <Section
+        title="Schema rail"
+        note="The shape of the database as a tree: root collections, the subcollections under their documents, and so on down, each with its live count from the engine's schema index. A root opens as a grid; a nested pattern opens as the collection group it names, so every order in every user is one click. The row for where you are carries the brand bar; the footer says what that shape holds and how many parents carry it."
+      >
+        <div className="flex gap-3">
+          <div className="flex h-[420px] w-[264px] shrink-0 flex-col rounded-lg bg-kumo-base ring ring-kumo-line">
+            <div className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line px-3">
+              <TreeStructureIcon size={16} className="text-kumo-subtle" />
+              <span className="text-sm font-semibold text-kumo-default">Schema</span>
+              <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+                259,872 docs
+              </span>
+            </div>
+            <ul className="grid flex-1 gap-px overflow-hidden p-1.5">
+              {SHAPE.map((node) => (
+                <li key={`${node.depth}-${node.id}`}>
+                  <div
+                    className={`flex h-7 items-center rounded-md pr-1.5 ${
+                      'current' in node && node.current
+                        ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
+                        : ''
+                    }`}
+                  >
+                    {Array.from({ length: node.depth }, (_, level) => (
+                      <span key={level} className="relative h-full w-[14px] shrink-0">
+                        <span className="absolute top-0 bottom-0 left-[9px] border-l border-kumo-hairline" />
+                      </span>
+                    ))}
+                    <span className="flex size-5 shrink-0 items-center justify-center text-kumo-subtle">
+                      {'open' in node && node.open ? (
+                        <CaretRightIcon size={11} weight="bold" className="rotate-90" />
+                      ) : null}
+                    </span>
+                    {node.depth === 0 ? (
+                      <DatabaseIcon size={13} className="shrink-0 text-kumo-subtle" />
+                    ) : (
+                      <FolderIcon size={13} className="shrink-0 text-kumo-subtle" />
+                    )}
+                    <span className="ml-1.5 min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-default">
+                      {node.id}
+                    </span>
+                    <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+                      {node.count}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="grid shrink-0 gap-0.5 border-t border-kumo-line px-3 py-2">
+              <span className="font-mono text-[11px] text-kumo-subtle">users/*/orders</span>
+              <span className="text-[13px] text-kumo-default tabular-nums">
+                12,340 documents{' '}
+                <span className="text-kumo-subtle">
+                  in 4,100 of 211,260 <span className="font-mono text-[12px]">users</span>
+                </span>
+              </span>
+              <span className="text-[12px] text-kumo-subtle">
+                Each holds <span className="font-mono text-[11px] text-kumo-default">items</span>
+              </span>
+            </div>
+          </div>
+          <div className="grid flex-1 content-start gap-3">
+            <div className="flex h-11 items-center gap-1 rounded-lg bg-kumo-base px-3 ring ring-kumo-line">
+              <TreeStructureIcon size={16} className="text-kumo-default" />
+              <PathSegment label="(default)" />
+              <span className="px-0.5 text-kumo-inactive">/</span>
+              <PathSegment label="users" count="211,260" />
+              <span className="px-0.5 text-kumo-inactive">/</span>
+              <span className="px-1.5 font-mono text-[13px] text-kumo-inactive">*</span>
+              <span className="px-0.5 text-kumo-inactive">/</span>
+              <PathSegment label="orders" count="12,340" current />
+              <span className="ml-2 flex items-center gap-1">
+                <ArrowElbowDownRightIcon size={12} className="text-kumo-inactive" />
+                <span className="flex h-5 items-center gap-1 rounded bg-kumo-tint px-1.5 font-mono text-[11px] text-kumo-subtle">
+                  items <span className="text-kumo-inactive">30,100</span>
+                </span>
+              </span>
+              <span className="ml-auto">
+                <Badge variant="outline">group</Badge>
+              </span>
+            </div>
+            <Text variant="secondary" size="sm">
+              The path bar reads the same tree: a pattern shows its <code>*</code> for any document,
+              each collection segment carries its count, and what lives below the current collection
+              follows as chips that open their group.
+            </Text>
+            <LayerCard className="p-0">
+              <Table>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <TypeHead label="id" type="doc" variant="neutral" />
+                    <Table.Head>
+                      <span className="flex items-center gap-1.5 text-kumo-subtle">
+                        <FolderIcon size={13} />
+                        <span className="font-mono text-[12px] font-medium">subcollections</span>
+                      </span>
+                    </Table.Head>
+                    <TypeHead label="email" type="string" variant="blue" />
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {[
+                    {
+                      id: 'u_9f3k2',
+                      subs: [
+                        ['orders', '5'],
+                        ['sessions', '2'],
+                      ],
+                      email: 'ada@example.test',
+                    },
+                    { id: 'u_2fc4c', subs: [['orders', '3']], email: 'linus@example.test' },
+                    { id: 'u_2s5rh', subs: [], email: 'grace@example.test' },
+                  ].map((row) => (
+                    <Table.Row key={row.id}>
+                      <Table.Cell>
+                        <span className="font-mono text-[12px]">{row.id}</span>
+                      </Table.Cell>
+                      <Table.Cell>
+                        <span className="flex items-center gap-1">
+                          {row.subs.map(([id, count]) => (
+                            <span
+                              key={id}
+                              className="flex h-5 items-center gap-1 rounded bg-kumo-tint pr-1.5 pl-1 font-mono text-[11px] text-kumo-default"
+                            >
+                              <FolderIcon size={11} className="text-kumo-subtle" />
+                              {id}
+                              <span className="text-kumo-subtle tabular-nums">{count}</span>
+                            </span>
+                          ))}
+                        </span>
+                      </Table.Cell>
+                      <Table.Cell>{row.email}</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            </LayerCard>
+            <Text variant="secondary" size="sm">
+              In the grid, a document's subcollections are named chips in their own column, each a
+              link straight in. The column exists when the schema says documents here can hold
+              subcollections; each rendered row asks which ones it actually has.
+            </Text>
+          </div>
+        </div>
+      </Section>
+    </Stack>
+  )
+}
+
 defineCards([
   {
     id: 'app-shell',
@@ -940,6 +1109,16 @@ defineCards([
     width: 1100,
     surface: 'canvas',
     render: () => <DataGrid />,
+  },
+  {
+    id: 'schema-tree',
+    group: 'Patterns',
+    name: 'Schema rail and subcollections',
+    subtitle:
+      'The database as a tree of patterns with live counts, pattern paths in the path bar, named subcollection chips per row',
+    width: 1100,
+    surface: 'canvas',
+    render: () => <SchemaTree />,
   },
   {
     id: 'inspector',
