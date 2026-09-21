@@ -154,30 +154,31 @@ export async function seedFirestore(origin, project, database = '(default)') {
     bio: v.s('The first programmer.'),
   })
 
-  for (const uid of userIds.slice(0, 36)) {
-    for (let index = 0; index < int(2, 18); index += 1) {
+  // Every third user has orders, and every order has its items as a
+  // subcollection of its own: three levels, users/{u}/orders/{o}/items/{i},
+  // so the tree is worth walking. The first user always has a session too.
+  for (const [position, uid] of userIds.entries()) {
+    if (position % 3 !== 0) continue
+    for (let index = 0; index < int(2, 8); index += 1) {
       const oid = id('o')
-      const items = Array.from({ length: int(1, 4) }, () => {
+      let total = 0
+      const itemCount = int(1, 4)
+      for (let item = 0; item < itemCount; item += 1) {
         const qty = int(1, 3)
         const price = Number((random() * 80 + 4).toFixed(2))
-        return v.map({
+        total += qty * price
+        set(`users/${uid}/orders/${oid}/items/${id('it')}`, {
           sku: v.s(id('sku')),
           name: v.s(pick(PRODUCTS)),
           qty: v.i(qty),
           price: v.d(price),
         })
-      })
-      const total = items.reduce(
-        (sum, item) =>
-          sum +
-          Number(item.mapValue.fields.qty.integerValue) * item.mapValue.fields.price.doubleValue,
-        0,
-      )
+      }
       const fields = {
         status: v.s(pick(STATUSES)),
         total: v.d(Number(total.toFixed(2))),
         currency: v.s(pick(['USD', 'EUR', 'MYR'])),
-        items: v.arr(items),
+        itemCount: v.i(itemCount),
         createdAt: v.t(iso(int(0, 120))),
         customer: v.ref(`users/${uid}`),
         shipping: v.map({
@@ -189,7 +190,7 @@ export async function seedFirestore(origin, project, database = '(default)') {
         fields.note = v.s(pick(['Gift wrap please', 'Leave at door', 'Call on arrival']))
       set(`users/${uid}/orders/${oid}`, fields)
     }
-    for (let index = 0; index < int(0, 3); index += 1) {
+    for (let index = 0; index < (position === 0 ? 2 : int(0, 3)); index += 1) {
       set(`users/${uid}/sessions/${id('s')}`, {
         startedAt: v.t(iso(int(0, 10), 24)),
         device: v.s(pick(['ios', 'android', 'web'])),
@@ -199,7 +200,8 @@ export async function seedFirestore(origin, project, database = '(default)') {
   }
 
   for (let index = 0; index < 60; index += 1) {
-    set(`products/${id('p')}`, {
+    const pid = id('p')
+    set(`products/${pid}`, {
       name: v.s(`${pick(PRODUCTS)} ${pick(['Classic', 'Mini', 'Pro', 'XL'])}`),
       price: v.d(Number((random() * 120 + 3).toFixed(2))),
       stock: v.i(int(0, 500)),
@@ -216,6 +218,17 @@ export async function seedFirestore(origin, project, database = '(default)') {
       published: v.b(random() > 0.2),
       createdAt: v.t(iso(int(1, 300))),
     })
+    // Every fourth product carries reviews.
+    if (index % 4 === 0)
+      for (let review = 0; review < int(1, 5); review += 1)
+        set(`products/${pid}/reviews/${id('r')}`, {
+          rating: v.i(int(1, 5)),
+          author: v.ref(`users/${pick(userIds)}`),
+          body: v.s(
+            pick(['Solid.', 'Broke in a week.', 'Exactly as pictured.', 'Would buy again.']),
+          ),
+          postedAt: v.t(iso(int(0, 200))),
+        })
   }
 
   // The classic bug: the same field as a timestamp in some documents and a
@@ -235,6 +248,17 @@ export async function seedFirestore(origin, project, database = '(default)') {
   set('teams/t_ghost/members/m_2', { role: v.s('editor'), user: v.ref(`users/${userIds[1]}`) })
   set('teams/t_real', { name: v.s('Design'), seats: v.i(5) })
   set('teams/t_real/members/m_1', { role: v.s('owner'), user: v.ref(`users/${userIds[2]}`) })
+  // Channels with messages: three levels under a real root document.
+  for (const channel of ['general', 'design']) {
+    set(`teams/t_real/channels/${channel}`, { topic: v.s(`#${channel}`), archived: v.b(false) })
+    for (let index = 0; index < int(3, 8); index += 1)
+      set(`teams/t_real/channels/${channel}/messages/${id('m')}`, {
+        from: v.ref(`users/${pick(userIds.slice(0, 6))}`),
+        text: v.s(pick(['Shipping Friday.', 'Can someone review #42?', 'Lunch?', 'Done.'])),
+        sentAt: v.t(iso(int(0, 3), 24)),
+        reactions: v.map({ '👍': v.i(int(0, 3)) }),
+      })
+  }
 
   async function post(url, body) {
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })

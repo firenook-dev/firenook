@@ -538,8 +538,9 @@ served until every section has landed.
   import), typed fields from the first document, the inspector grows
   subcollections in place, the path bar offers to create what does not
   exist, column headers sort, filter and hide, scalar cells edit in place,
-  reference cells peek at their target beside the grid, and ⌘K carries the
-  page's collections, recent paths and actions.
+  reference cells peek at their target beside the grid, every row shows
+  its subcollections and jumps into them, and ⌘K carries the page's
+  collections, recent paths and actions.
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
   the page, undo within the change-log window, rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,

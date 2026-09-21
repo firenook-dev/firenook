@@ -115,6 +115,34 @@ test('documents are added and deleted from the workbench', async ({ page }) => {
   expect(gone.status()).toBe(404)
 })
 
+test('rows show their subcollections and the tree walks three levels deep', async ({ page }) => {
+  // Ada sits past the first page of ids, so ask for her by query.
+  await page.goto(
+    `${origin()}/console/firestore?path=users&q=${encodeURIComponent('where("email", "==", "ada@example.test")')}`,
+  )
+  const ada = page.getByTestId('grid-row').filter({ hasText: 'u_k65eq' })
+  await expect(ada.getByTestId('subcollections-chip')).toHaveText('2')
+  await ada.getByTestId('subcollections-chip').click()
+  await expect(page.getByRole('menuitem', { name: /orders/ })).toBeVisible()
+  await page.getByRole('menuitem', { name: /orders/ }).click()
+  await expect(page).toHaveURL(/path=users%2Fu_k65eq%2Forders$/)
+  await expect(page.getByTestId('path-bar')).toContainText('orders')
+  // Every order carries its items as a subcollection of its own.
+  const order = page.getByTestId('grid-row').first()
+  await expect(order.getByTestId('subcollections-chip')).toHaveText('1')
+  await order.getByTestId('subcollections-chip').click()
+  await page.getByRole('menuitem', { name: /items/ }).click()
+  await expect(page).toHaveURL(/path=users%2Fu_k65eq%2Forders%2F[^%]+%2Fitems$/)
+  await expect(page.getByRole('table').locator('thead')).toContainText('sku')
+  // A user without subcollections has no chip.
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  const chips = await page.getByTestId('subcollections-chip').count()
+  const rows = await page.getByTestId('grid-row').count()
+  expect(chips).toBeGreaterThan(0)
+  expect(chips).toBeLessThan(rows)
+})
+
 test('the path bar completes collections and shows missing ancestors', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore`)
   await expect(page.getByRole('button', { name: /^users/ })).toBeVisible()

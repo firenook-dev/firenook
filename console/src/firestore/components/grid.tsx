@@ -35,6 +35,7 @@ import { IdCell, ValueCell } from './cells'
 import { HeaderMenu } from './header-menu'
 import { InlineCellEditor, inlineEditable } from './inline-cell-editor'
 import { INSPECTOR_WIDTH } from './inspector'
+import { SubcollectionsChip } from './subcollections-chip'
 import { useWorkbench } from './workbench-context'
 
 const ROW_HEIGHT = 36
@@ -325,6 +326,9 @@ export function Grid() {
                         id={workbench.group ? document.path : document.id}
                         missing={document.missing}
                       />
+                      <span className="ml-auto flex shrink-0 items-center">
+                        <SubcollectionsChip path={document.path} />
+                      </span>
                     </span>
                   </Table.Cell>
                   {columns.map((column) => {

@@ -123,6 +123,11 @@ card there for every new pattern before it is designed with. Component docs: `np
   the inspector opens. Reference cells and reference fields *peek*
   (`selectDocument`) rather than navigate; the inspector shows "open in
   grid" when the document is outside the current collection.
+- Subcollections in the grid: `SubcollectionsChip` after the id asks
+  `listCollectionIds` for each *rendered* row only (virtualized, cached 60 s,
+  invalidated by the live channel) and jumps into the subcollection from a
+  menu; the seed nests three levels (`users/{u}/orders/{o}/items/{i}`,
+  `teams/t_real/channels/{c}/messages/{m}`, `products/{p}/reviews/{r}`).
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for

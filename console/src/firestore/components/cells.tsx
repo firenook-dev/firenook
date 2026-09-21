@@ -8,7 +8,7 @@ import { type FsValue, displayValue, formatNumber, relativeTime } from '../value
 
 export function IdCell({ id, missing }: { id: string; missing?: boolean | undefined }) {
   return (
-    <span className={`flex items-center gap-1 ${missing ? 'italic text-kumo-subtle' : ''}`}>
+    <span className={`flex min-w-0 items-center gap-1 ${missing ? 'italic text-kumo-subtle' : ''}`}>
       <InlineCopyText
         value={id}
         variant="mono"
