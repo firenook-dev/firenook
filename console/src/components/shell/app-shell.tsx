@@ -19,7 +19,7 @@ import {
 import { CommandIcon, GaugeIcon, SidebarSimpleIcon, SquareHalfIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { useEffect } from 'react'
 import { statusQuery } from '@/api/queries'
 import { NAV_MODES, type NavMode, useLayout } from '@/lib/layout'
@@ -31,6 +31,13 @@ const AREAS: readonly ServiceArea[] = ['data', 'compute', 'messaging', 'observe'
 
 /** The section panel's width, px; the panel toggle above it shares the edge. */
 export const PANEL_WIDTH = 264
+
+/**
+ * The navigation's expanded width. Kumo's default is 16.25rem; the labels
+ * here are short (the longest is "Authentication"), so the nav gives the
+ * width back to the data.
+ */
+const NAV_WIDTH: CSSProperties = { '--sidebar-width': '14rem' } as CSSProperties
 
 export function AppShell({ children }: { children: ReactNode }) {
   const togglePalette = useConsoleUi((state) => state.togglePalette)
@@ -81,6 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             peekable={navMode === 'hover'}
             collapsible="icon"
             className="z-30 h-full w-auto shrink-0"
+            style={NAV_WIDTH}
           >
             <Navigation />
           </Sidebar.Provider>
@@ -173,7 +181,6 @@ function Navigation() {
       <Sidebar.Footer>
         <NavModeControl />
       </Sidebar.Footer>
-      <Sidebar.Rail />
     </Sidebar>
   )
 }

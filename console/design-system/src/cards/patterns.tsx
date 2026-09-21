@@ -39,6 +39,7 @@ import {
   TrashIcon,
   XIcon,
 } from '@phosphor-icons/react'
+import type { CSSProperties } from 'react'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { defineCards } from '../registry'
 import { Section, Stack } from './shared'
@@ -137,7 +138,12 @@ function Shell() {
     <TooltipProvider>
       <div className="grid gap-4">
         <div className="flex h-[640px] w-full overflow-hidden rounded-lg ring ring-kumo-hairline">
-          <Sidebar.Provider contained defaultOpen className="h-full w-auto shrink-0 min-h-0!">
+          <Sidebar.Provider
+            contained
+            defaultOpen
+            className="h-full w-auto shrink-0 min-h-0!"
+            style={{ '--sidebar-width': '14rem' } as CSSProperties}
+          >
             <Sidebar>
               <Sidebar.Header>
                 <div className="flex items-center gap-2 px-2 py-1">
