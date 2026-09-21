@@ -20,7 +20,7 @@ use futures_util::stream::{self, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use ts_rs::TS;
@@ -42,6 +42,10 @@ pub struct FirestoreConsole {
     /// The Requests diagnostics feed (`/requests` upgrades to a websocket),
     /// when the Firestore front records evaluations.
     pub requests: Option<Router>,
+    /// Flips to `true` when the suite stops. Every open change stream ends
+    /// then; a stream that stayed open would hold the UI listener's graceful
+    /// shutdown for as long as a console tab was open.
+    pub shutdown: watch::Receiver<bool>,
 }
 
 /// One atomic commit as the console sees it.
@@ -95,6 +99,13 @@ pub struct ChangeFeed {
     store: Store,
 }
 
+/// What the change stream handler needs: the feed and the suite's stop flag.
+#[derive(Clone)]
+struct ChangeStreams {
+    feed: ChangeFeed,
+    shutdown: watch::Receiver<bool>,
+}
+
 impl ChangeFeed {
     /// Creates the feed and registers it with `store`.
     #[must_use]
@@ -108,10 +119,13 @@ impl ChangeFeed {
         feed
     }
 
-    fn router(self) -> Router {
+    fn router(self, shutdown: watch::Receiver<bool>) -> Router {
         Router::new()
             .route("/changes", axum::routing::get(changes))
-            .with_state(self)
+            .with_state(ChangeStreams {
+                feed: self,
+                shutdown,
+            })
     }
 }
 
@@ -183,14 +197,15 @@ impl ChangeScope {
 
 /// `GET /changes?database=(default)&scope=users`: a server-sent event stream.
 /// `hello` carries the current revision, `change` one commit, and `reset`
-/// tells a console that fell behind to reload what it shows.
+/// tells a console that fell behind to reload what it shows. The stream
+/// ends when the suite stops, so shutdown never waits on a console tab.
 async fn changes(
-    State(feed): State<ChangeFeed>,
+    State(streams): State<ChangeStreams>,
     Query(scope): Query<ChangeScope>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let receiver = feed.sender.subscribe();
+    let receiver = streams.feed.sender.subscribe();
     let hello = ChangeHello {
-        revision: feed.store.revision().get(),
+        revision: streams.feed.store.revision().get(),
     };
     let first = stream::once(async move { Ok(json_event("hello", &hello)) });
     let rest = BroadcastStream::new(receiver).filter_map(move |item| {
@@ -219,7 +234,12 @@ async fn changes(
         };
         async move { event.map(Ok) }
     });
-    Sse::new(first.chain(rest)).keep_alive(
+    let mut shutdown = streams.shutdown;
+    let stopped = async move {
+        // A dropped sender means the suite is gone too.
+        while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
+    };
+    Sse::new(first.chain(rest).take_until(stopped)).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(15))
             .text("keep-alive"),
@@ -237,7 +257,10 @@ fn json_event(name: &str, data: &impl Serialize) -> Event {
 /// Requests feed and the REST front, mounted together under
 /// `/api/v1/firestore`.
 pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
-    let mut router = console.changes.router().merge(console.schema.router());
+    let mut router = console
+        .changes
+        .router(console.shutdown)
+        .merge(console.schema.router());
     if let Some(requests) = console.requests {
         router = router.merge(requests);
     }
@@ -246,6 +269,10 @@ pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
 
 #[cfg(test)]
 mod tests {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt as _;
+
     use super::*;
 
     fn change(database: &str, path: &str) -> DocumentChange {
@@ -272,5 +299,42 @@ mod tests {
     fn an_empty_scope_matches_every_change() {
         let scope = ChangeScope::default();
         assert!(scope.matches(&change("(default)", "anything/at/all/here")));
+    }
+
+    #[tokio::test]
+    async fn a_change_stream_ends_when_the_suite_stops() {
+        let store = Store::default();
+        let (stop, shutdown) = watch::channel(false);
+        let router = ChangeFeed::attach(&store).router(shutdown);
+        let response = router
+            .oneshot(
+                Request::get("/changes?database=(default)")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        // The greeting arrives while the suite runs; the body then only
+        // ends because the suite stopped, not because a tab closed.
+        let mut body = response.into_body().into_data_stream();
+        let greeting = tokio::time::timeout(Duration::from_secs(5), body.next())
+            .await
+            .expect("the greeting arrives")
+            .expect("a chunk")
+            .expect("bytes");
+        stop.send(true).expect("a subscriber is listening");
+        let remainder = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut collected = Vec::new();
+            while let Some(chunk) = body.next().await {
+                collected.extend_from_slice(&chunk.expect("bytes"));
+            }
+            collected
+        })
+        .await
+        .expect("the stream ended after shutdown");
+        let body = [greeting.to_vec(), remainder].concat();
+        let text = String::from_utf8(body).expect("utf-8");
+        assert!(text.contains("event: hello"), "{text}");
     }
 }

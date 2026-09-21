@@ -588,6 +588,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     changes: parts.changes,
                     schema: parts.schema,
                     requests: requests.clone(),
+                    shutdown: shutdown.subscribe(),
                 }),
                 auth: auth.as_ref().map(|auth| auth.application()),
             }),
