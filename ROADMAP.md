@@ -511,7 +511,15 @@ Auth, Storage and the UI itself. No new service or API.
   return. Candidates only; every filter is still evaluated. Randomized and
   exhaustive equivalence tests against the scanning stores;
   `FIRENOOK_FIELD_INDEXES=0` restores scanning.
-- [ ] Acceptance-host lanes and publication as `0.2.0-next.2`.
+- [x] Published as `firenook@0.2.0-next.2` with `@firenook/cli-<platform>` ×5
+  on 2026-10-03 (release PR #68, tag `npm-v0.2.0-next.2` on ed6876a, engine
+  63d554c, release run 37123335020; registry integrity equal to the release
+  assets for all six packages, provenance attestations verified on a fresh
+  install, `next` → 0.2.0-next.2, `latest` untouched). The release also
+  carries the console scaffold (#63) and the Rust 1.99 lint fixes (#67).
+- [ ] Acceptance-host lanes for this engine: not run before publication; the
+  local verification is in the CHANGELOG entry and the follow-up section of
+  `support/read-path-audit.md`.
 
 ## Own console (Phase N, unreleased)
 
@@ -522,10 +530,10 @@ Base UI, Tailwind) and is embedded into the binary by `crates/console-front`,
 mounted under `/console` on the UI port next to the Google UI, which stays
 served until every section has landed.
 
-- [x] Stack, shell, command palette, overview and the Console API's first
-  route with Rust-generated TypeScript types; unit, end-to-end (real engine)
-  and bundle-budget checks in CI; the console is built before every engine
-  build.
+- [x] (Shipped in `0.2.0-next.2`.) Stack, shell, command palette, overview and
+  the Console API's first route with Rust-generated TypeScript types; unit,
+  end-to-end (real engine) and bundle-budget checks in CI; the console is
+  built before every engine build.
 - [ ] Console API contract and live channel (one multiplexed socket, deltas
   per scope, bounded like the Requests feed).
 - [ ] Firestore workbench: path bar, grid with inferred columns, query
