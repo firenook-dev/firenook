@@ -1,3 +1,44 @@
+# 0.2.0-next.2 — the read path, incremental listeners and a field index
+
+- Pin the engine to `63d554c15f2699cf623c7fac19a4d1393c77f322`, the qualified head of
+  [PR #66](https://github.com/firenook-dev/firenook/pull/66) (the equality field
+  index) on [PR #67](https://github.com/firenook-dev/firenook/pull/67) (clippy on
+  Rust 1.99), [PR #63](https://github.com/firenook-dev/firenook/pull/63) (the
+  console scaffold) and [PR #62](https://github.com/firenook-dev/firenook/pull/62)
+  (the read path). This exact revision passed CI
+  ([run 37119862089](https://github.com/firenook-dev/firenook/actions/runs/37119862089))
+  and the five-platform packed-install matrix
+  ([run 37119862029](https://github.com/firenook-dev/firenook/actions/runs/37119862029));
+  locally the workspace tests (51 suites), clippy, the packaging tests (92/92)
+  and the Firestore conformance suite in memory and disk modes (37/37 each)
+  passed, and a store written by it reopened on `0.2.0-next.1`, was written
+  there and reopened here with its field index rebuilt.
+- Firestore no longer reads the whole store to serve the Emulator UI and the
+  listings it polls: `ListCollectionIds`, `ListDocuments` with missing
+  documents or no collection id, recursive delete and clear-database walk keys
+  under a prefix; an unfiltered `count()` reads only the scope index; REST
+  `runQuery` honours `select`. Firestore reads run on a bounded read pool
+  instead of the shared async workers, so a long scan no longer stalls Auth,
+  Storage or the UI; Auth persists its state only when a request changed it;
+  the Requests-diagnostics report is summarized once a minute.
+- Listen streams wake on a commit notifier instead of a 10 ms poll and
+  maintain their views incrementally, falling back to full evaluation only
+  for window exits and moves, `offset`, `limit_to_last` and nearest-neighbour
+  queries.
+- Disk state keeps an equality index over every document's top-level fields:
+  a query with `==` or `in` on them reads only the documents holding the value
+  instead of its whole collection. Every filter is still evaluated on each
+  candidate, so results are unchanged; ranges, `or`, `!=`, `not-in`, array
+  membership, nested paths and collection groups still scan. A state last
+  written by an earlier release rebuilds the index on its first start, in the
+  pass that already reads every document (measured at 246 s for a 32.6 GB,
+  1.9-million-document state); `FIRENOOK_FIELD_INDEXES=0` turns it off.
+- The emulator's own console is served under `/console` on the UI port,
+  beside the Google Emulator UI, which stays the default. It is an early
+  scaffold: overview, shell and command palette.
+- No emulator behaviour, port, command or file format changed otherwise; the
+  index tables are ignored by `0.2.0-next.1`, which can still open the state.
+
 # 0.2.0-next.1 — Firenook: the project renamed, one license
 
 - Pin the engine to `9d6925115e12e49524b9991f5924d112eb14ffd1`, the qualified head of

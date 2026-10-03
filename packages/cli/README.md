@@ -10,12 +10,12 @@ Install the unscoped `firenook` package; the `@firenook/cli-<platform>`
 packages are its optional dependencies and are never installed directly.
 Releases up to `0.1.0-next.9` were published as `@fireside-dev/cli`; the root
 project README records what changes when migrating. The following
-exact-version command is for this `0.2.0-next.1` preview package once
+exact-version command is for this `0.2.0-next.2` preview package once
 published. Repository development may precede registry availability; check
 the root project README for the currently published version.
 
 ```sh
-npm install --save-dev --save-exact firenook@0.2.0-next.1
+npm install --save-dev --save-exact firenook@0.2.0-next.2
 npx firenook setup
 npx firenook init                      # new project: firebase.json, rules, a Functions codebase
 npx firenook init --adopt              # existing project: check it, add what Firenook needs
