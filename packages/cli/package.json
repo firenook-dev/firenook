@@ -1,6 +1,6 @@
 {
   "name": "firenook",
-  "version": "0.2.0-next.1",
+  "version": "0.2.0-next.2",
   "description": "Firenook: a Rust Firebase-compatible local emulator suite with persistent disk storage",
   "type": "module",
   "bin": {"firenook": "bin/firenook.mjs"},
@@ -12,10 +12,10 @@
   "bugs": {"url": "https://github.com/firenook-dev/firenook/issues"},
   "publishConfig": {"access": "public", "registry": "https://registry.npmjs.org/"},
   "optionalDependencies": {
-    "@firenook/cli-darwin-arm64": "0.2.0-next.1",
-    "@firenook/cli-darwin-x64": "0.2.0-next.1",
-    "@firenook/cli-linux-x64": "0.2.0-next.1",
-    "@firenook/cli-linux-arm64": "0.2.0-next.1",
-    "@firenook/cli-win32-x64": "0.2.0-next.1"
+    "@firenook/cli-darwin-arm64": "0.2.0-next.2",
+    "@firenook/cli-darwin-x64": "0.2.0-next.2",
+    "@firenook/cli-linux-x64": "0.2.0-next.2",
+    "@firenook/cli-linux-arm64": "0.2.0-next.2",
+    "@firenook/cli-win32-x64": "0.2.0-next.2"
   }
 }
