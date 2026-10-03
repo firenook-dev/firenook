@@ -2250,7 +2250,10 @@ mod tests {
             FieldOperator::In,
             Value::Array(vec![Value::Null, Value::Double(f64::NAN)]),
         ));
-        assert!(ids(&database, &snapshot, &in_only_sentinels).is_empty());
+        assert_eq!(
+            ids(&database, &snapshot, &in_only_sentinels),
+            [] as [std::string::String; 0]
+        );
 
         let in_with_ordinary = query().filter(filter(
             "scalar",
@@ -2268,7 +2271,10 @@ mod tests {
             FieldOperator::ArrayContainsAny,
             Value::Array(vec![Value::Null, Value::Double(f64::NAN)]),
         ));
-        assert!(ids(&database, &snapshot, &array_only_sentinels).is_empty());
+        assert_eq!(
+            ids(&database, &snapshot, &array_only_sentinels),
+            [] as [std::string::String; 0]
+        );
 
         let array_with_ordinary = query().filter(filter(
             "array",

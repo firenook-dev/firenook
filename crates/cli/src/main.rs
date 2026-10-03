@@ -2219,10 +2219,9 @@ mod tests {
                 Some(PathBuf::from("/project/firestore.indexes.json")),
             )]
         );
-        assert!(
-            resolve_firestore_databases(config_dir, None)
-                .expect("no section")
-                .is_empty()
+        assert_eq!(
+            resolve_firestore_databases(config_dir, None).expect("no section"),
+            [] as [firenook_suite_runtime::FirestoreDatabaseConfig; 0]
         );
 
         let databases: FirebaseProjectConfig = serde_json::from_str(

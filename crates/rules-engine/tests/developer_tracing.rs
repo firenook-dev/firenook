@@ -160,7 +160,7 @@ fn empty_match_has_no_manufactured_allow_outcomes() {
     let (result, trace) = compiled.evaluate_with_trace(&request, &EmptyDocumentAccess);
     assert_eq!(result, compiled.evaluate(&request, &EmptyDocumentAccess));
     assert!(!result.allowed);
-    assert!(trace.outcomes().is_empty());
+    assert_eq!(trace.outcomes(), []);
 }
 
 #[test]
@@ -203,7 +203,7 @@ fn atomic_traces_preserve_request_order_and_empty_batch() {
     assert_eq!(traces[1].outcomes()[0].decision, AllowDecision::Deny);
     let (result, traces) = compiled.evaluate_atomic_with_trace(&[], &EmptyDocumentAccess);
     assert_eq!(result, compiled.evaluate_atomic(&[], &EmptyDocumentAccess));
-    assert!(traces.is_empty());
+    assert_eq!(traces, [] as [firenook_rules_engine::EvaluationTrace; 0]);
 }
 
 #[test]

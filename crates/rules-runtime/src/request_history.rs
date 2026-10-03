@@ -347,6 +347,9 @@ impl Subscriber {
     fn enqueue(&self, text: Arc<str>) -> bool {
         // Only the producer under State's mutex increments; guards decrement
         // independently after a completed/aborted send. Include in-flight bytes.
+        // Rust 1.99 renamed `fetch_update` to `try_update`; the workspace
+        // still supports 1.98, which has only the old name.
+        #[allow(deprecated)]
         if self
             .bytes
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |bytes| {

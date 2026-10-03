@@ -742,7 +742,7 @@ mod tests {
         record_exchange(&capture, exchange(1), MAX_CAPTURED_BODY_BYTES + 1);
 
         let capture = lock_capture(&capture);
-        assert!(capture.fixture.exchanges.is_empty());
+        assert_eq!(capture.fixture.exchanges, [] as [CapturedExchange; 0]);
         assert_eq!(
             capture.capture_error.as_deref(),
             Some("capture exceeded the 67108864-byte body limit")

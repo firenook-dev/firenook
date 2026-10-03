@@ -3106,7 +3106,10 @@ mod tests {
                 children(Some("users/ghost"), None),
                 [("users/ghost/posts/p3".to_owned(), true)]
             );
-            assert!(children(None, Some("nothing")).is_empty());
+            assert_eq!(
+                children(None, Some("nothing")),
+                [] as [(std::string::String, bool); 0]
+            );
 
             // Deleting the only document under a subtree removes it from the
             // listing; overlay-only state (a snapshot taken right after the
@@ -3208,7 +3211,10 @@ mod tests {
         for store in [Store::default(), disk] {
             let other_project =
                 DatabaseName::new("firenook-other-project", "(default)").expect("database");
-            assert!(store.snapshot().databases("firenook-test").is_empty());
+            assert_eq!(
+                store.snapshot().databases("firenook-test"),
+                [] as [DatabaseName; 0]
+            );
             let seeded = store
                 .commit(&[
                     Write::Create {
@@ -3241,8 +3247,14 @@ mod tests {
                 store.snapshot().databases("firenook-other-project"),
                 vec![other_project]
             );
-            assert!(store.snapshot().databases("firenook-tes").is_empty());
-            assert!(store.snapshot().databases("firenook-test-2").is_empty());
+            assert_eq!(
+                store.snapshot().databases("firenook-tes"),
+                [] as [DatabaseName; 0]
+            );
+            assert_eq!(
+                store.snapshot().databases("firenook-test-2"),
+                [] as [DatabaseName; 0]
+            );
 
             let emptied = store
                 .commit(&[Write::Delete {
@@ -3270,12 +3282,12 @@ mod tests {
                     .databases("firenook-test"),
                 vec![database("(default)"), database("zeta")]
             );
-            assert!(
+            assert_eq!(
                 store
                     .snapshot_at(Revision::from_u64(0))
                     .expect("initial revision")
-                    .databases("firenook-test")
-                    .is_empty()
+                    .databases("firenook-test"),
+                [] as [DatabaseName; 0]
             );
         }
         let _ = std::fs::remove_dir_all(&directory);

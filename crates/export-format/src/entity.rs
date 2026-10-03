@@ -523,7 +523,7 @@ fn encode_path(path: &str) -> Result<wire::Path, EntityError> {
         )));
     }
     let (pairs, remainder) = segments.as_slice().as_chunks::<2>();
-    debug_assert!(remainder.is_empty());
+    debug_assert_eq!(remainder, [] as [&str; 0]);
     Ok(wire::Path {
         elements: pairs
             .iter()

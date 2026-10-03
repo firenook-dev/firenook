@@ -56,7 +56,7 @@ fn unrelated_changes_preserve_result_map_without_reconstruction() {
         let batch = target
             .refresh_with_changes(&store.snapshot(), Some(&changes))
             .unwrap();
-        assert!(batch.changes.is_empty());
+        assert_eq!(batch.changes, [] as [WatchChange; 0]);
         assert_eq!(target.revision(), store.revision());
         assert_eq!(target.logical_memory_usage(), usage);
         assert_eq!(
@@ -133,12 +133,12 @@ fn captured_snapshot_never_skips_future_matching_commit() {
     let captured = store.snapshot();
     write(&store, "colors/seed", 1);
     let history = store.changes_since(after).unwrap();
-    assert!(
+    assert_eq!(
         target
             .refresh_with_changes(&captured, Some(&history))
             .unwrap()
-            .changes
-            .is_empty()
+            .changes,
+        [] as [WatchChange; 0]
     );
     assert_eq!(target.revision(), captured.revision());
     assert_eq!(

@@ -376,7 +376,10 @@ async fn replay_session_request(
             .unwrap_or_else(|_| panic!("{fixture_name} backchannel did not flush"))
             .expect("backchannel should yield a body chunk")
             .expect("backchannel body chunk should succeed");
-        assert!(!decode_frames(&String::from_utf8_lossy(&chunk)).is_empty());
+        assert_ne!(
+            decode_frames(&String::from_utf8_lossy(&chunk)),
+            [] as [serde_json::Value; 0]
+        );
     } else {
         let body = response
             .into_body()

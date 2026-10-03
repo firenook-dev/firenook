@@ -1997,11 +1997,12 @@ mod tests {
         assert_eq!(two[0].ack_id, "projects/p/subscriptions/sub-a:1");
         let rest = broker.pull("projects/p/subscriptions/sub-a", 10).unwrap();
         assert_eq!(rest.len(), 1);
-        assert!(
+        assert_eq!(
             broker
                 .pull("projects/p/subscriptions/sub-a", 10)
                 .unwrap()
-                .is_empty()
+                .len(),
+            0
         );
         broker
             .acknowledge("projects/p/subscriptions/sub-a", &[two[0].ack_id.clone()])
