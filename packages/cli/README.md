@@ -315,6 +315,13 @@ second of writes, and the state stays consistent. `--durability per-commit`
 syncs every write before acknowledging it, at the drive's flush latency
 (typically 10 to 30 ms per write) instead of under a millisecond.
 
+Disk state keeps an equality index over every document's top-level fields, so
+a query with `==` or `in` on them reads only the documents holding the value,
+not the whole collection. Results are identical either way. A state last
+written by an older release rebuilds the index once on the next start (one read
+of every stored document). `FIRENOOK_FIELD_INDEXES=0` turns it off for a
+comparison; queries then scan, as before.
+
 Roll back by cleanly stopping Firenook, retaining its completed official-format
 export, then starting the official CLI on separate working state. Never run
 both on the same ports or let both own a working directory.

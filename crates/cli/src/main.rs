@@ -1557,6 +1557,7 @@ fn open_store(arguments: &FirestoreArgs) -> Result<Store, String> {
                     .redb_cache_size
                     .unwrap_or(DEFAULT_REDB_CACHE_SIZE_BYTES),
                 durability: arguments.durability.disk(),
+                field_indexes: firenook_core_store::field_indexes_from_env(),
             },
         )
         .map_err(|error| error.to_string()),
@@ -2219,10 +2220,9 @@ mod tests {
                 Some(PathBuf::from("/project/firestore.indexes.json")),
             )]
         );
-        assert!(
-            resolve_firestore_databases(config_dir, None)
-                .expect("no section")
-                .is_empty()
+        assert_eq!(
+            resolve_firestore_databases(config_dir, None).expect("no section"),
+            [] as [firenook_suite_runtime::FirestoreDatabaseConfig; 0]
         );
 
         let databases: FirebaseProjectConfig = serde_json::from_str(

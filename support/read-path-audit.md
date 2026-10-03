@@ -149,3 +149,53 @@ four of them.
 - The REST body is still assembled as one JSON value before it is sent.
 - Filtered counts still copy each candidate body to read the filtered field;
   a borrowed field decode would remove that copy.
+
+## Follow-up: equality field index
+
+The listener work above maintains a view incrementally, but a `limit` window
+that loses its entry, and every query, still read their whole collection. A
+job queue makes that the common case: the queue's head listener (`owner ==`,
+`kind ==`, `status in [queued, running]`, ordered, `limit 1`) refills its
+window from a full scan whenever the head job is claimed or settles, each
+worker's long-poll opens a fresh listener, and each claim runs two more
+queries, all over every settled job the collection keeps. The disk store now
+keeps an equality index over top-level fields (DESIGN.md, "Equality field
+index"); these queries read only the documents holding the values.
+
+Measured directly through the engine crates (no transport) on a copy of the
+private consumer's working state (1,933,795 documents, a 32.6 GB store), Apple
+M2 Pro, 32 GiB, local SSD, cold OS cache for the copy; medians of seven runs,
+not an acceptance-host figure:
+
+| query or write | index off | index on |
+| --- | --- | --- |
+| queue head on a 30,162-document job collection, no active job (`limit 1`) | 1,413 ms (676–9,231) | 0.01 ms |
+| claimable jobs (`owner ==`, `status in`, `claimableAt <=`, `limit 25`) | 4,320 ms | < 0.01 ms |
+| queued jobs, as a long-poll listener opens (`owner ==`, `status ==`) | 2,497 ms | < 0.01 ms |
+| one conversation's jobs (`conversationId ==`, 4 results) | 1,188 ms | 0.38 ms |
+| `owner ==` with `limit 50`, every document matching | 4.1 ms | 4.4 ms |
+| queue head on a 6,554-document job collection | 116 ms | 0.01 ms |
+| commit creating one 9-field document | 0.073 ms | 0.363 ms |
+| commit updating that document's status | 1.73 ms | 2.36 ms |
+
+The index held 13,816,364 entries under 343,003 prefixes in 2.3 GB of redb
+pages (1.19 GB of keys and values, depth 5); the store file did not grow, the
+rebuild filled free pages. Most entries belong to a subcollection of small
+event documents. Opening the copy with a stale index took 246 s for the
+rebuild, which replaces the open's own counting pass over every document;
+later opens took 102 s with the index and 105 s without. An earlier layout
+that repeated the database, collection path and document key in every entry
+took 7.6 GB and 465 s; the prefix table and stored ids cut both.
+
+Verification: 9 store tests (`disk/field_index/tests.rs`: key equality and
+prefix-freedom, maintenance equal to a rebuild after sets, patches, deletes
+and type changes, rebuild after the index was off, journal replay, bulk load,
+historical overlays, a randomized join against brute force, the rebuild's
+memory accounting) and 4 query tests (`query-engine/src/field_index_tests.rs`)
+comparing a memory store, a disk store without the index and one with it;
+breaking the numeric canonicalization, reference keys, the 1,500-byte prefix
+or update maintenance fails them.
+
+Left for a later round: collection-group queries, ranges and orders still
+scan; the rebuild inserts in document order, so index leaves end about half
+full.

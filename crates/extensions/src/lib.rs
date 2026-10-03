@@ -974,7 +974,7 @@ mod tests {
         assert_eq!(backend.env["DERIVED"], "${param:LOCATION}-derived");
         assert!(!backend.env.contains_key("API_KEY"));
         assert_eq!(backend.secret_values["API_KEY"], "secret-value");
-        assert!(backend.secret_env.is_empty());
+        assert_eq!(backend.secret_env, [] as [serde_json::Value; 0]);
         let names: Vec<&str> = backend.definitions.iter().map(Definition::name).collect();
         assert_eq!(names, ["ext-synthetic-httpFn", "ext-synthetic-storageFn"]);
         assert_eq!(

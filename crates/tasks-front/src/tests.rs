@@ -1681,7 +1681,7 @@ async fn discovery_registers_task_functions_and_refresh_replaces_only_changes() 
     )
     .unwrap();
     let runtime = TasksRuntime::new("demo-two", &inventory, "http://127.0.0.1:5001", log);
-    assert!(runtime.queue_keys().is_empty());
+    assert_eq!(runtime.queue_keys(), [] as [std::string::String; 0]);
     assert!(
         lines
             .lock()

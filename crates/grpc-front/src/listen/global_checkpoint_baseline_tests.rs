@@ -107,7 +107,7 @@ fn through_checkpoint(
                 }
                 checkpoint = kind == TargetChangeType::NoChange && change.target_ids.is_empty();
                 if checkpoint {
-                    assert!(!change.resume_token.is_empty());
+                    assert_ne!(change.resume_token, [] as [u8; 0]);
                     assert!(change.read_time.is_some());
                 }
             }

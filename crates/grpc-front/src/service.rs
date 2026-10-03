@@ -276,7 +276,6 @@ impl FirestoreService {
 
     /// Opens an in-process Listen channel backed by the same engine as the
     /// public gRPC streaming RPC.
-    #[must_use]
     pub fn open_listen_channel(
         &self,
     ) -> (mpsc::Sender<ListenRequest>, ResponseStream<ListenResponse>) {
@@ -285,7 +284,6 @@ impl FirestoreService {
 
     /// Opens a browser-client Listen channel whose optional body-encoded
     /// Authorization header is evaluated by Security Rules.
-    #[must_use]
     pub fn open_client_listen_channel(
         &self,
         authorization_header: Option<String>,
@@ -316,7 +314,6 @@ impl FirestoreService {
 
     /// Opens an in-process Write channel backed by the same engine as the
     /// public gRPC streaming RPC.
-    #[must_use]
     pub fn open_write_channel(
         &self,
     ) -> (mpsc::Sender<WriteRequest>, ResponseStream<WriteResponse>) {
@@ -325,7 +322,6 @@ impl FirestoreService {
 
     /// Opens a browser-client Write channel whose optional body-encoded
     /// Authorization header is evaluated by Security Rules.
-    #[must_use]
     pub fn open_client_write_channel(
         &self,
         authorization_header: Option<String>,
@@ -3154,7 +3150,7 @@ mod tests {
             .expect("write engine should answer the handshake")
             .expect("write handshake should succeed");
         assert!(write_handshake.stream_id.starts_with("firenook-write-"));
-        assert!(!write_handshake.stream_token.is_empty());
+        assert_ne!(write_handshake.stream_token, [] as [u8; 0]);
 
         let (listen_requests, mut listen_responses) = service.open_listen_channel();
         let (invalid_requests, mut invalid_responses) = service.open_listen_channel();
@@ -3490,7 +3486,7 @@ mod tests {
             .expect("transaction response should exist")
             .expect("transaction response should succeed")
             .transaction;
-        assert!(!transaction.is_empty());
+        assert_ne!(transaction, [] as [u8; 0]);
         assert_eq!(service.store().memory_usage().transactions.read_entries, 0);
 
         let first_document = query_stream

@@ -19,12 +19,16 @@ use redb::{
 
 use super::{
     Change, CommitError, CommitPlan, CommitResult, DatabaseName, DiskCacheMemoryUsage,
-    DiskWriteBufferMemoryUsage, Document, DocumentKey, EncodedDocument, LazyDocument,
-    ListenerMemoryUsage, LogicalMemoryUsage, ResetRequired, Revision, Snapshot, SnapshotError,
-    State, StoreMemoryUsage, StoreOptions, Timestamp, TransactionMemoryUsage, Write,
+    DiskWriteBufferMemoryUsage, Document, DocumentKey, EncodedDocument, FieldEquality,
+    LazyDocument, ListenerMemoryUsage, LogicalMemoryUsage, ResetRequired, Revision, Snapshot,
+    SnapshotError, State, StoreMemoryUsage, StoreOptions, Timestamp, TransactionMemoryUsage, Write,
     WriteBufferMemoryUsage, compare_resource_paths, decode_stored_document,
-    document_entry_logical_bytes, encode_stored_document, numeric_resource_id, usize_to_u64,
+    document_entry_logical_bytes, encode_stored_document, numeric_resource_id,
+    stored_scalar_fields, usize_to_u64,
 };
+
+mod field_index;
+use field_index::{EqualityJoin, PrefixIds, document_entries, entries};
 
 const LEGACY_DOCUMENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("documents_v1");
 const DOCUMENTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("documents_v2");
@@ -32,7 +36,18 @@ const COLLECTIONS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("collect
 const COLLECTION_GROUPS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("collection_groups_v2");
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("metadata_v1");
+/// Equality entries for top-level fields; see `field_index`.
+const FIELD_INDEX: TableDefinition<&[u8], &[u8]> = TableDefinition::new("field_equality_v1");
+/// The 4-byte id of each `[database][collection path][field]` the field index
+/// holds entries for.
+const FIELD_PREFIXES: TableDefinition<&[u8], u32> =
+    TableDefinition::new("field_equality_v1_prefixes");
 const STATE_KEY: &str = "state";
+/// The store revision the field index describes. Written with every commit
+/// while the index is maintained; a store last written without it (an older
+/// release, or the index switched off) holds an older value or none, and the
+/// next open rebuilds the index.
+const FIELD_INDEX_REVISION_KEY: &str = "field_equality_v1_revision";
 const DOCUMENTS_V2_MIGRATION_KEY: &str = "documents_v2_migrated";
 const ORDERED_SCOPE_INDEX_MIGRATION_KEY: &str = "ordered_scope_indexes_v2_migrated";
 const DATABASE_FILE: &str = "firenook.redb";
@@ -102,6 +117,11 @@ pub struct DiskOptions {
     pub cache_size_bytes: usize,
     /// When commits reach stable storage.
     pub durability: DiskDurability,
+    /// Maintain the equality index over top-level fields and let queries use
+    /// it. Off, the store behaves as releases before the index: commits skip
+    /// it and every query scans its collection; the next open with it on
+    /// rebuilds it.
+    pub field_indexes: bool,
 }
 
 impl Default for DiskOptions {
@@ -111,8 +131,22 @@ impl Default for DiskOptions {
             journal: true,
             cache_size_bytes: DEFAULT_REDB_CACHE_SIZE_BYTES,
             durability: DiskDurability::default(),
+            field_indexes: true,
         }
     }
+}
+
+/// Whether the environment leaves the field index on: `FIRENOOK_FIELD_INDEXES`
+/// set to `0`, `off` or `false` turns it off for a comparison against the
+/// scanning behaviour.
+#[must_use]
+pub fn field_indexes_from_env() -> bool {
+    std::env::var("FIRENOOK_FIELD_INDEXES").map_or(true, |value| {
+        !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "off" | "false"
+        )
+    })
 }
 
 /// A redb-backed store with an optional, default-on write-ahead journal.
@@ -167,12 +201,27 @@ impl DiskStore {
             None
         };
 
+        // Decided before the journal replays: replay maintains a valid index
+        // and stamps its revision, which would hide an index left stale.
+        let index_valid = field_index_valid(&database)?;
         if let Some((journal, records)) = &mut journal {
-            replay_records(&database, records, &write_buffers)?;
+            replay_records(
+                &database,
+                records,
+                &write_buffers,
+                options.field_indexes && index_valid,
+            )?;
             journal.checkpoint()?;
         }
+        // A rebuild reads every document, so it also counts them for the
+        // memory accounting and the open reads the store once.
+        let counted = if options.field_indexes && !index_valid {
+            Some(rebuild_field_index(&database)?)
+        } else {
+            None
+        };
 
-        let (revision, last_commit_time, current_documents) = load_database(&database)?;
+        let (revision, last_commit_time, current_documents) = load_database(&database, counted)?;
         let memory = State::from_persisted(
             options.store,
             revision,
@@ -189,6 +238,7 @@ impl DiskStore {
             requires_restart: false,
             durability: options.durability,
             unflushed: false,
+            field_indexes: options.field_indexes,
         }));
         if let DiskDurability::WriteBehind { interval } = options.durability {
             spawn_flusher(Arc::downgrade(&inner), Arc::clone(&write_buffers), interval);
@@ -218,7 +268,7 @@ impl DiskStore {
         let state = self.state();
         Snapshot::disk(
             state.memory.revision,
-            DiskSnapshot::open(&state.database, im::OrdMap::new()),
+            DiskSnapshot::open(&state.database, im::OrdMap::new(), state.field_indexes),
             state.memory.current_documents,
         )
     }
@@ -229,7 +279,7 @@ impl DiskStore {
         let overlay = historical_overlay(&state.memory, revision)?;
         Ok(Snapshot::disk(
             revision,
-            DiskSnapshot::open(&state.database, overlay),
+            DiskSnapshot::open(&state.database, overlay, state.field_indexes),
             state.memory.document_usage_at_revision(revision),
         ))
     }
@@ -253,7 +303,7 @@ impl DiskStore {
         let overlay = historical_overlay(&state.memory, revision)?;
         Ok(Snapshot::disk(
             revision,
-            DiskSnapshot::open(&state.database, overlay),
+            DiskSnapshot::open(&state.database, overlay, state.field_indexes),
             state.memory.document_usage_at_revision(revision),
         ))
     }
@@ -293,6 +343,7 @@ impl DiskStore {
             &record,
             &self.write_buffers,
             redb_durability(state.durability),
+            state.field_indexes,
         ) {
             state.requires_restart = true;
             return Err(error);
@@ -387,16 +438,23 @@ impl DiskStore {
 pub(crate) struct DiskSnapshot {
     transaction: Arc<ReadTransaction>,
     overlay: im::OrdMap<DocumentKey, Option<Arc<Document>>>,
+    /// Whether the field index describes this transaction's documents.
+    field_indexes: bool,
 }
 
 impl DiskSnapshot {
-    fn open(database: &Database, overlay: im::OrdMap<DocumentKey, Option<Arc<Document>>>) -> Self {
+    fn open(
+        database: &Database,
+        overlay: im::OrdMap<DocumentKey, Option<Arc<Document>>>,
+        field_indexes: bool,
+    ) -> Self {
         let transaction = database
             .begin_read()
             .expect("an open redb database must support read snapshots");
         Self {
             transaction: Arc::new(transaction),
             overlay,
+            field_indexes,
         }
     }
 
@@ -439,6 +497,31 @@ impl DiskSnapshot {
             .and_then(|prefix| indexed_range(&self.transaction, COLLECTIONS, &prefix))
             .unwrap_or(DiskRange::Empty);
         self.iterator(scope, source)
+    }
+
+    /// A superset of the direct documents of `collection_path` that satisfy
+    /// every lookup, in the collection's query order, read through the field
+    /// index; `None` when the index is off or a value is not indexed. The
+    /// redb index describes the newest documents, so every overlay entry of a
+    /// historical snapshot is a candidate too, with its overlay state.
+    pub(crate) fn iter_collection_equal(
+        &self,
+        database: &DatabaseName,
+        collection_path: &str,
+        lookups: &[FieldEquality<'_>],
+    ) -> Option<DiskDocumentIterator> {
+        if !self.field_indexes || lookups.is_empty() {
+            return None;
+        }
+        let index = self.transaction.open_table(FIELD_INDEX).ok()?;
+        let prefixes = self.transaction.open_table(FIELD_PREFIXES).ok()?;
+        let join = EqualityJoin::open(index, &prefixes, database, collection_path, lookups)?;
+        let documents = self.transaction.open_table(DOCUMENTS).ok()?;
+        let scope = DiskDocumentScope::Collection {
+            database: database.clone(),
+            collection_path: collection_path.to_owned(),
+        };
+        Some(self.iterator(scope, DiskRange::Equality { documents, join }))
     }
 
     pub(crate) fn iter_collection_group(
@@ -772,6 +855,10 @@ enum DiskRange {
         documents: ReadOnlyTable<&'static [u8], &'static [u8]>,
         range: redb::Range<'static, &'static [u8], &'static [u8]>,
     },
+    Equality {
+        documents: ReadOnlyTable<&'static [u8], &'static [u8]>,
+        join: EqualityJoin,
+    },
     Empty,
 }
 
@@ -910,6 +997,22 @@ fn next_disk_document(
                     LazyDocument::Encoded(EncodedDocument::new(document.value())),
                 ));
             }
+            DiskRange::Equality { documents, join } => {
+                let key = join.next()?;
+                if !scope.matches(&key) {
+                    continue;
+                }
+                let Ok(encoded_key) = encode_document_key(&key) else {
+                    continue;
+                };
+                let Ok(Some(document)) = documents.get(encoded_key.as_slice()) else {
+                    continue;
+                };
+                return Some((
+                    key,
+                    LazyDocument::Encoded(EncodedDocument::new(document.value())),
+                ));
+            }
             DiskRange::Empty => return None,
         }
     }
@@ -1014,6 +1117,8 @@ struct DiskState {
     durability: DiskDurability,
     /// Commits acknowledged since the last durable flush (write-behind only).
     unflushed: bool,
+    /// The field index is maintained by every commit and read by queries.
+    field_indexes: bool,
 }
 
 const fn redb_durability(durability: DiskDurability) -> Durability {
@@ -1041,7 +1146,12 @@ fn flush_state(
         if let Some(journal) = &mut state.journal {
             journal.sync()?;
         }
-        persist_state_durably(&state.database, &state.memory, write_buffers)?;
+        persist_state_durably(
+            &state.database,
+            &state.memory,
+            write_buffers,
+            state.field_indexes,
+        )?;
         if let Some(journal) = &mut state.journal {
             journal.checkpoint()?;
         }
@@ -1067,6 +1177,7 @@ fn persist_state_durably(
     database: &Database,
     memory: &State,
     write_buffers: &WriteBufferAccounting,
+    field_indexes: bool,
 ) -> Result<(), DiskError> {
     let mut transaction = database.begin_write().map_err(DiskError::redb)?;
     transaction
@@ -1077,6 +1188,7 @@ fn persist_state_durably(
         memory.revision,
         memory.last_commit_time,
         write_buffers,
+        field_indexes,
     )?;
     transaction.commit().map_err(DiskError::redb)
 }
@@ -1163,6 +1275,12 @@ fn initialize_database(database: &Database) -> Result<(), DiskError> {
             .open_table(COLLECTION_GROUPS)
             .map_err(DiskError::redb)?;
         transaction.open_table(METADATA).map_err(DiskError::redb)?;
+        transaction
+            .open_table(FIELD_INDEX)
+            .map_err(DiskError::redb)?;
+        transaction
+            .open_table(FIELD_PREFIXES)
+            .map_err(DiskError::redb)?;
     }
     transaction.commit().map_err(DiskError::redb)?;
     migrate_legacy_documents(database)?;
@@ -1270,10 +1388,13 @@ fn migrate_ordered_scope_indexes(database: &Database) -> Result<(), DiskError> {
     transaction.commit().map_err(DiskError::redb)
 }
 
-fn load_database(database: &Database) -> Result<LoadedDatabase, DiskError> {
+fn load_database(
+    database: &Database,
+    counted: Option<LogicalMemoryUsage>,
+) -> Result<LoadedDatabase, DiskError> {
     let transaction = database.begin_read().map_err(DiskError::redb)?;
-    let mut current_documents = LogicalMemoryUsage::default();
-    {
+    let mut current_documents = counted.unwrap_or_default();
+    if counted.is_none() {
         let table = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
         let entries = table.iter().map_err(DiskError::redb)?;
         for entry in entries {
@@ -1334,17 +1455,24 @@ fn persist_record(
     record: &WalRecord,
     write_buffers: &WriteBufferAccounting,
     durability: Durability,
+    field_indexes: bool,
 ) -> Result<(), DiskError> {
     let mut transaction = database.begin_write().map_err(DiskError::redb)?;
     transaction
         .set_durability(durability)
         .map_err(DiskError::redb)?;
-    apply_mutations(&transaction, &record.mutations, write_buffers)?;
+    apply_mutations(
+        &transaction,
+        &record.mutations,
+        write_buffers,
+        field_indexes,
+    )?;
     persist_state(
         &transaction,
         record.revision,
         record.commit_time,
         write_buffers,
+        field_indexes,
     )?;
     transaction.commit().map_err(DiskError::redb)
 }
@@ -1353,6 +1481,7 @@ fn apply_mutations(
     transaction: &WriteTransaction,
     mutations: &[PersistedMutation],
     write_buffers: &WriteBufferAccounting,
+    field_indexes: bool,
 ) -> Result<(), DiskError> {
     {
         let mut documents = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
@@ -1362,6 +1491,18 @@ fn apply_mutations(
         let mut collection_groups = transaction
             .open_table(COLLECTION_GROUPS)
             .map_err(DiskError::redb)?;
+        let mut field_index = if field_indexes {
+            Some((
+                transaction
+                    .open_table(FIELD_INDEX)
+                    .map_err(DiskError::redb)?,
+                transaction
+                    .open_table(FIELD_PREFIXES)
+                    .map_err(DiskError::redb)?,
+            ))
+        } else {
+            None
+        };
         for mutation in mutations {
             let key = track_write_buffer(
                 encode_document_key(&mutation.key)?,
@@ -1370,6 +1511,45 @@ fn apply_mutations(
             );
             let collection_key = encode_collection_index_key(&mutation.key)?;
             let collection_group_key = encode_collection_group_index_key(&mutation.key)?;
+            if let Some((field_index, prefixes)) = &mut field_index {
+                let mut prefixes = PrefixIds { table: prefixes };
+                // The entries the stored document holds now, read from this
+                // transaction, so a journal replay or a bulk load's earlier
+                // batch is accounted exactly like a live commit.
+                let previous = match documents.get(key.as_slice()).map_err(DiskError::redb)? {
+                    Some(stored) => {
+                        let fields = stored_scalar_fields(stored.value())
+                            .map_err(|error| DiskError::Encoding(error.to_string()))?;
+                        entries(
+                            &mut prefixes,
+                            false,
+                            &mutation.key,
+                            fields.iter().map(|(field, value)| (field.as_str(), value)),
+                        )?
+                    }
+                    None => Vec::new(),
+                };
+                let next = match &mutation.document {
+                    Some(document) => document_entries(&mut prefixes, &mutation.key, document)?,
+                    None => Vec::new(),
+                };
+                for (entry, _) in previous
+                    .iter()
+                    .filter(|entry| next.binary_search(entry).is_err())
+                {
+                    field_index
+                        .remove(entry.as_slice())
+                        .map_err(DiskError::redb)?;
+                }
+                for (entry, id) in next
+                    .iter()
+                    .filter(|entry| previous.binary_search(entry).is_err())
+                {
+                    field_index
+                        .insert(entry.as_slice(), id.as_slice())
+                        .map_err(DiskError::redb)?;
+                }
+            }
             if let Some(document) = &mutation.document {
                 let value = track_write_buffer(
                     encode_stored_document(document)
@@ -1405,6 +1585,7 @@ fn persist_state(
     revision: Revision,
     last_commit_time: Timestamp,
     write_buffers: &WriteBufferAccounting,
+    field_indexes: bool,
 ) -> Result<(), DiskError> {
     let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
     let state = encode_write_buffer(
@@ -1418,7 +1599,90 @@ fn persist_state(
     metadata
         .insert(STATE_KEY, state.as_slice())
         .map_err(DiskError::redb)?;
+    if field_indexes {
+        metadata
+            .insert(FIELD_INDEX_REVISION_KEY, encode(&revision)?.as_slice())
+            .map_err(DiskError::redb)?;
+    }
     Ok(())
+}
+
+/// Whether the field index describes the store's persisted revision.
+fn field_index_valid(database: &Database) -> Result<bool, DiskError> {
+    let state = load_persisted_state(database)?;
+    let transaction = database.begin_read().map_err(DiskError::redb)?;
+    let metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+    let indexed = metadata
+        .get(FIELD_INDEX_REVISION_KEY)
+        .map_err(DiskError::redb)?
+        .map(|revision| decode::<Revision>(revision.value()))
+        .transpose()?;
+    Ok(indexed == Some(state.revision))
+}
+
+/// Replaces the field index with one built from every stored document, in
+/// one transaction, and stamps the persisted revision. Runs on open when the
+/// index is missing or stale; its cost is one read of every document, which
+/// also yields the documents' memory accounting, returned for the open.
+fn rebuild_field_index(database: &Database) -> Result<LogicalMemoryUsage, DiskError> {
+    let started = std::time::Instant::now();
+    let state = load_persisted_state(database)?;
+    let mut transaction = database.begin_write().map_err(DiskError::redb)?;
+    transaction
+        .set_durability(Durability::Immediate)
+        .map_err(DiskError::redb)?;
+    transaction
+        .delete_table(FIELD_INDEX)
+        .map_err(DiskError::redb)?;
+    transaction
+        .delete_table(FIELD_PREFIXES)
+        .map_err(DiskError::redb)?;
+    let mut counted = LogicalMemoryUsage::default();
+    {
+        let documents = transaction.open_table(DOCUMENTS).map_err(DiskError::redb)?;
+        let mut field_index = transaction
+            .open_table(FIELD_INDEX)
+            .map_err(DiskError::redb)?;
+        let mut prefixes = transaction
+            .open_table(FIELD_PREFIXES)
+            .map_err(DiskError::redb)?;
+        let mut prefixes = PrefixIds {
+            table: &mut prefixes,
+        };
+        for entry in documents.iter().map_err(DiskError::redb)? {
+            let (encoded_key, stored) = entry.map_err(DiskError::redb)?;
+            let key = decode_document_key(encoded_key.value())?;
+            let document = decode_stored_document(stored.value())
+                .map_err(|error| DiskError::Encoding(error.to_string()))?;
+            for (index_key, id) in document_entries(&mut prefixes, &key, &document)? {
+                field_index
+                    .insert(index_key.as_slice(), id.as_slice())
+                    .map_err(DiskError::redb)?;
+            }
+            counted.entries = counted.entries.saturating_add(1);
+            counted.logical_bytes = counted
+                .logical_bytes
+                .saturating_add(document_entry_logical_bytes(&key, &document));
+        }
+    }
+    {
+        let mut metadata = transaction.open_table(METADATA).map_err(DiskError::redb)?;
+        metadata
+            .insert(
+                FIELD_INDEX_REVISION_KEY,
+                encode(&state.revision)?.as_slice(),
+            )
+            .map_err(DiskError::redb)?;
+    }
+    transaction.commit().map_err(DiskError::redb)?;
+    if counted.entries > 0 {
+        eprintln!(
+            "firenook: indexed the top-level fields of {} Firestore documents in {:.1} s",
+            counted.entries,
+            started.elapsed().as_secs_f64()
+        );
+    }
+    Ok(counted)
 }
 
 /// A pre-serving bulk load that keeps every batch inside one redb transaction.
@@ -1480,7 +1744,12 @@ impl DiskBulkCommit<'_> {
         };
         let plan = self.state.memory.plan_with_documents(writes, documents)?;
         let record = WalRecord::from_plan(&plan);
-        if let Err(error) = apply_mutations(transaction, &record.mutations, &self.write_buffers) {
+        if let Err(error) = apply_mutations(
+            transaction,
+            &record.mutations,
+            &self.write_buffers,
+            self.state.field_indexes,
+        ) {
             self.abandon();
             return Err(error);
         }
@@ -1504,6 +1773,7 @@ impl DiskBulkCommit<'_> {
             self.state.memory.revision,
             self.state.memory.last_commit_time,
             &self.write_buffers,
+            self.state.field_indexes,
         )
         .and_then(|()| transaction.commit().map_err(DiskError::redb));
         if committed.is_err() {
@@ -1535,6 +1805,7 @@ fn replay_records(
     database: &Database,
     records: &[WalRecord],
     write_buffers: &WriteBufferAccounting,
+    field_indexes: bool,
 ) -> Result<(), DiskError> {
     let mut state = load_persisted_state(database)?;
     for record in records {
@@ -1558,7 +1829,13 @@ fn replay_records(
                 "journal commit timestamps are not strictly increasing".to_owned(),
             ));
         }
-        persist_record(database, record, write_buffers, Durability::Immediate)?;
+        persist_record(
+            database,
+            record,
+            write_buffers,
+            Durability::Immediate,
+            field_indexes,
+        )?;
         state.revision = record.revision;
         state.last_commit_time = record.commit_time;
     }
@@ -3018,6 +3295,7 @@ mod tests {
                 &record,
                 &store.write_buffers,
                 Durability::Immediate,
+                state.field_indexes,
             )
             .expect("redb commit should complete");
         }
