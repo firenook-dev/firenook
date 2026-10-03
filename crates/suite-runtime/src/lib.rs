@@ -1292,6 +1292,7 @@ fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
             journal: true,
             cache_size_bytes: firenook_core_store::DEFAULT_REDB_CACHE_SIZE_BYTES,
             durability: config.durability,
+            field_indexes: firenook_core_store::field_indexes_from_env(),
         },
     )
     .map_err(|error| failure(format!("Firestore state failed to open: {error}")))

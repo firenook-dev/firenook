@@ -137,7 +137,7 @@ fn assert_reset_frames(frames: &[ListenResponse], expected_paths: &[&str]) {
                     assert_eq!(change.target_ids, [TARGET_ID]);
                 }
                 if kind == TargetChangeType::Reset {
-                    assert!(!change.resume_token.is_empty());
+                    assert_ne!(change.resume_token, [] as [u8; 0]);
                     assert!(change.read_time.is_some());
                 }
                 changes.push(kind);
@@ -209,13 +209,13 @@ async fn expired_opaque_resume_resets_current_target_and_delivers_later_update()
                 .fields()["version"],
             Value::Integer(1)
         );
-        assert!(
+        assert_eq!(
             initial
                 .watch
                 .refresh(&store.snapshot())
                 .expect("same snapshot")
-                .changes
-                .is_empty()
+                .changes,
+            [] as [firenook_watch_broker::WatchChange; 0]
         );
         assert!(store.retained_change_count() <= 8);
     }
@@ -588,7 +588,7 @@ async fn unauthorized_expired_resume_only_removes_its_target_without_replay() {
         change.cause.as_ref().expect("denial cause").code,
         Code::PermissionDenied as i32
     );
-    assert!(change.resume_token.is_empty());
+    assert_eq!(change.resume_token, [] as [u8; 0]);
     assert!(change.read_time.is_none());
     assert_eq!(targets.keys().copied().collect::<Vec<_>>(), [7]);
 

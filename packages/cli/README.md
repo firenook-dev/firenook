@@ -10,12 +10,12 @@ Install the unscoped `firenook` package; the `@firenook/cli-<platform>`
 packages are its optional dependencies and are never installed directly.
 Releases up to `0.1.0-next.9` were published as `@fireside-dev/cli`; the root
 project README records what changes when migrating. The following
-exact-version command is for this `0.2.0-next.1` preview package once
+exact-version command is for this `0.2.0-next.2` preview package once
 published. Repository development may precede registry availability; check
 the root project README for the currently published version.
 
 ```sh
-npm install --save-dev --save-exact firenook@0.2.0-next.1
+npm install --save-dev --save-exact firenook@0.2.0-next.2
 npx firenook setup
 npx firenook init                      # new project: firebase.json, rules, a Functions codebase
 npx firenook init --adopt              # existing project: check it, add what Firenook needs
@@ -314,6 +314,13 @@ emulator loses nothing; only a kernel crash or power cut can lose the last
 second of writes, and the state stays consistent. `--durability per-commit`
 syncs every write before acknowledging it, at the drive's flush latency
 (typically 10 to 30 ms per write) instead of under a millisecond.
+
+Disk state keeps an equality index over every document's top-level fields, so
+a query with `==` or `in` on them reads only the documents holding the value,
+not the whole collection. Results are identical either way. A state last
+written by an older release rebuilds the index once on the next start (one read
+of every stored document). `FIRENOOK_FIELD_INDEXES=0` turns it off for a
+comparison; queries then scan, as before.
 
 Roll back by cleanly stopping Firenook, retaining its completed official-format
 export, then starting the official CLI on separate working state. Never run

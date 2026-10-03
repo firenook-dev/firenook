@@ -270,7 +270,7 @@ async fn refreshed_function_targets_preserve_topics_ids_and_queued_work() {
         .refresh_inventory(PROJECT, &empty, &mut scheduler)
         .await
         .unwrap();
-    assert!(runtime.schedules().is_empty());
+    assert_eq!(runtime.schedules().len(), 0);
     let response = runtime
         .application()
         .oneshot(request("added-topic"))

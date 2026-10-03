@@ -480,7 +480,7 @@ resume tokens issued before it; no emulator behaviour changed.
   (every version carries the deprecation notice; a notice-only
   `0.1.0-next.10` with no engine is their `latest`/`next`).
 
-## Read path and listener maintenance (`0.2.0-next.2`, unreleased)
+## Read path and listener maintenance (`0.2.0-next.2`)
 
 A fix round on the `0.2.0-next.1` engine, recorded in
 `support/read-path-audit.md`: the official Emulator UI's Firestore browser
@@ -504,7 +504,22 @@ Auth, Storage and the UI itself. No new service or API.
 - [x] Listen streams wake on a commit notifier instead of a 10 ms poll and
   maintain their views incrementally (window entry/eviction included), with a
   randomized equivalence test against full evaluation on both backends.
-- [ ] Acceptance-host lanes and publication as `0.2.0-next.2`.
+- [x] Equality field index in the disk store: top-level `==` and `in`
+  filters on one collection read only the documents holding the value
+  instead of the whole collection, so a queue-shaped query (a few active jobs
+  among many settled ones) and every listener refill it causes cost what they
+  return. Candidates only; every filter is still evaluated. Randomized and
+  exhaustive equivalence tests against the scanning stores;
+  `FIRENOOK_FIELD_INDEXES=0` restores scanning.
+- [x] Published as `firenook@0.2.0-next.2` with `@firenook/cli-<platform>` ×5
+  on 2026-10-03 (release PR #68, tag `npm-v0.2.0-next.2` on ed6876a, engine
+  63d554c, release run 37123335020; registry integrity equal to the release
+  assets for all six packages, provenance attestations verified on a fresh
+  install, `next` → 0.2.0-next.2, `latest` untouched). The release also
+  carries the console scaffold (#63) and the Rust 1.99 lint fixes (#67).
+- [ ] Acceptance-host lanes for this engine: not run before publication; the
+  local verification is in the CHANGELOG entry and the follow-up section of
+  `support/read-path-audit.md`.
 
 ## Own console (Phase N, unreleased)
 
@@ -515,10 +530,10 @@ Base UI, Tailwind) and is embedded into the binary by `crates/console-front`,
 mounted under `/console` on the UI port next to the Google UI, which stays
 served until every section has landed.
 
-- [x] Stack, shell, command palette, overview and the Console API's first
-  route with Rust-generated TypeScript types; unit, end-to-end (real engine)
-  and bundle-budget checks in CI; the console is built before every engine
-  build.
+- [x] (Shipped in `0.2.0-next.2`.) Stack, shell, command palette, overview and
+  the Console API's first route with Rust-generated TypeScript types; unit,
+  end-to-end (real engine) and bundle-budget checks in CI; the console is
+  built before every engine build.
 - [x] Same-origin data services under the console: the Firestore REST front,
   the Requests feed and the Auth application mount under `/console/api/v1`,
   so the console works wherever its page loads from (a proxy, an HTTPS

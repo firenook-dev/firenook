@@ -1,6 +1,6 @@
 # Scoped roadmap progress
 
-Updated 2026-09-19 UTC (renamed to Firenook; `firenook@0.2.0-next.1` published). The A–F roadmap remains active; no full-release,
+Updated 2026-10-03 UTC (`firenook@0.2.0-next.2` published: the read path, incremental listeners and the equality field index). The A–F roadmap remains active; no full-release,
 universal-compatibility, publication or performance-win claim is made here.
 
 | Phase | Current state | Remaining qualification |
@@ -97,8 +97,8 @@ checks on its exact combined candidate instead of substituting older binaries.
 | Buffer retention and slow clients | Real TCP non-readers for Requests/Logs, fixed send-deadline tests, client admission/reclamation, byte/count/age bounds and coverage expiry/contention tests |
 | Unchanged decisions and overhead | Traced/untraced rules corpora; rotated nine-run overhead driver asserting every result and final state, with all samples retained |
 | Rename | Renamed to Firenook and published as `firenook@0.2.0-next.1` (2026-09-19): PR #58, repositories moved to `firenook-dev`, release run 35449320572, registry integrity and provenance verified, fresh-machine installs on three platforms | Consumer pin swap and gates on the installed package; then deprecate the former packages |
-| Read path (unreleased) | `support/read-path-audit.md`: key cursor, index-only counts, read pool, REST `select`, Auth persist-on-change, commit-notified incremental listeners; 49 workspace suites, conformance 37/37 on official/memory/disk, Auth replay 0 mismatches, developer-machine before/after table | Acceptance-host lanes, then publication as `0.2.0-next.2` |
-| Console (unreleased) | `console/` + `crates/console-front`: stack, shell, palette, overview, Console API status route with generated types; crate tests, Vitest, Playwright against a real engine, bundle budget | Live channel, Firestore workbench, Auth, the other sections, parity checklist |
+| Read path and field index | Published as `firenook@0.2.0-next.2` (2026-10-03): PRs #62, #66 and #67 on engine 63d554c, release run 37123335020, registry integrity and provenance verified; workspace tests, packaging tests and the Firestore conformance suite in memory and disk modes on the candidate; upgrade from and downgrade to `0.2.0-next.1` exercised locally | Acceptance-host lanes on this engine |
+| Console (unreleased) | `console/` + `crates/console-front`: the scaffold shipped in `0.2.0-next.2` (PR #63); on top of it the Firestore workbench (path bar, typed grid, query line, inspector, view-as-user, create and delete, copy as code), the live channel, the engine's schema index and database list, and the shell's navigation and section panel; crate tests, Vitest, Playwright journeys against a real engine, bundle budget | Auth, the other sections, parity checklist; acceptance-host lanes, then a later release |
 
 The public preview compatibility document continues to describe the installed
 release. Merged but unpublished source improvements must not be presented as

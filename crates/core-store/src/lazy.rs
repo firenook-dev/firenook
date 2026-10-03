@@ -114,6 +114,59 @@ pub(crate) fn decode_stored_document(bytes: &[u8]) -> Result<Document, DecodeErr
     Ok(document)
 }
 
+/// The top-level fields of a stored value whose values are not arrays, maps
+/// or vectors, decoding only those values: what the disk store's field index
+/// holds for the document. A value without a directory is decoded in full.
+pub(crate) fn stored_scalar_fields(bytes: &[u8]) -> Result<Vec<(String, Value)>, DecodeError> {
+    if bytes.first() != Some(&DIRECTORY_MARKER) {
+        return Ok(decode_stored_document(bytes)?
+            .fields
+            .into_iter()
+            .filter(|(_, value)| {
+                !matches!(value, Value::Array(_) | Value::Map(_) | Value::Vector(_))
+            })
+            .collect());
+    }
+    let mut directory_decoder = decoder(&bytes[1..]);
+    let entries = length(&mut directory_decoder)?;
+    let mut directory = Vec::with_capacity(entries.min(1_024));
+    for _ in 0..entries {
+        let key_len = length(&mut directory_decoder)?;
+        let key = {
+            let key = directory_decoder.reader().peek_read(key_len).ok_or(
+                DecodeError::UnexpectedEnd {
+                    additional: key_len,
+                },
+            )?;
+            String::from_utf8(key.to_vec())
+                .map_err(|_| DecodeError::Other("field key is not UTF-8"))?
+        };
+        directory_decoder.reader().consume(key_len);
+        let offset = u32::decode(&mut directory_decoder)? as usize;
+        let len = u32::decode(&mut directory_decoder)? as usize;
+        directory.push((key, offset, len));
+    }
+    let body_start = 1 + directory_decoder.reader().consumed;
+    let mut fields = Vec::with_capacity(directory.len());
+    for (key, offset, len) in directory {
+        let start = body_start
+            .checked_add(offset)
+            .ok_or(DecodeError::Other("directory offset overflows"))?;
+        let end = start
+            .checked_add(len)
+            .ok_or(DecodeError::Other("directory length overflows"))?;
+        let value = bytes
+            .get(start..end)
+            .ok_or(DecodeError::UnexpectedEnd { additional: len })?;
+        let variant = u32::decode(&mut decoder(value))?;
+        if matches!(variant, VARIANT_ARRAY | VARIANT_MAP | VARIANT_VECTOR) {
+            continue;
+        }
+        fields.push((key, Value::decode(&mut decoder(value))?));
+    }
+    Ok(fields)
+}
+
 /// The plain bincode document inside a stored value.
 fn document_body(bytes: &[u8]) -> Result<&[u8], DecodeError> {
     if bytes.first() != Some(&DIRECTORY_MARKER) {

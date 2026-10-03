@@ -697,6 +697,7 @@ dependencies = [
  "im",
  "redb",
  "serde",
+ "sha2",
  "smol_str",
 ]
 
