@@ -110,6 +110,63 @@ to 91 ms (65 ms), `__name__ in` ten ids from 646 ms to 10 ms (403 ms), and
 `array-contains` from 257 ms to 50 ms (554 ms). The remaining gap on ordered
 scans is the read and copy of every candidate's bytes out of redb.
 
+### Equality field index
+
+Disk mode keeps one more derived table beside the scope indexes: for each
+direct collection, top-level field and value, the documents holding that value
+(`crates/core-store/src/disk/field_index.rs`). A query whose filter has
+top-level `==` or `in` conjuncts on top-level fields of one collection reads
+its candidates from that table instead of scanning the collection; several
+conjuncts are joined zig-zag, each seeking to the largest document id another
+is at, so the cost follows the most selective one. A queue query such as
+`owner == o AND kind == k AND status in [queued, running] ORDER BY
+claimableAt LIMIT 1` therefore reads the few active documents however many
+settled ones the collection holds, and so does a listener's refill of its
+`limit` window.
+
+The index narrows candidates and never decides a result: every filter, order,
+cursor and limit is still evaluated on each candidate, exactly as on a scan,
+so the only possible defect is a missed document. Two rules exclude it. Every
+pair of values the query engine compares as equal shares one key: integers
+and doubles share a numeric domain (`1` and `1.0`, `0` and `-0.0`), NaNs equal
+one another, strings and bytes key on the first 1,500 bytes the Standard
+edition compares (the Enterprise edition's whole-value equality implies it),
+references key on their resource path with numeric ids by value, and keys
+longer than 64 bytes become a 16-byte SHA-256 prefix, where a collision only
+adds a candidate. And every top-level field of every document is indexed
+except arrays, maps and vectors, which equal no indexed value; filters on
+them, on nested paths, under an `or`, `!=`, `not-in`, array membership,
+ranges and collection groups keep the scan. `in` drops `null` and NaN, which
+never match a membership.
+
+An entry is small: each `[database][collection path][field]` is named once in
+a prefix table by a 4-byte id, the entry key is `[prefix id][value key]
+[ordered document id]`, and its value is the document id as stored, from
+which the candidate's key is rebuilt. Entries are written in the redb
+transaction of the documents they describe, by the one mutation path that
+ordinary commits, bulk seed loads and journal replay share; the previous
+entries of a document are read from that same transaction, so all three paths
+account a document identically. A historical
+snapshot reads the newest index through its overlay: every overlay entry is
+also a candidate, carrying its historical state. The metadata key
+`field_equality_v1_revision` records the revision the index describes and is
+stamped with every commit. An open whose persisted revision differs (a store
+last written by an older release, or with the index switched off) decides so
+before replaying the journal and rebuilds the index from every stored
+document in one transaction; that pass also counts the documents for the
+memory accounting, so the open still reads the store once. `FIRENOOK_FIELD_INDEXES=0` (or `off`, `false`)
+opens the store without the index: commits skip it, queries scan, and the next
+open with it rebuilds. Memory mode has no field index: its documents are
+already decoded in memory.
+
+Tests: exhaustive `==`/`in` over a pool of values with equal-but-different
+encodings in both editions, and a randomized run of writes (set, patch,
+delete across collections and subcollections), queries (conjunctions, nested
+`and`, `or`, orders, limits, limit-to-last, offsets, projections, `count()`)
+and historical snapshots, each compared between a memory store, a disk store
+without the index and one with it. Breaking the numeric canonicalization,
+reference keys, the 1,500-byte prefix or update maintenance each fails them.
+
 ### Seed import path
 
 A fresh start seeds the disk store through `Store::begin_bulk_commit`, not

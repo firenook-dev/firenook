@@ -504,6 +504,13 @@ Auth, Storage and the UI itself. No new service or API.
 - [x] Listen streams wake on a commit notifier instead of a 10 ms poll and
   maintain their views incrementally (window entry/eviction included), with a
   randomized equivalence test against full evaluation on both backends.
+- [x] Equality field index in the disk store: top-level `==` and `in`
+  filters on one collection read only the documents holding the value
+  instead of the whole collection, so a queue-shaped query (a few active jobs
+  among many settled ones) and every listener refill it causes cost what they
+  return. Candidates only; every filter is still evaluated. Randomized and
+  exhaustive equivalence tests against the scanning stores;
+  `FIRENOOK_FIELD_INDEXES=0` restores scanning.
 - [ ] Acceptance-host lanes and publication as `0.2.0-next.2`.
 
 ## Own console (Phase N, unreleased)

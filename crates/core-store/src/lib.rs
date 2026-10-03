@@ -26,10 +26,10 @@ mod lazy;
 
 pub use disk::{
     DEFAULT_REDB_CACHE_SIZE_BYTES, DEFAULT_WRITE_BEHIND_INTERVAL, DiskBulkCommit, DiskDurability,
-    DiskError, DiskOptions, DiskStore, adopt_legacy_files,
+    DiskError, DiskOptions, DiskStore, adopt_legacy_files, field_indexes_from_env,
 };
 pub use lazy::{EncodedDocument, LazyDocument};
-use lazy::{decode_stored_document, encode_stored_document};
+use lazy::{decode_stored_document, encode_stored_document, stored_scalar_fields};
 
 /// Firestore document fields in deterministic field-name order.
 pub type Fields = BTreeMap<String, Value>;
@@ -131,6 +131,23 @@ pub enum Value {
     Map(BTreeMap<String, Self>),
     /// A vector embedding. Its query order is between arrays and maps.
     Vector(Vec<f64>),
+}
+
+/// One conjunct of an equality lookup through the disk store's field index:
+/// the top-level field `field` equals one of `values`.
+#[derive(Debug, Clone, Copy)]
+pub struct FieldEquality<'a> {
+    /// Top-level field name, unescaped.
+    pub field: &'a str,
+    /// Alternatives; a document matches when its field equals any of them.
+    pub values: &'a [Value],
+}
+
+/// Whether the disk store's field index holds `value`, so an equality on it
+/// can be read from the index. Arrays, maps and vectors are not indexed.
+#[must_use]
+pub const fn field_index_holds(value: &Value) -> bool {
+    !matches!(value, Value::Array(_) | Value::Map(_) | Value::Vector(_))
 }
 
 /// A project and database pair.
@@ -1426,6 +1443,34 @@ impl Snapshot {
             SnapshotDocuments::Disk(documents) => {
                 SnapshotDocumentIterator::disk(documents.iter_collection(database, collection_path))
             }
+        }
+    }
+
+    /// A superset of the direct documents of `collection_path` whose
+    /// top-level fields satisfy every equality, in the collection's query
+    /// order, read through the disk store's field index. `None` when this
+    /// snapshot has no field index (memory stores, or the index switched
+    /// off), when `equalities` is empty or when a value is not indexed; the
+    /// caller then scans the collection. The caller must still evaluate its
+    /// filters on every candidate.
+    #[must_use]
+    pub fn iter_collection_equal(
+        &self,
+        database: &DatabaseName,
+        collection_path: &str,
+        equalities: &[FieldEquality<'_>],
+    ) -> Option<SnapshotLazyDocumentIterator> {
+        if equalities
+            .iter()
+            .any(|equality| !equality.values.iter().all(field_index_holds))
+        {
+            return None;
+        }
+        match &self.documents {
+            SnapshotDocuments::Memory { .. } => None,
+            SnapshotDocuments::Disk(documents) => documents
+                .iter_collection_equal(database, collection_path, equalities)
+                .map(|documents| SnapshotDocumentIterator::disk(documents).lazy()),
         }
     }
 

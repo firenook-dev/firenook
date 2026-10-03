@@ -1557,6 +1557,7 @@ fn open_store(arguments: &FirestoreArgs) -> Result<Store, String> {
                     .redb_cache_size
                     .unwrap_or(DEFAULT_REDB_CACHE_SIZE_BYTES),
                 durability: arguments.durability.disk(),
+                field_indexes: firenook_core_store::field_indexes_from_env(),
             },
         )
         .map_err(|error| error.to_string()),

@@ -6,8 +6,8 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 use firenook_core_store::{
-    DatabaseName, Document, DocumentKey, Fields, LazyDocument, Snapshot, Value,
-    compare_resource_paths,
+    DatabaseName, Document, DocumentKey, FieldEquality, Fields, LazyDocument, Snapshot, Value,
+    compare_resource_paths, field_index_holds,
 };
 
 use crate::{DatabaseEdition, compare_values};
@@ -15,6 +15,10 @@ use crate::{DatabaseEdition, compare_values};
 #[cfg(test)]
 #[path = "ordered_disk_tests.rs"]
 mod ordered_disk_tests;
+
+#[cfg(test)]
+#[path = "field_index_tests.rs"]
+mod field_index_tests;
 
 /// A document field or the special document-name field.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1280,6 +1284,10 @@ type ScopedCandidates = Box<dyn Iterator<Item = (DocumentKey, LazyDocument)> + S
 ///
 /// A top-level `__name__ ==` or `__name__ in` filter names its candidates
 /// outright, so they are read individually instead of scanning the scope.
+/// Top-level `==` and `in` filters on top-level fields of one collection are
+/// read through the disk store's field index when it holds their values.
+/// Either way the candidates are a superset of the results: every filter is
+/// still evaluated on each of them.
 fn scoped_documents(
     snapshot: &Snapshot,
     database: &DatabaseName,
@@ -1293,6 +1301,20 @@ fn scoped_documents(
                 .map(|document| (key, LazyDocument::Decoded(document)))
         }));
     }
+    if let QueryScope::Collection(collection_path) = &query.scope {
+        let lookups = equality_lookups(query);
+        if !lookups.is_empty() {
+            let equalities = lookups
+                .iter()
+                .map(|(field, values)| FieldEquality { field, values })
+                .collect::<Vec<_>>();
+            if let Some(candidates) =
+                snapshot.iter_collection_equal(database, collection_path, &equalities)
+            {
+                return Box::new(candidates);
+            }
+        }
+    }
     match &query.scope {
         QueryScope::Collection(collection_path) => {
             Box::new(snapshot.iter_collection(database, collection_path).lazy())
@@ -1303,6 +1325,50 @@ fn scoped_documents(
                 .lazy(),
         ),
     }
+}
+
+/// The conjunctive `==` and `in` filters on one top-level field whose values
+/// the field index holds, as `(field, alternatives)`. `in` drops `null` and
+/// NaN, which never match a membership; an `in` left with no value matches
+/// nothing, and its empty lookup yields no candidate. Filters under an `or`,
+/// on nested or `__name__` paths, or on arrays, maps and vectors are not
+/// lookups.
+fn equality_lookups(query: &Query) -> Vec<(String, Vec<Value>)> {
+    fn collect(filter: &Filter, lookups: &mut Vec<(String, Vec<Value>)>) {
+        match filter {
+            Filter::And(filters) => {
+                for filter in filters {
+                    collect(filter, lookups);
+                }
+            }
+            Filter::Or(_) => {}
+            Filter::Field(filter) => {
+                let FieldPath::Field(segments) = &filter.path else {
+                    return;
+                };
+                let [field] = segments.as_slice() else {
+                    return;
+                };
+                let values = match (&filter.operator, &filter.value) {
+                    (FieldOperator::Equal, value) => vec![value.clone()],
+                    (FieldOperator::In, Value::Array(values)) => values
+                        .iter()
+                        .filter(|value| !is_membership_sentinel(value))
+                        .cloned()
+                        .collect(),
+                    _ => return,
+                };
+                if values.iter().all(field_index_holds) {
+                    lookups.push((field.clone(), values));
+                }
+            }
+        }
+    }
+    let mut lookups = Vec::new();
+    if let Some(filter) = &query.filter {
+        collect(filter, &mut lookups);
+    }
+    lookups
 }
 
 /// Keys named by a top-level `__name__` equality or membership filter that
