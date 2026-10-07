@@ -391,6 +391,7 @@ export function Grid() {
                     return (
                       <Table.Cell
                         key={column.field}
+                        data-testid={`cell-${column.field}`}
                         className={`${odd ? 'bg-kumo-warning-tint' : ''} ${isEditing ? '!px-1' : ''}`}
                         title={
                           odd

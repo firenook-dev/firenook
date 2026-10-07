@@ -128,7 +128,10 @@ export const pageQueryOptions = (
       scope.authorization ?? '',
     ],
     queryFn: ({ pageParam }) =>
-      runQuery(scope, parent, toStructuredQuery(collectionId, group, query, root, pageParam)),
+      runQuery(scope, parent, toStructuredQuery(collectionId, group, query, root, pageParam), {
+        // The cursor compares these, so they must not arrive cut short.
+        keep: effectiveOrder(query).map((order) => order.field),
+      }),
     initialPageParam: undefined as RestValue[] | undefined,
     getNextPageParam: (last) => {
       if (last.documents.length < query.limit) return undefined

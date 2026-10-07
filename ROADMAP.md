@@ -618,6 +618,16 @@ served until every section has landed.
   `firenook --version` and the console's status document report them, and a
   binary started any other way says "unreleased build" rather than naming a
   number that means nothing.
+- [x] The grid reads previews instead of whole documents. A collection whose
+  documents carry large maps made the page query ship 30 MB of JSON to paint
+  one screen — 302 KB a document, of which a cell shows one truncated line,
+  and the inspector refetched the document anyway. `runQuery` now opts in
+  with `x-firenook-preview`, and the REST front cuts strings and containers
+  to what a preview can draw while reporting their real sizes, so a cell
+  still shows the true entry count and never passes a fragment off as the
+  whole value. The fields the cursor orders by are kept whole, a cut value
+  is not editable in place, and a request without the header is unchanged
+  byte for byte.
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
   the page, undo within the change-log window, and a rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,

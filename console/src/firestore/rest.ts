@@ -66,18 +66,51 @@ async function call<T>(scope: FirestoreScope, path: string, init: RequestInit = 
   return (await response.json()) as T
 }
 
+/**
+ * How much of each value a previewed read returns. A grid cell draws one
+ * truncated line, so a page of documents carrying large maps need not ship
+ * every byte of them — one collection here was 30 MB of JSON for a screen
+ * that showed a few hundred characters, and the inspector refetches the
+ * whole document anyway when a row is opened. `keep` names the fields the
+ * paging cursor orders by: those come back whole, because a cut value would
+ * page to the wrong place.
+ */
+export interface Preview {
+  keep: string[]
+}
+
+const PREVIEW_HEADER = 'x-firenook-preview'
+/** Longest string a cell can use, in bytes, and entries kept per container. */
+const PREVIEW_BYTES = 256
+const PREVIEW_ENTRIES = 24
+
+function previewHeader(preview: Preview | undefined): Record<string, string> {
+  if (!preview) return {}
+  const keep = preview.keep.filter((field) => field && field !== '__name__')
+  return {
+    [PREVIEW_HEADER]: `bytes=${PREVIEW_BYTES}; entries=${PREVIEW_ENTRIES}${
+      keep.length > 0 ? `; keep=${keep.join(',')}` : ''
+    }`,
+  }
+}
+
 /** Documents matching a query under `parent` (a document path, or empty for the root). */
 export async function runQuery(
   scope: FirestoreScope,
   parent: string,
   structuredQuery: StructuredQuery,
+  preview?: Preview,
 ): Promise<QueryPage> {
   const started = performance.now()
   const suffix = parent ? `/${parent}` : ''
   const rows = await call<Array<{ document?: RestDocument; readTime?: string }>>(
     scope,
     `${suffix}:runQuery`,
-    { method: 'POST', body: JSON.stringify({ structuredQuery }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({ structuredQuery }),
+      headers: previewHeader(preview),
+    },
   )
   const documents: FsDocument[] = []
   let readTime = ''

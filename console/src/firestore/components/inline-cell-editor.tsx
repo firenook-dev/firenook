@@ -13,6 +13,7 @@ import {
   type FsValue,
   editorText,
   encodeValue,
+  isPartial,
   parseEditorText,
 } from '../value'
 import { useWorkbench } from './workbench-context'
@@ -27,7 +28,12 @@ export const INLINE_TYPES: ReadonlySet<FirestoreValueType> = new Set([
 ])
 
 export function inlineEditable(value: FsValue | undefined): boolean {
-  return value === undefined || INLINE_TYPES.has(value.type)
+  if (value === undefined) return true
+  // A previewed read carries the first bytes of a long string. Saving that
+  // back would write the fragment over the value; the inspector holds the
+  // whole document, so the edit belongs there.
+  if (isPartial(value)) return false
+  return INLINE_TYPES.has(value.type)
 }
 
 /** What plain text most plausibly is when no type is stored yet. */

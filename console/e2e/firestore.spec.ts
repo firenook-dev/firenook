@@ -494,6 +494,72 @@ test('a query that does not parse says so, and stays editable', async ({ page })
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
 })
 
+test('the grid loads previews of heavy documents, and says so rather than lying', async ({
+  page,
+}) => {
+  const root = `projects/${project()}/databases/(default)/documents`
+  const long = 'L'.repeat(5000)
+  const payload = Object.fromEntries(
+    Array.from({ length: 60 }, (_, index) => [`k${index}`, { stringValue: 'y'.repeat(400) }]),
+  )
+  const written = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: {
+      writes: [
+        {
+          update: {
+            name: `${root}/heavy/h_1`,
+            fields: {
+              status: { stringValue: 'queued' },
+              note: { stringValue: long },
+              result: { mapValue: { fields: payload } },
+              tags: {
+                arrayValue: {
+                  values: Array.from({ length: 40 }, (_, i) => ({ stringValue: `tag${i}` })),
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+  })
+  expect(written.ok()).toBeTruthy()
+
+  let pageBytes = 0
+  page.on('response', async (response) => {
+    if (!response.url().endsWith(':runQuery')) return
+    pageBytes += (await response.body().catch(() => Buffer.alloc(0))).length
+  })
+  await page.goto(`${origin()}/console/firestore?path=heavy`)
+  const row = page.getByTestId('grid-row').first()
+  await expect(row).toBeVisible()
+  await page.waitForTimeout(400)
+
+  // The whole document is about 29 KB; the grid draws it from a fraction.
+  expect(pageBytes).toBeGreaterThan(0)
+  expect(pageBytes).toBeLessThan(10_000)
+
+  // The counts are the engine's, not a count of what happened to arrive.
+  await expect(row.getByText('{60}')).toBeVisible()
+  await expect(row.getByText('[40]')).toBeVisible()
+
+  // A cut string says it is cut instead of passing the fragment off whole.
+  const note = row.getByTestId('cell-note')
+  await expect(note).toContainText('…')
+  await expect(note.getByTitle(/more bytes — open the row to read it all/)).toBeVisible()
+
+  // And it refuses to be edited in place, which would save the fragment.
+  await note.dblclick()
+  await expect(note.locator('input')).toHaveCount(0)
+
+  // The inspector holds the whole value, because it fetches the document.
+  await row.getByRole('cell').nth(1).click()
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector).toBeVisible()
+  await expect(inspector.getByRole('textbox', { name: 'note value' })).toHaveValue(long)
+})
+
 test('a long field name keeps its column, and its controls, in bounds', async ({ page }) => {
   const field = 'aVeryLongFieldNameThatGoesOnAndOnForQuiteAWhileIndeed'
   const root = `projects/${project()}/databases/(default)/documents`

@@ -56,6 +56,8 @@ const CORS_ALLOWED_METHODS: HeaderValue =
     HeaderValue::from_static("DELETE,GET,HEAD,PATCH,POST,PUT");
 const JSON_CONTENT_TYPE: HeaderValue = HeaderValue::from_static("application/json");
 
+mod preview;
+use preview::Preview;
 mod coverage;
 mod listing;
 mod read_json;
@@ -924,12 +926,14 @@ async fn run_query_at_root(
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
     let project = path.project.clone();
+    let preview = Preview::from_headers(&headers)?;
     run_query(
         &state,
         &database_name(path)?,
         None,
         &body,
         &request_authorization(&headers, &project)?,
+        preview.as_ref(),
     )
     .await
 }
@@ -946,7 +950,16 @@ async fn run_query_at_parent(
         .map_err(|error| RestError::invalid(error.to_string()))?;
     if let Some(parent) = path.document.strip_suffix(":runQuery") {
         validate_parent(parent)?;
-        return run_query(&state, &database, Some(parent), &body, &authorization).await;
+        let preview = Preview::from_headers(headers)?;
+        return run_query(
+            &state,
+            &database,
+            Some(parent),
+            &body,
+            &authorization,
+            preview.as_ref(),
+        )
+        .await;
     }
     if let Some(parent) = path.document.strip_suffix(":runAggregationQuery") {
         validate_parent(parent)?;
@@ -980,12 +993,14 @@ async fn run_query(
     parent: Option<&str>,
     body: &JsonValue,
     authorization: &Authorization,
+    preview: Option<&Preview>,
 ) -> Result<Json<JsonValue>, RestError> {
     let state = state.clone();
     let database = database.clone();
     let parent = parent.map(str::to_owned);
     let body = body.clone();
     let authorization = authorization.clone();
+    let preview = preview.cloned();
     let service = state.service.clone();
     service
         .run_read(move || {
@@ -995,6 +1010,7 @@ async fn run_query(
                 parent.as_deref(),
                 &body,
                 &authorization,
+                preview.as_ref(),
             ))
         })
         .await
@@ -1034,6 +1050,7 @@ fn run_query_blocking(
     parent: Option<&str>,
     body: &JsonValue,
     authorization: &Authorization,
+    preview: Option<&Preview>,
 ) -> Result<Json<JsonValue>, RestError> {
     let structured = body
         .get("structuredQuery")
@@ -1055,7 +1072,10 @@ fn run_query_blocking(
             Ok(json!({
                 "document": {
                     "name": document.key().to_string(),
-                    "fields": encode_fields(document.fields())?,
+                    "fields": match preview {
+                        Some(preview) => preview.encode_fields(document.fields(), encode_value)?,
+                        None => encode_fields(document.fields())?,
+                    },
                     "createTime": format_timestamp(document.document().create_time())?,
                     "updateTime": format_timestamp(document.document().update_time())?,
                 },

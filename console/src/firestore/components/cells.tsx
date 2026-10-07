@@ -4,7 +4,7 @@
 
 import { InlineCopyText } from '@cloudflare/kumo'
 import { ArrowSquareInIcon } from '@phosphor-icons/react'
-import { type FsValue, displayValue, formatNumber, relativeTime } from '../value'
+import { type FsValue, displayValue, entryCount, formatNumber, relativeTime } from '../value'
 
 export function IdCell({ id, missing }: { id: string; missing?: boolean | undefined }) {
   // A whole path (a group's row) keeps its own id in view and lets the
@@ -38,8 +38,22 @@ export function ValueCell({
   switch (value.type) {
     case 'string':
       return (
-        <span className="block truncate" title={value.value}>
-          {value.value === '' ? <span className="text-kumo-inactive">""</span> : value.value}
+        <span
+          className="block truncate"
+          // A previewed read sends the first bytes only; the tooltip says so
+          // rather than passing the fragment off as the whole value.
+          title={
+            value.elided === undefined
+              ? value.value
+              : `${value.value}…\n\n${formatNumber(value.elided)} more bytes — open the row to read it all`
+          }
+        >
+          {value.value === '' && value.elided === undefined ? (
+            <span className="text-kumo-inactive">""</span>
+          ) : (
+            value.value
+          )}
+          {value.elided !== undefined && <span className="text-kumo-inactive">…</span>}
         </span>
       )
     case 'number':
@@ -95,7 +109,9 @@ export function ValueCell({
       // tells one row from the next; the count sits in the chip beside them.
       // Only the first few are rendered: the cell truncates anyway, and a
       // thousand-item array must not cost a thousand conversions a row.
-      const count = value.type === 'map' ? Object.keys(value.fields).length : value.items.length
+      // The engine's count, not the entries that arrived: a previewed read
+      // sends the first few and says how many there really are.
+      const count = entryCount(value)
       const preview = (limit: number) =>
         (value.type === 'map'
           ? Object.keys(value.fields).slice(0, limit)

@@ -15,18 +15,43 @@ export type FirestoreValueType =
   | 'null'
   | 'vector'
 
+// A previewed read (see `preview` in rest.ts) returns values cut down to
+// what a grid cell can draw. `elided` counts the bytes left behind and
+// `count` is the container's real size, so nothing has to be inferred from a
+// truncated value: a cell shows the true number of entries and an editor
+// refuses to write back half a string.
 export type FsValue =
-  | { type: 'string'; value: string }
+  | { type: 'string'; value: string; elided?: number }
   | { type: 'number'; value: number; integer: boolean }
   | { type: 'boolean'; value: boolean }
   | { type: 'timestamp'; value: string }
   | { type: 'reference'; value: string; path: string }
   | { type: 'geopoint'; latitude: number; longitude: number }
-  | { type: 'map'; fields: Record<string, FsValue> }
-  | { type: 'array'; items: FsValue[] }
-  | { type: 'bytes'; base64: string }
+  | { type: 'map'; fields: Record<string, FsValue>; count?: number }
+  | { type: 'array'; items: FsValue[]; count?: number }
+  | { type: 'bytes'; base64: string; elided?: number }
   | { type: 'null' }
   | { type: 'vector'; values: number[] }
+
+/** Whether only part of this value was loaded. */
+export function isPartial(value: FsValue): boolean {
+  switch (value.type) {
+    case 'string':
+    case 'bytes':
+      return value.elided !== undefined
+    case 'map':
+    case 'array':
+      return value.count !== undefined
+    default:
+      return false
+  }
+}
+
+/** How many entries a container holds, whether or not all of them arrived. */
+export function entryCount(value: { type: 'map' | 'array' } & FsValue): number {
+  if (value.type === 'map') return value.count ?? Object.keys(value.fields).length
+  return value.count ?? value.items.length
+}
 
 /** A Firestore REST `Value`. */
 export interface RestValue {
@@ -39,8 +64,10 @@ export interface RestValue {
   bytesValue?: string
   referenceValue?: string
   geoPointValue?: { latitude?: number; longitude?: number }
-  arrayValue?: { values?: RestValue[] }
-  mapValue?: { fields?: Record<string, RestValue> }
+  arrayValue?: { values?: RestValue[]; firenookCount?: number }
+  mapValue?: { fields?: Record<string, RestValue>; firenookCount?: number }
+  /** Bytes the engine left behind on a previewed string or byte string. */
+  firenookElided?: number
 }
 
 export interface RestDocument {
@@ -73,7 +100,10 @@ export function relativePath(name: string): string {
 }
 
 export function decodeValue(value: RestValue): FsValue {
-  if ('stringValue' in value) return { type: 'string', value: value.stringValue ?? '' }
+  if ('stringValue' in value)
+    return value.firenookElided === undefined
+      ? { type: 'string', value: value.stringValue ?? '' }
+      : { type: 'string', value: value.stringValue ?? '', elided: value.firenookElided }
   if ('integerValue' in value)
     return { type: 'number', value: Number(value.integerValue), integer: true }
   if ('doubleValue' in value)
@@ -99,11 +129,20 @@ export function decodeValue(value: RestValue): FsValue {
         values: (fields.value.arrayValue.values ?? []).map((item) => Number(item.doubleValue ?? 0)),
       }
     }
-    return { type: 'map', fields: decodeFields(fields) }
+    const count = value.mapValue?.firenookCount
+    return count === undefined
+      ? { type: 'map', fields: decodeFields(fields) }
+      : { type: 'map', fields: decodeFields(fields), count }
   }
-  if ('arrayValue' in value)
-    return { type: 'array', items: (value.arrayValue?.values ?? []).map(decodeValue) }
-  if ('bytesValue' in value) return { type: 'bytes', base64: value.bytesValue ?? '' }
+  if ('arrayValue' in value) {
+    const items = (value.arrayValue?.values ?? []).map(decodeValue)
+    const count = value.arrayValue?.firenookCount
+    return count === undefined ? { type: 'array', items } : { type: 'array', items, count }
+  }
+  if ('bytesValue' in value)
+    return value.firenookElided === undefined
+      ? { type: 'bytes', base64: value.bytesValue ?? '' }
+      : { type: 'bytes', base64: value.bytesValue ?? '', elided: value.firenookElided }
   return { type: 'null' }
 }
 
@@ -229,13 +268,13 @@ export function displayValue(value: FsValue): string {
     case 'geopoint':
       return `${value.latitude}, ${value.longitude}`
     case 'map': {
-      const keys = Object.keys(value.fields)
-      return keys.length === 0 ? '{}' : `{ ${keys.length} field${keys.length === 1 ? '' : 's'} }`
+      const fields = entryCount(value)
+      return fields === 0 ? '{}' : `{ ${fields} field${fields === 1 ? '' : 's'} }`
     }
-    case 'array':
-      return value.items.length === 0
-        ? '[]'
-        : `[ ${value.items.length} item${value.items.length === 1 ? '' : 's'} ]`
+    case 'array': {
+      const items = entryCount(value)
+      return items === 0 ? '[]' : `[ ${items} item${items === 1 ? '' : 's'} ]`
+    }
     case 'bytes':
       return `${Math.ceil((value.base64.length * 3) / 4)} bytes`
     case 'vector':

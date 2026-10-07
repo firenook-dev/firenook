@@ -71,6 +71,23 @@ derive `ts_rs::TS`; `cargo test -p firenook-console-front` writes
 `git diff --exit-code`. Never hand-edit the generated files. Routes live under
 `/console/api/v1`; unknown API paths answer JSON 404, never the shell.
 
+**The grid reads previews, not whole documents.** A page of documents
+carrying large maps was 30 MB of JSON to paint one screen: the grid draws a
+truncated line per cell and the inspector refetches the document anyway, so
+every one of those bytes was wasted. `runQuery` sends
+`x-firenook-preview: bytes=256; entries=24; keep=<cursor fields>`
+(`src/firestore/rest.ts`), and `crates/rest-front/src/preview.rs` cuts
+strings, keeps the first entries of a map or array and reports the real size
+in `firenookElided` / `firenookCount`. The request path is otherwise
+untouched — same query, same rules, same documents — and a request without
+the header is byte-for-byte what it always was, so no SDK sees this.
+Three rules when touching it: the fields the paging cursor orders by go in
+`keep`, or paging lands in the wrong place; `entryCount` is the only way to
+count a container, because the entries that arrived are not all of them;
+and `isPartial` blocks inline editing, because saving a previewed string
+would write the fragment over the value. The inspector is unaffected: it has
+always fetched the document itself (2 ms for a 100 KB one).
+
 **The engine does not know its own version.** Every crate here carries the
 `0.0.1` workspace placeholder, because the product ships as an npm package
 whose version the packaging checkout decides while the binary is built from
