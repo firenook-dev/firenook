@@ -115,6 +115,16 @@ export function QueryLine() {
             <Button variant="primary" size="sm" icon={<PlayIcon />} onClick={run}>
               Run
             </Button>
+            <Button
+              variant={explain ? 'secondary' : 'ghost'}
+              size="sm"
+              icon={<LightningIcon />}
+              onClick={() => setExplain(!explain)}
+              aria-label="Explain this query"
+              data-testid="explain-toggle"
+            >
+              Explain
+            </Button>
             {(active || draft) && (
               <Button
                 variant="ghost"
@@ -145,18 +155,6 @@ export function QueryLine() {
           </Button>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2 whitespace-nowrap">
-          {workbench.collectionPath && !workbench.queryError && (
-            <Button
-              variant={explain ? 'secondary' : 'ghost'}
-              size="sm"
-              icon={<LightningIcon />}
-              onClick={() => setExplain(!explain)}
-              aria-label="Explain this query"
-              data-testid="explain-toggle"
-            >
-              Explain
-            </Button>
-          )}
           {workbench.collectionPath && !workbench.queryError && (
             <Text variant="secondary" size="sm" as="span" data-testid="match-count">
               {total ? (

@@ -152,7 +152,7 @@ export function ExportDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={close}>
-      <Dialog size="base" className="p-6">
+      <Dialog size="lg" className="p-6">
         <div className="mb-3 flex items-start justify-between gap-4">
           <Dialog.Title className="text-lg font-semibold">Export</Dialog.Title>
           <Dialog.Close
