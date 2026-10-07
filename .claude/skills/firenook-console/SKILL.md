@@ -71,6 +71,15 @@ derive `ts_rs::TS`; `cargo test -p firenook-console-front` writes
 `git diff --exit-code`. Never hand-edit the generated files. Routes live under
 `/console/api/v1`; unknown API paths answer JSON 404, never the shell.
 
+**The schema index's walk belongs to the index, not to a request.** It is
+started on a detached task and every reader — including the one that
+triggered it — waits on the `Notify`. Owning the walk from the handler meant
+a reader that went away (a browser navigating, a socket closing, a client
+timing out) dropped it mid-flight and left the database marked as building
+for ever: `/schema` and `/subcollections` then hung for the life of the
+process, while queries and `/status` kept answering, which is what makes it
+so confusing to diagnose. There is a regression test; keep it.
+
 **The grid reads previews, not whole documents.** A page of documents
 carrying large maps was 30 MB of JSON to paint one screen: the grid draws a
 truncated line per cell and the inspector refetches the document anyway, so

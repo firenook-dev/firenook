@@ -174,6 +174,11 @@ enum Step<T> {
     Build(Arc<Notify>),
 }
 
+/// How many times one reader will start the walk before giving up. A walk
+/// that fails removes the database, so the next reader would start another;
+/// a budget keeps a store that cannot be walked from looping for ever.
+const BUILD_ATTEMPTS: u8 = 2;
+
 /// Why a schema could not be answered.
 #[derive(Debug)]
 pub enum SchemaError {
@@ -242,6 +247,7 @@ impl SchemaIndex {
     ) -> Result<T, SchemaError> {
         let database = DatabaseName::new(self.project.clone(), database_id)
             .map_err(|error| SchemaError::InvalidDatabase(error.to_string()))?;
+        let mut attempts = 0_u8;
         loop {
             // The lock never outlives this block, so no await holds it.
             let step = {
@@ -271,12 +277,32 @@ impl SchemaIndex {
             match step {
                 Step::Ready(answered) => return Ok(answered),
                 Step::Wait(notified) => notified.await,
-                Step::Build(done) => self.build(database.clone(), &done).await?,
+                Step::Build(done) => {
+                    if attempts >= BUILD_ATTEMPTS {
+                        return Err(SchemaError::BuildFailed);
+                    }
+                    attempts += 1;
+                    // Register for the wake-up before the walk can finish.
+                    let mut notified = Box::pin(Arc::clone(&done).notified_owned());
+                    notified.as_mut().enable();
+                    // The walk belongs to the index, not to whichever request
+                    // happened to ask first. A caller that goes away — a
+                    // browser navigating, a socket closing, a client timing
+                    // out — used to drop the walk mid-flight and leave the
+                    // database marked as building for ever, so every later
+                    // reader waited on a notification nobody would send.
+                    let index = self.clone();
+                    let database = database.clone();
+                    tokio::spawn(async move {
+                        let _ = index.build(database, &done).await;
+                    });
+                    notified.await;
+                }
             }
         }
     }
 
-    async fn build(&self, database: DatabaseName, done: &Notify) -> Result<(), SchemaError> {
+    async fn build(&self, database: DatabaseName, done: &Arc<Notify>) -> Result<(), SchemaError> {
         let store = self.store.clone();
         let database_id = database.database_id().to_owned();
         let walked = tokio::task::spawn_blocking(move || {
@@ -959,6 +985,47 @@ mod tests {
                 documents: 1
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn a_reader_that_goes_away_does_not_wedge_the_index_for_everyone_else() {
+        // The walk used to belong to whichever request asked first. A browser
+        // navigating away, a socket closing or a client timing out dropped it
+        // mid-flight, leaving the database marked as building for ever: every
+        // later reader — the schema tree, the grid's subcollections — waited
+        // on a notification nobody would send, for the life of the process.
+        let store = Store::default();
+        let mut writes = Vec::new();
+        for index in 0..4_000u32 {
+            writes.push(create(&format!("users/u{index:06}")));
+        }
+        store.commit(&writes).expect("commit");
+        let index = SchemaIndex::attach(&store, PROJECT);
+
+        // Start a read and drop it immediately, as a cancelled request does.
+        let abandoned = index.clone();
+        let started = tokio::spawn(async move { abandoned.snapshot("(default)").await });
+        tokio::task::yield_now().await;
+        started.abort();
+
+        // Everyone after it still gets an answer.
+        let snapshot = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            index.snapshot("(default)"),
+        )
+        .await
+        .expect("the index must not be wedged by a reader that left")
+        .expect("schema");
+        assert_eq!(snapshot.documents, 4_000);
+
+        let children = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            index.subcollections("(default)", &["users/u000001".to_owned()]),
+        )
+        .await
+        .expect("subcollections must not be wedged either")
+        .expect("subcollections");
+        assert_eq!(children.parents.len(), 1);
     }
 
     #[tokio::test]
