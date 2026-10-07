@@ -45,8 +45,8 @@ use firenook_storage_front::{
     StorageDurability, StorageRuntime,
 };
 use firenook_suite_front::{
-    BackgroundRequest, ExportCommand, HubConfig, HubRuntime, LoggingRuntime, ServiceInfo,
-    SuiteDirectory, UiConfig, requests_router, ui_router,
+    BackgroundRequest, EngineRelease, ExportCommand, HubConfig, HubRuntime, LoggingRuntime,
+    ServiceInfo, SuiteDirectory, UiConfig, requests_router, ui_router,
 };
 use firenook_tasks_front::TasksRuntime;
 use firenook_webchannel_front::{FirestoreBackend, router as webchannel_router};
@@ -585,6 +585,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             CONSOLE_PATH,
             console_router(ConsoleServices {
                 directory,
+                release: EngineRelease::from_environment(),
                 firestore: console_firestore.map(|parts| FirestoreConsole {
                     rest: parts.rest,
                     changes: parts.changes,

@@ -590,10 +590,30 @@ served until every section has landed.
   narrow, the inspector floats over the grid below `xl` instead of
   squeezing it to a sliver, and the console follows the operating system's
   colour scheme (Kumo's dark tokens were complete; nothing set `data-mode`).
+- [x] One request for a whole screen of subcollections.
+  `POST /console/api/v1/firestore/subcollections` answers a list of parents
+  at once — which collections each document has and how many documents are
+  in each — from the schema index, which now keeps the concrete collections
+  (`users/u_9f3k2/orders`) beside the patterns it already kept. The grid's
+  column asked `ListCollectionIds` per rendered row and a count per chip, so
+  a screen cost dozens of requests and scrolling a large collection cost
+  thousands; the console now collects every path a tick asks for into one
+  request, while keeping its cache and live invalidation per document. The
+  index agrees with the store's own listing, descendant-only collections
+  included: `teams/t1` has `channels` even when no channel document exists.
+  Measured on 82,000 documents, a 32-row screen takes 2 ms in one request
+  against 10 ms in the 68 it replaces.
+- [x] The engine reports the version it actually ships as. Every crate here
+  carries the `0.0.1` workspace placeholder, because the npm package's
+  version is set by the packaging checkout while the binary is built from
+  the pinned engine commit — so the binary cannot know it at compile time
+  and the console's badge read `engine 0.0.1`. The CLI now passes
+  `FIRENOOK_RELEASE_VERSION` and `FIRENOOK_ENGINE_REVISION` at launch,
+  `firenook --version` and the console's status document report them, and a
+  binary started any other way says "unreleased build" rather than naming a
+  number that means nothing.
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
-  the page, undo within the change-log window, rules editor, and one batched
-  answer for "which of these documents have subcollections" — the grid asks
-  per rendered row today.
+  the page, undo within the change-log window, and a rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

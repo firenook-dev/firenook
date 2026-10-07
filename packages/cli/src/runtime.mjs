@@ -77,7 +77,12 @@ export function prepareLaunch(diagnostic, options, mode = 'start') {
   if (options['no-diagnostics']) args.push('--no-diagnostics');
   if (options.durability) args.push('--durability', options.durability);
   const host = connectHost(p.host);
-  const env = {...process.env, GOOGLE_CLOUD_PROJECT:p.project, GCLOUD_PROJECT:p.project,
+  // The engine cannot know its own release: this wrapper's version is set by
+  // the packaging checkout, while the binary is built from the pinned engine
+  // commit. So tell it, and its `--version` and the console's engine badge
+  // report what was installed instead of the placeholder crate version.
+  const env = {...process.env, FIRENOOK_RELEASE_VERSION:manifest.version, FIRENOOK_ENGINE_REVISION:release.engineRevision,
+    GOOGLE_CLOUD_PROJECT:p.project, GCLOUD_PROJECT:p.project,
     GOOGLE_APPLICATION_CREDENTIALS:credentials, CLOUDSDK_CONFIG:join(run, 'gcloud'),
     FIRESTORE_EMULATOR_HOST:`${host}:${p.ports.firestore}`, FIREBASE_AUTH_EMULATOR_HOST:`${host}:${p.ports.auth}`,
     FIREBASE_STORAGE_EMULATOR_HOST:`${host}:${p.ports.storage}`, STORAGE_EMULATOR_HOST:`http://${host}:${p.ports.storage}`,

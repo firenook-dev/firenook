@@ -71,6 +71,18 @@ derive `ts_rs::TS`; `cargo test -p firenook-console-front` writes
 `git diff --exit-code`. Never hand-edit the generated files. Routes live under
 `/console/api/v1`; unknown API paths answer JSON 404, never the shell.
 
+**The engine does not know its own version.** Every crate here carries the
+`0.0.1` workspace placeholder, because the product ships as an npm package
+whose version the packaging checkout decides while the binary is built from
+the pinned `engineRevision` — a different commit. So never report
+`CARGO_PKG_VERSION`. The npm CLI passes `FIRENOOK_RELEASE_VERSION` and
+`FIRENOOK_ENGINE_REVISION` at launch (`packages/cli/src/runtime.mjs`);
+`firenook_suite_front::EngineRelease` validates them and is what
+`firenook --version` and `ConsoleStatus.engine` report. A binary launched
+any other way has no release and says "unreleased build" rather than naming
+a number — `src/lib/engine.ts` phrases it, and the browser journey declares
+a release in `e2e/engine.ts` so the badge has something real to assert.
+
 ## Commands
 
 ```
@@ -196,12 +208,25 @@ card there for every new pattern before it is designed with. Component docs: `np
   `['fs', db, 'schema']` on any create or delete.
 - Subcollections in the grid: `SubcollectionsCell` is its own column (shown
   when the schema knows subcollections under this collection, or a missing
-  ancestor is loaded; `subcollectionsWidth` sizes it from the known ids).
-  Each rendered row asks `listCollectionIds` (virtualized, cached 60 s,
-  invalidated by the live channel) and renders named chips that navigate,
-  with a menu past three; the seed nests three levels
+  ancestor is loaded; `subcollectionsWidth` sizes it from the known ids). It
+  renders named chips with their document counts, each navigating, with a
+  menu past three; the seed nests three levels
   (`users/{u}/orders/{o}/items/{i}`, `teams/t_real/channels/{c}/messages/{m}`,
   `products/{p}/reviews/{r}`).
+  **Never ask per row.** `listCollectionIds` plus a count per chip is one
+  request per row and three more per chip — a screen costs dozens and
+  scrolling costs thousands. `POST /firestore/subcollections` answers a list
+  of parents at once from the schema index, and
+  `src/firestore/subcollections.ts` collects every path asked for in the
+  same macrotask into one of those requests (`BATCH_LIMIT` 200, the engine
+  refuses over 500). Queries stay keyed per path
+  (`['fs', db, 'subcollections', path]`), so the cache and the live channel
+  still invalidate per document; only the traffic is shared. The inspector
+  uses the same query, so opening a row costs nothing. Like `/schema`, the
+  endpoint reads the index and evaluates no rules, so the key carries no
+  authorization. Measured on 82,000 documents: 2 ms for a 32-row screen
+  against 10 ms for the 32 listings and 41 counts it replaces, and one
+  request instead of 68.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for

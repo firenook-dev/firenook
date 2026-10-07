@@ -14,7 +14,7 @@ describe('the console API client', () => {
         200,
         JSON.stringify({
           projectId: 'demo',
-          engine: { name: 'Firenook', crateVersion: '0.0.1' },
+          engine: { name: 'Firenook', version: '0.2.0-next.2', revision: null },
           services: [],
         }),
       ),

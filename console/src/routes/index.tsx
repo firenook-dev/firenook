@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { statusQuery } from '@/api/queries'
 import { ServiceTable } from '@/components/service-table'
 import { Page } from '@/components/shell/page'
+import { engineVersion } from '@/lib/engine'
 import { SECTIONS } from '@/lib/services'
 
 export const Route = createFileRoute('/')({
@@ -23,7 +24,14 @@ function Overview() {
         <Text variant="secondary">
           {data.services.length} services running for project{' '}
           <span className="font-mono text-[0.9em]">{data.projectId}</span> on {data.engine.name}{' '}
-          {data.engine.crateVersion}.
+          {engineVersion(data.engine)}
+          {data.engine.revision ? (
+            <>
+              , engine source{' '}
+              <span className="font-mono text-[0.9em]">{data.engine.revision.slice(0, 12)}</span>
+            </>
+          ) : null}
+          .
         </Text>
       </div>
 

@@ -21,7 +21,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type { CSSProperties, ReactNode } from 'react'
 import { useEffect } from 'react'
+import type { EngineInfo } from '@/api/generated/EngineInfo'
 import { statusQuery } from '@/api/queries'
+import { engineBuild, engineVersion } from '@/lib/engine'
 import { useLayout } from '@/lib/layout'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
@@ -233,7 +235,7 @@ function TopBar() {
         )}
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <EngineBadge state={status.status} version={status.data?.engine.crateVersion} />
+        <EngineBadge state={status.status} engine={status.data?.engine} />
         <Button
           variant="ghost"
           size="sm"
@@ -255,10 +257,10 @@ function TopBar() {
 
 function EngineBadge({
   state,
-  version,
+  engine,
 }: {
   state: 'pending' | 'error' | 'success'
-  version?: string | undefined
+  engine?: EngineInfo | undefined
 }) {
   if (state === 'error') {
     return (
@@ -274,9 +276,13 @@ function EngineBadge({
       </Badge>
     )
   }
+  // The engine source commit is the detail, not the headline: it only
+  // matters when a version has to be traced back to a build.
   return (
-    <Badge variant="success" appearance="dot">
-      engine {version}
-    </Badge>
+    <span title={engineBuild(engine)} data-testid="engine-badge">
+      <Badge variant="success" appearance="dot">
+        engine {engineVersion(engine)}
+      </Badge>
+    </span>
   )
 }

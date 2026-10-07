@@ -9,6 +9,14 @@ export type EngineInfo = {
  */
 name: string, 
 /**
- * Version of the engine crate that built this binary.
+ * The release this engine ships as, as the distribution that launched
+ * it declares. Absent for a binary run straight from a build, which has
+ * no release version to report: the crate versions in this workspace
+ * are a placeholder, so reporting one would invent an answer.
  */
-crateVersion: string, };
+version: string | null, 
+/**
+ * The engine source commit this binary was built from, when the
+ * distribution recorded one.
+ */
+revision: string | null, };

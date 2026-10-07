@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { ENGINE_REVISION, RELEASE_VERSION } from './engine'
 
 const origin = () => {
   const value = process.env.FIRENOOK_CONSOLE_ORIGIN
@@ -15,7 +16,16 @@ test('the overview lists the running services from the engine', async ({ page })
   await expect(table.getByText('Firestore', { exact: true })).toBeVisible()
   await expect(table.getByText('Authentication', { exact: true })).toBeVisible()
   await expect(table.getByText('Emulator hub', { exact: true })).toBeVisible()
-  await expect(page.getByText(/engine \d+\.\d+\.\d+/)).toBeVisible()
+  // The release the launcher declared, not the placeholder crate version:
+  // the engine is built from a pinned commit and cannot know what it ships
+  // as, so a wrong number here means the handoff is broken.
+  const badge = page.getByTestId('engine-badge')
+  await expect(badge).toHaveText(`engine ${RELEASE_VERSION}`)
+  await expect(badge).toHaveAttribute(
+    'title',
+    `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`,
+  )
+  await expect(page.getByText(`on Firenook ${RELEASE_VERSION}`)).toBeVisible()
 })
 
 test('client routes deep-link through the engine and navigate in place', async ({ page }) => {

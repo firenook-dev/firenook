@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -24,6 +24,7 @@ use firenook_rest_front::{
     AllocatorMemoryReporter, AllocatorMemoryUsage, router_with_shared_service as rest_router,
 };
 use firenook_rules_runtime::RulesRuntime;
+use firenook_suite_front::EngineRelease;
 use firenook_suite_runtime::{
     DEFAULT_FIRESTORE_DATABASE, FirestoreDatabaseConfig, ServiceSelection, StorageBucketConfig,
     StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
@@ -91,10 +92,20 @@ enum AllocatorBootstrapPlan {
     },
 }
 
+/// The line `--version` prints, read from the environment once and held for
+/// the life of the process, which is what clap needs.
+fn release_label() -> &'static str {
+    static LABEL: LazyLock<String> = LazyLock::new(|| EngineRelease::from_environment().label());
+    LABEL.as_str()
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "firenook",
-    version,
+    // Not `version`, which would print the workspace placeholder: the
+    // release this binary ships as is declared by the distribution that
+    // launched it. See `firenook_suite_front::EngineRelease`.
+    version = release_label(),
     about = "A clean-room local emulator suite grounded in production behavior"
 )]
 struct Cli {

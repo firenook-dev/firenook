@@ -24,9 +24,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { statusQuery } from '@/api/queries'
 import { useMemo, useState } from 'react'
 import { useCreateDialog } from '../create'
-import { type CodeTarget, EMPTY_QUERY, documentAsCode } from '../query'
-import { collectionsQuery, countQueryOptions, documentQuery } from '../queries'
+import { type CodeTarget, documentAsCode } from '../query'
+import { documentQuery } from '../queries'
 import { type WriteOperation, commit, documentRoot } from '../rest'
+import { type Subcollection, subcollectionsQuery } from '../subcollections'
 import {
   type FsDocument,
   type FsValue,
@@ -45,7 +46,9 @@ export const INSPECTOR_WIDTH = 420 + 12
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
   const document = useQuery(documentQuery(workbench.scope, path))
-  const subcollections = useQuery(collectionsQuery(workbench.ownerScope, path))
+  // Names and counts in one request, shared with the grid's column: the
+  // row the inspector was opened from has usually asked already.
+  const subcollections = useQuery(subcollectionsQuery(workbench.database, path))
 
   return (
     <aside
@@ -112,14 +115,20 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
           onDelete={onDelete}
           // Subcollections belong with the document, above the actions: a
           // footer that is not the last thing in the panel reads as a divider.
-          subcollections={<Subcollections parent={path} ids={subcollections.data ?? []} />}
+          subcollections={<Subcollections parent={path} found={subcollections.data ?? []} />}
         />
       )}
     </aside>
   )
 }
 
-function MissingDocument({ path, subcollections }: { path: string; subcollections: string[] }) {
+function MissingDocument({
+  path,
+  subcollections,
+}: {
+  path: string
+  subcollections: Subcollection[]
+}) {
   const openCreate = useCreateDialog((state) => state.open)
   const collection = parentCollection(path)
   const id = path.split('/').at(-1) ?? path
@@ -151,19 +160,19 @@ function MissingDocument({ path, subcollections }: { path: string; subcollection
           Add a subcollection
         </Button>
       </div>
-      <Subcollections parent={path} ids={subcollections} />
+      <Subcollections parent={path} found={subcollections} />
     </div>
   )
 }
 
-function Subcollections({ parent, ids }: { parent: string; ids: string[] }) {
+function Subcollections({ parent, found }: { parent: string; found: Subcollection[] }) {
   const workbench = useWorkbench()
   const openCreate = useCreateDialog((state) => state.open)
   return (
     <div className="shrink-0 border-t border-kumo-line px-3 py-2" data-testid="subcollections">
       <div className="mb-1 flex items-center">
         <Text variant="secondary" size="sm" as="p">
-          Subcollections{ids.length > 0 ? ` · ${ids.length}` : ''}
+          Subcollections{found.length > 0 ? ` · ${found.length}` : ''}
         </Text>
         <span className="ml-auto">
           <Tooltip
@@ -182,37 +191,29 @@ function Subcollections({ parent, ids }: { parent: string; ids: string[] }) {
           />
         </span>
       </div>
-      {ids.length === 0 && (
+      {found.length === 0 && (
         <Text variant="secondary" size="sm">
           None yet.
         </Text>
       )}
       <ul className="grid gap-0.5">
-        {ids.map((id) => (
-          <li key={id}>
+        {found.map((child) => (
+          <li key={child.id}>
             <button
               type="button"
               className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-kumo-tint"
-              onClick={() => workbench.setPath(`${parent}/${id}`)}
+              onClick={() => workbench.setPath(`${parent}/${child.id}`)}
             >
               <FolderIcon size={14} className="text-kumo-subtle" />
-              <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{id}</span>
-              <SubcollectionCount path={`${parent}/${id}`} />
+              <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{child.id}</span>
+              <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+                {child.documents.toLocaleString('en-US')}
+              </span>
             </button>
           </li>
         ))}
       </ul>
     </div>
-  )
-}
-
-function SubcollectionCount({ path }: { path: string }) {
-  const workbench = useWorkbench()
-  const count = useQuery(countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY))
-  return (
-    <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
-      {count.data ? count.data.count.toLocaleString('en-US') : ''}
-    </span>
   )
 }
 

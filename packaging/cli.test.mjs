@@ -299,6 +299,20 @@ test('state and credential isolation stay outside original config and seed', () 
   assert.equal(launch.env.FIREBASE_AUTH_EMULATOR_HOST,'127.0.0.1:9099');
   assert.equal(launch.env.FIREBASE_TOKEN,undefined);
 });
+test('the engine is told the release it ships as, since it cannot know it itself', () => {
+  const {dir,options} = project();
+  const launch = launchFor(dir, options);
+  // The binary is built from the pinned engine commit, while this version
+  // comes from the packaging checkout; without the handoff the console badge
+  // and `firenook --version` would show the placeholder crate version.
+  assert.equal(launch.env.FIRENOOK_RELEASE_VERSION,manifest.version);
+  assert.equal(launch.env.FIRENOOK_ENGINE_REVISION,release.engineRevision);
+  assert.match(launch.env.FIRENOOK_RELEASE_VERSION,/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/);
+  assert.match(launch.env.FIRENOOK_ENGINE_REVISION,/^[a-f0-9]{40}$/);
+  const receipt = JSON.parse(readFileSync(join(launch.run,'launch.json'),'utf8'));
+  assert.equal(receipt.version,launch.env.FIRENOOK_RELEASE_VERSION);
+  assert.equal(receipt.engineRevision,launch.env.FIRENOOK_ENGINE_REVISION);
+});
 test('asset verification refuses corrupt data without changing it', async () => {
   const dir = mkdtempSync(join(tmpdir(),'firenook-asset-test-'));
   const file = join(dir,'test'); writeFileSync(file,'okay');

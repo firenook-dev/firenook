@@ -124,6 +124,9 @@ export function useLiveChanges(queryClient: QueryClient, database: string) {
         }
         if (kind === 'doc') return documents.has(scope)
         if (kind === 'collections') return structural && (scope === '' || parents.has(scope))
+        // A subcollections answer carries counts, so a write inside one of
+        // them makes it stale as surely as a new collection does.
+        if (kind === 'subcollections') return structural && (scope === '' || parents.has(scope))
         if (kind === 'schema') return structural
         return false
       })

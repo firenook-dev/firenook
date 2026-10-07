@@ -7,6 +7,9 @@ const origin = () => {
   return value
 }
 const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'
+
+/** A box's right edge; Playwright reports position and size, not edges. */
+const edge = (box: { x: number; width: number } | null) => (box ? box.x + box.width : NaN)
 const documents = () =>
   `${origin()}/console/api/v1/firestore/v1/projects/${project()}/databases/(default)/documents`
 const owner = { authorization: 'Bearer owner', 'content-type': 'application/json' }
@@ -143,6 +146,48 @@ test('rows show their subcollections and the tree walks three levels deep', asyn
   const rows = await page.getByTestId('grid-row').count()
   expect(chips).toBeGreaterThan(0)
   expect(chips).toBeLessThan(rows)
+})
+
+test('a screen of rows asks for its subcollections once, not once a row', async ({ page }) => {
+  const batches: string[][] = []
+  let perDocument = 0
+  page.on('request', (request) => {
+    const url = request.url()
+    if (url.endsWith('/firestore/subcollections')) {
+      const body = JSON.parse(request.postData() ?? '{}') as { paths?: string[] }
+      batches.push(body.paths ?? [])
+    }
+    if (url.includes(':listCollectionIds')) perDocument += 1
+  })
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('subcollections-chip').first()).toBeVisible()
+  const rows = await page.getByTestId('grid-row').count()
+  expect(rows).toBeGreaterThan(10)
+
+  // One request for the whole screen, naming every row it drew.
+  expect(batches).toHaveLength(1)
+  expect(batches[0]?.length).toBe(rows)
+  expect(batches[0]?.[0]).toMatch(/^users\//)
+  // And no per-document listing at all: that fan-out is what the batch
+  // replaced, and it is what made scrolling a large collection expensive.
+  expect(perDocument).toBe(0)
+
+  // The counts came with the names, so no chip needs a request of its own.
+  await expect(
+    page.getByTestId('subcollection-link').filter({ hasText: 'orders' }).first(),
+  ).toHaveText(/^orders\d+$/)
+
+  // Opening a row reads the answer the grid already has. The id cell, not
+  // the row's centre, which may land on a chip and navigate instead.
+  const nested = page
+    .getByTestId('grid-row')
+    .filter({ has: page.getByTestId('subcollections-chip') })
+    .first()
+  await nested.getByRole('cell').nth(1).click()
+  await expect(page.getByTestId('inspector')).toBeVisible()
+  await expect(page.getByTestId('subcollections')).toContainText('Subcollections')
+  expect(batches).toHaveLength(1)
+  expect(perDocument).toBe(0)
 })
 
 test('the schema tree shows the shape and opens a nested pattern as its group', async ({
@@ -481,6 +526,5 @@ test('a long field name keeps its column, and its controls, in bounds', async ({
   const panel = page.getByTestId('inspector')
   const remove = panel.getByRole('button', { name: `Remove ${field}` })
   await expect(remove).toBeVisible()
-  const edge = (box: { x: number; width: number } | null) => (box ? box.x + box.width : NaN)
   expect(edge(await remove.boundingBox())).toBeLessThanOrEqual(edge(await panel.boundingBox()))
 })
