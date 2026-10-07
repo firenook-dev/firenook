@@ -298,6 +298,23 @@ card there for every new pattern before it is designed with. Component docs: `np
   as a map; it matches on the wire's own field names, so a person's own
   one-key map is not mistaken for it. The dialog names the scope and whose
   identity it reads as, because rules apply.
+- Undo (the live indicator's popover, ⌘K): `ChangeLog` in
+  `crates/console-front/src/changelog.rs` is a commit observer keeping a
+  bounded window of commits with the `before`/`after` images the store hands
+  it, so an undo restores the exact document rather than a re-derivation.
+  `GET /changelog` lists, `POST /undo` applies the inverse as **one** commit
+  with a precondition per document, so a change something has moved past is
+  refused whole. Two rules that are easy to get wrong: a document written
+  twice in one commit must collapse to a single inverse (two writes would
+  precondition on different update times and refuse each other), and the
+  undo's own commit is found again by the revision it installed, not by
+  being the newest. The window carries document data, so it is bounded in
+  commits and bytes, drops a commit over `MAX_COMMIT_BYTES` rather than
+  letting a bulk import evict everything, and is attached only when
+  `config.diagnostics` is on — the route is then simply absent, and the
+  console reads a 404 as "diagnostics are off" rather than "nothing
+  happened". The console asks only while the popover is open, because the
+  live channel invalidates `['fs', db, 'changelog']` on every commit.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
@@ -309,6 +326,9 @@ card there for every new pattern before it is designed with. Component docs: `np
 - Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
   `CommandPalette.Results`/`Items` render functions must return keyed
   elements; a `Tooltip` inside a `<button>` nests buttons (use `title`);
+  `Popover.Content` drops unknown props, so a test id goes on a div inside
+  it; a Kumo toast puts the same words in its title and its description, so
+  a journey matches the heading by role;
   `Text` takes no `className` (wrap it). A Rust doc comment on a `ts-rs`
   type must not contain `*/` (it ends the generated JSDoc early), so
   patterns are described in words there.

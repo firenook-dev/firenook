@@ -128,6 +128,8 @@ export function useLiveChanges(queryClient: QueryClient, database: string) {
         // them makes it stale as surely as a new collection does.
         if (kind === 'subcollections') return structural && (scope === '' || parents.has(scope))
         if (kind === 'schema') return structural
+        // Every commit is a new entry in the window, whatever it touched.
+        if (kind === 'changelog') return true
         return false
       })
     }

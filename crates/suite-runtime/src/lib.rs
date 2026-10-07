@@ -18,8 +18,8 @@ use axum::routing::get;
 use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
-    CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, QueryExplainer,
-    SchemaIndex, console_router,
+    CONSOLE_PATH, ChangeFeed, ChangeLog, ConsoleServices, DatabaseCatalog, FirestoreConsole,
+    QueryExplainer, SchemaIndex, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -461,6 +461,7 @@ struct ConsoleFirestoreParts {
     schema: SchemaIndex,
     databases: DatabaseCatalog,
     explain: QueryExplainer,
+    changelog: Option<ChangeLog>,
 }
 
 /// What `prepare_firestore` builds when Firestore is selected.
@@ -594,6 +595,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     schema: parts.schema,
                     databases: parts.databases,
                     explain: parts.explain,
+                    changelog: parts.changelog,
                     requests: requests.clone(),
                     shutdown: shutdown.subscribe(),
                 }),
@@ -1039,6 +1041,10 @@ fn prepare_firestore(
             DatabaseEdition::Standard,
             index_catalogs(config)?,
         ),
+        // The window holds the documents a commit replaced, so it belongs
+        // with the other bounded local diagnostics that may carry document
+        // data, and is off with them.
+        changelog: config.diagnostics.then(|| ChangeLog::attach(store)),
     };
     Ok(Some(FirestoreParts {
         routes: tonic::service::Routes::from(firestore_http).add_service(service.into_server()),

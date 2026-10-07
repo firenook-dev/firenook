@@ -681,8 +681,23 @@ served until every section has landed.
   canonical form — always `Z`, a fraction of exactly zero, three, six or
   nine digits — is now what every endpoint writes, and the normalisation the
   WebChannel and Functions paths each carried a copy of lives in one place.
-- [ ] Firestore follow-ups: undo within the change-log window, and a rules
-  editor.
+- [x] Undo, within the window the engine keeps. Every write the emulator
+  accepts passes through the store's commit observers with the document as
+  it was and as it became, so the console keeps a bounded window of them —
+  the console's own writes, the app's, a trigger's — and can put one back.
+  Three things make the undo trustworthy rather than a guess: it restores
+  the exact document the commit replaced, not a re-derivation of it; it
+  carries a precondition per document, so a commit something has changed
+  since is refused whole instead of quietly overwriting newer work; and it
+  is one atomic commit, so a partial undo cannot happen. A document written
+  twice in one commit collapses to a single inverse, because two writes in
+  one undo would each precondition on a different update time and refuse
+  each other. An undo is itself a commit, so it can be undone. The window
+  holds document data, so it keeps to a bounded number of commits and bytes,
+  drops a bulk import's documents rather than letting it evict everything
+  worth keeping, is never persisted, and is off with `--no-diagnostics` —
+  which the console says, rather than showing an empty list.
+- [ ] Firestore follow-ups: a rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

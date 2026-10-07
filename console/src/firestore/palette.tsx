@@ -3,7 +3,9 @@
 // one opens as its group), the subcollections of the open document, and
 // the workbench's own actions. The panel's toggle is the shell's.
 
+import { useKumoToastManager } from '@cloudflare/kumo'
 import {
+  ArrowCounterClockwiseIcon,
   ArrowRightIcon,
   ClockCounterClockwiseIcon,
   DatabaseIcon,
@@ -17,7 +19,7 @@ import {
   LightningIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
 import {
   type PaletteGroup,
@@ -28,9 +30,10 @@ import {
 import { useConsoleUi } from '@/lib/store'
 import { normalizePath, useWorkbench } from './components/workbench-context'
 import { useCreateDialog } from './create'
+import { undoLatest } from './changelog'
 import { useExportDialog } from './export'
 import { useQueryLine } from './query-line-store'
-import { collectionsQuery } from './queries'
+import { FS, collectionsQuery } from './queries'
 import { useRecents } from './recents'
 import { flattenSchema, schemaQuery } from './schema'
 
@@ -43,6 +46,8 @@ export function useFirestorePalette() {
   const openQuery = useQueryLine((state) => state.setOpen)
   const setExplain = useQueryLine((state) => state.setExplain)
   const openExport = useExportDialog((state) => state.setOpen)
+  const toasts = useKumoToastManager()
+  const queryClient = useQueryClient()
   const recents = useRecents((state) => state.items)
   const selected = workbench.selectedDocument
   const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
@@ -110,6 +115,34 @@ export function useFirestorePalette() {
       run: go(recent.path),
     }))
     const actions: PaletteItem[] = []
+    actions.push({
+      id: 'fs:undo',
+      title: 'Undo the last change',
+      description: 'whoever made it, if nothing has moved on since',
+      keywords: 'revert back restore mistake',
+      icon: <ArrowCounterClockwiseIcon size={16} />,
+      run: () => {
+        void undoLatest(workbench.database)
+          .then((result) => {
+            toasts.add({
+              title:
+                result.documents === 1
+                  ? 'Change undone'
+                  : `Change undone · ${result.documents} documents`,
+              description: 'The documents are back as they were before that write.',
+              variant: 'success',
+            })
+            void queryClient.invalidateQueries({ queryKey: [FS, workbench.database] })
+          })
+          .catch((error: unknown) => {
+            toasts.add({
+              title: 'Nothing was undone',
+              description: error instanceof Error ? error.message : String(error),
+              variant: 'error',
+            })
+          })
+      },
+    })
     if (workbench.collectionPath)
       actions.push(
         {
@@ -216,6 +249,8 @@ export function useFirestorePalette() {
     openQuery,
     setExplain,
     openExport,
+    toasts,
+    queryClient,
   ])
 
   useEffect(() => {

@@ -9,7 +9,6 @@ import { TrashIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
-import { LiveDot } from '@/components/kit'
 import { Page } from '@/components/shell/page'
 import { useCreateDialog } from '../create'
 import { useExportDialog } from '../export'
@@ -18,6 +17,7 @@ import { useFirestorePalette } from '../palette'
 import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
+import { ChangesPopover } from './changes-popover'
 import { CreateDialog } from './create-dialog'
 import { DeleteDialog } from './delete-dialog'
 import { ExplainPanel } from './explain-panel'
@@ -134,7 +134,7 @@ function WorkbenchBody() {
       >
         <PathBar />
         <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
-        <LiveDot
+        <ChangesPopover
           state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
           changes={commits}
         />

@@ -760,3 +760,59 @@ async function readDownload(download: { path(): Promise<string> }): Promise<stri
   const { readFile } = await import('node:fs/promises')
   return readFile(await download.path(), 'utf8')
 }
+
+test('a change can be undone, and refuses when something moved on', async ({ page }) => {
+  const path = `${resource()}/undoable/one`
+  const write = (text: string) =>
+    page.request.post(`${documents()}:commit`, {
+      headers: owner,
+      data: { writes: [{ update: { name: path, fields: { note: { stringValue: text } } } }] },
+    })
+  expect((await write('first')).ok()).toBeTruthy()
+
+  await page.goto(`${origin()}/console/firestore?path=undoable`)
+  await expect(page.getByTestId('grid-row')).toHaveCount(1)
+  expect((await write('second')).ok()).toBeTruthy()
+  // The live channel brings the new value and the new entry without a reload.
+  await expect(page.getByTestId('grid-row').first()).toContainText('second')
+
+  await page.getByTestId('changes-trigger').click()
+  const popover = page.getByTestId('changes-popover')
+  await expect(popover).toContainText('1 updated')
+  await expect(popover).toContainText('one')
+
+  // Undo puts the document back as it was, exactly.
+  await popover.getByRole('button', { name: 'Undo' }).first().click()
+  await expect(page.getByText('Change undone')).toBeVisible()
+  await expect(page.getByTestId('grid-row').first()).toContainText('first')
+
+  // The undo is itself a change, and the original now says so.
+  await page.getByTestId('changes-trigger').click()
+  await expect(page.getByTestId('changes-popover')).toContainText('Undid an earlier change')
+  await expect(page.getByTestId('changes-popover').getByText('undone')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // A write that lands after a change makes its undo refuse, whole. The
+  // entry is found by its own id rather than its position, because every
+  // other journey writes to this database too.
+  expect((await write('third')).ok()).toBeTruthy()
+  await expect(page.getByTestId('grid-row').first()).toContainText('third')
+  await page.getByTestId('changes-trigger').click()
+  const undoThird = await page
+    .getByTestId('changes-popover')
+    .locator('li')
+    .first()
+    .getByRole('button', { name: 'Undo' })
+    .getAttribute('data-testid')
+  expect(undoThird).toMatch(/^undo-\d+$/)
+
+  // The popover stays open while the write lands: the live channel keeps
+  // the list current, so the entry is still there and still identified.
+  expect((await write('fourth')).ok()).toBeTruthy()
+  await expect(page.getByTestId('changes-popover')).toContainText('1 updated')
+  await page.getByTestId(undoThird ?? 'undo-missing').click()
+  await expect(page.getByRole('heading', { name: 'Nothing was undone' })).toBeVisible()
+  await expect(page.getByText('a document has changed since')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('grid-row').first()).toContainText('fourth')
+})
