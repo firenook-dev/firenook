@@ -904,7 +904,7 @@ mod tests {
             "teams/t1/channels-archive/c0",
         ];
         let store = Store::default();
-        store.commit(&paths.map(create).to_vec()).expect("commit");
+        store.commit(paths.map(create).as_ref()).expect("commit");
         let index = SchemaIndex::attach(&store, PROJECT);
         let database = DatabaseName::new(PROJECT, "(default)").expect("name");
         let snapshot = store.snapshot();
