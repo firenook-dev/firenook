@@ -1447,7 +1447,7 @@ fn open_seeded_store(arguments: &FirestoreArgs) -> Result<Store, String> {
 async fn start_requests_listener(
     arguments: &FirestoreArgs,
     rules: &RulesRuntime,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, String> {
     let Some(port) = arguments.websocket_port else {
         return Ok(None);
@@ -1459,11 +1459,15 @@ async fn start_requests_listener(
     let application =
         firenook_suite_front::requests_router(rules.request_history(), shutdown.clone());
     Ok(Some(tokio::spawn(async move {
-        if let Err(error) = axum::serve(firenook_suite_runtime::no_delay(listener), application)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown.wait_for(|stopping| *stopping).await;
-            })
-            .await
+        // The suite's drain, deadline included: a client that stops partway
+        // through a request must not keep this process alive either.
+        if let Err(error) = firenook_suite_runtime::serve_until_shutdown(
+            "Requests",
+            listener,
+            application,
+            shutdown,
+        )
+        .await
         {
             eprintln!("Requests listener failed: {error}");
         }

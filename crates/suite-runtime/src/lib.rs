@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::response::Redirect;
@@ -1701,20 +1702,62 @@ pub fn no_delay(listener: TcpListener) -> TapIo<TcpListener, fn(&mut tokio::net:
     })
 }
 
+/// How long a listener's graceful drain may wait for the connections that
+/// were open when the suite stopped.
+///
+/// Every stream the console and the UI hold open ends itself on the stop
+/// signal, so this budget is only ever spent on a response still being
+/// written, or on a client that stopped partway through a request. Without it
+/// one such connection holds the drain open for the life of the process: the
+/// suite prints that it is stopping and then never exits, so the ports stay
+/// taken and nothing can restart on them.
+///
+/// The Firestore port needs no budget of its own: `WebChannel` and gRPC hold a
+/// response open by design, so [`spawn_firestore`] closes those connections
+/// as soon as the suite stops rather than waiting on them.
+const DRAIN_GRACE: Duration = Duration::from_secs(3);
+
+/// Serves `application` on `listener` until `shutdown` turns true, closing
+/// whatever is still connected [`DRAIN_GRACE`] later.
+pub async fn serve_until_shutdown(
+    name: &str,
+    listener: TcpListener,
+    application: Router,
+    mut shutdown: watch::Receiver<bool>,
+) -> std::io::Result<()> {
+    let (closing, close_when_overdue) = watch::channel(false);
+    let mut stopping = shutdown.clone();
+    let label = name.to_owned();
+    let overdue = tokio::spawn(async move {
+        while !*stopping.borrow() && stopping.changed().await.is_ok() {}
+        tokio::time::sleep(DRAIN_GRACE).await;
+        eprintln!(
+            "firenook: the {label} listener still had a connection open {}s after the stop request; closing it",
+            DRAIN_GRACE.as_secs()
+        );
+        let _ = closing.send(true);
+    });
+    let result = axum::serve(
+        shutdown_io::ClosingListener::new(no_delay(listener), close_when_overdue),
+        application,
+    )
+    .with_graceful_shutdown(async move {
+        while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
+    })
+    .await;
+    overdue.abort();
+    result
+}
+
 fn spawn_axum(
     name: &'static str,
     listener: TcpListener,
     application: Router,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
     failed: mpsc::UnboundedSender<String>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let result = axum::serve(no_delay(listener), application)
-            .with_graceful_shutdown(async move {
-                while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
-            })
-            .await;
-        if let Err(error) = result {
+        if let Err(error) = serve_until_shutdown(name, listener, application, shutdown).await {
             let _ = failed.send(format!("{name} listener failed: {error}"));
         }
     })

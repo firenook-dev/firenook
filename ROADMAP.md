@@ -636,13 +636,17 @@ served until every section has landed.
   and the status document kept answering normally. The walk now runs on its
   own task and every reader waits on the notification, with an attempt
   budget so a store that cannot be walked fails instead of looping.
-- [ ] The suite's graceful stop waits for an open console change stream. A
-  console tab left open holds the engine between "stopping" and exit
-  indefinitely: it releases its ports and its memory but never finishes, so
-  the launcher cannot restart it. Closing the tab lets it exit within
-  seconds. The stream is meant to end when the suite stops; the shutdown
-  signal and the UI listener's own graceful stop are evidently sequenced the
-  wrong way round.
+- [x] One connection could hold the suite's stop open for ever. The engine
+  printed that it was stopping and then never exited, so the ports stayed
+  taken and nothing could restart on them. A listener's graceful drain stops
+  accepting and then waits for the connections it already has: it closes the
+  ones sitting idle between requests, but a connection that has begun a
+  request and not finished sending it is not idle, so the wait never ended.
+  Every stream the console and the UI hold open already ends itself on the
+  stop signal, which is why the change feed was not the cause. Each HTTP
+  listener now gives the drain three seconds and then closes whatever is
+  still connected, the way the Firestore port already closed its WebChannel
+  and gRPC responses. A stop with nothing left to wait for is unchanged.
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
   the page, undo within the change-log window, and a rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,

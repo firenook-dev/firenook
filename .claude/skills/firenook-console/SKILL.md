@@ -109,6 +109,19 @@ any other way has no release and says "unreleased build" rather than naming
 a number — `src/lib/engine.ts` phrases it, and the browser journey declares
 a release in `e2e/engine.ts` so the badge has something real to assert.
 
+**Nothing the console opens may outlive the stop signal.** A listener's
+graceful drain stops accepting and then waits for the connections it already
+holds, with no deadline of its own, so one connection can hold the whole
+suite: the engine prints that it is stopping and never exits, the ports stay
+taken, and the launcher cannot restart it. Two rules keep that from
+happening. A handler that holds a response open ends it on the signal — the
+change feed does this with `take_until`, and so do the logging and Requests
+sockets; and `serve_until_shutdown` gives the drain `DRAIN_GRACE` and then
+closes whatever is still connected, which is what catches a client that
+stopped partway through a request. Add a streaming endpoint and it needs the
+first rule; the second is already there for everything. `transport_tests.rs`
+holds the reproduction beside the fix for both the HTTP and the gRPC side.
+
 ## Commands
 
 ```
