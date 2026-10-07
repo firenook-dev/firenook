@@ -12,6 +12,8 @@ const searchSchema = z.object({
   as: z.string().optional(),
   doc: z.string().optional(),
   tab: z.enum(['fields', 'json']).optional(),
+  // The content column: the data grid, or this database's security rules.
+  view: z.enum(['rules']).optional(),
 })
 
 export type FirestoreSearch = z.infer<typeof searchSchema>

@@ -28,6 +28,7 @@ use ts_rs::TS;
 use crate::changelog::ChangeLog;
 use crate::databases::DatabaseCatalog;
 use crate::explain::QueryExplainer;
+use crate::rules::RulesEditor;
 use crate::schema::SchemaIndex;
 
 /// Commits retained for a slow console before it is told to resync.
@@ -48,6 +49,8 @@ pub struct FirestoreConsole {
     pub explain: QueryExplainer,
     /// Recent commits and their undo, when diagnostics keep them.
     pub changelog: Option<ChangeLog>,
+    /// The security rules, as text that can be changed.
+    pub rules: RulesEditor,
     /// The Requests diagnostics feed (`/requests` upgrades to a websocket),
     /// when the Firestore front records evaluations.
     pub requests: Option<Router>,
@@ -271,7 +274,8 @@ pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
         .router(console.shutdown)
         .merge(console.schema.router())
         .merge(console.databases.router())
-        .merge(console.explain.router());
+        .merge(console.explain.router())
+        .merge(console.rules.router());
     if let Some(changelog) = console.changelog {
         router = router.merge(changelog.router());
     }

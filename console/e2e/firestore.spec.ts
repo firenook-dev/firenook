@@ -816,3 +816,61 @@ test('a change can be undone, and refuses when something moved on', async ({ pag
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('grid-row').first()).toContainText('fourth')
 })
+
+test('rules are text you can change, and the change is in force at once', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  // Viewing as a user: her own document reads, another's does not.
+  const asAda = `?path=users&as=u_k65eq%3Aada%40example.test`
+  await page.goto(`${origin()}/console/firestore${asAda}`)
+  await expect(page.getByText('Denied by security rules')).toBeVisible()
+
+  await page.getByTestId('open-rules').click()
+  const editor = page.getByTestId('rules-editor')
+  await expect(editor).toContainText('Rules')
+  const source = page.getByTestId('rules-source')
+  await expect(source).toHaveValue(/allow read: if request.auth != null/)
+  // The file it would save to is named, so nothing is written by surprise.
+  await expect(editor).toContainText('firestore.rules')
+
+  // Rules that do not compile change nothing, and say where.
+  const original = (await source.inputValue()) as string
+  await source.fill('service cloud.firestore { match')
+  await page.getByTestId('rules-apply').click()
+  await expect(page.getByRole('heading', { name: 'Nothing changed' })).toBeVisible()
+  const problems = page.getByTestId('rules-diagnostics')
+  await expect(problems).toBeVisible()
+  await expect(problems.locator('li').first()).toContainText(/^\d+:\d+ /)
+
+  // A ruleset that opens the collection takes effect on the next request.
+  await source.fill(
+    [
+      "rules_version = '2';",
+      'service cloud.firestore {',
+      '  match /databases/{database}/documents {',
+      '    match /{document=**} {',
+      '      allow read: if true;',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n'),
+  )
+  await page.getByTestId('rules-apply').click()
+  await expect(page.getByRole('heading', { name: 'Rules applied' })).toBeVisible()
+  await page.goto(`${origin()}/console/firestore${asAda}`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await expect(page.getByText('Denied by security rules')).toBeHidden()
+
+  // Put the project back as it was, applied but not written to the file.
+  await page.getByTestId('open-rules').click()
+  const restored = page.getByTestId('rules-source')
+  // Wait for the editor to hold what is in force before replacing it: a
+  // fill that lands while the fetch is still in flight is merged, not
+  // replaced, by the controlled textarea.
+  await expect(restored).toHaveValue(/allow read: if true/)
+  await restored.fill(original)
+  await expect(restored).toHaveValue(original)
+  await page.getByTestId('rules-apply').click()
+  await expect(page.getByRole('heading', { name: 'Rules applied' })).toBeVisible()
+  await page.getByTestId('rules-close').click()
+  await expect(page.getByTestId('toolbar')).toBeVisible()
+})

@@ -678,6 +678,7 @@ dependencies = [
  "firenook-core-store",
  "firenook-query-engine",
  "firenook-rest-front",
+ "firenook-rules-runtime",
  "firenook-suite-front",
  "futures-util",
  "rust-embed",

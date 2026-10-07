@@ -39,6 +39,8 @@ export interface Workbench {
   queryError: string | undefined
   selectedDocument: string | undefined
   tab: 'fields' | 'json'
+  /** The content column: the grid, or the rules editor. */
+  view: 'data' | 'rules'
   origin: string
   navigate: (patch: Partial<FirestoreSearch>, options?: { replace?: boolean }) => void
   setPath: (path: string) => void
@@ -128,23 +130,33 @@ export function useWorkbenchState(): Workbench | null {
       queryError,
       selectedDocument: search.doc,
       tab: search.tab ?? 'fields',
+      view: search.view ?? 'data',
       origin: window.location.origin,
       navigate,
       setPath: (next) => {
         const normalized = normalizePath(next)
         const nextSegments = normalized ? normalized.split('/') : []
-        // A document path opens that document in its collection.
+        // Choosing a collection is asking for its data, so it leaves the
+        // rules editor rather than changing the path behind it.
         if (nextSegments.length % 2 === 0 && nextSegments.length > 0)
           navigate({
             path: nextSegments.slice(0, -1).join('/'),
             doc: normalized,
             q: undefined,
             group: undefined,
+            view: undefined,
           })
         // A pattern from the schema tree opens as its collection group.
         else if (isPattern(normalized))
-          navigate({ path: normalized, doc: undefined, q: undefined, group: true })
-        else navigate({ path: normalized, doc: undefined, q: undefined, group: undefined })
+          navigate({ path: normalized, doc: undefined, q: undefined, group: true, view: undefined })
+        else
+          navigate({
+            path: normalized,
+            doc: undefined,
+            q: undefined,
+            group: undefined,
+            view: undefined,
+          })
       },
       setQuery: (next) => navigate({ q: printQuery(next) || undefined }),
       setQueryText: (text) => navigate({ q: text.trim() || undefined }),

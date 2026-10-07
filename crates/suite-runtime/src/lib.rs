@@ -19,7 +19,7 @@ use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
     CONSOLE_PATH, ChangeFeed, ChangeLog, ConsoleServices, DatabaseCatalog, FirestoreConsole,
-    QueryExplainer, SchemaIndex, console_router,
+    QueryExplainer, RulesEditor, SchemaIndex, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -462,6 +462,7 @@ struct ConsoleFirestoreParts {
     databases: DatabaseCatalog,
     explain: QueryExplainer,
     changelog: Option<ChangeLog>,
+    rules: RulesEditor,
 }
 
 /// What `prepare_firestore` builds when Firestore is selected.
@@ -596,6 +597,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     databases: parts.databases,
                     explain: parts.explain,
                     changelog: parts.changelog,
+                    rules: parts.rules,
                     requests: requests.clone(),
                     shutdown: shutdown.subscribe(),
                 }),
@@ -1001,6 +1003,10 @@ fn prepare_firestore(
     let query_policy = query_policy(config)?;
     let firestore_rules = firestore_rules(config)?;
     let request_history = firestore_rules.request_history();
+    // The console's editor replaces a database's ruleset in the same
+    // runtime every front evaluates against, so a change takes effect on
+    // the next request rather than on the next start.
+    let rules_for_console = firestore_rules.clone();
     let service = FirestoreService::new_with_query_policy_and_rules(
         store.clone(),
         query_policy.clone(),
@@ -1045,6 +1051,20 @@ fn prepare_firestore(
         // with the other bounded local diagnostics that may carry document
         // data, and is off with them.
         changelog: config.diagnostics.then(|| ChangeLog::attach(store)),
+        rules: RulesEditor::new(
+            &rules_for_console,
+            &config.project_id,
+            config
+                .firestore_databases
+                .iter()
+                .filter_map(|database| {
+                    database
+                        .rules
+                        .as_ref()
+                        .map(|path| (database.database_id.clone(), path.clone()))
+                })
+                .collect(),
+        ),
     };
     Ok(Some(FirestoreParts {
         routes: tonic::service::Routes::from(firestore_http).add_service(service.into_server()),

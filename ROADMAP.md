@@ -697,7 +697,17 @@ served until every section has landed.
   drops a bulk import's documents rather than letting it evict everything
   worth keeping, is never persisted, and is off with `--no-diagnostics` —
   which the console says, rather than showing an empty list.
-- [ ] Firestore follow-ups: a rules editor.
+- [x] A rules editor. The emulator exists so rules can be got right before
+  they reach production, and the loop that takes — edit the file, restart,
+  try again — is the slowest part of writing them. The rules are now the
+  text on screen: `GET`/`PUT /console/api/v1/firestore/rules` read what is
+  in force and replace it, a change compiles and takes effect on the next
+  request, and the Requests feed then shows the line that decided it.
+  Applying and saving are separate, so trying something out never rewrites
+  the file behind you; a ruleset that does not compile changes nothing, says
+  which line and column, and never reaches the file. A database whose rules
+  `firebase.json` does not configure can still be edited and says it was not
+  saved rather than implying it was.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

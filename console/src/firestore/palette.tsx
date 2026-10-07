@@ -17,6 +17,7 @@ import {
   FunnelIcon,
   HouseIcon,
   LightningIcon,
+  ShieldCheckIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -115,6 +116,14 @@ export function useFirestorePalette() {
       run: go(recent.path),
     }))
     const actions: PaletteItem[] = []
+    actions.push({
+      id: 'fs:rules',
+      title: 'Security rules',
+      description: `edit the rules this database is served with`,
+      keywords: 'permissions allow deny security firestore.rules',
+      icon: <ShieldCheckIcon size={16} />,
+      run: () => workbench.navigate({ view: 'rules' }),
+    })
     actions.push({
       id: 'fs:undo',
       title: 'Undo the last change',

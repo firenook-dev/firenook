@@ -1169,6 +1169,86 @@ function SchemaTree() {
   )
 }
 
+const RULES_SOURCE = [
+  "rules_version = '2';",
+  'service cloud.firestore {',
+  '  match /databases/{database}/documents {',
+  '    match /users/{uid} {',
+  '      allow read: if request.auth != null && request.auth.uid == uid;',
+  '      allow write: if false;',
+  '    }',
+  '  }',
+  '}',
+]
+
+/** The rules, as text, with a numbered gutter and a place for problems. */
+function RulesEditorCard() {
+  return (
+    <Stack>
+      <Section
+        title="Rules as text"
+        note="Apply puts them in force from the next request; Save also writes the file the project configures, which is named so nothing is written by surprise."
+      >
+        <div className="overflow-hidden rounded-lg border border-kumo-line">
+          <div className="flex h-11 items-center gap-2 border-b border-kumo-line bg-kumo-base pr-2 pl-3">
+            <Button variant="ghost" size="sm">
+              Data
+            </Button>
+            <span className="mx-0.5 h-5 w-px shrink-0 bg-kumo-line" />
+            <span className="flex items-center gap-2">
+              <span className="text-kumo-subtle">
+                <ShieldCheckIcon size={16} />
+              </span>
+              <Text as="span" size="sm" bold>
+                Rules
+              </Text>
+              <Text as="span" variant="secondary" size="sm">
+                (default)
+              </Text>
+            </span>
+            <Badge variant="outline">unsaved</Badge>
+            <span className="ml-auto flex items-center gap-2">
+              <span className="font-mono text-[11px] text-kumo-subtle">firestore.rules</span>
+              <Button variant="ghost" size="sm">
+                Revert
+              </Button>
+              <Button variant="secondary" size="sm">
+                Apply
+              </Button>
+              <Button variant="primary" size="sm">
+                Save
+              </Button>
+            </span>
+          </div>
+          <div className="flex">
+            <pre className="shrink-0 border-r border-kumo-hairline bg-kumo-base px-2 py-3 text-right font-mono text-[12px] leading-5 text-kumo-inactive tabular-nums">
+              {RULES_SOURCE.map((_, index) => index + 1).join('\n')}
+            </pre>
+            <pre className="min-w-0 flex-1 bg-kumo-canvas px-3 py-3 font-mono text-[12px] leading-5 text-kumo-default">
+              {RULES_SOURCE.join('\n')}
+            </pre>
+          </div>
+          <ul className="border-t border-kumo-danger bg-kumo-danger-tint">
+            <li className="flex items-start gap-2 px-3 py-1.5">
+              <span className="flex h-lh shrink-0 items-center text-kumo-danger">
+                <WarningIcon size={14} />
+              </span>
+              <span className="font-mono text-[12px] text-kumo-default">
+                8:2 expected end of rules source
+              </span>
+            </li>
+          </ul>
+          <div className="flex h-9 items-center border-t border-kumo-line px-3">
+            <Text variant="secondary" size="sm" as="span">
+              Apply puts these rules in force from the next request. Save also writes the file.
+            </Text>
+          </div>
+        </div>
+      </Section>
+    </Stack>
+  )
+}
+
 /** One commit in the recent-changes list. */
 function ChangeRow({
   summary,
@@ -1555,6 +1635,16 @@ defineCards([
     width: 880,
     surface: 'canvas',
     render: () => <QueryPlan />,
+  },
+  {
+    id: 'rules-editor',
+    group: 'Patterns',
+    name: 'Rules editor',
+    subtitle:
+      'The security rules as text, with a numbered gutter, the file it saves to named, and compiler problems placed in the source',
+    width: 900,
+    surface: 'canvas',
+    render: () => <RulesEditorCard />,
   },
   {
     id: 'recent-changes',

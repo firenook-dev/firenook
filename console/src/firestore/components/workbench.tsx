@@ -5,7 +5,7 @@
 // engine's change feed.
 
 import { Button, Text } from '@cloudflare/kumo'
-import { TrashIcon } from '@phosphor-icons/react'
+import { ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
@@ -28,6 +28,7 @@ import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
 import { QueryLine } from './query-line'
 import { RequestsDrawer } from './requests-drawer'
+import { RulesEditorPanel } from './rules-editor'
 import { SchemaPanel } from './schema-panel'
 import { WorkbenchProvider, useWorkbench, useWorkbenchState } from './workbench-context'
 
@@ -128,6 +129,45 @@ function WorkbenchBody() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">
       <h1 className="sr-only">Firestore</h1>
       <SchemaPanel />
+      {workbench.view === 'rules' ? (
+        <RulesEditorPanel />
+      ) : (
+        <WorkbenchData
+          checked={checked}
+          live={live}
+          commits={commits}
+          onDelete={setDeleting}
+          explain={explain}
+          setExplain={setExplain}
+        />
+      )}
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <RequestsDrawer open={requestsOpen} setOpen={setRequestsOpen} />
+      <CreateDialog />
+      <DeleteDialog paths={deleting} onOpenChange={(open) => !open && setDeleting([])} />
+    </div>
+  )
+}
+
+/** The data view: the toolbar, the query line and the grid. */
+function WorkbenchData({
+  checked,
+  live,
+  commits,
+  onDelete,
+  explain,
+  setExplain,
+}: {
+  checked: ReadonlySet<string>
+  live: string
+  commits: number
+  onDelete: (paths: string[]) => void
+  explain: boolean
+  setExplain: (explain: boolean) => void
+}) {
+  const workbench = useWorkbench()
+  return (
+    <>
       <div
         className="flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3"
         data-testid="toolbar"
@@ -143,13 +183,22 @@ function WorkbenchBody() {
             variant="secondary-destructive"
             size="sm"
             icon={<TrashIcon />}
-            onClick={() => setDeleting([...checked])}
+            onClick={() => onDelete([...checked])}
             data-testid="delete-selected"
             className="ml-1"
           >
             Delete {checked.size}
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<ShieldCheckIcon />}
+          onClick={() => workbench.navigate({ view: 'rules' })}
+          data-testid="open-rules"
+        >
+          Rules
+        </Button>
         <span className="ml-1">
           <NewMenu />
         </span>
@@ -164,13 +213,9 @@ function WorkbenchBody() {
           <Grid />
         </div>
         {workbench.selectedDocument && (
-          <Inspector path={workbench.selectedDocument} onDelete={(path) => setDeleting([path])} />
+          <Inspector path={workbench.selectedDocument} onDelete={(path) => onDelete([path])} />
         )}
       </div>
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
-      <RequestsDrawer open={requestsOpen} setOpen={setRequestsOpen} />
-      <CreateDialog />
-      <DeleteDialog paths={deleting} onOpenChange={(open) => !open && setDeleting([])} />
-    </div>
+    </>
   )
 }

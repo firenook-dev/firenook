@@ -315,6 +315,19 @@ card there for every new pattern before it is designed with. Component docs: `np
   console reads a 404 as "diagnostics are off" rather than "nothing
   happened". The console asks only while the popover is open, because the
   live channel invalidates `['fs', db, 'changelog']` on every commit.
+- Rules (`?view=rules`, the toolbar's Rules button, ⌘K): `RulesEditor` in
+  `crates/console-front/src/rules.rs` reads `RulesRuntime::rules_for(...)`
+  and replaces a database's ruleset with `install_database`, which is the
+  level `firebase.json` declares rules at and the level that takes
+  precedence. **Compile before writing**: a ruleset that does not compile
+  must change nothing and must never reach the file, and `LoadError`'s
+  diagnostics carry the line and column the editor places. Applying and
+  saving are separate — a change is in force the moment it compiles and
+  reaches the repository only when asked. `?view` switches the content
+  column rather than adding a route, and `setPath` clears it, because
+  choosing a collection is asking for its data. The editor is a textarea
+  over a numbered gutter in one scroller: a code editor would cost several
+  times its worth of the first-route budget.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for

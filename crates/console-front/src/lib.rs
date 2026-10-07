@@ -12,6 +12,7 @@ mod changelog;
 mod databases;
 mod explain;
 mod firestore;
+mod rules;
 mod schema;
 
 use axum::Json;
@@ -37,6 +38,7 @@ pub use explain::{
 pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
 };
+pub use rules::{RulesDiagnostic, RulesDocument, RulesEditor, RulesError, RulesInstalled};
 pub use schema::{
     ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
     SubcollectionsSnapshot,
@@ -317,6 +319,9 @@ mod tests {
         Explanation::export_all(&config).expect("TypeScript bindings written");
         ChangeLogPage::export_all(&config).expect("TypeScript bindings written");
         UndoResult::export_all(&config).expect("TypeScript bindings written");
+        RulesDocument::export_all(&config).expect("TypeScript bindings written");
+        RulesInstalled::export_all(&config).expect("TypeScript bindings written");
+        RulesDiagnostic::export_all(&config).expect("TypeScript bindings written");
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(
