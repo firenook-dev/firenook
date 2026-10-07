@@ -1,6 +1,7 @@
 import {
   Badge,
   Button,
+  Checkbox,
   Collapsible,
   InlineCopyText,
   Input,
@@ -21,6 +22,7 @@ import {
   CommandIcon,
   CopyIcon,
   DatabaseIcon,
+  DownloadSimpleIcon,
   FolderIcon,
   EnvelopeSimpleIcon,
   FunnelSimpleIcon,
@@ -1166,6 +1168,97 @@ function SchemaTree() {
   )
 }
 
+/** The export dialog's body, in one of the states it is met in. */
+function ExportDialogBody({
+  scope,
+  note,
+  progress,
+  typed,
+}: {
+  scope: string
+  note: string
+  progress?: string
+  typed?: boolean
+}) {
+  return (
+    <div className="grid gap-4 rounded-lg border border-kumo-line bg-kumo-base p-5">
+      <div className="grid gap-1.5">
+        <Text variant="heading" size="lg" as="h3">
+          Export
+        </Text>
+        <Text variant="secondary" size="sm">
+          {scope}, read whole — not the shortened values the grid draws. {note}
+        </Text>
+      </div>
+      <Tabs
+        size="sm"
+        variant="segmented"
+        tabs={[
+          { value: 'json', label: 'JSON' },
+          { value: 'ndjson', label: 'NDJSON' },
+          { value: 'csv', label: 'CSV' },
+        ]}
+        selectedValue={typed === undefined ? 'csv' : 'json'}
+      />
+      <Text variant="secondary" size="sm">
+        {typed === undefined
+          ? 'Flattened columns for a spreadsheet; nested keys join with a dot.'
+          : 'One object keyed by document id — the shape this console imports.'}
+      </Text>
+      {typed === undefined ? null : (
+        <div className="grid gap-1">
+          <Checkbox label="Keep Firestore types exactly" checked={typed} />
+          <span className="pl-6">
+            <Text variant="secondary" size="sm">
+              The REST wire shape. References, bytes, geopoints and vectors have no plain-JSON form
+              that survives a round trip.
+            </Text>
+          </span>
+        </div>
+      )}
+      {progress ? (
+        <Text variant="secondary" size="sm">
+          {progress}
+        </Text>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary">{progress ? 'Stop' : 'Cancel'}</Button>
+        <Button variant="primary" icon={<DownloadSimpleIcon />}>
+          Export {typed === undefined ? 'CSV' : 'JSON'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** The export dialog: what will be written, before anything is. */
+function ExportDialogCard() {
+  return (
+    <Stack>
+      <Section
+        title="A whole collection"
+        note="The scope is named in words, and so is whose view it is."
+      >
+        <ExportDialogBody
+          scope="every document in users"
+          note="Rules are bypassed, so this is everything the engine holds."
+          typed={false}
+        />
+      </Section>
+      <Section
+        title="A query, as a spreadsheet, while it runs"
+        note="A long export reports what it has read and can be stopped."
+      >
+        <ExportDialogBody
+          scope={'every document matching where("plan", "==", "pro")'}
+          note="Security rules apply, so this is what the identity you are viewing as can read."
+          progress="Read 4,500…"
+        />
+      </Section>
+    </Stack>
+  )
+}
+
 /** One figure in the plan's row of facts. */
 function PlanFact({
   label,
@@ -1338,6 +1431,16 @@ defineCards([
     width: 880,
     surface: 'canvas',
     render: () => <QueryPlan />,
+  },
+  {
+    id: 'export-dialog',
+    group: 'Patterns',
+    name: 'Export dialog',
+    subtitle:
+      'What will be written before anything is: the scope in words, whose view it is, the format, and progress that can be stopped',
+    width: 720,
+    surface: 'canvas',
+    render: () => <ExportDialogCard />,
   },
   {
     id: 'data-grid',

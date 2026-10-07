@@ -2109,12 +2109,38 @@ fn now_timestamp() -> Timestamp {
     .expect("system time is a valid timestamp")
 }
 
+/// A timestamp in protobuf JSON's canonical form, which is what Firestore
+/// returns: always `Z`, and a fraction of exactly zero, three, six or nine
+/// digits.
+///
+/// `time`'s RFC 3339 writes as many digits as the value needs and trims the
+/// rest, so the same instant came back as `…51.23986Z` from the endpoints
+/// that encode by hand and `…51.239860Z` from the one that serializes the
+/// protobuf message. A client comparing an `updateTime` it listed with one
+/// it read saw two different strings for one document.
 fn format_timestamp(value: Timestamp) -> Result<String, RestError> {
-    OffsetDateTime::from_unix_timestamp(value.seconds())
-        .and_then(|timestamp| timestamp.replace_nanosecond(value.nanos()))
-        .map_err(|error| RestError::internal(format!("invalid stored timestamp: {error}")))?
-        .format(&Rfc3339)
-        .map_err(|error| RestError::internal(format!("timestamp formatting failed: {error}")))
+    let moment = OffsetDateTime::from_unix_timestamp(value.seconds())
+        .map_err(|error| RestError::internal(format!("invalid stored timestamp: {error}")))?;
+    let seconds = format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        moment.year(),
+        u8::from(moment.month()),
+        moment.day(),
+        moment.hour(),
+        moment.minute(),
+        moment.second(),
+    );
+    let nanos = value.nanos();
+    let fraction = if nanos == 0 {
+        String::new()
+    } else if nanos.is_multiple_of(1_000_000) {
+        format!(".{:03}", nanos / 1_000_000)
+    } else if nanos.is_multiple_of(1_000) {
+        format!(".{:06}", nanos / 1_000)
+    } else {
+        format!(".{nanos:09}")
+    };
+    Ok(format!("{seconds}{fraction}Z"))
 }
 
 fn number_field(fields: &Map<String, JsonValue>, name: &str) -> Result<f64, RestError> {
@@ -2888,6 +2914,74 @@ mod tests {
         );
         assert!(response[0].get("readTime").is_some());
         assert!(response[0].get("done").is_none());
+    }
+
+    /// Google writes a UTC timestamp as `Z` from every endpoint. This
+    /// server hand-encodes most responses and gets that for free, but a
+    /// listing is serialized from the protobuf message, which writes
+    /// `+00:00` — so the same document read two ways used to come back with
+    /// the same instant spelled two ways.
+    #[tokio::test]
+    async fn every_endpoint_spells_a_utc_timestamp_the_same_way() {
+        const PROJECT: &str = "demo-timestamp-shape";
+        let store = Store::default();
+        let database = DatabaseName::new(PROJECT, "(default)").expect("database");
+        store
+            .commit(&[firenook_core_store::Write::Create {
+                key: firenook_core_store::DocumentKey::new(database, "things/one")
+                    .expect("document key"),
+                fields: firenook_core_store::Fields::from([(
+                    "when".to_owned(),
+                    Value::Timestamp(
+                        firenook_core_store::Timestamp::new(1_772_600_767, 0).expect("timestamp"),
+                    ),
+                )]),
+            }])
+            .expect("commit");
+
+        let read = |path: String| {
+            let store = store.clone();
+            async move {
+                let response = router(store)
+                    .oneshot(
+                        Request::builder()
+                            .method(Method::GET)
+                            .uri(path)
+                            .body(Body::empty())
+                            .expect("request"),
+                    )
+                    .await
+                    .expect("response");
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("body");
+                serde_json::from_slice::<JsonValue>(&body).expect("JSON")
+            }
+        };
+
+        let root = format!("/v1/projects/{PROJECT}/databases/(default)/documents");
+        let fetched = read(format!("{root}/things/one")).await;
+        let listed = read(format!("{root}/things")).await;
+        let listed = &listed["documents"][0];
+
+        for (endpoint, document) in [("get", &fetched), ("list", listed)] {
+            for field in ["createTime", "updateTime"] {
+                let value = document[field].as_str().expect(field);
+                assert!(
+                    value.ends_with('Z'),
+                    "{endpoint} returned {field} as {value}"
+                );
+            }
+            assert_eq!(
+                document["fields"]["when"]["timestampValue"], "2026-03-04T05:06:07Z",
+                "{endpoint} returned a document timestamp in the wrong shape"
+            );
+        }
+        assert_eq!(
+            fetched["updateTime"], listed["updateTime"],
+            "the same document read two ways must carry the same updateTime"
+        );
     }
 
     async fn post_json(store: Store, path: &str, body: JsonValue) -> (StatusCode, JsonValue) {

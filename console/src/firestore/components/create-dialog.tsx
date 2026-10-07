@@ -9,7 +9,15 @@ import { useMemo, useRef, useState } from 'react'
 import { type CreateRequest, generateId, parseImport, useCreateDialog, validateId } from '../create'
 import { useSelection } from '../selection'
 import { FirestoreError, type WriteOperation, commit, documentRoot } from '../rest'
-import { type RestValue, encodeFields, encodeValue, fromJson, parseEditorText } from '../value'
+import {
+  type RestValue,
+  decodeFields,
+  encodeFields,
+  encodeValue,
+  fromJson,
+  isRestShape,
+  parseEditorText,
+} from '../value'
 import { type FieldDraft, FieldsPanel, draftFor, draftsFrom } from './field-editor'
 import { useWorkbench } from './workbench-context'
 
@@ -283,6 +291,18 @@ function ImportForm({ collection, onClose }: { collection: string; onClose: () =
         const id = document.id ?? generateId()
         const problem = validateId(id, 'document')
         if (problem) throw new Error(`${id}: ${problem}`)
+        // An export made with "keep Firestore types exactly" is already in
+        // the wire shape; reading it as plain JSON would store the wrappers.
+        if (isRestShape(document.fields))
+          return {
+            set: {
+              path: `${collection}/${id}`,
+              fields: encodeFields(
+                decodeFields(document.fields as Record<string, RestValue>),
+                root,
+              ),
+            },
+          }
         const value = fromJson(document.fields, { timestamps })
         if (value.type !== 'map') throw new Error(`${id}: fields must be an object`)
         return { set: { path: `${collection}/${id}`, fields: encodeFields(value.fields, root) } }

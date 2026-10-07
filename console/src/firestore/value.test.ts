@@ -6,6 +6,7 @@ import {
   editorText,
   encodeValue,
   fromJson,
+  isRestShape,
   parseEditorText,
   relativeTime,
   toJson,
@@ -122,5 +123,30 @@ describe('the Firestore value codec', () => {
     expect(relativeTime('2026-09-15T09:00:00Z', now)).toBe('5 d ago')
     expect(relativeTime('2026-09-20T10:00:00Z', now)).toBe('in 1 h')
     expect(relativeTime('not a date', now)).toBe('not a date')
+  })
+})
+
+describe('telling a typed export from plain JSON', () => {
+  it('recognises the wire shape an export writes', () => {
+    expect(isRestShape({ name: { stringValue: 'Ada' }, age: { integerValue: '36' } })).toBe(true)
+    expect(isRestShape({ at: { timestampValue: '2026-01-01T00:00:00Z' } })).toBe(true)
+    expect(isRestShape({ tags: { arrayValue: { values: [] } } })).toBe(true)
+  })
+
+  it('leaves plain JSON alone', () => {
+    expect(isRestShape({ name: 'Ada', age: 36 })).toBe(false)
+    expect(isRestShape({ tags: ['a'] })).toBe(false)
+    expect(isRestShape({})).toBe(false)
+  })
+
+  it('does not mistake a one-key map of a person’s own for the wire shape', () => {
+    // `value` is not one of the wire's names, so this stays plain.
+    expect(isRestShape({ settings: { value: 1 } })).toBe(false)
+    // A map with two keys is plain whatever they are called.
+    expect(isRestShape({ settings: { stringValue: 'a', other: 1 } })).toBe(false)
+  })
+
+  it('needs every field to be typed, not just the first', () => {
+    expect(isRestShape({ a: { stringValue: 'x' }, b: 'plain' })).toBe(false)
   })
 })

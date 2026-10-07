@@ -13,6 +13,8 @@ const edge = (box: { x: number; width: number } | null) => (box ? box.x + box.wi
 const documents = () =>
   `${origin()}/console/api/v1/firestore/v1/projects/${project()}/databases/(default)/documents`
 const owner = { authorization: 'Bearer owner', 'content-type': 'application/json' }
+/** The resource name a write names, as opposed to the URL it is sent to. */
+const resource = () => `projects/${project()}/databases/(default)/documents`
 
 test('a collection is a typed grid with live counts in the path bar', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
@@ -645,3 +647,116 @@ test('explain names what the query reads, and the index production would need', 
   await page.getByLabel('Close the query plan').click()
   await expect(page.getByTestId('explain-panel')).toBeHidden()
 })
+
+test('export writes the whole result, in the shape asked for', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=products`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+
+  // The whole collection, keyed by id, as the console's own import reads it.
+  await page.getByTestId('export-open').click()
+  await expect(page.getByTestId('export-scope')).toHaveText('every document in products')
+  const jsonDownload = page.waitForEvent('download')
+  await page.getByTestId('confirm-export').click()
+  const json = await jsonDownload
+  expect(json.suggestedFilename()).toMatch(/^products-[\d-]+\.json$/)
+  const exported = JSON.parse(await readDownload(json)) as Record<string, Record<string, unknown>>
+  expect(Object.keys(exported)).toHaveLength(60)
+  const [, first] = Object.entries(exported)[0] ?? []
+  expect(typeof first?.name).toBe('string')
+
+  // A query narrows the export, and CSV flattens it for a spreadsheet.
+  const input = page.getByTestId('query-input')
+  await page.keyboard.press('f')
+  await input.fill('where("published", "==", false)')
+  await input.press('Enter')
+  await expect(page.getByTestId('match-count')).toContainText(/\d+ documents/)
+  const matched = Number(
+    (await page.getByTestId('match-count').innerText()).replace(/[^\d].*$/, ''),
+  )
+  expect(matched).toBeGreaterThan(0)
+  expect(matched).toBeLessThan(60)
+
+  await page.getByTestId('export-open').click()
+  await expect(page.getByTestId('export-scope')).toContainText('where("published", "==", false)')
+  await page.getByRole('tab', { name: 'CSV' }).click()
+  const csvDownload = page.waitForEvent('download')
+  await page.getByTestId('confirm-export').click()
+  const csv = await csvDownload
+  const lines = (await readDownload(csv)).trim().split('\n')
+  expect(lines).toHaveLength(matched + 1)
+  expect(lines[0]).toContain('__id__')
+  // A nested map becomes dotted columns; an array stays in one.
+  expect(lines[0]).toContain('dimensions.w')
+  expect(lines[0]).toContain('categories')
+})
+
+test('a typed export imports back as the same documents', async ({ page }) => {
+  // A reference, a geopoint and bytes have no plain-JSON form that survives
+  // a round trip, so this is the export that has to keep them.
+  const created = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: {
+      writes: [
+        {
+          update: {
+            name: `${resource()}/roundtrip/one`,
+            fields: {
+              label: { stringValue: 'keep me' },
+              owner: { referenceValue: `${resource()}/users/u_k65eq` },
+              where: { geoPointValue: { latitude: 51.5, longitude: -0.12 } },
+              blob: { bytesValue: 'ZmlyZW5vb2s=' },
+              when: { timestampValue: '2026-03-04T05:06:07Z' },
+              count: { integerValue: '42' },
+            },
+          },
+        },
+      ],
+    },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  await page.goto(`${origin()}/console/firestore?path=roundtrip`)
+  await expect(page.getByTestId('grid-row')).toHaveCount(1)
+
+  await page.getByTestId('export-open').click()
+  await page.getByRole('checkbox', { name: 'Keep Firestore types exactly' }).click()
+  const download = page.waitForEvent('download')
+  await page.getByTestId('confirm-export').click()
+  const text = await readDownload(await download)
+  expect(JSON.parse(text)).toMatchObject({
+    one: {
+      label: { stringValue: 'keep me' },
+      where: { geoPointValue: { latitude: 51.5, longitude: -0.12 } },
+      blob: { bytesValue: 'ZmlyZW5vb2s=' },
+      when: { timestampValue: '2026-03-04T05:06:07Z' },
+    },
+  })
+
+  // Importing that file back reproduces the types, instead of storing the
+  // wrappers as maps. The id in the file is taken, so it lands beside it.
+  await page.getByTestId('new-menu').click()
+  await page.getByTestId('new-import').click()
+  await page.getByTestId('import-json').fill(text.replace('"one"', '"two"'))
+  await expect(page.getByTestId('import-preview')).toContainText('1 document')
+  await page.getByTestId('import-submit').click()
+  await expect(page.getByText('1 document imported')).toBeVisible()
+
+  const back = await page.request.get(`${documents()}/roundtrip`, { headers: owner })
+  const listed = (await back.json()) as {
+    documents: { name: string; fields: Record<string, unknown> }[]
+  }
+  const copy = listed.documents.find((item) => item.name.endsWith('/two'))
+  expect(copy?.fields).toMatchObject({
+    label: { stringValue: 'keep me' },
+    owner: { referenceValue: `${resource()}/users/u_k65eq` },
+    where: { geoPointValue: { latitude: 51.5, longitude: -0.12 } },
+    blob: { bytesValue: 'ZmlyZW5vb2s=' },
+    when: { timestampValue: '2026-03-04T05:06:07Z' },
+    count: { integerValue: '42' },
+  })
+})
+
+/** A download's bytes, as text. */
+async function readDownload(download: { path(): Promise<string> }): Promise<string> {
+  const { readFile } = await import('node:fs/promises')
+  return readFile(await download.path(), 'utf8')
+}

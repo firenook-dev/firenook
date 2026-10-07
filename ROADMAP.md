@@ -662,8 +662,27 @@ served until every section has landed.
   declared index is a trailing `__name__` away from looking missing, which
   is how the Firebase CLI writes some of its entries, so that field is now
   matched as the implicit one it is.
-- [ ] Firestore follow-ups: export from the page, undo within the
-  change-log window, and a rules editor.
+- [x] Export from the page: the query you are looking at, as JSON, NDJSON or
+  CSV. It reads whole documents rather than the previews a cell draws from,
+  pages the whole result with the grid's own cursors, and says before it
+  writes anything what the file will contain and whose view it is — an
+  export made while viewing as a user holds what that user can read. Plain
+  JSON is keyed by document id, which is the shape this console imports, so
+  an export loads straight back in; references, bytes, geopoints and vectors
+  have no plain-JSON form that survives that, so "keep Firestore types
+  exactly" writes the REST wire shape and the import now recognises it
+  instead of storing the wrappers as maps.
+- [x] One instant, one spelling. Writing that round trip found the engine
+  answering with a timestamp in two shapes: every REST response it encodes
+  by hand carried `Z` and as many fractional digits as the value needed,
+  while a listing, which is serialized from the protobuf message, carried
+  `+00:00` and six. A client comparing an `updateTime` it listed against one
+  it read saw one document with two different times. Protobuf JSON's
+  canonical form — always `Z`, a fraction of exactly zero, three, six or
+  nine digits — is now what every endpoint writes, and the normalisation the
+  WebChannel and Functions paths each carried a copy of lives in one place.
+- [ ] Firestore follow-ups: undo within the change-log window, and a rules
+  editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

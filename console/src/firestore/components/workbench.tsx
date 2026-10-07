@@ -12,6 +12,7 @@ import { statusQuery } from '@/api/queries'
 import { LiveDot } from '@/components/kit'
 import { Page } from '@/components/shell/page'
 import { useCreateDialog } from '../create'
+import { useExportDialog } from '../export'
 import { useLive, useLiveChanges } from '../live'
 import { useFirestorePalette } from '../palette'
 import { resetColumns, useQueryLine } from '../query-line-store'
@@ -20,6 +21,7 @@ import { resetSelection, useSelection } from '../selection'
 import { CreateDialog } from './create-dialog'
 import { DeleteDialog } from './delete-dialog'
 import { ExplainPanel } from './explain-panel'
+import { ExportDialog } from './export-dialog'
 import { Grid } from './grid'
 import { Inspector } from './inspector'
 import { NewMenu } from './new-menu'
@@ -65,6 +67,8 @@ function WorkbenchBody() {
   const setExplain = useQueryLine((state) => state.setExplain)
   const openCreate = useCreateDialog((state) => state.open)
   const [requestsOpen, setRequestsOpen] = useState(false)
+  const exportOpen = useExportDialog((state) => state.open)
+  const setExportOpen = useExportDialog((state) => state.setOpen)
   const [deleting, setDeleting] = useState<string[]>([])
 
   // The selection and hidden columns belong to one collection.
@@ -163,6 +167,7 @@ function WorkbenchBody() {
           <Inspector path={workbench.selectedDocument} onDelete={(path) => setDeleting([path])} />
         )}
       </div>
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <RequestsDrawer open={requestsOpen} setOpen={setRequestsOpen} />
       <CreateDialog />
       <DeleteDialog paths={deleting} onOpenChange={(open) => !open && setDeleting([])} />

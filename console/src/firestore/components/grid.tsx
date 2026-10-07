@@ -6,6 +6,7 @@ import { Button, Empty, Table, Text } from '@cloudflare/kumo'
 import {
   ClockCounterClockwiseIcon,
   DatabaseIcon,
+  DownloadSimpleIcon,
   FileIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -20,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { TypeBadge } from '@/components/kit'
 import { inferColumns } from '../columns'
 import { useCreateDialog } from '../create'
+import { useExportDialog } from '../export'
 import { useLive } from '../live'
 import { EMPTY_QUERY } from '../query'
 import { useColumns } from '../query-line-store'
@@ -465,6 +467,7 @@ function GridFooter({
   onShowAll: () => void
 }) {
   const checked = useSelection((state) => state.checked)
+  const openExport = useExportDialog((state) => state.setOpen)
   return (
     // Nothing here wraps: the bar is one row high, so a narrow grid scrolls
     // its footer sideways instead of stacking the words on top of each other.
@@ -493,6 +496,17 @@ function GridFooter({
           </Button>
         </span>
       )}
+      <span className="shrink-0">
+        <Button
+          variant="ghost"
+          size="xs"
+          icon={<DownloadSimpleIcon />}
+          onClick={() => openExport(true)}
+          data-testid="export-open"
+        >
+          {checked.size > 0 ? `Export ${checked.size}` : 'Export'}
+        </Button>
+      </span>
       {checked.size > 0 && (
         <span className="ml-auto shrink-0 pl-3">
           <Text variant="secondary" size="sm" as="span">

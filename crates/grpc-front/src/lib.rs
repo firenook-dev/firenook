@@ -10,9 +10,11 @@ mod listen;
 mod pipeline;
 mod query_codec;
 mod service;
+mod timestamp_json;
 mod write_stream;
 
 pub use service::{FirestoreService, ResponseStream};
+pub use timestamp_json::utc_as_z;
 
 /// Encodes an immutable core document as the canonical Firestore v1 message.
 ///

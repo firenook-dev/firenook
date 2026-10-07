@@ -7,6 +7,7 @@ import {
   ArrowRightIcon,
   ClockCounterClockwiseIcon,
   DatabaseIcon,
+  DownloadSimpleIcon,
   FileIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -27,6 +28,7 @@ import {
 import { useConsoleUi } from '@/lib/store'
 import { normalizePath, useWorkbench } from './components/workbench-context'
 import { useCreateDialog } from './create'
+import { useExportDialog } from './export'
 import { useQueryLine } from './query-line-store'
 import { collectionsQuery } from './queries'
 import { useRecents } from './recents'
@@ -40,6 +42,7 @@ export function useFirestorePalette() {
   const openCreate = useCreateDialog((state) => state.open)
   const openQuery = useQueryLine((state) => state.setOpen)
   const setExplain = useQueryLine((state) => state.setExplain)
+  const openExport = useExportDialog((state) => state.setOpen)
   const recents = useRecents((state) => state.items)
   const selected = workbench.selectedDocument
   const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
@@ -134,6 +137,14 @@ export function useFirestorePalette() {
           run: () => setExplain(true),
         },
         {
+          id: 'fs:export',
+          title: 'Export',
+          description: 'this query as JSON, NDJSON or CSV',
+          keywords: 'download csv ndjson json save',
+          icon: <DownloadSimpleIcon size={16} />,
+          run: () => openExport(true),
+        },
+        {
           id: 'fs:import',
           title: 'Import JSON',
           description: `into ${workbench.collectionPath}`,
@@ -204,6 +215,7 @@ export function useFirestorePalette() {
     openCreate,
     openQuery,
     setExplain,
+    openExport,
   ])
 
   useEffect(() => {

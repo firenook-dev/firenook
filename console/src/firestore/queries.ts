@@ -93,7 +93,11 @@ export function splitCollection(collectionPath: string, group: boolean) {
 }
 
 /** The cursor after `document` for the query's effective order. */
-function cursorAfter(document: FsDocument, query: WorkbenchQuery, root: string): RestValue[] {
+export function cursorAfter(
+  document: FsDocument,
+  query: WorkbenchQuery,
+  root: string,
+): RestValue[] {
   return effectiveOrder(query).map((order) => {
     if (order.field === '__name__') return { referenceValue: `${root}/${document.path}` }
     const value = order.field.split('.').reduce<unknown>((current, segment) => {

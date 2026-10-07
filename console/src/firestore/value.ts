@@ -398,6 +398,43 @@ export interface FromJsonOptions {
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/
 
+/** Every key the REST wire shape uses for a value. */
+const REST_VALUE_KEYS = new Set([
+  'nullValue',
+  'booleanValue',
+  'integerValue',
+  'doubleValue',
+  'timestampValue',
+  'stringValue',
+  'bytesValue',
+  'referenceValue',
+  'geoPointValue',
+  'arrayValue',
+  'mapValue',
+])
+
+/**
+ * Whether these fields are already typed, in the REST wire shape, rather
+ * than the plain JSON a person writes.
+ *
+ * An export that keeps Firestore types exactly writes `{"stringValue":"Ada"}`
+ * where a plain one writes `"Ada"`, so importing it as plain JSON would
+ * store the wrapper as a map and lose every type it was written to keep.
+ * Each field has to be an object with exactly one key, and that key has to
+ * be one of the wire's own — a document whose fields happen to be maps with
+ * one key of their own is not mistaken for this, because `stringValue` and
+ * the rest are the only names that count.
+ */
+export function isRestShape(fields: Record<string, unknown>): boolean {
+  const values = Object.values(fields)
+  if (values.length === 0) return false
+  return values.every((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const keys = Object.keys(value as Record<string, unknown>)
+    return keys.length === 1 && REST_VALUE_KEYS.has(keys[0] ?? '')
+  })
+}
+
 /** Plain JSON → typed values, inferring the Firestore type the way the SDK would. */
 export function fromJson(input: unknown, options: FromJsonOptions = {}): FsValue {
   if (input === null || input === undefined) return { type: 'null' }

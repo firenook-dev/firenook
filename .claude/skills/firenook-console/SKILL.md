@@ -287,6 +287,17 @@ card there for every new pattern before it is designed with. Component docs: `np
   engine's own. The console explains the query the person wrote: the grid's
   `DEFAULT_LIMIT` page size is dropped (`queryToExplain`), because explaining
   with it reports a floor of one page and a strategy our paging chose.
+- Export (the grid's footer, ⌘K): `src/firestore/export.ts` pages the whole
+  result with `cursorAfter`, the same cursor builder the grid pages with,
+  and **without the preview header** — a file must never carry a value cut
+  short for a cell. Formats are JSON keyed by document id (what
+  `parseImport` reads, so an export loads back in), NDJSON and CSV with
+  dotted columns for nested maps. "Keep Firestore types exactly" writes the
+  REST wire shape, and `isRestShape` in `value.ts` is what lets the import
+  recognise such a file and decode it rather than storing `{"stringValue":…}`
+  as a map; it matches on the wire's own field names, so a person's own
+  one-key map is not mistaken for it. The dialog names the scope and whose
+  identity it reads as, because rules apply.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
