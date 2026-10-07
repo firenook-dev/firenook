@@ -602,7 +602,7 @@ served until every section has landed.
   index agrees with the store's own listing, descendant-only collections
   included: `teams/t1` has `channels` even when no channel document exists.
   Measured on 82,000 documents, a 32-row screen takes 2 ms in one request
-  against 10 ms in the 68 it replaces.
+  against 9 ms in the 96 it replaces.
 - [x] The engine reports the version it actually ships as. Every crate here
   carries the `0.0.1` workspace placeholder, because the npm package's
   version is set by the packaging checkout while the binary is built from

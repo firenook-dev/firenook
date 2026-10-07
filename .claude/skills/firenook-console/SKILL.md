@@ -224,9 +224,10 @@ card there for every new pattern before it is designed with. Component docs: `np
   still invalidate per document; only the traffic is shared. The inspector
   uses the same query, so opening a row costs nothing. Like `/schema`, the
   endpoint reads the index and evaluates no rules, so the key carries no
-  authorization. Measured on 82,000 documents: 2 ms for a 32-row screen
-  against 10 ms for the 32 listings and 41 counts it replaces, and one
-  request instead of 68.
+  authorization. Measured on 82,000 documents: 2 ms for a 32-row screen in
+  one request, against 9 ms in the 96 requests it replaces (32 listings
+  and 64 counts), and those 96 issued concurrently from a host with no
+  browser connection limit.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
