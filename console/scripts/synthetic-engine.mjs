@@ -68,7 +68,7 @@ export async function startEngine(options = {}) {
   writeFileSync(
     join(directory, 'firebase.json'),
     JSON.stringify({
-      firestore: { rules: 'firestore.rules' },
+      firestore: { rules: 'firestore.rules', indexes: 'firestore.indexes.json' },
       emulators: { ui: { enabled: true } },
     }),
   )
@@ -99,6 +99,28 @@ export async function startEngine(options = {}) {
       '}',
       '',
     ].join('\n'),
+  )
+  // One declared composite index, so the console can show both answers: a
+  // query this project is ready to deploy, and one that would fail there.
+  writeFileSync(
+    join(directory, 'firestore.indexes.json'),
+    JSON.stringify(
+      {
+        indexes: [
+          {
+            collectionGroup: 'users',
+            queryScope: 'COLLECTION',
+            fields: [
+              { fieldPath: 'plan', order: 'ASCENDING' },
+              { fieldPath: 'lastSeen', order: 'DESCENDING' },
+            ],
+          },
+        ],
+        fieldOverrides: [],
+      },
+      null,
+      2,
+    ),
   )
   mkdirSync(join(directory, 'state'))
 

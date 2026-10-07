@@ -13,6 +13,7 @@ import {
   FolderSimplePlusIcon,
   FunnelIcon,
   HouseIcon,
+  LightningIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
@@ -38,6 +39,7 @@ export function useFirestorePalette() {
   const unregister = usePaletteProviders((state) => state.unregister)
   const openCreate = useCreateDialog((state) => state.open)
   const openQuery = useQueryLine((state) => state.setOpen)
+  const setExplain = useQueryLine((state) => state.setExplain)
   const recents = useRecents((state) => state.items)
   const selected = workbench.selectedDocument
   const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
@@ -124,6 +126,14 @@ export function useFirestorePalette() {
           run: () => openQuery(true),
         },
         {
+          id: 'fs:explain',
+          title: 'Explain this query',
+          description: 'what it reads, and the index production needs',
+          keywords: 'plan index slow performance composite',
+          icon: <LightningIcon size={16} />,
+          run: () => setExplain(true),
+        },
+        {
           id: 'fs:import',
           title: 'Import JSON',
           description: `into ${workbench.collectionPath}`,
@@ -184,7 +194,17 @@ export function useFirestorePalette() {
         })
       return groups
     }
-  }, [workbench, roots.data, schema.data, under.data, recents, selected, openCreate, openQuery])
+  }, [
+    workbench,
+    roots.data,
+    schema.data,
+    under.data,
+    recents,
+    selected,
+    openCreate,
+    openQuery,
+    setExplain,
+  ])
 
   useEffect(() => {
     register('firestore', provider)

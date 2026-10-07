@@ -3,7 +3,7 @@
 // out of the way while browsing and opens on `f` or the filter button.
 
 import { Badge, Button, Text, Tooltip } from '@cloudflare/kumo'
-import { FunnelIcon, PlayIcon, XIcon } from '@phosphor-icons/react'
+import { FunnelIcon, LightningIcon, PlayIcon, XIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { type WorkbenchQuery, isEmptyQuery, printLiteral, printQuery } from '../query'
@@ -20,6 +20,8 @@ export function QueryLine() {
   const openState = useQueryLine((state) => state.open)
   const setOpen = useQueryLine((state) => state.setOpen)
   const prefill = useQueryLine((state) => state.prefill)
+  const explain = useQueryLine((state) => state.explain)
+  const setExplain = useQueryLine((state) => state.setExplain)
   // An active query always shows its line, and so does a broken one: the
   // text that failed to parse is in the URL, so the input has to be there to
   // fix it rather than collapsed behind the filter button.
@@ -143,6 +145,18 @@ export function QueryLine() {
           </Button>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2 whitespace-nowrap">
+          {workbench.collectionPath && !workbench.queryError && (
+            <Button
+              variant={explain ? 'secondary' : 'ghost'}
+              size="sm"
+              icon={<LightningIcon />}
+              onClick={() => setExplain(!explain)}
+              aria-label="Explain this query"
+              data-testid="explain-toggle"
+            >
+              Explain
+            </Button>
+          )}
           {workbench.collectionPath && !workbench.queryError && (
             <Text variant="secondary" size="sm" as="span" data-testid="match-count">
               {total ? (

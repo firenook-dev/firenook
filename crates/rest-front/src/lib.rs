@@ -1293,6 +1293,16 @@ fn decode_aggregation_field(value: &JsonValue) -> Result<QueryFieldPath, RestErr
     decode_query_field(field)
 }
 
+/// Decodes a `structuredQuery` body the way `runQuery` does, for a caller
+/// outside this crate — the console's explain endpoint, which must reason
+/// about exactly the query the REST front would run.
+pub fn structured_query(
+    structured: &Map<String, JsonValue>,
+    parent: Option<&str>,
+) -> Result<StructuredQuery, String> {
+    decode_query(structured, parent).map_err(|error| error.message)
+}
+
 fn decode_query(
     structured: &Map<String, JsonValue>,
     parent: Option<&str>,

@@ -647,8 +647,23 @@ served until every section has landed.
   listener now gives the drain three seconds and then closes whatever is
   still connected, the way the Firestore port already closed its WebChannel
   and gRPC responses. A stop with nothing left to wait for is unchanged.
-- [ ] Firestore follow-ups: explain (composite-index warning), export from
-  the page, undo within the change-log window, and a rules editor.
+- [x] Explain: what a query reads here, and what it would need in
+  production. The local engine answers every query it is given, so a query
+  that works all through development can still fail after a deploy for want
+  of a composite index. The plan comes from the code that runs the query,
+  not from a description of it — one function decides the strategy and
+  `execute_iter` and `plan` both call it — and names where the candidates
+  come from: documents read by name, an equality field index, a collection
+  scan or a collection-group scan. Beside it is the index requirement,
+  derived by asking a catalog that declares nothing what the query would
+  need, and the project's own `firestore.indexes.json` then says whether it
+  is already declared. The entry to paste is printed from the requirement
+  and a test declares that printed entry to prove it satisfies the query. A
+  declared index is a trailing `__name__` away from looking missing, which
+  is how the Firebase CLI writes some of its entries, so that field is now
+  matched as the implicit one it is.
+- [ ] Firestore follow-ups: export from the page, undo within the
+  change-log window, and a rules editor.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

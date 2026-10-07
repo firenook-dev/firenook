@@ -26,6 +26,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use ts_rs::TS;
 
 use crate::databases::DatabaseCatalog;
+use crate::explain::QueryExplainer;
 use crate::schema::SchemaIndex;
 
 /// Commits retained for a slow console before it is told to resync.
@@ -42,6 +43,8 @@ pub struct FirestoreConsole {
     pub schema: SchemaIndex,
     /// The project's databases, declared and written.
     pub databases: DatabaseCatalog,
+    /// How a query runs and what it would require in production.
+    pub explain: QueryExplainer,
     /// The Requests diagnostics feed (`/requests` upgrades to a websocket),
     /// when the Firestore front records evaluations.
     pub requests: Option<Router>,
@@ -264,7 +267,8 @@ pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
         .changes
         .router(console.shutdown)
         .merge(console.schema.router())
-        .merge(console.databases.router());
+        .merge(console.databases.router())
+        .merge(console.explain.router());
     if let Some(requests) = console.requests {
         router = router.merge(requests);
     }

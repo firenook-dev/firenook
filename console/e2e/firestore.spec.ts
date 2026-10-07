@@ -594,3 +594,54 @@ test('a long field name keeps its column, and its controls, in bounds', async ({
   await expect(remove).toBeVisible()
   expect(edge(await remove.boundingBox())).toBeLessThanOrEqual(edge(await panel.boundingBox()))
 })
+
+test('explain names what the query reads, and the index production would need', async ({
+  page,
+}) => {
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+
+  // An unfiltered collection: the finding is that it reads everything.
+  await page.keyboard.press('e')
+  const panel = page.getByTestId('explain-panel')
+  await expect(panel.getByTestId('explain-headline')).toHaveText('Reads every document in users')
+  await expect(panel.getByTestId('explain-matched')).toHaveText('matched240 documents')
+  await expect(panel.getByTestId('explain-order')).toContainText('__name__ asc')
+  // Nothing to declare for a query production indexes by itself.
+  await expect(page.getByTestId('explain-index')).toBeHidden()
+
+  // The composite this project declares: confirmed, with nothing to do.
+  const input = page.getByTestId('query-input')
+  await input.fill('where("plan", "==", "pro").orderBy("lastSeen", "desc")')
+  await input.press('Enter')
+  const declared = page.getByTestId('explain-index')
+  await expect(declared).toHaveAttribute('data-declared', 'true')
+  await expect(declared).toContainText('firestore.indexes.json declares')
+  await expect(page.getByTestId('copy-index-entry')).toBeHidden()
+
+  // A composite it does not declare: the warning, and the entry to paste.
+  await input.fill('where("plan", "==", "pro").orderBy("displayName", "asc")')
+  await input.press('Enter')
+  const missing = page.getByTestId('explain-index')
+  await expect(missing).toHaveAttribute('data-declared', 'false')
+  await expect(missing).toContainText('Production needs a composite index')
+  await page.getByTestId('copy-index-entry').click()
+  await expect(page.getByTestId('copy-index-entry')).toContainText('Copied')
+  // What it copies has to be a real index file entry for this query.
+  const copied = await page.evaluate(() =>
+    (navigator as Navigator & { clipboard: { readText(): Promise<string> } }).clipboard.readText(),
+  )
+  expect(JSON.parse(copied)).toMatchObject({
+    collectionGroup: 'users',
+    queryScope: 'COLLECTION',
+    fields: [
+      { fieldPath: 'plan', order: 'ASCENDING' },
+      { fieldPath: 'displayName', order: 'ASCENDING' },
+    ],
+  })
+
+  // The filter narrows by the field index rather than reading the collection.
+  await expect(panel.getByTestId('explain-headline')).toHaveText('Narrows users by the plan index')
+  await page.getByLabel('Close the query plan').click()
+  await expect(page.getByTestId('explain-panel')).toBeHidden()
+})

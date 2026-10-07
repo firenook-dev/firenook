@@ -676,6 +676,8 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "firenook-core-store",
+ "firenook-query-engine",
+ "firenook-rest-front",
  "firenook-suite-front",
  "futures-util",
  "rust-embed",

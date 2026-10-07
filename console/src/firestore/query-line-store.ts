@@ -6,16 +6,23 @@ import { create } from 'zustand'
 
 interface QueryLineState {
   open: boolean
+  /** Whether the query plan is showing below the line. */
+  explain: boolean
   /** Text to put in the line with the caret at `caret`; `session` makes each request distinct. */
   prefill: { text: string; caret: number; session: number } | null
   setOpen: (open: boolean) => void
+  setExplain: (explain: boolean) => void
   compose: (text: string, caret: number) => void
 }
 
 export const useQueryLine = create<QueryLineState>((set) => ({
   open: false,
+  explain: false,
   prefill: null,
   setOpen: (open) => set({ open }),
+  // Explaining runs the query, so the panel opens the line with it: the
+  // plan is about the query you can see and edit, not a hidden one.
+  setExplain: (explain) => set(explain ? { explain: true, open: true } : { explain: false }),
   compose: (text, caret) =>
     set((state) => ({
       open: true,

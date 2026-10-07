@@ -24,9 +24,11 @@ import {
   FolderIcon,
   EnvelopeSimpleIcon,
   FunnelSimpleIcon,
+  CheckCircleIcon,
   GaugeIcon,
   GoogleLogoIcon,
   KeyIcon,
+  LightningIcon,
   LockSimpleIcon,
   MagnifyingGlassIcon,
   PasswordIcon,
@@ -35,9 +37,10 @@ import {
   ShieldCheckIcon,
   SquareHalfIcon,
   TrashIcon,
+  WarningIcon,
   XIcon,
 } from '@phosphor-icons/react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { defineCards } from '../registry'
 import { Section, Stack } from './shared'
@@ -372,7 +375,9 @@ function PathAndQuery() {
                 <span className="font-mono text-[0.9em] text-kumo-default">12,345</span> match ·
                 count 4 ms
               </span>
-              <Switch variant="neutral" label="Explain" size="sm" />
+              <Button variant="ghost" size="sm" icon={<LightningIcon />}>
+                Explain
+              </Button>
               <Button variant="primary" size="sm">
                 Run
               </Button>
@@ -1161,6 +1166,149 @@ function SchemaTree() {
   )
 }
 
+/** One figure in the plan's row of facts. */
+function PlanFact({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
+  return (
+    <span className="flex items-baseline gap-1 text-[13px]">
+      <span className="text-kumo-subtle">{label}</span>
+      <span className={`text-kumo-default tabular-nums ${mono ? 'font-mono text-[0.92em]' : ''}`}>
+        {value}
+      </span>
+    </span>
+  )
+}
+
+/** The plan itself: the sentence, the figures, and whatever card follows. */
+function PlanPanel({ headline, children }: { headline: string; children?: ReactNode }) {
+  return (
+    <div className="grid gap-3 rounded-lg border border-kumo-line bg-kumo-base px-3 py-2.5">
+      <div className="flex items-start gap-2">
+        <span className="flex h-lh shrink-0 items-center text-kumo-subtle">
+          <LightningIcon size={16} />
+        </span>
+        <div className="grid min-w-0 flex-1 gap-1.5">
+          <Text size="sm" as="p">
+            {headline}
+          </Text>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <PlanFact label="matched" value="240 documents" />
+            <PlanFact label="took" value="2.9 ms" />
+            <PlanFact label="results" value="streamed" />
+            <PlanFact label="ordered by" value="__name__ asc" mono />
+          </div>
+        </div>
+        <Button variant="ghost" size="sm" icon={<XIcon />} aria-label="Close the query plan" />
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** The index spelled out as the entry it would become, with its action. */
+function PlanIndexFields({
+  fields,
+  copy = false,
+}: {
+  fields: ReadonlyArray<[string, string]>
+  copy?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="font-mono text-[12px] text-kumo-subtle">users</span>
+        {fields.map(([name, mark]) => (
+          <span
+            key={name}
+            className="flex h-5 items-center rounded bg-kumo-base px-1.5 font-mono text-[11px] text-kumo-default"
+          >
+            {name}
+            <span className="pl-1 text-kumo-subtle">{mark}</span>
+          </span>
+        ))}
+      </div>
+      {copy ? (
+        <Button variant="secondary" size="sm" icon={<CopyIcon />}>
+          Copy entry
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/** The query plan, in the three states a person meets it in. */
+function QueryPlan() {
+  return (
+    <Stack>
+      <Section
+        title="Nothing to declare"
+        note="A query production indexes by itself: the plan alone, no card."
+      >
+        <PlanPanel headline="Reads every document in users" />
+      </Section>
+      <Section
+        title="The index is declared"
+        note="Confirmed quietly, in success tint, with nothing to do and nothing to copy."
+      >
+        <PlanPanel headline="Narrows users by the plan index">
+          <div className="grid gap-2 rounded-md bg-kumo-success-tint p-2.5 ring ring-kumo-hairline">
+            <div className="flex items-start gap-2">
+              <span className="flex h-lh shrink-0 items-center text-kumo-subtle">
+                <CheckCircleIcon size={16} />
+              </span>
+              <div className="grid min-w-0 flex-1 gap-1.5">
+                <Text size="sm" as="p">
+                  firestore.indexes.json declares the composite index this query needs.
+                </Text>
+                <PlanIndexFields
+                  fields={[
+                    ['plan', '↑'],
+                    ['lastSeen', '↓'],
+                  ]}
+                />
+              </div>
+            </div>
+          </div>
+        </PlanPanel>
+      </Section>
+      <Section
+        title="The index is missing"
+        note="The one state that needs acting on: warning tint, a warning ring, and the entry to paste."
+      >
+        <PlanPanel headline="Narrows users by the plan index">
+          <div className="grid gap-2 rounded-md bg-kumo-warning-tint p-2.5 ring ring-kumo-warning">
+            <div className="flex items-start gap-2">
+              <span className="flex h-lh shrink-0 items-center text-kumo-subtle">
+                <WarningIcon size={16} />
+              </span>
+              <div className="grid min-w-0 flex-1 gap-1.5">
+                <Text size="sm" as="p">
+                  Production needs a composite index for this query. The emulator answers it either
+                  way, so it would fail after a deploy, not here.
+                </Text>
+                <PlanIndexFields
+                  copy
+                  fields={[
+                    ['plan', '↑'],
+                    ['displayName', '↑'],
+                  ]}
+                />
+              </div>
+            </div>
+          </div>
+        </PlanPanel>
+      </Section>
+    </Stack>
+  )
+}
+
 defineCards([
   {
     id: 'app-shell',
@@ -1180,6 +1328,16 @@ defineCards([
     width: 1100,
     surface: 'canvas',
     render: () => <PathAndQuery />,
+  },
+  {
+    id: 'query-plan',
+    group: 'Patterns',
+    name: 'Query plan',
+    subtitle:
+      'What the query reads, how long it took, and the index production would require — quiet when declared, a warning with a copyable entry when not',
+    width: 880,
+    surface: 'canvas',
+    render: () => <QueryPlan />,
   },
   {
     id: 'data-grid',

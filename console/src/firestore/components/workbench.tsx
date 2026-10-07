@@ -19,6 +19,7 @@ import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
 import { CreateDialog } from './create-dialog'
 import { DeleteDialog } from './delete-dialog'
+import { ExplainPanel } from './explain-panel'
 import { Grid } from './grid'
 import { Inspector } from './inspector'
 import { NewMenu } from './new-menu'
@@ -60,6 +61,8 @@ function WorkbenchBody() {
   const checked = useSelection((state) => state.checked)
   const clearSelection = useSelection((state) => state.clear)
   const openQuery = useQueryLine((state) => state.setOpen)
+  const explain = useQueryLine((state) => state.explain)
+  const setExplain = useQueryLine((state) => state.setExplain)
   const openCreate = useCreateDialog((state) => state.open)
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [deleting, setDeleting] = useState<string[]>([])
@@ -105,6 +108,9 @@ function WorkbenchBody() {
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && checked.size > 0) {
         event.preventDefault()
         setDeleting([...checked])
+      } else if (event.key === 'e' && workbench.collectionPath) {
+        event.preventDefault()
+        setExplain(!useQueryLine.getState().explain)
       } else if (event.key === 'n' && workbench.collectionPath && !workbench.isPattern) {
         event.preventDefault()
         openCreate({ kind: 'document', collection: workbench.collectionPath })
@@ -112,7 +118,7 @@ function WorkbenchBody() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench, checked, clearSelection, openQuery, openCreate])
+  }, [workbench, checked, clearSelection, openQuery, openCreate, setExplain])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">
@@ -145,6 +151,9 @@ function WorkbenchBody() {
         </span>
       </div>
       {workbench.collectionPath && <QueryLine />}
+      {explain && workbench.collectionPath && !workbench.queryError && (
+        <ExplainPanel onClose={() => setExplain(false)} />
+      )}
       {/* Relative so a narrow inspector can float over the grid's right edge. */}
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

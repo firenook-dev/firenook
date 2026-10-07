@@ -10,6 +10,8 @@ repository.workspace = true
 [dependencies]
 axum.workspace = true
 firenook-core-store = { path = "../core-store" }
+firenook-query-engine = { path = "../query-engine" }
+firenook-rest-front = { path = "../rest-front" }
 firenook-suite-front = { path = "../suite-front" }
 futures-util.workspace = true
 rust-embed.workspace = true

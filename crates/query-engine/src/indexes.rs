@@ -6,6 +6,9 @@ use serde::Deserialize;
 
 use crate::query::{Direction, FieldOperator, Filter, Query, QueryScope as StructuredQueryScope};
 
+/// The field every Firestore index ends with, implicitly.
+const DOCUMENT_NAME: &str = "__name__";
+
 /// Index query scope used by `firestore.indexes.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IndexScope {
@@ -41,6 +44,61 @@ pub struct IndexRequirement {
     pub collection_group: String,
     pub query_scope: IndexScope,
     pub fields: Vec<IndexRequirementField>,
+}
+
+impl IndexRequirement {
+    /// Whether this spans more than one field, which is what production
+    /// calls a composite index and never creates on its own.
+    #[must_use]
+    pub fn is_composite(&self) -> bool {
+        self.fields.len() > 1
+    }
+
+    /// The entry to paste into `firestore.indexes.json`, in the format the
+    /// Firebase CLI reads and writes.
+    #[must_use]
+    pub fn config_entry(&self) -> serde_json::Value {
+        serde_json::json!({
+            "collectionGroup": self.collection_group,
+            "queryScope": match self.query_scope {
+                IndexScope::Collection => "COLLECTION",
+                IndexScope::CollectionGroup => "COLLECTION_GROUP",
+            },
+            "fields": self.fields.iter().map(IndexRequirementField::config_entry).collect::<Vec<_>>(),
+        })
+    }
+}
+
+impl IndexRequirementField {
+    /// This field as `firestore.indexes.json` spells it.
+    #[must_use]
+    pub fn config_entry(&self) -> serde_json::Value {
+        match self.mode {
+            IndexMode::Ordered(direction) => serde_json::json!({
+                "fieldPath": self.field_path,
+                "order": match direction {
+                    IndexDirection::Ascending => "ASCENDING",
+                    IndexDirection::Descending => "DESCENDING",
+                },
+            }),
+            IndexMode::ArrayContains => serde_json::json!({
+                "fieldPath": self.field_path,
+                "arrayConfig": "CONTAINS",
+            }),
+            IndexMode::Vector(dimension) => serde_json::json!({
+                "fieldPath": self.field_path,
+                "vectorConfig": { "dimension": dimension, "flat": {} },
+            }),
+        }
+    }
+}
+
+/// What [`IndexCatalog::advise`] found: the index production would require
+/// for a query, and whether the project already declares it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexAdvice {
+    pub requirement: IndexRequirement,
+    pub declared: bool,
 }
 
 /// Parsed strict-index catalog.
@@ -106,6 +164,27 @@ impl IndexCatalog {
             }
         }
         Ok(())
+    }
+
+    /// The index a query needs in production, and whether this catalog
+    /// declares it.
+    ///
+    /// Unlike [`IndexCatalog::validate`] this never fails a query: the local
+    /// engine answers whatever it is asked, and a developer wants to know
+    /// before deploying that a query which runs here would be refused in
+    /// production for want of a composite index. A catalog that declares
+    /// nothing names exactly what is required, because single-field indexes
+    /// inside one collection are automatic there, so asking an empty catalog
+    /// is the same question as "what must be declared".
+    #[must_use]
+    pub fn advise(&self, query: &Query) -> Option<IndexAdvice> {
+        let Err(IndexConfigError::Missing(requirement)) = Self::default().validate(query) else {
+            return None;
+        };
+        Some(IndexAdvice {
+            declared: self.validate(query).is_ok(),
+            requirement,
+        })
     }
 
     fn single_field_available(
@@ -341,9 +420,34 @@ impl TryFrom<RawIndex> for IndexRequirement {
         Ok(Self {
             collection_group: raw.collection_group,
             query_scope: raw.query_scope.into(),
-            fields,
+            fields: without_implicit_document_name(fields),
         })
     }
+}
+
+/// Drops a trailing `__name__` that only restates the previous field's
+/// direction.
+///
+/// Firestore appends the document name to every index, and the Firebase CLI
+/// writes it out explicitly in some of the entries it generates. A
+/// requirement derived from a query never carries it, so a declared index
+/// that spells it out would not compare equal and a query whose index the
+/// project already declares would be reported as missing. A `__name__` whose
+/// direction differs from the field before it does carry information, so it
+/// stays.
+fn without_implicit_document_name(
+    mut fields: Vec<IndexRequirementField>,
+) -> Vec<IndexRequirementField> {
+    if fields.len() < 2 {
+        return fields;
+    }
+    let [.., previous, last] = fields.as_slice() else {
+        return fields;
+    };
+    if last.field_path == DOCUMENT_NAME && last.mode == previous.mode {
+        fields.pop();
+    }
+    fields
 }
 
 impl From<RawScope> for IndexScope {

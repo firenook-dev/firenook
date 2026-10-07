@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,8 +18,8 @@ use axum::routing::get;
 use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
-    CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, SchemaIndex,
-    console_router,
+    CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, QueryExplainer,
+    SchemaIndex, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -460,6 +460,7 @@ struct ConsoleFirestoreParts {
     changes: ChangeFeed,
     schema: SchemaIndex,
     databases: DatabaseCatalog,
+    explain: QueryExplainer,
 }
 
 /// What `prepare_firestore` builds when Firestore is selected.
@@ -592,6 +593,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     changes: parts.changes,
                     schema: parts.schema,
                     databases: parts.databases,
+                    explain: parts.explain,
                     requests: requests.clone(),
                     shutdown: shutdown.subscribe(),
                 }),
@@ -1031,6 +1033,12 @@ fn prepare_firestore(
                 .iter()
                 .map(|database| database.database_id.clone()),
         ),
+        explain: QueryExplainer::new(
+            store,
+            &config.project_id,
+            DatabaseEdition::Standard,
+            index_catalogs(config)?,
+        ),
     };
     Ok(Some(FirestoreParts {
         routes: tonic::service::Routes::from(firestore_http).add_service(service.into_server()),
@@ -1300,9 +1308,17 @@ fn open_store(config: &SuiteConfig) -> Result<Store, SuiteRuntimeError> {
     .map_err(|error| failure(format!("Firestore state failed to open: {error}")))
 }
 
-/// Validates every configured index file; the suite enforces none of them,
-/// as the official local emulator does not.
-fn query_policy(config: &SuiteConfig) -> Result<QueryPolicy, SuiteRuntimeError> {
+/// Every configured index file, parsed once and kept per database id.
+///
+/// The suite enforces none of them, as the official local emulator does not,
+/// but the console's explain endpoint reads them to tell a developer whether
+/// the composite index their query needs is one the project already declares.
+/// A database with no index file gets no entry, which is the same answer as
+/// an empty catalog: nothing is declared.
+fn index_catalogs(
+    config: &SuiteConfig,
+) -> Result<BTreeMap<String, Arc<IndexCatalog>>, SuiteRuntimeError> {
+    let mut catalogs = BTreeMap::new();
     for database in &config.firestore_databases {
         let Some(path) = &database.indexes else {
             continue;
@@ -1313,13 +1329,21 @@ fn query_policy(config: &SuiteConfig) -> Result<QueryPolicy, SuiteRuntimeError> 
                 database.database_id
             ))
         })?;
-        suite_query_policy(Some(&source)).map_err(|error| {
+        let catalog = IndexCatalog::from_json(&source).map_err(|error| {
             failure(format!(
-                "database \"{}\": {}",
-                database.database_id, error.0
+                "database \"{}\": invalid Firestore indexes: {error}",
+                database.database_id
             ))
         })?;
+        catalogs.insert(database.database_id.clone(), Arc::new(catalog));
     }
+    Ok(catalogs)
+}
+
+/// Validates every configured index file; the suite enforces none of them,
+/// as the official local emulator does not.
+fn query_policy(config: &SuiteConfig) -> Result<QueryPolicy, SuiteRuntimeError> {
+    index_catalogs(config)?;
     suite_query_policy(None)
 }
 

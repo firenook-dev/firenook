@@ -272,6 +272,21 @@ card there for every new pattern before it is designed with. Component docs: `np
   one request, against 9 ms in the 96 requests it replaces (32 listings
   and 64 counts), and those 96 issued concurrently from a host with no
   browser connection limit.
+- Explain (`e`, the query line's button, ⌘K): `POST
+  /console/api/v1/firestore/explain` answers how the query runs and what it
+  would require in production. The plan is never a description of the engine
+  written twice — `QueryStrategy::of` is the only place that chooses, and
+  both `execute_iter` and `plan` call it, with a test that runs every query
+  shape through both and fails if they disagree. `IndexCatalog::advise` asks
+  an empty catalog what the query needs (single-field indexes inside a
+  collection are automatic in production, so an empty catalog names exactly
+  what must be declared) and this project's catalog whether it declares it;
+  `suite-runtime` keeps the parsed catalog per database id for that, where it
+  used to validate the file and throw it away. The endpoint runs the query to
+  time it and evaluates no rules, so the panel labels the count as the
+  engine's own. The console explains the query the person wrote: the grid's
+  `DEFAULT_LIMIT` page size is dropped (`queryToExplain`), because explaining
+  with it reports a floor of one page and a strategy our paging chose.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
