@@ -28,6 +28,7 @@ import { useLayout } from '@/lib/layout'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
 import { CommandPalette } from './command-palette'
+import { ThemePicker } from './theme-picker'
 
 const AREAS: readonly ServiceArea[] = ['data', 'compute', 'messaging', 'observe']
 
@@ -236,6 +237,7 @@ function TopBar() {
       </div>
       <div className="ml-auto flex items-center gap-2">
         <EngineBadge state={status.status} engine={status.data?.engine} />
+        <ThemePicker />
         <Button
           variant="ghost"
           size="sm"

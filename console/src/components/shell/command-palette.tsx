@@ -13,8 +13,10 @@ import {
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
+import { describeTheme, useTheme } from '@/lib/color-mode'
 import { useLayout } from '@/lib/layout'
 import { SECTIONS } from '@/lib/services'
+import { THEME_CHOICES } from './theme-picker'
 import { useConsoleUi } from '@/lib/store'
 
 export function CommandPalette() {
@@ -28,6 +30,9 @@ export function CommandPalette() {
   const panel = useLayout((state) => state.panel)
   const panelOpen = useLayout((state) => state.panelOpen)
   const togglePanel = useLayout((state) => state.togglePanel)
+  const theme = useTheme((state) => state.choice)
+  const mode = useTheme((state) => state.mode)
+  const setTheme = useTheme((state) => state.setChoice)
 
   const sections = useMemo<PaletteItem[]>(() => {
     const go = (to: string) => () => void navigate({ to })
@@ -77,8 +82,20 @@ export function CommandPalette() {
         icon: <SquareHalfIcon size={16} />,
         run: togglePanel,
       })
+    // Every theme is offered, the one in force included, so the list says
+    // which it is instead of hiding it.
+    for (const option of THEME_CHOICES)
+      items.push({
+        id: `layout:theme:${option.choice}`,
+        title: `${option.label} theme`,
+        description:
+          option.choice === theme ? `in use · ${describeTheme(theme, mode)}` : 'colour scheme',
+        keywords: 'theme colour color scheme dark light appearance',
+        icon: <option.icon size={16} />,
+        run: () => setTheme(option.choice),
+      })
     return items
-  }, [navOpen, toggleNav, panel, panelOpen, togglePanel])
+  }, [navOpen, toggleNav, panel, panelOpen, togglePanel, theme, mode, setTheme])
 
   // What the page on screen contributes comes first; the sections and the
   // layout always follow.

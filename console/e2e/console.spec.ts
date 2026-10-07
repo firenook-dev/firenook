@@ -28,6 +28,46 @@ test('the overview lists the running services from the engine', async ({ page })
   await expect(page.getByText(`on Firenook ${RELEASE_VERSION}`)).toBeVisible()
 })
 
+test('the theme is light, dark or the system\u2019s, and it is remembered', async ({ browser }) => {
+  // A browser whose OS says dark, so "match the system" has something to
+  // follow and an explicit choice has something to override.
+  const context = await browser.newContext({ colorScheme: 'dark' })
+  const page = await context.newPage()
+  const mode = () => page.locator('html').getAttribute('data-mode')
+
+  await page.goto(`${origin()}/console`)
+  await expect(page.getByTestId('theme-picker')).toHaveAttribute('data-choice', 'system')
+  expect(await mode()).toBe('dark')
+
+  // An explicit light choice beats the dark OS.
+  await page.getByTestId('theme-light').click()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await expect(page.getByTestId('theme-picker')).toHaveAttribute('data-choice', 'light')
+
+  // And survives a reload rather than snapping back to the OS.
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await expect(page.getByTestId('theme-picker')).toHaveAttribute('data-choice', 'light')
+
+  // Back to the system, and the dark OS takes over again.
+  await page.getByTestId('theme-system').click()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'dark')
+
+  // The system changing is followed live, with no reload.
+  await page.emulateMedia({ colorScheme: 'light' })
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'dark')
+
+  // The palette offers the same three and says which is in force.
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('combobox').fill('theme')
+  await expect(page.getByRole('option', { name: /Dark theme/ })).toBeVisible()
+  await page.getByRole('option', { name: /Light theme/ }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await context.close()
+})
+
 test('client routes deep-link through the engine and navigate in place', async ({ page }) => {
   await page.goto(`${origin()}/console/auth`)
   await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()

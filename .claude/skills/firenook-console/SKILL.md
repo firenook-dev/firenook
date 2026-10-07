@@ -106,12 +106,17 @@ self-hosted from `public/fonts`. The sans face is registered as
 `InterVariable`, not `Inter`: the TanStack devtools inject a document-level
 `@font-face` named Inter in dev builds, and the last declared face wins, so
 a face named Inter would render the devtools' build on the dev server.
-The console follows the operating system's colour scheme:
-`lib/color-mode.ts` sets `data-mode` from `prefers-color-scheme` before the
-first render and keeps following it. Kumo's dark tokens and the dark block
-in `theme.css` key on that attribute, and `index.html` declares
-`color-scheme: light dark` so the browser's own scrollbars and controls
-match. There is no in-app toggle: the OS is the only switch.
+Light, dark, or the operating system's choice: `lib/color-mode.ts` holds
+`useTheme` (`light | dark | system`, remembered under
+`firenook.console.theme`), resolves it and sets `data-mode` before the first
+render, and keeps following `prefers-color-scheme` for as long as `system`
+is the choice. Kumo's dark tokens and the dark block in `theme.css` key on
+that attribute, and `index.html` declares `color-scheme: light dark` so the
+browser's own scrollbars and controls match. `ThemePicker` in the header is
+three buttons, not a menu, and ⌘K offers the same three: Kumo's
+`DropdownMenu` is not in the first route's chunk and pulling it in cost
+10 KB of the bundle budget, which is a poor trade for hiding three icons
+behind a click.
 `theme.css` also sets what kumo-ui.com sets on its body and Kumo's
 stylesheet does not: `-webkit-font-smoothing: antialiased` and Inter's
 `calt, cv02, cv03, cv04`; without them macOS renders every weight heavier

@@ -590,6 +590,12 @@ served until every section has landed.
   narrow, the inspector floats over the grid below `xl` instead of
   squeezing it to a sliver, and the console follows the operating system's
   colour scheme (Kumo's dark tokens were complete; nothing set `data-mode`).
+- [x] A theme the person picks: light, dark, or match the operating system,
+  remembered per browser and offered both in the header and in ⌘K. `system`
+  keeps following the OS live, so a machine that darkens at sunset takes the
+  console with it, while an explicit choice outlives the OS changing. Three
+  buttons rather than a menu, because Kumo's `DropdownMenu` is not in the
+  first route's chunk and pulling it in cost 10 KB of the bundle budget.
 - [x] One request for a whole screen of subcollections.
   `POST /console/api/v1/firestore/subcollections` answers a list of parents
   at once — which collections each document has and how many documents are
