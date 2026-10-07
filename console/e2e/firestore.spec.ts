@@ -428,3 +428,59 @@ test('a database a client writes to joins the picker and opens on its own', asyn
   await expect(page).not.toHaveURL(/db=/)
   await expect(panel.locator('[data-pattern="users"]')).toBeVisible()
 })
+
+test('a query that does not parse says so, and stays editable', async ({ page }) => {
+  // The page query is switched off while the text is broken. A disabled
+  // TanStack query reads as pending, which used to leave the grid claiming
+  // to load for ever, with the offending text hidden behind the filter
+  // button so there was nothing to correct.
+  await page.goto(
+    `${origin()}/console/firestore?path=users&q=where%28%22plan%22%2C%22%3D%3D%22%2C%22pro`,
+  )
+  await expect(page.getByTestId('query-unparsed')).toContainText('This query did not parse')
+  await expect(page.getByText('Loading users…')).toHaveCount(0)
+
+  // The text that failed is in the line, ready to be fixed in place.
+  const input = page.getByTestId('query-input')
+  await expect(input).toHaveValue('where("plan","==","pro')
+  await input.fill('where("plan", "==", "pro")')
+  await input.press('Enter')
+  await expect(page.getByTestId('query-unparsed')).toHaveCount(0)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+})
+
+test('a long field name keeps its column, and its controls, in bounds', async ({ page }) => {
+  const field = 'aVeryLongFieldNameThatGoesOnAndOnForQuiteAWhileIndeed'
+  const root = `projects/${project()}/databases/(default)/documents`
+  const written = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: {
+      writes: [
+        {
+          update: {
+            name: `${root}/widefields/w_1`,
+            fields: { [field]: { stringValue: 'yes' }, after: { stringValue: 'visible' } },
+          },
+        },
+      ],
+    },
+  })
+  expect(written.ok()).toBeTruthy()
+
+  await page.goto(`${origin()}/console/firestore?path=widefields`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  // One long name must not push every other column off the screen.
+  const header = page.getByTestId(`column-${field}`)
+  const width = (await header.boundingBox())?.width ?? 0
+  expect(width).toBeLessThanOrEqual(320)
+  await expect(page.getByTestId('column-after')).toBeVisible()
+
+  // In the inspector the same name truncates rather than carrying the type
+  // badge and the remove button out past the panel's edge.
+  await page.getByTestId('grid-row').first().click()
+  const panel = page.getByTestId('inspector')
+  const remove = panel.getByRole('button', { name: `Remove ${field}` })
+  await expect(remove).toBeVisible()
+  const edge = (box: { x: number; width: number } | null) => (box ? box.x + box.width : NaN)
+  expect(edge(await remove.boundingBox())).toBeLessThanOrEqual(edge(await panel.boundingBox()))
+})

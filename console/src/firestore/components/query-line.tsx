@@ -20,8 +20,10 @@ export function QueryLine() {
   const openState = useQueryLine((state) => state.open)
   const setOpen = useQueryLine((state) => state.setOpen)
   const prefill = useQueryLine((state) => state.prefill)
-  // An active query always shows its line.
-  const open = openState || !isEmptyQuery(workbench.query)
+  // An active query always shows its line, and so does a broken one: the
+  // text that failed to parse is in the URL, so the input has to be there to
+  // fix it rather than collapsed behind the filter button.
+  const open = openState || !isEmptyQuery(workbench.query) || Boolean(workbench.queryError)
   const [draft, setDraft] = useState(workbench.queryText)
   const [base, setBase] = useState(workbench.queryText)
   const [seenPrefill, setSeenPrefill] = useState(0)
@@ -79,7 +81,7 @@ export function QueryLine() {
       className="grid shrink-0 gap-1.5 border-b border-kumo-line bg-kumo-base px-3 py-1.5"
       data-testid="query-line"
     >
-      <div className="flex min-h-8 items-center gap-2">
+      <div className="flex min-h-8 items-center gap-2 overflow-x-auto">
         {open ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <span className="flex h-lh items-center text-kumo-subtle">
@@ -140,7 +142,7 @@ export function QueryLine() {
             )}
           </Button>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2 pl-2 whitespace-nowrap">
           {workbench.collectionPath && !workbench.queryError && (
             <Text variant="secondary" size="sm" as="span" data-testid="match-count">
               {total ? (

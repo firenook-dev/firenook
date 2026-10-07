@@ -165,7 +165,11 @@ function CreateForm({
           ? 'A collection exists once it has a document, so the first one is written here with it.'
           : 'Fields are typed as the SDK would type them; change a type from its badge.'}
       </Dialog.Description>
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      {/* A document has only its id to name, so it takes the whole row
+          rather than leaving half the dialog empty beside it. */}
+      <div
+        className={`mt-4 grid gap-3 ${request.kind === 'collection' ? 'grid-cols-2' : 'grid-cols-1'}`}
+      >
         {request.kind === 'collection' && (
           <label className="grid gap-1">
             <Text variant="secondary" size="sm" as="span">
@@ -205,7 +209,9 @@ function CreateForm({
           {documentError && <span className="text-[12px] text-kumo-danger">{documentError}</span>}
         </label>
       </div>
-      <div className="mt-3 flex h-[400px] min-h-0 flex-col rounded-md ring ring-kumo-line">
+      {/* Grows with the fields instead of opening at its full height, so a
+          one-field document is not mostly empty space. */}
+      <div className="mt-3 flex max-h-[400px] min-h-[180px] flex-col rounded-md ring ring-kumo-line">
         <FieldsPanel
           drafts={drafts}
           onDraftsChange={setDrafts}

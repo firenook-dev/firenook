@@ -49,7 +49,11 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
 
   return (
     <aside
-      className="flex min-h-0 w-[420px] shrink-0 flex-col border-l border-kumo-line bg-kumo-base"
+      // Wide enough for the grid to keep working beside it, the inspector
+      // sits in the flow. Below that it floats over the right of the grid
+      // instead, because squeezing the grid into the remaining sliver makes
+      // both halves useless.
+      className="absolute inset-y-0 right-0 z-20 flex min-h-0 w-[420px] max-w-full shrink-0 flex-col border-l border-kumo-line bg-kumo-base shadow-lg xl:static xl:shadow-none"
       data-testid="inspector"
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-1 pl-3">
@@ -106,9 +110,11 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
           key={`${path}:${document.data.updateTime ?? ''}`}
           document={document.data}
           onDelete={onDelete}
+          // Subcollections belong with the document, above the actions: a
+          // footer that is not the last thing in the panel reads as a divider.
+          subcollections={<Subcollections parent={path} ids={subcollections.data ?? []} />}
         />
       )}
-      {document.data !== null && <Subcollections parent={path} ids={subcollections.data ?? []} />}
     </aside>
   )
 }
@@ -213,9 +219,11 @@ function SubcollectionCount({ path }: { path: string }) {
 function DocumentEditor({
   document,
   onDelete,
+  subcollections,
 }: {
   document: FsDocument
   onDelete: (path: string) => void
+  subcollections: React.ReactNode
 }) {
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
@@ -293,6 +301,7 @@ function DocumentEditor({
         onTabChange={workbench.setTab}
         onOpenReference={(path) => workbench.selectDocument(path)}
       />
+      {subcollections}
       <footer className="flex h-12 shrink-0 items-center gap-2 border-t border-kumo-line px-3">
         <Button
           variant="primary"

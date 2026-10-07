@@ -9,6 +9,7 @@ import {
   FileIcon,
   FolderIcon,
   FolderPlusIcon,
+  FunnelIcon,
   LockKeyIcon,
   PlusIcon,
   WarningIcon,
@@ -177,6 +178,9 @@ export function Grid() {
   }, [lastVisible, documents.length, page])
 
   if (!workbench.collectionPath) return <RootLanding />
+  // The page query is switched off while the query text does not parse, and a
+  // disabled query reads as pending forever; say what is actually wrong.
+  if (workbench.queryError) return <QueryUnparsed />
   if (page.isError) return <QueryFailure error={page.error} />
   if (page.isPending)
     return (
@@ -461,32 +465,59 @@ function GridFooter({
 }) {
   const checked = useSelection((state) => state.checked)
   return (
-    <div className="flex h-9 shrink-0 items-center gap-3 border-t border-kumo-line px-3">
-      <Text variant="secondary" size="sm" as="span">
-        <span className="tabular-nums">{loaded.toLocaleString('en-US')}</span> loaded
-        {hasMore ? ' · more on scroll' : ''}
-        <span className="text-kumo-inactive">
-          {' '}
-          · first page {Math.max(1, Math.round(elapsedMs))} ms
-        </span>
-      </Text>
+    // Nothing here wraps: the bar is one row high, so a narrow grid scrolls
+    // its footer sideways instead of stacking the words on top of each other.
+    <div className="flex h-9 shrink-0 items-center gap-3 overflow-x-auto border-t border-kumo-line px-3 whitespace-nowrap">
+      <span className="shrink-0">
+        <Text variant="secondary" size="sm" as="span">
+          <span className="tabular-nums">{loaded.toLocaleString('en-US')}</span> loaded
+          {hasMore ? ' · more on scroll' : ''}
+          <span className="text-kumo-inactive">
+            {' '}
+            · first page {Math.max(1, Math.round(elapsedMs))} ms
+          </span>
+        </Text>
+      </span>
       {hasMore && (
-        <Button variant="ghost" size="xs" onClick={onLoadMore} loading={fetching}>
-          Load more
-        </Button>
+        <span className="shrink-0">
+          <Button variant="ghost" size="xs" onClick={onLoadMore} loading={fetching}>
+            Load more
+          </Button>
+        </span>
       )}
       {hiddenCount > 0 && (
-        <Button variant="ghost" size="xs" onClick={onShowAll} data-testid="show-all-columns">
-          {hiddenCount} hidden column{hiddenCount === 1 ? '' : 's'} · show all
-        </Button>
+        <span className="shrink-0">
+          <Button variant="ghost" size="xs" onClick={onShowAll} data-testid="show-all-columns">
+            {hiddenCount} hidden column{hiddenCount === 1 ? '' : 's'} · show all
+          </Button>
+        </span>
       )}
       {checked.size > 0 && (
-        <span className="ml-auto">
+        <span className="ml-auto shrink-0 pl-3">
           <Text variant="secondary" size="sm" as="span">
             <span className="tabular-nums">{checked.size}</span> selected
           </Text>
         </span>
       )}
+    </div>
+  )
+}
+
+/** The query text does not parse, so nothing ran; the line above says why. */
+function QueryUnparsed() {
+  const workbench = useWorkbench()
+  return (
+    <div className="min-h-0 flex-1 overflow-auto" data-testid="query-unparsed">
+      <Empty
+        icon={<FunnelIcon size={48} className="text-kumo-inactive" />}
+        title="This query did not parse"
+        description="The filter line above says what went wrong. Nothing ran, so this is empty rather than showing rows from the last query that worked."
+        contents={
+          <Button variant="secondary" onClick={() => workbench.setQueryText('')}>
+            Clear the query
+          </Button>
+        }
+      />
     </div>
   )
 }
@@ -608,7 +639,7 @@ function RootLanding() {
                   <span className="flex items-center gap-2">
                     <span className="min-w-0 flex-1 truncate font-mono text-[0.9em]">{id}</span>
                     {shape ? (
-                      <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+                      <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
                         {formatNumber(shape.documents)}
                       </span>
                     ) : (
@@ -620,13 +651,14 @@ function RootLanding() {
                       className="truncate font-mono text-[11px] text-kumo-subtle"
                       title={shape ? describeChildren(shape, 20) : undefined}
                     >
-                      {shape && shape.children.length > 0 ? (
+                      {/* The line keeps every card the same height; only the
+                          ones that actually nest say anything, so the eye
+                          catches those instead of the word "no" 17 times. */}
+                      {shape && shape.children.length > 0 && (
                         <span className="flex items-center gap-1">
                           <FolderIcon size={11} className="shrink-0" />
                           <span className="truncate">{describeChildren(shape)}</span>
                         </span>
-                      ) : (
-                        <span className="text-kumo-inactive">no subcollections</span>
                       )}
                     </span>
                   )}
@@ -659,7 +691,7 @@ function RootCount({ path }: { path: string }) {
   const workbench = useWorkbench()
   const count = useQuery(countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY))
   return (
-    <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
+    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
       {count.data ? count.data.count.toLocaleString('en-US') : ''}
     </span>
   )

@@ -145,7 +145,8 @@ function WorkbenchBody() {
         </span>
       </div>
       {workbench.collectionPath && <QueryLine />}
-      <div className="flex min-h-0 flex-1">
+      {/* Relative so a narrow inspector can float over the grid's right edge. */}
+      <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Grid />
         </div>

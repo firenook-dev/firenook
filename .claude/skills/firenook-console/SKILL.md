@@ -94,6 +94,12 @@ self-hosted from `public/fonts`. The sans face is registered as
 `InterVariable`, not `Inter`: the TanStack devtools inject a document-level
 `@font-face` named Inter in dev builds, and the last declared face wins, so
 a face named Inter would render the devtools' build on the dev server.
+The console follows the operating system's colour scheme:
+`lib/color-mode.ts` sets `data-mode` from `prefers-color-scheme` before the
+first render and keeps following it. Kumo's dark tokens and the dark block
+in `theme.css` key on that attribute, and `index.html` declares
+`color-scheme: light dark` so the browser's own scrollbars and controls
+match. There is no in-app toggle: the OS is the only switch.
 `theme.css` also sets what kumo-ui.com sets on its body and Kumo's
 stylesheet does not: `-webkit-font-smoothing: antialiased` and Inter's
 `calt, cv02, cv03, cv04`; without them macOS renders every weight heavier
@@ -150,7 +156,13 @@ card there for every new pattern before it is designed with. Component docs: `np
   cells; a click that would open the inspector over the clicked cell waits
   `DOUBLE_CLICK_MS` so a double-click can edit instead. Columns keep their
   width (a trailing filler `<col>` takes the slack) so nothing moves when
-  the inspector opens. Reference cells and reference fields *peek*
+  the inspector opens. Column widths come from `inferColumns`: the type's own
+  width, or the header's needs when those are greater, capped at
+  `MAX_HEADER_WIDTH`. `headerWidth` counts the type badge's text as well as
+  the field name, because a two-letter field under a `boolean` badge needs
+  more room than its values ever will; the cap stops one long field name
+  from pushing every other column off the screen. Both ends are covered by
+  `columns.test.ts` and a browser journey. Reference cells and reference fields *peek*
   (`selectDocument`) rather than navigate; the inspector shows "open in
   grid" when the document is outside the current collection.
 - The schema panel: `GET /console/api/v1/firestore/schema?database=` is the

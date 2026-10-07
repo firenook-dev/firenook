@@ -168,7 +168,7 @@ export function FieldsPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {tab === 'fields' ? (
-          <div className="grid gap-0.5 p-2">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 p-2">
             {drafts.map((draft, index) => (
               <FieldEditor
                 key={draft.name}
@@ -385,7 +385,12 @@ export function FieldEditor({
 
   return (
     <div
-      className={`grid gap-1 rounded-md px-2 py-1.5 ${draft.dirty ? 'bg-kumo-tint' : ''}`}
+      // The explicit minmax column lets the name truncate: a grid track is
+      // `auto` by default, so it grows to the longest field name and pushes
+      // the type badge and the remove button out of the panel.
+      className={`grid grid-cols-[minmax(0,1fr)] gap-1 rounded-md px-2 py-1.5 ${
+        draft.dirty ? 'bg-kumo-tint' : ''
+      }`}
       data-testid="field-row"
     >
       <div className="flex items-center gap-2">
@@ -400,7 +405,7 @@ export function FieldEditor({
             render={
               <button
                 type="button"
-                className="flex h-5 items-center rounded px-0.5 hover:bg-kumo-tint"
+                className="flex h-5 shrink-0 items-center rounded px-0.5 hover:bg-kumo-tint"
                 aria-label={`${draft.name} type: ${draft.type}`}
               >
                 <TypeBadge type={draft.type} />

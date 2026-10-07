@@ -579,8 +579,21 @@ served until every section has landed.
   a client has written to (the store seeks once per database), and the
   panel's picker offers them, asking again each time it opens. Picking one
   switches the tree, the path bar and the grid to that database alone.
+- [x] A pass over the Firestore section against a database of its own making:
+  a long field name no longer widens its column without end and a short one
+  under a long type badge keeps its header, arrays preview their items the
+  way maps preview their keys, the inspector keeps a long field's type and
+  remove controls inside the panel, a query that does not parse says so
+  instead of claiming to load for ever and leaves its text editable, the
+  document actions sit below the subcollections they act with, the grid's
+  footer and the query line scroll rather than stack when the column is
+  narrow, the inspector floats over the grid below `xl` instead of
+  squeezing it to a sliver, and the console follows the operating system's
+  colour scheme (Kumo's dark tokens were complete; nothing set `data-mode`).
 - [ ] Firestore follow-ups: explain (composite-index warning), export from
-  the page, undo within the change-log window, rules editor.
+  the page, undo within the change-log window, rules editor, and one batched
+  answer for "which of these documents have subcollections" — the grid asks
+  per rendered row today.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and

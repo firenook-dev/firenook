@@ -17,6 +17,25 @@ export interface InferredColumn {
   width: number
 }
 
+/**
+ * How wide a header's own content needs to be, px: the cell's padding plus
+ * the menu's gaps and sort caret (41 px measured), the field name in 12 px
+ * mono, and the type badge, whose width follows the type's own name — a
+ * two-letter field under a `boolean` badge needs more room than its value
+ * ever will. Each term rounds up, because a header that truncates by a pixel
+ * reads as a bug while a few pixels of slack reads as nothing at all.
+ */
+function headerWidth(field: string, type: FirestoreValueType): number {
+  return 43 + field.length * 7.4 + 22 + type.length * 6.5
+}
+
+/**
+ * A long field name stops widening its column here. The header truncates and
+ * keeps its full name in a tooltip, which is a far better trade than one
+ * 52-character name pushing every other column off the screen.
+ */
+const MAX_HEADER_WIDTH = 320
+
 const WIDTHS: Record<FirestoreValueType, number> = {
   string: 200,
   number: 120,
@@ -55,8 +74,9 @@ export function inferColumns(documents: readonly FsDocument[]): InferredColumn[]
         type = candidate
       }
     }
-    // Wide enough for the header (name in 12 px mono plus the type badge).
-    const width = Math.max(WIDTHS[type], 28 + field.length * 7.3 + 72)
+    // Wide enough for the header, but the type's own width always wins and a
+    // long name never grows the column past the cap.
+    const width = Math.max(WIDTHS[type], Math.min(MAX_HEADER_WIDTH, headerWidth(field, type)))
     const column: InferredColumn = { field, type, present, width: Math.round(width) }
     if (entry.types.size > 1) column.mixed = Object.fromEntries(entry.types)
     columns.push(column)

@@ -91,17 +91,22 @@ export function ValueCell({
       )
     case 'map':
     case 'array': {
+      // A map previews its keys and an array its items, because that is what
+      // tells one row from the next; the count sits in the chip beside them.
+      // Only the first few are rendered: the cell truncates anyway, and a
+      // thousand-item array must not cost a thousand conversions a row.
       const count = value.type === 'map' ? Object.keys(value.fields).length : value.items.length
-      const preview =
-        value.type === 'map'
-          ? Object.keys(value.fields).slice(0, 3).join(', ')
-          : displayValue(value)
+      const preview = (limit: number) =>
+        (value.type === 'map'
+          ? Object.keys(value.fields).slice(0, limit)
+          : value.items.slice(0, limit).map(displayValue)
+        ).join(', ') + (count > limit ? ', …' : '')
       return (
-        <span className="flex min-w-0 items-center gap-1.5" title={preview}>
+        <span className="flex min-w-0 items-center gap-1.5" title={preview(24)}>
           <span className="shrink-0 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle tabular-nums">
             {value.type === 'map' ? `{${count}}` : `[${count}]`}
           </span>
-          <span className="truncate text-kumo-subtle">{value.type === 'map' ? preview : ''}</span>
+          <span className="truncate text-kumo-subtle">{preview(8)}</span>
         </span>
       )
     }
