@@ -140,6 +140,13 @@ describe('changing a type', () => {
     expect(retype(asBoolean, 'number').text).toBe('42')
   })
 
+  it('never carries the word a null is drawn with into the next type', () => {
+    const node = nodeFrom('closedAt', { type: 'null' })
+    expect(node.text).toBe('null')
+    expect(retype(node, 'string').text).toBe('')
+    expect(retype(node, 'number').text).toBe('0')
+  })
+
   it('leaves the entries of a map alone while it is looked at as something else', () => {
     const node = nodeFrom('m', { type: 'map', fields: { a: text('1') } })
     const away = retype(node, 'string')

@@ -99,13 +99,18 @@ export function emptyNode(name: string, type: FirestoreValueType): DraftNode {
 export function retype(node: DraftNode, type: FirestoreValueType): DraftNode {
   if (type === node.type) return node
   const remembered = node.memory?.[type]
+  // A null has no text of its own: the word is how the type is drawn, not
+  // a value anyone typed. Carrying it over makes the string `"null"`,
+  // which is never what was meant and is indistinguishable afterwards
+  // from a field that genuinely holds that word.
+  const carried = node.type === 'null' ? '' : node.text
   const text =
-    remembered ?? (parseEditorText(type, node.text).ok ? node.text : editorText(emptyValue(type)))
+    remembered ?? (parseEditorText(type, carried).ok ? carried : editorText(emptyValue(type)))
   const next: DraftNode = {
     ...node,
     type,
     text,
-    memory: { ...node.memory, [node.type]: node.text },
+    memory: node.type === 'null' ? node.memory : { ...node.memory, [node.type]: node.text },
   }
   if (type === 'number') next.integer = isIntegral(text)
   return next
