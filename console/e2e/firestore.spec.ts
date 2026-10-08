@@ -212,6 +212,21 @@ test('the toolbar groups hold, and never overlap, as it narrows', async ({ page 
   const segments = (await page.getByTestId('path-segments').boundingBox())!.x
   expect(segments).toBeGreaterThan(edge(await page.getByTestId('path-controls').boundingBox()))
 
+  // Copy belongs to the path and sits inside its field, against the right
+  // edge: the end of the path wherever the path ends, and a target that a
+  // longer path does not move.
+  const copyAt = async (path: string) => {
+    await page.goto(`${origin()}/console/firestore?path=${path}`)
+    await expect(page.getByTestId('grid-row').first()).toBeVisible()
+    return (await page.getByRole('button', { name: 'Copy the path' }).boundingBox())!
+  }
+  const shortPath = await copyAt('users')
+  const longPath = await copyAt('users/u_k65eq/orders')
+  expect(longPath.x).toBe(shortPath.x)
+  const field = await page.getByTestId('path-field').boundingBox()
+  expect(edge(longPath)).toBeLessThanOrEqual(edge(field))
+  expect(edge(longPath)).toBeGreaterThan(edge(field) - 8)
+
   for (const width of [1440, 1280, 1152, 1024]) {
     await page.setViewportSize({ width, height: 760 })
     await expect(page.getByTestId('grid-row').first()).toBeVisible()
@@ -377,7 +392,21 @@ test('the path bar completes collections and shows missing ancestors', async ({ 
   await page.keyboard.press('/')
   const input = page.getByTestId('path-input')
   await input.fill('users/u_k65eq/ord')
-  await expect(page.getByRole('button', { name: 'users/u_k65eq/orders' })).toBeVisible()
+  const suggestion = page.getByRole('button', { name: 'users/u_k65eq/orders' })
+  await expect(suggestion).toBeVisible()
+  // The completions hang below the toolbar from inside it, and the toolbar
+  // clips what does not fit so its controls never paint over their
+  // neighbours. A clipped popup is an invisible one, and neither Playwright's
+  // visibility check nor its click sees that — the click scrolls the clipping
+  // box first, which nobody using a mouse can do. So ask the page what is
+  // actually painted where the suggestion claims to be.
+  expect(
+    await suggestion.evaluate((el) => {
+      const box = el.getBoundingClientRect()
+      const at = el.ownerDocument.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      return el.contains(at)
+    }),
+  ).toBe(true)
   await input.press('Tab')
   await input.press('Enter')
   await expect(page).toHaveURL(/path=users%2Fu_k65eq%2Forders/)

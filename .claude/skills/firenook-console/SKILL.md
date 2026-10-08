@@ -214,25 +214,42 @@ count 15 ms`.
 
 A section's toolbar is two rows and the split is a rule, not a space
 problem. A persistent control keeps a fixed place; variable-length content
-runs after it. The scope picker and copy lead the row, divider, then the
-path — the browser's own shape, and the reason is that a path changes length
-with every move, so a control placed after it slides a few hundred pixels on
-each one and can never be aimed at. Adjacency is worth less than a target
-that stays put; the breadcrumb beside it already says what the scope applies
-to. Dividers mark the groups, and the last one isolates the control that
+runs after it. The reason is that a path changes length with every move, so
+a control placed after it slides a few hundred pixels on each one and can
+never be aimed at. Adjacency is worth less than a target that stays put.
+
+So the path is a **field**, the way an address bar is, and the row is the
+browser's own shape: the scope picker leads, then the field, which holds the
+breadcrumb and runs to the end of the row. Reading the path and typing it
+are the same box — clicking to edit swaps the content and changes no
+geometry, which is what stops an outlined input appearing out of nowhere
+under the pointer. The field's own edge separates it from the scope, so no
+divider goes between them. The one control that acts on the whole path —
+copy — sits **inside** the field against its right edge: the end of the path
+wherever the path ends, and a target a longer path cannot move. Elsewhere
+dividers mark the groups, and the last one isolates the control that
 writes — `New` stands alone, everything that reports or switches view is on
 the other side.
 
 A toolbar must degrade, never overlap. A `shrink-0` group inside a
 `flex-1` parent paints over its neighbour when the parent runs out of room,
-so the parent takes `overflow-hidden` and the pieces give way in a stated
-order: the identity's qualifier first (`As Admin (bypasses rules)` →
+so the parent takes `overflow-hidden` — but that clip also swallows any
+popup anchored inside it, so it lifts while one can be open (the path's
+completions hang below the row from inside it). **Playwright sees neither
+half of that**: `toBeVisible` does not test for a clip, and `click` scrolls
+the clipping box first, which nobody using a mouse can do — so both passed
+while the completions were unreachable for months. Assert the popup with
+`ownerDocument.elementFromPoint` at its own centre instead. The pieces give
+way in a stated order: the identity's qualifier first (`As Admin (bypasses rules)` →
 `As Admin` below `2xl`), then the words on `Live` and `Rules` below `xl`,
 then the empty click-to-edit target (`flex-1 basis-0`, no `min-w`), and only
 then the path itself, which scrolls **to its end** — the database name never
-changes and where you are is the last segment. A `ResizeObserver` on the
-segments keeps that true when the counts arrive and widen them. One journey
-checks all of this at 1440, 1280, 1152 and 1024. **Row one is the scope**: where you are (the database picker, the
+changes and where you are is the last segment. A `ResizeObserver` watches
+the segments *and* their box, because both sides of that move: the counts
+arrive and widen the content, and the window narrows and takes the box's
+width away. The scroller sits inside a 32 px field now, so it hides its own
+scrollbar or the bar is drawn across the path. One journey checks all of
+this at 1440, 1280, 1152 and 1024. **Row one is the scope**: where you are (the database picker, the
 path, the collection-group toggle), the state of the connection (`live`),
 who the reads run as (`View as` — it applies to every read the section
 makes, the schema tree and the inspector included, so it is never a
