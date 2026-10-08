@@ -105,7 +105,7 @@ export function QueryLine() {
               placeholder='where("status", "==", "paid").orderBy("createdAt", "desc").limit(50)'
               spellCheck={false}
               autoComplete="off"
-              className={`h-8 min-w-0 flex-1 rounded-md bg-kumo-control px-2.5 font-mono text-[0.9em] text-kumo-default ring outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus ${
+              className={`h-8 min-w-0 flex-1 rounded-md bg-kumo-control px-2.5 font-mono text-[12px] text-kumo-default ring outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus ${
                 workbench.queryError ? 'ring-kumo-danger' : 'ring-kumo-line'
               }`}
               aria-label="Query"
@@ -155,7 +155,13 @@ export function QueryLine() {
         )}
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2 whitespace-nowrap">
           {workbench.collectionPath && !workbench.queryError && (
-            <Text variant="secondary" size="sm" as="span" data-testid="match-count">
+            <Text
+              variant="secondary"
+              size="sm"
+              as="span"
+              DANGEROUS_className="text-[12px]"
+              data-testid="match-count"
+            >
               {total ? (
                 <>
                   <span className="font-mono text-[0.95em] text-kumo-default tabular-nums">

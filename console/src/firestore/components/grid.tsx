@@ -652,7 +652,7 @@ function RootLanding() {
                 <DatabaseIcon size={16} className="shrink-0 text-kumo-subtle" />
                 <span className="grid min-w-0 flex-1 gap-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate font-mono text-[0.9em]">{id}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[14px]">{id}</span>
                     {shape ? (
                       <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
                         {formatNumber(shape.documents)}
@@ -693,7 +693,7 @@ function RootLanding() {
               data-testid="root-new-collection"
             >
               <FolderPlusIcon size={16} />
-              <span className="text-[0.9em]">New collection</span>
+              <span className="text-[14px]">New collection</span>
             </button>
           </li>
         )}

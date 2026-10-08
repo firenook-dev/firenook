@@ -377,7 +377,9 @@ export function FieldEditor({
           value={draft.text}
           onChange={(event) => setText(event.target.value)}
           spellCheck={false}
-          className={`${inputClass} ${draft.type === 'string' ? '' : mono}`}
+          // A string is data too. Left in the interface face it was the one
+          // value in the panel set two pixels larger than its neighbours.
+          className={`${inputClass} ${mono}`}
           aria-label={`${draft.name} value`}
         />
       )

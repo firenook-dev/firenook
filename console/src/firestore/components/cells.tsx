@@ -1,6 +1,12 @@
 // How each Firestore type reads in a grid cell: exact, copyable, and typed
 // at a glance. Colour carries meaning only (a reference is a link, a
 // boolean is a state), never decoration.
+//
+// Every cell names its own size in pixels — 12 for the value, 11 for the
+// detail beside it — and every value is set in the data face. A cell is a
+// block, not a phrase inside one, so there is no surrounding size for an
+// `em` to measure against: one did, and the same class rendered 14.4 px in
+// the toolbar, 12.6 px here and 10.8 px where 12 was meant.
 
 import { InlineCopyText } from '@cloudflare/kumo'
 import { ArrowSquareInIcon } from '@phosphor-icons/react'
@@ -18,9 +24,12 @@ export function IdCell({ id, missing }: { id: string; missing?: boolean | undefi
       title={id}
     >
       {parent && (
-        <span className="min-w-0 truncate font-mono text-[0.9em] text-kumo-subtle">{parent}</span>
+        <span className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle">{parent}</span>
       )}
-      <InlineCopyText value={id} variant="mono" className="shrink-0 text-[0.9em]" title={id}>
+      {/* Kumo locks its monospace variants to 13 px, which is a size above
+          the rest of the row, so the face is asked for here and the size is
+          taken from the body scale. */}
+      <InlineCopyText value={id} variant="body" size="xs" className="shrink-0 font-mono" title={id}>
         {own}
       </InlineCopyText>
     </span>
@@ -39,7 +48,7 @@ export function ValueCell({
     case 'string':
       return (
         <span
-          className="block truncate"
+          className="block truncate font-mono text-[12px]"
           // A previewed read sends the first bytes only; the tooltip says so
           // rather than passing the fragment off as the whole value.
           title={
@@ -59,7 +68,7 @@ export function ValueCell({
     case 'number':
       return (
         <span
-          className="block truncate font-mono text-[0.9em] tabular-nums"
+          className="block truncate font-mono text-[12px] tabular-nums"
           title={String(value.value)}
         >
           {formatNumber(value.value)}
@@ -68,14 +77,16 @@ export function ValueCell({
     case 'boolean':
       return (
         <span
-          className={`font-mono text-[0.9em] ${value.value ? 'text-kumo-success' : 'text-kumo-subtle'}`}
+          className={`font-mono text-[12px] ${value.value ? 'text-kumo-success' : 'text-kumo-subtle'}`}
         >
           {value.value ? 'true' : 'false'}
         </span>
       )
     case 'timestamp':
       return (
-        <span className="flex items-baseline gap-1.5" title={value.value}>
+        <span className="flex items-baseline gap-1.5 text-[12px]" title={value.value}>
+          {/* The relative time is the answer and reads as English; the exact
+              stamp beside it is the detail, in the data face a step down. */}
           <span className="whitespace-nowrap">{relativeTime(value.value)}</span>
           <span className="truncate font-mono text-[11px] text-kumo-subtle">
             {compactIso(value.value)}
@@ -90,7 +101,7 @@ export function ValueCell({
             event.stopPropagation()
             onOpenReference(value.path)
           }}
-          className="group flex max-w-full items-center gap-1 font-mono text-[0.9em] text-kumo-link hover:underline"
+          className="group flex max-w-full items-center gap-1 font-mono text-[12px] text-kumo-link hover:underline"
           title={value.path}
         >
           <span className="truncate">{value.path}</span>
@@ -99,7 +110,7 @@ export function ValueCell({
       )
     case 'geopoint':
       return (
-        <span className="font-mono text-[0.9em] tabular-nums">
+        <span className="font-mono text-[12px] tabular-nums">
           {value.latitude}, {value.longitude}
         </span>
       )
@@ -122,16 +133,16 @@ export function ValueCell({
           <span className="shrink-0 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle tabular-nums">
             {value.type === 'map' ? `{${count}}` : `[${count}]`}
           </span>
-          <span className="truncate text-kumo-subtle">{preview(8)}</span>
+          <span className="truncate font-mono text-[12px] text-kumo-subtle">{preview(8)}</span>
         </span>
       )
     }
     case 'bytes':
-      return <span className="font-mono text-[0.9em] text-kumo-subtle">{displayValue(value)}</span>
+      return <span className="font-mono text-[12px] text-kumo-subtle">{displayValue(value)}</span>
     case 'vector':
-      return <span className="font-mono text-[0.9em] text-kumo-subtle">{displayValue(value)}</span>
+      return <span className="font-mono text-[12px] text-kumo-subtle">{displayValue(value)}</span>
     case 'null':
-      return <span className="font-mono text-[0.9em] text-kumo-inactive">null</span>
+      return <span className="font-mono text-[12px] text-kumo-inactive">null</span>
   }
 }
 

@@ -54,8 +54,10 @@ export function SchemaPanel() {
     <SectionPanel label="Schema">
       <div className="grid shrink-0 gap-1.5 border-b border-kumo-line p-2">
         <div data-testid="database-select">
+          {/* `xs`, so it is set like the filter directly under it: Kumo's
+              `sm` Select is 14 px while its `sm` Input is 12. */}
           <Select
-            size="sm"
+            size="xs"
             value={workbench.database}
             onValueChange={(value) => workbench.setDatabase(String(value))}
             // Opening the picker asks again, so a database a client created

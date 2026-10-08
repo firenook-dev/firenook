@@ -119,7 +119,6 @@ export function InlineCellEditor({
     onDone()
   }
 
-  const mono = !value || value.type !== 'string'
   return (
     <input
       ref={inputRef}
@@ -143,9 +142,10 @@ export function InlineCellEditor({
       onDoubleClick={(event) => event.stopPropagation()}
       spellCheck={false}
       title={error}
-      className={`h-7 w-full rounded-md bg-kumo-control px-1.5 text-kumo-default ring outline-none ${
-        mono ? 'font-mono text-[12px]' : ''
-      } ${error ? 'ring-kumo-danger' : 'ring-kumo-focus'}`}
+      // It opens over the cell it is replacing, so it is set like one.
+      className={`h-7 w-full rounded-md bg-kumo-control px-1.5 font-mono text-[12px] text-kumo-default ring outline-none ${
+        error ? 'ring-kumo-danger' : 'ring-kumo-focus'
+      }`}
       aria-label={`${field} of ${document.id}`}
       data-testid="inline-cell-editor"
     />

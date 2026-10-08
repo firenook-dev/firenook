@@ -61,10 +61,13 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       data-testid="inspector"
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-1 pl-3">
+        {/* Kumo's monospace variants are fixed at 13 px; the face is asked
+            for here and the size comes from the scale. */}
         <InlineCopyText
           value={path}
-          variant="mono"
-          className="min-w-0 flex-1 truncate text-[12px]"
+          variant="body"
+          size="xs"
+          className="min-w-0 flex-1 truncate font-mono"
           title={path}
         >
           {path}
@@ -174,7 +177,9 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
   return (
     <div className="shrink-0 border-t border-kumo-line px-3 py-2" data-testid="subcollections">
       <div className="mb-1 flex items-center">
-        <Text variant="secondary" size="sm" as="p">
+        {/* A section label in the panel's chrome, the size of the tab row
+            above it rather than of the prose below. */}
+        <Text variant="secondary" size="sm" as="p" DANGEROUS_className="text-[12px]">
           Subcollections{found.length > 0 ? ` · ${found.length}` : ''}
         </Text>
         <span className="ml-auto">

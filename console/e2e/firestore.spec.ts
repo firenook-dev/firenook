@@ -258,6 +258,53 @@ test('the toolbar groups hold, and never overlap, as it narrows', async ({ page 
   }
 })
 
+test('one type scale holds across the grid and the panel beside it', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=users%2Fu_k65eq%2Forders`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.getByTestId('grid-row').first().click()
+  await expect(page.getByTestId('inspector')).toBeVisible()
+
+  // Every rendered run of text, as `<size> <face>`. A block that names no
+  // size of its own inherits one, and an `em` measures against whatever
+  // ancestor happens to be set — which is how one row came to hold five
+  // sizes at once. Reading them back is the only way to see that.
+  const scale = (testId: string) =>
+    page
+      .getByTestId(testId)
+      .first()
+      .evaluate((root) => {
+        const found = new Set<string>()
+        for (const el of root.querySelectorAll('*')) {
+          const own = [...el.childNodes]
+            .filter((node) => node.nodeType === 3)
+            .map((node) => node.textContent?.trim() ?? '')
+            .join('')
+          if (!own) continue
+          const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+          found.add(`${style.fontSize} ${/mono|plex/i.test(style.fontFamily) ? 'mono' : 'sans'}`)
+        }
+        return [...found].toSorted()
+      })
+
+  // A row is the grid's 12 px, with 11 px for the detail beside a value —
+  // the exact stamp under a relative time, the count in a container's chip.
+  // The relative time is the only English in it, so the only sans.
+  expect(await scale('grid-row')).toEqual(['11px mono', '12px mono', '12px sans'])
+
+  // Every value in the panel is set the same way, whatever its type: a
+  // string left in the interface face was two pixels larger than the
+  // timestamp above it.
+  const values = await page.getByTestId('inspector').evaluate((root) =>
+    [...root.querySelectorAll('input, textarea')]
+      .filter((el) => el.getAttribute('type') !== 'checkbox')
+      .map((el) => {
+        const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+        return `${style.fontSize} ${/mono|plex/i.test(style.fontFamily) ? 'mono' : 'sans'}`
+      }),
+  )
+  expect([...new Set(values)]).toEqual(['12px mono'])
+})
+
 test('the scope picker names both scopes, and reads what it says', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()

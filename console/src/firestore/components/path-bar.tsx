@@ -143,9 +143,9 @@ export function PathBar() {
                   if (segment === '*')
                     return (
                       <span key={path} className="flex shrink-0 items-center">
-                        <span className="px-0.5 text-kumo-inactive">/</span>
+                        <span className="px-0.5 text-[12px] text-kumo-inactive">/</span>
                         <span
-                          className="px-1.5 font-mono text-[0.9em] text-kumo-inactive"
+                          className="px-1.5 font-mono text-[12px] text-kumo-inactive"
                           title="Any document"
                         >
                           *
@@ -173,7 +173,7 @@ export function PathBar() {
             </div>
             <button
               type="button"
-              className="h-7 flex-1 basis-0 cursor-text rounded-md px-1.5 text-left text-[0.9em] text-kumo-inactive"
+              className="h-7 flex-1 basis-0 cursor-text rounded-md px-1.5 text-left text-[12px] text-kumo-inactive"
               onClick={() => setEditing(workbench.path)}
               aria-label="Edit the path"
               // Empty space to click: it gives up every pixel the path itself
@@ -213,7 +213,7 @@ export function PathBar() {
                 120,
               )
             }
-            className="h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[0.9em] text-kumo-default outline-none"
+            className="h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none"
             placeholder="users/u_9f3k2/orders"
             spellCheck={false}
             autoComplete="off"
@@ -249,7 +249,7 @@ export function PathBar() {
                 <li>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[0.9em] hover:bg-kumo-tint"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] hover:bg-kumo-tint"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={create}
                     data-testid="path-create-collection"
@@ -275,7 +275,7 @@ export function PathBar() {
                   <li key={id}>
                     <button
                       type="button"
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[0.9em] hover:bg-kumo-tint"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[13px] hover:bg-kumo-tint"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => commit(full)}
                     >
@@ -335,7 +335,7 @@ function PathSegment({
 }) {
   return (
     <span className="flex shrink-0 items-center">
-      {!first && <span className="px-0.5 text-kumo-inactive">/</span>}
+      {!first && <span className="px-0.5 text-[12px] text-kumo-inactive">/</span>}
       <button
         type="button"
         onClick={onClick}
@@ -343,7 +343,7 @@ function PathSegment({
         // of its own — and a tag would have to fight whatever ground the
         // field is showing. Hovering anything in here lights the field, so a
         // segment's own hover reads against that ground, not against the bar.
-        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[0.9em] hover:bg-kumo-base hover:text-kumo-default ${
+        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[12px] hover:bg-kumo-base hover:text-kumo-default ${
           current ? 'text-kumo-default' : 'text-kumo-subtle'
         }`}
         aria-current={current ? 'location' : undefined}

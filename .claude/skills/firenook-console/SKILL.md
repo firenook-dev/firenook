@@ -191,6 +191,37 @@ rather than Kumo's `selected`, which renders the tick hard against the label
 with no gap; note that a Phosphor icon carries width and height attributes,
 so a gap has to go on a wrapper — padding on the icon eats the glyph.
 
+**Every block names its own size, in pixels.** A size is inherited only
+inside a run of prose. `em` is for one case and one only — mono set *within*
+a sans sentence, where `text-[0.9em]` has to track whatever that sentence
+is: `Import into <mono>products</mono>`. Used on a block it silently
+measures against whichever ancestor happens to be set, and the same class
+rendered 14.4 px in the toolbar, 12.6 px in a grid cell and 10.8 px where 12
+was meant. A block that names nothing is worse: `html` is 14 px so it lands
+on the content size rather than the browser's 16, but a Kumo `Table.Cell` is
+14 px and a cell that sets no size takes it. One grid row held five sizes at
+once that way — 11, 12, 12.6, 13 and 14 px — and the whole of it read as
+sloppy without any one thing looking wrong.
+
+**A value is data, so it is set in the data face** — strings included. A
+string left in the interface face was the only value in the inspector two
+pixels larger than the timestamp above it, and the only column in the grid
+that did not line up with the id beside it. The grid is 12 px for a value
+and 11 px for the detail that qualifies one (the exact stamp under a
+relative time, the count in a container's chip); the relative time is the
+only English in a row, so the only sans. A field row in the inspector is a
+grid row stood on its end and takes the same 12 px, not the panel's 13 —
+13 px is for the panel's prose.
+
+Kumo decides some of this and has to be asked the right way. Its monospace
+`Text` variants are **fixed at 13 px** (`size` accepts only `lg`), so
+`InlineCopyText variant="mono"` is a size above a 12 px row: take
+`variant="body" size="xs"` and ask for `font-mono` in the class instead.
+Its `Select` at `size="sm"` is 14 px while its `Input` at `size="sm"` is 12,
+so a select stacked above a filter needs `size="xs"` to match it. A journey
+reads the computed sizes back out of a row and the panel beside it, because
+this is not a thing you can see in a diff.
+
 ### Capitals: English for the person, lowercase for the data
 
 Anything written *to* the reader starts with a capital — every control label

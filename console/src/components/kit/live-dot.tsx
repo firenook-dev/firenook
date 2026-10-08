@@ -24,7 +24,7 @@ export function LiveDot({
         ? 'bg-kumo-warning'
         : 'bg-kumo-danger'
   return (
-    <span className="flex items-center gap-1.5 text-sm text-kumo-subtle">
+    <span className="flex items-center gap-1.5 text-[12px] text-kumo-subtle">
       <span className="relative flex size-2">
         {state === 'live' ? (
           <span className={`absolute inline-flex size-full rounded-full ${colour} opacity-60`} />

@@ -68,6 +68,10 @@
 @layer base {
   html {
     font-family: var(--font-sans);
+    /* The content size, so a block that names no size of its own lands on
+       the scale instead of the browser's 16 px — and so an `em` inside a
+       run of prose measures against something the design chose. */
+    font-size: var(--text-base);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: 'calt', 'cv02', 'cv03', 'cv04';
