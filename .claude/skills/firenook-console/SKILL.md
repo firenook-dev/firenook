@@ -186,7 +186,26 @@ for the action of the row (`New`, `Run`). `Switch` is a settings control and
 does not belong in a toolbar. Base UI's `Toggle`/`ToggleGroup` are installed
 and unstyled if a real pressed state is ever needed. Let the label carry the
 state wherever an off state would otherwise have no name: `Filter` becomes
-the printed query, `group` becomes `all <collection>`.
+the printed query it is applying.
+
+A toggle can only ever show the state you are in. When the state you are
+*not* in has to be legible too — a mode that changes what every row means —
+it is a `DropdownMenu` that names both, like `ScopePicker` and `ViewAsPicker`
+beside it, not a pressed button. Put the figures and the explanation in the
+menu items (`DropdownMenu.Item` has `icon`, `selected` and children, no
+`description`; **a `DropdownMenu.Label` throws unless it and its items sit
+inside a `DropdownMenu.Group`**), and keep a one-key shortcut so flipping it
+costs no more than the toggle did. `DropdownMenu` is already in the Firestore
+chunk, so it is free there and 10 KB anywhere in the first route.
+
+Use Firestore's own words even when they are long: `collection group`, not
+`group` — a bare `group` in a grid reads as group-by, and the canonical term
+is what someone searches the docs and `firestore.indexes.json` with. The
+schema index knows what a collection group spans without a request:
+`patternsById` gives every pattern carrying an id, each node's `documents`
+sums to the group's size and its `parents` to the number of collections
+(one pattern is not one collection — `users/*\/orders` is a separate orders
+under every user that has one).
 
 The component library the design tool works from is `design-system/`
 (`npm run design-system` renders every card through a real browser into

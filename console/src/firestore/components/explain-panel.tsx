@@ -119,7 +119,11 @@ function Summary({ explanation }: { explanation: Explanation }) {
           title="The engine always orders by __name__ last, which is what makes the paging cursor exact."
           mono
         />
-        {explanation.scope === 'collectionGroup' && <Badge variant="outline">group</Badge>}
+        {explanation.scope === 'collectionGroup' && (
+          // The canonical term, not the bare word: `group` in a grid reads as
+          // group-by, and this is the badge someone searches the docs from.
+          <Badge variant="outline">collection group</Badge>
+        )}
       </div>
     </div>
   )

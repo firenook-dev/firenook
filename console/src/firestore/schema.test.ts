@@ -10,6 +10,7 @@ import {
   isExpanded,
   isPattern,
   patternOf,
+  patternsById,
   siblingsById,
   useSchemaTree,
 } from './schema'
@@ -116,6 +117,24 @@ describe('the tree', () => {
         })),
       }),
     ).toBe('a · b · c · d · +1')
+  })
+})
+
+describe('what a collection group reads', () => {
+  it('gathers every pattern that carries the id', () => {
+    expect(patternsById(schema, 'orders')).toEqual([shopOrders, orders])
+    const total = patternsById(schema, 'orders').reduce((sum, node) => sum + node.documents, 0)
+    expect(total).toBe(315)
+  })
+
+  it('is one pattern when the id is unique, so the group reads the same documents', () => {
+    expect(patternsById(schema, 'sessions')).toHaveLength(1)
+    expect(patternsById(schema, 'sessions')[0]?.documents).toBe(101)
+  })
+
+  it('is empty for an id the database has never held', () => {
+    expect(patternsById(schema, 'invoices')).toEqual([])
+    expect(patternsById(undefined, 'orders')).toEqual([])
   })
 })
 

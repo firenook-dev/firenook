@@ -4,7 +4,7 @@
 // from anywhere on the page. What lives below is the panel's job.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { CopyIcon, FolderPlusIcon, StackIcon } from '@phosphor-icons/react'
+import { CopyIcon, FolderPlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useCreateDialog, validateId } from '../create'
@@ -12,6 +12,7 @@ import { EMPTY_QUERY } from '../query'
 import { collectionsQuery, countQueryOptions } from '../queries'
 import { findNode, isPattern, schemaQuery } from '../schema'
 import { formatNumber } from '../value'
+import { ScopePicker } from './scope-picker'
 import { useWorkbench } from './workbench-context'
 
 export function PathBar() {
@@ -49,9 +50,6 @@ export function PathBar() {
     setEditing(null)
     workbench.setPath(value)
   }
-
-  // The collection the group toggle widens, named in its label.
-  const collectionId = workbench.collectionPath.split('/').at(-1) ?? ''
 
   // A collection segment that matches nothing can be created on the spot.
   const creatable = editing !== null ? creatableCollection(suggestions.data, editing) : undefined
@@ -193,43 +191,7 @@ export function PathBar() {
         </div>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        {workbench.collectionPath && (
-          <Tooltip
-            content={
-              workbench.isPattern
-                ? `Every ${collectionId} under the pattern; click to go back to ${
-                    workbench.collectionPath.split('/')[0] ?? ''
-                  }`
-                : workbench.group
-                  ? `Every ${collectionId} in the database, whatever its parent; click for this one only`
-                  : 'Query every collection with this id, at any depth'
-            }
-            render={
-              <Button
-                // A scope, not an action: `primary` belongs to New and Run.
-                variant={workbench.group ? 'secondary' : 'ghost'}
-                size="sm"
-                icon={<StackIcon />}
-                className="max-w-56"
-                onClick={() =>
-                  // A pattern is nothing but its group; leaving it lands on
-                  // the root collection the pattern starts from.
-                  workbench.isPattern
-                    ? workbench.setPath(workbench.collectionPath.split('/')[0] ?? '')
-                    : workbench.setGroup(!workbench.group)
-                }
-                aria-pressed={workbench.group}
-                aria-label="Toggle collection group"
-              >
-                {/* Off, the state has no name; on, `group` does not say which
-                    one. The label carries it, the way Filter carries the query. */}
-                <span className="min-w-0 truncate">
-                  {workbench.group ? `all ${collectionId}` : 'group'}
-                </span>
-              </Button>
-            }
-          />
-        )}
+        {workbench.collectionPath && <ScopePicker />}
         <Tooltip
           content="Copy the path"
           render={

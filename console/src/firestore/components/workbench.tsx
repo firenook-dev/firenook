@@ -117,6 +117,11 @@ function WorkbenchBody() {
       } else if (event.key === 'e' && workbench.collectionPath) {
         event.preventDefault()
         setExplain(!useQueryLine.getState().explain)
+      } else if (event.key === 'g' && workbench.collectionPath && !workbench.isPattern) {
+        // The scope is a menu so both scopes are named, but flipping it stays
+        // one keystroke. A pattern is already the group, with nowhere to go.
+        event.preventDefault()
+        workbench.setGroup(!workbench.group)
       } else if (event.key === 'n' && workbench.collectionPath && !workbench.isPattern) {
         event.preventDefault()
         openCreate({ kind: 'document', collection: workbench.collectionPath })

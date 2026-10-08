@@ -87,6 +87,17 @@ export function siblingsById(schema: SchemaSnapshot | undefined, node: SchemaNod
     .filter((candidate) => candidate.id === node.id && candidate.pattern !== node.pattern)
 }
 
+/**
+ * Every pattern that carries a collection id, which is exactly the set a
+ * collection-group query reads. One entry means the id is unique in the
+ * database, and the group reads the same documents as the collection.
+ */
+export function patternsById(schema: SchemaSnapshot | undefined, id: string): SchemaNode[] {
+  return flattenSchema(schema)
+    .map((entry) => entry.node)
+    .filter((node) => node.id === id)
+}
+
 /** Formats a node's shape for one line: `orders › items · sessions`. */
 export function describeChildren(node: SchemaNode, limit = 4): string {
   const parts = node.children.map((child) => {
