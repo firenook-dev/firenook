@@ -215,7 +215,7 @@ test('the scope picker names both scopes, and reads what it says', async ({ page
   await page.goto(`${origin()}/console/firestore?path=users/u_k65eq/orders`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   await page.getByTestId('scope-picker').click()
-  await expect(page.getByTestId('scope-one')).toContainText('the orders under users/u_k65eq')
+  await expect(page.getByTestId('scope-one')).toContainText('only the one under users/u_k65eq')
   await expect(page.getByTestId('scope-all')).toContainText(/\d+ of them/)
   const mine = Number((await page.getByTestId('scope-one').innerText()).match(/\d+/)?.[0])
   await page.getByTestId('scope-all').click()
