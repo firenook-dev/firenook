@@ -30,6 +30,7 @@ import { QueryLine } from './query-line'
 import { RequestsDrawer } from './requests-drawer'
 import { RulesEditorPanel } from './rules-editor'
 import { SchemaPanel } from './schema-panel'
+import { ViewAsPicker } from './view-as-picker'
 import { WorkbenchProvider, useWorkbench, useWorkbenchState } from './workbench-context'
 
 export function FirestoreWorkbench() {
@@ -178,6 +179,9 @@ function WorkbenchData({
           state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
           changes={commits}
         />
+        {/* Not a property of the query below: the identity applies to every
+            read the workbench makes, the schema tree and inspector included. */}
+        <ViewAsPicker />
         {checked.size > 0 && (
           <Button
             variant="secondary-destructive"

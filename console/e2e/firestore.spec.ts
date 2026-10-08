@@ -16,14 +16,16 @@ const owner = { authorization: 'Bearer owner', 'content-type': 'application/json
 /** The resource name a write names, as opposed to the URL it is sent to. */
 const resource = () => `projects/${project()}/databases/(default)/documents`
 
-test('a collection is a typed grid with live counts in the path bar', async ({ page }) => {
+test('a collection is a typed grid counted once, in the query line', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
   const header = page.getByRole('table').locator('thead')
   await expect(header.getByText('displayName')).toBeVisible()
   await expect(header.getByText('lastSeen')).toBeVisible()
   await expect(header.getByText('timestamp', { exact: true }).first()).toBeVisible()
-  await expect(page.getByTestId('path-bar')).toContainText('240')
   await expect(page.getByTestId('match-count')).toContainText('240 documents')
+  // Only there: the path bar does not print the same figure a row above,
+  // where it would carry neither the query nor the identity in force.
+  await expect(page.getByTestId('path-bar')).not.toContainText('240')
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
 })
 
@@ -134,6 +136,8 @@ test('rows show their subcollections and the tree walks three levels deep', asyn
   await ada.getByTestId('subcollection-link').filter({ hasText: 'orders' }).click()
   await expect(page).toHaveURL(/path=users%2Fu_k65eq%2Forders$/)
   await expect(page.getByTestId('path-bar')).toContainText('orders')
+  // An ancestor keeps its count — it is the only place that figure appears.
+  await expect(page.getByTestId('path-bar')).toContainText('240')
   // Every order carries its items as a subcollection of its own.
   const order = page.getByTestId('grid-row').first()
   await expect(order.getByTestId('subcollection-link')).toHaveText(/items/)
@@ -249,6 +253,10 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await orders.getByTestId('schema-node-open').click()
   await expect(page).toHaveURL(/path=users%2F\*%2Forders&group=true/)
   await expect(page.getByTestId('path-bar')).toContainText('*')
+  // The toggle names the scope it put you in, rather than saying `group`.
+  await expect(page.getByRole('button', { name: 'Toggle collection group' })).toContainText(
+    'all orders',
+  )
   await expect(page.getByTestId('grid-row').first()).toContainText(/users\/[^/]+\/orders\//)
   await expect(items).toBeVisible()
   await expect(panel.getByTestId('schema-summary')).toContainText(

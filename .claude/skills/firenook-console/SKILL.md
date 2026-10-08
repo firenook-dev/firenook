@@ -163,6 +163,31 @@ than Kumo's docs show. The accent is reserved for the primary
 action, active navigation and links; switches use `variant="neutral"` (Kumo's
 default switch is hard-coded blue) so they match the checkbox.
 
+### The two toolbar rows, and toggles
+
+A section's toolbar is two rows and the split is a rule, not a space
+problem. **Row one is the scope**: where you are (the database picker, the
+path, the collection-group toggle), the state of the connection (`live`),
+who the reads run as (`View as` — it applies to every read the section
+makes, the schema tree and the inspector included, so it is never a
+property of the query), and what acts on the whole section (`Rules`,
+`New`). **Row two is this one query**: the filter or the SDK chain, `Run`,
+`Explain`, what came back, and `Code`. A control that belongs to both rows
+belongs in row one.
+
+Count each figure once. The path bar prints a count for every collection on
+the way *except* the one in view, because row two already counts that one
+under the query and the identity actually in force; two counts a row apart
+either agree redundantly or disagree with nothing to explain why.
+
+Kumo ships no `Toggle`; a toggle is a `Button` with `aria-pressed` and
+`variant={on ? 'secondary' : 'ghost'}` — never `primary`, which is reserved
+for the action of the row (`New`, `Run`). `Switch` is a settings control and
+does not belong in a toolbar. Base UI's `Toggle`/`ToggleGroup` are installed
+and unstyled if a real pressed state is ever needed. Let the label carry the
+state wherever an off state would otherwise have no name: `Filter` becomes
+the printed query, `group` becomes `all <collection>`.
+
 The component library the design tool works from is `design-system/`
 (`npm run design-system` renders every card through a real browser into
 `.design-system/bundle`, `npm run design-system:dev` serves the cards). Add a

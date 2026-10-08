@@ -12,7 +12,6 @@ import { countQueryOptions } from '../queries'
 import { findNode, schemaQuery } from '../schema'
 import { formatNumber } from '../value'
 import { CodePopover } from './code-popover'
-import { ViewAsPicker } from './view-as-picker'
 import { useWorkbench } from './workbench-context'
 
 export function QueryLine() {
@@ -177,7 +176,6 @@ export function QueryLine() {
             </Text>
           )}
           <CodePopover />
-          <ViewAsPicker />
         </div>
       </div>
       {workbench.queryError && (

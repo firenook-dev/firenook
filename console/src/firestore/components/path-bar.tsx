@@ -50,6 +50,9 @@ export function PathBar() {
     workbench.setPath(value)
   }
 
+  // The collection the group toggle widens, named in its label.
+  const collectionId = workbench.collectionPath.split('/').at(-1) ?? ''
+
   // A collection segment that matches nothing can be created on the spot.
   const creatable = editing !== null ? creatableCollection(suggestions.data, editing) : undefined
   function create() {
@@ -85,7 +88,14 @@ export function PathBar() {
                 label={segment}
                 current={index === segments.length - 1}
                 onClick={() => workbench.setPath(path)}
-                count={isCollection ? <CollectionCount path={path} /> : undefined}
+                // The query line already counts the collection in view, under
+                // the query and the identity actually in force. A second
+                // figure here can only agree redundantly or disagree silently.
+                count={
+                  isCollection && path !== workbench.collectionPath ? (
+                    <CollectionCount path={path} />
+                  ) : undefined
+                }
               />
             )
           })}
@@ -187,16 +197,20 @@ export function PathBar() {
           <Tooltip
             content={
               workbench.isPattern
-                ? `Every ${workbench.collectionPath.split('/').at(-1) ?? ''} under the pattern; click to go back to ${
+                ? `Every ${collectionId} under the pattern; click to go back to ${
                     workbench.collectionPath.split('/')[0] ?? ''
                   }`
-                : 'Query every collection with this id, at any depth'
+                : workbench.group
+                  ? `Every ${collectionId} in the database, whatever its parent; click for this one only`
+                  : 'Query every collection with this id, at any depth'
             }
             render={
               <Button
-                variant={workbench.group ? 'primary' : 'ghost'}
+                // A scope, not an action: `primary` belongs to New and Run.
+                variant={workbench.group ? 'secondary' : 'ghost'}
                 size="sm"
                 icon={<StackIcon />}
+                className="max-w-56"
                 onClick={() =>
                   // A pattern is nothing but its group; leaving it lands on
                   // the root collection the pattern starts from.
@@ -207,7 +221,11 @@ export function PathBar() {
                 aria-pressed={workbench.group}
                 aria-label="Toggle collection group"
               >
-                group
+                {/* Off, the state has no name; on, `group` does not say which
+                    one. The label carries it, the way Filter carries the query. */}
+                <span className="min-w-0 truncate">
+                  {workbench.group ? `all ${collectionId}` : 'group'}
+                </span>
               </Button>
             }
           />
