@@ -163,6 +163,25 @@ than Kumo's docs show. The accent is reserved for the primary
 action, active navigation and links; switches use `variant="neutral"` (Kumo's
 default switch is hard-coded blue) so they match the checkbox.
 
+### Capitals: English for the person, lowercase for the data
+
+Anything written *to* the reader starts with a capital — every control label
+(`Rules`, `New`, `Run`, `Explain`, `Code`, `Filter`, `This collection`,
+`All <id>`), every menu item and group label, every status word
+(`Live`, `Unavailable`, `Unsaved`, `Undone`, `Not enforced`) and every
+sentence of explanation under one, which also takes a full stop. A control
+and the menu it opens must agree: the trigger said `this collection` while
+its own menu item said `This collection`, which is the kind of mismatch that
+reads as carelessness before anyone can say why.
+
+Anything that *is* data stays exactly as the data has it: Firestore's value
+types (`string`, `timestamp`, `doc`, `null`), collection ids and field names
+including the grid's own `id` and `subcollections` columns, the query text,
+a path preview's `auto id`, and API vocabulary someone will retype elsewhere
+(`collection group`, which is `COLLECTION_GROUP` in `firestore.indexes.json`).
+Output that leads with a figure needs no capital at all — `67 documents ·
+count 15 ms`.
+
 ### The two toolbar rows, and toggles
 
 A section's toolbar is two rows and the split is a rule, not a space

@@ -60,7 +60,7 @@ test('viewing as a user applies the rules the app would hit', async ({ page }) =
   await expect(inspector.getByText('orders')).toBeVisible()
   // The Requests drawer streams the evaluations with the lines that fired.
   await page.getByTestId('requests-drawer').getByRole('button').first().click()
-  await expect(page.getByTestId('requests-drawer')).toContainText('live')
+  await expect(page.getByTestId('requests-drawer')).toContainText('Live')
   await page.getByTestId('view-as').click()
   await page.getByRole('menuitem', { name: /Anonymous/ }).click()
   await expect(page.getByTestId('requests-drawer')).toContainText('denied', { timeout: 10_000 })
@@ -96,7 +96,7 @@ test('the inspector saves typed edits and the change flashes back through the li
   })
   expect(response.ok()).toBeTruthy()
   await expect(row).toContainText('11', { timeout: 5_000 })
-  await expect(page.getByText(/live · \d+ change/)).toBeVisible()
+  await expect(page.getByText(/Live · \d+ change/)).toBeVisible()
 })
 
 test('documents are added and deleted from the workbench', async ({ page }) => {
@@ -200,14 +200,14 @@ test('the scope picker names both scopes, and reads what it says', async ({ page
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   // At rest it says which scope you are in, not what clicking would do.
-  await expect(page.getByTestId('scope-picker')).toContainText('this collection')
+  await expect(page.getByTestId('scope-picker')).toContainText('This collection')
   await page.getByTestId('scope-picker').click()
   // `users` sits at the root and nothing else carries the id, so the group
   // reads the same documents — the menu says so rather than leaving you to
   // toggle it and wonder why nothing moved.
   await expect(page.getByTestId('scope-one')).toContainText('240')
   await expect(page.getByTestId('scope-all')).toContainText('240')
-  await expect(page.getByTestId('scope-all')).toContainText('the only users in the database')
+  await expect(page.getByTestId('scope-all')).toContainText('The only users in the database')
   await page.keyboard.press('Escape')
 
   // A subcollection is the case where the two scopes differ: this user's
@@ -215,12 +215,12 @@ test('the scope picker names both scopes, and reads what it says', async ({ page
   await page.goto(`${origin()}/console/firestore?path=users/u_k65eq/orders`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   await page.getByTestId('scope-picker').click()
-  await expect(page.getByTestId('scope-one')).toContainText('only the one under users/u_k65eq')
+  await expect(page.getByTestId('scope-one')).toContainText('Only the one under users/u_k65eq')
   await expect(page.getByTestId('scope-all')).toContainText(/\d+ of them/)
   const mine = Number((await page.getByTestId('scope-one').innerText()).match(/\d+/)?.[0])
   await page.getByTestId('scope-all').click()
   await expect(page).toHaveURL(/group=true/)
-  await expect(page.getByTestId('scope-picker')).toContainText('all orders')
+  await expect(page.getByTestId('scope-picker')).toContainText('All orders')
   // Every order in the database, named by path because an id no longer
   // identifies a row.
   await expect(page.getByRole('table').locator('thead')).toContainText('path')
@@ -231,7 +231,7 @@ test('the scope picker names both scopes, and reads what it says', async ({ page
   // g flips it back without opening the menu.
   await page.keyboard.press('g')
   await expect(page).not.toHaveURL(/group=true/)
-  await expect(page.getByTestId('scope-picker')).toContainText('this collection')
+  await expect(page.getByTestId('scope-picker')).toContainText('This collection')
 })
 
 test('the schema tree shows the shape and opens a nested pattern as its group', async ({
@@ -292,7 +292,7 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await expect(page).toHaveURL(/path=users%2F\*%2Forders&group=true/)
   await expect(page.getByTestId('path-bar')).toContainText('*')
   // The scope picker names the scope it put you in, rather than saying `group`.
-  await expect(page.getByTestId('scope-picker')).toContainText('all orders')
+  await expect(page.getByTestId('scope-picker')).toContainText('All orders')
   await expect(page.getByTestId('grid-row').first()).toContainText(/users\/[^/]+\/orders\//)
   await expect(items).toBeVisible()
   await expect(panel.getByTestId('schema-summary')).toContainText(

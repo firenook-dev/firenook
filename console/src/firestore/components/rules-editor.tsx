@@ -112,10 +112,10 @@ export function RulesEditorPanel() {
         </span>
         {rules.data && !rules.data.enforced && (
           <Badge variant="warning" appearance="dot">
-            not enforced
+            Not enforced
           </Badge>
         )}
-        {edited && <Badge variant="outline">unsaved</Badge>}
+        {edited && <Badge variant="outline">Unsaved</Badge>}
         <span className="ml-auto flex items-center gap-2">
           {rules.data?.path && (
             <span className="hidden max-w-[32ch] truncate font-mono text-[11px] text-kumo-subtle lg:block">

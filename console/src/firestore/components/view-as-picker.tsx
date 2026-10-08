@@ -36,7 +36,7 @@ export function ViewAsPicker() {
             data-testid="view-as"
           >
             <span className="flex items-center gap-1">
-              <span className="text-kumo-subtle">as</span> {describeViewAs(current)}
+              <span className="text-kumo-subtle">As</span> {describeViewAs(current)}
               <CaretDownIcon size={12} className="text-kumo-subtle" />
             </span>
           </Button>

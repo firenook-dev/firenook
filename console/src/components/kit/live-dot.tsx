@@ -7,7 +7,7 @@ export type LiveState = 'live' | 'reconnecting' | 'offline'
  * @category Status
  */
 export function LiveDot({ state = 'live', changes }: { state?: LiveState; changes?: number }) {
-  const label = state === 'live' ? 'live' : state === 'reconnecting' ? 'reconnecting' : 'offline'
+  const label = state === 'live' ? 'Live' : state === 'reconnecting' ? 'Reconnecting' : 'Offline'
   const colour =
     state === 'live'
       ? 'bg-kumo-success'

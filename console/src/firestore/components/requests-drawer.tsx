@@ -45,13 +45,13 @@ export function RequestsDrawer({
         </Text>
         {open && status === 'live' && (
           <Badge variant="success" appearance="dot">
-            live
+            Live
           </Badge>
         )}
         {open && status === 'unavailable' && (
           <span title={detail ?? ''}>
             <Badge variant="error" appearance="dot">
-              unavailable
+              Unavailable
             </Badge>
           </span>
         )}

@@ -137,7 +137,7 @@ function CommitRow({
         <Text as="span" size="sm">
           {describeCommit(commit)}
         </Text>
-        {commit.undone && <Badge variant="outline">undone</Badge>}
+        {commit.undone && <Badge variant="outline">Undone</Badge>}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           <Text as="span" variant="secondary" size="sm">
             {relativeTime(commit.commitTime)}

@@ -57,10 +57,10 @@ export function ScopePicker() {
             <span className="flex min-w-0 items-center gap-1">
               {workbench.group ? (
                 <span className="flex min-w-0 items-center gap-1">
-                  all <Id>{collectionId}</Id>
+                  All <Id>{collectionId}</Id>
                 </span>
               ) : (
-                'this collection'
+                'This collection'
               )}
               <CaretDownIcon size={12} className="shrink-0 text-kumo-subtle" />
             </span>
@@ -92,10 +92,10 @@ export function ScopePicker() {
               count={here.data?.count}
             >
               {workbench.isPattern
-                ? 'a pattern stands for the group, so it names no one collection'
+                ? 'A pattern stands for the group, so it names no one collection.'
                 : parent
-                  ? `only the one under ${parent}`
-                  : 'only the one at the root of the database'}
+                  ? `Only the one under ${parent}.`
+                  : 'Only the one at the root of the database.'}
             </Option>
           </DropdownMenu.Item>
           <DropdownMenu.Item
@@ -114,8 +114,8 @@ export function ScopePicker() {
               count={patterns.length > 0 ? everywhere : undefined}
             >
               {places > 1
-                ? `every collection called ${collectionId}, whatever its parent — ${formatNumber(places)} of them. A collection group.`
-                : `the only ${collectionId} in the database, so the same documents. A collection group.`}
+                ? `Every collection called ${collectionId}, whatever its parent — ${formatNumber(places)} of them. A collection group.`
+                : `The only ${collectionId} in the database, so the same documents. A collection group.`}
             </Option>
           </DropdownMenu.Item>
         </DropdownMenu.Group>

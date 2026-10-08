@@ -169,7 +169,7 @@ export function QueryLine() {
                   </span>
                 </>
               ) : count.isError || schema.isError ? (
-                <span className="text-kumo-danger">count unavailable</span>
+                <span className="text-kumo-danger">Count unavailable</span>
               ) : (
                 '…'
               )}
@@ -197,7 +197,7 @@ export function QueryLine() {
           )}
           {workbench.group && (
             <Tooltip content="Collection group: every collection with this id">
-              <Badge variant="outline">group</Badge>
+              <Badge variant="outline">collection group</Badge>
             </Tooltip>
           )}
         </div>
