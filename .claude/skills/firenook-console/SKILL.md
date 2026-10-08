@@ -213,11 +213,15 @@ count 15 ms`.
 ### The two toolbar rows, and toggles
 
 A section's toolbar is two rows and the split is a rule, not a space
-problem. Within a row, a control sits against the thing it acts on: the
-scope picker and copy belong beside the path, not pushed to the far right
-of it, or they read as unrelated to what they change. Dividers mark the
-groups, and the last one isolates the control that writes — `New` stands
-alone, everything that reports or switches view is on the other side.
+problem. A persistent control keeps a fixed place; variable-length content
+runs after it. The scope picker and copy lead the row, divider, then the
+path — the browser's own shape, and the reason is that a path changes length
+with every move, so a control placed after it slides a few hundred pixels on
+each one and can never be aimed at. Adjacency is worth less than a target
+that stays put; the breadcrumb beside it already says what the scope applies
+to. Dividers mark the groups, and the last one isolates the control that
+writes — `New` stands alone, everything that reports or switches view is on
+the other side.
 
 A toolbar must degrade, never overlap. A `shrink-0` group inside a
 `flex-1` parent paints over its neighbour when the parent runs out of room,

@@ -197,14 +197,20 @@ test('a screen of rows asks for its subcollections once, not once a row', async 
 })
 
 test('the toolbar groups hold, and never overlap, as it narrows', async ({ page }) => {
-  await page.goto(`${origin()}/console/firestore?path=users/u_k65eq/orders`)
-  await expect(page.getByTestId('grid-row').first()).toBeVisible()
-  // The controls that act on the path sit against it, not across the row.
-  const lastSegment = page.getByTestId('path-bar').getByRole('button', { name: 'orders' })
-  const gap = async () =>
-    (await page.getByTestId('scope-picker').boundingBox())!.x -
-    edge(await lastSegment.boundingBox())
-  expect(await gap()).toBeLessThan(24)
+  // The controls that act on the path lead the row, so they are in the same
+  // place whatever the path is: a path changes length with every move, and a
+  // control that slides with it can never be aimed at.
+  const scopeAt = async (path: string) => {
+    await page.goto(`${origin()}/console/firestore?path=${path}`)
+    await expect(page.getByTestId('grid-row').first()).toBeVisible()
+    return (await page.getByTestId('scope-picker').boundingBox())!.x
+  }
+  const near = await scopeAt('users')
+  const far = await scopeAt('users/u_k65eq/orders')
+  expect(far).toBe(near)
+  // And the path runs after them, not before.
+  const segments = (await page.getByTestId('path-segments').boundingBox())!.x
+  expect(segments).toBeGreaterThan(edge(await page.getByTestId('path-controls').boundingBox()))
 
   for (const width of [1440, 1280, 1152, 1024]) {
     await page.setViewportSize({ width, height: 760 })

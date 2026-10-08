@@ -85,9 +85,15 @@ export function PathBar() {
     >
       {editing === null ? (
         <>
-          {/* The segments scroll inside a box of their own so the controls
-              that act on the path stay beside it however long it grows. */}
-          <div ref={trail} className="flex min-w-0 items-center overflow-x-auto">
+          <PathControls />
+          <span className="mr-0.5 ml-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+          {/* The segments scroll inside a box of their own, so a long path
+              never pushes anything else along the row. */}
+          <div
+            ref={trail}
+            className="flex min-w-0 items-center overflow-x-auto"
+            data-testid="path-segments"
+          >
             <div ref={segmentsRef} className="flex items-center">
               <PathSegment label={workbench.database} onClick={() => workbench.setPath('')} first />
               {segments.map((segment, index) => {
@@ -125,7 +131,6 @@ export function PathBar() {
               })}
             </div>
           </div>
-          <PathControls />
           <button
             type="button"
             className="ml-1 h-7 flex-1 basis-0 cursor-text rounded-md px-2 text-left font-mono text-[0.9em] text-kumo-inactive hover:bg-kumo-tint"
@@ -139,6 +144,8 @@ export function PathBar() {
         </>
       ) : (
         <>
+          <PathControls />
+          <span className="mr-0.5 ml-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
           <div className="relative min-w-0 flex-1">
             <input
               ref={inputRef}
@@ -221,14 +228,17 @@ export function PathBar() {
               </ul>
             )}
           </div>
-          <PathControls />
         </>
       )}
     </div>
   )
 }
 
-/** The controls that act on the path, which is why they sit against it. */
+/**
+ * The controls that act on the path. They lead the row rather than follow
+ * the last segment: a path changes length with every move, and a control
+ * that slides a few hundred pixels on each one can never be aimed at.
+ */
 function PathControls() {
   const workbench = useWorkbench()
   return (
