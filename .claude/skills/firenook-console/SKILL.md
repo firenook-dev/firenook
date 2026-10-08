@@ -369,6 +369,84 @@ inside a `DropdownMenu.Group`**), and keep a one-key shortcut so flipping it
 costs no more than the toggle did. `DropdownMenu` is already in the Firestore
 chunk, so it is free there and 10 KB anywhere in the first route.
 
+### The field tree, and what an editor is for
+
+A document in the inspector is a `DraftNode[]` (`src/firestore/draft.ts`),
+not a list of `{name, type, text}` rows. **A field, a map entry and an array
+element are the same object** — a name (or an index), a type, a value — so
+they are one node and `FieldRow` recurses. That is the whole reason the
+panel exists: the one case a form beats raw JSON at is nested structure, and
+the version before this dropped to a JSON textarea the moment a value
+stopped being flat, which is exactly where it was wanted. Rows are the
+default and `raw` on a container is the escape hatch, revealed on hover.
+
+`draft.ts` is pure and unit-tested: `nodesFrom` builds the tree,
+`parseNode` reads it back, `problemsOf` says what is wrong *by node*, and
+`diffDocument` works out the one write. Everything the components do is
+render it.
+
+**The editor is what knows what a good value looks like, so there is one per
+type.** A text box per type is the same as no editor: a number carries an
+`integer`/`double` control, a timestamp a calendar and how long ago it was,
+a reference the completion of the path it points at, a geopoint two
+labelled numbers instead of one string with a comma in it, bytes their
+count and their text when they are text. `value-editors.tsx` holds them.
+
+**An integer and a double are different Firestore types written the same
+way.** `3` is both, so the text cannot say which, and the node carries it
+(`integer`, `numberForm`). Without that, `editorText` printed `3` and
+`parseEditorText` read an integer back: every double that read whole was
+silently narrowed the moment its field was touched, and *duplicating* a
+document narrowed all of them at once, because a duplicate writes every
+field. A unit test and a journey hold both ends.
+
+**Checked as it is typed, and Save knows before it is pressed.**
+`problemsOf` runs on every keystroke and the message lands on the row that
+owns it — a broken number three levels down is marked three levels down,
+not on the field at the top of the tree. `diffDocument` compares *values*,
+so Save is dead until something really changed and alive again when it is
+typed back. That comparison is by value, which means a timestamp compares
+by instant: the engine returns `…T00:00:00Z` and the editor writes
+`…T00:00:00.000Z`, and comparing the strings made every document holding a
+whole-second timestamp look edited the moment it was opened.
+
+**A rename is a delete and a set, and only here.** Firestore has no rename
+operation; the mask carries the new name and the old one in one write. The
+diff gets this for free by looking `before` up under the name the field is
+*going* to have — a name the document does not hold yet has nothing to be
+equal to, so it is written, and the old name falls out of `live` and is
+cleared. A second `renamed` term looked necessary and was not; it was
+removed when no regression could be made to fail with it gone. The row says
+**renaming changes this document only**, because the other documents in the
+collection keep the old name and a console that does not say so is setting
+a trap.
+
+**The name reads as a label and edits as a field**, by the same rule as the
+path field: nothing at rest, a ground under the pointer, an outline for
+focus alone.
+
+**Adding a field is one line, and the line knows the collection.**
+`useKnownFields` reads the grid's own page query — same key, same cache, no
+second request — and runs `inferColumns` over it, so the name completes
+from what the rest of the collection calls its fields and brings that
+field's usual type with it. Tab completes, Enter adds, focus lands on the
+value. Firestore is schemaless, but a collection has a de-facto shape and
+the console had already worked it out.
+
+**A popup inside `overflow: auto` is an invisible popup.** Both lists here
+hang off an input in a scrolling column, so `Completions` draws in a portal
+from the input's own rectangle and follows it while anything scrolls; the
+add-field line itself sits *below* the scroller, where it is always
+reachable and nothing clips it. The journeys assert paint with
+`elementFromPoint` at the element's own centre — `toBeVisible` does not
+test for a clip and `click` scrolls the clipping box first, which no person
+can do.
+
+**Reference completion is a key range, not a page filtered in the browser.**
+`listDocumentIds` orders by `__name__` from the prefix. The first version
+fetched fifty ids and filtered them here, which offered nothing on the
+first collection it met, because the id being typed was the two-hundredth.
+
 Use Firestore's own words even when they are long: `collection group`, not
 `group` — a bare `group` in a grid reads as group-by, and the canonical term
 is what someone searches the docs and `firestore.indexes.json` with. The
@@ -416,9 +494,8 @@ card there for every new pattern before it is designed with. Component docs: `np
   `import` (object keyed by id, array or NDJSON, batches of 200 `set`s). An
   explicit id uses a `create` write (`currentDocument.exists: false`); the
   engine answers 412, shown as "already exists". `FieldsPanel` in
-  `field-editor.tsx` is the typed rows + JSON view shared by the inspector
-  and the dialog; `draftsFromJson` keeps timestamp/reference types when the
-  text is unchanged.
+  `field-editor.tsx` is the field tree + JSON view shared by the inspector
+  and the dialog; the model is `src/firestore/draft.ts` (see below).
 - Grid interactions: `HeaderMenu` writes `orderBy` into the query (the header
   shows the arrow) and composes `where("field", "==", )` into the query line
   through `useQueryLine.compose` (caret placed before `)`); hidden columns

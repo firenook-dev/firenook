@@ -204,6 +204,42 @@ export async function listMissingDocuments(
   return missing
 }
 
+/**
+ * Document ids in a collection from a prefix onward, names only.
+ *
+ * Completion over a collection with a quarter of a million documents in it
+ * is only worth anything if the engine does the seeking, so this is a key
+ * range ordered by `__name__` rather than the first page filtered in the
+ * browser — which, on the collection this was first tried against, offered
+ * nothing because the id being typed was the two-hundredth.
+ */
+export async function listDocumentIds(
+  scope: FirestoreScope,
+  collection: string,
+  from: string,
+  limit: number,
+): Promise<string[]> {
+  const slash = collection.lastIndexOf('/')
+  const parent = slash === -1 ? '' : collection.slice(0, slash)
+  const collectionId = slash === -1 ? collection : collection.slice(slash + 1)
+  const query: StructuredQuery = {
+    from: [{ collectionId }],
+    orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+    limit,
+    select: { fields: [{ fieldPath: '__name__' }] },
+  }
+  if (from)
+    query.where = {
+      fieldFilter: {
+        field: { fieldPath: '__name__' },
+        op: 'GREATER_THAN_OR_EQUAL',
+        value: { referenceValue: `${documentRoot(scope)}/${collection}/${from}` },
+      },
+    }
+  const page = await runQuery(scope, parent, query)
+  return page.documents.map((document) => document.id)
+}
+
 export interface WriteOperation {
   /** Create or replace the document with exactly these fields. */
   set?: { path: string; fields: Record<string, RestValue> }

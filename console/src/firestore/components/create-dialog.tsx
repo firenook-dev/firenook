@@ -6,6 +6,7 @@ import { Button, Checkbox, Dialog, Text, useKumoToastManager } from '@cloudflare
 import { UploadSimpleIcon, XIcon } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useRef, useState } from 'react'
+import { type DraftNode, nodeFrom, nodesFrom, parseNode, problemsOf } from '../draft'
 import { type CreateRequest, generateId, parseImport, useCreateDialog, validateId } from '../create'
 import { useSelection } from '../selection'
 import { FirestoreError, type WriteOperation, commit, documentRoot } from '../rest'
@@ -16,9 +17,9 @@ import {
   encodeValue,
   fromJson,
   isRestShape,
-  parseEditorText,
 } from '../value'
-import { type FieldDraft, FieldsPanel, draftFor, draftsFrom } from './field-editor'
+import { FieldsPanel } from './field-editor'
+import { useKnownFields } from './known-fields'
 import { useWorkbench } from './workbench-context'
 
 export function CreateDialog() {
@@ -42,9 +43,11 @@ export function CreateDialog() {
   )
 }
 
-function initialDrafts(request: CreateRequest): FieldDraft[] {
-  if (request.kind === 'document' && request.template) return draftsFrom(request.template, true)
-  return [{ ...draftFor('createdAt', 'timestamp', new Date().toISOString()), dirty: true }]
+function initialNodes(request: CreateRequest): DraftNode[] {
+  // A duplicate carries the types it was read with, down to whether a
+  // number was stored as an integer or a double.
+  if (request.kind === 'document' && request.template) return nodesFrom(request.template.fields)
+  return [nodeFrom('createdAt', { type: 'timestamp', value: new Date().toISOString() })]
 }
 
 function CreateForm({
@@ -64,14 +67,16 @@ function CreateForm({
   const [documentId, setDocumentId] = useState(
     request.kind === 'document' ? (request.id ?? '') : '',
   )
-  const [drafts, setDrafts] = useState<FieldDraft[]>(() => initialDrafts(request))
+  const [nodes, setNodes] = useState<DraftNode[]>(() => initialNodes(request))
   const [tab, setTab] = useState<'fields' | 'json'>('fields')
   const [error, setError] = useState<string | undefined>()
+  const problems = useMemo(() => problemsOf(nodes), [nodes])
 
   const collectionPath =
     request.kind === 'document'
       ? request.collection
       : [request.parent, collectionId.trim()].filter(Boolean).join('/')
+  const known = useKnownFields(collectionPath)
   const collectionError =
     request.kind === 'collection' ? validateId(collectionId.trim(), 'collection') : undefined
   const documentError = documentId.trim() ? validateId(documentId.trim(), 'document') : undefined
@@ -82,21 +87,14 @@ function CreateForm({
       if (documentError) throw new Error(documentError)
       const root = documentRoot(workbench.scope)
       const fields: Record<string, RestValue> = {}
-      const next = drafts.map((draft) => ({ ...draft }))
-      let failed = false
-      for (const draft of next) {
-        const parsed = parseEditorText(draft.type, draft.text)
+      for (const node of nodes) {
+        if (node.removed === true) continue
+        const parsed = parseNode(node)
         if (!parsed.ok) {
-          draft.error = parsed.error
-          failed = true
-          continue
+          setTab('fields')
+          throw new Error(`${node.name}: ${parsed.error}`)
         }
-        fields[draft.name] = encodeValue(parsed.value, root)
-      }
-      if (failed) {
-        setDrafts(next)
-        setTab('fields')
-        throw new Error('Fix the highlighted fields')
+        fields[node.name.trim()] = encodeValue(parsed.value, root)
       }
       const path = `${collectionPath}/${documentId.trim() || generateId()}`
       // An explicit id must not silently replace a document already there.
@@ -221,18 +219,22 @@ function CreateForm({
           one-field document is not mostly empty space. */}
       <div className="mt-3 flex max-h-[400px] min-h-[180px] flex-col rounded-md ring ring-kumo-line">
         <FieldsPanel
-          drafts={drafts}
-          onDraftsChange={setDrafts}
+          nodes={nodes}
+          onNodesChange={setNodes}
+          problems={problems}
+          known={known}
           tab={tab}
           onTabChange={setTab}
           onOpenReference={(path) => workbench.selectDocument(path)}
           rows={14}
         />
       </div>
-      {error && (
+      {(error || problems.size > 0) && (
         <div className="mt-2">
-          <Text variant="error" size="sm">
-            {error}
+          <Text variant="error" size="sm" data-testid="create-blocked">
+            {problems.size > 0
+              ? `${problems.size} field${problems.size === 1 ? '' : 's'} to fix`
+              : error}
           </Text>
         </div>
       )}
@@ -251,7 +253,7 @@ function CreateForm({
           variant="primary"
           onClick={() => create.mutate()}
           loading={create.isPending}
-          disabled={Boolean(collectionError) || Boolean(documentError)}
+          disabled={Boolean(collectionError) || Boolean(documentError) || problems.size > 0}
           data-testid="create-submit"
         >
           {submitLabel}

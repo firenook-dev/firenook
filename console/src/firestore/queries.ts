@@ -9,6 +9,7 @@ import {
   documentRoot,
   getDocument,
   listCollectionIds,
+  listDocumentIds,
   listMissingDocuments,
   runQuery,
 } from './rest'
@@ -25,6 +26,15 @@ export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
   queryOptions({
     queryKey: [FS, scope.database, 'collections', parent, scope.authorization ?? ''],
     queryFn: () => listCollectionIds(scope, parent),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+/** Document ids in one collection from a prefix, for completing a reference. */
+export const documentIdsQuery = (scope: FirestoreScope, collection: string, from: string) =>
+  queryOptions({
+    queryKey: [FS, scope.database, 'ids', collection, from, scope.authorization ?? ''],
+    queryFn: () => listDocumentIds(scope, collection, from, 20),
     staleTime: 30_000,
     retry: false,
   })

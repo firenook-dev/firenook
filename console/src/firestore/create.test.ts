@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { generateId, parseImport, validateId } from './create'
-import { draftsFromJson, draftsToJson } from './components/field-editor'
 import { inferScalar } from './components/inline-cell-editor'
 import { recentsKey, useRecents } from './recents'
 import { fromJson } from './value'
@@ -61,27 +60,7 @@ describe('importing JSON', () => {
   })
 })
 
-describe('field drafts and JSON', () => {
-  it('round-trips drafts through JSON and keeps types JSON cannot express', () => {
-    const drafts = [
-      { name: 'at', type: 'timestamp' as const, text: '2026-09-20T09:00:00.000Z', dirty: false },
-      { name: 'ref', type: 'reference' as const, text: 'users/u1', dirty: false },
-      { name: 'n', type: 'number' as const, text: '3', dirty: false },
-    ]
-    const json = draftsToJson(drafts)
-    expect(json).toEqual({ at: '2026-09-20T09:00:00.000Z', ref: 'users/u1', n: 3 })
-    const back = draftsFromJson(JSON.stringify({ ...json, n: 4, extra: true }), drafts)
-    expect(back.drafts.map((draft) => [draft.name, draft.type, draft.dirty])).toEqual([
-      ['at', 'timestamp', false],
-      ['ref', 'reference', false],
-      ['n', 'number', true],
-      ['extra', 'boolean', true],
-    ])
-    expect(back.gone).toEqual([])
-    expect(draftsFromJson('{"at": "2026-09-20T09:00:00.000Z"}', drafts).gone).toEqual(['ref', 'n'])
-    expect(() => draftsFromJson('[1]', drafts)).toThrow(/object/)
-  })
-
+describe('inline cell editing', () => {
   it('infers a scalar type for a cell with no type yet', () => {
     expect(inferScalar('true')).toEqual({ type: 'boolean', value: true })
     expect(inferScalar('12')).toEqual({ type: 'number', value: 12, integer: true })

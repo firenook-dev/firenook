@@ -4,7 +4,6 @@ import {
   Checkbox,
   Collapsible,
   InlineCopyText,
-  Input,
   LayerCard,
   Link,
   Select,
@@ -19,6 +18,7 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowSquareOutIcon,
   BracketsCurlyIcon,
+  CaretDownIcon,
   CaretRightIcon,
   CommandIcon,
   CopyIcon,
@@ -419,20 +419,38 @@ function PathAndQuery() {
  * `mixed` is the exception, because a column disagreeing with itself is
  * worth a glance — and it is the only amber in the grid, so it gets one.
  */
+function TypeChip({
+  type,
+  mixed,
+  menu,
+}: {
+  type: string
+  mixed?: string | undefined
+  menu?: boolean | undefined
+}) {
+  return (
+    <span
+      className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
+        mixed ? 'bg-kumo-warning-tint text-kumo-default' : 'bg-kumo-tint text-kumo-subtle'
+      }`}
+      title={mixed ? `More than one type here: ${mixed}` : undefined}
+    >
+      {mixed && <span className="size-1.5 shrink-0 rounded-full bg-kumo-warning" />}
+      {type}
+      {/* The same chip labels a column and opens the type menu on a field
+          row. The one that can be changed says so with a caret, not with a
+          colour: colour here is spent on `mixed` and nothing else. */}
+      {menu && <CaretDownIcon size={9} className="-mr-0.5 shrink-0 opacity-70" />}
+    </span>
+  )
+}
+
 function TypeHead({ label, type, mixed }: { label: string; type: string; mixed?: string }) {
   return (
     <Table.Head>
       <span className="flex items-center gap-2">
         <span className="font-mono text-[12px] font-medium">{label}</span>
-        <span
-          className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
-            mixed ? 'bg-kumo-warning-tint text-kumo-default' : 'bg-kumo-tint text-kumo-subtle'
-          }`}
-          title={mixed ? `More than one type here: ${mixed}` : undefined}
-        >
-          {mixed && <span className="size-1.5 shrink-0 rounded-full bg-kumo-warning" />}
-          {type}
-        </span>
+        <TypeChip type={type} mixed={mixed} />
       </span>
     </Table.Head>
   )
@@ -616,24 +634,84 @@ function DataGrid() {
   )
 }
 
-function Field({
+/**
+ * One row of the field tree, and it recurses.
+ *
+ * A field of a document, an entry of a map and an element of an array are
+ * the same object — a name (or an index), a type, a value — so they are one
+ * row. That is what lets the panel edit a nested structure at all: the case
+ * a form beats raw JSON at is nesting, and a panel that drops to a textarea
+ * the moment a value stops being flat has given up exactly where it was
+ * wanted. The name wears no chrome until it is pointed at, because it is
+ * read far more often than it is changed, and editing it is the rename
+ * Firestore has no operation for: a delete and a set, in this document only.
+ */
+function FieldRow({
   name,
+  index,
   type,
-  variant,
+  note,
+  removed,
   children,
 }: {
-  name: string
-  type: string
-  variant: 'blue' | 'teal' | 'purple' | 'orange' | 'green' | 'neutral'
-  children: React.ReactNode
+  name?: string | undefined
+  index?: number | undefined
+  type?: string | undefined
+  note?: string | undefined
+  removed?: boolean | undefined
+  children?: ReactNode
 }) {
+  if (removed)
+    return (
+      <div className="flex items-center gap-2 rounded-md px-2 py-1.5 opacity-70">
+        <span className="min-w-0 flex-1 truncate font-mono text-[12px] line-through">{name}</span>
+        <span className="shrink-0 text-[11px] text-kumo-subtle">Removed on save</span>
+        <Button variant="ghost" size="xs" icon={<ArrowCounterClockwiseIcon />}>
+          Undo
+        </Button>
+      </div>
+    )
   return (
-    <div className="grid grid-cols-[160px_1fr] items-center gap-3 py-1.5">
-      <span className="flex items-center gap-2">
-        <span className="font-mono text-[13px]">{name}</span>
-        <Badge variant={variant}>{type}</Badge>
-      </span>
-      <div className="min-w-0">{children}</div>
+    <div className="grid gap-1 rounded-md px-2 py-1.5">
+      <div className="flex items-center gap-1">
+        {index === undefined ? (
+          <span className="min-w-0 flex-1 truncate rounded px-1 font-mono text-[12px] font-medium">
+            {name}
+          </span>
+        ) : (
+          <>
+            <span className="w-6 shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums">
+              {index}
+            </span>
+            <span className="min-w-0 flex-1" />
+          </>
+        )}
+        {type && <TypeChip type={type} menu />}
+        <Button
+          variant="ghost"
+          size="xs"
+          shape="square"
+          icon={<TrashIcon />}
+          aria-label={`Remove ${name ?? index}`}
+        />
+      </div>
+      {children}
+      {note && <span className="text-[11px] text-kumo-subtle">{note}</span>}
+    </div>
+  )
+}
+
+/** The entries of a map or the items of an array, under a guide line. */
+function Nested({ children }: { children: ReactNode }) {
+  return <div className="ml-1 grid gap-1 border-l border-kumo-line pl-2">{children}</div>
+}
+
+function ValueBox({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={`flex h-7 min-w-0 items-center rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line ${className}`}
+    >
+      {children}
     </div>
   )
 }
@@ -643,7 +721,7 @@ function Inspector() {
     <Stack>
       <Section
         title="Inspector"
-        note="The selected document, edited in place with a typed editor per field. Fields or JSON. Subcollections beneath with counts. Copy as code emits the read or write in the SDK dialect the developer chooses."
+        note="The selected document as one recursive row: a name, a type, a value. Maps and arrays open in place rather than falling back to a JSON textarea, every type gets the editor it needs, and what is typed is checked as it is typed. Fields or JSON. Subcollections beneath with counts. Copy as code emits the read or write in the SDK dialect the developer chooses."
       >
         <LayerCard className="w-[520px] p-0">
           <LayerCard.Secondary className="flex items-center gap-2">
@@ -678,44 +756,78 @@ function Inspector() {
               ]}
               selectedValue="fields"
             />
-            <div className="grid divide-y divide-kumo-hairline">
-              <Field name="status" type="string" variant="blue">
-                <Input size="sm" defaultValue="paid" />
-              </Field>
-              <Field name="total" type="number" variant="teal">
-                <Input size="sm" defaultValue="42" className="w-40 font-mono" />
-              </Field>
-              <Field name="paid" type="boolean" variant="green">
-                <Switch
-                  variant="neutral"
-                  size="sm"
-                  checked
-                  onCheckedChange={() => {}}
-                  label="true"
-                />
-              </Field>
-              <Field name="createdAt" type="timestamp" variant="purple">
-                <Input size="sm" defaultValue="2026-09-20T10:14:02.117Z" className="font-mono" />
-              </Field>
-              <Field name="customer" type="reference" variant="orange">
-                <Link href="#" className="font-mono text-[0.9em]">
-                  users/u_9f3k2
-                </Link>
-              </Field>
-              <Field name="items" type="array" variant="neutral">
-                <Collapsible.Root defaultOpen={false}>
-                  <Collapsible.DefaultTrigger>3 items</Collapsible.DefaultTrigger>
-                  <Collapsible.DefaultPanel>
-                    <span className="font-mono text-[12px] text-kumo-subtle">
-                      [ sku_1, sku_9, sku_12 ]
-                    </span>
-                  </Collapsible.DefaultPanel>
-                </Collapsible.Root>
-              </Field>
+            <div className="grid gap-0.5">
+              <FieldRow name="status" type="string">
+                <ValueBox>paid</ValueBox>
+              </FieldRow>
+              <FieldRow name="total" type="number">
+                <div className="flex items-center gap-1">
+                  <ValueBox className="flex-1">42</ValueBox>
+                  {/* `3` is how Firestore writes an integer and a double
+                      alike, so nothing in the text can say which this is.
+                      The editor says it, and lets it be changed. */}
+                  <span className="flex h-7 shrink-0 items-center rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle ring ring-kumo-line">
+                    double
+                  </span>
+                </div>
+              </FieldRow>
+              <FieldRow name="paid" type="boolean">
+                <div className="flex h-7 items-center">
+                  <Switch variant="neutral" size="sm" checked onCheckedChange={() => {}} />
+                  <span className="ml-2 font-mono text-[12px] text-kumo-subtle">true</span>
+                </div>
+              </FieldRow>
+              <FieldRow name="createdAt" type="timestamp" note="2 mo ago">
+                <ValueBox>2026-09-20T10:14:02.117Z</ValueBox>
+              </FieldRow>
+              <FieldRow
+                name="buyer"
+                type="reference"
+                note="Renaming customer here changes this document only."
+              >
+                <ValueBox>users/u_9f3k2</ValueBox>
+              </FieldRow>
+              <FieldRow name="office" type="geopoint">
+                <div className="flex items-center gap-1">
+                  <ValueBox className="flex-1">
+                    <span className="mr-1.5 text-[11px] text-kumo-inactive">lat</span>3.139
+                  </ValueBox>
+                  <ValueBox className="flex-1">
+                    <span className="mr-1.5 text-[11px] text-kumo-inactive">lng</span>101.6869
+                  </ValueBox>
+                </div>
+              </FieldRow>
+              <FieldRow name="billing" type="map">
+                <Nested>
+                  <FieldRow name="currency" type="string">
+                    <ValueBox>MYR</ValueBox>
+                  </FieldRow>
+                  <FieldRow name="contacts" type="array">
+                    <Nested>
+                      <FieldRow index={0} type="map">
+                        <Nested>
+                          <FieldRow name="email" type="string">
+                            <ValueBox>ada@example.test</ValueBox>
+                          </FieldRow>
+                        </Nested>
+                      </FieldRow>
+                    </Nested>
+                  </FieldRow>
+                </Nested>
+              </FieldRow>
+              <FieldRow name="legacy" type="string" removed />
             </div>
-            <Button variant="ghost" size="sm" icon={<PlusIcon />} className="justify-self-start">
-              Add field
-            </Button>
+            {/* Below the rows, not among them: a document with forty fields
+                should not need scrolling to the end to gain a forty-first,
+                and the name completes from what the rest of the collection
+                calls its fields, bringing that field's usual type with it. */}
+            <div className="flex items-center gap-1 border-t border-kumo-line px-2 pt-3">
+              <ValueBox className="flex-1 text-kumo-inactive">New field name</ValueBox>
+              <TypeChip type="string" menu />
+              <Button variant="ghost" size="sm" icon={<PlusIcon />}>
+                Add field
+              </Button>
+            </div>
             <Collapsible.Root defaultOpen>
               <Collapsible.DefaultTrigger>Subcollections (2)</Collapsible.DefaultTrigger>
               <Collapsible.DefaultPanel>
@@ -1696,7 +1808,8 @@ defineCards([
     id: 'inspector',
     group: 'Patterns',
     name: 'Document inspector',
-    subtitle: 'Typed field editors, JSON tab, subcollections, save, copy as code, delete',
+    subtitle:
+      'The recursive field row, an editor per type, rename and removal, JSON, subcollections',
     width: 880,
     surface: 'canvas',
     render: () => <Inspector />,

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { type Locator, expect, test } from '@playwright/test'
 
 // The Firestore workbench against a real engine seeded by scripts/seed-firestore.mjs.
 const origin = () => {
@@ -1123,4 +1123,235 @@ test('rules are text you can change, and the change is in force at once', async 
   await expect(page.getByRole('heading', { name: 'Rules applied' })).toBeVisible()
   await page.getByTestId('rules-close').click()
   await expect(page.getByTestId('toolbar')).toBeVisible()
+})
+
+/**
+ * Whether the element is the thing the document paints at its own centre.
+ * Playwright's own checks cannot answer this: `toBeVisible` does not test
+ * for a clip by an ancestor's `overflow: hidden`, and `click` scrolls the
+ * clipping box first, which no person can do. Both walked straight through
+ * a popup that had been invisible for months.
+ */
+async function paintedAtItsOwnCentre(locator: Locator): Promise<boolean> {
+  return locator.evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    const hit = el.ownerDocument.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+    return el === hit || el.contains(hit)
+  })
+}
+
+/** A document written straight to the engine, bypassing the console. */
+async function put(
+  request: { post: (url: string, options: object) => Promise<{ ok: () => boolean }> },
+  path: string,
+  fields: Record<string, unknown>,
+) {
+  const response = await request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: { writes: [{ update: { name: `${resource()}/${path}`, fields } }] },
+  })
+  expect(response.ok()).toBeTruthy()
+}
+
+async function drop(
+  request: { post: (url: string, options: object) => Promise<{ ok: () => boolean }> },
+  ...paths: string[]
+) {
+  await request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: { writes: paths.map((path) => ({ delete: `${resource()}/${path}` })) },
+  })
+}
+
+test('a nested value edits as rows, and a rename is the same single write', async ({ page }) => {
+  await put(page.request, 'teams/t_nested', {
+    title: { stringValue: 'Nested' },
+    legacy: { stringValue: 'drop me' },
+    lead: { referenceValue: `${resource()}/users/u_k65eq` },
+    billing: {
+      mapValue: {
+        fields: {
+          currency: { stringValue: 'MYR' },
+          contacts: {
+            arrayValue: {
+              values: [{ mapValue: { fields: { email: { stringValue: 'ada@example.test' } } } }],
+            },
+          },
+        },
+      },
+    },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_nested`)
+  const inspector = page.getByTestId('inspector')
+
+  // A map is rows. Its entries — and the entries of the array inside it —
+  // are edited where they are, not in a JSON textarea standing in for them.
+  await expect(inspector.getByLabel('currency value')).toHaveValue('MYR')
+  await inspector.getByLabel('email value').fill('grace@example.test')
+
+  // An entry added to the map in place: name it, Enter, type the value.
+  await inspector.getByLabel('Add to billing').click()
+  await expect(inspector.getByLabel('Field name', { exact: true })).toBeFocused()
+  await page.keyboard.type('plan')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('pro')
+
+  // A reference completes the path it is pointing at, a segment at a time.
+  // Its list hangs off a row inside the scrolling column, where an
+  // `absolute` popup is an invisible one the moment the row nears an edge:
+  // `toBeVisible` cannot see that, and a click scrolls the clipping box
+  // first, which nobody can do. So ask the document what it paints there.
+  await inspector.getByLabel('lead value').fill('users/u_k6')
+  const paths = page.getByTestId('reference-completions')
+  await expect(paths).toContainText('u_k65eq')
+  expect(await paintedAtItsOwnCentre(paths.getByRole('button').first())).toBe(true)
+  await paths.getByRole('button', { name: /u_k65eq/ }).click()
+
+  // Firestore has no rename: this is a delete and a set, in this document
+  // alone, and the row says so before it is saved.
+  await inspector.getByLabel('title name').fill('heading')
+  await expect(inspector).toContainText('changes this document only')
+
+  // A removal is shown on its own row, and can be taken back.
+  await inspector.getByLabel('Remove legacy').click()
+  await expect(inspector).toContainText('Removed on save')
+  await inspector.getByLabel('Keep legacy').click()
+  await expect(inspector.getByLabel('legacy value')).toHaveValue('drop me')
+  await inspector.getByLabel('Remove legacy').click()
+
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+
+  const stored = await page.request.get(`${documents()}/teams/t_nested`, { headers: owner })
+  const body = (await stored.json()) as { fields: Record<string, Record<string, never>> }
+  expect(body.fields.heading).toEqual({ stringValue: 'Nested' })
+  expect(body.fields.lead).toEqual({ referenceValue: `${resource()}/users/u_k65eq` })
+  expect(body.fields.title).toBeUndefined()
+  expect(body.fields.legacy).toBeUndefined()
+  expect(body.fields.billing).toEqual({
+    mapValue: {
+      fields: {
+        currency: { stringValue: 'MYR' },
+        plan: { stringValue: 'pro' },
+        contacts: {
+          arrayValue: {
+            values: [{ mapValue: { fields: { email: { stringValue: 'grace@example.test' } } } }],
+          },
+        },
+      },
+    },
+  })
+  await drop(page.request, 'teams/t_nested')
+})
+
+test('an integer and a double are told apart, and stay that way', async ({ page }) => {
+  await put(page.request, 'teams/t_numbers', {
+    whole: { doubleValue: 3 },
+    count: { integerValue: '3' },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_numbers`)
+  const inspector = page.getByTestId('inspector')
+
+  // `3` is how Firestore writes both an integer and a double, so nothing in
+  // the text can say which this is. The editor says it instead — and before
+  // it did, every double that read whole came back an integer.
+  await expect(inspector.getByLabel('whole is a double')).toHaveText('double')
+  await expect(inspector.getByLabel('count is an integer')).toHaveText('integer')
+
+  await inspector.getByLabel('count value').fill('4')
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+  const touched = await page.request.get(`${documents()}/teams/t_numbers`, { headers: owner })
+  const after = (await touched.json()) as { fields: Record<string, unknown> }
+  expect(after.fields.whole).toEqual({ doubleValue: 3 })
+  expect(after.fields.count).toEqual({ integerValue: '4' })
+
+  // Duplicating writes every field, which is where the narrowing used to
+  // happen without anyone touching the number at all.
+  await inspector.getByTestId('duplicate-document').click()
+  await page.getByTestId('create-submit').click()
+  await expect(page.getByText('Document added')).toBeVisible()
+  const copy = new URL(page.url()).searchParams.get('doc') ?? ''
+  expect(copy).toMatch(/^teams\//)
+  const copied = await page.request.get(`${documents()}/${copy}`, { headers: owner })
+  expect(((await copied.json()) as { fields: Record<string, unknown> }).fields.whole).toEqual({
+    doubleValue: 3,
+  })
+
+  // And the form is the editor's to change, which is the other half of it.
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_numbers`)
+  await inspector.getByLabel('whole is a double').click()
+  await expect(inspector.getByLabel('whole is an integer')).toHaveText('integer')
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+  const narrowed = await page.request.get(`${documents()}/teams/t_numbers`, { headers: owner })
+  expect(((await narrowed.json()) as { fields: Record<string, unknown> }).fields.whole).toEqual({
+    integerValue: '3',
+  })
+  await drop(page.request, 'teams/t_numbers', copy)
+})
+
+test('a value is checked as it is typed, and Save knows whether there is anything to do', async ({
+  page,
+}) => {
+  await put(page.request, 'teams/t_typed', { seats: { integerValue: '3' } })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_typed`)
+  const inspector = page.getByTestId('inspector')
+
+  // An untouched document has nothing to save, and says so by being unable to.
+  await expect(inspector.getByTestId('save-document')).toBeDisabled()
+
+  await inspector.getByLabel('seats value').fill('banana')
+  await expect(inspector).toContainText('Not a number')
+  await expect(inspector.getByTestId('save-blocked')).toContainText('1 field to fix')
+  await expect(inspector.getByTestId('save-document')).toBeDisabled()
+
+  await inspector.getByLabel('seats value').fill('77')
+  await expect(inspector.getByTestId('save-pending')).toContainText('1 change')
+  await expect(inspector.getByTestId('save-document')).toBeEnabled()
+
+  // Typing it back makes the change go away, because the panel compares
+  // values rather than remembering that a key was pressed.
+  await inspector.getByLabel('seats value').fill('3')
+  await expect(inspector.getByTestId('save-document')).toBeDisabled()
+  await drop(page.request, 'teams/t_typed')
+})
+
+test('a new field completes from the collection, with the type the collection gives it', async ({
+  page,
+}) => {
+  await put(page.request, 'teams/t_sparse', { name: { stringValue: 'Sparse' } })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_sparse`)
+  const inspector = page.getByTestId('inspector')
+  await inspector.getByTestId('new-field-name').click()
+
+  const list = page.getByTestId('field-completions')
+  await expect(list).toContainText('seats')
+  // The list hangs off a control inside a scrolling column, where an
+  // `absolute` popup is an invisible one the moment its row nears an edge.
+  // `toBeVisible` cannot see that, and a click scrolls the clipping box
+  // first, which nobody can do — so ask the document what it paints there.
+  const painted = await list
+    .getByRole('button')
+    .first()
+    .evaluate((el) => {
+      const box = el.getBoundingClientRect()
+      const hit = el.ownerDocument.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      return el === hit || el.contains(hit)
+    })
+  expect(painted).toBe(true)
+
+  await list.getByRole('button', { name: /seats/ }).click()
+  // Typed the way the rest of the collection types it, with the value
+  // already waiting for the keyboard.
+  await expect(inspector.getByRole('button', { name: 'seats type: number' })).toBeVisible()
+  await expect(inspector.getByLabel('seats value')).toBeFocused()
+  await page.keyboard.type('5')
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+  const stored = await page.request.get(`${documents()}/teams/t_sparse`, { headers: owner })
+  expect(((await stored.json()) as { fields: Record<string, unknown> }).fields.seats).toEqual({
+    integerValue: '5',
+  })
+  await drop(page.request, 'teams/t_sparse')
 })

@@ -27,18 +27,20 @@ import { useMemo, useState } from 'react'
 import { useCreateDialog } from '../create'
 import { type CodeTarget, documentAsCode } from '../query'
 import { documentQuery } from '../queries'
-import { type WriteOperation, commit, documentRoot } from '../rest'
+import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { type Subcollection, subcollectionsQuery } from '../subcollections'
 import {
-  type FsDocument,
-  type FsValue,
-  type RestValue,
-  encodeValue,
-  parseEditorText,
-  relativeTime,
-} from '../value'
+  type DraftNode,
+  diffDocument,
+  nodesFrom,
+  parseNode,
+  problemsOf,
+  toJsonValue,
+} from '../draft'
+import { type FsDocument, type FsValue, type RestValue, encodeValue, relativeTime } from '../value'
 import { CodeBlock, firestoreOrigin } from './code-popover'
-import { type FieldDraft, FieldsPanel, draftsFrom, toJsonValue } from './field-editor'
+import { FieldsPanel } from './field-editor'
+import { useKnownFields } from './known-fields'
 import { useWorkbench } from './workbench-context'
 
 /** The inspector's width plus the gap before it, px; the grid uses it to know what it covers. */
@@ -239,39 +241,31 @@ function DocumentEditor({
   const toasts = useKumoToastManager()
   const status = useQuery(statusQuery)
   const openCreate = useCreateDialog((state) => state.open)
-  const [drafts, setDrafts] = useState<FieldDraft[]>(() => draftsFrom(document))
-  const [removed, setRemoved] = useState<string[]>([])
+  const [nodes, setNodes] = useState<DraftNode[]>(() => nodesFrom(document.fields, true))
   const [codeTarget, setCodeTarget] = useState<CodeTarget>('web')
+  const known = useKnownFields(document.collection)
 
-  const dirty = removed.length > 0 || drafts.some((draft) => draft.dirty)
+  // Both run on every keystroke, which is the point: a value that will not
+  // parse says so under the row it is in, and Save knows whether there is
+  // anything to save before it is pressed rather than after.
+  const problems = useMemo(() => problemsOf(nodes), [nodes])
+  const diff = useMemo(() => diffDocument(document.fields, nodes), [document.fields, nodes])
+  const changed = Object.keys(diff.write).length + diff.clear.length
   const root = documentRoot(workbench.scope)
 
   const save = useMutation({
     mutationFn: async () => {
-      const fields: Record<string, ReturnType<typeof encodeValue>> = {}
-      const mask: string[] = [...removed]
-      const next = drafts.map((draft) => ({ ...draft }))
-      let failed = false
-      for (const draft of next) {
-        if (!draft.dirty) continue
-        const parsed = parseEditorText(draft.type, draft.text)
-        if (!parsed.ok) {
-          draft.error = parsed.error
-          failed = true
-          continue
-        }
-        fields[draft.name] = encodeValue(parsed.value, root)
-        mask.push(draft.name)
-      }
-      if (failed) {
-        setDrafts(next)
-        throw new Error('Fix the highlighted fields')
-      }
-      const operation: WriteOperation = {
-        update: { path: document.path, fields, mask: mask.map(quote), exists: true },
-      }
-      await commit(workbench.scope, [operation])
-      return mask.length
+      const fields: Record<string, RestValue> = {}
+      for (const [name, value] of Object.entries(diff.write))
+        fields[name] = encodeValue(value, root)
+      // The mask carries the cleared names as well as the written ones, so
+      // a removal and a rename — which is a delete and a set — are the same
+      // single write as an edit, and either all of it lands or none does.
+      const mask = [...Object.keys(diff.write), ...diff.clear].map(quoteFieldSegment)
+      await commit(workbench.scope, [
+        { update: { path: document.path, fields, mask, exists: true } },
+      ])
+      return changed
     },
     onSuccess: (count) => {
       void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
@@ -286,26 +280,23 @@ function DocumentEditor({
   const forCode = useMemo(() => {
     const plain: Record<string, unknown> = {}
     const rest: Record<string, RestValue> = {}
-    for (const draft of drafts) {
-      const parsed = parseEditorText(draft.type, draft.text)
-      const value: FsValue = parsed.ok ? parsed.value : { type: 'string', value: draft.text }
-      plain[draft.name] = toJsonValue(value)
-      rest[draft.name] = encodeValue(value, root)
+    for (const node of nodes) {
+      if (node.removed === true) continue
+      const parsed = parseNode(node)
+      const value: FsValue = parsed.ok ? parsed.value : { type: 'string', value: node.text }
+      plain[node.name] = toJsonValue(value)
+      rest[node.name] = encodeValue(value, root)
     }
     return { json: plain, rest }
-  }, [drafts, root])
+  }, [nodes, root])
 
   return (
     <>
       <FieldsPanel
-        drafts={drafts}
-        onDraftsChange={(next) => {
-          setDrafts(next)
-          // A field brought back by JSON is no longer removed.
-          setRemoved((previous) => previous.filter((name) => !next.some((d) => d.name === name)))
-        }}
-        removed={removed}
-        onRemoved={(names) => setRemoved((previous) => [...new Set([...previous, ...names])])}
+        nodes={nodes}
+        onNodesChange={setNodes}
+        problems={problems}
+        known={known}
         tab={workbench.tab}
         onTabChange={workbench.setTab}
         onOpenReference={(path) => workbench.selectDocument(path)}
@@ -316,17 +307,25 @@ function DocumentEditor({
           variant="primary"
           size="sm"
           onClick={() => save.mutate()}
-          disabled={!dirty}
+          disabled={changed === 0 || problems.size > 0}
           loading={save.isPending}
           data-testid="save-document"
         >
           Save
         </Button>
-        {save.isError && (
+        {save.isError ? (
           <Text variant="error" size="sm" truncate>
             {save.error.message}
           </Text>
-        )}
+        ) : problems.size > 0 ? (
+          <Text variant="error" size="sm" data-testid="save-blocked">
+            {problems.size} field{problems.size === 1 ? '' : 's'} to fix
+          </Text>
+        ) : changed > 0 ? (
+          <Text variant="secondary" size="sm" data-testid="save-pending">
+            {changed} change{changed === 1 ? '' : 's'}
+          </Text>
+        ) : null}
         <div className="ml-auto flex items-center gap-1">
           <Popover>
             <Popover.Trigger
@@ -387,10 +386,6 @@ function DocumentEditor({
       </footer>
     </>
   )
-}
-
-function quote(name: string): string {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `\`${name.replace(/`/g, '\\`')}\``
 }
 
 function parentCollection(path: string): string {

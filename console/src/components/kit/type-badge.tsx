@@ -1,3 +1,5 @@
+import { CaretDownIcon } from '@phosphor-icons/react'
+
 export type FirestoreValueType =
   | 'string'
   | 'number'
@@ -27,14 +29,22 @@ export type FirestoreValueType =
  * coloured badge in the grid, and the odd cells beneath it carry the same
  * amber. What counts as that case is the caller's to decide — a column of
  * timestamps and nulls does not.
+ *
+ * `menu` is the other half of that restraint. The chip reads the same in a
+ * grid header, where it is a label, and in the inspector, where it opens
+ * the type menu — so the one that can be changed says so with a caret
+ * rather than with a colour or a second shape.
  * @category Data
  */
 export function TypeBadge({
   type,
   mixed,
+  menu,
 }: {
   type: FirestoreValueType
   mixed?: string | undefined
+  /** This chip opens a menu: it takes a caret. */
+  menu?: boolean | undefined
 }) {
   return (
     <span
@@ -52,6 +62,7 @@ export function TypeBadge({
     >
       {mixed && <span className="size-1.5 shrink-0 rounded-full bg-kumo-warning" />}
       {type}
+      {menu && <CaretDownIcon size={9} className="-mr-0.5 shrink-0 opacity-70" />}
     </span>
   )
 }
