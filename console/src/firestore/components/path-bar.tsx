@@ -105,9 +105,16 @@ export function PathBar() {
           <ScopePicker />
         </div>
       )}
+      {/* At rest the field is a trough, not an outline: this is a breadcrumb
+          you read, and an outline is the one thing on a screen that means
+          `type here`. A fill says `one region` and claims nothing. It also
+          cannot be clipped — an outline here is a `ring`, which paints
+          outside the box, so the row's own clip ate its right edge and left
+          the field open-ended. Focus is where the outline belongs, and by
+          then the clip has lifted for the completions. */}
       <div
-        className={`relative flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 pl-1 ring ${
-          editing === null ? 'ring-kumo-hairline' : 'bg-kumo-control ring-kumo-focus'
+        className={`relative flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 pl-1 ${
+          editing === null ? 'bg-kumo-tint' : 'bg-kumo-control ring ring-kumo-focus'
         }`}
         data-testid="path-field"
       >
@@ -329,8 +336,8 @@ function PathSegment({
       <button
         type="button"
         onClick={onClick}
-        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[0.9em] hover:bg-kumo-tint ${
-          current ? 'bg-kumo-tint text-kumo-default' : 'text-kumo-default'
+        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[0.9em] text-kumo-default hover:bg-kumo-base ${
+          current ? 'bg-kumo-base' : ''
         }`}
         aria-current={current ? 'location' : undefined}
       >

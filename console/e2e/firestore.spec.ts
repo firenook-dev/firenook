@@ -226,6 +226,15 @@ test('the toolbar groups hold, and never overlap, as it narrows', async ({ page 
   const field = await page.getByTestId('path-field').boundingBox()
   expect(edge(longPath)).toBeLessThanOrEqual(edge(field))
   expect(edge(longPath)).toBeGreaterThan(edge(field) - 8)
+  // The field ends exactly where the row's clip does, and a Tailwind `ring`
+  // is a shadow painted outside the box — so an outline here loses its right
+  // edge and the field reads as open-ended. At rest it is a fill, which
+  // cannot be clipped; the outline belongs to focus, by which time the clip
+  // has lifted for the completions.
+  const chrome = await page
+    .getByTestId('path-field')
+    .evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el).boxShadow)
+  expect(chrome).toBe('none')
 
   for (const width of [1440, 1280, 1152, 1024]) {
     await page.setViewportSize({ width, height: 760 })
