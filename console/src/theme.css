@@ -51,6 +51,20 @@
  * (macOS subpixel rendering makes every weight heavier than designed) and
  * Inter's contextual alternates with its open 4, 6 and 9.
  */
+/*
+ * A menu hangs off a control, so it takes the panel body size (13 px), not
+ * Kumo's 14 px content size: a 12 px toolbar button that opens a 14 px menu
+ * reads as two type systems a pixel apart. Unlayered like the brand tokens
+ * above, so it beats Tailwind's `text-base` utility whatever the specificity.
+ */
+[data-kumo-component='DropdownMenu'][data-kumo-part='item'],
+[data-kumo-component='DropdownMenu'][data-kumo-part='link-item'],
+[data-kumo-component='DropdownMenu'][data-kumo-part='checkbox-item'],
+[data-kumo-component='DropdownMenu'][data-kumo-part='radio-item'],
+[data-kumo-component='DropdownMenu'][data-kumo-part='submenu-trigger'] {
+  font-size: var(--text-sm);
+}
+
 @layer base {
   html {
     font-family: var(--font-sans);

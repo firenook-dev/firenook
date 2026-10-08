@@ -182,6 +182,15 @@ surface read as a larger world than the page behind it. A surface attached
 to a control gets a title one step above its own body and no more. Never
 reach past 14 px inside one.
 
+Kumo's `DropdownMenu.Item` is `text-base`, so `theme.css` sets every menu
+part to 13 px once, unlayered, rather than per call site — a new menu is the
+right size without being told. A menu row's second line is 12 px whatever
+its face, and a two-line row takes `className="items-start"` so its icon
+and tick sit on the first line instead of between the two. Use `MenuCheck`
+rather than Kumo's `selected`, which renders the tick hard against the label
+with no gap; note that a Phosphor icon carries width and height attributes,
+so a gap has to go on a wrapper — padding on the icon eats the glyph.
+
 ### Capitals: English for the person, lowercase for the data
 
 Anything written *to* the reader starts with a capital — every control label

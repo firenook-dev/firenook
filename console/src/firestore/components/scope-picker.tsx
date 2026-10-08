@@ -9,9 +9,10 @@
 // click to change it.
 
 import { Button, DropdownMenu } from '@cloudflare/kumo'
-import { CaretDownIcon, CheckIcon, StackIcon, TableIcon } from '@phosphor-icons/react'
+import { CaretDownIcon, StackIcon, TableIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { MenuCheck } from '@/components/kit'
 import { EMPTY_QUERY } from '../query'
 import { countQueryOptions } from '../queries'
 import { patternsById, schemaQuery } from '../schema'
@@ -161,7 +162,7 @@ function Option({
         </span>
         <span className="text-[12px] leading-[1.45] text-kumo-subtle">{children}</span>
       </span>
-      {selected && <CheckIcon size={13} className="mt-0.5 ml-auto shrink-0 text-kumo-brand" />}
+      <MenuCheck on={selected} />
     </span>
   )
 }

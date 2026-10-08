@@ -13,7 +13,7 @@ import {
   SortDescendingIcon,
   XIcon,
 } from '@phosphor-icons/react'
-import { TypeBadge } from '@/components/kit'
+import { MenuCheck, TypeBadge } from '@/components/kit'
 import type { InferredColumn } from '../columns'
 import { printQuery } from '../query'
 import { useColumns, useQueryLine } from '../query-line-store'
@@ -80,19 +80,13 @@ export function HeaderMenu({ column }: { column: InferredColumn }) {
         }
       />
       <DropdownMenu.Content align="start">
-        <DropdownMenu.Item
-          icon={SortAscendingIcon}
-          selected={sorted === 'asc'}
-          onClick={() => sortBy('asc')}
-        >
+        <DropdownMenu.Item icon={SortAscendingIcon} onClick={() => sortBy('asc')}>
           Sort ascending
+          <MenuCheck on={sorted === 'asc'} />
         </DropdownMenu.Item>
-        <DropdownMenu.Item
-          icon={SortDescendingIcon}
-          selected={sorted === 'desc'}
-          onClick={() => sortBy('desc')}
-        >
+        <DropdownMenu.Item icon={SortDescendingIcon} onClick={() => sortBy('desc')}>
           Sort descending
+          <MenuCheck on={sorted === 'desc'} />
         </DropdownMenu.Item>
         {sorted && (
           <DropdownMenu.Item icon={XIcon} onClick={clearSort}>

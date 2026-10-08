@@ -10,6 +10,7 @@ import {
   UserCircleDashedIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
+import { MenuCheck } from '@/components/kit'
 import { authUsersQuery } from '../queries'
 import { describeViewAs } from '../view-as'
 import { useWorkbench } from './workbench-context'
@@ -45,29 +46,30 @@ export function ViewAsPicker() {
       <DropdownMenu.Content>
         <DropdownMenu.Item
           icon={ShieldCheckIcon}
-          selected={current.kind === 'owner'}
           onClick={() => workbench.setViewAs({ kind: 'owner' })}
         >
           Admin (bypasses rules)
+          <MenuCheck on={current.kind === 'owner'} />
         </DropdownMenu.Item>
         <DropdownMenu.Item
           icon={UserCircleDashedIcon}
-          selected={current.kind === 'anonymous'}
           onClick={() => workbench.setViewAs({ kind: 'anonymous' })}
         >
           Anonymous client
+          <MenuCheck on={current.kind === 'anonymous'} />
         </DropdownMenu.Item>
         {(users.data ?? []).map((user) => (
           <DropdownMenu.Item
             key={user.uid}
             icon={UserIcon}
-            selected={current.kind === 'user' && current.uid === user.uid}
+            className="items-start"
             onClick={() => workbench.setViewAs({ kind: 'user', uid: user.uid, email: user.email })}
           >
-            <span className="flex flex-col">
-              <span>{user.email ?? user.displayName ?? user.uid}</span>
-              <span className="font-mono text-[11px] text-kumo-subtle">{user.uid}</span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate">{user.email ?? user.displayName ?? user.uid}</span>
+              <span className="truncate font-mono text-[12px] text-kumo-subtle">{user.uid}</span>
             </span>
+            <MenuCheck on={current.kind === 'user' && current.uid === user.uid} />
           </DropdownMenu.Item>
         ))}
         {users.data?.length === 0 && (
