@@ -13,8 +13,8 @@ import {
   SortDescendingIcon,
   XIcon,
 } from '@phosphor-icons/react'
-import { MenuCheck, TypeBadge, describeMixed } from '@/components/kit'
-import type { InferredColumn } from '../columns'
+import { MenuCheck, TypeBadge } from '@/components/kit'
+import { type InferredColumn, describeTypes } from '../columns'
 import { printQuery } from '../query'
 import { useColumns, useQueryLine } from '../query-line-store'
 import { useWorkbench } from './workbench-context'
@@ -56,7 +56,10 @@ export function HeaderMenu({ column }: { column: InferredColumn }) {
             >
               {column.field}
             </span>
-            <TypeBadge type={column.type} mixed={column.mixed} />
+            <TypeBadge
+              type={column.type}
+              mixed={column.mixed && column.holds ? describeTypes(column.holds) : undefined}
+            />
             {sorted === 'asc' && <ArrowUpIcon size={12} className="shrink-0 text-kumo-brand" />}
             {sorted === 'desc' && <ArrowDownIcon size={12} className="shrink-0 text-kumo-brand" />}
             <CaretDownIcon
@@ -67,16 +70,18 @@ export function HeaderMenu({ column }: { column: InferredColumn }) {
         }
       />
       <DropdownMenu.Content align="start">
-        {/* The amber dot in the header says a column disagrees with itself;
-            this says how. A tooltip is the wrong place for the only
-            explanation of a mark nobody has seen before. */}
-        {column.mixed && (
+        {/* What the loaded documents actually put in this field. The amber
+            dot in the header marks only the case worth marking — two real
+            types in one column — but a field that is sometimes null is
+            worth being able to find out about, and a tooltip is the wrong
+            place for the only explanation of either. */}
+        {column.holds && (
           <DropdownMenu.Group>
             <DropdownMenu.Label className="px-2 pt-0.5 pb-1 text-[11px] font-medium tracking-wide text-kumo-subtle">
-              More than one type here
+              {column.mixed ? 'More than one type here' : 'What this column holds'}
             </DropdownMenu.Label>
             <div className="px-2 pb-1.5 font-mono text-[12px] text-kumo-default">
-              {describeMixed(column.mixed)}
+              {describeTypes(column.holds)}
             </div>
           </DropdownMenu.Group>
         )}

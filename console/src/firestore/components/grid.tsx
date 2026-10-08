@@ -383,10 +383,15 @@ export function Grid() {
                   )}
                   {columns.map((column) => {
                     const value = document.fields[column.field]
-                    // A value whose type differs from the column's is the odd one out.
+                    // A value whose type differs from the column's is the odd
+                    // one out — but only in a column that holds two real
+                    // types. An unset field is written `null` on purpose, and
+                    // tinting every one of those marks ordinary data as a
+                    // fault; the muted `null` in the cell already says it.
                     const odd =
-                      column.mixed !== undefined &&
+                      column.mixed === true &&
                       value !== undefined &&
+                      value.type !== 'null' &&
                       value.type !== column.type
                     const isEditing =
                       editing?.path === document.path && editing.field === column.field

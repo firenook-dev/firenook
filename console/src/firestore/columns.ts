@@ -1,20 +1,39 @@
 // Columns come from the documents on screen: every top-level field, ordered
-// by how many documents carry it, with the type each document gives it. A
-// field whose type differs between documents is the classic Firestore bug
-// (a timestamp here, a string there); the header says so.
+// by how many documents carry it, with the type each document gives it.
+// Firestore has no columns and no schema — a field is whatever each
+// document says it is — so these are a reading of the page, not a promise.
+//
+// A field that is a timestamp in one document and a string in the next is
+// the classic Firestore bug, and the header says so. A field that is a
+// timestamp or `null` is not that bug: it is an optional field written the
+// way Firestore wants it written, so that `where(f, '==', null)` can find
+// the unset ones. Null is the absence of a value, not a rival type, so the
+// column's type is read from the values that have one and nulls never set
+// the marker. Only when the column is nothing but nulls is `null` its
+// type — which is the honest answer, there being nothing else to go on.
 
 import type { FirestoreValueType, FsDocument } from './value'
 
 export interface InferredColumn {
   field: string
-  /** The type most documents use. */
+  /** The type most documents give it, counting only those that hold a value. */
   type: FirestoreValueType
   /** Documents (of those loaded) that carry the field. */
   present: number
-  /** Type → count, when more than one type was seen. */
-  mixed?: Partial<Record<FirestoreValueType, number>> | undefined
+  /** Type → count, when the loaded documents do not all agree. Nulls included. */
+  holds?: Partial<Record<FirestoreValueType, number>> | undefined
+  /** Two or more documents hold *values* of different types — the bug worth a mark. */
+  mixed?: boolean | undefined
   /** Hint for the initial width, px. */
   width: number
+}
+
+/** `timestamp ×17, null ×2`, commonest first — what the column actually holds. */
+export function describeTypes(holds: Partial<Record<FirestoreValueType, number>>): string {
+  return Object.entries(holds)
+    .toSorted(([, a], [, b]) => (b ?? 0) - (a ?? 0))
+    .map(([name, count]) => `${name} ×${count}`)
+    .join(', ')
 }
 
 /**
@@ -65,10 +84,13 @@ export function inferColumns(documents: readonly FsDocument[]): InferredColumn[]
   const columns: InferredColumn[] = []
   for (const [field, entry] of seen) {
     let present = 0
-    let type: FirestoreValueType = 'string'
+    let type: FirestoreValueType = 'null'
     let best = -1
+    let valued = 0
     for (const [candidate, count] of entry.types) {
       present += count
+      if (candidate === 'null') continue
+      valued += 1
       if (count > best) {
         best = count
         type = candidate
@@ -78,7 +100,8 @@ export function inferColumns(documents: readonly FsDocument[]): InferredColumn[]
     // long name never grows the column past the cap.
     const width = Math.max(WIDTHS[type], Math.min(MAX_HEADER_WIDTH, headerWidth(field, type)))
     const column: InferredColumn = { field, type, present, width: Math.round(width) }
-    if (entry.types.size > 1) column.mixed = Object.fromEntries(entry.types)
+    if (entry.types.size > 1) column.holds = Object.fromEntries(entry.types)
+    if (valued > 1) column.mixed = true
     columns.push(column)
   }
   const order = new Map([...seen].map(([field, entry]) => [field, entry.order]))

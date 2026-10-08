@@ -323,7 +323,7 @@ test('a type is named once, and only a column at odds with itself is coloured', 
         {
           update: {
             name: `${resource()}/typecheck/two`,
-            fields: { amount: { stringValue: 'three' }, label: { stringValue: 'b' } },
+            fields: { amount: { stringValue: 'three' }, label: { nullValue: null } },
           },
         },
       ],
@@ -355,11 +355,25 @@ test('a type is named once, and only a column at odds with itself is coloured', 
     ),
   ).not.toBe(grounds[0])
 
+  // Firestore has no schema, so a field is whatever each document makes it
+  // and `null` is a value like any other — the way an optional field is
+  // written, so that `== null` can find it. `label` is a string in one
+  // document and null in the other, and that is not the bug the mark is
+  // for: it stays a string column, drawn like every settled one.
+  const label = page.locator('thead [data-testid="type-badge"]', { hasText: 'string' }).last()
+  await expect(label).not.toHaveAttribute('data-mixed', '')
+  await expect(page.getByTestId('cell-label').first()).not.toHaveClass(/warning/)
+
   // A mark nobody has seen before cannot have its only explanation in a
-  // tooltip, so the column's own menu says what it found.
+  // tooltip, so the column's own menu says what it found — and a column
+  // that is merely sometimes null says so too, just without the colour.
   await page.getByTestId('column-amount').click()
   await expect(page.getByRole('menu')).toContainText('More than one type here')
   await expect(page.getByRole('menu')).toContainText('×1')
+  await page.keyboard.press('Escape')
+  await page.getByTestId('column-label').click()
+  await expect(page.getByRole('menu')).toContainText('What this column holds')
+  await expect(page.getByRole('menu')).toContainText('string ×1, null ×1')
   await page.keyboard.press('Escape')
 
   const removed = await page.request.post(`${documents()}:commit`, {

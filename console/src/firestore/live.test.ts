@@ -61,7 +61,8 @@ describe('column inference', () => {
     expect(columns[1]).toMatchObject({
       type: 'timestamp',
       present: 3,
-      mixed: { timestamp: 2, string: 1 },
+      mixed: true,
+      holds: { timestamp: 2, string: 1 },
     })
     expect(columns[0]?.mixed).toBeUndefined()
   })

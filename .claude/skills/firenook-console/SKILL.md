@@ -317,12 +317,28 @@ chips across a header row is a rainbow with no hierarchy that drowns the
 one colour in there that carries information. It also made a `null` look
 like an error, which it is not; a null is a value.
 
-That one colour is **`mixed`**: a column whose documents disagree about a
-field's type. It is amber, with a dot, and the odd cells beneath it carry
-the same amber tint — the only pair of coloured things in the grid, which
-is what makes them legible. A mark nobody has seen before cannot have its
-only explanation in a `title`, so the column's own menu opens with
+That one colour is **`mixed`**: a column holding *values* of two different
+types. It is amber, with a dot, and the odd cells beneath it carry the same
+amber tint — the only pair of coloured things in the grid, which is what
+makes them legible. A mark nobody has seen before cannot have its only
+explanation in a `title`, so the column's own menu opens with
 `More than one type here` and the breakdown (`string ×3, number ×1`).
+
+**A null is not a second type.** Firestore has no schema — a field is
+whatever each document says it is, and these columns are a reading of the
+page, not a promise — but `null` is how an *optional* field is written, and
+deliberately so: a document that omits the field is invisible to a query
+that filters or orders on it, while `where(f, '==', null)` finds one that
+holds null. So a column of timestamps and nulls is a timestamp column, and
+marking it fired the warning on the commonest well-formed shape in a real
+database: three of eight columns, all of them fine. `inferColumns` reads
+the type from the documents that hold a value, sets `mixed` only when two
+or more of those disagree, and calls a column `null` only when that is all
+there is. The cell tint follows the same rule. What the column holds is
+still one click away in its menu, under `What this column holds` when there
+is nothing wrong with it. The muted `null` already in the cell is the only
+mark that case needs, and an absent field stays blank, which is a different
+thing again.
 
 A chip on a row that lights up on hover has to move the other way or it is
 swallowed: `TypeBadge` takes `group-hover:bg-kumo-base`, and both the
