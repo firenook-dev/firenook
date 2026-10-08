@@ -21,7 +21,7 @@ import { useState } from 'react'
 import { TypeBadge } from '@/components/kit'
 import { type DraftNode, emptyNode, retype } from '../draft'
 import { type FirestoreValueType, VALUE_TYPES } from '../value'
-import { useFieldEditing, useFocusTarget } from './field-context'
+import { ACCESSORY, useFieldEditing, useFocusTarget } from './field-context'
 import { ValueEditor } from './value-editors'
 
 export function FieldRows({
@@ -86,6 +86,7 @@ function FieldRow({
   const problem = editing.problems.get(node.id)
   const container = node.type === 'map' || node.type === 'array'
   const label = named ? node.name || 'new field' : String(index)
+  const unsaved = soft && node.name.trim() !== '' && editing.changed.has(node.name.trim())
   const renamedFrom = node.was !== undefined && node.was !== node.name.trim() ? node.was : undefined
 
   const addChild = () => {
@@ -98,7 +99,7 @@ function FieldRow({
   if (node.removed === true)
     return (
       <div
-        className="flex items-center gap-2 rounded-md px-2 py-1.5 opacity-70"
+        className="flex items-center gap-2 px-1.5 opacity-70"
         data-testid="field-row"
         data-removed=""
       >
@@ -119,12 +120,12 @@ function FieldRow({
     )
 
   return (
-    <div className="group/row grid gap-1 rounded-md px-2 py-1.5" data-testid="field-row">
-      <div className="flex items-center gap-1">
+    <div className="group/row grid gap-0.5" data-testid="field-row">
+      <div className="flex items-center gap-1 pr-1.5 pl-0.5">
         {container && (
           <button
             type="button"
-            className="-ml-1 flex size-5 shrink-0 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-tint"
+            className="flex size-5 shrink-0 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-tint"
             onClick={() => setOpen(!open)}
             aria-expanded={open}
             aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}
@@ -135,12 +136,21 @@ function FieldRow({
         {named ? (
           <NameInput node={node} onChange={onChange} invalid={problem?.name !== undefined} />
         ) : (
-          <span className="w-6 shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums">
+          <span className="w-6 shrink-0 pl-1.5 font-mono text-[12px] text-kumo-subtle tabular-nums">
             {index}
           </span>
         )}
+        {/* Which fields the footer's count is counting. Save is the row's
+            own accent, and this is what it is about to write. */}
+        {unsaved && (
+          <span
+            className="size-1.5 shrink-0 rounded-full bg-kumo-brand"
+            title="Unsaved"
+            data-testid="unsaved-mark"
+          />
+        )}
         {!named && (
-          <span className="flex shrink-0 items-center opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+          <span className={`flex items-center ${ACCESSORY}`}>
             <Button
               variant="ghost"
               size="xs"
@@ -187,28 +197,24 @@ function FieldRow({
         </DropdownMenu>
         {container && (
           <>
-            <Tooltip
-              content={node.type === 'map' ? 'Add an entry' : 'Add an item'}
-              render={
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  shape="square"
-                  icon={<PlusIcon />}
-                  aria-label={`Add to ${label}`}
-                  onClick={addChild}
-                />
-              }
-            />
+            <span className={ACCESSORY}>
+              <Tooltip
+                content={node.type === 'map' ? 'Add an entry' : 'Add an item'}
+                render={
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    shape="square"
+                    icon={<PlusIcon />}
+                    aria-label={`Add to ${label}`}
+                    onClick={addChild}
+                  />
+                }
+              />
+            </span>
             {/* Rows are the point; JSON is the escape hatch, so it waits
                 to be asked for unless it is already in use. */}
-            <span
-              className={
-                node.raw === true
-                  ? 'shrink-0'
-                  : 'shrink-0 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100'
-              }
-            >
+            <span className={node.raw === true ? 'shrink-0' : ACCESSORY}>
               <Tooltip
                 content={node.raw === true ? 'Back to rows' : 'Edit as JSON'}
                 render={
@@ -225,26 +231,28 @@ function FieldRow({
             </span>
           </>
         )}
-        <Tooltip
-          content={soft ? 'Remove this field' : 'Remove'}
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              shape="square"
-              icon={<TrashIcon />}
-              aria-label={`Remove ${label}`}
-              onClick={() => (soft ? onChange({ ...node, removed: true }) : onRemove())}
-            />
-          }
-        />
+        <span className={ACCESSORY}>
+          <Tooltip
+            content={soft ? 'Remove this field' : 'Remove'}
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                shape="square"
+                icon={<TrashIcon />}
+                aria-label={`Remove ${label}`}
+                onClick={() => (soft ? onChange({ ...node, removed: true }) : onRemove())}
+              />
+            }
+          />
+        </span>
       </div>
       {/* A rename is a delete and a set in one write, and only in this
           document: Firestore has no rename and no schema, so the rest of the
           collection keeps the old name. Saying so costs one line and saves
           someone an afternoon. */}
       {renamedFrom !== undefined && (
-        <span className="text-[11px] text-kumo-subtle">
+        <span className="px-1.5 text-[11px] text-kumo-subtle">
           Renaming <span className="font-mono">{renamedFrom}</span> here changes this document only.
         </span>
       )}
@@ -262,11 +270,11 @@ function FieldRow({
           />
         ) : open ? (
           node.children.length === 0 ? (
-            <span className="font-mono text-[12px] text-kumo-inactive">
+            <span className="px-1.5 font-mono text-[12px] text-kumo-inactive">
               {node.type === 'map' ? '{}' : '[]'}
             </span>
           ) : (
-            <div className="ml-1 grid gap-1 border-l border-kumo-line pl-2">
+            <div className="ml-2 grid gap-2.5 border-l border-kumo-line pl-2">
               <FieldRows
                 nodes={node.children}
                 named={node.type === 'map'}
@@ -275,7 +283,7 @@ function FieldRow({
             </div>
           )
         ) : (
-          <span className="font-mono text-[12px] text-kumo-subtle">{summary(node)}</span>
+          <span className="px-1.5 font-mono text-[12px] text-kumo-subtle">{summary(node)}</span>
         )
       ) : (
         <ValueEditor
@@ -286,10 +294,10 @@ function FieldRow({
         />
       )}
       {problem?.value !== undefined && (
-        <span className="text-[12px] text-kumo-danger">{problem.value}</span>
+        <span className="px-1.5 text-[12px] text-kumo-danger">{problem.value}</span>
       )}
       {problem?.name !== undefined && (
-        <span className="text-[12px] text-kumo-danger">{problem.name}</span>
+        <span className="px-1.5 text-[12px] text-kumo-danger">{problem.name}</span>
       )}
     </div>
   )
@@ -331,7 +339,7 @@ function NameInput({
       autoComplete="off"
       placeholder="name"
       title={node.name}
-      className={`h-6 min-w-0 flex-1 rounded bg-transparent px-1 font-mono text-[12px] font-medium text-kumo-default outline-none placeholder:font-sans placeholder:font-normal placeholder:text-kumo-inactive hover:bg-kumo-tint focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
+      className={`h-6 min-w-0 flex-1 rounded bg-transparent px-1.5 font-mono text-[12px] font-medium text-kumo-default outline-none placeholder:font-sans placeholder:font-normal placeholder:text-kumo-inactive hover:bg-kumo-tint focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
         invalid ? 'ring ring-kumo-danger' : ''
       }`}
       aria-label={node.name ? `${node.name} name` : 'Field name'}

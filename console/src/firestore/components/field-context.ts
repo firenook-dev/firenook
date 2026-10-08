@@ -16,9 +16,20 @@ export interface KnownField {
   present: number
 }
 
+/**
+ * A control that is not the value: present, keeping its place in the row,
+ * but not drawn until the row is pointed at or something in it has focus.
+ * A document of fourteen fields had eighty-six buttons on screen at once,
+ * and the loudest repeated one was the delete nobody was reaching for.
+ */
+export const ACCESSORY =
+  'shrink-0 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100'
+
 export interface FieldEditing {
   problems: Map<string, NodeProblem>
   known: readonly KnownField[]
+  /** Top-level fields the next Save will write, so the panel can say which. */
+  changed: ReadonlySet<string>
   /** The node whose editor should take focus, once. */
   focus: string | undefined
   takeFocus: (id: string | undefined) => void

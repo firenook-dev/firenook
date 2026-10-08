@@ -18,7 +18,7 @@ import { type DraftNode, numberForm } from '../draft'
 import { collectionsQuery, documentIdsQuery } from '../queries'
 import { relativeTime } from '../value'
 import { Completion, Completions } from './completions'
-import { useFieldEditing, useFocusTarget } from './field-context'
+import { ACCESSORY, useFieldEditing, useFocusTarget } from './field-context'
 import { useWorkbench } from './workbench-context'
 
 export interface EditorProps {
@@ -29,14 +29,38 @@ export interface EditorProps {
   invalid: boolean
 }
 
-/** The chrome every value wears, so one row never looks louder than the next. */
+/**
+ * A value is text you read far more often than you change, so it wears its
+ * chrome one state at a time — the same rule as the path field and the
+ * field name. Nothing at rest, a ground under the pointer, an outline for
+ * focus. Fourteen filled boxes stacked in a 420 px column is what made a
+ * document of fourteen short strings read as a form to fill in.
+ *
+ * Being wrong is the exception that always shows: an outline you did not
+ * ask for means the value does not parse.
+ */
 export function valueInputClass(invalid: boolean): string {
-  return `h-7 w-full min-w-0 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring outline-none focus:ring-kumo-focus ${
+  // No width: Tailwind orders its own utilities, so a `w-auto` appended by
+  // a caller loses to a `w-full` declared here, and the caller's intent is
+  // silently dropped. Each editor says how wide it is.
+  return `h-7 rounded-md px-1.5 font-mono text-[12px] text-kumo-default outline-none ${
+    invalid
+      ? 'bg-kumo-control ring ring-kumo-danger'
+      : 'bg-transparent hover:bg-kumo-tint focus:bg-kumo-control focus:ring focus:ring-kumo-focus'
+  }`
+}
+
+/**
+ * A box, on the other hand, says how much room there is, so the editors
+ * that are a region rather than a line keep their outline at rest.
+ */
+export function valueAreaClass(invalid: boolean): string {
+  return `w-full resize-y rounded-md bg-kumo-control px-2 py-1 font-mono text-[12px] leading-5 text-kumo-default ring outline-none focus:ring-kumo-focus ${
     invalid ? 'ring-kumo-danger' : 'ring-kumo-line'
   }`
 }
 
-const NOTE = 'mt-0.5 font-mono text-[11px] text-kumo-subtle'
+const NOTE = 'px-1.5 font-mono text-[11px] text-kumo-subtle'
 
 export function ValueEditor(props: EditorProps) {
   switch (props.node.type) {
@@ -87,9 +111,7 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
           onChange={(event) => onChange({ ...node, text: event.target.value })}
           rows={Math.min(10, Math.max(2, lines))}
           spellCheck={false}
-          className={`w-full resize-y rounded-md bg-kumo-control px-2 py-1 font-mono text-[12px] leading-5 text-kumo-default ring outline-none focus:ring-kumo-focus ${
-            invalid ? 'ring-kumo-danger' : 'ring-kumo-line'
-          }`}
+          className={valueAreaClass(invalid)}
           aria-label={`${label} value`}
         />
       ) : (
@@ -99,14 +121,15 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
           onChange={(event) => onChange({ ...node, text: event.target.value })}
           onKeyDown={onEnterNext(next)}
           spellCheck={false}
-          className={valueInputClass(invalid)}
+          placeholder={'""'}
+          className={`${valueInputClass(invalid)} w-full min-w-0 placeholder:text-kumo-inactive`}
           aria-label={`${label} value`}
         />
       )}
       {(!box || lines === 1) && (
         // A string is the commonest field there is, so the one control it
         // has that is not the value waits to be asked for.
-        <span className="shrink-0 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+        <span className={ACCESSORY}>
           <Tooltip
             content={box ? 'One line' : 'More room'}
             render={
@@ -139,7 +162,13 @@ function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
         onKeyDown={onEnterNext(next)}
         spellCheck={false}
         inputMode="decimal"
-        className={valueInputClass(invalid)}
+        // `field-sizing: content` floors the box at the `size` attribute,
+        // whose default is twenty characters — the floor here is the class.
+        size={1}
+        // A number is short and the control beside it says how it is
+        // stored, so the box follows the digits instead of running the
+        // width of the panel and stranding that control at the far edge.
+        className={`${valueInputClass(invalid)} w-auto min-w-14 max-w-40 field-sizing-content`}
         aria-label={`${label} value`}
       />
       {/* Firestore stores an integer and a double as different types, and
@@ -150,7 +179,7 @@ function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
         type="button"
         disabled={form.forced}
         onClick={() => onChange({ ...node, integer: !form.integer })}
-        className="h-7 shrink-0 rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle ring ring-kumo-line outline-none hover:bg-kumo-tint focus-visible:ring-kumo-focus disabled:text-kumo-inactive"
+        className="h-7 shrink-0 rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle outline-none hover:bg-kumo-tint focus-visible:ring focus-visible:ring-kumo-focus disabled:text-kumo-inactive"
         title={
           form.forced
             ? 'A number with a fraction is always a double'
@@ -192,17 +221,22 @@ function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
   const when = new Date(node.text.trim())
   const known = !Number.isNaN(when.getTime())
   return (
-    <div>
-      <div className="flex items-center gap-1">
-        <input
-          ref={ref}
-          value={node.text}
-          onChange={(event) => onChange({ ...node, text: event.target.value })}
-          onKeyDown={onEnterNext(next)}
-          spellCheck={false}
-          className={valueInputClass(invalid)}
-          aria-label={`${label} value`}
-        />
+    <div className="flex items-center gap-1">
+      <input
+        ref={ref}
+        value={node.text}
+        onChange={(event) => onChange({ ...node, text: event.target.value })}
+        onKeyDown={onEnterNext(next)}
+        spellCheck={false}
+        className={`${valueInputClass(invalid)} w-full min-w-0`}
+        aria-label={`${label} value`}
+      />
+      {known && (
+        <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
+          {relativeTime(when.toISOString())}
+        </span>
+      )}
+      <span className={ACCESSORY}>
         <Popover>
           <Popover.Trigger
             render={
@@ -242,8 +276,7 @@ function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
             </div>
           </Popover.Content>
         </Popover>
-      </div>
-      {known && <div className={NOTE}>{relativeTime(when.toISOString())}</div>}
+      </span>
     </div>
   )
 }
@@ -318,22 +351,24 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
           spellCheck={false}
           autoComplete="off"
           placeholder="users/u_9f3k2"
-          className={`${valueInputClass(invalid)} placeholder:font-sans placeholder:text-kumo-inactive`}
+          className={`${valueInputClass(invalid)} w-full min-w-0 placeholder:font-sans placeholder:text-kumo-inactive`}
           aria-label={`${label} value`}
         />
-        <Tooltip
-          content="Open the referenced document"
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              shape="square"
-              icon={<ArrowSquareOutIcon />}
-              aria-label={`Open ${label}`}
-              onClick={() => onOpenReference(node.text)}
-            />
-          }
-        />
+        <span className={ACCESSORY}>
+          <Tooltip
+            content="Open the referenced document"
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                shape="square"
+                icon={<ArrowSquareOutIcon />}
+                aria-label={`Open ${label}`}
+                onClick={() => onOpenReference(node.text)}
+              />
+            }
+          />
+        </span>
       </div>
       {open && matches.length > 0 && (
         <Completions anchor={ref} testId="reference-completions">
@@ -359,8 +394,10 @@ function GeopointEditor({ node, onChange, label, invalid }: EditorProps) {
   const longitude = comma === -1 ? '' : node.text.slice(comma + 1).trim()
   const set = (lat: string, lng: string) => onChange({ ...node, text: `${lat}, ${lng}` })
   const part = `h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none`
-  const group = `flex h-7 min-w-0 flex-1 items-center rounded-md bg-kumo-control ring focus-within:ring-kumo-focus ${
-    invalid ? 'ring-kumo-danger' : 'ring-kumo-line'
+  const group = `flex h-7 w-32 min-w-0 shrink items-center rounded-md ${
+    invalid
+      ? 'bg-kumo-control ring ring-kumo-danger'
+      : 'hover:bg-kumo-tint focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus'
   }`
   return (
     <div className="flex items-center gap-1">
@@ -406,7 +443,7 @@ function BytesEditor({ node, onChange, label, invalid }: EditorProps) {
         onKeyDown={onEnterNext(next)}
         spellCheck={false}
         placeholder="base64"
-        className={`${valueInputClass(invalid)} placeholder:font-sans placeholder:text-kumo-inactive`}
+        className={`${valueInputClass(invalid)} w-full min-w-0 placeholder:font-sans placeholder:text-kumo-inactive`}
         aria-label={`${label} value`}
       />
       {text !== '' && !invalid && (
@@ -453,9 +490,7 @@ function VectorEditor({ node, onChange, label, invalid }: EditorProps) {
         onChange={(event) => onChange({ ...node, text: event.target.value })}
         rows={Math.min(8, Math.max(2, node.text.split('\n').length))}
         spellCheck={false}
-        className={`w-full resize-y rounded-md bg-kumo-control px-2 py-1 font-mono text-[12px] leading-5 text-kumo-default ring outline-none focus:ring-kumo-focus ${
-          invalid ? 'ring-kumo-danger' : 'ring-kumo-line'
-        }`}
+        className={valueAreaClass(invalid)}
         aria-label={`${label} value`}
       />
       {dimensions !== undefined && (

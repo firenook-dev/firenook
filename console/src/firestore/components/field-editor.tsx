@@ -17,12 +17,14 @@ import { type FieldEditing, FieldEditingProvider, type KnownField } from './fiel
 import { FieldRows } from './field-row'
 
 const NO_FIELDS: KnownField[] = []
+const NOTHING_CHANGED: ReadonlySet<string> = new Set()
 
 export function FieldsPanel({
   nodes,
   onNodesChange,
   problems,
   known = NO_FIELDS,
+  changed = NOTHING_CHANGED,
   tab,
   onTabChange,
   onOpenReference,
@@ -33,6 +35,8 @@ export function FieldsPanel({
   problems: Map<string, NodeProblem>
   /** What the rest of the collection calls its fields, for completing a new one. */
   known?: readonly KnownField[] | undefined
+  /** Fields the next Save will write, marked so the count has somewhere to point. */
+  changed?: ReadonlySet<string> | undefined
   tab: 'fields' | 'json'
   onTabChange: (tab: 'fields' | 'json') => void
   onOpenReference: (path: string) => void
@@ -67,6 +71,7 @@ export function FieldsPanel({
   const editing: FieldEditing = {
     problems,
     known,
+    changed,
     focus,
     takeFocus: setFocus,
     next: () => addRef.current?.focus(),
@@ -93,7 +98,7 @@ export function FieldsPanel({
       {tab === 'fields' ? (
         <>
           <div className="min-h-0 flex-1 overflow-auto">
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 p-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5 p-2">
               <FieldRows nodes={nodes} named onChange={onNodesChange} soft />
               {nodes.length === 0 && (
                 <div className="px-2 py-1">

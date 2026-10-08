@@ -1140,6 +1140,16 @@ async function paintedAtItsOwnCentre(locator: Locator): Promise<boolean> {
   })
 }
 
+/** Whether anything above this element is holding it at zero opacity. */
+async function faded(handle: Locator): Promise<boolean> {
+  return handle.evaluate((el) => {
+    const view = el.ownerDocument.defaultView!
+    for (let node = el.parentElement; node; node = node.parentElement)
+      if (Number(view.getComputedStyle(node).opacity) < 0.05) return true
+    return false
+  })
+}
+
 /** A document written straight to the engine, bypassing the console. */
 async function put(
   request: { post: (url: string, options: object) => Promise<{ ok: () => boolean }> },
@@ -1354,4 +1364,36 @@ test('a new field completes from the collection, with the type the collection gi
     integerValue: '5',
   })
   await drop(page.request, 'teams/t_sparse')
+})
+
+test('a document at rest is text, and its controls arrive under the pointer', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
+
+  // A value is read far more often than it is changed, so at rest it is
+  // text. Filled boxes stacked down a 420 px column is what made a document
+  // of a dozen short strings read as a form to fill in, and the panel had
+  // thirty-seven of them with eighty-six buttons between them.
+  const chrome = await inspector.locator('input[aria-label$=" value"]').evaluateAll((inputs) =>
+    inputs.map((el) => {
+      const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+      return style.boxShadow !== 'none' || style.borderTopWidth !== '0px'
+    }),
+  )
+  expect(chrome.length).toBeGreaterThan(5)
+  expect(chrome.filter(Boolean)).toEqual([])
+
+  // The controls that are not the value keep their place in the row and
+  // are drawn when the row is pointed at, delete loudest among them.
+  const remove = inspector.getByLabel('Remove displayName')
+  expect(await faded(remove)).toBe(true)
+  await inspector.getByLabel('displayName value').hover()
+  expect(await faded(remove)).toBe(false)
+
+  // And the count in the footer has somewhere to point.
+  await expect(inspector.getByTestId('unsaved-mark')).toHaveCount(0)
+  await inspector.getByLabel('displayName value').fill('Ada L')
+  await expect(inspector.getByTestId('unsaved-mark')).toHaveCount(1)
+  await expect(inspector.getByTestId('save-pending')).toContainText('1 change')
 })

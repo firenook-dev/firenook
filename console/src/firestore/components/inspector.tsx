@@ -251,6 +251,7 @@ function DocumentEditor({
   const problems = useMemo(() => problemsOf(nodes), [nodes])
   const diff = useMemo(() => diffDocument(document.fields, nodes), [document.fields, nodes])
   const changed = Object.keys(diff.write).length + diff.clear.length
+  const changedNames = useMemo(() => new Set(Object.keys(diff.write)), [diff])
   const root = documentRoot(workbench.scope)
 
   const save = useMutation({
@@ -297,6 +298,7 @@ function DocumentEditor({
         onNodesChange={setNodes}
         problems={problems}
         known={known}
+        changed={changedNames}
         tab={workbench.tab}
         onTabChange={workbench.setTab}
         onOpenReference={(path) => workbench.selectDocument(path)}

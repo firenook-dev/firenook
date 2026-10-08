@@ -421,9 +421,40 @@ removed when no regression could be made to fail with it gone. The row says
 collection keep the old name and a console that does not say so is setting
 a trap.
 
-**The name reads as a label and edits as a field**, by the same rule as the
-path field: nothing at rest, a ground under the pointer, an outline for
-focus alone.
+**Everything in a row earns its chrome one state at a time** — the name,
+and the value too. This is the third place the rule applies (the path field
+was the first) and it is now the console's rule, not a tweak: nothing at
+rest, a ground under the pointer, an outline for focus alone, and an
+outline you did not ask for means the value does not parse. The first cut
+of the tree put every value in a filled, ringed box and every control on
+every row, and a real fourteen-field document measured **37 outlined boxes
+and 86 buttons** in one 420 px column — it read as a form to fill in rather
+than a document to read. At rest it is now two boxes (the one textarea and
+the add-field line) and the buttons left are the type chips, the disclosure
+carets and the switches, which are information or structure. `ACCESSORY` in
+`field-context.ts` is the shared class for the rest: they keep their place
+in the row and are drawn under the pointer or on focus.
+
+A box is how a *region* says how much room it has, so a textarea keeps its
+outline (`valueAreaClass`) while a line does not. A number's box follows
+its digits (`field-sizing: content`, floored by the class because the
+property's floor is the `size` attribute's default of twenty characters),
+so the control saying whether it is an integer or a double stays beside the
+number instead of being stranded at the panel's edge. `valueInputClass`
+names no width at all: Tailwind orders its own utilities, so a `w-auto`
+appended by a caller loses to a `w-full` declared in the shared class and
+the caller's intent vanishes. Remember too that `html` is 14 px here, so
+`max-w-40` is 140 px, not 160.
+
+Once a panel is that quiet, **the footer's count needs somewhere to point**:
+a field the next Save will write carries a small ember dot beside its name.
+That is the accent doing the job it is reserved for — Save is the row's
+primary action and this is what it is about to write.
+
+`TypeBadge` takes `menu` where the chip opens the type menu, and the two
+places differ on purpose: in a grid header it is a label in a dense row and
+keeps its ground, on a field row it is one of a column of chips and is a
+word and a caret until the row is pointed at.
 
 **Adding a field is one line, and the line knows the collection.**
 `useKnownFields` reads the grid's own page query — same key, same cache, no

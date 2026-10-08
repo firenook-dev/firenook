@@ -30,10 +30,12 @@ export type FirestoreValueType =
  * amber. What counts as that case is the caller's to decide — a column of
  * timestamps and nulls does not.
  *
- * `menu` is the other half of that restraint. The chip reads the same in a
- * grid header, where it is a label, and in the inspector, where it opens
- * the type menu — so the one that can be changed says so with a caret
- * rather than with a colour or a second shape.
+ * `menu` is the other half of that restraint, and the two places differ in
+ * what they are doing. In a grid header the chip is a label in a dense row
+ * and takes a ground to separate it. On a field row it is a control in a
+ * column of its own, where a stack of filled chips is a ladder nobody
+ * needs to climb — so it is a word and a caret, and the ground arrives
+ * with the rest of the row's controls, under the pointer.
  * @category Data
  */
 export function TypeBadge({
@@ -54,7 +56,9 @@ export function TypeBadge({
       className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
         mixed
           ? 'bg-kumo-warning-tint text-kumo-default'
-          : 'bg-kumo-tint text-kumo-subtle group-hover:bg-kumo-base'
+          : menu
+            ? 'text-kumo-subtle group-hover:bg-kumo-tint'
+            : 'bg-kumo-tint text-kumo-subtle group-hover:bg-kumo-base'
       }`}
       title={mixed ? `More than one type here: ${mixed}` : undefined}
       data-testid="type-badge"

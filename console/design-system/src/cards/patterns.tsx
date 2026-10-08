@@ -652,6 +652,7 @@ function FieldRow({
   type,
   note,
   removed,
+  unsaved,
   children,
 }: {
   name?: string | undefined
@@ -659,6 +660,7 @@ function FieldRow({
   type?: string | undefined
   note?: string | undefined
   removed?: boolean | undefined
+  unsaved?: boolean | undefined
   children?: ReactNode
 }) {
   if (removed)
@@ -672,10 +674,10 @@ function FieldRow({
       </div>
     )
   return (
-    <div className="grid gap-1 rounded-md px-2 py-1.5">
-      <div className="flex items-center gap-1">
+    <div className="grid gap-0.5">
+      <div className="flex items-center gap-1 pr-1.5 pl-0.5">
         {index === undefined ? (
-          <span className="min-w-0 flex-1 truncate rounded px-1 font-mono text-[12px] font-medium">
+          <span className="min-w-0 flex-1 truncate rounded px-1.5 font-mono text-[12px] font-medium">
             {name}
           </span>
         ) : (
@@ -686,30 +688,60 @@ function FieldRow({
             <span className="min-w-0 flex-1" />
           </>
         )}
+        {/* Which fields the footer's count is counting: Save is the row's
+            own accent, and this is what it is about to write. */}
+        {unsaved && <span className="size-1.5 shrink-0 rounded-full bg-kumo-brand" />}
         {type && <TypeChip type={type} menu />}
-        <Button
-          variant="ghost"
-          size="xs"
-          shape="square"
-          icon={<TrashIcon />}
-          aria-label={`Remove ${name ?? index}`}
-        />
+        {/* Not drawn until the row is pointed at: a document of fourteen
+            fields had eighty-six buttons on screen at once, and the
+            loudest repeated one was the delete nobody was reaching for. */}
+        <span className={unsaved ? '' : 'opacity-0'}>
+          <Button
+            variant="ghost"
+            size="xs"
+            shape="square"
+            icon={<TrashIcon />}
+            aria-label={`Remove ${name ?? index}`}
+          />
+        </span>
       </div>
       {children}
-      {note && <span className="text-[11px] text-kumo-subtle">{note}</span>}
+      {note && <span className="px-1.5 text-[11px] text-kumo-subtle">{note}</span>}
     </div>
   )
 }
 
 /** The entries of a map or the items of an array, under a guide line. */
 function Nested({ children }: { children: ReactNode }) {
-  return <div className="ml-1 grid gap-1 border-l border-kumo-line pl-2">{children}</div>
+  return <div className="ml-2 grid gap-2.5 border-l border-kumo-line pl-2">{children}</div>
 }
 
-function ValueBox({ children, className = '' }: { children: ReactNode; className?: string }) {
+/**
+ * A value is read far more often than it is changed, so at rest it is
+ * text — and it takes a ground under the pointer and an outline on focus,
+ * the same three states as the path field and the field name. Filled boxes
+ * stacked down a 420 px column are what made a document of a dozen short
+ * strings read as a form to fill in. A region keeps its box, because a box
+ * is how a region says how much room there is.
+ */
+function Value({
+  children,
+  state = 'rest',
+  className = '',
+}: {
+  children: ReactNode
+  state?: 'rest' | 'hover' | 'focus' | 'area'
+  className?: string
+}) {
+  const chrome = {
+    rest: '',
+    hover: 'bg-kumo-tint',
+    focus: 'bg-kumo-control ring ring-kumo-focus',
+    area: 'bg-kumo-control ring ring-kumo-line',
+  }[state]
   return (
     <div
-      className={`flex h-7 min-w-0 items-center rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line ${className}`}
+      className={`flex h-7 min-w-0 items-center rounded-md px-1.5 font-mono text-[12px] text-kumo-default ${chrome} ${className}`}
     >
       {children}
     </div>
@@ -756,17 +788,17 @@ function Inspector() {
               ]}
               selectedValue="fields"
             />
-            <div className="grid gap-0.5">
+            <div className="grid gap-2.5">
               <FieldRow name="status" type="string">
-                <ValueBox>paid</ValueBox>
+                <Value>paid</Value>
               </FieldRow>
               <FieldRow name="total" type="number">
                 <div className="flex items-center gap-1">
-                  <ValueBox className="flex-1">42</ValueBox>
+                  <Value className="w-14">42</Value>
                   {/* `3` is how Firestore writes an integer and a double
                       alike, so nothing in the text can say which this is.
                       The editor says it, and lets it be changed. */}
-                  <span className="flex h-7 shrink-0 items-center rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle ring ring-kumo-line">
+                  <span className="flex h-7 shrink-0 items-center rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle">
                     double
                   </span>
                 </div>
@@ -777,37 +809,43 @@ function Inspector() {
                   <span className="ml-2 font-mono text-[12px] text-kumo-subtle">true</span>
                 </div>
               </FieldRow>
-              <FieldRow name="createdAt" type="timestamp" note="2 mo ago">
-                <ValueBox>2026-09-20T10:14:02.117Z</ValueBox>
+              <FieldRow name="createdAt" type="timestamp">
+                <div className="flex items-center gap-1">
+                  <Value className="flex-1">2026-09-20T10:14:02.117Z</Value>
+                  <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">2 mo ago</span>
+                </div>
               </FieldRow>
               <FieldRow
                 name="buyer"
                 type="reference"
                 note="Renaming customer here changes this document only."
+                unsaved
               >
-                <ValueBox>users/u_9f3k2</ValueBox>
+                {/* Pointed at: the ground arrives, and so do the controls
+                    that are not the value. */}
+                <Value state="hover">users/u_9f3k2</Value>
               </FieldRow>
               <FieldRow name="office" type="geopoint">
                 <div className="flex items-center gap-1">
-                  <ValueBox className="flex-1">
+                  <Value className="w-32">
                     <span className="mr-1.5 text-[11px] text-kumo-inactive">lat</span>3.139
-                  </ValueBox>
-                  <ValueBox className="flex-1">
+                  </Value>
+                  <Value className="w-32">
                     <span className="mr-1.5 text-[11px] text-kumo-inactive">lng</span>101.6869
-                  </ValueBox>
+                  </Value>
                 </div>
               </FieldRow>
               <FieldRow name="billing" type="map">
                 <Nested>
                   <FieldRow name="currency" type="string">
-                    <ValueBox>MYR</ValueBox>
+                    <Value>MYR</Value>
                   </FieldRow>
                   <FieldRow name="contacts" type="array">
                     <Nested>
                       <FieldRow index={0} type="map">
                         <Nested>
                           <FieldRow name="email" type="string">
-                            <ValueBox>ada@example.test</ValueBox>
+                            <Value>ada@example.test</Value>
                           </FieldRow>
                         </Nested>
                       </FieldRow>
@@ -822,7 +860,9 @@ function Inspector() {
                 and the name completes from what the rest of the collection
                 calls its fields, bringing that field's usual type with it. */}
             <div className="flex items-center gap-1 border-t border-kumo-line px-2 pt-3">
-              <ValueBox className="flex-1 text-kumo-inactive">New field name</ValueBox>
+              <Value state="area" className="flex-1 text-kumo-inactive">
+                New field name
+              </Value>
               <TypeChip type="string" menu />
               <Button variant="ghost" size="sm" icon={<PlusIcon />}>
                 Add field
