@@ -305,6 +305,75 @@ test('one type scale holds across the grid and the panel beside it', async ({ pa
   expect([...new Set(values)]).toEqual(['12px mono'])
 })
 
+test('a type is named once, and only a column at odds with itself is coloured', async ({
+  page,
+}) => {
+  // Two documents that disagree about `amount`, so one column is mixed and
+  // the others are not.
+  const written = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: {
+      writes: [
+        {
+          update: {
+            name: `${resource()}/typecheck/one`,
+            fields: { amount: { integerValue: '3' }, label: { stringValue: 'a' } },
+          },
+        },
+        {
+          update: {
+            name: `${resource()}/typecheck/two`,
+            fields: { amount: { stringValue: 'three' }, label: { stringValue: 'b' } },
+          },
+        },
+      ],
+    },
+  })
+  expect(written.ok()).toBeTruthy()
+
+  await page.goto(`${origin()}/console/firestore?path=typecheck`)
+  await expect(page.getByTestId('grid-row')).toHaveCount(2)
+
+  // The word names the type, so the chip does not need a colour to repeat
+  // it: every settled column is drawn exactly alike, whatever its type.
+  const grounds = await page
+    .locator('thead [data-testid="type-badge"]:not([data-mixed])')
+    .evaluateAll((badges) =>
+      badges.map((el) => el.ownerDocument.defaultView!.getComputedStyle(el).backgroundColor),
+    )
+  expect(grounds.length).toBeGreaterThan(1)
+  expect(new Set(grounds).size).toBe(1)
+
+  // And the one column that disagrees with itself is the only thing in the
+  // header wearing a colour at all.
+  const mixed = page.locator('thead [data-testid="type-badge"][data-mixed]')
+  await expect(mixed).toHaveCount(1)
+  await expect(mixed).toHaveText(/string|integer|number/)
+  expect(
+    await mixed.evaluate(
+      (el) => el.ownerDocument.defaultView!.getComputedStyle(el).backgroundColor,
+    ),
+  ).not.toBe(grounds[0])
+
+  // A mark nobody has seen before cannot have its only explanation in a
+  // tooltip, so the column's own menu says what it found.
+  await page.getByTestId('column-amount').click()
+  await expect(page.getByRole('menu')).toContainText('More than one type here')
+  await expect(page.getByRole('menu')).toContainText('×1')
+  await page.keyboard.press('Escape')
+
+  const removed = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: {
+      writes: [
+        { delete: `${resource()}/typecheck/one` },
+        { delete: `${resource()}/typecheck/two` },
+      ],
+    },
+  })
+  expect(removed.ok()).toBeTruthy()
+})
+
 test('the scope picker names both scopes, and reads what it says', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()

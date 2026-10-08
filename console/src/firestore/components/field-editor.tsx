@@ -407,7 +407,7 @@ export function FieldEditor({
             render={
               <button
                 type="button"
-                className="flex h-5 shrink-0 items-center rounded px-0.5 hover:bg-kumo-tint"
+                className="group flex h-5 shrink-0 items-center rounded px-0.5 hover:bg-kumo-tint"
                 aria-label={`${draft.name} type: ${draft.type}`}
               >
                 <TypeBadge type={draft.type} />

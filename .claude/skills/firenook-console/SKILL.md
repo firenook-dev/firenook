@@ -308,6 +308,28 @@ property of the query), and what acts on the whole section (`Rules`,
 `Explain`, what came back, and `Code`. A control that belongs to both rows
 belongs in row one.
 
+### Colour means something, or it is not spent
+
+The type badge is one quiet chip for every type — 11 px mono,
+`bg-kumo-tint`, `text-kumo-subtle` — because the word already names the
+type. A colour per type says the same thing twice, and eight saturated
+chips across a header row is a rainbow with no hierarchy that drowns the
+one colour in there that carries information. It also made a `null` look
+like an error, which it is not; a null is a value.
+
+That one colour is **`mixed`**: a column whose documents disagree about a
+field's type. It is amber, with a dot, and the odd cells beneath it carry
+the same amber tint — the only pair of coloured things in the grid, which
+is what makes them legible. A mark nobody has seen before cannot have its
+only explanation in a `title`, so the column's own menu opens with
+`More than one type here` and the breakdown (`string ×3, number ×1`).
+
+A chip on a row that lights up on hover has to move the other way or it is
+swallowed: `TypeBadge` takes `group-hover:bg-kumo-base`, and both the
+header button and the inspector's type trigger carry `group`. A journey
+holds every settled badge to one ground and the mixed one to a different
+one, and fails the moment a second colour appears.
+
 Count each figure once. The path bar prints a count for every collection on
 the way *except* the one in view, because row two already counts that one
 under the query and the identity actually in force; two counts a row apart

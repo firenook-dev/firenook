@@ -413,20 +413,26 @@ function PathAndQuery() {
   )
 }
 
-function TypeHead({
-  label,
-  type,
-  variant,
-}: {
-  label: string
-  type: string
-  variant: 'blue' | 'teal' | 'purple' | 'orange' | 'green' | 'neutral'
-}) {
+/**
+ * One quiet chip for every type: the word already names it, and a colour
+ * per type spends the whole palette on something nobody has to look up.
+ * `mixed` is the exception, because a column disagreeing with itself is
+ * worth a glance — and it is the only amber in the grid, so it gets one.
+ */
+function TypeHead({ label, type, mixed }: { label: string; type: string; mixed?: string }) {
   return (
     <Table.Head>
       <span className="flex items-center gap-2">
         <span className="font-mono text-[12px] font-medium">{label}</span>
-        <Badge variant={variant}>{type}</Badge>
+        <span
+          className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
+            mixed ? 'bg-kumo-warning-tint text-kumo-default' : 'bg-kumo-tint text-kumo-subtle'
+          }`}
+          title={mixed ? `More than one type here: ${mixed}` : undefined}
+        >
+          {mixed && <span className="size-1.5 shrink-0 rounded-full bg-kumo-warning" />}
+          {type}
+        </span>
       </span>
     </Table.Head>
   )
@@ -502,12 +508,12 @@ function DataGrid() {
                   onCheckedChange={() => {}}
                   aria-label="Select all"
                 />
-                <TypeHead label="id" type="doc" variant="neutral" />
-                <TypeHead label="status" type="string" variant="blue" />
-                <TypeHead label="total" type="number" variant="teal" />
-                <TypeHead label="createdAt" type="timestamp" variant="purple" />
-                <TypeHead label="customer" type="reference" variant="orange" />
-                <TypeHead label="items" type="array" variant="neutral" />
+                <TypeHead label="id" type="doc" />
+                <TypeHead label="status" type="string" />
+                <TypeHead label="total" type="number" />
+                <TypeHead label="createdAt" type="timestamp" mixed="timestamp ×3, null ×1" />
+                <TypeHead label="customer" type="reference" />
+                <TypeHead label="items" type="array" />
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -1110,14 +1116,14 @@ function SchemaTree() {
               <Table>
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <TypeHead label="id" type="doc" variant="neutral" />
+                    <TypeHead label="id" type="doc" />
                     <Table.Head>
                       <span className="flex items-center gap-1.5 text-kumo-subtle">
                         <FolderIcon size={13} />
                         <span className="font-mono text-[12px] font-medium">subcollections</span>
                       </span>
                     </Table.Head>
-                    <TypeHead label="email" type="string" variant="blue" />
+                    <TypeHead label="email" type="string" />
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
