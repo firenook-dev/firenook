@@ -570,7 +570,7 @@ test('the New menu creates a typed root collection, and a subcollection grows fr
   await page.getByTestId('new-document-id').fill('inv_001')
   await page.getByTestId('new-field-name').fill('total')
   await page.getByTestId('new-field-name').press('Enter')
-  await page.getByRole('button', { name: 'total type: string' }).click()
+  await press(page.getByRole('button', { name: 'total type: string' }))
   await page.getByRole('menuitemradio', { name: 'number' }).click()
   await page.getByLabel('total value').fill('120')
   await page.getByTestId('create-submit').click()
@@ -1150,6 +1150,22 @@ async function faded(handle: Locator): Promise<boolean> {
   })
 }
 
+/**
+ * Point at a row, then press one of its controls. The strip holding them is
+ * drawn — and takes a click — only while its own line is under the pointer,
+ * so reaching straight for a button that nothing is pointing at is asking
+ * for something no person can do.
+ */
+async function press(control: Locator) {
+  await control.locator('xpath=ancestor::*[@data-testid="field-row"][1]/*[1]').hover()
+  await control.click()
+}
+
+/** Whether the text in a field runs past the box drawn around it. */
+async function clipped(field: Locator): Promise<boolean> {
+  return field.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+}
+
 /** A document written straight to the engine, bypassing the console. */
 async function put(
   request: { post: (url: string, options: object) => Promise<{ ok: () => boolean }> },
@@ -1200,7 +1216,7 @@ test('a nested value edits as rows, and a rename is the same single write', asyn
   await inspector.getByLabel('email value').fill('grace@example.test')
 
   // An entry added to the map in place: name it, Enter, type the value.
-  await inspector.getByLabel('Add to billing').click()
+  await press(inspector.getByLabel('Add to billing'))
   await expect(inspector.getByLabel('Field name', { exact: true })).toBeFocused()
   await page.keyboard.type('plan')
   await page.keyboard.press('Enter')
@@ -1223,11 +1239,11 @@ test('a nested value edits as rows, and a rename is the same single write', asyn
   await expect(inspector).toContainText('changes this document only')
 
   // A removal is shown on its own row, and can be taken back.
-  await inspector.getByLabel('Remove legacy').click()
+  await press(inspector.getByLabel('Remove legacy'))
   await expect(inspector).toContainText('Removed on save')
   await inspector.getByLabel('Keep legacy').click()
   await expect(inspector.getByLabel('legacy value')).toHaveValue('drop me')
-  await inspector.getByLabel('Remove legacy').click()
+  await press(inspector.getByLabel('Remove legacy'))
 
   await inspector.getByTestId('save-document').click()
   await expect(page.getByText('Document saved')).toBeVisible()
@@ -1396,4 +1412,44 @@ test('a document at rest is text, and its controls arrive under the pointer', as
   await inspector.getByLabel('displayName value').fill('Ada L')
   await expect(inspector.getByTestId('unsaved-mark')).toHaveCount(1)
   await expect(inspector.getByTestId('save-pending')).toContainText('1 change')
+})
+
+test('a document is a tree, and depth is the only thing that moves a name', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
+  const left = async (name: string) => (await inspector.getByLabel(`${name} name`).boundingBox())!.x
+  const apart = async (a: string, b: string) => Math.abs((await left(a)) - (await left(b)))
+
+  // Siblings line up whatever they hold, and a child sits right of its
+  // parent. The caret column belonged to maps alone and was wider than the
+  // indent, so a map stood right of its own siblings and `projects` was
+  // drawn six pixels to the left of `limits`, the map containing it.
+  expect(await apart('address', 'balance')).toBeLessThan(1)
+  expect(await apart('city', 'digest')).toBeLessThan(1)
+  expect(await left('settings')).toBeLessThan(await left('limits'))
+  expect(await left('limits')).toBeLessThan(await left('projects'))
+
+  // A row is a line, and a name and its value share it. On two lines a
+  // node is a block, and an indent says nothing against a block's height.
+  const name = (await inspector.getByLabel('balance name').boundingBox())!
+  const value = (await inspector.getByLabel('balance value').boundingBox())!
+  expect(value.x).toBeGreaterThan(name.x + name.width)
+  expect(Math.abs(value.y + value.height / 2 - (name.y + name.height / 2))).toBeLessThan(1)
+
+  // The controls overlay the end of the line rather than holding a quarter
+  // of it open at rest for buttons that are not drawn at rest — which is
+  // the width this timestamp was being cut short by.
+  const stamp = inspector.getByLabel('lastSeen value')
+  await expect(stamp).toHaveValue(/^2026-/)
+  expect(await clipped(stamp)).toBe(false)
+
+  // And they stay down while a value has focus, so they never land on the
+  // text being typed. A Tab into the strip still brings them up.
+  await stamp.click()
+  await page.mouse.move(8, 8)
+  const remove = inspector.getByLabel('Remove lastSeen')
+  expect(await faded(remove)).toBe(true)
+  await page.keyboard.press('Tab')
+  expect(await faded(remove)).toBe(false)
 })

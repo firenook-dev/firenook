@@ -18,7 +18,7 @@ import { type DraftNode, numberForm } from '../draft'
 import { collectionsQuery, documentIdsQuery } from '../queries'
 import { relativeTime } from '../value'
 import { Completion, Completions } from './completions'
-import { ACCESSORY, useFieldEditing, useFocusTarget } from './field-context'
+import { useFieldEditing, useFocusTarget } from './field-context'
 import { useWorkbench } from './workbench-context'
 
 export interface EditorProps {
@@ -32,9 +32,13 @@ export interface EditorProps {
 /**
  * A value is text you read far more often than you change, so it wears its
  * chrome one state at a time — the same rule as the path field and the
- * field name. Nothing at rest, a ground under the pointer, an outline for
- * focus. Fourteen filled boxes stacked in a 420 px column is what made a
- * document of fourteen short strings read as a form to fill in.
+ * field name. Nothing at rest, an outline for focus. Fourteen filled boxes
+ * stacked in a 420 px column is what made a document of fourteen short
+ * strings read as a form to fill in.
+ *
+ * The ground under the pointer belongs to the line, not to this: a row of
+ * one line is the unit you are pointing at, and grounding the value alone
+ * answered "which control" when the question is "which field".
  *
  * Being wrong is the exception that always shows: an outline you did not
  * ask for means the value does not parse.
@@ -46,8 +50,19 @@ export function valueInputClass(invalid: boolean): string {
   return `h-7 rounded-md px-1.5 font-mono text-[12px] text-kumo-default outline-none ${
     invalid
       ? 'bg-kumo-control ring ring-kumo-danger'
-      : 'bg-transparent hover:bg-kumo-tint focus:bg-kumo-control focus:ring focus:ring-kumo-focus'
+      : 'bg-transparent focus:bg-kumo-control focus:ring focus:ring-kumo-focus'
   }`
+}
+
+/**
+ * Whether this value is a region of text rather than a line of it. A region
+ * cannot share the line with its name, so the row puts it underneath at the
+ * full width of the panel.
+ */
+export function valueIsRegion(node: DraftNode): boolean {
+  if (node.type === 'vector') return true
+  if (node.type !== 'string') return false
+  return node.wide === true || node.text.includes('\n')
 }
 
 /**
@@ -61,6 +76,14 @@ export function valueAreaClass(invalid: boolean): string {
 }
 
 const NOTE = 'px-1.5 font-mono text-[11px] text-kumo-subtle'
+
+/**
+ * A value that is followed by a word of its own — `double`, `ref`, `18 d
+ * ago`, `11 bytes` — takes the width of its text rather than the width of
+ * the line, so the word stays beside it instead of at the far edge of the
+ * panel with a desert in between.
+ */
+const SIZED = 'w-auto max-w-full field-sizing-content'
 
 export function ValueEditor(props: EditorProps) {
   switch (props.node.type) {
@@ -99,11 +122,11 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
   const lines = node.text.split('\n').length
   // A string with a newline in it cannot be shown on a line without losing
   // the newline, so that one opens as a box whatever the setting says.
-  const box = node.wide === true || lines > 1
+  const box = valueIsRegion(node)
   const ref = useFocusTarget<HTMLInputElement>(node.id)
   const area = useFocusTarget<HTMLTextAreaElement>(node.id)
   return (
-    <div className="flex items-start gap-1">
+    <div className={`flex min-w-0 flex-1 gap-1 ${box ? 'items-start' : 'items-center'}`}>
       {box ? (
         <textarea
           ref={area}
@@ -126,27 +149,45 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
           aria-label={`${label} value`}
         />
       )}
-      {(!box || lines === 1) && (
-        // A string is the commonest field there is, so the one control it
-        // has that is not the value waits to be asked for.
-        <span className={ACCESSORY}>
-          <Tooltip
-            content={box ? 'One line' : 'More room'}
-            render={
-              <Button
-                variant="ghost"
-                size="xs"
-                shape="square"
-                icon={box ? <ArrowsInSimpleIcon /> : <ArrowsOutSimpleIcon />}
-                aria-label={box ? `${label} on one line` : `${label} in a box`}
-                onClick={() => onChange({ ...node, wide: !box })}
-              />
-            }
-          />
-        </span>
-      )}
     </div>
   )
+}
+
+/**
+ * The control a type has that is not its value — more room for a string, a
+ * calendar for a timestamp, a way through for a reference. It belongs to the
+ * row's strip rather than to the editor: a control drawn only on hover has no
+ * business holding a column of the line open at rest.
+ */
+export function ValueControls({ node, onChange, label }: Omit<EditorProps, 'invalid'>) {
+  switch (node.type) {
+    case 'string': {
+      // A string with a newline in it has nowhere to go but a box.
+      if (valueIsRegion(node) && node.text.includes('\n')) return null
+      const box = valueIsRegion(node)
+      return (
+        <Tooltip
+          content={box ? 'One line' : 'More room'}
+          render={
+            <Button
+              variant="ghost"
+              size="xs"
+              shape="square"
+              icon={box ? <ArrowsInSimpleIcon /> : <ArrowsOutSimpleIcon />}
+              aria-label={box ? `${label} on one line` : `${label} in a box`}
+              onClick={() => onChange({ ...node, wide: !box })}
+            />
+          }
+        />
+      )
+    }
+    case 'timestamp':
+      return <TimestampPicker node={node} onChange={onChange} label={label} />
+    case 'reference':
+      return <OpenReference node={node} label={label} />
+    default:
+      return null
+  }
 }
 
 function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
@@ -154,7 +195,7 @@ function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
   const ref = useFocusTarget<HTMLInputElement>(node.id)
   const form = numberForm(node)
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex min-w-0 flex-1 items-center gap-1">
       <input
         ref={ref}
         value={node.text}
@@ -168,7 +209,7 @@ function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
         // A number is short and the control beside it says how it is
         // stored, so the box follows the digits instead of running the
         // width of the panel and stranding that control at the far edge.
-        className={`${valueInputClass(invalid)} w-auto min-w-14 max-w-40 field-sizing-content`}
+        className={`${valueInputClass(invalid)} ${SIZED} min-w-10`}
         aria-label={`${label} value`}
       />
       {/* Firestore stores an integer and a double as different types, and
@@ -196,7 +237,7 @@ function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
 
 function BooleanEditor({ node, onChange, label }: EditorProps) {
   return (
-    <div className="flex h-7 items-center">
+    <div className="flex h-7 min-w-0 flex-1 items-center">
       <Switch
         variant="neutral"
         size="sm"
@@ -211,7 +252,9 @@ function BooleanEditor({ node, onChange, label }: EditorProps) {
 
 function NullEditor() {
   return (
-    <span className="flex h-7 items-center font-mono text-[12px] text-kumo-inactive">null</span>
+    <span className="flex h-7 min-w-0 flex-1 items-center px-1.5 font-mono text-[12px] text-kumo-inactive">
+      null
+    </span>
   )
 }
 
@@ -221,14 +264,15 @@ function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
   const when = new Date(node.text.trim())
   const known = !Number.isNaN(when.getTime())
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex min-w-0 flex-1 items-center gap-1">
       <input
         ref={ref}
         value={node.text}
         onChange={(event) => onChange({ ...node, text: event.target.value })}
         onKeyDown={onEnterNext(next)}
         spellCheck={false}
-        className={`${valueInputClass(invalid)} w-full min-w-0`}
+        size={1}
+        className={`${valueInputClass(invalid)} ${SIZED} min-w-24`}
         aria-label={`${label} value`}
       />
       {known && (
@@ -236,48 +280,52 @@ function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
           {relativeTime(when.toISOString())}
         </span>
       )}
-      <span className={ACCESSORY}>
-        <Popover>
-          <Popover.Trigger
-            render={
-              <Button
-                variant="ghost"
-                size="xs"
-                shape="square"
-                icon={<CalendarBlankIcon />}
-                aria-label={`Pick ${label}`}
-              />
-            }
-          />
-          <Popover.Content className="w-[280px]">
-            <div className="grid gap-2" data-testid="timestamp-picker">
-              <input
-                type="datetime-local"
-                step="1"
-                value={known ? localInput(when) : ''}
-                onChange={(event) => {
-                  const picked = new Date(event.target.value)
-                  if (!Number.isNaN(picked.getTime()))
-                    onChange({ ...node, text: picked.toISOString() })
-                }}
-                className="h-8 w-full rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
-                aria-label={`${label} date and time`}
-              />
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => onChange({ ...node, text: new Date().toISOString() })}
-                >
-                  Now
-                </Button>
-                <span className="font-mono text-[11px] text-kumo-subtle">{timeZone()}</span>
-              </div>
-            </div>
-          </Popover.Content>
-        </Popover>
-      </span>
     </div>
+  )
+}
+
+function TimestampPicker({ node, onChange, label }: Omit<EditorProps, 'invalid'>) {
+  const when = new Date(node.text.trim())
+  const known = !Number.isNaN(when.getTime())
+  return (
+    <Popover>
+      <Popover.Trigger
+        render={
+          <Button
+            variant="ghost"
+            size="xs"
+            shape="square"
+            icon={<CalendarBlankIcon />}
+            aria-label={`Pick ${label}`}
+          />
+        }
+      />
+      <Popover.Content className="w-[280px]">
+        <div className="grid gap-2" data-testid="timestamp-picker">
+          <input
+            type="datetime-local"
+            step="1"
+            value={known ? localInput(when) : ''}
+            onChange={(event) => {
+              const picked = new Date(event.target.value)
+              if (!Number.isNaN(picked.getTime())) onChange({ ...node, text: picked.toISOString() })
+            }}
+            className="h-8 w-full rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
+            aria-label={`${label} date and time`}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onChange({ ...node, text: new Date().toISOString() })}
+            >
+              Now
+            </Button>
+            <span className="font-mono text-[11px] text-kumo-subtle">{timeZone()}</span>
+          </div>
+        </div>
+      </Popover.Content>
+    </Popover>
   )
 }
 
@@ -298,7 +346,7 @@ function localInput(date: Date): string {
 
 function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
   const workbench = useWorkbench()
-  const { next, onOpenReference } = useFieldEditing()
+  const { next } = useFieldEditing()
   const ref = useFocusTarget<HTMLInputElement>(node.id)
   const [open, setOpen] = useState(false)
 
@@ -330,7 +378,7 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
   }
 
   return (
-    <div>
+    <div className="min-w-0 flex-1">
       <div className="flex items-center gap-1">
         <input
           ref={ref}
@@ -351,24 +399,13 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
           spellCheck={false}
           autoComplete="off"
           placeholder="users/u_9f3k2"
-          className={`${valueInputClass(invalid)} w-full min-w-0 placeholder:font-sans placeholder:text-kumo-inactive`}
+          size={1}
+          className={`${valueInputClass(invalid)} ${SIZED} min-w-24 placeholder:font-sans placeholder:text-kumo-inactive`}
           aria-label={`${label} value`}
         />
-        <span className={ACCESSORY}>
-          <Tooltip
-            content="Open the referenced document"
-            render={
-              <Button
-                variant="ghost"
-                size="xs"
-                shape="square"
-                icon={<ArrowSquareOutIcon />}
-                aria-label={`Open ${label}`}
-                onClick={() => onOpenReference(node.text)}
-              />
-            }
-          />
-        </span>
+        {/* A path is the one value that reads exactly like a string, so
+            this type keeps a word the way a double does. */}
+        {node.text.trim() !== '' && <span className={`shrink-0 ${NOTE}`}>ref</span>}
       </div>
       {open && matches.length > 0 && (
         <Completions anchor={ref} testId="reference-completions">
@@ -386,6 +423,25 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
   )
 }
 
+function OpenReference({ node, label }: Omit<EditorProps, 'invalid' | 'onChange'>) {
+  const { onOpenReference } = useFieldEditing()
+  return (
+    <Tooltip
+      content="Open the referenced document"
+      render={
+        <Button
+          variant="ghost"
+          size="xs"
+          shape="square"
+          icon={<ArrowSquareOutIcon />}
+          aria-label={`Open ${label}`}
+          onClick={() => onOpenReference(node.text)}
+        />
+      }
+    />
+  )
+}
+
 function GeopointEditor({ node, onChange, label, invalid }: EditorProps) {
   const { next } = useFieldEditing()
   const ref = useFocusTarget<HTMLInputElement>(node.id)
@@ -394,13 +450,13 @@ function GeopointEditor({ node, onChange, label, invalid }: EditorProps) {
   const longitude = comma === -1 ? '' : node.text.slice(comma + 1).trim()
   const set = (lat: string, lng: string) => onChange({ ...node, text: `${lat}, ${lng}` })
   const part = `h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none`
-  const group = `flex h-7 w-32 min-w-0 shrink items-center rounded-md ${
+  const group = `flex h-7 w-28 min-w-0 shrink items-center rounded-md ${
     invalid
       ? 'bg-kumo-control ring ring-kumo-danger'
-      : 'hover:bg-kumo-tint focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus'
+      : 'focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus'
   }`
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex min-w-0 flex-1 items-center gap-1">
       <div className={group}>
         <span className="pl-2 font-mono text-[11px] text-kumo-inactive">lat</span>
         <input
@@ -435,7 +491,7 @@ function BytesEditor({ node, onChange, label, invalid }: EditorProps) {
   const ref = useFocusTarget<HTMLInputElement>(node.id)
   const text = node.text.trim()
   return (
-    <div>
+    <div className="flex min-w-0 flex-1 items-center gap-1">
       <input
         ref={ref}
         value={node.text}
@@ -443,14 +499,15 @@ function BytesEditor({ node, onChange, label, invalid }: EditorProps) {
         onKeyDown={onEnterNext(next)}
         spellCheck={false}
         placeholder="base64"
-        className={`${valueInputClass(invalid)} w-full min-w-0 placeholder:font-sans placeholder:text-kumo-inactive`}
+        size={1}
+        className={`${valueInputClass(invalid)} ${SIZED} min-w-24 placeholder:font-sans placeholder:text-kumo-inactive`}
         aria-label={`${label} value`}
       />
       {text !== '' && !invalid && (
-        <div className={NOTE}>
+        <span className={`shrink-0 ${NOTE}`}>
           {byteLength(text)} bytes
           {readable(text) === undefined ? '' : ` · ${readable(text)}`}
-        </div>
+        </span>
       )}
     </div>
   )

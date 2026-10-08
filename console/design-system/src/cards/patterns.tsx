@@ -642,9 +642,19 @@ function DataGrid() {
  * row. That is what lets the panel edit a nested structure at all: the case
  * a form beats raw JSON at is nesting, and a panel that drops to a textarea
  * the moment a value stops being flat has given up exactly where it was
- * wanted. The name wears no chrome until it is pointed at, because it is
- * read far more often than it is changed, and editing it is the rename
- * Firestore has no operation for: a delete and a set, in this document only.
+ * wanted.
+ *
+ * A row is one line, and a name and its value share it. A document is a
+ * tree, and a tree is legible only when a node is a line: on two lines
+ * every node is a block, and an indent of sixteen pixels says nothing
+ * against a block forty-seven pixels tall. Every row carries the caret
+ * column whether or not it has a caret, so depth is the only thing that
+ * moves a name — giving it to maps alone indented them past their own
+ * siblings, and past their own children.
+ *
+ * The name wears no chrome until the line is pointed at, because it is read
+ * far more often than it is changed, and editing it is the rename Firestore
+ * has no operation for: a delete and a set, in this document only.
  */
 function FieldRow({
   name,
@@ -653,6 +663,8 @@ function FieldRow({
   note,
   removed,
   unsaved,
+  pointed,
+  value,
   children,
 }: {
   name?: string | undefined
@@ -661,11 +673,15 @@ function FieldRow({
   note?: string | undefined
   removed?: boolean | undefined
   unsaved?: boolean | undefined
+  /** Drawn as it is under the pointer: the ground and the controls arrive. */
+  pointed?: boolean | undefined
+  value?: ReactNode
   children?: ReactNode
 }) {
   if (removed)
     return (
-      <div className="flex items-center gap-2 rounded-md px-2 py-1.5 opacity-70">
+      <div className="flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70">
+        <span className="size-5 shrink-0" />
         <span className="min-w-0 flex-1 truncate font-mono text-[12px] line-through">{name}</span>
         <span className="shrink-0 text-[11px] text-kumo-subtle">Removed on save</span>
         <Button variant="ghost" size="xs" icon={<ArrowCounterClockwiseIcon />}>
@@ -674,28 +690,41 @@ function FieldRow({
       </div>
     )
   return (
-    <div className="grid gap-0.5">
-      <div className="flex items-center gap-1 pr-1.5 pl-0.5">
+    <div>
+      {/* The ground belongs to the line, not to each control. Hovering a
+          row is how you see which field you are on — the question a column
+          of twenty one-line rows has to answer and a column of blocks
+          never had to. */}
+      <div
+        className={`relative flex min-h-7 items-center gap-1 rounded-md pr-1 pl-0.5 ${
+          pointed ? 'bg-kumo-tint' : ''
+        }`}
+      >
+        <span className="flex size-5 shrink-0 items-center justify-center text-kumo-subtle">
+          {children ? <CaretDownIcon size={12} /> : null}
+        </span>
         {index === undefined ? (
-          <span className="min-w-0 flex-1 truncate rounded px-1.5 font-mono text-[12px] font-medium">
-            {name}
-          </span>
+          <span className="shrink-0 rounded px-1.5 font-mono text-[12px] font-medium">{name}</span>
         ) : (
-          <>
-            <span className="w-6 shrink-0 font-mono text-[12px] text-kumo-subtle tabular-nums">
-              {index}
-            </span>
-            <span className="min-w-0 flex-1" />
-          </>
+          <span className="min-w-4 shrink-0 text-right font-mono text-[12px] text-kumo-subtle tabular-nums">
+            {index}
+          </span>
         )}
+        <span className="-ml-1.5 shrink-0 font-mono text-[12px] text-kumo-inactive">:</span>
         {/* Which fields the footer's count is counting: Save is the row's
             own accent, and this is what it is about to write. */}
         {unsaved && <span className="size-1.5 shrink-0 rounded-full bg-kumo-brand" />}
-        {type && <TypeChip type={type} menu />}
-        {/* Not drawn until the row is pointed at: a document of fourteen
-            fields had eighty-six buttons on screen at once, and the
-            loudest repeated one was the delete nobody was reaching for. */}
-        <span className={unsaved ? '' : 'opacity-0'}>
+        {value}
+        {/* Every control that is not the value, in one strip drawn over the
+            end of the line. It overlays rather than reserves: keeping its
+            place cost ninety-three of a line's four hundred and five
+            pixels, held open at rest for buttons not drawn at rest. */}
+        <span
+          className={`absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit pl-3 ${
+            pointed ? '' : 'opacity-0'
+          }`}
+        >
+          {type && <TypeChip type={type} menu />}
           <Button
             variant="ghost"
             size="xs"
@@ -705,24 +734,29 @@ function FieldRow({
           />
         </span>
       </div>
-      {children}
-      {note && <span className="px-1.5 text-[11px] text-kumo-subtle">{note}</span>}
+      {note && <span className="block pl-6 text-[11px] text-kumo-subtle">{note}</span>}
+      {children && <Nested>{children}</Nested>}
     </div>
   )
 }
 
-/** The entries of a map or the items of an array, under a guide line. */
+/**
+ * The entries of a map or the items of an array, under a guide line. The
+ * step is the caret column's own width, so a child's name lands one column
+ * right of its parent's rather than, as it did, to the left of it.
+ */
 function Nested({ children }: { children: ReactNode }) {
-  return <div className="ml-2 grid gap-2.5 border-l border-kumo-line pl-2">{children}</div>
+  return <div className="ml-2.5 grid gap-0.5 border-l border-kumo-line pl-2.5">{children}</div>
 }
 
 /**
  * A value is read far more often than it is changed, so at rest it is
- * text — and it takes a ground under the pointer and an outline on focus,
- * the same three states as the path field and the field name. Filled boxes
- * stacked down a 420 px column are what made a document of a dozen short
- * strings read as a form to fill in. A region keeps its box, because a box
- * is how a region says how much room there is.
+ * text, and it takes an outline on focus alone. Filled boxes stacked down a
+ * 420 px column are what made a document of a dozen short strings read as a
+ * form to fill in. The ground under the pointer is the line's, not this:
+ * grounding the value alone answers "which control" when the question is
+ * "which field". A region keeps its box, because a box is how a region says
+ * how much room there is.
  */
 function Value({
   children,
@@ -730,12 +764,11 @@ function Value({
   className = '',
 }: {
   children: ReactNode
-  state?: 'rest' | 'hover' | 'focus' | 'area'
+  state?: 'rest' | 'focus' | 'area'
   className?: string
 }) {
   const chrome = {
     rest: '',
-    hover: 'bg-kumo-tint',
     focus: 'bg-kumo-control ring ring-kumo-focus',
     area: 'bg-kumo-control ring ring-kumo-line',
   }[state]
@@ -745,6 +778,15 @@ function Value({
     >
       {children}
     </div>
+  )
+}
+
+/** What a map or an array says on its own line, open or shut. */
+function Summary({ children }: { children: ReactNode }) {
+  return (
+    <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-subtle">
+      {children}
+    </span>
   )
 }
 
@@ -788,70 +830,83 @@ function Inspector() {
               ]}
               selectedValue="fields"
             />
-            <div className="grid gap-2.5">
-              <FieldRow name="status" type="string">
-                <Value>paid</Value>
-              </FieldRow>
-              <FieldRow name="total" type="number">
-                <div className="flex items-center gap-1">
-                  <Value className="w-14">42</Value>
-                  {/* `3` is how Firestore writes an integer and a double
-                      alike, so nothing in the text can say which this is.
-                      The editor says it, and lets it be changed. */}
-                  <span className="flex h-7 shrink-0 items-center rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle">
-                    double
-                  </span>
-                </div>
-              </FieldRow>
-              <FieldRow name="paid" type="boolean">
-                <div className="flex h-7 items-center">
-                  <Switch variant="neutral" size="sm" checked onCheckedChange={() => {}} />
-                  <span className="ml-2 font-mono text-[12px] text-kumo-subtle">true</span>
-                </div>
-              </FieldRow>
-              <FieldRow name="createdAt" type="timestamp">
-                <div className="flex items-center gap-1">
-                  <Value className="flex-1">2026-09-20T10:14:02.117Z</Value>
-                  <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">2 mo ago</span>
-                </div>
-              </FieldRow>
+            <div className="grid gap-0.5">
+              <FieldRow name="status" type="string" value={<Value>paid</Value>} />
+              <FieldRow
+                name="total"
+                type="number"
+                value={
+                  <>
+                    <Value>42</Value>
+                    {/* `3` is how Firestore writes an integer and a double
+                        alike, so nothing in the text can say which this is.
+                        The editor says it, and lets it be changed — beside
+                        the number, which is why the box follows its digits
+                        rather than running the width of the panel. */}
+                    <span className="flex h-7 shrink-0 items-center rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle">
+                      double
+                    </span>
+                  </>
+                }
+              />
+              <FieldRow
+                name="paid"
+                type="boolean"
+                value={
+                  <div className="flex h-7 items-center">
+                    <Switch variant="neutral" size="sm" checked onCheckedChange={() => {}} />
+                    <span className="ml-2 font-mono text-[12px] text-kumo-subtle">true</span>
+                  </div>
+                }
+              />
+              <FieldRow
+                name="createdAt"
+                type="timestamp"
+                value={
+                  <>
+                    <Value>2026-09-20T10:14:02.117Z</Value>
+                    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
+                      2 mo ago
+                    </span>
+                  </>
+                }
+              />
+              {/* Pointed at: the ground arrives on the line, and so does
+                  every control that is not the value. */}
               <FieldRow
                 name="buyer"
                 type="reference"
                 note="Renaming customer here changes this document only."
                 unsaved
-              >
-                {/* Pointed at: the ground arrives, and so do the controls
-                    that are not the value. */}
-                <Value state="hover">users/u_9f3k2</Value>
-              </FieldRow>
-              <FieldRow name="office" type="geopoint">
-                <div className="flex items-center gap-1">
-                  <Value className="w-32">
-                    <span className="mr-1.5 text-[11px] text-kumo-inactive">lat</span>3.139
-                  </Value>
-                  <Value className="w-32">
-                    <span className="mr-1.5 text-[11px] text-kumo-inactive">lng</span>101.6869
-                  </Value>
-                </div>
-              </FieldRow>
-              <FieldRow name="billing" type="map">
-                <Nested>
-                  <FieldRow name="currency" type="string">
-                    <Value>MYR</Value>
+                pointed
+                value={
+                  <>
+                    <Value>users/u_9f3k2</Value>
+                    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">ref</span>
+                  </>
+                }
+              />
+              <FieldRow
+                name="office"
+                type="geopoint"
+                value={
+                  <>
+                    <Value className="w-28">
+                      <span className="mr-1.5 text-[11px] text-kumo-inactive">lat</span>3.139
+                    </Value>
+                    <Value className="w-28">
+                      <span className="mr-1.5 text-[11px] text-kumo-inactive">lng</span>101.6869
+                    </Value>
+                  </>
+                }
+              />
+              <FieldRow name="billing" type="map" value={<Summary>{'{ 2 fields }'}</Summary>}>
+                <FieldRow name="currency" type="string" value={<Value>MYR</Value>} />
+                <FieldRow name="contacts" type="array" value={<Summary>{'[ 1 item ]'}</Summary>}>
+                  <FieldRow index={0} type="map" value={<Summary>{'{ 1 field }'}</Summary>}>
+                    <FieldRow name="email" type="string" value={<Value>ada@example.test</Value>} />
                   </FieldRow>
-                  <FieldRow name="contacts" type="array">
-                    <Nested>
-                      <FieldRow index={0} type="map">
-                        <Nested>
-                          <FieldRow name="email" type="string">
-                            <Value>ada@example.test</Value>
-                          </FieldRow>
-                        </Nested>
-                      </FieldRow>
-                    </Nested>
-                  </FieldRow>
-                </Nested>
+                </FieldRow>
               </FieldRow>
               <FieldRow name="legacy" type="string" removed />
             </div>

@@ -17,13 +17,23 @@ export interface KnownField {
 }
 
 /**
- * A control that is not the value: present, keeping its place in the row,
- * but not drawn until the row is pointed at or something in it has focus.
- * A document of fourteen fields had eighty-six buttons on screen at once,
- * and the loudest repeated one was the delete nobody was reaching for.
+ * Every control of a row that is not its value, in one strip, drawn over the
+ * end of the line when the line is pointed at. A document of fourteen fields
+ * had eighty-six buttons on screen at once, and the loudest repeated one was
+ * the delete nobody was reaching for.
+ *
+ * It overlays rather than reserves. Keeping its place cost ninety-three of a
+ * line's four hundred and five pixels — a quarter of every row, held open at
+ * rest for buttons that are not drawn at rest — and that was the width a
+ * timestamp was being truncated by.
+ *
+ * It answers to the line, not the row, because a row contains its children:
+ * pointing at an entry of a map used to arm the map's controls as well. And
+ * it stays down while a value has focus, so it never lands on the text being
+ * typed; `focus-within` is its own, so a Tab into the strip still shows it.
  */
 export const ACCESSORY =
-  'shrink-0 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100'
+  'pointer-events-none absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit pl-3 opacity-0 group-hover/line:pointer-events-auto group-hover/line:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100'
 
 export interface FieldEditing {
   problems: Map<string, NodeProblem>

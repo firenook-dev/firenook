@@ -421,6 +421,24 @@ removed when no regression could be made to fail with it gone. The row says
 collection keep the old name and a console that does not say so is setting
 a trap.
 
+**A row is one line, and depth is the only thing that moves a name.** A
+document is a tree, and a tree is legible only when a node is a line: the
+first cut put the name on one line and the value on the next, which made
+every node a block 47 px tall, and an indent of 16 px says nothing against
+that. Worse, the caret column was given to containers alone and was *wider*
+(21 px) than the indent — so at one depth a map stood right of its
+siblings, and `projects` was drawn **six pixels to the left of `limits`,
+the map containing it**. Depth and type were fighting over the same
+pixels and depth lost. Now every row carries the caret column whether or
+not it has a caret, the indent is that column's own width, and a name and
+its value share a line with a quiet `:` between them. The same document
+went from 1,107 px to 557.
+
+A value that is a *region* of text rather than a line of it — a multi-line
+string, a vector, a container in `raw` mode — cannot share the line, so it
+goes underneath at the panel's full width (`valueIsRegion`). A container
+says `{ 3 fields }` on its own line whether it is open or shut.
+
 **Everything in a row earns its chrome one state at a time** — the name,
 and the value too. This is the third place the rule applies (the path field
 was the first) and it is now the console's rule, not a tweak: nothing at
@@ -432,12 +450,37 @@ and 86 buttons** in one 420 px column — it read as a form to fill in rather
 than a document to read. At rest it is now two boxes (the one textarea and
 the add-field line) and the buttons left are the type chips, the disclosure
 carets and the switches, which are information or structure. `ACCESSORY` in
-`field-context.ts` is the shared class for the rest: they keep their place
-in the row and are drawn under the pointer or on focus.
+`field-context.ts` is the one strip holding all the rest.
+
+**The strip overlays the end of the line; it does not reserve it.** Holding
+its place cost **93 of a line's 405 px** — a quarter of every row, kept
+open at rest for buttons that are not drawn at rest — and that was exactly
+the width a 24-character timestamp was being truncated by. It is
+`absolute`, inherits the line's own ground (`bg-inherit`, and
+`bg-kumo-tint` is opaque, so there is no seam), and is
+`pointer-events-none` until shown, or an invisible button would swallow
+clicks on the end of a value. Two consequences worth knowing:
+
+- It answers to the **line**, not the row, because a row contains its
+  children — `group/line`, not `group/row`. Pointing at one entry of a map
+  used to arm the map's controls as well, three sets lit for one pointer.
+- It reveals on hover and on its **own** `focus-within`, never the line's.
+  A strip that came up on the line's focus landed on the text being typed;
+  this way it stays down while a value has focus, and a Tab out of the
+  value into the strip still brings it up.
+- Because of `pointer-events-none`, a journey must point at the row before
+  pressing one of its controls. `press()` in `firestore.spec.ts` does that;
+  a bare `.click()` hangs on actionability, which is the right answer —
+  no person can click a control nothing is pointing at.
+
+The hover ground belongs to the **line**, not to each input. A column of
+twenty one-line rows has to answer "which field am I on", and grounding the
+value alone answered "which control" instead. So `valueInputClass` keeps
+focus chrome only.
 
 A box is how a *region* says how much room it has, so a textarea keeps its
-outline (`valueAreaClass`) while a line does not. A number's box follows
-its digits (`field-sizing: content`, floored by the class because the
+outline (`valueAreaClass`) while a line does not. A sized value's box follows
+its text (`field-sizing: content`, floored by the class because the
 property's floor is the `size` attribute's default of twenty characters),
 so the control saying whether it is an integer or a double stays beside the
 number instead of being stranded at the panel's edge. `valueInputClass`
@@ -453,8 +496,14 @@ primary action and this is what it is about to write.
 
 `TypeBadge` takes `menu` where the chip opens the type menu, and the two
 places differ on purpose: in a grid header it is a label in a dense row and
-keeps its ground, on a field row it is one of a column of chips and is a
-word and a caret until the row is pointed at.
+keeps its ground; on a field row it lives in the strip, because **the type
+is a control and the value already says what it is** — a number is digits,
+a boolean is a switch, a map counts its own entries. Where the text alone
+is ambiguous the editor says so in a word of its own instead: `double`,
+`ref`, `lat`/`lng`, `11 bytes`, `3 dimensions`, `18 d ago`. Any value with
+a word after it is sized to its text (`SIZED` in `value-editors.tsx`), so
+the word stays beside it rather than at the far edge of the panel with a
+desert in between.
 
 **Adding a field is one line, and the line knows the collection.**
 `useKnownFields` reads the grid's own page query — same key, same cache, no

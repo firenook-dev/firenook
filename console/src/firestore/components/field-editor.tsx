@@ -98,7 +98,7 @@ export function FieldsPanel({
       {tab === 'fields' ? (
         <>
           <div className="min-h-0 flex-1 overflow-auto">
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5 p-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 p-2">
               <FieldRows nodes={nodes} named onChange={onNodesChange} soft />
               {nodes.length === 0 && (
                 <div className="px-2 py-1">
