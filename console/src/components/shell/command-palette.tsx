@@ -67,7 +67,7 @@ export function CommandPalette() {
       {
         id: 'layout:nav',
         title: navOpen ? 'Collapse the sidebar' : 'Expand the sidebar',
-        description: navOpen ? 'icons only; hover to peek · [' : 'icons and labels · [',
+        description: navOpen ? 'Icons only; hover to peek · [' : 'Icons and labels · [',
         keywords: 'navigation layout sidebar collapse expand',
         icon: <SidebarSimpleIcon size={16} />,
         run: toggleNav,
@@ -77,7 +77,7 @@ export function CommandPalette() {
       items.push({
         id: 'layout:panel',
         title: `${panelOpen ? 'Hide' : 'Show'} the ${panel.label.toLowerCase()} panel`,
-        description: 'the column beside the content · t',
+        description: 'The column beside the content · t',
         keywords: 'layout tree schema rail sidebar',
         icon: <SquareHalfIcon size={16} />,
         run: togglePanel,
@@ -89,7 +89,7 @@ export function CommandPalette() {
         id: `layout:theme:${option.choice}`,
         title: `${option.label} theme`,
         description:
-          option.choice === theme ? `in use · ${describeTheme(theme, mode)}` : 'colour scheme',
+          option.choice === theme ? `In use · ${describeTheme(theme, mode)}` : 'Colour scheme',
         keywords: 'theme colour color scheme dark light appearance',
         icon: <option.icon size={16} />,
         run: () => setTheme(option.choice),

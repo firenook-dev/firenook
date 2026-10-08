@@ -55,7 +55,7 @@ export function RulesEditorPanel() {
       toasts.add({
         title: variables.save ? 'Rules applied and saved' : 'Rules applied',
         description: result.saved
-          ? (result.path ?? 'written to the configured file')
+          ? (result.path ?? 'Written to the configured file')
           : 'In force from the next request. Not written to disk.',
         variant: 'success',
       })

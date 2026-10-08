@@ -22,6 +22,7 @@ import {
 } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { statusQuery } from '@/api/queries'
+import { PanelTitle } from '@/components/kit'
 import { useMemo, useState } from 'react'
 import { useCreateDialog } from '../create'
 import { type CodeTarget, documentAsCode } from '../query'
@@ -100,11 +101,15 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       </header>
       {document.isPending ? (
         <div className="p-4">
-          <Text variant="secondary">Loading…</Text>
+          <Text variant="secondary" size="sm">
+            Loading…
+          </Text>
         </div>
       ) : document.isError ? (
         <div className="p-4">
-          <Text variant="error">{document.error.message}</Text>
+          <Text variant="error" size="sm">
+            {document.error.message}
+          </Text>
         </div>
       ) : document.data === null ? (
         <MissingDocument path={path} subcollections={subcollections.data ?? []} />
@@ -134,10 +139,8 @@ function MissingDocument({
   const id = path.split('/').at(-1) ?? path
   return (
     <div className="grid gap-3 p-4">
-      <Text variant="heading" as="h3">
-        No document here
-      </Text>
-      <Text variant="secondary">
+      <PanelTitle>No document here</PanelTitle>
+      <Text variant="secondary" size="sm">
         {subcollections.length > 0
           ? 'Nothing was ever written at this path, but it has subcollections; Firestore shows it in italics for the same reason.'
           : 'Nothing was ever written at this path.'}

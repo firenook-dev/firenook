@@ -1,7 +1,8 @@
 // Copy the current query, or a document, as the code that reproduces it.
 
-import { Button, Popover, Tabs, Text } from '@cloudflare/kumo'
+import { Button, Popover, Tabs } from '@cloudflare/kumo'
 import { CheckIcon, CodeIcon, CopyIcon } from '@phosphor-icons/react'
+import { PanelTitle } from '@/components/kit'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { statusQuery } from '@/api/queries'
@@ -57,9 +58,7 @@ export function CodeBlock({
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
-        <Text variant="heading" as="h3">
-          {title}
-        </Text>
+        <PanelTitle>{title}</PanelTitle>
         <Button
           variant="secondary"
           size="sm"

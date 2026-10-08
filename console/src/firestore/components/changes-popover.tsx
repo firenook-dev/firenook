@@ -9,7 +9,7 @@ import { Badge, Button, Popover, Text, useKumoToastManager } from '@cloudflare/k
 import { ArrowCounterClockwiseIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { LiveDot, type LiveState } from '@/components/kit'
+import { LiveDot, PanelTitle, type LiveState } from '@/components/kit'
 import { ApiError } from '@/api/client'
 import {
   type LoggedCommit,
@@ -77,9 +77,7 @@ export function ChangesPopover({ state, changes }: { state: LiveState; changes: 
             the layout live on a div of our own inside it. */}
         <div className="grid gap-2" data-testid="changes-popover">
           <div className="flex items-baseline justify-between gap-3">
-            <Text variant="heading" as="h3">
-              Recent changes
-            </Text>
+            <PanelTitle>Recent changes</PanelTitle>
             {log.data && log.data.retained > 0 && (
               <Text variant="secondary" size="sm">
                 {log.data.retained.toLocaleString('en-US')} kept

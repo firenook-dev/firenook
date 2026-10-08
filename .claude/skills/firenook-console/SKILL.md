@@ -163,6 +163,25 @@ than Kumo's docs show. The accent is reserved for the primary
 action, active navigation and links; switches use `variant="neutral"` (Kumo's
 default switch is hard-coded blue) so they match the checkbox.
 
+### The type scale, and which surface a size belongs to
+
+Kumo's scale resolves to `xs` 12, `sm` 13, `base` 14, `lg` 16, `xl` 20 px,
+and `Text variant="heading"` is 16 px semibold whatever `size` says (20 px
+only at `size="lg"`). The console uses it by surface, not by taste:
+
+| | title | body | chrome, counts |
+| --- | --- | --- | --- |
+| page (Overview, a section placeholder) | 20 px `heading size="lg"`, sections 16 px | 14 px | — |
+| dialog — it owns the screen | 16 px `text-lg font-semibold` | 14 px | 13 px |
+| popover, dropdown, the inspector | **14 px `PanelTitle`** | 13 px `size="sm"` | 12 px, figures 11 px |
+| toolbar, grid, chips | — | — | 12 px, figures 11 px, `kbd` 10 px |
+
+`PanelTitle` (`components/kit`) exists because `variant="heading"` is three
+steps above the 12 px control a popover hangs off, which makes the whole
+surface read as a larger world than the page behind it. A surface attached
+to a control gets a title one step above its own body and no more. Never
+reach past 14 px inside one.
+
 ### Capitals: English for the person, lowercase for the data
 
 Anything written *to* the reader starts with a capital — every control label

@@ -119,7 +119,7 @@ export function useFirestorePalette() {
     actions.push({
       id: 'fs:rules',
       title: 'Security rules',
-      description: `edit the rules this database is served with`,
+      description: `Edit the rules this database is served with`,
       keywords: 'permissions allow deny security firestore.rules',
       icon: <ShieldCheckIcon size={16} />,
       run: () => workbench.navigate({ view: 'rules' }),
@@ -127,7 +127,7 @@ export function useFirestorePalette() {
     actions.push({
       id: 'fs:undo',
       title: 'Undo the last change',
-      description: 'whoever made it, if nothing has moved on since',
+      description: 'Whoever made it, if nothing has moved on since',
       keywords: 'revert back restore mistake',
       icon: <ArrowCounterClockwiseIcon size={16} />,
       run: () => {
@@ -157,7 +157,7 @@ export function useFirestorePalette() {
         {
           id: 'fs:new-document',
           title: 'New document',
-          description: `in ${workbench.collectionPath}`,
+          description: `In ${workbench.collectionPath}`,
           keywords: 'add create',
           icon: <FileIcon size={16} />,
           run: () => openCreate({ kind: 'document', collection: workbench.collectionPath }),
@@ -173,7 +173,7 @@ export function useFirestorePalette() {
         {
           id: 'fs:explain',
           title: 'Explain this query',
-          description: 'what it reads, and the index production needs',
+          description: 'What it reads, and the index production needs',
           keywords: 'plan index slow performance composite',
           icon: <LightningIcon size={16} />,
           run: () => setExplain(true),
@@ -181,7 +181,7 @@ export function useFirestorePalette() {
         {
           id: 'fs:export',
           title: 'Export',
-          description: 'this query as JSON, NDJSON or CSV',
+          description: 'This query as JSON, NDJSON or CSV',
           keywords: 'download csv ndjson json save',
           icon: <DownloadSimpleIcon size={16} />,
           run: () => openExport(true),
@@ -189,7 +189,7 @@ export function useFirestorePalette() {
         {
           id: 'fs:import',
           title: 'Import JSON',
-          description: `into ${workbench.collectionPath}`,
+          description: `Into ${workbench.collectionPath}`,
           keywords: 'upload ndjson',
           icon: <UploadSimpleIcon size={16} />,
           run: () => openCreate({ kind: 'import', collection: workbench.collectionPath }),
@@ -199,7 +199,7 @@ export function useFirestorePalette() {
       actions.push({
         id: 'fs:new-subcollection',
         title: 'New subcollection',
-        description: `under ${selected}`,
+        description: `Under ${selected}`,
         keywords: 'add create',
         icon: <FolderSimplePlusIcon size={16} />,
         run: () => openCreate({ kind: 'collection', parent: selected }),

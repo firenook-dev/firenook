@@ -698,7 +698,7 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
 
   // The whole collection, keyed by id, as the console's own import reads it.
   await page.getByTestId('export-open').click()
-  await expect(page.getByTestId('export-scope')).toHaveText('every document in products')
+  await expect(page.getByTestId('export-scope')).toHaveText('Every document in products')
   const jsonDownload = page.waitForEvent('download')
   await page.getByTestId('confirm-export').click()
   const json = await jsonDownload

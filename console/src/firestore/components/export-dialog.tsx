@@ -147,8 +147,8 @@ export function ExportDialog({
   const what = only
     ? `${formatNumber(only.length)} selected ${only.length === 1 ? 'document' : 'documents'}`
     : workbench.query.where.length > 0 || workbench.query.orderBy.length > 0
-      ? `every document matching ${printQuery(workbench.query)}`
-      : `every document in ${workbench.collectionPath}`
+      ? `Every document matching ${printQuery(workbench.query)}`
+      : `Every document in ${workbench.collectionPath}`
 
   return (
     <Dialog.Root open={open} onOpenChange={close}>
