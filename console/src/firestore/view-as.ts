@@ -81,6 +81,11 @@ export function describeViewAs(viewAs: ViewAs): string {
   return viewAs.email ?? viewAs.uid
 }
 
+/** The same, without the qualifier a narrow toolbar has no room for. */
+export function describeViewAsShort(viewAs: ViewAs): string {
+  return viewAs.kind === 'owner' ? 'Admin' : describeViewAs(viewAs)
+}
+
 export interface AuthUser {
   uid: string
   email?: string | undefined

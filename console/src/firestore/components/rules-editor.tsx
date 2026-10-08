@@ -100,12 +100,15 @@ export function RulesEditorPanel() {
         </Button>
         <span className="mx-0.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
         <span className="flex items-center gap-2">
-          <span className="text-kumo-subtle">
-            <ShieldCheckIcon size={16} />
-          </span>
-          <Text as="span" size="sm" bold>
+          {/* The toolbar's own Rules button, lit. The pair reads the same in
+              both views: one of two places to be, and you are in this one. */}
+          <span
+            className="flex h-6.5 items-center gap-1 rounded-md bg-kumo-base px-2 text-xs ring ring-kumo-line"
+            aria-current="page"
+          >
+            <ShieldCheckIcon size={14} />
             Rules
-          </Text>
+          </span>
           <Text as="span" variant="secondary" size="sm">
             {workbench.database}
           </Text>

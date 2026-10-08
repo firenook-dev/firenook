@@ -6,7 +6,16 @@ export type LiveState = 'live' | 'reconnecting' | 'offline'
  * since the view opened. Never a spinner for data already on screen.
  * @category Status
  */
-export function LiveDot({ state = 'live', changes }: { state?: LiveState; changes?: number }) {
+export function LiveDot({
+  state = 'live',
+  changes,
+  compact = false,
+}: {
+  state?: LiveState
+  changes?: number
+  /** Dot and counter only: a crowded toolbar can spare the word, not the state. */
+  compact?: boolean
+}) {
   const label = state === 'live' ? 'Live' : state === 'reconnecting' ? 'Reconnecting' : 'Offline'
   const colour =
     state === 'live'
@@ -22,8 +31,8 @@ export function LiveDot({ state = 'live', changes }: { state?: LiveState; change
         ) : null}
         <span className={`relative inline-flex size-2 rounded-full ${colour}`} />
       </span>
-      {label}
-      {changes ? ` · ${changes} ${changes === 1 ? 'change' : 'changes'}` : ''}
+      <span className={compact ? 'sr-only' : undefined}>{label}</span>
+      {changes ? ` ${compact ? '' : '· '}${changes} ${changes === 1 ? 'change' : 'changes'}` : ''}
     </span>
   )
 }

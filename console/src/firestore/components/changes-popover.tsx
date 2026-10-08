@@ -68,7 +68,14 @@ export function ChangesPopover({ state, changes }: { state: LiveState; changes: 
             aria-label="Recent changes"
             data-testid="changes-trigger"
           >
-            <LiveDot state={state} changes={changes} />
+            {/* The word goes before the state does: a crowded toolbar still
+                has to say whether the channel is up. */}
+            <span className="hidden xl:flex">
+              <LiveDot state={state} changes={changes} />
+            </span>
+            <span className="flex xl:hidden">
+              <LiveDot state={state} changes={changes} compact />
+            </span>
           </button>
         }
       />

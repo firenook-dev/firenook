@@ -196,6 +196,38 @@ test('a screen of rows asks for its subcollections once, not once a row', async 
   expect(perDocument).toBe(0)
 })
 
+test('the toolbar groups hold, and never overlap, as it narrows', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=users/u_k65eq/orders`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  // The controls that act on the path sit against it, not across the row.
+  const lastSegment = page.getByTestId('path-bar').getByRole('button', { name: 'orders' })
+  const gap = async () =>
+    (await page.getByTestId('scope-picker').boundingBox())!.x -
+    edge(await lastSegment.boundingBox())
+  expect(await gap()).toBeLessThan(24)
+
+  for (const width of [1440, 1280, 1152, 1024]) {
+    await page.setViewportSize({ width, height: 760 })
+    await expect(page.getByTestId('grid-row').first()).toBeVisible()
+    // Nothing paints over its neighbour: the path and its controls end
+    // before the group that reports state begins, and New is last.
+    const controls = edge(await page.getByTestId('view-as').boundingBox())
+    const newMenu = await page.getByTestId('new-menu').boundingBox()
+    expect(controls).toBeLessThanOrEqual(newMenu!.x + 1)
+    expect(edge(newMenu)).toBeLessThanOrEqual(width)
+    // And the toolbar itself never scrolls sideways.
+    const overflow = await page
+      .getByTestId('toolbar')
+      .evaluate((el) => el.scrollWidth - el.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(1)
+    // The path bar clips rather than painting over its neighbour, so a
+    // control that no longer fits inside it disappears instead of
+    // overlapping. Whatever else gives way, the scope must not.
+    const bar = edge(await page.getByTestId('path-bar').boundingBox())
+    expect(edge(await page.getByTestId('path-controls').boundingBox())).toBeLessThanOrEqual(bar + 1)
+  }
+})
+
 test('the scope picker names both scopes, and reads what it says', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()

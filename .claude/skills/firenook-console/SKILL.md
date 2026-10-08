@@ -213,7 +213,22 @@ count 15 ms`.
 ### The two toolbar rows, and toggles
 
 A section's toolbar is two rows and the split is a rule, not a space
-problem. **Row one is the scope**: where you are (the database picker, the
+problem. Within a row, a control sits against the thing it acts on: the
+scope picker and copy belong beside the path, not pushed to the far right
+of it, or they read as unrelated to what they change. Dividers mark the
+groups, and the last one isolates the control that writes — `New` stands
+alone, everything that reports or switches view is on the other side.
+
+A toolbar must degrade, never overlap. A `shrink-0` group inside a
+`flex-1` parent paints over its neighbour when the parent runs out of room,
+so the parent takes `overflow-hidden` and the pieces give way in a stated
+order: the identity's qualifier first (`As Admin (bypasses rules)` →
+`As Admin` below `2xl`), then the words on `Live` and `Rules` below `xl`,
+then the empty click-to-edit target (`flex-1 basis-0`, no `min-w`), and only
+then the path itself, which scrolls **to its end** — the database name never
+changes and where you are is the last segment. A `ResizeObserver` on the
+segments keeps that true when the counts arrive and widen them. One journey
+checks all of this at 1440, 1280, 1152 and 1024. **Row one is the scope**: where you are (the database picker, the
 path, the collection-group toggle), the state of the connection (`live`),
 who the reads run as (`View as` — it applies to every read the section
 makes, the schema tree and the inspector included, so it is never a

@@ -12,7 +12,7 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { MenuCheck } from '@/components/kit'
 import { authUsersQuery } from '../queries'
-import { describeViewAs } from '../view-as'
+import { describeViewAs, describeViewAsShort } from '../view-as'
 import { useWorkbench } from './workbench-context'
 
 export function ViewAsPicker() {
@@ -37,7 +37,11 @@ export function ViewAsPicker() {
             data-testid="view-as"
           >
             <span className="flex items-center gap-1">
-              <span className="text-kumo-subtle">As</span> {describeViewAs(current)}
+              <span className="text-kumo-subtle">As</span>
+              {/* The qualifier is a reminder, and it is the first line of the
+                  menu; the path is read every minute. It yields first. */}
+              <span className="hidden 2xl:inline">{describeViewAs(current)}</span>
+              <span className="2xl:hidden">{describeViewAsShort(current)}</span>
               <CaretDownIcon size={12} className="text-kumo-subtle" />
             </span>
           </Button>

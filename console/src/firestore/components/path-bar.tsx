@@ -40,6 +40,25 @@ export function PathBar() {
     if (editing !== null) inputRef.current?.select()
   }, [editing])
 
+  // A path too long for its box scrolls to the end, not the start: the
+  // database name never changes, and where you are is the last segment. The
+  // counts arrive after the segments do and widen them again, so follow the
+  // content rather than measuring once.
+  const trail = useRef<HTMLDivElement>(null)
+  const segmentsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const box = trail.current
+    const content = segmentsRef.current
+    if (!box || !content) return
+    const toEnd = () => {
+      box.scrollLeft = box.scrollWidth
+    }
+    toEnd()
+    const observer = new ResizeObserver(toEnd)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
+
   const segments = workbench.path ? workbench.path.split('/') : []
   const suggestions = useQuery({
     ...collectionsQuery(workbench.ownerScope, parentDocumentOf(editing ?? '')),
@@ -60,154 +79,176 @@ export function PathBar() {
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-1 items-center gap-1" data-testid="path-bar">
+    <div
+      className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden"
+      data-testid="path-bar"
+    >
       {editing === null ? (
-        <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
-          <PathSegment label={workbench.database} onClick={() => workbench.setPath('')} first />
-          {segments.map((segment, index) => {
-            const path = segments.slice(0, index + 1).join('/')
-            const isCollection = index % 2 === 0
-            // The `*` of a pattern stands for any document; it goes nowhere.
-            if (segment === '*')
-              return (
-                <span key={path} className="flex shrink-0 items-center">
-                  <span className="px-0.5 text-kumo-inactive">/</span>
-                  <span
-                    className="px-1.5 font-mono text-[0.9em] text-kumo-inactive"
-                    title="Any document"
-                  >
-                    *
-                  </span>
-                </span>
-              )
-            return (
-              <PathSegment
-                key={path}
-                label={segment}
-                current={index === segments.length - 1}
-                onClick={() => workbench.setPath(path)}
-                // The query line already counts the collection in view, under
-                // the query and the identity actually in force. A second
-                // figure here can only agree redundantly or disagree silently.
-                count={
-                  isCollection && path !== workbench.collectionPath ? (
-                    <CollectionCount path={path} />
-                  ) : undefined
-                }
-              />
-            )
-          })}
+        <>
+          {/* The segments scroll inside a box of their own so the controls
+              that act on the path stay beside it however long it grows. */}
+          <div ref={trail} className="flex min-w-0 items-center overflow-x-auto">
+            <div ref={segmentsRef} className="flex items-center">
+              <PathSegment label={workbench.database} onClick={() => workbench.setPath('')} first />
+              {segments.map((segment, index) => {
+                const path = segments.slice(0, index + 1).join('/')
+                const isCollection = index % 2 === 0
+                // The `*` of a pattern stands for any document; it goes nowhere.
+                if (segment === '*')
+                  return (
+                    <span key={path} className="flex shrink-0 items-center">
+                      <span className="px-0.5 text-kumo-inactive">/</span>
+                      <span
+                        className="px-1.5 font-mono text-[0.9em] text-kumo-inactive"
+                        title="Any document"
+                      >
+                        *
+                      </span>
+                    </span>
+                  )
+                return (
+                  <PathSegment
+                    key={path}
+                    label={segment}
+                    current={index === segments.length - 1}
+                    onClick={() => workbench.setPath(path)}
+                    // The query line already counts the collection in view, under
+                    // the query and the identity actually in force. A second
+                    // figure here can only agree redundantly or disagree silently.
+                    count={
+                      isCollection && path !== workbench.collectionPath ? (
+                        <CollectionCount path={path} />
+                      ) : undefined
+                    }
+                  />
+                )
+              })}
+            </div>
+          </div>
+          <PathControls />
           <button
             type="button"
-            className="ml-1 h-7 min-w-24 flex-1 cursor-text rounded-md px-2 text-left font-mono text-[0.9em] text-kumo-inactive hover:bg-kumo-tint"
+            className="ml-1 h-7 flex-1 basis-0 cursor-text rounded-md px-2 text-left font-mono text-[0.9em] text-kumo-inactive hover:bg-kumo-tint"
             onClick={() => setEditing(workbench.path)}
             aria-label="Edit the path"
+            // Empty space to click: it gives up every pixel the path itself
+            // needs before the path starts scrolling.
           >
             {segments.length === 0 ? 'Type a collection or document path' : ''}
           </button>
-        </div>
+        </>
       ) : (
-        <div className="relative min-w-0 flex-1">
-          <input
-            ref={inputRef}
-            value={editing}
-            onChange={(event) => setEditing(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && creatable) {
-                event.preventDefault()
-                create()
-              } else if (event.key === 'Enter') {
-                event.preventDefault()
-                commit(editing)
-              } else if (event.key === 'Escape') {
-                event.preventDefault()
-                setEditing(null)
-              } else if (event.key === 'Tab') {
-                const first = matching(suggestions.data, editing)[0]
-                if (first) {
+        <>
+          <div className="relative min-w-0 flex-1">
+            <input
+              ref={inputRef}
+              value={editing}
+              onChange={(event) => setEditing(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && creatable) {
                   event.preventDefault()
-                  setEditing(
-                    `${parentDocumentOf(editing)}${parentDocumentOf(editing) ? '/' : ''}${first}/`,
-                  )
+                  create()
+                } else if (event.key === 'Enter') {
+                  event.preventDefault()
+                  commit(editing)
+                } else if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setEditing(null)
+                } else if (event.key === 'Tab') {
+                  const first = matching(suggestions.data, editing)[0]
+                  if (first) {
+                    event.preventDefault()
+                    setEditing(
+                      `${parentDocumentOf(editing)}${parentDocumentOf(editing) ? '/' : ''}${first}/`,
+                    )
+                  }
                 }
+              }}
+              onBlur={() =>
+                window.setTimeout(
+                  () => setEditing((current) => (current === editing ? null : current)),
+                  120,
+                )
               }
-            }}
-            onBlur={() =>
-              window.setTimeout(
-                () => setEditing((current) => (current === editing ? null : current)),
-                120,
-              )
-            }
-            className="h-7 w-full rounded-md bg-kumo-control px-2 font-mono text-[0.9em] text-kumo-default outline-none ring ring-kumo-focus"
-            placeholder="users/u_9f3k2/orders"
-            spellCheck={false}
-            autoComplete="off"
-            aria-label="Path"
-            data-testid="path-input"
-          />
-          {suggestions.data && (matching(suggestions.data, editing).length > 0 || creatable) && (
-            <ul className="absolute top-full left-0 z-20 mt-1 max-h-64 w-max min-w-80 max-w-[40rem] overflow-auto rounded-lg bg-kumo-elevated p-1 shadow-md ring ring-kumo-line">
-              {creatable && (
-                <li>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[0.9em] hover:bg-kumo-tint"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={create}
-                    data-testid="path-create-collection"
-                  >
-                    <FolderPlusIcon size={14} className="shrink-0 text-kumo-subtle" />
-                    <span className="min-w-0 flex-1 truncate">
-                      Create collection{' '}
-                      <span className="font-mono">
-                        {creatable.parent ? `${creatable.parent}/` : ''}
-                        {creatable.id}
-                      </span>
-                    </span>
-                    <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
-                      ⌘↵
-                    </kbd>
-                  </button>
-                </li>
-              )}
-              {matching(suggestions.data, editing).map((id) => {
-                const parent = parentDocumentOf(editing)
-                const full = parent ? `${parent}/${id}` : id
-                return (
-                  <li key={id}>
+              className="h-7 w-full rounded-md bg-kumo-control px-2 font-mono text-[0.9em] text-kumo-default outline-none ring ring-kumo-focus"
+              placeholder="users/u_9f3k2/orders"
+              spellCheck={false}
+              autoComplete="off"
+              aria-label="Path"
+              data-testid="path-input"
+            />
+            {suggestions.data && (matching(suggestions.data, editing).length > 0 || creatable) && (
+              <ul className="absolute top-full left-0 z-20 mt-1 max-h-64 w-max min-w-80 max-w-[40rem] overflow-auto rounded-lg bg-kumo-elevated p-1 shadow-md ring ring-kumo-line">
+                {creatable && (
+                  <li>
                     <button
                       type="button"
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[0.9em] hover:bg-kumo-tint"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[0.9em] hover:bg-kumo-tint"
                       onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => commit(full)}
+                      onClick={create}
+                      data-testid="path-create-collection"
                     >
-                      {full}
+                      <FolderPlusIcon size={14} className="shrink-0 text-kumo-subtle" />
+                      <span className="min-w-0 flex-1 truncate">
+                        Create collection{' '}
+                        <span className="font-mono">
+                          {creatable.parent ? `${creatable.parent}/` : ''}
+                          {creatable.id}
+                        </span>
+                      </span>
+                      <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
+                        ⌘↵
+                      </kbd>
                     </button>
                   </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
+                )}
+                {matching(suggestions.data, editing).map((id) => {
+                  const parent = parentDocumentOf(editing)
+                  const full = parent ? `${parent}/${id}` : id
+                  return (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[0.9em] hover:bg-kumo-tint"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => commit(full)}
+                      >
+                        {full}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+          <PathControls />
+        </>
       )}
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        {workbench.collectionPath && <ScopePicker />}
-        <Tooltip
-          content="Copy the path"
-          render={
-            <Button
-              variant="ghost"
-              size="sm"
-              shape="square"
-              icon={<CopyIcon />}
-              aria-label="Copy the path"
-              onClick={() =>
-                void navigator.clipboard.writeText(workbench.selectedDocument ?? workbench.path)
-              }
-            />
-          }
-        />
-      </div>
+    </div>
+  )
+}
+
+/** The controls that act on the path, which is why they sit against it. */
+function PathControls() {
+  const workbench = useWorkbench()
+  return (
+    <div className="flex shrink-0 items-center gap-0.5" data-testid="path-controls">
+      {workbench.collectionPath && <ScopePicker />}
+      <Tooltip
+        content="Copy the path"
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={<CopyIcon />}
+            aria-label="Copy the path"
+            onClick={() =>
+              void navigator.clipboard.writeText(workbench.selectedDocument ?? workbench.path)
+            }
+          />
+        }
+      />
     </div>
   )
 }

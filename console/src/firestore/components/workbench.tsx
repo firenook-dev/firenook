@@ -155,6 +155,11 @@ function WorkbenchBody() {
   )
 }
 
+/** The rule that separates one group of toolbar controls from the next. */
+function Divider() {
+  return <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+}
+
 /** The data view: the toolbar, the query line and the grid. */
 function WorkbenchData({
   checked,
@@ -179,7 +184,7 @@ function WorkbenchData({
         data-testid="toolbar"
       >
         <PathBar />
-        <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+        <Divider />
         <ChangesPopover
           state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
           changes={commits}
@@ -199,18 +204,21 @@ function WorkbenchData({
             Delete {checked.size}
           </Button>
         )}
+        {/* A view, not an action on the grid: it belongs with what you are
+            reading as, and the rule is the divider — only the control that
+            writes stands on the other side of it. */}
         <Button
           variant="ghost"
           size="sm"
           icon={<ShieldCheckIcon />}
           onClick={() => workbench.navigate({ view: 'rules' })}
+          aria-label="Security rules"
           data-testid="open-rules"
         >
-          Rules
+          <span className="hidden xl:inline">Rules</span>
         </Button>
-        <span className="ml-1">
-          <NewMenu />
-        </span>
+        <Divider />
+        <NewMenu />
       </div>
       {workbench.collectionPath && <QueryLine />}
       {explain && workbench.collectionPath && !workbench.queryError && (
