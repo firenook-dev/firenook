@@ -101,20 +101,23 @@ export function PathBar() {
           length with every move, and a control placed after it can never be
           aimed at twice. */}
       {workbench.collectionPath && (
-        <div className="mr-1 flex shrink-0 items-center" data-testid="path-controls">
+        <div className="flex shrink-0 items-center" data-testid="path-controls">
           <ScopePicker />
+          <span className="mr-0.5 ml-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
         </div>
       )}
-      {/* At rest the field is a trough, not an outline: this is a breadcrumb
-          you read, and an outline is the one thing on a screen that means
-          `type here`. A fill says `one region` and claims nothing. It also
-          cannot be clipped — an outline here is a `ring`, which paints
-          outside the box, so the row's own clip ate its right edge and left
-          the field open-ended. Focus is where the outline belongs, and by
-          then the clip has lifted for the completions. */}
+      {/* The dividers say where the path group starts and ends, so the field
+          itself carries no chrome at rest: this is a breadcrumb you read,
+          and both an outline and a fill claim more than that. The ground
+          appears under the pointer, which is when being one clickable region
+          is the thing worth saying, and the outline is left to mean focus
+          alone. (It has to be earned that way too — an outline here is a
+          `ring`, painted outside the box, and the field ends flush with the
+          row's clip, which ate its right edge. By focus the clip has lifted
+          for the completions.) */}
       <div
-        className={`relative flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 pl-1 ${
-          editing === null ? 'bg-kumo-tint' : 'bg-kumo-control ring ring-kumo-focus'
+        className={`group relative flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 pl-1 ${
+          editing === null ? 'hover:bg-kumo-tint' : 'bg-kumo-control ring ring-kumo-focus'
         }`}
         data-testid="path-field"
       >
@@ -336,8 +339,12 @@ function PathSegment({
       <button
         type="button"
         onClick={onClick}
-        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[0.9em] text-kumo-default hover:bg-kumo-base ${
-          current ? 'bg-kumo-base' : ''
+        // Where you are is the segment that is not faded, so it needs no tag
+        // of its own — and a tag would have to fight whatever ground the
+        // field is showing. Hovering anything in here lights the field, so a
+        // segment's own hover reads against that ground, not against the bar.
+        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[0.9em] hover:bg-kumo-base hover:text-kumo-default ${
+          current ? 'text-kumo-default' : 'text-kumo-subtle'
         }`}
         aria-current={current ? 'location' : undefined}
       >

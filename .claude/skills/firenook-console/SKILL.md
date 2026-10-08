@@ -223,25 +223,32 @@ browser's own shape: the scope picker leads, then the field, which holds the
 breadcrumb and runs to the end of the row. Reading the path and typing it
 are the same box — clicking to edit swaps the content and changes no
 geometry, which is what stops an outlined input appearing out of nowhere
-under the pointer. The field's own ground separates it from the scope, so no
-divider goes between them. The one control that acts on the whole path —
-copy — sits **inside** the field against its right edge: the end of the path
-wherever the path ends, and a target a longer path cannot move. Elsewhere
-dividers mark the groups, and the last one isolates the control that
-writes — `New` stands alone, everything that reports or switches view is on
-the other side.
+under the pointer. The one control that acts on the whole path — copy —
+sits **inside** the field against its right edge: the end of the path
+wherever the path ends, and a target a longer path cannot move. Dividers
+mark the groups — one between the scope and the path, one before the status
+group — and the last isolates the control that writes: `New` stands alone,
+everything that reports or switches view is on the other side.
 
-**At rest that field is a fill, never an outline.** An outline is the one
-thing on a screen that means *type here*, and at rest this is a breadcrumb
-you read; a fill (`bg-kumo-tint`) says *one region* and claims nothing, so
-the outline is left to mean focus. The current segment then has to be raised
-out of the trough rather than sunk into it — `bg-kumo-base`, with the hover
-on its neighbours going the same way — or it disappears into the ground it
-used to stand on. The fill is also the only shape of chrome that survives
-here: a Tailwind `ring` is a shadow painted *outside* the box, the field
-ends exactly where the row's clip does, and the clip ate its right edge, so
-the box read as open-ended on any wide window. A journey holds the resting
-`boxShadow` at `none`.
+**The field carries no chrome at rest.** It has three states and each one
+earns its ink: flat for reading, a ground (`bg-kumo-tint`) under the
+pointer, an outline only on focus. An outline is the one mark on a screen
+that means *type here*, so at rest it would lie about a breadcrumb; and a
+permanent fill claims a whole row of the toolbar is an input. The dividers,
+not the ground, are what say where the path group begins and ends, which is
+what keeps copy attached to the path while the field shows nothing. An
+outline is also the one shape of chrome that cannot survive here: a Tailwind
+`ring` is a shadow painted *outside* the box, the field ends flush with the
+row's clip, and the clip ate its right edge, leaving the box open-ended on
+any wide window. A journey holds the resting `boxShadow` at `none`.
+
+Nothing inside the field may be marked with a fill of its own, because the
+ground under it moves. **Where you are is the segment that is not faded** —
+ancestors `text-kumo-subtle`, the last one `text-kumo-default` — not a
+tagged chip; a chip has to be light on the bar and dark on the hover ground,
+and flipping it as the pointer arrives reads as a fault. A segment's own
+hover is `bg-kumo-base`, which only ever appears while the field is lit, so
+it always has the ground to stand against.
 
 A toolbar must degrade, never overlap. A `shrink-0` group inside a
 `flex-1` parent paints over its neighbour when the parent runs out of room,
