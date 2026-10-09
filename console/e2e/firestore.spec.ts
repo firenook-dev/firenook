@@ -1939,6 +1939,47 @@ async function codeInk(editor: Locator): Promise<{
   })
 }
 
+test('both tabs put their one action where the panel puts every action', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_22xjp`)
+  const inspector = page.getByTestId('inspector')
+
+  // Measured from the panel's right edge, because that is the edge all
+  // three are supposed to be sitting against. The JSON band was the one
+  // facing the other way — Add field 11 from the right, Apply to fields
+  // 418 — and the two bands swap in and out of the same slot, so the
+  // action was jumping across the panel when the tab changed.
+  const inset = async (testId: string) =>
+    inspector.evaluate((panel, id) => {
+      const control = panel.querySelector(`[data-testid="${id}"]`)!
+      return Math.round(panel.getBoundingClientRect().right - control.getBoundingClientRect().right)
+    }, testId)
+
+  await expect(inspector.getByTestId('add-field')).toBeVisible()
+  const addField = await inset('add-field')
+  const save = await inset('save-document')
+  await inspector.getByRole('tab', { name: 'JSON' }).click()
+  await expect(inspector.getByTestId('apply-json')).toBeVisible()
+  const apply = await inset('apply-json')
+
+  // The two bands share a slot, so they agree exactly.
+  expect(apply).toBe(addField)
+  // The footer is its own strip with its own padding, so it only has to
+  // be against the same edge, not at the same pixel.
+  expect(Math.abs(save - apply)).toBeLessThanOrEqual(10)
+  for (const [name, value] of Object.entries({ addField, apply, save }))
+    expect(value, `${name} from the right`).toBeLessThan(40)
+
+  // And the band is one row again. A legend saying "4 marked values
+  // keep types JSON cannot write down" sat under these buttons at all
+  // times, explaining a mark that is informational — ignoring it costs
+  // nothing, the types are kept either way — and that already says the
+  // whole sentence on the value it is true of, when pointed at.
+  await expect(inspector.getByTestId('carried-types')).toHaveCount(0)
+  const strip = (await inspector.getByTestId('json-actions').boundingBox())!
+  expect(Math.round(strip.height)).toBeLessThanOrEqual(44)
+})
+
 test("the code editor's ink tells a key from a string from a number, in both modes", async ({
   page,
 }) => {
@@ -2037,7 +2078,6 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
   // Two of those four values are typed more precisely than the text can
   // say, and the sentence that used to claim it of the whole document
   // now points at the two it is true of.
-  await expect(inspector.getByTestId('carried-types')).toContainText('2 marked')
   await expect(inspector.locator('.cm-lint-marker')).toHaveCount(2)
   // Which of the two comes first is the engine's field order, not ours,
   // so both are read rather than the first one guessed at.
