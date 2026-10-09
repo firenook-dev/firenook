@@ -28,7 +28,6 @@ export function FieldsPanel({
   tab,
   onTabChange,
   onOpenReference,
-  rows = 12,
 }: {
   nodes: DraftNode[]
   onNodesChange: (next: DraftNode[]) => void
@@ -40,8 +39,6 @@ export function FieldsPanel({
   tab: 'fields' | 'json'
   onTabChange: (tab: 'fields' | 'json') => void
   onOpenReference: (path: string) => void
-  /** Rows the JSON textarea starts with. */
-  rows?: number | undefined
 }) {
   const [json, setJson] = useState('')
   const [jsonTab, setJsonTab] = useState<'fields' | 'json'>('fields')
@@ -133,19 +130,28 @@ export function FieldsPanel({
           </div>
         </>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="grid gap-2 p-3">
+        <>
+          {/* The editor is the view. A twelve-row box held 224 pixels of a
+              593-pixel panel and scrolled the document inside them, while
+              282 pixels below it — half the panel — stayed empty. Nothing
+              else wanted that room, and the one thing here that can always
+              use more of it is the text. */}
+          <div className="min-h-0 flex-1 p-3">
             <textarea
               value={json}
               onChange={(event) => setJson(event.target.value)}
-              rows={rows}
               spellCheck={false}
-              className="w-full resize-y rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
+              className="h-full w-full resize-none rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
               aria-label="Document JSON"
               data-testid="document-json"
             />
+          </div>
+          {/* The band the Fields tab puts its one action in, with this
+              tab's one action in it. Below the editor rather than after
+              it, so growing the editor never pushes Apply out of reach. */}
+          <div className="shrink-0 border-t border-kumo-line px-3 py-2" data-testid="json-actions">
             {jsonError && (
-              <Text variant="error" size="sm">
+              <Text variant="error" size="sm" as="p" DANGEROUS_className="mb-1.5">
                 {jsonError}
               </Text>
             )}
@@ -159,7 +165,7 @@ export function FieldsPanel({
               </Text>
             </div>
           </div>
-        </div>
+        </>
       )}
     </FieldEditingProvider>
   )

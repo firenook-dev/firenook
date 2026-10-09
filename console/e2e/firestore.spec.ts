@@ -1823,6 +1823,35 @@ test('a map and its JSON are the same subtree, written two ways', async ({ page 
   await drop(page.request, 'teams/t_json')
 })
 
+test('the JSON tab spends the panel on the JSON', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  // Eighteen fields: twenty lines of JSON, which the old box showed
+  // twelve of.
+  const keys = Array.from({ length: 18 }, (_, index) => `f${index}`)
+  await put(page.request, 'teams/t_tall', numbered(keys))
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_tall&tab=json`)
+  const inspector = page.getByTestId('inspector')
+  const editor = inspector.getByTestId('document-json')
+  await expect(editor).toBeVisible()
+
+  // The box was `rows={12}` — 224 of the panel's 593 pixels — and the
+  // 282 below the Apply line, half the panel, were empty while the text
+  // inside those 224 scrolled. Nothing idles under the one action now.
+  const actions = (await inspector.getByTestId('json-actions').boundingBox())!
+  const below = (await inspector.getByTestId('subcollections').boundingBox())!
+  expect(Math.round(below.y - (actions.y + actions.height))).toBeLessThanOrEqual(2)
+
+  // And the room went to the text: a document that needed three screens
+  // of a twelve-row box is read without scrolling at all.
+  const shown = await editor.evaluate((el) => ({
+    fits: el.scrollHeight <= el.clientHeight,
+    height: el.clientHeight,
+  }))
+  expect(shown.height).toBeGreaterThan(400)
+  expect(shown.fits).toBe(true)
+  await drop(page.request, 'teams/t_tall')
+})
+
 test('the inspector takes the width it is given, and remembers it', async ({ page }) => {
   // Room to drag in, so what is measured is the behaviour and not the
   // window: the ceiling below is what the window has to do with it.

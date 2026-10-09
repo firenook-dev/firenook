@@ -226,7 +226,6 @@ function CreateForm({
           tab={tab}
           onTabChange={setTab}
           onOpenReference={(path) => workbench.selectDocument(path)}
-          rows={14}
         />
       </div>
       {(error || problems.size > 0) && (
