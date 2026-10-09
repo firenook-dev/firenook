@@ -1538,19 +1538,32 @@ test('the inspector takes the width it is given, and remembers it', async ({ pag
   const grip = page.getByTestId('inspector-resize')
   const drag = async (by: number) => {
     const box = (await grip.boundingBox())!
-    await page.mouse.move(box.x + box.width / 2, box.y + 200)
+    const from = box.x + box.width / 2
+    await page.mouse.move(from, box.y + 200)
     await page.mouse.down()
-    await page.mouse.move(box.x - by, box.y + 200, { steps: 8 })
+    await page.mouse.move(from - by, box.y + 200, { steps: 8 })
     await page.mouse.up()
   }
   expect(await width()).toBe(420)
 
+  // The grip is the panel's own left edge, and is drawn there. It was
+  // not: in the flow the panel was `static`, which is not a containing
+  // block, so the grip escaped to an ancestor and drew itself 523 px away
+  // down the side of the grid. Every drag still changed the width, because
+  // it landed on the clamp — which is what an assertion about the width
+  // alone cannot tell apart from the real thing.
+  const box = (await grip.boundingBox())!
+  const panelEdge = (await inspector.boundingBox())!.x
+  expect(Math.abs(box.x + box.width / 2 - panelEdge)).toBeLessThan(3)
+  expect(await paintedAtItsOwnCentre(grip)).toBe(true)
+
   // The panel's width is the real constraint on the field editor, not the
   // arrangement inside it: a name column and a value column share 420 px,
   // which leaves a value thirty-nine characters before it wraps, and a
-  // document of URLs and hashes has none that short.
+  // document of URLs and hashes has none that short. It follows the
+  // pointer exactly, rather than jumping to whatever the clamp allows.
   await drag(180)
-  expect(await width()).toBeGreaterThan(560)
+  expect(Math.abs((await width()) - 600)).toBeLessThan(4)
 
   // However far it is dragged, the grid beside it stays worth having.
   await drag(4000)

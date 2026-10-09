@@ -481,6 +481,18 @@ the grip, with a double-click home and arrow keys for the keyboard. At
 620 px the pairings document stops wrapping entirely, which is more than
 any arrangement of the two columns can buy.
 
+**The panel is `xl:relative`, never `xl:static`.** The two lay out
+identically in the flow, but only a positioned element is a containing
+block, and under `static` the grip absolutely positioned on its edge
+escaped to an ancestor and drew itself **523 px away, down the left side of
+the grid**. A user found that, not the suite, and the reason is worth
+keeping: the journey asserted the width *changed*, and every drag it made
+landed on the clamp — which a width-only assertion cannot tell apart from a
+working grip. A control that is dragged needs a guard that it is **where a
+hand would reach for it** (`paintedAtItsOwnCentre` on the panel's edge) and
+that it **follows the pointer by the distance dragged**, not merely that
+something moved.
+
 **A value is never cut short.** A console is for reading a document before
 it is for editing one, so a value that runs past the panel's edge is the
 panel failing at its first job — and a URL truncated there loses its path,

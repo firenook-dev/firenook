@@ -111,7 +111,12 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       // sits in the flow. Below that it floats over the right of the grid
       // instead, because squeezing the grid into the remaining sliver makes
       // both halves useless.
-      className="absolute inset-y-0 right-0 z-20 flex min-h-0 max-w-full shrink-0 flex-col border-l border-kumo-line bg-kumo-base shadow-lg xl:static xl:shadow-none"
+      //
+      // `relative` in the flow, never `static`: the two lay out identically,
+      // but only a positioned element is a containing block, and under
+      // `static` the grip on its edge escaped to an ancestor and drew itself
+      // 523 px away, down the left side of the grid.
+      className="absolute inset-y-0 right-0 z-20 flex min-h-0 max-w-full shrink-0 flex-col border-l border-kumo-line bg-kumo-base shadow-lg xl:relative xl:shadow-none"
       style={{ width }}
       data-testid="inspector"
     >
