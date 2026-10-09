@@ -1125,6 +1125,40 @@ both under the word "change".
   type must not contain `*/` (it ends the generated JSDoc early), so
   patterns are described in words there.
 
+## Rows and JSON are one draft (`field-editor.tsx`)
+
+The inspector's two tabs are two views of a single `DraftNode[]`, not two
+editors with a hand-off. There is **no Apply button**, and adding one back
+would be a regression:
+
+- Text that parses becomes rows on the keystroke. `Save` reads the rows,
+  so it works from either view with no special case and its count is
+  honest in both.
+- Text that does not parse leaves the rows alone, says so in place, and
+  holds `Save` with "The JSON does not parse yet" — writing the last good
+  rows would be writing something other than what is on screen.
+- Reconciliation is against `baseline`, the rows as they were when the
+  view opened, **never against its own output**. Reconciling against the
+  last keystroke's result loses a type the moment its line is briefly
+  mid-edit: delete a timestamp, type the same instant back, and it
+  returns as a string.
+- Entering the view rebuilds the text from the rows, because anything
+  that parsed is already in them — *except* when the text does not parse
+  and `nodes === leftWith` (nothing edited the rows while the view was
+  away), which is the one case where the text is the only copy of that
+  work. This is a fixed bug, not a nicety: the view used to rebuild
+  unconditionally, so a glance at the Fields tab silently discarded
+  anything typed and not applied.
+
+Why Apply went: a user asked what it was for, and the honest answer was
+two jobs — turning text into rows, and rescuing that text before the tab
+switch threw it away. The tab beside it already did the first. One draft,
+two views, and exactly one control in the panel that writes.
+
+Note the JSON view therefore has **nothing on the right of its band**.
+That is correct rather than lopsided: it has no action of its own, so
+`Format` sits alone on the left where tools go.
+
 ## The code editor (`src/components/code-editor/`)
 
 CodeMirror 6, MIT, behind a `lazy()`. Three files:

@@ -108,8 +108,8 @@ test('documents are added and deleted from the workbench', async ({ page }) => {
   await page.keyboard.press('n')
   await page.getByTestId('new-document-id').fill('t_journey')
   await page.getByRole('dialog').getByRole('tab', { name: 'JSON' }).click()
+  // No Apply: the text is the draft, so the tab counts it as it is typed.
   await page.getByTestId('document-json').fill('{"name": "Journey", "seats": 2, "tags": ["e2e"]}')
-  await page.getByRole('button', { name: 'Apply to fields' }).click()
   await expect(page.getByRole('dialog')).toContainText('Fields · 3')
   await page.getByTestId('create-submit').click()
   await expect(page).toHaveURL(/doc=teams%2Ft_journey/)
@@ -1182,6 +1182,26 @@ function numbered(keys: string[]): Record<string, unknown> {
   return Object.fromEntries(keys.map((key, index) => [key, { integerValue: String(index) }]))
 }
 
+/**
+ * The whole document replaced by a paste, the way a person does it:
+ * select all, then paste. `fill()` would set the text without the paste
+ * event the editor tidies on.
+ */
+async function replaceJson(
+  page: { keyboard: { press: (key: string) => Promise<void> } },
+  editor: Locator,
+  text: string,
+) {
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await editor.evaluate((el, pasted) => {
+    const window = el.ownerDocument.defaultView!
+    const data = new window.DataTransfer()
+    data.setData('text/plain', pasted)
+    el.dispatchEvent(new window.ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, text)
+}
+
 /** A document written straight to the engine, bypassing the console. */
 async function put(
   request: { post: (url: string, options: object) => Promise<{ ok: () => boolean }> },
@@ -1939,45 +1959,69 @@ async function codeInk(editor: Locator): Promise<{
   })
 }
 
-test('both tabs put their one action where the panel puts every action', async ({ page }) => {
+test('the two views are one draft, and only Save writes', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
-  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_22xjp`)
+  await put(page.request, 'teams/t_views', {
+    name: { stringValue: 'Probe' },
+    openedAt: { timestampValue: '2026-09-20T09:00:00Z' },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_views&tab=json`)
   const inspector = page.getByTestId('inspector')
+  const editor = inspector.getByTestId('document-json')
+  await expect(editor).toBeVisible()
 
-  // Measured from the panel's right edge, because that is the edge all
-  // three are supposed to be sitting against. The JSON band was the one
-  // facing the other way — Add field 11 from the right, Apply to fields
-  // 418 — and the two bands swap in and out of the same slot, so the
-  // action was jumping across the panel when the tab changed.
-  const inset = async (testId: string) =>
-    inspector.evaluate((panel, id) => {
-      const control = panel.querySelector(`[data-testid="${id}"]`)!
-      return Math.round(panel.getBoundingClientRect().right - control.getBoundingClientRect().right)
-    }, testId)
+  // Apply to fields is gone, and so is the hand-off it stood for. It was
+  // doing two jobs — turning text into rows, and rescuing that text from
+  // a tab switch that would otherwise discard it — and the tab beside it
+  // already does the first.
+  await expect(inspector.getByTestId('apply-json')).toHaveCount(0)
+  await expect(inspector.getByTestId('save-document')).toBeDisabled()
 
-  await expect(inspector.getByTestId('add-field')).toBeVisible()
-  const addField = await inset('add-field')
-  const save = await inset('save-document')
+  // Text that reads as a document *is* the document, with nothing
+  // pressed: four fields where there were two, and a change to save.
+  await replaceJson(
+    page,
+    editor,
+    '{"name":"Probe","openedAt":"2026-09-20T09:00:00.000Z","brandNew":"hello","nested":{"deep":[1,2]}}',
+  )
+  await expect(inspector).toContainText('Fields · 4')
+  await expect(inspector.getByTestId('save-pending')).toContainText('2 changes')
+  await expect(inspector.getByTestId('save-document')).toBeEnabled()
+
+  // Text that does not read as a document leaves the rows where they
+  // were and holds Save, because the rows behind it are no longer what
+  // is on screen.
+  await replaceJson(page, editor, '{"name":"Probe",,,}')
+  await expect(inspector).toContainText('Fields · 4')
+  await expect(inspector.getByTestId('save-blocked')).toContainText('does not parse')
+  await expect(inspector.getByTestId('save-document')).toBeDisabled()
+
+  // And it is never thrown away. Entering this view used to rebuild the
+  // text from the rows, so a glance at the other tab silently discarded
+  // anything typed and not applied.
+  const broken = await editor.textContent()
+  await inspector.getByRole('tab', { name: /Fields/ }).click()
   await inspector.getByRole('tab', { name: 'JSON' }).click()
-  await expect(inspector.getByTestId('apply-json')).toBeVisible()
-  const apply = await inset('apply-json')
+  await expect(inspector.getByTestId('document-json')).toHaveText(broken ?? '')
 
-  // The two bands share a slot, so they agree exactly.
-  expect(apply).toBe(addField)
-  // The footer is its own strip with its own padding, so it only has to
-  // be against the same edge, not at the same pixel.
-  expect(Math.abs(save - apply)).toBeLessThanOrEqual(10)
-  for (const [name, value] of Object.entries({ addField, apply, save }))
-    expect(value, `${name} from the right`).toBeLessThan(40)
+  // Unless the rows moved while it was away, in which case they are the
+  // newer truth and the stale text goes.
+  await inspector.getByRole('tab', { name: /Fields/ }).click()
+  await inspector.getByTestId('new-field-name').fill('addedInRows')
+  await inspector.getByTestId('add-field').click()
+  await inspector.getByRole('tab', { name: 'JSON' }).click()
+  await expect(inspector.getByTestId('document-json')).toContainText('addedInRows')
 
-  // And the band is one row again. A legend saying "4 marked values
-  // keep types JSON cannot write down" sat under these buttons at all
-  // times, explaining a mark that is informational — ignoring it costs
-  // nothing, the types are kept either way — and that already says the
-  // whole sentence on the value it is true of, when pointed at.
-  await expect(inspector.getByTestId('carried-types')).toHaveCount(0)
-  const strip = (await inspector.getByTestId('json-actions').boundingBox())!
-  expect(Math.round(strip.height)).toBeLessThanOrEqual(44)
+  // Save writes from this view, and the timestamp the text cannot spell
+  // comes through it as a timestamp.
+  await replaceJson(page, editor, '{"name":"Probed","openedAt":"2026-09-20T09:00:00.000Z"}')
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+  const stored = await page.request.get(`${documents()}/teams/t_views`, { headers: owner })
+  const saved = (await stored.json()) as { fields: Record<string, Record<string, unknown>> }
+  expect(Object.keys(saved.fields.openedAt ?? {})).toEqual(['timestampValue'])
+  expect(saved.fields.name).toEqual({ stringValue: 'Probed' })
+  await drop(page.request, 'teams/t_views')
 })
 
 test("the code editor's ink tells a key from a string from a number, in both modes", async ({
@@ -2093,14 +2137,11 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
 
   // A document pasted over this one arrives laid out, which is the case
   // anybody ever reached for a Format button for. One line in, six out.
-  await editor.click()
-  await page.keyboard.press('ControlOrMeta+a')
-  await editor.evaluate((el, text) => {
-    const window = el.ownerDocument.defaultView!
-    const data = new window.DataTransfer()
-    data.setData('text/plain', text)
-    el.dispatchEvent(new window.ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
-  }, '{"name":"Mapping","seats":4,"opened":"2026-09-20T09:00:00.000Z","active":true}')
+  await replaceJson(
+    page,
+    editor,
+    '{"name":"Mapping","seats":4,"opened":"2026-09-20T09:00:00.000Z","active":true}',
+  )
   await expect(inspector.locator('.cm-line')).toHaveCount(6)
 
   // And one undo takes the paste and its laying out together, because
@@ -2124,7 +2165,6 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
 
   // And the rows are still the thing being saved: fix it, apply, save.
   await editor.fill('{"name": "Mapped", "seats": 4, "opened": "2026-09-20T09:00:00.000Z"}')
-  await inspector.getByTestId('apply-json').click()
   await expect(inspector).toContainText('Fields · 3')
   await inspector.getByTestId('save-document').click()
   await expect(page.getByText('Document saved')).toBeVisible()

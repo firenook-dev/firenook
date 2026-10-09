@@ -299,6 +299,7 @@ function DocumentEditor({
   const status = useQuery(statusQuery)
   const openCreate = useCreateDialog((state) => state.open)
   const [nodes, setNodes] = useState<DraftNode[]>(() => nodesFrom(document.fields, true))
+  const [jsonError, setJsonError] = useState<string | undefined>()
   const [codeTarget, setCodeTarget] = useState<CodeTarget>('web')
   const known = useKnownFields(document.collection)
 
@@ -359,6 +360,7 @@ function DocumentEditor({
         changed={changedNames}
         tab={workbench.tab}
         onTabChange={workbench.setTab}
+        onJsonError={setJsonError}
         onOpenReference={(path) => workbench.selectDocument(path)}
       />
       {subcollections}
@@ -442,6 +444,13 @@ function DocumentEditor({
             <Text variant="error" size="sm" truncate>
               {save.error.message}
             </Text>
+          ) : jsonError !== undefined ? (
+            // The JSON view holds text that is not a document. The rows
+            // behind it are the last ones that were, and writing those
+            // would be writing something other than what is on screen.
+            <Text variant="error" size="sm" truncate data-testid="save-blocked">
+              The JSON does not parse yet
+            </Text>
           ) : problems.size > 0 ? (
             <Text variant="error" size="sm" data-testid="save-blocked">
               {problems.size} field{problems.size === 1 ? '' : 's'} to fix
@@ -459,10 +468,10 @@ function DocumentEditor({
               read. Outlined at rest, filled the moment the count beside
               it is not zero. */}
           <Button
-            variant={changed > 0 ? 'primary' : 'secondary'}
+            variant={changed > 0 && jsonError === undefined ? 'primary' : 'secondary'}
             size="sm"
             onClick={() => save.mutate()}
-            disabled={changed === 0 || problems.size > 0}
+            disabled={changed === 0 || problems.size > 0 || jsonError !== undefined}
             loading={save.isPending}
             data-testid="save-document"
           >

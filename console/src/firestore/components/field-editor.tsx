@@ -1,6 +1,19 @@
-// The fields of one document, as rows you can edit and as the JSON behind
-// them. The caller owns the tree (it is the caller that saves it); the panel
-// owns the JSON text, where focus is going, and the line that adds a field.
+// One document being edited, under two views of it.
+//
+// Rows and JSON are the same draft seen two ways, not two editors with a
+// hand-off between them. There used to be an Apply to fields button, and
+// it was doing two jobs: turning text into rows, and rescuing that text
+// before a tab switch threw it away — because entering the JSON view
+// rebuilt the text from the rows, so anything typed and not applied was
+// silently gone. A user asked why the button needed to exist at all,
+// which was the right question: with the text kept in step as it is
+// typed, switching to the rows *is* applying, and Save is the one
+// control in the panel that writes.
+//
+// So: a change that parses becomes rows at once, and the rows are what
+// Save reads, from either view. A change that does not parse leaves the
+// rows where they were, says so in place, and holds Save until it reads
+// as a document again — never discarding what was typed.
 //
 // Text is kept exactly as typed and parsed on every keystroke, so a
 // half-written value never fights the cursor and a wrong one says so where
@@ -38,6 +51,7 @@ export function FieldsPanel({
   changed = NOTHING_CHANGED,
   tab,
   onTabChange,
+  onJsonError,
   onOpenReference,
 }: {
   nodes: DraftNode[]
@@ -49,6 +63,8 @@ export function FieldsPanel({
   changed?: ReadonlySet<string> | undefined
   tab: 'fields' | 'json'
   onTabChange: (tab: 'fields' | 'json') => void
+  /** Text in the JSON view that is not a document yet, so Save can wait. */
+  onJsonError?: ((message: string | undefined) => void) | undefined
   onOpenReference: (path: string) => void
 }) {
   const [json, setJson] = useState('')
@@ -56,39 +72,64 @@ export function FieldsPanel({
   const [jsonError, setJsonError] = useState<string | undefined>()
   const [focus, setFocus] = useState<string | undefined>()
   const addRef = useRef<HTMLInputElement>(null)
+  // The rows the text is reconciled against: the ones in force when this
+  // view opened, not the ones the last keystroke produced. Reconciling
+  // against its own output would lose a type the moment the line holding
+  // it was briefly mid-edit — delete a timestamp and type the same
+  // instant back, and it would come back a string.
+  const [baseline, setBaseline] = useState<DraftNode[]>(nodes)
+  // The rows as they stood when this view was last left, so returning to
+  // it can tell "nobody touched anything while I was away" from "the
+  // rows moved on without me".
+  const [leftWith, setLeftWith] = useState<DraftNode[]>(nodes)
 
-  // Opening the JSON tab shows the rows as they are now (derived in render).
+  const say = (message: string | undefined) => {
+    setJsonError(message)
+    onJsonError?.(message)
+  }
+
+  // Arriving at the JSON view. The text is rebuilt from the rows, because
+  // anything that parsed is already *in* the rows — except when it did
+  // not parse and nothing has edited the rows since, which is the one
+  // case where the text is the only copy of the work.
   if (tab !== jsonTab) {
     setJsonTab(tab)
     if (tab === 'json') {
-      setJson(JSON.stringify(nodesToJson(nodes), null, 2))
-      setJsonError(undefined)
-    }
+      // Text that does not parse is not in the rows, so it is the only
+      // copy of that work — unless the rows have moved since, in which
+      // case they are the newer truth and the stale text goes.
+      const onlyCopy = jsonError !== undefined && nodes === leftWith
+      if (!onlyCopy) {
+        setJson(JSON.stringify(nodesToJson(nodes), null, 2))
+        say(undefined)
+      }
+      setBaseline(nodes)
+    } else setLeftWith(nodes)
   }
 
-  const applyJson = () => {
+  // Every keystroke that reads as a document is the document.
+  const editJson = (text: string) => {
+    setJson(text)
     try {
-      onNodesChange(nodesFromJson(json, nodes))
-      setJsonError(undefined)
-      onTabChange('fields')
+      onNodesChange(nodesFromJson(text, baseline))
+      say(undefined)
     } catch (error) {
-      setJsonError(error instanceof Error ? error.message : String(error))
+      say(error instanceof Error ? error.message : String(error))
     }
   }
 
   const format = () => {
     const tidied = tidyJson(json)
     if (tidied === undefined) {
-      setJsonError('This is not JSON yet, so there is nothing to lay out')
+      say('This is not JSON yet, so there is nothing to lay out')
       return
     }
-    setJson(tidied)
-    setJsonError(undefined)
+    editJson(tidied)
   }
 
-  // The rows are what carry the types JSON cannot write down, so the
-  // marks are recomputed when they change and not on every keystroke.
-  const annotate = useCallback((text: string) => typeMarks(text, nodes), [nodes])
+  // The marks say which values are carrying a type the text cannot. They
+  // read the baseline, for the same reason the reconciliation does.
+  const annotate = useCallback((text: string) => typeMarks(text, baseline), [baseline])
 
   const editing: FieldEditing = {
     problems,
@@ -171,7 +212,7 @@ export function FieldsPanel({
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md ring ring-kumo-line focus-within:ring-kumo-focus">
               <CodeEditor
                 value={json}
-                onChange={setJson}
+                onChange={editJson}
                 annotate={annotate}
                 tidyPaste={tidyJson}
                 ariaLabel="Document JSON"
@@ -188,20 +229,17 @@ export function FieldsPanel({
                 {jsonError}
               </Text>
             )}
-            {/* The tool on the left and the action on the right, which
-                is where the Fields tab has had Add field all along and
-                where the footer has Save. This band was the only one of
-                the three facing the other way, measured at 418 pixels
-                from the panel's right edge against Add field's 11.
+            {/* Nothing on the right of this band, which is right rather
+                than lopsided: this view has no action of its own any
+                more. Apply to fields stood there, and the tab beside it
+                does the same thing — the rows are these fields. Minify
+                stood there before that, and nobody has ever needed a
+                Firestore document on one line.
 
-                Minify stood here too, and nobody has ever needed a
-                Firestore document on one line: it was a button because
-                `JSON.stringify` takes a third argument, not because the
-                job exists. Format stays, and mostly has nothing to do —
-                the tab opens laid out, and a document pasted over this
-                one arrives laid out — but hand-editing can still leave
-                it ragged, and a visible one-click fix beats a shortcut
-                nobody is told about. */}
+                Format is a tool, so it sits where tools sit, and it
+                mostly has nothing to do: the view opens laid out and a
+                document pasted over it arrives laid out. Hand-editing
+                can still leave it ragged. */}
             <div className="flex items-center gap-1">
               <Tooltip
                 content="Lay the document out again, two spaces"
@@ -211,11 +249,6 @@ export function FieldsPanel({
                   </Button>
                 }
               />
-              <span className="ml-auto">
-                <Button variant="secondary" size="sm" onClick={applyJson} data-testid="apply-json">
-                  Apply to fields
-                </Button>
-              </span>
             </div>
           </div>
         </>
