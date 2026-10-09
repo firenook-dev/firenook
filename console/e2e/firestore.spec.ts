@@ -1582,6 +1582,54 @@ test('a value too long for its line wraps rather than being cut short', async ({
   await expect(inspector.getByLabel('redirectUri value')).toHaveValue(/\n/)
 })
 
+test('a map and its JSON are the same subtree, written two ways', async ({ page }) => {
+  await put(page.request, 'teams/t_json', {
+    redirectUri: {
+      mapValue: {
+        fields: {
+          app: { mapValue: { fields: { scheme: { stringValue: 'example-dev' } } } },
+          at: { timestampValue: '2026-09-20T09:00:00Z' },
+        },
+      },
+    },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_json`)
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector.getByLabel('scheme value')).toHaveValue('example-dev')
+
+  // A container's `text` is empty — its children are its value — and the
+  // button only flipped a flag, so the JSON view read something the rows
+  // had never written: `{}` for a map with fields in it, marked changed,
+  // and that empty map is what the next Save would have stored.
+  await press(inspector.getByLabel('Edit redirectUri as JSON'))
+  const shown = inspector.getByLabel('redirectUri value')
+  expect(JSON.parse(await shown.inputValue())).toEqual({
+    app: { scheme: 'example-dev' },
+    at: '2026-09-20T09:00:00.000Z',
+  })
+
+  // And looking is not editing: the two views stand for one value, so
+  // opening this one leaves the document with nothing to save.
+  await expect(inspector.getByTestId('save-pending')).toHaveCount(0)
+
+  // What is typed becomes rows again, and the type JSON cannot write down
+  // survives because the row the JSON still describes is the row kept.
+  await shown.fill('{"app": {"scheme": "example-prod"}, "at": "2026-09-20T09:00:00.000Z"}')
+  await press(inspector.getByLabel('Edit redirectUri as JSON'))
+  await expect(inspector.getByLabel('scheme value')).toHaveValue('example-prod')
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+
+  const stored = await page.request.get(`${documents()}/teams/t_json`, { headers: owner })
+  const saved = (await stored.json()) as {
+    fields: { redirectUri: { mapValue: { fields: Record<string, Record<string, unknown>> } } }
+  }
+  const fields = saved.fields.redirectUri.mapValue.fields
+  expect(fields.app).toEqual({ mapValue: { fields: { scheme: { stringValue: 'example-prod' } } } })
+  expect(Object.keys(fields.at ?? {})).toEqual(['timestampValue'])
+  await drop(page.request, 'teams/t_json')
+})
+
 test('the inspector takes the width it is given, and remembers it', async ({ page }) => {
   // Room to drag in, so what is measured is the behaviour and not the
   // window: the ceiling below is what the window has to do with it.

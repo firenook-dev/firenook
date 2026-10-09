@@ -25,7 +25,7 @@ import {
 } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { TypeBadge } from '@/components/kit'
-import { type DraftNode, emptyNode, retype } from '../draft'
+import { type DraftNode, emptyNode, retype, toggleRaw } from '../draft'
 import { type FirestoreValueType, VALUE_TYPES } from '../value'
 import { ACCESSORY, useFieldEditing, useFocusTarget } from './field-context'
 import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './value-editors'
@@ -130,6 +130,9 @@ function FieldRow({
   const unsaved = soft && node.name.trim() !== '' && editing.changed.has(node.name.trim())
   const renamedFrom = node.was !== undefined && node.was !== node.name.trim() ? node.was : undefined
   const raw = container && node.raw === true
+  // JSON that will not parse cannot become rows, and the row says why
+  // underneath it either way.
+  const broken = raw && problem?.value !== undefined
   // The line holds a line. Anything taller is a region, and a region needs
   // the width of the panel rather than the stub left over beside a name.
   const region = raw || (!container && valueIsRegion(node))
@@ -290,9 +293,19 @@ function FieldRow({
                 }
               />
               {/* Rows are the point; JSON is the escape hatch, so it waits
-                  to be asked for. The line says `json` while it is in use. */}
+                  to be asked for. The line says `json` while it is in use.
+                  The two are the same subtree written two ways, so the
+                  button converts rather than flipping a flag: it used to
+                  do the latter, which showed `{}` for a map with fields in
+                  it and would have saved that. */}
               <Tooltip
-                content={raw ? 'Back to rows' : 'Edit as JSON'}
+                content={
+                  raw
+                    ? broken
+                      ? 'Fix the JSON to go back to rows'
+                      : 'Back to rows'
+                    : 'Edit as JSON'
+                }
                 render={
                   <Button
                     variant={raw ? 'secondary' : 'ghost'}
@@ -300,7 +313,8 @@ function FieldRow({
                     shape="square"
                     icon={<BracketsCurlyIcon />}
                     aria-label={`Edit ${label} as JSON`}
-                    onClick={() => onChange({ ...node, raw: node.raw !== true })}
+                    disabled={broken}
+                    onClick={() => onChange(toggleRaw(node))}
                   />
                 }
               />

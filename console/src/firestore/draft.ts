@@ -132,7 +132,7 @@ export type Parsed = { ok: true; value: FsValue } | { ok: false; error: string }
 export function parseNode(node: DraftNode): Parsed {
   switch (node.type) {
     case 'map': {
-      if (node.raw) return parseEditorText('map', node.text)
+      if (node.raw) return parseRaw(node)
       const fields: Record<string, FsValue> = {}
       for (const child of node.children) {
         if (child.removed) continue
@@ -145,7 +145,7 @@ export function parseNode(node: DraftNode): Parsed {
       return { ok: true, value: { type: 'map', fields } }
     }
     case 'array': {
-      if (node.raw) return parseEditorText('array', node.text)
+      if (node.raw) return parseRaw(node)
       const items: FsValue[] = []
       for (const child of node.children) {
         if (child.removed) continue
@@ -163,6 +163,69 @@ export function parseNode(node: DraftNode): Parsed {
     default:
       return parseEditorText(node.type, node.text)
   }
+}
+
+/**
+ * A container being hand-edited as JSON, read back through its own rows.
+ *
+ * Parsing the text straight to a value loses every type JSON cannot write
+ * down — a timestamp and a reference both come back strings — so a map
+ * merely *looked* at as JSON would save as a different map. Going through
+ * the rows instead lets `agrees` keep the node that was already there
+ * wherever the JSON still describes it, which is the same round trip the
+ * document's own JSON tab makes.
+ */
+function parseRaw(node: DraftNode): Parsed {
+  const rebuilt = rawChildren(node)
+  if (!rebuilt.ok) return rebuilt
+  return parseNode({ ...node, raw: false, text: '', children: rebuilt.children })
+}
+
+type Rebuilt = { ok: true; children: DraftNode[] } | { ok: false; error: string }
+
+/** The rows a container's raw JSON stands for, or why it stands for none. */
+function rawChildren(node: DraftNode): Rebuilt {
+  const parsed = parseEditorText(node.type, node.text)
+  if (!parsed.ok) return parsed
+  if (parsed.value.type === 'map')
+    return { ok: true, children: mapEntries(parsed.value.fields, node.children) }
+  if (parsed.value.type === 'array')
+    return { ok: true, children: itemNodes(parsed.value.items, node.children) }
+  return { ok: false, error: `A ${node.type} needs JSON of the same shape` }
+}
+
+/**
+ * Rows and JSON, the one swapped for the other.
+ *
+ * It used to flip the flag and nothing else. A container's `text` is empty
+ * — the children are the value — so opening the JSON view showed `{}` for
+ * a map with fields in it, marked the field changed, and would have
+ * written that empty map on the next Save. Going back discarded whatever
+ * had been typed, for the same reason in reverse.
+ */
+export function toggleRaw(node: DraftNode): DraftNode {
+  if (node.raw !== true) return { ...node, raw: true, text: containerJson(node) }
+  const rebuilt = rawChildren(node)
+  // Rows cannot be built from JSON that does not parse. The row already
+  // says so underneath it, and the text is worth more than the view.
+  if (!rebuilt.ok) return node
+  return { ...node, raw: false, text: '', children: rebuilt.children }
+}
+
+/** What a container's rows look like written out, for its JSON view. */
+export function containerJson(node: DraftNode): string {
+  const parsed = parseNode({ ...node, raw: false })
+  if (parsed.ok) return JSON.stringify(toJsonValue(parsed.value), null, 2)
+  // A subtree half-written is exactly when the escape hatch is wanted, so
+  // a node that does not parse contributes its text rather than nothing.
+  const live = node.children.filter((child) => child.removed !== true)
+  if (node.type === 'array') return JSON.stringify(live.map(looseJson), null, 2)
+  return JSON.stringify(nodesToJson(live), null, 2)
+}
+
+function looseJson(node: DraftNode): unknown {
+  const parsed = parseNode(node)
+  return parsed.ok ? toJsonValue(parsed.value) : node.text
 }
 
 export interface NodeProblem {
@@ -327,9 +390,14 @@ export function nodesFromJson(text: string, current: readonly DraftNode[]): Draf
     throw new Error('The document must be a JSON object')
   const value = fromJson(parsed)
   if (value.type !== 'map') throw new Error('The document must be a JSON object')
+  return mapEntries(value.fields, current)
+}
+
+/** Named entries, keeping whichever rows the JSON still describes. */
+function mapEntries(fields: Record<string, FsValue>, current: readonly DraftNode[]): DraftNode[] {
   const before = new Map(current.map((node) => [node.name, node]))
   const nodes: DraftNode[] = []
-  for (const [name, item] of Object.entries(value.fields)) {
+  for (const [name, item] of Object.entries(fields)) {
     const previous = before.get(name)
     if (previous && agrees(previous, item)) {
       nodes.push(previous.removed === true ? { ...previous, removed: false } : previous)
@@ -340,6 +408,14 @@ export function nodesFromJson(text: string, current: readonly DraftNode[]): Draf
     nodes.push(node)
   }
   return nodes
+}
+
+/** The same, by position, for an array's items. */
+function itemNodes(items: readonly FsValue[], current: readonly DraftNode[]): DraftNode[] {
+  return items.map((item, index) => {
+    const previous = current[index]
+    return previous && agrees(previous, item) ? previous : nodeFrom('', item)
+  })
 }
 
 function agrees(node: DraftNode, incoming: FsValue): boolean {

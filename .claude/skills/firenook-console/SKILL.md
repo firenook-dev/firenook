@@ -380,6 +380,25 @@ the version before this dropped to a JSON textarea the moment a value
 stopped being flat, which is exactly where it was wanted. Rows are the
 default and `raw` on a container is the escape hatch, revealed on hover.
 
+**Rows and `raw` are one subtree written two ways, so the button converts
+— it does not flip a flag.** It flipped a flag, and a container's `text` is
+*empty* by construction (the children are the value), so opening the JSON
+view on a map with fields in it showed `{}`, marked the field changed, and
+would have written that empty map on the next Save. Going back discarded
+whatever had been typed, for the same reason in reverse. A user found it.
+`toggleRaw` now serialises the children on the way in (`containerJson`) and
+rebuilds them on the way out (`rawChildren`), and refuses to leave while
+the JSON does not parse — the row already says why underneath, and the text
+is worth more than the view, so the button disables rather than discarding.
+
+`parseNode` on a `raw` container goes **through the rows**, not straight to
+a value. Parsing the text directly loses every type JSON cannot write down
+— a timestamp and a reference both come back strings — so a map merely
+*looked* at as JSON would have saved as a different map. Routing through
+`rawChildren` lets `agrees` keep whichever node the JSON still describes,
+which is the same round trip the document-level JSON tab makes. `mapEntries`
+and `itemNodes` are that one rule, shared by both.
+
 `draft.ts` is pure and unit-tested: `nodesFrom` builds the tree,
 `parseNode` reads it back, `problemsOf` says what is wrong *by node*, and
 `diffDocument` works out the one write. Everything the components do is

@@ -12,6 +12,7 @@ import {
   problemsOf,
   retype,
   sameValue,
+  toggleRaw,
 } from './draft'
 import type { FsValue } from './value'
 
@@ -266,3 +267,68 @@ describe('the JSON view', () => {
     expect(() => nodesFromJson('[1]', [])).toThrow(/object/)
   })
 })
+
+describe('one field as JSON', () => {
+  const nested = (): DraftNode =>
+    nodeFrom('redirectUri', {
+      type: 'map',
+      fields: { dasd: { type: 'map', fields: { dsad: text('dasdsad') } } },
+    })
+
+  it('shows the subtree it is standing in for', () => {
+    // It showed `{}` for a map with fields in it: a container's `text` is
+    // empty — the children are the value — and the button only flipped a
+    // flag, so the JSON view was reading something the rows never wrote.
+    const open = toggleRaw(nested())
+    expect(open.raw).toBe(true)
+    expect(JSON.parse(open.text)).toEqual({ dasd: { dsad: 'dasdsad' } })
+  })
+
+  it('is the same value either way, so looking at it changes nothing', () => {
+    const stored = { redirectUri: { type: 'map' as const, fields: { a: text('1') } } }
+    const nodes = nodesFrom(stored, true)
+    const looked = patch(nodes, 'redirectUri', toggleRaw(find(nodes, 'redirectUri')))
+    expect(diffDocument(stored, looked)).toEqual({ write: {}, clear: [] })
+  })
+
+  it('takes what was typed back into rows', () => {
+    const open = toggleRaw(nested())
+    const typed = { ...open, text: '{"dasd": {"dsad": "changed"}, "more": 2}' }
+    const rows = toggleRaw(typed)
+    expect(rows.raw).toBe(false)
+    expect(rows.children.map((child) => child.name)).toEqual(['dasd', 'more'])
+    expect(parseNode(rows)).toEqual({
+      ok: true,
+      value: {
+        type: 'map',
+        fields: {
+          dasd: { type: 'map', fields: { dsad: text('changed') } },
+          more: whole(2, true),
+        },
+      },
+    })
+  })
+
+  it('keeps the types the JSON cannot write down', () => {
+    const node = nodeFrom('meta', {
+      type: 'map',
+      fields: { at: stamp('2026-09-20T09:00:00.000Z'), rate: whole(3, false) },
+    })
+    const open = toggleRaw(node)
+    // Saving straight from the JSON view, without going back to rows.
+    expect(parseNode(open)).toEqual({ ok: true, value: parseNodeValue(node) })
+    expect(toggleRaw(open).children.map((child) => child.type)).toEqual(['timestamp', 'number'])
+  })
+
+  it('stays in JSON while the JSON is broken, rather than losing it', () => {
+    const typed = { ...toggleRaw(nested()), text: '{"dasd": ' }
+    expect(toggleRaw(typed)).toBe(typed)
+    expect(problemsOf([typed]).get(typed.id)?.value).toBeDefined()
+  })
+})
+
+function parseNodeValue(node: DraftNode): FsValue {
+  const parsed = parseNode(node)
+  if (!parsed.ok) throw new Error(parsed.error)
+  return parsed.value
+}
