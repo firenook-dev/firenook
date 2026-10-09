@@ -14,7 +14,7 @@ import { type DraftNode, type NodeProblem, emptyNode, nodesFromJson, nodesToJson
 import { type FirestoreValueType, VALUE_TYPES } from '../value'
 import { Completion, Completions } from './completions'
 import { type FieldEditing, FieldEditingProvider, type KnownField } from './field-context'
-import { FieldRows } from './field-row'
+import { FieldRows, GUTTER } from './field-row'
 
 const NO_FIELDS: KnownField[] = []
 const NOTHING_CHANGED: ReadonlySet<string> = new Set()
@@ -98,7 +98,7 @@ export function FieldsPanel({
       {tab === 'fields' ? (
         <>
           <div className="min-h-0 flex-1 overflow-auto">
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 p-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5 py-2 pr-1 pl-0">
               <FieldRows nodes={nodes} named onChange={onNodesChange} soft />
               {nodes.length === 0 && (
                 <div className="px-2 py-1">
@@ -113,7 +113,7 @@ export function FieldsPanel({
               fields should not need scrolling to the end to gain a
               forty-first, and the one line that is always worth reaching
               is the one that adds a field. */}
-          <div className="shrink-0 border-t border-kumo-line px-2 py-1.5">
+          <div className="shrink-0 border-t border-kumo-line py-1.5 pr-1 pl-0">
             <AddField
               inputRef={addRef}
               known={known}
@@ -198,6 +198,9 @@ function AddField({
 
   return (
     <div className="flex items-center gap-1">
+      {/* A field row without a caret: the name being typed belongs in the
+          column the names above it are in. */}
+      <span className={GUTTER} />
       <input
         ref={inputRef}
         value={name}

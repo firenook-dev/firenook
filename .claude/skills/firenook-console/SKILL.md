@@ -434,6 +434,16 @@ not it has a caret, the indent is that column's own width, and a name and
 its value share a line with a quiet `:` between them. The same document
 went from 1,107 px to 557.
 
+The caret column is as narrow as a caret and a hit target allow, and the
+tree keeps no left padding of its own, because **the tree is the one thing
+in the panel that starts right of the panel's own content column** and
+every pixel here widens that step. It was 31 px in while the path and the
+tabs sat at 12; on a real document whose only map was its last field, that
+read as a dozen rows of nothing. It is 20 px now, and the add-field line
+carries the same column — it is a field row without a caret, and the name
+being typed belongs where the names above it are. A journey holds that
+column.
+
 A value that is a *region* of text rather than a line of it — a multi-line
 string, a vector, a container in `raw` mode — cannot share the line, so it
 goes underneath at the panel's full width (`valueIsRegion`). A container

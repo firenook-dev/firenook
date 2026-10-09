@@ -1161,6 +1161,16 @@ async function press(control: Locator) {
   await control.click()
 }
 
+/** Where a field's text begins, padding included — its column. */
+async function textLeft(field: Locator): Promise<number> {
+  return field.evaluate((el) => {
+    const view = el.ownerDocument.defaultView!
+    return (
+      el.getBoundingClientRect().left + Number.parseFloat(view.getComputedStyle(el).paddingLeft)
+    )
+  })
+}
+
 /** Whether the text in a field runs past the box drawn around it. */
 async function clipped(field: Locator): Promise<boolean> {
   return field.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
@@ -1429,6 +1439,17 @@ test('a document is a tree, and depth is the only thing that moves a name', asyn
   expect(await apart('city', 'digest')).toBeLessThan(1)
   expect(await left('settings')).toBeLessThan(await left('limits'))
   expect(await left('limits')).toBeLessThan(await left('projects'))
+
+  // One name column, and the line that adds a field is in it. The tree is
+  // the only thing in the panel that starts right of the panel's own
+  // content column, so that step is the caret's width and nothing more —
+  // on a document whose only map is its last field it is otherwise a
+  // column of nothing a dozen rows tall.
+  const column = await textLeft(inspector.getByLabel('address name'))
+  expect(Math.abs((await textLeft(inspector.getByLabel('balance name'))) - column)).toBeLessThan(1)
+  expect(Math.abs((await textLeft(inspector.getByTestId('new-field-name'))) - column)).toBeLessThan(
+    2,
+  )
 
   // A row is a line, and a name and its value share it. On two lines a
   // node is a block, and an indent says nothing against a block's height.

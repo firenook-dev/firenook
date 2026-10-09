@@ -35,8 +35,13 @@ import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './val
  * giving it only to maps indented them past their own siblings, and past
  * their own children, so the one thing an indent is for — depth — was the
  * one thing it did not say.
+ *
+ * It is as narrow as a caret and a hit target allow, because on a document
+ * whose only map is its last field it is twelve rows of nothing: the tree
+ * is already the one thing in the panel that starts right of the panel's
+ * own content column, and every pixel here widens that step.
  */
-const GUTTER = 'flex size-5 shrink-0 items-center justify-center'
+export const GUTTER = 'flex size-4 shrink-0 items-center justify-center'
 
 export function FieldRows({
   nodes,
@@ -148,7 +153,7 @@ function FieldRow({
           {container && (
             <button
               type="button"
-              className="flex size-5 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-base"
+              className="flex size-4 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-base"
               onClick={() => setOpen(!open)}
               aria-expanded={open}
               aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}

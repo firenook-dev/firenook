@@ -681,7 +681,7 @@ function FieldRow({
   if (removed)
     return (
       <div className="flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70">
-        <span className="size-5 shrink-0" />
+        <span className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate font-mono text-[12px] line-through">{name}</span>
         <span className="shrink-0 text-[11px] text-kumo-subtle">Removed on save</span>
         <Button variant="ghost" size="xs" icon={<ArrowCounterClockwiseIcon />}>
@@ -700,7 +700,7 @@ function FieldRow({
           pointed ? 'bg-kumo-tint' : ''
         }`}
       >
-        <span className="flex size-5 shrink-0 items-center justify-center text-kumo-subtle">
+        <span className="flex size-4 shrink-0 items-center justify-center text-kumo-subtle">
           {children ? <CaretDownIcon size={12} /> : null}
         </span>
         {index === undefined ? (
@@ -914,7 +914,10 @@ function Inspector() {
                 should not need scrolling to the end to gain a forty-first,
                 and the name completes from what the rest of the collection
                 calls its fields, bringing that field's usual type with it. */}
-            <div className="flex items-center gap-1 border-t border-kumo-line px-2 pt-3">
+            {/* A field row without a caret: the name being typed belongs
+                in the column the names above it are in. */}
+            <div className="flex items-center gap-1 border-t border-kumo-line pt-3">
+              <span className="size-4 shrink-0" />
               <Value state="area" className="flex-1 text-kumo-inactive">
                 New field name
               </Value>
