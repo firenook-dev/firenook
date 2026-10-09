@@ -13,12 +13,23 @@
 import { queryOptions } from '@tanstack/react-query'
 import { API_BASE, ApiError } from '@/api/client'
 import type { ChangeLogPage } from '@/api/generated/ChangeLogPage'
+import type { CommitDiff } from '@/api/generated/CommitDiff'
+import type { DocumentDiff } from '@/api/generated/DocumentDiff'
+import type { FieldChange } from '@/api/generated/FieldChange'
 import type { LoggedCommit } from '@/api/generated/LoggedCommit'
 import type { LoggedDocument } from '@/api/generated/LoggedDocument'
 import type { UndoResult } from '@/api/generated/UndoResult'
 import { FS } from './queries'
 
-export type { ChangeLogPage, LoggedCommit, LoggedDocument, UndoResult }
+export type {
+  ChangeLogPage,
+  CommitDiff,
+  DocumentDiff,
+  FieldChange,
+  LoggedCommit,
+  LoggedDocument,
+  UndoResult,
+}
 
 /** Commits the panel asks for. The engine caps a page at 100. */
 export const CHANGELOG_LIMIT = 50
@@ -51,6 +62,26 @@ export function fetchChangeLog(database: string): Promise<ChangeLogPage> {
   )
 }
 
+export function fetchCommitDiff(id: number): Promise<CommitDiff> {
+  return call<CommitDiff>(`/changelog/diff?id=${id}`)
+}
+
+/**
+ * What a commit did, field by field, asked for only when a row is opened.
+ *
+ * The engine has kept the before-images all along — the undo needs them —
+ * and the panel was showing a path and a verb while the answer to "what
+ * changed?" sat unread beside it. Per commit rather than with the page,
+ * because two hundred commits of document data is not a list response.
+ */
+export const commitDiffQuery = (database: string, id: number) =>
+  queryOptions({
+    queryKey: [FS, database, 'changelog', 'diff', id],
+    queryFn: () => fetchCommitDiff(id),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+
 export function undoCommit(id: number): Promise<UndoResult> {
   return call<UndoResult>('/undo', { method: 'POST', body: JSON.stringify({ id }) })
 }
@@ -69,8 +100,28 @@ export const changeLogQuery = (database: string) =>
   })
 
 /** `users/u_9f3k2` → `u_9f3k2`; the panel leads with the id. */
-export function lastSegment(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1)
+/**
+ * The collection and the id, which is what names a document to a reader.
+ *
+ * It was the id alone, and an id alone is an opaque string: a panel row
+ * read `1fcedbc4-4bb9-4333-9c68-49a089b92cd7` and left you no way to tell
+ * what had been touched. The whole path is on the wire already; a
+ * subcollection's ancestry is in the tooltip rather than the chip.
+ */
+export function documentName(path: string): string {
+  const parts = path.split('/')
+  return parts.slice(-2).join('/')
+}
+
+/** What pressing Undo on this commit will do, when it is worth saying. */
+export function undoSays(commit: LoggedCommit): string | undefined {
+  const counts = { created: 0, updated: 0, deleted: 0 }
+  for (const document of commit.documents) counts[document.kind] += 1
+  const total = commit.documents.length
+  if (total < 2) return undefined
+  const only = (['created', 'updated', 'deleted'] as const).find((kind) => counts[kind] === total)
+  const verb = only === 'created' ? 'delete' : only === 'deleted' ? 'restore' : 'revert'
+  return `${verb} ${total.toLocaleString('en-US')}`
 }
 
 /** One line for a commit, whatever mixture of writes it holds. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LoggedCommit } from '@/api/generated/LoggedCommit'
-import { describeCommit, lastSegment, undoBlockedBecause } from './changelog'
+import { describeCommit, documentName, undoBlockedBecause } from './changelog'
 
 const commit = (over: Partial<LoggedCommit> = {}): LoggedCommit => ({
   id: 1,
@@ -63,8 +63,12 @@ describe('whether undo is offered', () => {
 })
 
 describe('the chip a document shows', () => {
-  it('is the document id, not the whole path', () => {
-    expect(lastSegment('users/u_9f3k2/orders/o_1')).toBe('o_1')
-    expect(lastSegment('users')).toBe('users')
+  // The id alone is an opaque string: a uuid-keyed document read as
+  // `1fcedbc4-4bb9-4333-9c68-49a089b92cd7` and left no way to tell what
+  // had been touched, while the whole path was on the wire already.
+  it('is the collection and the id, which is what names a document', () => {
+    expect(documentName('users/u_9f3k2/orders/o_1')).toBe('orders/o_1')
+    expect(documentName('users/u_9f3k2')).toBe('users/u_9f3k2')
+    expect(documentName('users')).toBe('users')
   })
 })

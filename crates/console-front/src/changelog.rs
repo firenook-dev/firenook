@@ -24,10 +24,11 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use firenook_core_store::{
-    Change, CommitObservation, CommitObserver, Document, DocumentKey, Precondition, Store,
-    Timestamp, Write, document_key_logical_bytes, fields_logical_bytes,
+    Change, CommitObservation, CommitObserver, Document, DocumentKey, Fields, Precondition, Store,
+    Timestamp, Value, Write, document_key_logical_bytes, fields_logical_bytes,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use ts_rs::TS;
 
 /// Commits retained. Older ones fall off the back of the window.
@@ -39,6 +40,11 @@ const MAX_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_COMMIT_BYTES: u64 = 2 * 1024 * 1024;
 /// Entries one listing may return.
 const PAGE_LIMIT: usize = 100;
+/// Documents one diff describes. A bulk commit says how many it left out
+/// rather than sending two hundred documents to draw a list nobody reads.
+const DIFF_DOCUMENTS: usize = 20;
+/// Changed fields one document of a diff describes.
+const DIFF_FIELDS: usize = 40;
 
 /// What happened to a document in a commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
@@ -106,6 +112,54 @@ pub struct UndoResult {
     /// Documents restored, deleted or recreated.
     #[ts(type = "number")]
     pub documents: u64,
+}
+
+/// One field a commit moved, as the panel shows it.
+///
+/// Leaves only: a map whose entries changed is reported as the entries
+/// that changed, under their dotted path, because "settings changed" is
+/// the thing the list already said and not the thing anybody opened it to
+/// find out.
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldChange {
+    /// Dotted path inside the document, such as `settings.limits.projects`.
+    pub field: String,
+    /// The REST value before this commit; absent when the field was added.
+    #[ts(type = "unknown | null")]
+    pub before: Option<JsonValue>,
+    /// The REST value after it; absent when the field was removed.
+    #[ts(type = "unknown | null")]
+    pub after: Option<JsonValue>,
+}
+
+/// One document of a commit, with the fields that actually moved.
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentDiff {
+    /// Relative document path, for example `users/u_9f3k2`.
+    pub path: String,
+    pub kind: LoggedKind,
+    pub fields: Vec<FieldChange>,
+    /// Changed fields past the cap, counted rather than sent.
+    #[ts(type = "number")]
+    pub elided: u64,
+}
+
+/// What one commit did, field by field.
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CommitDiff {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub documents: Vec<DocumentDiff>,
+    /// Documents past the cap, counted rather than sent.
+    #[ts(type = "number")]
+    pub elided: u64,
+    /// False when the commit was too large to keep its before-images, so
+    /// there is nothing to compare and the paths are all there is.
+    pub retained: bool,
 }
 
 /// One retained document transition, with the images an undo needs.
@@ -209,6 +263,7 @@ impl ChangeLog {
     pub(crate) fn router(self) -> axum::Router {
         axum::Router::new()
             .route("/changelog", axum::routing::get(changelog))
+            .route("/changelog/diff", axum::routing::get(changelog_diff))
             .route("/undo", axum::routing::post(undo))
             .with_state(self)
     }
@@ -246,6 +301,56 @@ impl ChangeLog {
             commits,
             retained: entry_count(&window),
         }
+    }
+
+    /// What one commit did, field by field.
+    ///
+    /// The before-images are already here for the undo; the list has been
+    /// showing a path and a verb while the answer to "what changed?" sat
+    /// unread beside it. Fetched per commit rather than with the page,
+    /// because two hundred commits of document data is not a list.
+    #[must_use]
+    pub fn diff(&self, id: u64) -> Option<CommitDiff> {
+        let window = self
+            .window
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = window.entries.iter().find(|entry| entry.id == id)?;
+        if entry.retained.is_empty() {
+            return Some(CommitDiff {
+                id,
+                documents: Vec::new(),
+                elided: 0,
+                retained: false,
+            });
+        }
+        let documents = entry
+            .retained
+            .iter()
+            .take(DIFF_DOCUMENTS)
+            .map(|retained| {
+                let mut fields = Vec::new();
+                let elided = diff_fields(
+                    retained.before.as_ref().map(|document| document.fields()),
+                    retained.after.as_ref().map(|document| document.fields()),
+                    "",
+                    &mut fields,
+                );
+                DocumentDiff {
+                    path: retained.key.path().to_owned(),
+                    kind: retained.kind(),
+                    fields,
+                    elided,
+                }
+            })
+            .collect();
+        Some(CommitDiff {
+            id,
+            documents,
+            elided: u64::try_from(entry.retained.len().saturating_sub(DIFF_DOCUMENTS))
+                .unwrap_or(u64::MAX),
+            retained: true,
+        })
     }
 
     /// Puts one commit back, as one atomic commit of its own.
@@ -305,6 +410,59 @@ impl ChangeLog {
 
 fn entry_count(window: &Window) -> u64 {
     u64::try_from(window.entries.len()).unwrap_or(u64::MAX)
+}
+
+/// The leaves that moved between two field maps, under their dotted path.
+///
+/// Returns how many it left out: a document with a thousand changed
+/// fields says so rather than shipping them, and a value no RFC 3339
+/// timestamp can print is counted here rather than invented.
+fn diff_fields(
+    before: Option<&Fields>,
+    after: Option<&Fields>,
+    prefix: &str,
+    out: &mut Vec<FieldChange>,
+) -> u64 {
+    let empty = Fields::new();
+    let before = before.unwrap_or(&empty);
+    let after = after.unwrap_or(&empty);
+    let mut names: Vec<&String> = before.keys().chain(after.keys()).collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut elided = 0_u64;
+    for name in names {
+        let was = before.get(name);
+        let now = after.get(name);
+        if was == now {
+            continue;
+        }
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}.{name}")
+        };
+        // Two maps are compared through, so what is reported is the leaf
+        // that moved and not the branch above it.
+        if let (Some(Value::Map(was)), Some(Value::Map(now))) = (was, now) {
+            elided = elided.saturating_add(diff_fields(Some(was), Some(now), &path, out));
+            continue;
+        }
+        if out.len() >= DIFF_FIELDS {
+            elided = elided.saturating_add(1);
+            continue;
+        }
+        let encode = |value: Option<&Value>| value.map(firenook_rest_front::value_as_rest);
+        match (encode(was), encode(now)) {
+            // A value present on a side but unprintable: counted, never guessed.
+            (Some(None), _) | (_, Some(None)) => elided = elided.saturating_add(1),
+            (was, now) => out.push(FieldChange {
+                field: path,
+                before: was.flatten(),
+                after: now.flatten(),
+            }),
+        }
+    }
+    elided
 }
 
 /// One transition per document, however many writes a commit made to it.
@@ -450,6 +608,12 @@ pub(crate) struct ChangeLogRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct DiffRequest {
+    id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct UndoRequest {
     id: u64,
 }
@@ -461,6 +625,14 @@ async fn changelog(
 ) -> Json<ChangeLogPage> {
     let database = request.database.as_deref().unwrap_or("(default)");
     Json(log.page(database, request.limit.unwrap_or(PAGE_LIMIT)))
+}
+
+/// `GET /changelog/diff?id=7`: what that commit did, field by field.
+async fn changelog_diff(
+    State(log): State<ChangeLog>,
+    Query(request): Query<DiffRequest>,
+) -> Result<Json<CommitDiff>, UndoError> {
+    log.diff(request.id).map(Json).ok_or(UndoError::Forgotten)
 }
 
 /// `POST /undo`: put one commit back.
@@ -507,6 +679,71 @@ mod tests {
                 Some(Value::String(value)) => Some(value.to_string()),
                 _ => None,
             })
+    }
+
+    #[test]
+    fn a_diff_names_the_leaf_that_moved_and_not_the_map_above_it() {
+        let store = Store::default();
+        let log = ChangeLog::attach(&store);
+        let nested = |plan: &str, projects: i64| {
+            Fields::from([
+                ("plan".to_owned(), Value::String(plan.into())),
+                (
+                    "settings".to_owned(),
+                    Value::Map(std::collections::BTreeMap::from([(
+                        "limits".to_owned(),
+                        Value::Map(std::collections::BTreeMap::from([(
+                            "projects".to_owned(),
+                            Value::Integer(projects),
+                        )])),
+                    )])),
+                ),
+            ])
+        };
+        store
+            .commit(&[Write::Create {
+                key: key("users/u1"),
+                fields: nested("pro", 3),
+            }])
+            .expect("create");
+        store
+            .commit(&[Write::Set {
+                key: key("users/u1"),
+                fields: nested("pro", 50),
+                transforms: Vec::new(),
+                precondition: Precondition::Exists(true),
+            }])
+            .expect("update");
+
+        let latest = log.page("(default)", 10).commits[0].id;
+        let diff = log.diff(latest).expect("a diff for a retained commit");
+        assert!(diff.retained);
+        let changed = &diff.documents[0];
+        assert_eq!(changed.path, "users/u1");
+        // `plan` did not move, so it is not reported; `settings` did, but
+        // what is reported is the leaf inside it under its dotted path.
+        let fields: Vec<&str> = changed.fields.iter().map(|f| f.field.as_str()).collect();
+        assert_eq!(fields, vec!["settings.limits.projects"]);
+        let moved = &changed.fields[0];
+        assert_eq!(moved.before, Some(serde_json::json!({"integerValue": "3"})));
+        assert_eq!(moved.after, Some(serde_json::json!({"integerValue": "50"})));
+    }
+
+    #[test]
+    fn a_diff_of_a_commit_too_large_to_keep_says_so_rather_than_showing_nothing() {
+        let store = Store::default();
+        let log = ChangeLog::attach(&store);
+        let big = "x".repeat(usize::try_from(MAX_COMMIT_BYTES).expect("64-bit") + 1);
+        store
+            .commit(&[Write::Create {
+                key: key("notes/n1"),
+                fields: text(&big),
+            }])
+            .expect("create");
+        let latest = log.page("(default)", 10).commits[0].id;
+        let diff = log.diff(latest).expect("a diff");
+        assert!(!diff.retained);
+        assert_eq!(diff.documents, Vec::new());
     }
 
     #[test]

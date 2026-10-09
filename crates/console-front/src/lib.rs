@@ -28,7 +28,8 @@ use serde_json::json;
 use ts_rs::TS;
 
 pub use changelog::{
-    ChangeLog, ChangeLogPage, LoggedCommit, LoggedDocument, LoggedKind, UndoError, UndoResult,
+    ChangeLog, ChangeLogPage, CommitDiff, DocumentDiff, FieldChange, LoggedCommit, LoggedDocument,
+    LoggedKind, UndoError, UndoResult,
 };
 pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
 pub use explain::{
@@ -318,6 +319,7 @@ mod tests {
         DatabaseList::export_all(&config).expect("TypeScript bindings written");
         Explanation::export_all(&config).expect("TypeScript bindings written");
         ChangeLogPage::export_all(&config).expect("TypeScript bindings written");
+        CommitDiff::export_all(&config).expect("TypeScript bindings written");
         UndoResult::export_all(&config).expect("TypeScript bindings written");
         RulesDocument::export_all(&config).expect("TypeScript bindings written");
         RulesInstalled::export_all(&config).expect("TypeScript bindings written");

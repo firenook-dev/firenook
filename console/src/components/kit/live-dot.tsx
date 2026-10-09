@@ -32,7 +32,12 @@ export function LiveDot({
         <span className={`relative inline-flex size-2 rounded-full ${colour}`} />
       </span>
       <span className={compact ? 'sr-only' : undefined}>{label}</span>
-      {changes ? ` ${compact ? '' : '· '}${changes} ${changes === 1 ? 'change' : 'changes'}` : ''}
+      {/* "new", not "change": this counts the writes that have arrived
+          since the tab was opened, while the panel it opens lists every
+          commit the engine still holds. Two different numbers under one
+          word read as a contradiction — the toolbar said 1 and the panel
+          listed nine. */}
+      {changes ? ` ${compact ? '' : '· '}${changes} new` : ''}
     </span>
   )
 }

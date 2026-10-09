@@ -916,6 +916,48 @@ pixels is the rhythm *within* a group, so delete sat in the copy cluster's
 own rhythm. A `w-px` rule puts it outside them without moving it off the
 row: 3 px within the group, 15 px past the rule.
 
+### Recent changes is a log with an undo, not an undo with a list
+
+A user opened the panel and asked *"what does this do and clicking undo
+does what?"* — which is the panel failing at its one job. Four causes,
+all of them the same inversion: it led with a button and an opaque id
+instead of with what happened.
+
+**The before-images were already kept and never shown.** The engine holds
+the full before and after of every document so the undo can restore the
+exact one it replaced — and `LoggedDocument` shipped `{database, path,
+kind}`, so the panel said "1 updated · u_22xjp" while the answer sat
+unread beside it. `GET /changelog/diff?id=N` now reports the **leaves**
+that moved under their dotted path (`settings.limits.projects 50 → 99`),
+not the branch above them, because "settings changed" is the thing the
+row already said. Per commit, fetched when a row is opened, capped at 20
+documents and 40 fields with the rest counted: two hundred commits of
+document data is not a list response.
+
+**Two numbers must not share one word.** The toolbar counted writes
+arrived since the tab opened; the panel counted commits the engine still
+holds. Both said "change", so the trigger read `1 change` above a list of
+nine. The toolbar says `1 new`, the panel says `9 held`.
+
+**"N kept" reads as an outcome** — *three of your changes were kept* — when
+it is the size of a window that drops its oldest. "held", with the bound
+in a tooltip.
+
+**Name a document by its collection and its id.** `lastSegment` gave the
+id alone, so a uuid-keyed document read as
+`1fcedbc4-4bb9-4333-9c68-49a089b92cd7` and nothing else — while the whole
+path was on the wire already. Last two segments in the chip, full path in
+the tooltip.
+
+**Put the consequence on a destructive button.** A `200 created` row was
+one unconfirmed click from deleting two hundred documents. `Undo · delete
+200`, shown whenever a commit touches more than one document.
+
+To expose a store value to the console, `firenook_rest_front::value_as_rest`
+returns the REST shape, `None` for the one value it cannot print (a
+timestamp outside RFC 3339). A describing surface **counts** such a value
+rather than inventing one.
+
 ## Firestore workbench (built, `src/firestore/`)
 
 - Data path: the browser talks Firestore REST to the console's own origin

@@ -6,20 +6,23 @@
 // and an undo that restores the exact documents it replaced.
 
 import { Badge, Button, Popover, Text, useKumoToastManager } from '@cloudflare/kumo'
-import { ArrowCounterClockwiseIcon } from '@phosphor-icons/react'
+import { ArrowCounterClockwiseIcon, CaretRightIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { LiveDot, PanelTitle, type LiveState } from '@/components/kit'
 import { ApiError } from '@/api/client'
 import {
+  type FieldChange,
   type LoggedCommit,
   changeLogQuery,
+  commitDiffQuery,
   describeCommit,
-  lastSegment,
+  documentName,
   undoBlockedBecause,
   undoCommit,
+  undoSays,
 } from '../changelog'
-import { relativeTime } from '../value'
+import { type RestValue, decodeValue, displayValue, relativeTime } from '../value'
 import { useWorkbench } from './workbench-context'
 
 export function ChangesPopover({ state, changes }: { state: LiveState; changes: number }) {
@@ -85,9 +88,17 @@ export function ChangesPopover({ state, changes }: { state: LiveState; changes: 
         <div className="grid gap-2" data-testid="changes-popover">
           <div className="flex items-baseline justify-between gap-3">
             <PanelTitle>Recent changes</PanelTitle>
+            {/* "held", and it says what holds them. "3 kept" reads as an
+                outcome — three of your changes were kept — when it is the
+                size of a window that drops its oldest. */}
             {log.data && log.data.retained > 0 && (
-              <Text variant="secondary" size="sm">
-                {log.data.retained.toLocaleString('en-US')} kept
+              <Text
+                variant="secondary"
+                size="sm"
+                DANGEROUS_className="cursor-help"
+                title="The engine holds up to 200 recent commits, or 8 MB of documents, while diagnostics are on. Older ones fall off."
+              >
+                {log.data.retained.toLocaleString('en-US')} held
               </Text>
             )}
           </div>
@@ -111,6 +122,7 @@ export function ChangesPopover({ state, changes }: { state: LiveState; changes: 
                   key={commit.id}
                   commit={commit}
                   busy={undo.isPending && undo.variables?.id === commit.id}
+                  database={workbench.database}
                   onUndo={() => undo.mutate(commit)}
                   onOpen={(path) => workbench.selectDocument(path)}
                 />
@@ -123,25 +135,122 @@ export function ChangesPopover({ state, changes }: { state: LiveState; changes: 
   )
 }
 
+/** One side of a field's move, or the dash that says it was not there. */
+function Side({ value, tone }: { value: unknown; tone: 'before' | 'after' }) {
+  if (value === null || value === undefined) return <span className="text-kumo-inactive">—</span>
+  const text = displayValue(decodeValue(value as RestValue))
+  return (
+    <span
+      className={`truncate font-mono text-[11px] ${
+        tone === 'before' ? 'text-kumo-subtle line-through' : 'text-kumo-default'
+      }`}
+      title={text}
+    >
+      {text}
+    </span>
+  )
+}
+
+/**
+ * What a commit did to one document, field by field.
+ *
+ * A row used to say "1 updated" and name a path, which is the question
+ * restated rather than answered. The engine has held the before-image all
+ * along for the undo; this is the same data, read.
+ */
+function Diff({ database, id }: { database: string; id: number }) {
+  const diff = useQuery(commitDiffQuery(database, id))
+  if (diff.isPending)
+    return (
+      <Text variant="secondary" size="sm">
+        Reading what changed…
+      </Text>
+    )
+  if (diff.isError || !diff.data)
+    return (
+      <Text variant="secondary" size="sm">
+        What changed is no longer held.
+      </Text>
+    )
+  if (!diff.data.retained)
+    return (
+      <Text variant="secondary" size="sm">
+        Too large to keep what it replaced, so only the paths are here.
+      </Text>
+    )
+  return (
+    <div className="grid gap-1.5 border-l border-kumo-line pl-2">
+      {diff.data.documents.map((document) => (
+        <div key={document.path} className="grid gap-0.5">
+          {/* The chips above already name a single document; repeating it
+              here only pushes what changed further down. */}
+          {diff.data.documents.length > 1 && (
+            <span className="truncate font-mono text-[11px] text-kumo-subtle">{document.path}</span>
+          )}
+          {document.fields.map((field: FieldChange) => (
+            <div key={field.field} className="flex items-baseline gap-1.5">
+              <span className="shrink-0 font-mono text-[11px] text-kumo-default">
+                {field.field}
+              </span>
+              <Side value={field.before} tone="before" />
+              <span className="shrink-0 text-[11px] text-kumo-inactive">→</span>
+              <Side value={field.after} tone="after" />
+            </div>
+          ))}
+          {document.fields.length === 0 && (
+            <span className="font-mono text-[11px] text-kumo-subtle">No field changed value.</span>
+          )}
+          {document.elided > 0 && (
+            <span className="font-mono text-[11px] text-kumo-subtle">
+              +{document.elided.toLocaleString('en-US')} more fields
+            </span>
+          )}
+        </div>
+      ))}
+      {diff.data.elided > 0 && (
+        <Text variant="secondary" size="sm">
+          +{diff.data.elided.toLocaleString('en-US')} more documents
+        </Text>
+      )}
+    </div>
+  )
+}
+
 function CommitRow({
   commit,
+  database,
   busy,
   onUndo,
   onOpen,
 }: {
   commit: LoggedCommit
+  database: string
   busy: boolean
   onUndo: () => void
   onOpen: (path: string) => void
 }) {
   const blocked = undoBlockedBecause(commit)
+  const says = undoSays(commit)
+  const [open, setOpen] = useState(false)
   const shown = commit.documents.slice(0, 3)
   return (
     <li className="grid gap-1 rounded-md px-1 py-1.5 hover:bg-kumo-tint">
       <div className="flex items-center gap-2">
-        <Text as="span" size="sm">
-          {describeCommit(commit)}
-        </Text>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-1 rounded text-left hover:text-kumo-default"
+          data-testid={`what-changed-${commit.id}`}
+        >
+          <CaretRightIcon
+            size={11}
+            className={`shrink-0 text-kumo-subtle ${open ? 'rotate-90' : ''}`}
+          />
+          <Text as="span" size="sm">
+            {describeCommit(commit)}
+          </Text>
+        </button>
         {commit.undone && <Badge variant="outline">Undone</Badge>}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           <Text as="span" variant="secondary" size="sm">
@@ -157,7 +266,10 @@ function CommitRow({
             title={blocked ?? 'Put these documents back as they were'}
             data-testid={`undo-${commit.id}`}
           >
-            Undo
+            {/* What it will do, when it is more than one document: the
+                row above this one was "200 created", one unconfirmed
+                click from deleting two hundred documents. */}
+            {says === undefined ? 'Undo' : `Undo · ${says}`}
           </Button>
         </span>
       </div>
@@ -180,7 +292,7 @@ function CommitRow({
               }`}
               aria-hidden
             />
-            <span className="truncate">{lastSegment(document.path)}</span>
+            <span className="truncate">{documentName(document.path)}</span>
           </button>
         ))}
         {commit.documents.length > shown.length && (
@@ -189,6 +301,7 @@ function CommitRow({
           </Text>
         )}
       </div>
+      {open && <Diff database={database} id={commit.id} />}
     </li>
   )
 }

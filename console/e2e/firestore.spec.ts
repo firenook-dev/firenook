@@ -96,7 +96,10 @@ test('the inspector saves typed edits and the change flashes back through the li
   })
   expect(response.ok()).toBeTruthy()
   await expect(row).toContainText('11', { timeout: 5_000 })
-  await expect(page.getByText(/Live · \d+ change/)).toBeVisible()
+  // "new", not "change": the toolbar counts what has arrived since this
+  // tab opened, and the panel it opens counts what the engine still
+  // holds. One word over two numbers read as a contradiction.
+  await expect(page.getByText(/Live · \d+ new/)).toBeVisible()
 })
 
 test('documents are added and deleted from the workbench', async ({ page }) => {
@@ -1041,10 +1044,29 @@ test('a change can be undone, and refuses when something moved on', async ({ pag
   await page.getByTestId('changes-trigger').click()
   const popover = page.getByTestId('changes-popover')
   await expect(popover).toContainText('1 updated')
-  await expect(popover).toContainText('one')
+
+  // A document is named by its collection and its id. It was the id
+  // alone, which on a document keyed by a uuid left a row reading
+  // `1fcedbc4-4bb9-4333-9c68-49a089b92cd7` and no way to tell what had
+  // been touched — while the whole path was already on the wire.
+  await expect(popover).toContainText('undoable/one')
+
+  // And a row says what changed, not only that something did. The engine
+  // has kept the before-image all along, for the undo; the panel was
+  // showing a path and a verb while the answer sat unread beside it.
+  await popover.locator('[data-testid^="what-changed-"]').first().click()
+  await expect(popover).toContainText('note')
+  await expect(popover.getByText('first', { exact: true })).toBeVisible()
+  await expect(popover.getByText('second', { exact: true })).toBeVisible()
+
+  // The toolbar counts what has arrived since the tab opened; the panel
+  // holds every commit the engine still has. Two numbers under one word
+  // read as a contradiction, so only one of them says "change".
+  await expect(page.getByTestId('changes-trigger')).not.toContainText('change')
+  await expect(popover).toContainText('held')
 
   // Undo puts the document back as it was, exactly.
-  await popover.getByRole('button', { name: 'Undo' }).first().click()
+  await popover.locator('[data-testid^="undo-"]').first().click()
   await expect(page.getByText('Change undone')).toBeVisible()
   await expect(page.getByTestId('grid-row').first()).toContainText('first')
 
@@ -1064,7 +1086,7 @@ test('a change can be undone, and refuses when something moved on', async ({ pag
     .getByTestId('changes-popover')
     .locator('li')
     .first()
-    .getByRole('button', { name: 'Undo' })
+    .locator('[data-testid^="undo-"]')
     .getAttribute('data-testid')
   expect(undoThird).toMatch(/^undo-\d+$/)
 
