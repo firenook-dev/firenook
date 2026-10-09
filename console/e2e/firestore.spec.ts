@@ -1173,7 +1173,15 @@ async function textLeft(field: Locator): Promise<number> {
 
 /** Whether the text in a field runs past the box drawn around it. */
 async function clipped(field: Locator): Promise<boolean> {
-  return field.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+  return field.evaluate(
+    (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1,
+  )
+}
+
+/** How many text lines a field is drawn across. */
+async function lineCount(field: Locator): Promise<number> {
+  const box = await field.boundingBox()
+  return Math.round((box?.height ?? 0) / 18)
 }
 
 /** A document written straight to the engine, bypassing the console. */
@@ -1473,4 +1481,38 @@ test('a document is a tree, and depth is the only thing that moves a name', asyn
   expect(await faded(remove)).toBe(true)
   await page.keyboard.press('Tab')
   expect(await faded(remove)).toBe(false)
+})
+
+test('a value too long for its line wraps rather than being cut short', async ({ page }) => {
+  await put(page.request, 'teams/t_long', {
+    redirectUri: { stringValue: 'example-dev://app/gateway/callback?state=U3kVZ4r1ADid' },
+    short: { stringValue: 'ok' },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_long`)
+  const inspector = page.getByTestId('inspector')
+  const long = inspector.getByLabel('redirectUri value')
+  await expect(long).toHaveValue(/callback/)
+
+  // A console is for reading a document before it is for editing one, and
+  // a value cut off at the panel's edge is a value the panel failed to
+  // show — a URL loses its path, which is the half that says anything. An
+  // `input` cannot wrap at all, so a value needing two lines gets two.
+  expect(await clipped(long)).toBe(false)
+  expect(await lineCount(long)).toBeGreaterThan(1)
+  expect(await lineCount(inspector.getByLabel('short value'))).toBe(1)
+
+  // The name stays on the value's first line rather than floating between
+  // the two of them.
+  const name = (await inspector.getByLabel('redirectUri name').boundingBox())!
+  const value = (await long.boundingBox())!
+  expect(Math.abs(name.y - value.y)).toBeLessThan(2)
+
+  // Enter still means "done with this one"; a newline is Shift, and that
+  // is what turns the value into a region below the line.
+  await long.click()
+  await page.keyboard.press('Enter')
+  await expect(long).toHaveValue(/callback\?state=U3kVZ4r1ADid$/)
+  await long.click()
+  await page.keyboard.press('Shift+Enter')
+  await expect(inspector.getByLabel('redirectUri value')).toHaveValue(/\n/)
 })

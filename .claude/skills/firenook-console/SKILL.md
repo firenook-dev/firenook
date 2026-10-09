@@ -444,6 +444,33 @@ carries the same column — it is a field row without a caret, and the name
 being typed belongs where the names above it are. A journey holds that
 column.
 
+**A value is never cut short.** A console is for reading a document before
+it is for editing one, so a value that runs past the panel's edge is the
+panel failing at its first job — and a URL truncated there loses its path,
+which is the half that says anything. An `input` cannot wrap at all, so
+every value whose text can be any length (string, reference, bytes) is a
+`textarea` that holds one line most of the time, inside `Grows`: an
+invisible mirror of the text sets the height of a grid cell and the field
+lies on top of it. `field-sizing: content` says that in one word but not in
+every browser, and a value cut short in Firefox is still cut short.
+
+Two traps in that, both measured: the mirror and the field must agree on
+their metrics to the pixel (`WRAP_BOX`), and the wrap must be
+`overflow-wrap: break-word`, **not** `anywhere` — they break a long token
+identically, but `anywhere` counts those break opportunities towards
+min-content width, which collapsed a content-sized field to one character
+per line. Every item on the line is one text line tall and the line is
+`items-start`, so a value that takes two lines leaves its name on the
+first rather than floating between them. In an inline field Enter still
+means "done with this one"; Shift+Enter puts in a newline, which is what
+turns the value into a region.
+
+That also settles where a trailing label goes. `double`, `ref`, `lat`,
+`18 d ago` are **words** — bounded, tiny — and sit beside the value. The
+bytes note is not a word but a sentence (the decoded text runs to forty
+characters), so it goes below: left beside the value it took 180 px of a
+405 px line and squeezed a base64 blob into four lines.
+
 A value that is a *region* of text rather than a line of it — a multi-line
 string, a vector, a container in `raw` mode — cannot share the line, so it
 goes underneath at the panel's full width (`valueIsRegion`). A container

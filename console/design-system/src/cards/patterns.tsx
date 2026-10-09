@@ -696,24 +696,32 @@ function FieldRow({
           of twenty one-line rows has to answer and a column of blocks
           never had to. */}
       <div
-        className={`relative flex min-h-7 items-center gap-1 rounded-md pr-1 pl-0.5 ${
+        className={`relative flex items-start gap-1 rounded-md pr-1 pl-0.5 ${
           pointed ? 'bg-kumo-tint' : ''
         }`}
       >
-        <span className="flex size-4 shrink-0 items-center justify-center text-kumo-subtle">
+        <span className="flex h-7 w-4 shrink-0 items-center justify-center text-kumo-subtle">
           {children ? <CaretDownIcon size={12} /> : null}
         </span>
         {index === undefined ? (
-          <span className="shrink-0 rounded px-1.5 font-mono text-[12px] font-medium">{name}</span>
+          <span className="flex h-7 shrink-0 items-center rounded px-1.5 font-mono text-[12px] font-medium">
+            {name}
+          </span>
         ) : (
-          <span className="min-w-4 shrink-0 text-right font-mono text-[12px] text-kumo-subtle tabular-nums">
+          <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
             {index}
           </span>
         )}
-        <span className="-ml-1.5 shrink-0 font-mono text-[12px] text-kumo-inactive">:</span>
+        <span className="-ml-1.5 flex h-7 shrink-0 items-center font-mono text-[12px] text-kumo-inactive">
+          :
+        </span>
         {/* Which fields the footer's count is counting: Save is the row's
             own accent, and this is what it is about to write. */}
-        {unsaved && <span className="size-1.5 shrink-0 rounded-full bg-kumo-brand" />}
+        {unsaved && (
+          <span className="flex h-7 shrink-0 items-center">
+            <span className="size-1.5 rounded-full bg-kumo-brand" />
+          </span>
+        )}
         {value}
         {/* Every control that is not the value, in one strip drawn over the
             end of the line. It overlays rather than reserves: keeping its
@@ -750,6 +758,13 @@ function Nested({ children }: { children: ReactNode }) {
 }
 
 /**
+ * A value that can be any length wraps rather than running off the end of
+ * its line: a console is for reading a document before it is for editing
+ * one, and a value cut short at the panel's edge is a value the panel
+ * failed to show — a URL loses its path, which is the half that says
+ * anything. An `input` cannot wrap at all, so these are `textarea`s that
+ * hold one line most of the time.
+ *
  * A value is read far more often than it is changed, so at rest it is
  * text, and it takes an outline on focus alone. Filled boxes stacked down a
  * 420 px column are what made a document of a dozen short strings read as a
@@ -774,7 +789,7 @@ function Value({
   }[state]
   return (
     <div
-      className={`flex h-7 min-w-0 items-center rounded-md px-1.5 font-mono text-[12px] text-kumo-default ${chrome} ${className}`}
+      className={`min-h-7 min-w-0 rounded-md px-1.5 py-[3.25px] font-mono text-[12px] leading-[18px] whitespace-pre-wrap text-kumo-default [overflow-wrap:break-word] ${chrome} ${className}`}
     >
       {children}
     </div>
@@ -784,7 +799,7 @@ function Value({
 /** What a map or an array says on its own line, open or shut. */
 function Summary({ children }: { children: ReactNode }) {
   return (
-    <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-subtle">
+    <span className="flex h-7 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
       {children}
     </span>
   )
@@ -832,6 +847,13 @@ function Inspector() {
             />
             <div className="grid gap-0.5">
               <FieldRow name="status" type="string" value={<Value>paid</Value>} />
+              {/* Two lines because it needs two, and the name stays on the
+                  first of them rather than floating between both. */}
+              <FieldRow
+                name="redirectUri"
+                type="string"
+                value={<Value>example-dev://app/gateway/callback?state=U3kVZ4r1ADid</Value>}
+              />
               <FieldRow
                 name="total"
                 type="number"

@@ -41,7 +41,7 @@ import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './val
  * is already the one thing in the panel that starts right of the panel's
  * own content column, and every pixel here widens that step.
  */
-export const GUTTER = 'flex size-4 shrink-0 items-center justify-center'
+export const GUTTER = 'flex h-7 w-4 shrink-0 items-center justify-center'
 
 export function FieldRows({
   nodes,
@@ -148,7 +148,7 @@ function FieldRow({
       {/* The ground is the line's, not each control's. Hovering a row is how
           you see which field you are on — the thing a column of twenty
           one-line rows has to answer and a column of blocks never had to. */}
-      <div className="group/line relative flex min-h-7 items-center gap-1 rounded-md pr-1 pl-0.5 hover:bg-kumo-tint focus-within:bg-kumo-tint">
+      <div className="group/line relative flex items-start gap-1 rounded-md pr-1 pl-0.5 hover:bg-kumo-tint focus-within:bg-kumo-tint">
         <span className={GUTTER}>
           {container && (
             <button
@@ -165,26 +165,30 @@ function FieldRow({
         {named ? (
           <NameInput node={node} onChange={onChange} invalid={problem?.name !== undefined} />
         ) : (
-          <span className="min-w-4 shrink-0 text-right font-mono text-[12px] text-kumo-subtle tabular-nums">
+          <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
             {index}
           </span>
         )}
-        <span className="-ml-1.5 shrink-0 font-mono text-[12px] text-kumo-inactive">:</span>
+        <span className="-ml-1.5 flex h-7 shrink-0 items-center font-mono text-[12px] text-kumo-inactive">
+          :
+        </span>
         {/* Which fields the footer's count is counting. Save is the row's
             own accent, and this is what it is about to write. */}
         {unsaved && (
-          <span
-            className="size-1.5 shrink-0 rounded-full bg-kumo-brand"
-            title="Unsaved"
-            data-testid="unsaved-mark"
-          />
+          <span className="flex h-7 shrink-0 items-center">
+            <span
+              className="size-1.5 rounded-full bg-kumo-brand"
+              title="Unsaved"
+              data-testid="unsaved-mark"
+            />
+          </span>
         )}
         {container ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-subtle">
+          <span className="flex h-7 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
             {raw ? 'json' : summary(node)}
           </span>
         ) : region ? (
-          <span className="min-w-0 flex-1" />
+          <span className="h-7 min-w-0 flex-1" />
         ) : (
           <ValueEditor
             node={node}
@@ -382,7 +386,7 @@ function NameInput({
       // `field-sizing: content` is floored by the `size` attribute, whose
       // default is twenty characters.
       size={1}
-      className={`h-6 w-auto max-w-40 min-w-10 shrink-0 rounded bg-transparent px-1.5 font-mono text-[12px] font-medium text-kumo-default outline-none field-sizing-content placeholder:font-sans placeholder:font-normal placeholder:text-kumo-inactive focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
+      className={`h-7 w-auto max-w-40 min-w-10 shrink-0 rounded bg-transparent px-1.5 font-mono text-[12px] font-medium text-kumo-default outline-none field-sizing-content placeholder:font-sans placeholder:font-normal placeholder:text-kumo-inactive focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
         invalid ? 'ring ring-kumo-danger' : ''
       }`}
       aria-label={node.name ? `${node.name} name` : 'Field name'}

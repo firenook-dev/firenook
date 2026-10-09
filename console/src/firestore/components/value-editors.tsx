@@ -13,7 +13,7 @@ import {
   CalendarBlankIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { type DraftNode, numberForm } from '../draft'
 import { collectionsQuery, documentIdsQuery } from '../queries'
 import { relativeTime } from '../value'
@@ -52,6 +52,59 @@ export function valueInputClass(invalid: boolean): string {
       ? 'bg-kumo-control ring ring-kumo-danger'
       : 'bg-transparent focus:bg-kumo-control focus:ring focus:ring-kumo-focus'
   }`
+}
+
+/**
+ * The metrics a growing field and the mirror sizing it must agree on, down
+ * to the pixel, or the box is the wrong height for its text. One line of
+ * it is 24.5 px, the height every other editor on the line already is.
+ */
+// `break-word`, not `anywhere`: the two wrap a long token identically, but
+// `anywhere` counts those break opportunities towards the min-content
+// width, which collapses a content-sized field to a single character.
+const WRAP_BOX =
+  'min-w-0 px-1.5 py-[3.25px] font-mono text-[12px] leading-[18px] whitespace-pre-wrap [overflow-wrap:break-word]'
+
+/**
+ * A value that can be any length wraps rather than running off the end of
+ * its line. A console is for reading a document before it is for editing
+ * one, and a value cut short at the panel's edge is a value the panel
+ * failed to show — a URL loses its path, which is the half that says
+ * anything. An `input` cannot wrap at all, which is why this is a
+ * `textarea` that happens to hold one line most of the time.
+ */
+export function wrapClass(invalid: boolean): string {
+  return `${WRAP_BOX} col-start-1 row-start-1 resize-none overflow-hidden rounded-md text-kumo-default outline-none ${
+    invalid
+      ? 'bg-kumo-control ring ring-kumo-danger'
+      : 'bg-transparent focus:bg-kumo-control focus:ring focus:ring-kumo-focus'
+  }`
+}
+
+/**
+ * A field that grows with what is in it, in every browser. An invisible
+ * copy of the text sets the height of the grid cell and the field lies on
+ * top of it. `field-sizing: content` says this in one word but not
+ * everywhere yet, and a value cut short in Firefox is still cut short.
+ */
+export function Grows({
+  text,
+  fit,
+  children,
+}: {
+  text: string
+  /** Content-wide until it has to wrap, for a value with a word after it. */
+  fit?: boolean | undefined
+  children: ReactNode
+}) {
+  return (
+    <div className={`grid min-w-0 ${fit === true ? 'w-fit max-w-full min-w-24' : 'flex-1'}`}>
+      <span className={`${WRAP_BOX} invisible col-start-1 row-start-1`} aria-hidden="true">
+        {`${text} `}
+      </span>
+      {children}
+    </div>
+  )
 }
 
 /**
@@ -123,10 +176,10 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
   // A string with a newline in it cannot be shown on a line without losing
   // the newline, so that one opens as a box whatever the setting says.
   const box = valueIsRegion(node)
-  const ref = useFocusTarget<HTMLInputElement>(node.id)
+  const line = useFocusTarget<HTMLTextAreaElement>(node.id)
   const area = useFocusTarget<HTMLTextAreaElement>(node.id)
   return (
-    <div className={`flex min-w-0 flex-1 gap-1 ${box ? 'items-start' : 'items-center'}`}>
+    <div className="flex min-w-0 flex-1 items-start gap-1">
       {box ? (
         <textarea
           ref={area}
@@ -138,16 +191,25 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
           aria-label={`${label} value`}
         />
       ) : (
-        <input
-          ref={ref}
-          value={node.text}
-          onChange={(event) => onChange({ ...node, text: event.target.value })}
-          onKeyDown={onEnterNext(next)}
-          spellCheck={false}
-          placeholder={'""'}
-          className={`${valueInputClass(invalid)} w-full min-w-0 placeholder:text-kumo-inactive`}
-          aria-label={`${label} value`}
-        />
+        <Grows text={node.text}>
+          <textarea
+            ref={line}
+            rows={1}
+            value={node.text}
+            onChange={(event) => onChange({ ...node, text: event.target.value })}
+            // Enter still means "done with this one"; a newline — which
+            // turns the value into a region below the line — is Shift.
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey) return
+              event.preventDefault()
+              next()
+            }}
+            spellCheck={false}
+            placeholder={'""'}
+            className={`${wrapClass(invalid)} placeholder:text-kumo-inactive`}
+            aria-label={`${label} value`}
+          />
+        </Grows>
       )}
     </div>
   )
@@ -347,7 +409,7 @@ function localInput(date: Date): string {
 function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
   const workbench = useWorkbench()
   const { next } = useFieldEditing()
-  const ref = useFocusTarget<HTMLInputElement>(node.id)
+  const ref = useFocusTarget<HTMLTextAreaElement>(node.id)
   const [open, setOpen] = useState(false)
 
   const path = node.text.replace(/^\/+/, '')
@@ -379,33 +441,38 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
 
   return (
     <div className="min-w-0 flex-1">
-      <div className="flex items-center gap-1">
-        <input
-          ref={ref}
-          value={node.text}
-          onChange={(event) => onChange({ ...node, text: event.target.value })}
-          onFocus={() => setOpen(true)}
-          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-          onKeyDown={(event) => {
-            const first = matches[0]
-            if (event.key === 'Tab' && first) {
-              event.preventDefault()
-              take(first)
-            } else if (event.key === 'Enter') {
-              event.preventDefault()
-              next()
-            } else if (event.key === 'Escape') setOpen(false)
-          }}
-          spellCheck={false}
-          autoComplete="off"
-          placeholder="users/u_9f3k2"
-          size={1}
-          className={`${valueInputClass(invalid)} ${SIZED} min-w-24 placeholder:font-sans placeholder:text-kumo-inactive`}
-          aria-label={`${label} value`}
-        />
+      <div className="flex items-start gap-1">
+        <Grows text={node.text} fit>
+          <textarea
+            ref={ref}
+            rows={1}
+            value={node.text}
+            onChange={(event) => onChange({ ...node, text: event.target.value })}
+            onFocus={() => setOpen(true)}
+            onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+            onKeyDown={(event) => {
+              const first = matches[0]
+              if (event.key === 'Tab' && first) {
+                event.preventDefault()
+                take(first)
+              } else if (event.key === 'Enter') {
+                // A path has no newline in it, whatever is pressed.
+                event.preventDefault()
+                next()
+              } else if (event.key === 'Escape') setOpen(false)
+            }}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="users/u_9f3k2"
+            className={`${wrapClass(invalid)} placeholder:font-sans placeholder:text-kumo-inactive`}
+            aria-label={`${label} value`}
+          />
+        </Grows>
         {/* A path is the one value that reads exactly like a string, so
             this type keeps a word the way a double does. */}
-        {node.text.trim() !== '' && <span className={`shrink-0 ${NOTE}`}>ref</span>}
+        {node.text.trim() !== '' && (
+          <span className={`flex h-7 shrink-0 items-center ${NOTE}`}>ref</span>
+        )}
       </div>
       {open && matches.length > 0 && (
         <Completions anchor={ref} testId="reference-completions">
@@ -488,26 +555,35 @@ function GeopointEditor({ node, onChange, label, invalid }: EditorProps) {
 
 function BytesEditor({ node, onChange, label, invalid }: EditorProps) {
   const { next } = useFieldEditing()
-  const ref = useFocusTarget<HTMLInputElement>(node.id)
+  const ref = useFocusTarget<HTMLTextAreaElement>(node.id)
   const text = node.text.trim()
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
-      <input
-        ref={ref}
-        value={node.text}
-        onChange={(event) => onChange({ ...node, text: event.target.value })}
-        onKeyDown={onEnterNext(next)}
-        spellCheck={false}
-        placeholder="base64"
-        size={1}
-        className={`${valueInputClass(invalid)} ${SIZED} min-w-24 placeholder:font-sans placeholder:text-kumo-inactive`}
-        aria-label={`${label} value`}
-      />
+    <div className="min-w-0 flex-1">
+      <Grows text={node.text}>
+        <textarea
+          ref={ref}
+          rows={1}
+          value={node.text}
+          onChange={(event) => onChange({ ...node, text: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            next()
+          }}
+          spellCheck={false}
+          placeholder="base64"
+          className={`${wrapClass(invalid)} placeholder:font-sans placeholder:text-kumo-inactive`}
+          aria-label={`${label} value`}
+        />
+      </Grows>
+      {/* A word goes beside a value — `double`, `ref`, `18 d ago`. This is
+          not a word but a note, and an unbounded one: the decoded text can
+          be forty characters, which is width the bytes themselves need. */}
       {text !== '' && !invalid && (
-        <span className={`shrink-0 ${NOTE}`}>
+        <div className={NOTE}>
           {byteLength(text)} bytes
           {readable(text) === undefined ? '' : ` · ${readable(text)}`}
-        </span>
+        </div>
       )}
     </div>
   )
