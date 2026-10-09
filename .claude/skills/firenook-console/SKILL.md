@@ -1159,6 +1159,49 @@ Note the JSON view therefore has **nothing on the right of its band**.
 That is correct rather than lopsided: it has no action of its own, so
 `Format` sits alone on the left where tools go.
 
+## How a value in the JSON view gets its type
+
+Three things, in this order, and the order is the safety property.
+
+1. **The rows.** `agrees` keeps a node whole when the text still projects
+   to the same JSON. This runs first, so reading can never retype a field
+   nobody touched — a string that happens to hold an ISO instant, left
+   alone, is still a string.
+2. **The characters** (`json-text.ts`). `JSON.parse` loses `3.0` vs `3`,
+   so the literal is read out of the source text. Not inference —
+   literacy, and the only way to author a `double` from this view.
+3. **The shapes** (`fromJson(value, INFER)`). `{latitude, longitude}` and
+   `{__type__: "__vector__", value}` are what `toJson` *writes*, so
+   reading them back inverts this module's own output. An ISO string
+   becoming a timestamp is the one real guess.
+
+Reachable from JSON: 9 of Firestore's 11 types. `reference` is not
+inferred — `"users/u1"` and `"images/logo.png"` are the same shape — and
+`bytes` cannot be, since base64 is indistinguishable from text. Both are
+set from the Fields tab's type menu.
+
+Traps met while building this, all of which shipped as bugs first:
+
+- **`writtenAsDouble` must only see number literals.** Run over every
+  span it matches the `e` in `"latitude"` and calls the map a double.
+- **`tidyJson` must put the point back.** Format and the paste-tidy both
+  go through `JSON.stringify`, which writes the double 3 as `3` — so
+  they silently destroyed the type before anything read it. The literals
+  written with a point are noted going in and spliced back coming out,
+  from the end forwards so earlier offsets hold.
+- **A whole double still cannot round-trip through text.** Regenerated
+  from rows it reads `269`, and only the row knows. That is what the
+  carried mark is for, and `json-marks.test.ts` pins the limit.
+- **`parseEditorText` deliberately does not infer.** A row declared
+  `map` whose text is `{"latitude":1,"longitude":2}` would become a
+  geopoint and fail its own type check.
+
+`json-marks.ts` marks both kinds and words them differently, because only
+one survives editing: *"Stays a timestamp…"* (the row holds it) versus
+*"Read as a timestamp…"* (the text says it). `inferredTypes` finds the
+second by parsing twice — with `INFER` and with nothing — and diffing, so
+there is no second copy of the rules to drift.
+
 ## The code editor (`src/components/code-editor/`)
 
 CodeMirror 6, MIT, behind a `lazy()`. Three files:

@@ -1959,6 +1959,60 @@ async function codeInk(editor: Locator): Promise<{
   })
 }
 
+test('the JSON view reads the types the text can tell it, and no more', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await put(page.request, 'teams/t_read', { seed: { stringValue: 'x' } })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_read&tab=json`)
+  const inspector = page.getByTestId('inspector')
+  const editor = inspector.getByTestId('document-json')
+  await expect(editor).toBeVisible()
+
+  await replaceJson(
+    page,
+    editor,
+    '{"whenISO":"2026-01-01T00:00:00.000Z","aDouble":3.0,"anInt":3,' +
+      '"here":{"latitude":1.5,"longitude":2.5},' +
+      '"vec":{"__type__":"__vector__","value":[0.1,0.2]},' +
+      '"plainMap":{"latitude":1,"longitude":2,"label":"home"},' +
+      '"notADate":"2026 was a year"}',
+  )
+
+  // The point survives being laid out. `JSON.stringify` writes the
+  // double 3 as `3`, so Format and the tidying of a pasted document
+  // both used to destroy the only evidence of the type before anything
+  // could read it, and `3.0` went in as an integer.
+  await expect(editor).toContainText('3.0')
+
+  // Four values are typed by something other than the plain reading,
+  // and each is marked on its own line.
+  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(4)
+
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+  const stored = await page.request.get(`${documents()}/teams/t_read`, { headers: owner })
+  const saved = (await stored.json()) as {
+    fields: Record<string, Record<string, { fields?: Record<string, unknown> }>>
+  }
+  const kind = (name: string) => Object.keys(saved.fields[name] ?? {})[0]
+
+  // Read, because the characters or the shape say so.
+  expect(kind('aDouble')).toBe('doubleValue')
+  expect(kind('here')).toBe('geoPointValue')
+  expect(kind('whenISO')).toBe('timestampValue')
+  // A vector is a map carrying Firestore's own marker, which is both
+  // how it is stored and how this console writes it down.
+  expect(Object.keys(saved.fields.vec?.mapValue?.fields ?? {})).toContain('__type__')
+
+  // And left alone, because nothing in the text says otherwise. A map
+  // with a third field is somebody's data, not a geopoint; a sentence
+  // with a year in it is not an instant; a bare 3 is an integer.
+  expect(kind('anInt')).toBe('integerValue')
+  expect(kind('plainMap')).toBe('mapValue')
+  expect(Object.keys(saved.fields.plainMap?.mapValue?.fields ?? {})).toHaveLength(3)
+  expect(kind('notADate')).toBe('stringValue')
+  await drop(page.request, 'teams/t_read')
+})
+
 test('the two views are one draft, and only Save writes', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
   await put(page.request, 'teams/t_views', {

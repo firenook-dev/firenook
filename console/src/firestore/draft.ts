@@ -10,9 +10,11 @@
 // back, saying what is wrong with it, and working out the single write that
 // saves it. The components hold a `DraftNode[]` and nothing else.
 
+import { SEP as SPAN_SEP, valueSpans, writtenAsDouble } from './json-text'
 import {
   type FirestoreValueType,
   type FsValue,
+  INFER,
   editorText,
   emptyValue,
   fieldsToJson,
@@ -378,20 +380,71 @@ export function nodesToJson(nodes: readonly DraftNode[]): Record<string, unknown
 }
 
 /**
- * JSON text → rows. A node whose value the JSON still agrees with is kept
- * whole, which is what carries the types JSON cannot write down — a
- * timestamp, a reference, a double that reads like an integer — through a
- * round trip. Fields the JSON does not mention are simply gone; the diff
- * clears them.
+ * JSON text → rows.
+ *
+ * Three things give a value a type here, in this order.
+ *
+ * The rows: a node whose value the JSON still agrees with is kept whole,
+ * which is what carries a timestamp, a reference, bytes and the rest
+ * through a round trip. This comes first, so reading can never change
+ * the type of a field nobody touched.
+ *
+ * The characters: `3.0` is a double and `3` is an integer, and
+ * `JSON.parse` has already lost the difference by the time it hands
+ * back a number — so the literal is read out of the source text, which
+ * is the only place the distinction still exists.
+ *
+ * The shapes: `{latitude, longitude}` and the vector marker are what
+ * `toJson` writes, so reading them back is the inverse of this module's
+ * own output rather than a guess about somebody else's data. An ISO
+ * string becoming a timestamp is the one real guess, and the editor
+ * marks every one of these on the line it happened on.
+ *
+ * Fields the JSON does not mention are simply gone; the diff clears them.
  */
 export function nodesFromJson(text: string, current: readonly DraftNode[]): DraftNode[] {
   const parsed: unknown = JSON.parse(text)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
     throw new Error('The document must be a JSON object')
-  const value = fromJson(parsed)
+  const value = fromJson(parsed, INFER)
   if (value.type !== 'map') throw new Error('The document must be a JSON object')
-  return mapEntries(value.fields, current)
+  return mapEntries(readDoubles(value, text).fields, current)
 }
+
+/**
+ * The numbers written with a point, marked as doubles.
+ *
+ * Firestore's `integer` and `double` are different types and `3` is how
+ * both are written, so without this there is no way at all to author a
+ * whole-reading double from the JSON view — `3.0` went in and
+ * `integerValue` came out.
+ */
+function readDoubles(value: FsMap, text: string): FsMap {
+  const spans = valueSpans(text)
+  const fix = (item: FsValue, path: readonly string[]): FsValue => {
+    if (item.type === 'number') {
+      if (!item.integer) return item
+      const span = spans.get(path.join(SPAN_SEP))
+      if (!span || !writtenAsDouble(text.slice(span.from, span.to))) return item
+      return { ...item, integer: false }
+    }
+    if (item.type === 'map') {
+      const fields: Record<string, FsValue> = {}
+      for (const [key, child] of Object.entries(item.fields))
+        fields[key] = fix(child, [...path, key])
+      return { type: 'map', fields }
+    }
+    if (item.type === 'array')
+      return {
+        type: 'array',
+        items: item.items.map((child, at) => fix(child, [...path, String(at)])),
+      }
+    return item
+  }
+  return fix(value, []) as FsMap
+}
+
+type FsMap = Extract<FsValue, { type: 'map' }>
 
 /** Named entries, keeping whichever rows the JSON still describes. */
 function mapEntries(fields: Record<string, FsValue>, current: readonly DraftNode[]): DraftNode[] {

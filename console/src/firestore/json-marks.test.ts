@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { nodesFrom, nodesToJson } from './draft'
-import { carriedTypes, typeMarks, valueSpans } from './json-marks'
+import { nodesFrom, nodesFromJson, nodesToJson, parseNode } from './draft'
+import { carriedTypes, inferredTypes, typeMarks } from './json-marks'
+import { SEP, tidyJson, valueSpans } from './json-text'
 import type { FsValue } from './value'
-
-const SEP = '\u0000'
 
 function document(fields: Record<string, FsValue>) {
   const nodes = nodesFrom(fields, true)
@@ -139,5 +138,157 @@ describe('typeMarks', () => {
     expect(marks).toHaveLength(1)
     expect(marks[0]?.severity).toBe('info')
     expect(marks[0]?.message).toContain('Stays a timestamp')
+  })
+})
+
+const read = (text: string) => Object.fromEntries(inferredTypes(text))
+
+/** The one field of a one-field document, parsed. */
+const only = (text: string) => {
+  const node = nodesFromJson(text, [])[0]!
+  const parsed = parseNode(node)
+  if (!parsed.ok) throw new Error(parsed.error)
+  return parsed.value
+}
+
+describe('inferredTypes', () => {
+  it('reads a whole number written with a point as a double', () => {
+    // The one `JSON.parse` destroys: 3.0 and 3 are the same number to
+    // it, and different types to Firestore.
+    expect(read('{"a": 3.0, "b": 3, "c": 1.5, "d": 3e2}')).toEqual({
+      a: 'a double',
+      c: 'a double',
+      d: 'a double',
+    })
+  })
+
+  it('reads back the shapes this console writes', () => {
+    expect(read('{"at": {"latitude": 1.5, "longitude": 2.5}}')).toEqual({ at: 'a geopoint' })
+    expect(read('{"v": {"__type__": "__vector__", "value": [0.1, 0.2]}}')).toEqual({
+      v: 'a vector',
+    })
+  })
+
+  it('leaves a map alone that merely carries a latitude', () => {
+    // Exactly two keys, both numbers, both in range. A map with a third
+    // field is somebody's data, not this module's output.
+    expect(read('{"m": {"latitude": 1, "longitude": 2, "label": "home"}}')).toEqual({})
+    expect(read('{"m": {"latitude": 1, "longitude": "2"}}')).toEqual({})
+    expect(read('{"m": {"latitude": 910, "longitude": 2}}')).toEqual({})
+  })
+
+  it('reads an ISO 8601 string as a timestamp, and nothing else as one', () => {
+    expect(read('{"when": "2026-09-20T09:00:00.000Z", "what": "2026 was a year"}')).toEqual({
+      when: 'a timestamp',
+    })
+  })
+
+  it('says nothing about text that is not a document yet', () => {
+    expect(read('{"a": ')).toEqual({})
+  })
+})
+
+describe('nodesFromJson, reading types out of the text', () => {
+  it('authors a double, which was unreachable from this view', () => {
+    expect(only('{"a": 3.0}')).toEqual({ type: 'number', value: 3, integer: false })
+    expect(only('{"a": 3}')).toEqual({ type: 'number', value: 3, integer: true })
+  })
+
+  it('authors a geopoint, a vector and a timestamp', () => {
+    expect(only('{"a": {"latitude": 1.5, "longitude": 2.5}}')).toEqual({
+      type: 'geopoint',
+      latitude: 1.5,
+      longitude: 2.5,
+    })
+    expect(only('{"a": {"__type__": "__vector__", "value": [0.1, 0.2]}}')).toEqual({
+      type: 'vector',
+      values: [0.1, 0.2],
+    })
+    expect(only('{"a": "2026-09-20T09:00:00.000Z"}')).toEqual({
+      type: 'timestamp',
+      value: '2026-09-20T09:00:00.000Z',
+    })
+  })
+
+  it('never retypes a field the rows already own', () => {
+    // The guarantee that makes reading safe: a string that happens to
+    // hold an instant, left alone, is still a string afterwards. The
+    // rows are consulted before the text is read.
+    const { nodes, text } = document({
+      when: { type: 'string', value: '2026-09-20T09:00:00.000Z' },
+    })
+    const after = nodesFromJson(text, nodes)
+    expect(after.map((node) => node.type)).toEqual(['string'])
+  })
+
+  it('round-trips three of the four through the text alone', () => {
+    const { text } = document({
+      when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' },
+      here: { type: 'geopoint', latitude: 1.5, longitude: 2.5 },
+      embedding: { type: 'vector', values: [0.1, 0.2] },
+    })
+    // Not through the rows — through the text alone, which is what
+    // pasting this document into an empty one would give.
+    expect(nodesFromJson(text, []).map((node) => node.type)).toEqual([
+      'timestamp',
+      'geopoint',
+      'vector',
+    ])
+  })
+
+  it('cannot round-trip a whole double through the text, and the mark says so', () => {
+    // `JSON.stringify` writes the double 269 as `269`, because to
+    // JavaScript it is the same number — so a double can be *authored*
+    // by typing `269.0`, but once the text is regenerated from the rows
+    // the point is gone and only the row still knows. That is exactly
+    // what the carried mark is for, and it is on this value.
+    const { nodes, text } = document({ total: { type: 'number', value: 269, integer: false } })
+    expect(text).toContain('269')
+    expect(text).not.toContain('269.0')
+    expect(nodesFromJson(text, [])[0]).toMatchObject({ type: 'number' })
+    expect(parseNode(nodesFromJson(text, [])[0]!)).toMatchObject({ value: { integer: true } })
+    // Through the rows, which is the path the editor actually takes, it
+    // survives — and is marked as being carried rather than read.
+    expect(parseNode(nodesFromJson(text, nodes)[0]!)).toMatchObject({ value: { integer: false } })
+    expect(typeMarks(text, nodes)[0]?.message).toContain('Stays a double')
+  })
+})
+
+describe('typeMarks tells carrying from reading', () => {
+  it('says the row is holding it when the row is', () => {
+    const { nodes, text } = document({
+      when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' },
+    })
+    expect(typeMarks(text, nodes)[0]?.message).toContain('Stays a timestamp')
+  })
+
+  it('says the text is saying it when nothing else is', () => {
+    const text = '{"when": "2026-09-20T09:00:00.000Z"}'
+    const marks = typeMarks(text, [])
+    expect(marks).toHaveLength(1)
+    expect(marks[0]?.message).toContain('Read as a timestamp')
+  })
+})
+
+describe('tidyJson', () => {
+  it('lays the document out', () => {
+    expect(tidyJson('{"a":1,"b":[2]}')).toBe('{\n  "a": 1,\n  "b": [\n    2\n  ]\n}')
+  })
+
+  it('keeps a double that reads whole, which stringify would flatten', () => {
+    // Format and the tidying of a pasted document both run through
+    // here, and both used to turn `3.0` into `3` before anything could
+    // read the point — destroying the only evidence of the type.
+    expect(tidyJson('{"a":3.0,"b":3,"c":1.5}')).toBe('{\n  "a": 3.0,\n  "b": 3,\n  "c": 1.5\n}')
+  })
+
+  it('puts the point back at the right value when several move', () => {
+    expect(tidyJson('{"a":1.0,"b":"x","c":[2.0,3],"d":4.0}')).toBe(
+      '{\n  "a": 1.0,\n  "b": "x",\n  "c": [\n    2.0,\n    3\n  ],\n  "d": 4.0\n}',
+    )
+  })
+
+  it('says nothing about text that is not a document', () => {
+    expect(tidyJson('{"a":')).toBeUndefined()
   })
 })

@@ -240,7 +240,11 @@ export function toJson(value: FsValue): unknown {
     case 'bytes':
       return value.base64
     case 'vector':
-      return value.values
+      // Firestore's own marker, not a bare array of numbers. A bare
+      // array is unreadable on the way back — every array of numbers
+      // would qualify — so this is the one shape here that had no
+      // inverse at all.
+      return { __type__: VECTOR_MARKER, value: value.values }
     case 'null':
       return null
   }
@@ -392,8 +396,46 @@ export function parseEditorText(
 }
 
 export interface FromJsonOptions {
-  /** Promote ISO 8601 strings to timestamps, the way an import usually wants. */
+  /**
+   * Promote ISO 8601 strings to timestamps. The one genuine guess in
+   * here: a string that looks like an instant usually is one, but
+   * somebody storing a date *as text* means the text.
+   */
   timestamps?: boolean | undefined
+  /**
+   * Read back the shapes `toJson` writes — `{latitude, longitude}` as a
+   * geopoint, `{__type__: "__vector__", value: [...]}` as a vector.
+   *
+   * Not a guess in the same sense: these are this module's own output,
+   * and without this the round trip is lossy in one direction only.
+   * The geopoint shape is required to be exactly those two keys, both
+   * finite and in range, so a map that merely carries a latitude among
+   * other fields stays a map.
+   */
+  shapes?: boolean | undefined
+}
+
+/** Everything the text can be read as. What the JSON view parses with. */
+export const INFER: FromJsonOptions = { timestamps: true, shapes: true }
+
+const VECTOR_MARKER = '__vector__'
+
+function asGeopoint(input: Record<string, unknown>): FsValue | undefined {
+  const keys = Object.keys(input)
+  if (keys.length !== 2 || !keys.includes('latitude') || !keys.includes('longitude'))
+    return undefined
+  const { latitude, longitude } = input as { latitude: unknown; longitude: unknown }
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') return undefined
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return undefined
+  return { type: 'geopoint', latitude, longitude }
+}
+
+function asVector(input: Record<string, unknown>): FsValue | undefined {
+  if (input.__type__ !== VECTOR_MARKER) return undefined
+  const values = input.value
+  if (!Array.isArray(values) || !values.every((item) => typeof item === 'number')) return undefined
+  return { type: 'vector', values: values as number[] }
 }
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/
@@ -449,9 +491,13 @@ export function fromJson(input: unknown, options: FromJsonOptions = {}): FsValue
   if (Array.isArray(input))
     return { type: 'array', items: input.map((item) => fromJson(item, options)) }
   if (typeof input === 'object') {
+    const record = input as Record<string, unknown>
+    if (options.shapes) {
+      const shaped = asVector(record) ?? asGeopoint(record)
+      if (shaped) return shaped
+    }
     const fields: Record<string, FsValue> = {}
-    for (const [key, value] of Object.entries(input as Record<string, unknown>))
-      fields[key] = fromJson(value, options)
+    for (const [key, value] of Object.entries(record)) fields[key] = fromJson(value, options)
     return { type: 'map', fields }
   }
   return { type: 'string', value: String(input) }

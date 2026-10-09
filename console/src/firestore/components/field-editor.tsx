@@ -25,6 +25,7 @@ import { useCallback, useRef, useState } from 'react'
 import { CodeEditor } from '@/components/code-editor'
 import { TypeBadge } from '@/components/kit'
 import { type DraftNode, type NodeProblem, emptyNode, nodesFromJson, nodesToJson } from '../draft'
+import { tidyJson } from '../json-text'
 import { typeMarks } from '../json-marks'
 import { type FirestoreValueType, VALUE_TYPES } from '../value'
 import { Completion, Completions } from './completions'
@@ -32,15 +33,6 @@ import { type FieldEditing, FieldEditingProvider, type KnownField } from './fiel
 import { COLUMNS, FieldRows } from './field-row'
 
 const NO_FIELDS: KnownField[] = []
-
-/** The document laid out, or nothing if it is not a document yet. */
-function tidyJson(text: string): string | undefined {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return undefined
-  }
-}
 const NOTHING_CHANGED: ReadonlySet<string> = new Set()
 
 export function FieldsPanel({
