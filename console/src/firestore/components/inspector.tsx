@@ -121,7 +121,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       data-testid="inspector"
     >
       <WidthHandle />
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-1.5 pl-3">
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-3 pl-5">
         {/* Kumo's monospace variants are fixed at 13 px; the face is asked
             for here and the size comes from the scale. */}
         <InlineCopyText
@@ -236,7 +236,7 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
   const workbench = useWorkbench()
   const openCreate = useCreateDialog((state) => state.open)
   return (
-    <div className="shrink-0 border-t border-kumo-line px-3 py-2" data-testid="subcollections">
+    <div className="shrink-0 border-t border-kumo-line px-5 py-2" data-testid="subcollections">
       <div className="mb-1 flex items-center">
         {/* A section label in the panel's chrome, the size of the tab row
             above it rather than of the prose below. */}
@@ -363,7 +363,7 @@ function DocumentEditor({
         onOpenReference={(path) => workbench.selectDocument(path)}
       />
       {subcollections}
-      <footer className="flex h-12 shrink-0 items-center gap-2 border-t border-kumo-line px-3">
+      <footer className="flex h-12 shrink-0 items-center gap-2 border-t border-kumo-line px-5">
         <Button
           variant="primary"
           size="sm"

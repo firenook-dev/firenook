@@ -1509,6 +1509,29 @@ test('every value wears a box, and the controls still arrive under the pointer',
   expect(Math.abs(ground.left - save.left)).toBeLessThan(2)
   expect(Math.abs(value.right - destroy.right)).toBeLessThan(2)
 
+  // The caret hangs in that margin; it does not stand in a column of its
+  // own. It had one, given to every row whether or not it held a caret,
+  // because giving it only to maps pushed a map's name past its own
+  // siblings. A column costs every row to serve the few: a document of
+  // fourteen fields with one map in it paid 18 px of nothing thirteen
+  // times, and its names sat 31 px in while every other label in the
+  // drawer sat on 12. Out of the flow it cannot push anything, so a name
+  // is a name whether or not the field opens.
+  const plain = await inset(inspector.getByLabel('displayName name'))
+  const holder = await inset(inspector.getByLabel('settings name'))
+  expect(Math.abs(plain.left - save.left)).toBeLessThan(2)
+  expect(Math.abs(holder.left - plain.left)).toBeLessThan(1)
+
+  // And hanging is not the same as gone: it has to be inside the panel
+  // and drawn there, which is what a left offset alone cannot tell apart
+  // from a caret clipped off the edge by the scroller.
+  // `address` and not `settings`: the paint test reads the document at a
+  // point, so it answers "nothing here" for a row below the fold just as
+  // it does for one that is clipped.
+  const caret = inspector.getByLabel('Collapse address')
+  expect((await inset(caret)).left).toBeGreaterThan(1)
+  expect(await paintedAtItsOwnCentre(caret)).toBe(true)
+
   // The controls that are not the value keep their place in the row and
   // are drawn when the row is pointed at, delete loudest among them.
   const remove = inspector.getByLabel('Remove displayName')

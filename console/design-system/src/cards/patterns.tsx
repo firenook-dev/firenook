@@ -699,7 +699,6 @@ function FieldRow({
   if (removed)
     return (
       <div className="col-span-2 flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70">
-        <span className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate font-mono text-[12px] line-through">{name}</span>
         <span className="shrink-0 text-[11px] text-kumo-subtle">Removed on save</span>
         <Button variant="ghost" size="xs" icon={<ArrowCounterClockwiseIcon />}>
@@ -714,14 +713,25 @@ function FieldRow({
           of twenty one-line rows has to answer and a column of blocks
           never had to. */}
       <div
-        className={`relative col-span-2 grid grid-cols-subgrid items-start rounded-md ${
-          pointed ? 'bg-kumo-tint' : ''
-        }`}
+        className={`relative col-span-2 grid grid-cols-subgrid items-start ${
+          children ? 'rounded-r-md' : 'rounded-md'
+        } ${pointed ? 'bg-kumo-tint' : ''}`}
       >
-        <div className="flex items-start gap-1 pl-0.5">
-          <span className="flex h-8 w-4 shrink-0 items-center justify-center text-kumo-subtle">
-            {children ? <CaretDownIcon size={12} /> : null}
-          </span>
+        <div className="flex items-start gap-1">
+          {/* The caret hangs in the panel's margin rather than standing in
+              a column of its own. A column costs every row to serve the
+              few: one map in a document of fourteen fields meant 18 px of
+              nothing thirteen times. Out of the flow it cannot push a
+              name, so siblings stay aligned for free. */}
+          {children ? (
+            <span
+              className={`absolute top-0 -left-4 flex h-8 w-4 items-center justify-center rounded-l-md text-kumo-subtle ${
+                pointed ? 'bg-kumo-tint' : ''
+              }`}
+            >
+              <CaretDownIcon size={12} />
+            </span>
+          ) : null}
           {index === undefined ? (
             <span className="flex h-8 shrink-0 items-center rounded px-1.5 text-[13px] font-medium">
               {name}
@@ -779,7 +789,7 @@ function Nested({ children }: { children: ReactNode }) {
   // document stays on one rail.
   return (
     <div
-      className={`col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5 ${BETWEEN}`}
+      className={`col-span-2 ml-1 grid grid-cols-subgrid border-l border-kumo-line pl-5 ${BETWEEN}`}
     >
       {children}
     </div>
@@ -983,10 +993,9 @@ function Inspector() {
                 should not need scrolling to the end to gain a forty-first,
                 and the name completes from what the rest of the collection
                 calls its fields, bringing that field's usual type with it. */}
-            {/* A field row without a caret: the name being typed belongs
-                in the column the names above it are in. */}
+            {/* The name being typed belongs in the column the names above
+                it are in, which is the drawer's own column now. */}
             <div className="flex items-center gap-1 border-t border-kumo-line pt-3">
-              <span className="size-4 shrink-0" />
               <Value className="text-kumo-inactive">New field name</Value>
               <TypeChip type="string" menu />
               <Button variant="ghost" size="sm" icon={<PlusIcon />}>

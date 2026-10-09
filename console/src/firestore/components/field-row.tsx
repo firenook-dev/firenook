@@ -41,7 +41,23 @@ import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './val
  * is already the one thing in the panel that starts right of the panel's
  * own content column, and every pixel here widens that step.
  */
-export const GUTTER = 'flex h-8 w-4 shrink-0 items-center justify-center'
+/**
+ * The caret hangs in the margin; it does not stand in a column of its own.
+ *
+ * It had one, given to every row whether or not it held a caret, because
+ * giving it only to maps pushed a map's name past its own siblings — the
+ * bug where `projects` drew six pixels left of the `limits` containing it.
+ * But a column costs every row to serve the few: a document of fourteen
+ * fields with one map in it paid eighteen pixels of nothing, thirteen
+ * times, and the names sat thirty-one pixels in while every other label in
+ * the drawer sat on twelve.
+ *
+ * Out of the flow it cannot push anything, so siblings stay aligned for
+ * free and the names join the drawer's own column. What is left to the
+ * left of a name is the margin the panel already had.
+ */
+const CARET =
+  'absolute top-0 -left-4 flex h-8 w-4 items-center justify-center rounded-l-md text-kumo-subtle group-hover/line:bg-kumo-tint group-focus-within/line:bg-kumo-tint hover:text-kumo-default'
 
 /** What a container shows where a value would be. */
 const SUMMARY =
@@ -168,11 +184,10 @@ function FieldRow({
   if (node.removed === true)
     return (
       <div
-        className="col-span-2 flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70"
+        className="col-span-2 flex items-center gap-1 rounded-md py-0.5 pr-1 opacity-70"
         data-testid="field-row"
         data-removed=""
       >
-        <span className={GUTTER} />
         <span className="min-w-0 flex-1 truncate font-mono text-[12px] line-through">
           {node.name}
         </span>
@@ -197,21 +212,23 @@ function FieldRow({
       {/* The ground is the line's, not each control's. Hovering a row is how
           you see which field you are on — the thing a column of twenty
           one-line rows has to answer and a column of blocks never had to. */}
-      <div className="group/line relative col-span-2 grid grid-cols-subgrid items-start rounded-md hover:bg-kumo-tint focus-within:bg-kumo-tint">
-        <div className="flex items-start gap-1 pl-0.5">
-          <span className={GUTTER}>
-            {container && (
-              <button
-                type="button"
-                className="flex size-4 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-base"
-                onClick={() => setOpen(!open)}
-                aria-expanded={open}
-                aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}
-              >
-                {open ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
-              </button>
-            )}
-          </span>
+      <div
+        className={`group/line relative col-span-2 grid grid-cols-subgrid items-start hover:bg-kumo-tint focus-within:bg-kumo-tint ${
+          container ? 'rounded-r-md' : 'rounded-md'
+        }`}
+      >
+        <div className="flex items-start gap-1">
+          {container && (
+            <button
+              type="button"
+              className={CARET}
+              onClick={() => setOpen(!open)}
+              aria-expanded={open}
+              aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}
+            >
+              {open ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
+            </button>
+          )}
           {named ? (
             <NameInput node={node} onChange={onChange} invalid={problem?.name !== undefined} />
           ) : (
@@ -414,8 +431,9 @@ function FieldRow({
         <span className="col-span-2 block pl-6 text-[12px] text-kumo-danger">{problem.name}</span>
       )}
       {container && !raw && open && node.children.length > 0 && (
-        // The step is the gutter's own width, so a child's name lands one
-        // column right of its parent's — never, as it did, to the left.
+        // The step clears the caret that hangs off a child's name: 22 px
+        // of indent against a 14 px hang, with the guide line at 3.5 so it
+        // runs to the left of that caret rather than through it.
         //
         // `subgrid`, not a grid of its own: a nested list used to size a
         // name column to its own widest name, so a list of short names
@@ -427,7 +445,7 @@ function FieldRow({
         // the indent narrows this list's names and leaves every value in
         // the document on one rail.
         <div
-          className={`col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5 ${BETWEEN}`}
+          className={`col-span-2 ml-1 grid grid-cols-subgrid border-l border-kumo-line pl-5 ${BETWEEN}`}
         >
           <FieldRows
             nodes={node.children}

@@ -585,17 +585,40 @@ number shares its box with the word saying how it is stored, so it is
 legitimately narrower, and comparing one against a string fails for a
 reason that has nothing to do with the column.
 
+**The caret hangs in the margin; it does not stand in a column.** It had
+one — `GUTTER`, given to every row whether or not it held a caret, because
+giving it only to maps pushed a map's name past its own siblings (the bug
+where `projects` drew left of the `limits` containing it). But a column
+costs every row to serve the few: a real document of fourteen fields with
+one map in it paid **18 px of nothing, thirteen times**, and its names sat
+31 px in while every other label in the drawer sat on 12. A user put it as
+"we literally leave a big empty left space for all fields".
+
+`CARET` is `absolute -left-4` against the line, which is the positioned
+ancestor. Out of the flow it cannot push anything, so **siblings stay
+aligned for free** — the thing the column was there to buy — and a name is
+a name whether or not the field opens. Three consequences:
+
+- The panel's left padding has to **hold** the hang: `pl-5` on the list
+  (17.5 px) against a 14 px caret leaves the glyph about 5 px inside the
+  edge. Hang it further than the padding and it is simply clipped away,
+  which a left-offset assertion cannot tell from a caret that is there —
+  so the guard also asks `paintedAtItsOwnCentre`.
+- The **nesting step** has to clear it too: `ml-1 … pl-5` is 22 px, so a
+  child's caret lands 8 px in and the guide line stays at 3.5 px, to the
+  left of that caret rather than running through it.
+- The caret takes the line's hover ground (`group-hover/line:bg-kumo-tint`)
+  and the line drops its left rounding for a container, or the band stops
+  at the name and the caret sits outside the row it belongs to.
+
 **The drawer has one content column, and every section is in it.** The
-path, the tabs, Subcollections, Save and Delete all sit on 12 px left and
-11 px right. The field list did not: at `pl-0` a row's hover ground began
-**1 px** from the panel's edge and its values ended **19 px** from the
-other — the asymmetry a user saw as "the field is until the end". It is
-`pl-3 pr-2` now, the smaller `pr` because the value cell already spends
-`pr-1` of its own. A **name** sits further in than everything else by the
-width of the caret column it shares the row with, and that is the column
-doing its job rather than a mistake to correct — so the guard compares a
-row's **ground** with Save, and a value's right edge with Delete, never a
-name against a value.
+path, the tabs, the field names, the add-field line, Subcollections, Save
+and Delete all sit on **19 px** left and about 18 right (`px-5`, with the
+list at `pl-5 pr-4` because the value cell already spends `pr-1`). The
+field list did not: at `pl-0` a row's hover ground began 1 px from the
+panel's edge and its values ended 19 px from the other — the asymmetry a
+user saw as "the field is until the end". The guard compares a row's
+**ground** with Save and a value's right edge with Delete.
 
 Measuring a drawer's padding means measuring **every section, and the ink
 rather than the box**: a ghost icon button carries its own padding, so its
