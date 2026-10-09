@@ -712,6 +712,21 @@ knowing:
 - Anything the strip can cover must be a *word*, not a control. It covers
   the end of every value box, so a control placed there is unreachable:
   hovering to reach it is what raises the thing hiding it.
+- **The strip owns its buttons** (`StripButton`), and Kumo's does not fit
+  here for two measured reasons. Its `xs` square renders **12 px** — the
+  root font is 14 px, so every rem-based size comes out an eighth smaller
+  than the design system means — and three of those **2 px apart** read as
+  one smudge rather than as three controls. And it has no pressed state to
+  offer: `ghost` and `secondary` resolve to the *same white square* at this
+  size, so the JSON toggle looked identical whether the row was in JSON or
+  not, which is the one thing it exists to report. `className` does not
+  survive its `cn()` merge either, so the state cannot be added from
+  outside. One 21 px square, a 3.5 px gap, and `on` draws as the console's
+  own filled-and-ringed box, with `aria-pressed` set only where there is a
+  state to report. The type chip is the same height.
+- A regression proof that *appends* a Tailwind utility proves nothing:
+  `gap-0` after `gap-1` loses to whichever the stylesheet orders last.
+  Replace the class, do not add to it.
 
 The hover ground belongs to the **line**, not to each input. A column of
 twenty one-line rows has to answer "which field am I on", and grounding the

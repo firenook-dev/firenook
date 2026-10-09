@@ -14,6 +14,7 @@ import { collectionsQuery, documentIdsQuery } from '../queries'
 import { relativeTime } from '../value'
 import { Anchored, Completion, Completions } from './completions'
 import { useFieldEditing, useFocusTarget } from './field-context'
+import { StripButton } from './strip-button'
 import { useWorkbench } from './workbench-context'
 
 export interface EditorProps {
@@ -239,12 +240,10 @@ export function ValueControls({ node, onChange, label }: Omit<EditorProps, 'inva
         <Tooltip
           content={box ? 'One line' : 'More room'}
           render={
-            <Button
-              variant="ghost"
-              size="xs"
-              shape="square"
-              icon={box ? <ArrowsInSimpleIcon /> : <ArrowsOutSimpleIcon />}
-              aria-label={box ? `${label} on one line` : `${label} in a box`}
+            <StripButton
+              label={box ? `${label} on one line` : `${label} in a box`}
+              icon={box ? <ArrowsInSimpleIcon size={14} /> : <ArrowsOutSimpleIcon size={14} />}
+              on={box}
               onClick={() => onChange({ ...node, wide: !box })}
             />
           }
@@ -325,20 +324,18 @@ function NumberForm({
   onPick: () => void
 }) {
   return (
-    <button
-      type="button"
+    <StripButton
+      label={`${label} is ${integer ? 'an integer' : 'a double'}`}
       disabled={forced}
       onClick={onPick}
-      className="flex h-6 shrink-0 items-center rounded px-1 font-mono text-[11px] text-kumo-subtle outline-none hover:bg-kumo-tint hover:text-kumo-default focus-visible:ring focus-visible:ring-kumo-focus disabled:text-kumo-inactive disabled:hover:bg-transparent disabled:hover:text-kumo-inactive"
       title={
         forced
           ? 'A number with a fraction is always a double'
           : 'Firestore stores integers and doubles as different types'
       }
-      aria-label={`${label} is ${integer ? 'an integer' : 'a double'}`}
     >
       {integer ? 'integer' : 'double'}
-    </button>
+    </StripButton>
   )
 }
 
@@ -590,12 +587,9 @@ function OpenReference({ node, label }: Omit<EditorProps, 'invalid' | 'onChange'
     <Tooltip
       content="Open the referenced document"
       render={
-        <Button
-          variant="ghost"
-          size="xs"
-          shape="square"
-          icon={<ArrowSquareOutIcon />}
-          aria-label={`Open ${label}`}
+        <StripButton
+          label={`Open ${label}`}
+          icon={<ArrowSquareOutIcon size={14} />}
           onClick={() => onOpenReference(node.text)}
         />
       }

@@ -42,7 +42,7 @@ export interface KnownField {
  * value that wrapped to three it is still beside the first of them.
  */
 export const ACCESSORY =
-  'pointer-events-none absolute top-0.5 right-1 flex h-7 items-center gap-0.5 rounded-md bg-kumo-base px-1 opacity-0 shadow-sm ring ring-kumo-line group-hover/line:pointer-events-auto group-hover/line:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100'
+  'pointer-events-none absolute top-0.5 right-1 flex h-7 items-center gap-1 rounded-md bg-kumo-base px-1 opacity-0 shadow-sm ring ring-kumo-line group-hover/line:pointer-events-auto group-hover/line:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100'
 
 export interface FieldEditing {
   problems: Map<string, NodeProblem>

@@ -671,6 +671,10 @@ function DataGrid() {
  * subgrid inherits the gaps above it unless it says otherwise.
  */
 const BETWEEN = 'gap-y-3.5'
+
+/** One control of a row's strip: the same square for every one of them. */
+const STRIP_BUTTON =
+  'flex size-6 shrink-0 items-center justify-center rounded-md text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default'
 const WITHIN = 'gap-y-1'
 const COLUMNS = `grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 ${BETWEEN}`
 
@@ -753,20 +757,30 @@ function FieldRow({
         {/* Every control that is not the value, in one strip drawn over the
             end of the line. It overlays rather than reserves: keeping its
             place cost ninety-three of a line's four hundred and five
-            pixels, held open at rest for buttons not drawn at rest. */}
+            pixels, held open at rest for buttons not drawn at rest. It
+            floats — its own ground, a hairline, a shadow — because a strip
+            in the line's own tint cut a notch out of the box it covered.
+
+            The strip owns its buttons. Kumo's square button renders 12 px
+            at this root size and has no pressed state to offer, and three
+            12 px squares two pixels apart read as one smudge: so one
+            square, one gap, and `on` is something you can see. */}
         <span
-          className={`absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit pl-3 ${
+          className={`absolute top-0.5 right-1 flex h-7 items-center gap-1 rounded-md bg-kumo-base px-1 shadow-sm ring ring-kumo-line ${
             pointed ? '' : 'opacity-0'
           }`}
         >
           {type && <TypeChip type={type} menu />}
-          <Button
-            variant="ghost"
-            size="xs"
-            shape="square"
-            icon={<TrashIcon />}
-            aria-label={`Remove ${name ?? index}`}
-          />
+          <span className={STRIP_BUTTON}>
+            <BracketsCurlyIcon size={14} />
+          </span>
+          {/* The same control, while what it toggles is on. */}
+          <span className={`${STRIP_BUTTON} bg-kumo-control text-kumo-default ring ring-kumo-line`}>
+            <BracketsCurlyIcon size={14} />
+          </span>
+          <span className={`${STRIP_BUTTON} hover:text-kumo-danger`}>
+            <TrashIcon size={14} />
+          </span>
         </span>
       </div>
       {note && <span className="col-span-2 block text-[11px] text-kumo-subtle">{note}</span>}

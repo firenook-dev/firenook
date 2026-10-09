@@ -1532,6 +1532,30 @@ test('every value wears a box, and the controls still arrive under the pointer',
   expect((await inset(caret)).left).toBeGreaterThan(1)
   expect(await paintedAtItsOwnCentre(caret)).toBe(true)
 
+  // Every control in the strip is one square with room around it. Kumo's
+  // own square button renders 12 px here — the root font is 14 px, so
+  // every rem-based size comes out an eighth smaller than the design
+  // system means — and three of those two pixels apart read as one smudge
+  // rather than as three controls.
+  const row = inspector
+    .getByLabel('address name')
+    .locator('xpath=ancestor::*[@data-testid="field-row"][1]')
+  await row.locator('> div').first().hover()
+  const rhythm = await row
+    .locator('> div > span')
+    .last()
+    .evaluate((el) => {
+      const kids = [...el.children].map((kid) => kid.getBoundingClientRect())
+      return {
+        heights: kids.map((box) => Math.round(box.height)),
+        gaps: kids.slice(1).map((box, i) => Math.round(box.x - (kids[i]!.x + kids[i]!.width))),
+      }
+    })
+  expect(rhythm.heights.length).toBeGreaterThan(2)
+  expect(new Set(rhythm.heights).size).toBe(1)
+  expect(Math.min(...rhythm.heights)).toBeGreaterThanOrEqual(20)
+  expect(Math.min(...rhythm.gaps)).toBeGreaterThanOrEqual(3)
+
   // The controls that are not the value keep their place in the row and
   // are drawn when the row is pointed at, delete loudest among them.
   const remove = inspector.getByLabel('Remove displayName')
@@ -1766,7 +1790,16 @@ test('a map and its JSON are the same subtree, written two ways', async ({ page 
   // button only flipped a flag, so the JSON view read something the rows
   // had never written: `{}` for a map with fields in it, marked changed,
   // and that empty map is what the next Save would have stored.
-  await press(inspector.getByLabel('Edit redirectUri as JSON'))
+  const toggle = inspector.getByLabel('Edit redirectUri as JSON')
+  const look = () =>
+    toggle.evaluate((el) => {
+      const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+      return `${style.backgroundColor} ${style.boxShadow}`
+    })
+  await toggle.locator('xpath=ancestor::*[@data-testid="field-row"][1]/*[1]').hover()
+  const resting = await look()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await press(toggle)
   const shown = inspector.getByLabel('redirectUri value')
   expect(JSON.parse(await shown.inputValue())).toEqual({
     app: { scheme: 'example-dev' },
@@ -1776,6 +1809,14 @@ test('a map and its JSON are the same subtree, written two ways', async ({ page 
   // And looking is not editing: the two views stand for one value, so
   // opening this one leaves the document with nothing to save.
   await expect(inspector.getByTestId('save-pending')).toHaveCount(0)
+
+  // The control says it is on. `ghost` and `secondary` resolved to the
+  // same white square at this size, so the toggle looked identical
+  // whether the row was in JSON or not — the one thing it is there to
+  // report. It is pressed now, and drawn as something pressed.
+  await toggle.locator('xpath=ancestor::*[@data-testid="field-row"][1]/*[1]').hover()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  expect(await look()).not.toBe(resting)
 
   // What is typed becomes rows again, and the type JSON cannot write down
   // survives because the row the JSON still describes is the row kept.

@@ -28,6 +28,7 @@ import { TypeBadge } from '@/components/kit'
 import { type DraftNode, emptyNode, retype, toggleRaw } from '../draft'
 import { type FirestoreValueType, VALUE_TYPES } from '../value'
 import { ACCESSORY, useFieldEditing, useFocusTarget } from './field-context'
+import { StripButton } from './strip-button'
 import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './value-editors'
 
 /**
@@ -194,7 +195,7 @@ function FieldRow({
         <span className="shrink-0 text-[11px] text-kumo-subtle">Removed on save</span>
         <Button
           variant="ghost"
-          size="xs"
+          size="sm"
           icon={<ArrowCounterClockwiseIcon />}
           onClick={() => onChange({ ...node, removed: false })}
           aria-label={`Keep ${node.name}`}
@@ -288,20 +289,14 @@ function FieldRow({
         <span className={ACCESSORY}>
           {!named && (
             <>
-              <Button
-                variant="ghost"
-                size="xs"
-                shape="square"
-                icon={<ArrowUpIcon />}
-                aria-label={`Move ${index} up`}
+              <StripButton
+                label={`Move ${index} up`}
+                icon={<ArrowUpIcon size={14} />}
                 onClick={() => onMove(-1)}
               />
-              <Button
-                variant="ghost"
-                size="xs"
-                shape="square"
-                icon={<ArrowDownIcon />}
-                aria-label={`Move ${index} down`}
+              <StripButton
+                label={`Move ${index} down`}
+                icon={<ArrowDownIcon size={14} />}
                 onClick={() => onMove(1)}
               />
             </>
@@ -316,7 +311,7 @@ function FieldRow({
               render={
                 <button
                   type="button"
-                  className="group flex h-5 items-center rounded px-0.5 hover:bg-kumo-base"
+                  className="group flex h-6 shrink-0 items-center rounded-md px-1 outline-none hover:bg-kumo-tint focus-visible:ring focus-visible:ring-kumo-focus"
                   aria-label={`${label} type: ${node.type}`}
                 >
                   <TypeBadge type={node.type} menu />
@@ -341,12 +336,9 @@ function FieldRow({
               <Tooltip
                 content={node.type === 'map' ? 'Add an entry' : 'Add an item'}
                 render={
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    shape="square"
-                    icon={<PlusIcon />}
-                    aria-label={`Add to ${label}`}
+                  <StripButton
+                    label={`Add to ${label}`}
+                    icon={<PlusIcon size={14} />}
                     onClick={addChild}
                   />
                 }
@@ -366,12 +358,10 @@ function FieldRow({
                     : 'Edit as JSON'
                 }
                 render={
-                  <Button
-                    variant={raw ? 'secondary' : 'ghost'}
-                    size="xs"
-                    shape="square"
-                    icon={<BracketsCurlyIcon />}
-                    aria-label={`Edit ${label} as JSON`}
+                  <StripButton
+                    label={`Edit ${label} as JSON`}
+                    icon={<BracketsCurlyIcon size={14} />}
+                    on={raw}
                     disabled={broken}
                     onClick={() => onChange(toggleRaw(node))}
                   />
@@ -382,12 +372,10 @@ function FieldRow({
           <Tooltip
             content={soft ? 'Remove this field' : 'Remove'}
             render={
-              <Button
-                variant="ghost"
-                size="xs"
-                shape="square"
-                icon={<TrashIcon />}
-                aria-label={`Remove ${label}`}
+              <StripButton
+                label={`Remove ${label}`}
+                icon={<TrashIcon size={14} />}
+                tone="danger"
                 onClick={() => (soft ? onChange({ ...node, removed: true }) : onRemove())}
               />
             }
