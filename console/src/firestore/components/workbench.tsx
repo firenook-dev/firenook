@@ -9,6 +9,7 @@ import { ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
+import { LiveDot } from '@/components/kit'
 import { Page } from '@/components/shell/page'
 import { useCreateDialog } from '../create'
 import { useExportDialog } from '../export'
@@ -17,7 +18,6 @@ import { useFirestorePalette } from '../palette'
 import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
-import { ChangesPopover } from './changes-popover'
 import { CreateDialog } from './create-dialog'
 import { DeleteDialog } from './delete-dialog'
 import { ExplainPanel } from './explain-panel'
@@ -61,7 +61,6 @@ function WorkbenchBody() {
   useLiveChanges(queryClient, workbench.database)
   useFirestorePalette()
   const live = useLive((state) => state.status)
-  const commits = useLive((state) => state.commits)
   const checked = useSelection((state) => state.checked)
   const clearSelection = useSelection((state) => state.clear)
   const openQuery = useQueryLine((state) => state.setOpen)
@@ -141,7 +140,6 @@ function WorkbenchBody() {
         <WorkbenchData
           checked={checked}
           live={live}
-          commits={commits}
           onDelete={setDeleting}
           explain={explain}
           setExplain={setExplain}
@@ -164,14 +162,12 @@ function Divider() {
 function WorkbenchData({
   checked,
   live,
-  commits,
   onDelete,
   explain,
   setExplain,
 }: {
   checked: ReadonlySet<string>
   live: string
-  commits: number
   onDelete: (paths: string[]) => void
   explain: boolean
   setExplain: (explain: boolean) => void
@@ -185,10 +181,18 @@ function WorkbenchData({
       >
         <PathBar />
         <Divider />
-        <ChangesPopover
-          state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
-          changes={commits}
-        />
+        {/* The state, and nothing to click. The grid is kept current by
+            this channel, so a channel that has dropped is a grid that
+            looks fresh and is not — which is the one thing a dev tool
+            must not do quietly. The count beside it went with the window
+            it used to open: a number you cannot look into is trivia, and
+            it was counting writes since the tab opened while the panel
+            counted what the engine still held, under one word. */}
+        <span className="flex h-7 items-center px-1.5" data-testid="live-state">
+          <LiveDot
+            state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
+          />
+        </span>
         {/* Not a property of the query below: the identity applies to every
             read the workbench makes, the schema tree and inspector included. */}
         <ViewAsPicker />

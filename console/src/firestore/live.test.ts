@@ -26,7 +26,6 @@ describe('the live channel', () => {
       commitTime: '2026-09-20T09:00:00Z',
       changes: [{ database: '(default)', path: 'users/u1', kind: 'deleted' }],
     })
-    expect(useLive.getState().commits).toBe(1)
     expect(useLive.getState().flashes.get('users/u1')?.kind).toBe('deleted')
     useLive.getState().expireFlashes(Date.now() + 1)
     expect(useLive.getState().flashes.size).toBe(0)

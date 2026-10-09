@@ -96,10 +96,10 @@ test('the inspector saves typed edits and the change flashes back through the li
   })
   expect(response.ok()).toBeTruthy()
   await expect(row).toContainText('11', { timeout: 5_000 })
-  // "new", not "change": the toolbar counts what has arrived since this
-  // tab opened, and the panel it opens counts what the engine still
-  // holds. One word over two numbers read as a contradiction.
-  await expect(page.getByText(/Live · \d+ new/)).toBeVisible()
+  // The channel says whether what you are looking at is current. It is
+  // the only thing left in that corner: the window it used to open is
+  // gone, and a count you cannot look into is trivia.
+  await expect(page.getByTestId('live-state')).toContainText('Live')
 })
 
 test('documents are added and deleted from the workbench', async ({ page }) => {
@@ -1026,81 +1026,6 @@ async function readDownload(download: { path(): Promise<string> }): Promise<stri
   return readFile(await download.path(), 'utf8')
 }
 
-test('a change can be undone, and refuses when something moved on', async ({ page }) => {
-  const path = `${resource()}/undoable/one`
-  const write = (text: string) =>
-    page.request.post(`${documents()}:commit`, {
-      headers: owner,
-      data: { writes: [{ update: { name: path, fields: { note: { stringValue: text } } } }] },
-    })
-  expect((await write('first')).ok()).toBeTruthy()
-
-  await page.goto(`${origin()}/console/firestore?path=undoable`)
-  await expect(page.getByTestId('grid-row')).toHaveCount(1)
-  expect((await write('second')).ok()).toBeTruthy()
-  // The live channel brings the new value and the new entry without a reload.
-  await expect(page.getByTestId('grid-row').first()).toContainText('second')
-
-  await page.getByTestId('changes-trigger').click()
-  const popover = page.getByTestId('changes-popover')
-  await expect(popover).toContainText('1 updated')
-
-  // A document is named by its collection and its id. It was the id
-  // alone, which on a document keyed by a uuid left a row reading
-  // `1fcedbc4-4bb9-4333-9c68-49a089b92cd7` and no way to tell what had
-  // been touched — while the whole path was already on the wire.
-  await expect(popover).toContainText('undoable/one')
-
-  // And a row says what changed, not only that something did. The engine
-  // has kept the before-image all along, for the undo; the panel was
-  // showing a path and a verb while the answer sat unread beside it.
-  await popover.locator('[data-testid^="what-changed-"]').first().click()
-  await expect(popover).toContainText('note')
-  await expect(popover.getByText('first', { exact: true })).toBeVisible()
-  await expect(popover.getByText('second', { exact: true })).toBeVisible()
-
-  // The toolbar counts what has arrived since the tab opened; the panel
-  // holds every commit the engine still has. Two numbers under one word
-  // read as a contradiction, so only one of them says "change".
-  await expect(page.getByTestId('changes-trigger')).not.toContainText('change')
-  await expect(popover).toContainText('held')
-
-  // Undo puts the document back as it was, exactly.
-  await popover.locator('[data-testid^="undo-"]').first().click()
-  await expect(page.getByText('Change undone')).toBeVisible()
-  await expect(page.getByTestId('grid-row').first()).toContainText('first')
-
-  // The undo is itself a change, and the original now says so.
-  await page.getByTestId('changes-trigger').click()
-  await expect(page.getByTestId('changes-popover')).toContainText('Undid an earlier change')
-  await expect(page.getByTestId('changes-popover').getByText('undone')).toBeVisible()
-  await page.keyboard.press('Escape')
-
-  // A write that lands after a change makes its undo refuse, whole. The
-  // entry is found by its own id rather than its position, because every
-  // other journey writes to this database too.
-  expect((await write('third')).ok()).toBeTruthy()
-  await expect(page.getByTestId('grid-row').first()).toContainText('third')
-  await page.getByTestId('changes-trigger').click()
-  const undoThird = await page
-    .getByTestId('changes-popover')
-    .locator('li')
-    .first()
-    .locator('[data-testid^="undo-"]')
-    .getAttribute('data-testid')
-  expect(undoThird).toMatch(/^undo-\d+$/)
-
-  // The popover stays open while the write lands: the live channel keeps
-  // the list current, so the entry is still there and still identified.
-  expect((await write('fourth')).ok()).toBeTruthy()
-  await expect(page.getByTestId('changes-popover')).toContainText('1 updated')
-  await page.getByTestId(undoThird ?? 'undo-missing').click()
-  await expect(page.getByRole('heading', { name: 'Nothing was undone' })).toBeVisible()
-  await expect(page.getByText('a document has changed since')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('grid-row').first()).toContainText('fourth')
-})
-
 test('rules are text you can change, and the change is in force at once', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
   // Viewing as a user: her own document reads, another's does not.
@@ -1159,13 +1084,6 @@ test('rules are text you can change, and the change is in force at once', async 
   await expect(page.getByTestId('toolbar')).toBeVisible()
 })
 
-/**
- * Whether the element is the thing the document paints at its own centre.
- * Playwright's own checks cannot answer this: `toBeVisible` does not test
- * for a clip by an ancestor's `overflow: hidden`, and `click` scrolls the
- * clipping box first, which no person can do. Both walked straight through
- * a popup that had been invisible for months.
- */
 async function paintedAtItsOwnCentre(locator: Locator): Promise<boolean> {
   return locator.evaluate((el) => {
     const box = el.getBoundingClientRect()

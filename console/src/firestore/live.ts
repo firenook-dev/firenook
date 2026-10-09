@@ -14,8 +14,6 @@ export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'offline'
 
 interface LiveState {
   status: LiveStatus
-  /** Commits seen since the stream opened. */
-  commits: number
   /** Rows to flash: path → what happened, with when it was seen. */
   flashes: Map<string, { kind: ChangeKind; at: number }>
   setStatus: (status: LiveStatus) => void
@@ -25,7 +23,6 @@ interface LiveState {
 
 export const useLive = create<LiveState>((set) => ({
   status: 'connecting',
-  commits: 0,
   flashes: new Map(),
   setStatus: (status) => set({ status }),
   recordBatch: (batch) =>
@@ -33,7 +30,7 @@ export const useLive = create<LiveState>((set) => ({
       const flashes = new Map(state.flashes)
       const at = Date.now()
       for (const change of batch.changes) flashes.set(change.path, { kind: change.kind, at })
-      return { commits: state.commits + 1, flashes }
+      return { flashes }
     }),
   expireFlashes: (before) =>
     set((state) => {
@@ -128,8 +125,6 @@ export function useLiveChanges(queryClient: QueryClient, database: string) {
         // them makes it stale as surely as a new collection does.
         if (kind === 'subcollections') return structural && (scope === '' || parents.has(scope))
         if (kind === 'schema') return structural
-        // Every commit is a new entry in the window, whatever it touched.
-        if (kind === 'changelog') return true
         return false
       })
     }

@@ -8,12 +8,10 @@ export type LiveState = 'live' | 'reconnecting' | 'offline'
  */
 export function LiveDot({
   state = 'live',
-  changes,
   compact = false,
 }: {
   state?: LiveState
-  changes?: number
-  /** Dot and counter only: a crowded toolbar can spare the word, not the state. */
+  /** Dot only: a crowded toolbar can spare the word, not the state. */
   compact?: boolean
 }) {
   const label = state === 'live' ? 'Live' : state === 'reconnecting' ? 'Reconnecting' : 'Offline'
@@ -32,12 +30,6 @@ export function LiveDot({
         <span className={`relative inline-flex size-2 rounded-full ${colour}`} />
       </span>
       <span className={compact ? 'sr-only' : undefined}>{label}</span>
-      {/* "new", not "change": this counts the writes that have arrived
-          since the tab was opened, while the panel it opens lists every
-          commit the engine still holds. Two different numbers under one
-          word read as a contradiction — the toolbar said 1 and the panel
-          listed nine. */}
-      {changes ? ` ${compact ? '' : '· '}${changes} new` : ''}
     </span>
   )
 }

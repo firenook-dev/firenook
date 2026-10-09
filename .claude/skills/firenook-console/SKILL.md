@@ -916,47 +916,30 @@ pixels is the rhythm *within* a group, so delete sat in the copy cluster's
 own rhythm. A `w-px` rule puts it outside them without moving it off the
 row: 3 px within the group, 15 px past the rule.
 
-### Recent changes is a log with an undo, not an undo with a list
+### The write log and its undo were built, then taken out
 
-A user opened the panel and asked *"what does this do and clicking undo
-does what?"* — which is the panel failing at its one job. Four causes,
-all of them the same inversion: it led with a button and an opaque id
-instead of with what happened.
+They are not in the console. `ROADMAP.md` carries the entry and the
+reasoning; the implementation is one commit back in history rather than
+dead code holding an 8 MB window open on the write path.
 
-**The before-images were already kept and never shown.** The engine holds
-the full before and after of every document so the undo can restore the
-exact one it replaced — and `LoggedDocument` shipped `{database, path,
-kind}`, so the panel said "1 updated · u_22xjp" while the answer sat
-unread beside it. `GET /changelog/diff?id=N` now reports the **leaves**
-that moved under their dotted path (`settings.limits.projects 50 → 99`),
-not the branch above them, because "settings changed" is the thing the
-row already said. Per commit, fetched when a row is opened, capped at 20
-documents and 40 fields with the rest counted: two hundred commits of
-document data is not a list response.
+What to keep from it if it returns. **An undo fires triggers** — it writes
+through `store.commit`, and `TriggerObserver` is a commit observer on that
+same store, so undoing a write a Function made runs that Function again.
+That is arguably right (a hidden write path that skipped triggers would
+make the emulator lie), and it means the button cannot keep the promise
+its toast makes. **The log is the valuable half and the undo is the
+hazardous one**, so if it comes back it is a log first, with the undo
+behind a confirmation that names the trigger behaviour. And it belongs
+**per document, in the inspector**, not as one global list: the question
+is almost always "what happened to *this*?".
 
-**Two numbers must not share one word.** The toolbar counted writes
-arrived since the tab opened; the panel counted commits the engine still
-holds. Both said "change", so the trigger read `1 change` above a list of
-nine. The toolbar says `1 new`, the panel says `9 held`.
-
-**"N kept" reads as an outcome** — *three of your changes were kept* — when
-it is the size of a window that drops its oldest. "held", with the bound
-in a tooltip.
-
-**Name a document by its collection and its id.** `lastSegment` gave the
-id alone, so a uuid-keyed document read as
-`1fcedbc4-4bb9-4333-9c68-49a089b92cd7` and nothing else — while the whole
-path was on the wire already. Last two segments in the chip, full path in
-the tooltip.
-
-**Put the consequence on a destructive button.** A `200 created` row was
-one unconfirmed click from deleting two hundred documents. `Undo · delete
-200`, shown whenever a commit touches more than one document.
-
-To expose a store value to the console, `firenook_rest_front::value_as_rest`
-returns the REST shape, `None` for the one value it cannot print (a
-timestamp outside RFC 3339). A describing surface **counts** such a value
-rather than inventing one.
+**What is left in its place:** `LiveDot` is a state chip, not a button.
+Keep it. The grid is kept current by that channel, so a channel that has
+dropped is a grid that looks fresh and is not — the one thing a dev tool
+must not do quietly. The count beside it went with the panel it used to
+open: a number nobody can look into is trivia, and it was counting writes
+since the tab opened while the panel counted what the engine still held,
+both under the word "change".
 
 ## Firestore workbench (built, `src/firestore/`)
 

@@ -2002,18 +2002,6 @@ fn decode_special_map(fields: Fields) -> Result<Value, RestError> {
         .map(Value::Vector)
 }
 
-/// One value in the REST shape, for surfaces that show values the way the
-/// console's editors read them.
-///
-/// `None` when the value cannot be represented, which today means only a
-/// timestamp outside the range RFC 3339 can print. A caller that is
-/// describing rather than serving should leave such a value out and say so
-/// rather than invent one.
-#[must_use]
-pub fn value_as_rest(value: &Value) -> Option<JsonValue> {
-    encode_value(value).ok()
-}
-
 fn encode_document(key: &DocumentKey, document: &Document) -> Result<JsonValue, RestError> {
     Ok(json!({
         "name": key.to_string(),

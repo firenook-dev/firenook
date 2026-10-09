@@ -8,7 +8,6 @@
 //! `/console` on the Emulator UI port; every asset and API call is
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
-mod changelog;
 mod databases;
 mod explain;
 mod firestore;
@@ -27,10 +26,6 @@ use serde::Serialize;
 use serde_json::json;
 use ts_rs::TS;
 
-pub use changelog::{
-    ChangeLog, ChangeLogPage, CommitDiff, DocumentDiff, FieldChange, LoggedCommit, LoggedDocument,
-    LoggedKind, UndoError, UndoResult,
-};
 pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
 pub use explain::{
     ExplainCandidates, ExplainIndex, ExplainIndexField, ExplainOrder, ExplainStrategy, Explanation,
@@ -318,9 +313,6 @@ mod tests {
         SubcollectionsSnapshot::export_all(&config).expect("TypeScript bindings written");
         DatabaseList::export_all(&config).expect("TypeScript bindings written");
         Explanation::export_all(&config).expect("TypeScript bindings written");
-        ChangeLogPage::export_all(&config).expect("TypeScript bindings written");
-        CommitDiff::export_all(&config).expect("TypeScript bindings written");
-        UndoResult::export_all(&config).expect("TypeScript bindings written");
         RulesDocument::export_all(&config).expect("TypeScript bindings written");
         RulesInstalled::export_all(&config).expect("TypeScript bindings written");
         RulesDiagnostic::export_all(&config).expect("TypeScript bindings written");
