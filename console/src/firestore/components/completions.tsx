@@ -1,6 +1,6 @@
-// A completion list that cannot be clipped.
+// A panel that hangs off a field and cannot be clipped.
 //
-// Both lists in this panel hang off an input that lives inside a scrolling
+// Every one of these hangs off an input that lives inside a scrolling
 // column, and an `absolute` popup inside `overflow: auto` is an invisible
 // popup the moment its row nears an edge — the same trap that hid the path
 // bar's completions, which two passing assertions walked straight through.
@@ -13,17 +13,29 @@ import { createPortal } from 'react-dom'
 /** Room a list wants below the field before it gives up and opens upward, px. */
 const ROOM = 180
 
-export function Completions({
+/**
+ * A panel placed on a field's own rectangle, in a portal.
+ *
+ * `width: 'field'` is for a list of things the field could say, which reads
+ * as a continuation of it. `width: 'content'` is for a panel that is its
+ * own thing — a calendar has a width of its own and a field is rarely it.
+ */
+export function Anchored({
   anchor,
   testId,
+  width = 'field',
+  room = ROOM,
   children,
 }: {
   anchor: React.RefObject<HTMLElement | null>
   testId: string
+  width?: 'field' | 'content'
+  /** How much room it wants below before it opens upward instead. */
+  room?: number
   children: React.ReactNode
 }) {
   // Measured where it is mounted — the caller renders this only while the
-  // list is open — and re-measured from the events that can move it.
+  // panel is open — and re-measured from the events that can move it.
   const [box, setBox] = useState<DOMRect | null>(
     () => anchor.current?.getBoundingClientRect() ?? null,
   )
@@ -40,20 +52,36 @@ export function Completions({
   }, [anchor])
 
   if (!box) return null
-  // The field itself has scrolled away; so has its list.
+  // The field itself has scrolled away; so has its panel.
   if (box.bottom < 0 || box.top > window.innerHeight) return null
-  const below = window.innerHeight - box.bottom > ROOM
+  const below = window.innerHeight - box.bottom > room
   const placement = below ? { top: box.bottom + 4 } : { bottom: window.innerHeight - box.top + 4 }
   return createPortal(
-    <ul
+    <div
       // Measured coordinates: the one thing a class cannot carry.
-      style={{ left: box.left, width: box.width, ...placement }}
-      className="fixed z-50 max-h-56 overflow-auto rounded-lg bg-kumo-elevated p-1 shadow-md ring ring-kumo-line"
+      style={{ left: box.left, ...(width === 'field' ? { width: box.width } : {}), ...placement }}
+      className="fixed z-50 rounded-lg bg-kumo-elevated shadow-md ring ring-kumo-line"
       data-testid={testId}
     >
       {children}
-    </ul>,
+    </div>,
     document.body,
+  )
+}
+
+export function Completions({
+  anchor,
+  testId,
+  children,
+}: {
+  anchor: React.RefObject<HTMLElement | null>
+  testId: string
+  children: React.ReactNode
+}) {
+  return (
+    <Anchored anchor={anchor} testId={testId}>
+      <ul className="max-h-56 overflow-auto p-1">{children}</ul>
+    </Anchored>
   )
 }
 

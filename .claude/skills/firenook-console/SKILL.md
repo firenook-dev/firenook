@@ -567,6 +567,32 @@ are what the eye went to. It is `tabIndex={-1}` and `aria-hidden` — a
 redundant pointer target, so the caret keeps the semantics and anything
 that is not a pointer still sees one control rather than two.
 
+**A field opens its own helper; a button beside it does not.** Three
+controls in this panel have now been moved for the same reason — a control
+drawn only on hover is a control nobody finds. The reference field opened
+its completions on focus from the start, and the **timestamp** now opens
+its picker the same way (`Anchored` in `completions.tsx`, which
+`Completions` is also built on). The calendar button is gone from the
+strip. Rules learned doing it:
+
+- The panel must **not shut on the field's own blur**. A calendar takes
+  focus onto the day it selects, so that shut it on the first day pressed
+  and a time could never be set. The test is whether focus left the field
+  *and* the panel: React sends a portal's events up its own React tree, so
+  one `onBlur` on the wrapper hears both, but the panel is not a DOM
+  descendant — it is matched by `data-testid`, not by `contains`.
+- Kumo's `DatePicker` is **react-day-picker, day granularity only**, and a
+  Firestore timestamp is an instant. So the panel pairs it with a time
+  input, and **the text stays the truth**: the pickers speak in days and
+  seconds, and the ISO text carries the milliseconds neither can say.
+  `defaultMonth` is required, or it opens on this month while the value's
+  own month sits behind an arrow.
+- It costs **+68 KB of JS** on the Firestore route and nothing on the
+  first route, because `bundle-budget.mjs` follows the entry chunk's
+  static imports and the Firestore route is already code-split. Measure
+  `find dist/assets -name '*.js' | xargs cat | wc -c`, not the budget, to
+  see what a Kumo component actually weighs.
+
 **One column for the whole document, not one per list.** A nested list used
 to build its own tracks (`COLUMNS`) and size the name column to its own
 widest name, so a map of short names inside a document of long ones started

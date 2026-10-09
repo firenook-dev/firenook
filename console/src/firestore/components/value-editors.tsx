@@ -5,19 +5,14 @@
 // path it is pointing at, a geopoint is two numbers rather than one string
 // with a comma in it, and bytes say how many they are.
 
-import { Button, Popover, Switch, Tooltip } from '@cloudflare/kumo'
-import {
-  ArrowSquareOutIcon,
-  ArrowsInSimpleIcon,
-  ArrowsOutSimpleIcon,
-  CalendarBlankIcon,
-} from '@phosphor-icons/react'
+import { Button, DatePicker, Switch, Tooltip } from '@cloudflare/kumo'
+import { ArrowSquareOutIcon, ArrowsInSimpleIcon, ArrowsOutSimpleIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { type DraftNode, numberForm } from '../draft'
 import { collectionsQuery, documentIdsQuery } from '../queries'
 import { relativeTime } from '../value'
-import { Completion, Completions } from './completions'
+import { Anchored, Completion, Completions } from './completions'
 import { useFieldEditing, useFocusTarget } from './field-context'
 import { useWorkbench } from './workbench-context'
 
@@ -267,8 +262,6 @@ export function ValueControls({ node, onChange, label }: Omit<EditorProps, 'inva
         />
       )
     }
-    case 'timestamp':
-      return <TimestampPicker node={node} onChange={onChange} label={label} />
     case 'reference':
       return <OpenReference node={node} label={label} />
     default:
@@ -376,73 +369,127 @@ function NullEditor() {
   )
 }
 
+/**
+ * A timestamp edits as the instant it is, and picks as the day and time a
+ * person thinks in.
+ *
+ * The calendar used to be a button in the row's strip — drawn on hover,
+ * at the far end of the line, for a value at the near end. A control
+ * nobody can see is a control nobody finds, which is the third time that
+ * has been true in this panel. The field opens it instead, the way the
+ * reference field opens its completions: one affordance, on the value it
+ * belongs to, the moment you touch it.
+ *
+ * The text stays the truth. A picker speaks in days and seconds and the
+ * stored value is an instant to the millisecond, so what is typed always
+ * wins and the panel only ever hands it a new instant.
+ */
 function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
   const { next } = useFieldEditing()
   const ref = useFocusTarget<HTMLInputElement>(node.id)
+  const [open, setOpen] = useState(false)
   const when = new Date(node.text.trim())
   const known = !Number.isNaN(when.getTime())
+  // A field that does not parse yet still has to pick from somewhere.
+  const base = known ? when : new Date()
+  const set = (moment: Date) => onChange({ ...node, text: moment.toISOString() })
+
   return (
-    <Line
-      invalid={invalid}
-      word={known ? <span className={WORD}>{relativeTime(when.toISOString())}</span> : undefined}
+    <div
+      className="min-w-0 flex-1"
+      // Shutting is about focus leaving the field *and* its panel, not
+      // leaving the field. The calendar takes focus onto the day it
+      // selects, so a panel that shut on the field's own blur shut on the
+      // first day pressed, and a time could never be set in it. React
+      // sends a portal's events up its own tree, so this hears both; the
+      // panel is not a DOM descendant, which is why it is named here
+      // rather than contained.
+      onBlur={(event) => {
+        const going = event.relatedTarget
+        if (
+          going &&
+          (event.currentTarget.contains(going) || going.closest(`[data-testid="${PANEL}"]`))
+        )
+          return
+        setOpen(false)
+      }}
     >
-      <input
-        ref={ref}
-        value={node.text}
-        onChange={(event) => onChange({ ...node, text: event.target.value })}
-        onKeyDown={onEnterNext(next)}
-        spellCheck={false}
-        className={INPUT}
-        aria-label={`${label} value`}
-      />
-    </Line>
+      <Line
+        invalid={invalid}
+        word={known ? <span className={WORD}>{relativeTime(when.toISOString())}</span> : undefined}
+      >
+        <input
+          ref={ref}
+          value={node.text}
+          onChange={(event) => onChange({ ...node, text: event.target.value })}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setOpen(false)
+            else if (event.key === 'Enter') {
+              event.preventDefault()
+              next()
+            }
+          }}
+          spellCheck={false}
+          className={INPUT}
+          aria-label={`${label} value`}
+        />
+      </Line>
+      {open && (
+        <Anchored anchor={ref} testId={PANEL} width="content" room={360}>
+          <div className="grid gap-2 p-2">
+            <DatePicker
+              mode="single"
+              selected={known ? when : undefined}
+              // Or it opens on this month and the value's own month is
+              // somewhere behind an arrow.
+              defaultMonth={base}
+              onChange={(day) => {
+                if (day) set(withDay(base, day))
+              }}
+            />
+            <div className="flex items-center gap-2 border-t border-kumo-line pt-2">
+              <input
+                type="time"
+                step="1"
+                value={timeOf(base)}
+                onChange={(event) => set(withTime(base, event.target.value))}
+                className="h-8 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
+                aria-label={`${label} time of day`}
+              />
+              <Button variant="secondary" size="sm" onClick={() => set(new Date())}>
+                Now
+              </Button>
+              <span className="ml-auto font-mono text-[11px] text-kumo-subtle">{timeZone()}</span>
+            </div>
+          </div>
+        </Anchored>
+      )}
+    </div>
   )
 }
 
-function TimestampPicker({ node, onChange, label }: Omit<EditorProps, 'invalid'>) {
-  const when = new Date(node.text.trim())
-  const known = !Number.isNaN(when.getTime())
-  return (
-    <Popover>
-      <Popover.Trigger
-        render={
-          <Button
-            variant="ghost"
-            size="xs"
-            shape="square"
-            icon={<CalendarBlankIcon />}
-            aria-label={`Pick ${label}`}
-          />
-        }
-      />
-      <Popover.Content className="w-[280px]">
-        <div className="grid gap-2" data-testid="timestamp-picker">
-          <input
-            type="datetime-local"
-            step="1"
-            value={known ? localInput(when) : ''}
-            onChange={(event) => {
-              const picked = new Date(event.target.value)
-              if (!Number.isNaN(picked.getTime())) onChange({ ...node, text: picked.toISOString() })
-            }}
-            className="h-8 w-full rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
-            aria-label={`${label} date and time`}
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => onChange({ ...node, text: new Date().toISOString() })}
-            >
-              Now
-            </Button>
-            <span className="font-mono text-[11px] text-kumo-subtle">{timeZone()}</span>
-          </div>
-        </div>
-      </Popover.Content>
-    </Popover>
-  )
+/** The same instant on another day; the time of day it already had. */
+function withDay(base: Date, day: Date): Date {
+  const next = new Date(base)
+  next.setFullYear(day.getFullYear(), day.getMonth(), day.getDate())
+  return next
 }
+
+/** The same day at another time; the milliseconds it already had. */
+function withTime(base: Date, value: string): Date {
+  const [hours = 0, minutes = 0, seconds = 0] = value.split(':').map(Number)
+  const next = new Date(base)
+  next.setHours(hours, minutes, seconds)
+  return next
+}
+
+function timeOf(date: Date): string {
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/** The panel's name, which is also how a blur tells inside from outside. */
+const PANEL = 'timestamp-picker'
 
 /** The browser's own zone, named, because the picker works in it. */
 function timeZone(): string {
@@ -451,12 +498,6 @@ function timeZone(): string {
 
 function pad(value: number): string {
   return String(value).padStart(2, '0')
-}
-
-function localInput(date: Date): string {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {

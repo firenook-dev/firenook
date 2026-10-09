@@ -1695,6 +1695,47 @@ test('a shut container says what it holds, and a big one opens shut', async ({ p
   await drop(page.request, 'teams/t_shape')
 })
 
+test('a timestamp picks from the field it is in, not from a button beside it', async ({ page }) => {
+  await put(page.request, 'teams/t_when', { at: { timestampValue: '2026-09-20T07:45:55.267Z' } })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_when`)
+  const inspector = page.getByTestId('inspector')
+  const field = inspector.getByLabel('at value')
+  await expect(field).toHaveValue('2026-09-20T07:45:55.267Z')
+
+  // The calendar was a button in the row's strip: drawn on hover, at the
+  // far end of the line, for a value at the near end. A control nobody can
+  // see is a control nobody finds — the third time that was true here. The
+  // field opens it, the way the reference field opens its completions.
+  await expect(inspector.getByLabel('Pick at')).toHaveCount(0)
+  const panel = page.getByTestId('timestamp-picker')
+  await expect(panel).toHaveCount(0)
+  await field.click()
+  await expect(panel).toHaveCount(1)
+
+  // It hangs off a field inside the scrolling column, so it is drawn in a
+  // portal; `toBeVisible` cannot see a clip, so ask what is painted there.
+  expect(await paintedAtItsOwnCentre(panel)).toBe(true)
+
+  // And it opens on the value's own month rather than on this one.
+  await expect(panel).toContainText('September 2026')
+
+  // A day keeps the time of day, and the panel stays up: the calendar
+  // takes focus onto the day it selects, which is not focus leaving.
+  await panel.locator('button').filter({ hasText: /^25$/ }).first().click()
+  await expect(field).toHaveValue('2026-09-25T07:45:55.267Z')
+  await expect(panel).toHaveCount(1)
+
+  // The pickers speak in days and seconds; the stored instant keeps the
+  // milliseconds neither of them can say, because the text is the truth.
+  await panel.locator('input[type="time"]').fill('11:30:00')
+  await expect(field).toHaveValue(/:00\.267Z$/)
+
+  // Focus leaving the field *and* its panel is what shuts it.
+  await inspector.getByTestId('new-field-name').click()
+  await expect(panel).toHaveCount(0)
+  await drop(page.request, 'teams/t_when')
+})
+
 test('a map and its JSON are the same subtree, written two ways', async ({ page }) => {
   await put(page.request, 'teams/t_json', {
     redirectUri: {
