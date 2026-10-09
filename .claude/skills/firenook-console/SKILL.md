@@ -551,8 +551,33 @@ characters), so it goes below: left beside the value it took 180 px of a
 
 A value that is a *region* of text rather than a line of it — a multi-line
 string, a vector, a container in `raw` mode — cannot share the line, so it
-goes underneath at the panel's full width (`valueIsRegion`). A container
-says `{ 3 fields }` on its own line whether it is open or shut.
+goes underneath at the panel's full width (`valueIsRegion`). **A container says what it holds, and only when shut.** It said
+`{ 3 fields }` either way — a count is the one thing about a map you can
+already see, since its fields are listed directly beneath it, and it said
+it loudest while open, where the children were right there saying it
+better. Open, the value cell is empty and the row is a header; shut, it is
+the keys and how many more (`{ dasd }`, `{ alpha, beta, delta, +5 }`), with
+an array showing brief values instead since its items have no names. A
+container with more than `LARGE` (6) descendants **opens shut**, so a
+document with a big map in it opens scannable rather than buried.
+
+**One column for the whole document, not one per list.** A nested list used
+to build its own tracks (`COLUMNS`) and size the name column to its own
+widest name, so a map of short names inside a document of long ones started
+its values **26 px left of its parent's siblings and ran that much wider** —
+the deeper the row, the further out it burst, which reads as the opposite
+of containment. A user found it on a real `redirectUri`. Every depth is now
+`grid-cols-subgrid` of the document's two tracks, and the indent still
+works because **a subgrid takes its own margin, border and padding out of
+the edge track**: `ml-2.5 border-l pl-2.5` narrows that list's name column
+and leaves the value column exactly where it is. Nested items also feed the
+top-level `max-content`, so the name track is the widest name at any depth,
+indent included, capped by `max-w-40` on the input.
+
+Guarding this needs **two strings at two depths**, not any two values: a
+number shares its box with the word saying how it is stored, so it is
+legitimately narrower, and comparing one against a string fails for a
+reason that has nothing to do with the column.
 
 **A value wears a box; a name does not.** The rule used to be "nothing at
 rest" for both, on the grounds that a value is read far more often than it

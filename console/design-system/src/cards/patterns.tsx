@@ -767,8 +767,14 @@ function FieldRow({
  * right of its parent's rather than, as it did, to the left of it.
  */
 function Nested({ children }: { children: ReactNode }) {
+  // `subgrid`, not a grid of its own: a nested list that sized a name
+  // column to its own widest name started its values 26 px LEFT of its
+  // parent's siblings and ran that much wider, so a child burst out of the
+  // column containing it. A subgrid takes its own margin and padding out of
+  // the edge track, so the indent narrows the names and every value in the
+  // document stays on one rail.
   return (
-    <div className={`col-span-2 ml-2.5 border-l border-kumo-line pl-2.5 ${COLUMNS}`}>
+    <div className="col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5">
       {children}
     </div>
   )
@@ -831,7 +837,11 @@ function Value({
   )
 }
 
-/** What a map or an array says on its own line, open or shut. */
+/**
+ * What a shut map or array says on its own line. Open, it says nothing:
+ * its fields are listed directly beneath it, which is the one thing the
+ * count it used to show — `{ 1 field }` — was telling anybody.
+ */
 function Summary({ children }: { children: ReactNode }) {
   return (
     <span className="flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
@@ -936,14 +946,24 @@ function Inspector() {
                   </>
                 }
               />
-              <FieldRow name="billing" type="map" value={<Summary>{'{ 2 fields }'}</Summary>}>
+              {/* Open: the children say what is in it. The value column
+                  runs on through every depth, so a child is never wider
+                  than the row containing it. */}
+              <FieldRow name="billing" type="map">
                 <FieldRow name="currency" type="string" value={<Value>MYR</Value>} />
-                <FieldRow name="contacts" type="array" value={<Summary>{'[ 1 item ]'}</Summary>}>
-                  <FieldRow index={0} type="map" value={<Summary>{'{ 1 field }'}</Summary>}>
+                <FieldRow name="contacts" type="array">
+                  <FieldRow index={0} type="map">
                     <FieldRow name="email" type="string" value={<Value>ada@example.test</Value>} />
                   </FieldRow>
                 </FieldRow>
               </FieldRow>
+              {/* Shut, and large enough to have opened that way: the keys,
+                  and how many more there are. */}
+              <FieldRow
+                name="permissions"
+                type="map"
+                value={<Summary>{'{ admin, billing, exports, +5 }'}</Summary>}
+              />
               <FieldRow name="legacy" type="string" removed />
             </div>
             {/* Below the rows, not among them: a document with forty fields

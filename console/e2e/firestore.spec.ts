@@ -1224,6 +1224,11 @@ async function boxedValues(fields: Locator): Promise<boolean[]> {
   )
 }
 
+/** Keys with a number each, for a map wide enough to be worth shutting. */
+function numbered(keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.map((key, index) => [key, { integerValue: String(index) }]))
+}
+
 /** A document written straight to the engine, bypassing the console. */
 async function put(
   request: { post: (url: string, options: object) => Promise<{ ok: () => boolean }> },
@@ -1524,6 +1529,19 @@ test('a document is a tree, and depth is the only thing that moves a name', asyn
     ).toBeLessThan(1)
   }
 
+  // One column for the whole document, not one per list. A nested list
+  // used to build its own tracks and size them to its own widest name, so
+  // a map of short names inside a document of long ones started its
+  // values 26 px LEFT of its parent's siblings and ran that much wider:
+  // the deeper the row, the further out it burst, which reads as the
+  // opposite of containment.
+  expect(Math.abs((await textLeft(inspector.getByLabel('city value'))) - values)).toBeLessThan(1)
+  // Two strings, so the boxes are comparable: a number shares its box
+  // with the word saying how it is stored, and is narrower by that word.
+  const outer = (await inspector.getByLabel('bio value').boundingBox())!
+  const inner = (await inspector.getByLabel('city value').boundingBox())!
+  expect(Math.abs(inner.width - outer.width)).toBeLessThan(1)
+
   // A row is a line, and a name and its value share it. On two lines a
   // node is a block, and an indent says nothing against a block's height.
   const name = (await inspector.getByLabel('balance name').boundingBox())!
@@ -1580,6 +1598,44 @@ test('a value too long for its line wraps rather than being cut short', async ({
   await long.click()
   await page.keyboard.press('Shift+Enter')
   await expect(inspector.getByLabel('redirectUri value')).toHaveValue(/\n/)
+})
+
+test('a shut container says what it holds, and a big one opens shut', async ({ page }) => {
+  await put(page.request, 'teams/t_shape', {
+    config: {
+      mapValue: {
+        fields: numbered(['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta']),
+      },
+    },
+    small: {
+      mapValue: { fields: { dasd: { mapValue: { fields: { dsad: { stringValue: 'x' } } } } } },
+    },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_shape`)
+  const inspector = page.getByTestId('inspector')
+  const summaryOf = (name: string) =>
+    inspector
+      .getByLabel(`${name} name`)
+      .locator('xpath=ancestor::*[@data-testid="field-row"][1]//*[@data-testid="field-summary"]')
+      .first()
+
+  // A small map is open, and an open map says nothing: its fields are
+  // listed directly beneath it, which is the one thing `{ 1 field }` was
+  // telling anybody — and it said it loudest on the map it helped least.
+  await expect(inspector.getByLabel('dsad value')).toHaveValue('x')
+  await expect(summaryOf('small')).toHaveText('')
+
+  // Shut, it says what is in it. A name is what you scan a document for.
+  await inspector.getByLabel('Collapse small').click()
+  await expect(summaryOf('small')).toHaveText('{ dasd }')
+
+  // And a map big enough to bury what follows it opens shut, so the
+  // document opens scannable — with the keys, and how many more.
+  await expect(inspector.getByLabel('alpha value')).toHaveCount(0)
+  await expect(summaryOf('config')).toHaveText('{ alpha, beta, delta, +5 }')
+  await inspector.getByLabel('Expand config').click()
+  await expect(inspector.getByLabel('alpha value')).toHaveValue('0')
+  await drop(page.request, 'teams/t_shape')
 })
 
 test('a map and its JSON are the same subtree, written two ways', async ({ page }) => {

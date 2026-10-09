@@ -54,8 +54,11 @@ export const GUTTER = 'flex h-8 w-4 shrink-0 items-center justify-center'
  * is the widest name, and each row is a `subgrid` so it can still paint its
  * own ground and carry its own controls.
  *
- * Per list, not per document: a nested list sets its own width, which is
- * what keeps depth readable when the names at one level are long.
+ * Once per document, not once per list. A nested list used to build its
+ * own tracks, which sized its name column to its own widest name — so a
+ * map of short names inside a document of long ones started its values
+ * left of its parent's siblings and ran wider than them, and a child read
+ * as an outdent. Every depth is a `subgrid` of this one now.
  *
  * The air between the rows is the other half of giving a value a box: a
  * column of boxes two pixels apart is a wall, and the same column six
@@ -123,7 +126,7 @@ function FieldRow({
   onMove: (by: number) => void
 }) {
   const editing = useFieldEditing()
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(() => !large(node))
   const problem = editing.problems.get(node.id)
   const container = node.type === 'map' || node.type === 'array'
   const label = named ? node.name || 'new field' : String(index)
@@ -212,8 +215,11 @@ function FieldRow({
         </div>
         <div className="flex min-w-0 items-start gap-1 pr-1">
           {container ? (
-            <span className="flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
-              {raw ? 'json' : summary(node)}
+            <span
+              className="flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle"
+              data-testid="field-summary"
+            >
+              {raw ? 'json' : open ? '' : preview(node)}
             </span>
           ) : region ? (
             <span className="h-8 min-w-0 flex-1" />
@@ -374,7 +380,17 @@ function FieldRow({
       {container && !raw && open && node.children.length > 0 && (
         // The step is the gutter's own width, so a child's name lands one
         // column right of its parent's — never, as it did, to the left.
-        <div className={`col-span-2 ml-2.5 border-l border-kumo-line pl-2.5 ${COLUMNS}`}>
+        //
+        // `subgrid`, not a grid of its own: a nested list used to size a
+        // name column to its own widest name, so a list of short names
+        // inside a document of long ones started its values 26 px to the
+        // LEFT of its parent's siblings and ran that much wider. A child
+        // burst out of the column containing it, which reads as an
+        // outdent. Sharing the document's tracks costs nothing, because a
+        // subgrid takes its own margin and padding out of the edge track:
+        // the indent narrows this list's names and leaves every value in
+        // the document on one rail.
+        <div className="col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5">
           <FieldRows
             nodes={node.children}
             named={node.type === 'map'}
@@ -386,10 +402,55 @@ function FieldRow({
   )
 }
 
-function summary(node: DraftNode): string {
-  const count = node.children.filter((child) => child.removed !== true).length
-  if (node.type === 'map') return count === 0 ? '{}' : `{ ${count} field${count === 1 ? '' : 's'} }`
-  return count === 0 ? '[]' : `[ ${count} item${count === 1 ? '' : 's'} ]`
+/**
+ * What a shut container holds, on one line.
+ *
+ * It used to be a count — `{ 1 field }` — which is the one thing about a
+ * map you can already see, since its fields are listed directly beneath
+ * it. Worse, it said it while the map was *open*, where the children were
+ * right there saying it better. A name is what you are looking for when
+ * you scan a document, so the keys are what this says, and how many more
+ * there are when they do not fit in three.
+ */
+function preview(node: DraftNode): string {
+  const live = node.children.filter((child) => child.removed !== true)
+  const map = node.type === 'map'
+  if (live.length === 0) return map ? '{}' : '[]'
+  const shown = live.slice(0, 3).map((child) => (map ? child.name || '…' : brief(child)))
+  const rest = live.length - shown.length
+  const inside = [...shown, ...(rest > 0 ? [`+${rest}`] : [])].join(', ')
+  return map ? `{ ${inside} }` : `[ ${inside} ]`
+}
+
+/** An array item has no name, so it is the value that stands for it. */
+function brief(node: DraftNode): string {
+  if (node.type === 'map') return '{…}'
+  if (node.type === 'array') return '[…]'
+  if (node.type === 'null') return 'null'
+  const text = node.text.trim()
+  if (text === '') return node.type
+  const short = text.length > 12 ? `${text.slice(0, 12)}…` : text
+  return node.type === 'string' ? `"${short}"` : short
+}
+
+/**
+ * A container large enough that opening it buries whatever follows it.
+ * A document opens scannable: the small maps are shown, the big ones say
+ * what they hold and wait to be asked.
+ */
+const LARGE = 6
+
+function large(node: DraftNode): boolean {
+  let count = 0
+  const walk = (nodes: readonly DraftNode[]): void => {
+    for (const child of nodes) {
+      if (child.removed === true || count > LARGE) continue
+      count += 1
+      walk(child.children)
+    }
+  }
+  walk(node.children)
+  return count > LARGE
 }
 
 /**
