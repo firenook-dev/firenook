@@ -1,10 +1,16 @@
 // The security rules, as text you can change.
 //
-// A plain textarea over a numbered gutter rather than a code editor: the
-// console's whole first-route budget is 300 KB, and CodeMirror alone is
-// several times the rules editor's worth of value here. What matters is
-// that a change compiles, takes effect on the next request, and says
-// exactly where it went wrong when it does not.
+// Still a plain textarea over a numbered gutter, and the reason given
+// here for years was wrong: "the console's whole first-route budget is
+// 300 KB, and CodeMirror alone is several times" it. That budget counts
+// the entry chunk and its static imports, and this editor lives in the
+// Firestore route chunk, which it has never counted. `components/
+// code-editor` is now CodeMirror behind a `lazy()`, serving the JSON
+// tab; this panel is next, and wants a mode for the rules language and
+// a diagnostic bridge from the list below into the editor's own gutter.
+//
+// What matters either way is that a change compiles, takes effect on the
+// next request, and says exactly where it went wrong when it does not.
 
 import { Badge, Button, Text, useKumoToastManager } from '@cloudflare/kumo'
 import {

@@ -6,11 +6,13 @@
 // half-written value never fights the cursor and a wrong one says so where
 // it is, rather than at the end as "fix the highlighted fields".
 
-import { Button, DropdownMenu, Tabs, Text } from '@cloudflare/kumo'
+import { Button, DropdownMenu, Tabs, Text, Tooltip } from '@cloudflare/kumo'
 import { PlusIcon } from '@phosphor-icons/react'
-import { useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { CodeEditor } from '@/components/code-editor'
 import { TypeBadge } from '@/components/kit'
 import { type DraftNode, type NodeProblem, emptyNode, nodesFromJson, nodesToJson } from '../draft'
+import { carriedTypes, typeMarks } from '../json-marks'
 import { type FirestoreValueType, VALUE_TYPES } from '../value'
 import { Completion, Completions } from './completions'
 import { type FieldEditing, FieldEditingProvider, type KnownField } from './field-context'
@@ -64,6 +66,22 @@ export function FieldsPanel({
       setJsonError(error instanceof Error ? error.message : String(error))
     }
   }
+
+  // Both of these are `JSON.stringify` with a different third argument.
+  // A library for that would be a library for nothing.
+  const rewrite = (indent: number) => {
+    try {
+      setJson(JSON.stringify(JSON.parse(json), null, indent))
+      setJsonError(undefined)
+    } catch (error) {
+      setJsonError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  // The rows are what carry the types JSON cannot write down, so the
+  // marks are recomputed when they change and not on every keystroke.
+  const annotate = useCallback((text: string) => typeMarks(text, nodes), [nodes])
+  const carried = useMemo(() => carriedTypes(nodes).size, [nodes])
 
   const editing: FieldEditing = {
     problems,
@@ -136,15 +154,22 @@ export function FieldsPanel({
               282 pixels below it — half the panel — stayed empty. Nothing
               else wanted that room, and the one thing here that can always
               use more of it is the text. */}
-          <div className="min-h-0 flex-1 p-3">
-            <textarea
-              value={json}
-              onChange={(event) => setJson(event.target.value)}
-              spellCheck={false}
-              className="h-full w-full resize-none rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
-              aria-label="Document JSON"
-              data-testid="document-json"
-            />
+          {/* A floor as well as a share. In the inspector the editor
+              fills a panel that is already tall; in the create dialog it
+              is one of three things inside a box that grows to its
+              content, and a `flex-1` with no height of its own let that
+              box collapse to its minimum and leave three lines of room
+              to paste a document into. */}
+          <div className="flex min-h-[220px] flex-1 flex-col p-3">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md ring ring-kumo-line focus-within:ring-kumo-focus">
+              <CodeEditor
+                value={json}
+                onChange={setJson}
+                annotate={annotate}
+                ariaLabel="Document JSON"
+                testId="document-json"
+              />
+            </div>
           </div>
           {/* The band the Fields tab puts its one action in, with this
               tab's one action in it. Below the editor rather than after
@@ -155,15 +180,56 @@ export function FieldsPanel({
                 {jsonError}
               </Text>
             )}
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={applyJson}>
+            <div className="flex items-center gap-1">
+              <Button variant="secondary" size="sm" onClick={applyJson} data-testid="apply-json">
                 Apply to fields
               </Button>
-              <Text variant="secondary" size="sm">
-                A value JSON cannot write down — a timestamp, a reference, a double that reads whole
-                — keeps its type while the JSON still agrees with it.
-              </Text>
+              <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+              <Tooltip
+                content="Re-indent at two spaces"
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => rewrite(2)}
+                    data-testid="format-json"
+                  >
+                    Format
+                  </Button>
+                }
+              />
+              <Tooltip
+                content="One line, no spaces"
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => rewrite(0)}
+                    data-testid="minify-json"
+                  >
+                    Minify
+                  </Button>
+                }
+              />
             </div>
+            {/* The sentence that used to live here was true of three
+                lines in thirty and left the reader to work out which
+                three. The three are marked now, so what is left to say
+                is how many there are — and it says it on a line of its
+                own, because a panel 448 pixels wide had already truncated
+                it mid-word beside the buttons. */}
+            {carried > 0 && (
+              <Text
+                variant="secondary"
+                size="sm"
+                as="p"
+                DANGEROUS_className="mt-1.5 text-[12px]"
+                data-testid="carried-types"
+              >
+                {carried} marked {carried === 1 ? 'value keeps a type' : 'values keep types'} JSON
+                cannot write down
+              </Text>
+            )}
           </div>
         </>
       )}

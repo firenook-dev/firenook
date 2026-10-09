@@ -58,6 +58,11 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - Virtualize every long list (rows, log lines, JSON trees).
 - First route under 300 KB gzip: `npm run budget --prefix console` reads the
   Vite manifest and fails over budget. Lazy-load CodeMirror, shiki, echarts.
+  **The budget is the entry chunk and its static imports only** — route
+  chunks are not counted, so "it would blow the budget" is never by itself
+  a reason to refuse something a route loads lazily. Check the manifest
+  before claiming it; the rules editor carried that wrong claim in a
+  header comment for months.
 - Assets ship inside the binary with immutable cache headers; the shell is
   `no-cache`. Fonts are self-hosted, never fetched.
 - The engine does the heavy lifting (key cursors, index counts, incremental
@@ -1108,6 +1113,9 @@ both under the word "change".
   are the shell's "Layout" group. `matchesQuery` is word-wise: every word
   of the query must appear in the title, breadcrumbs or keywords.
 - Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
+  a `Tooltip` given a `Button` as its **child** nests two `<button>`s and
+  React says so in the console — pass it as `render={<Button … />}`, which
+  is what every tooltip in the inspector does;
   `CommandPalette.Results`/`Items` render functions must return keyed
   elements; a `Tooltip` inside a `<button>` nests buttons (use `title`);
   `Popover.Content` drops unknown props, so a test id goes on a div inside
@@ -1116,6 +1124,56 @@ both under the word "change".
   `Text` takes no `className` (wrap it). A Rust doc comment on a `ts-rs`
   type must not contain `*/` (it ends the generated JSDoc early), so
   patterns are described in words there.
+
+## The code editor (`src/components/code-editor/`)
+
+CodeMirror 6, MIT, behind a `lazy()`. Three files:
+
+- `props.ts` — `CodeEditorProps` and `CodeMark`, written out rather than
+  imported from CodeMirror so an annotator is a plain function over strings
+  and numbers, unit-testable without an editor or a DOM.
+- `editor.tsx` — the real thing. **Nothing imports this directly.** A static
+  import from anywhere pulls ~400 KB of CodeMirror into that chunk.
+- `index.tsx` — `lazy(() => import('./editor'))` plus a `<pre>` fallback in
+  the same face, size and ground, so the swap moves no text. Import from
+  here.
+
+Measured: `editor-*.js` is 404 KB raw / 130 KB gzip in its own chunk; the
+Firestore route chunk grew 3 KB; the first-route budget did not move.
+
+Rules the editor follows:
+
+- **Fills by flexing, never by `height: 100%`.** A percentage height
+  against a parent whose own height is `auto` resolves as `auto`. The
+  create dialog's field box is exactly that — a column that grows to its
+  content with `min-h`/`max-h` — and the editor came out three lines tall
+  inside it. `'&': { flex: 1, minHeight: 0 }` in the theme, and a flex
+  column all the way up.
+- **Every colour is a Kumo token**, so dark mode needs no second palette.
+- **`lineHeight: '1.25rem'`**, the console's own `leading-5`.
+- **The palette is restrained on purpose.** The grid refuses a colour per
+  type because colour in this console means something or it is not spent.
+  Raw JSON is the exception that earns it: a field row writes `string`
+  beside the value, a line of JSON writes only `"269"`, so here the ink is
+  the only thing saying what a value is. One hue — keys carry weight, not
+  hue; strings are the baseline; everything that is **not** a string is
+  blue; null is the absence it describes.
+- **The test id goes on `.cm-content`**, the element that holds the text and
+  the focus. Playwright's `fill()` works on it because it is
+  `contenteditable`, so journeys written against the old textarea kept
+  passing unchanged.
+
+`src/firestore/json-marks.ts` is the Firestore half: the six types JSON
+cannot write down (timestamp, reference, bytes, geopoint, vector, and a
+double that reads whole) marked on the values that carry them, which
+replaced a sentence of prose that was true of three lines in thirty. Its
+`valueSpans` is a forgiving scanner — the text is being typed, so it stops
+at the first thing it cannot read and records only what it actually read;
+an empty span at the end of a half-typed document is a marker on nothing.
+Paths join on `\u0000`, so a key called `a.b` is never confused with `b`
+inside `a`. Container marks stop at the end of their first line: a
+geopoint is four lines of JSON and underlining all four to say one thing
+reads as damage.
 
 ## Repository rules that apply here too
 

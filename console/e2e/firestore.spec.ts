@@ -1842,14 +1842,102 @@ test('the JSON tab spends the panel on the JSON', async ({ page }) => {
   expect(Math.round(below.y - (actions.y + actions.height))).toBeLessThanOrEqual(2)
 
   // And the room went to the text: a document that needed three screens
-  // of a twelve-row box is read without scrolling at all.
-  const shown = await editor.evaluate((el) => ({
-    fits: el.scrollHeight <= el.clientHeight,
-    height: el.clientHeight,
-  }))
+  // of a twelve-row box is read without scrolling at all. Measured on
+  // the editor's scroller, which is the thing that would scroll — the
+  // element holding the text grows to its own content and would say it
+  // fits whatever height the panel gave it.
+  const shown = await editor.evaluate((el) => {
+    const scroller = el.closest('.cm-scroller')!
+    return { fits: scroller.scrollHeight <= scroller.clientHeight, height: scroller.clientHeight }
+  })
   expect(shown.height).toBeGreaterThan(400)
   expect(shown.fits).toBe(true)
   await drop(page.request, 'teams/t_tall')
+})
+
+test('the JSON tab is a code editor, and the types the rows carry are marked on it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await put(page.request, 'teams/t_code', {
+    name: { stringValue: 'Mapping' },
+    // A double that reads whole, and a timestamp: two of Firestore's six
+    // types that JSON has no way of writing down.
+    seats: { doubleValue: 4 },
+    opened: { timestampValue: '2026-09-20T09:00:00Z' },
+    active: { booleanValue: true },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_code&tab=json`)
+  const inspector = page.getByTestId('inspector')
+  const editor = inspector.getByTestId('document-json')
+  await expect(editor).toBeVisible()
+  await expect(inspector.locator('.cm-lineNumbers')).toBeVisible()
+
+  // Ink that separates a key from a string from a number. That is the
+  // one distinction raw JSON writes nowhere else — a field row says
+  // `string` beside the value, a line of JSON says only `"269"` — and
+  // it is the one Firestore punishes you for getting wrong, which is
+  // why this console spends colour here and nowhere else in the panel.
+  const ink = await editor.evaluate((el) => {
+    const found: Record<string, string> = {}
+    for (const span of el.querySelectorAll('span')) {
+      if (span.querySelector('span')) continue
+      const text = (span.textContent ?? '').trim()
+      const style = span.ownerDocument.defaultView!.getComputedStyle(span)
+      if (!(text in found)) found[text] = `${style.color} ${style.fontWeight}`
+    }
+    return found
+  })
+  expect(ink['"name"']).toBeTruthy()
+  expect(ink['"name"']).not.toBe(ink['"Mapping"'])
+  expect(ink['"Mapping"']).not.toBe(ink['4'])
+  expect(ink['true']).not.toBe(ink['"Mapping"'])
+
+  // Two of those four values are typed more precisely than the text can
+  // say, and the sentence that used to claim it of the whole document
+  // now points at the two it is true of.
+  await expect(inspector.getByTestId('carried-types')).toContainText('2 marked')
+  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(2)
+  // Which of the two comes first is the engine's field order, not ours,
+  // so both are read rather than the first one guessed at.
+  const tips: string[] = []
+  for (const index of [0, 1]) {
+    await inspector.locator('.cm-lint-marker').nth(index).hover()
+    await expect(page.locator('.cm-tooltip-lint')).toBeVisible()
+    tips.push((await page.locator('.cm-tooltip-lint').textContent()) ?? '')
+    await inspector.getByTestId('json-actions').hover()
+  }
+  expect(tips.some((tip) => tip.includes('Stays a timestamp'))).toBe(true)
+  expect(tips.some((tip) => tip.includes('Stays a double'))).toBe(true)
+
+  // Minify and Format are `JSON.stringify` with a different indent, and
+  // the editor takes the rewrite without losing what it is looking at.
+  await inspector.getByTestId('minify-json').click()
+  await expect(inspector.locator('.cm-line')).toHaveCount(1)
+  await inspector.getByTestId('format-json').click()
+  await expect(inspector.locator('.cm-line')).toHaveCount(6)
+
+  // A parse error lands on the character that caused it, not in a
+  // sentence under the box.
+  await editor.fill('{"name": "Mapping",,}')
+  await expect(inspector.locator('.cm-lint-marker-error')).toHaveCount(1)
+  await inspector.locator('.cm-lint-marker-error').hover()
+  await expect(page.locator('.cm-tooltip-lint')).toContainText('JSON')
+
+  // And the rows are still the thing being saved: fix it, apply, save.
+  await editor.fill('{"name": "Mapped", "seats": 4, "opened": "2026-09-20T09:00:00.000Z"}')
+  await inspector.getByTestId('apply-json').click()
+  await expect(inspector).toContainText('Fields · 3')
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+
+  // The timestamp survived the round trip through text, which is the
+  // whole claim the marks make.
+  const stored = await page.request.get(`${documents()}/teams/t_code`, { headers: owner })
+  const saved = (await stored.json()) as { fields: Record<string, Record<string, unknown>> }
+  expect(Object.keys(saved.fields.opened ?? {})).toEqual(['timestampValue'])
+  expect(Object.keys(saved.fields.seats ?? {})).toEqual(['doubleValue'])
+  await drop(page.request, 'teams/t_code')
 })
 
 test('the inspector takes the width it is given, and remembers it', async ({ page }) => {
