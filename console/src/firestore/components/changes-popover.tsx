@@ -166,10 +166,16 @@ function Diff({ database, id }: { database: string; id: number }) {
         Reading what changed…
       </Text>
     )
+  // Say what the engine said. This asserted "no longer held", which is
+  // the rarest of the reasons and was wrong for the common one: a
+  // commit listed a second ago has not fallen out of the window, and an
+  // engine older than this panel simply has no diff route — a bare 404
+  // that read as a confident claim about eviction.
   if (diff.isError || !diff.data)
     return (
       <Text variant="secondary" size="sm">
-        What changed is no longer held.
+        Could not read what changed
+        {diff.error instanceof Error ? `: ${diff.error.message}` : '.'}
       </Text>
     )
   if (!diff.data.retained)
