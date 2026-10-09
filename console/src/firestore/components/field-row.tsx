@@ -41,7 +41,7 @@ import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './val
  * is already the one thing in the panel that starts right of the panel's
  * own content column, and every pixel here widens that step.
  */
-export const GUTTER = 'flex h-7 w-4 shrink-0 items-center justify-center'
+export const GUTTER = 'flex h-8 w-4 shrink-0 items-center justify-center'
 
 /**
  * A list of siblings, and the two columns they share: one sized to the
@@ -56,8 +56,14 @@ export const GUTTER = 'flex h-7 w-4 shrink-0 items-center justify-center'
  *
  * Per list, not per document: a nested list sets its own width, which is
  * what keeps depth readable when the names at one level are long.
+ *
+ * The air between the rows is the other half of giving a value a box: a
+ * column of boxes two pixels apart is a wall, and the same column six
+ * pixels apart is a list. Six is what a row can afford — Supabase spends
+ * fifty-three on the same gap, which it can, because a Postgres row is six
+ * columns and never nests.
  */
-export const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-0.5'
+export const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-1.5'
 
 export function FieldRows({
   nodes,
@@ -182,7 +188,7 @@ function FieldRow({
           {named ? (
             <NameInput node={node} onChange={onChange} invalid={problem?.name !== undefined} />
           ) : (
-            <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
+            <span className="flex h-8 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
               {index}
             </span>
           )}
@@ -191,7 +197,7 @@ function FieldRow({
               always kept: appearing would otherwise widen the name column
               and shift every value in the list the first time one is
               edited, which is the jitter this layout is here to end. */}
-          <span className="flex h-7 w-1.5 shrink-0 items-center">
+          <span className="flex h-8 w-1.5 shrink-0 items-center">
             {unsaved && (
               <span
                 className="size-1.5 rounded-full bg-kumo-brand"
@@ -203,11 +209,11 @@ function FieldRow({
         </div>
         <div className="flex min-w-0 items-start gap-1 pr-1">
           {container ? (
-            <span className="flex h-7 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
+            <span className="flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
               {raw ? 'json' : summary(node)}
             </span>
           ) : region ? (
-            <span className="h-7 min-w-0 flex-1" />
+            <span className="h-8 min-w-0 flex-1" />
           ) : (
             <ValueEditor
               node={node}
@@ -377,6 +383,11 @@ function summary(node: DraftNode): string {
  * rest — this is a label you read far more often than you change — and it
  * takes the width of what it says, so the value it belongs to can sit
  * beside it instead of on the next line.
+ *
+ * It is the one thing in the panel set in the interface face rather than
+ * the monospace one. Name and value were both 12 px mono, which is two
+ * kinds of thing in one voice: the eye had nothing to tell the label from
+ * the data it labels, and a column of pairs read as a column of tokens.
  */
 function NameInput({
   node,
@@ -406,7 +417,7 @@ function NameInput({
       // `field-sizing: content` is floored by the `size` attribute, whose
       // default is twenty characters.
       size={1}
-      className={`h-7 w-auto max-w-40 min-w-10 shrink-0 rounded bg-transparent px-1.5 font-mono text-[12px] font-medium text-kumo-default outline-none field-sizing-content placeholder:font-sans placeholder:font-normal placeholder:text-kumo-inactive focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
+      className={`h-8 w-auto max-w-40 min-w-10 shrink-0 rounded bg-transparent px-1.5 text-[13px] font-medium text-kumo-default outline-none field-sizing-content placeholder:font-normal placeholder:text-kumo-inactive focus:bg-kumo-control focus:ring focus:ring-kumo-focus ${
         invalid ? 'ring ring-kumo-danger' : ''
       }`}
       aria-label={node.name ? `${node.name} name` : 'Field name'}

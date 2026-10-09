@@ -31,9 +31,18 @@ export interface KnownField {
  * pointing at an entry of a map used to arm the map's controls as well. And
  * it stays down while a value has focus, so it never lands on the text being
  * typed; `focus-within` is its own, so a Tab into the strip still shows it.
+ *
+ * It floats: its own ground, a hairline and a shadow, rather than the line's
+ * ground borrowed. While values wore nothing, borrowing was invisible. Now
+ * that one wears a box, a strip in the line's own tint cut a notch out of
+ * the end of that box and read as damage rather than as something laid over
+ * it. A thing that occludes has to look like a thing.
+ *
+ * It takes the height of one line and sits at the top of the row, so on a
+ * value that wrapped to three it is still beside the first of them.
  */
 export const ACCESSORY =
-  'pointer-events-none absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit pl-3 opacity-0 group-hover/line:pointer-events-auto group-hover/line:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100'
+  'pointer-events-none absolute top-0.5 right-1 flex h-7 items-center gap-0.5 rounded-md bg-kumo-base px-1 opacity-0 shadow-sm ring ring-kumo-line group-hover/line:pointer-events-auto group-hover/line:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100'
 
 export interface FieldEditing {
   problems: Map<string, NodeProblem>

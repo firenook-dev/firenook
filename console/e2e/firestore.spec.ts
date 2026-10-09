@@ -294,15 +294,27 @@ test('one type scale holds across the grid and the panel beside it', async ({ pa
   // Every value in the panel is set the same way, whatever its type: a
   // string left in the interface face was two pixels larger than the
   // timestamp above it.
-  const values = await page.getByTestId('inspector').evaluate((root) =>
-    [...root.querySelectorAll('input, textarea')]
-      .filter((el) => el.getAttribute('type') !== 'checkbox')
-      .map((el) => {
-        const style = el.ownerDocument.defaultView!.getComputedStyle(el)
-        return `${style.fontSize} ${/mono|plex/i.test(style.fontFamily) ? 'mono' : 'sans'}`
-      }),
-  )
-  expect([...new Set(values)]).toEqual(['12px mono'])
+  const face = (selector: string) =>
+    page.getByTestId('inspector').evaluate(
+      (root, within) =>
+        [...root.querySelectorAll(within)]
+          .filter((el) => el.getAttribute('type') !== 'checkbox')
+          .map((el) => {
+            const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+            return `${style.fontSize} ${/mono|plex/i.test(style.fontFamily) ? 'mono' : 'sans'}`
+          }),
+      selector,
+    )
+  expect([
+    ...new Set(await face('input[aria-label$=" value"], textarea[aria-label$=" value"]')),
+  ]).toEqual(['12px mono'])
+
+  // And a name is not a value. Both were 12 px mono, which is two kinds of
+  // thing in one voice: the eye had nothing to tell a label from the data
+  // it labels, so a column of pairs read as a column of tokens.
+  expect([
+    ...new Set(await face('input[aria-label$=" name"], input[data-testid="new-field-name"]')),
+  ]).toEqual(['13px sans'])
 })
 
 test('a type is named once, and only a column at odds with itself is coloured', async ({
@@ -1178,10 +1190,38 @@ async function clipped(field: Locator): Promise<boolean> {
   )
 }
 
-/** How many text lines a field is drawn across. */
+/** How many text lines a field is drawn across, its own padding discounted. */
 async function lineCount(field: Locator): Promise<number> {
-  const box = await field.boundingBox()
-  return Math.round((box?.height ?? 0) / 18)
+  return field.evaluate((el) => {
+    const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+    const text =
+      el.getBoundingClientRect().height -
+      Number.parseFloat(style.paddingTop) -
+      Number.parseFloat(style.paddingBottom)
+    return Math.round(text / Number.parseFloat(style.lineHeight))
+  })
+}
+
+/**
+ * Whether a value is drawn in a box. The ring belongs to the box around
+ * the field rather than to the field — a growing value is a textarea lying
+ * on top of a mirror of its own text, and only their container knows how
+ * tall the pair ended up — so this looks at the field and what holds it.
+ */
+async function boxedValues(fields: Locator): Promise<boolean[]> {
+  return fields.evaluateAll((all) =>
+    all.map((el) => {
+      const view = el.ownerDocument.defaultView!
+      let node = el
+      for (let depth = 0; depth < 3; depth += 1) {
+        if (view.getComputedStyle(node).boxShadow !== 'none') return true
+        const up = node.parentElement
+        if (up === null) return false
+        node = up
+      }
+      return false
+    }),
+  )
 }
 
 /** A document written straight to the engine, bypassing the console. */
@@ -1323,8 +1363,12 @@ test('an integer and a double are told apart, and stay that way', async ({ page 
   })
 
   // And the form is the editor's to change, which is the other half of it.
+  // It is a control, so it lives in the row's strip with every other one:
+  // as the word at the end of the value it sat exactly where the strip is
+  // drawn, and once values wore boxes the strip covered it and nothing
+  // could reach it.
   await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_numbers`)
-  await inspector.getByLabel('whole is a double').click()
+  await press(inspector.getByLabel('whole is a double'))
   await expect(inspector.getByLabel('whole is an integer')).toHaveText('integer')
   await inspector.getByTestId('save-document').click()
   await expect(page.getByText('Document saved')).toBeVisible()
@@ -1400,23 +1444,34 @@ test('a new field completes from the collection, with the type the collection gi
   await drop(page.request, 'teams/t_sparse')
 })
 
-test('a document at rest is text, and its controls arrive under the pointer', async ({ page }) => {
+test('every value wears a box, and the controls still arrive under the pointer', async ({
+  page,
+}) => {
   await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
   const inspector = page.getByTestId('inspector')
   await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
 
-  // A value is read far more often than it is changed, so at rest it is
-  // text. Filled boxes stacked down a 420 px column is what made a document
-  // of a dozen short strings read as a form to fill in, and the panel had
-  // thirty-seven of them with eighty-six buttons between them.
-  const chrome = await inspector.locator('input[aria-label$=" value"]').evaluateAll((inputs) =>
-    inputs.map((el) => {
-      const style = el.ownerDocument.defaultView!.getComputedStyle(el)
-      return style.boxShadow !== 'none' || style.borderTopWidth !== '0px'
-    }),
-  )
-  expect(chrome.length).toBeGreaterThan(5)
-  expect(chrome.filter(Boolean)).toEqual([])
+  // A value used to wear nothing at rest, on the rule that it is text you
+  // read far more often than you change. The rule was wrong about what the
+  // reader needs to know: a bordered control says "you can type here"
+  // before anybody tries one, and a column of bare text says the opposite,
+  // so the panel read as a dump of a document rather than an editor of one.
+  // Nothing else argued otherwise either — the type menu, the only hint
+  // that a value's type can be changed at all, is under the pointer.
+  const values = inspector.locator('input[aria-label$=" value"], textarea[aria-label$=" value"]')
+  const drawn = await boxedValues(values)
+  expect(drawn.length).toBeGreaterThan(5)
+  expect(drawn.filter((box) => !box)).toEqual([])
+
+  // The box costs nothing — a ring is painted with a shadow, so a boxed
+  // line is exactly as tall as a bare one. What the old rule was really
+  // protecting against was boxes stacked two pixels apart, which is a wall
+  // and not a list, and the answer to that is the air between them.
+  const gap = await inspector
+    .getByTestId('field-row')
+    .first()
+    .evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el.parentElement!).rowGap)
+  expect(Number.parseFloat(gap)).toBeGreaterThanOrEqual(4)
 
   // The controls that are not the value keep their place in the row and
   // are drawn when the row is pointed at, delete loudest among them.
@@ -1581,4 +1636,14 @@ test('the inspector takes the width it is given, and remembers it', async ({ pag
   // And the edge gives it back: a double-click is the way home.
   await grip.dblclick()
   expect(await width()).toBe(420)
+
+  // Home is a share of the window, not a number picked on a laptop. The
+  // flat 420 this started as is sixteen per cent of a 2557 px display,
+  // against the twenty-six per cent Supabase gives the same panel — snug
+  // on the machine it was chosen on and stingy on the one it shipped to.
+  await page.evaluate(() => localStorage.removeItem('firenook.console.inspector-width'))
+  await page.setViewportSize({ width: 2560, height: 900 })
+  await page.reload()
+  await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
+  expect(await width()).toBeGreaterThan(640)
 })

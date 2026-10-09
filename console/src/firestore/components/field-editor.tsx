@@ -221,7 +221,7 @@ function AddField({
         placeholder="New field name"
         spellCheck={false}
         autoComplete="off"
-        className="h-7 min-w-0 flex-1 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line outline-none placeholder:font-sans placeholder:text-kumo-inactive focus:ring-kumo-focus"
+        className="h-8 min-w-0 flex-1 rounded-md bg-kumo-control px-2 text-[13px] text-kumo-default ring ring-kumo-line outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus"
         aria-label="New field name"
         data-testid="new-field-name"
       />
@@ -230,7 +230,7 @@ function AddField({
           render={
             <button
               type="button"
-              className="group flex h-7 shrink-0 items-center rounded px-0.5 hover:bg-kumo-tint"
+              className="group flex h-8 shrink-0 items-center rounded px-0.5 hover:bg-kumo-tint"
               aria-label={`New field type: ${type}`}
             >
               <TypeBadge type={type} menu />

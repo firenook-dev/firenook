@@ -481,6 +481,16 @@ the grip, with a double-click home and arrow keys for the keyboard. At
 620 px the pairings document stops wrapping entirely, which is more than
 any arrangement of the two columns can buy.
 
+**It opens at a share of the window, not a number.** `defaultWidth()` is
+28% of `innerWidth`, floored at 420 and capped at 760. The flat 420 it
+replaces was picked on a 1440 px laptop and shipped to a 2557 px display,
+where it is **16% of the window against the 26% Supabase gives the same
+panel** — snug where it was chosen and stingy where it ended up. The floor
+means nothing changes below ~1500 px, which is also why the journey's
+`toBe(420)` still holds; the share only shows above it. It reads the
+*window*, not the space beside the grid, because the first panel opens
+before there is a layout to measure.
+
 **The panel is `xl:relative`, never `xl:static`.** The two lay out
 identically in the flow, but only a positioned element is a containing
 block, and under `static` the grip absolutely positioned on its edge
@@ -525,27 +535,42 @@ string, a vector, a container in `raw` mode — cannot share the line, so it
 goes underneath at the panel's full width (`valueIsRegion`). A container
 says `{ 3 fields }` on its own line whether it is open or shut.
 
-**Everything in a row earns its chrome one state at a time** — the name,
-and the value too. This is the third place the rule applies (the path field
-was the first) and it is now the console's rule, not a tweak: nothing at
-rest, a ground under the pointer, an outline for focus alone, and an
-outline you did not ask for means the value does not parse. The first cut
-of the tree put every value in a filled, ringed box and every control on
-every row, and a real fourteen-field document measured **37 outlined boxes
-and 86 buttons** in one 420 px column — it read as a form to fill in rather
-than a document to read. At rest it is now two boxes (the one textarea and
-the add-field line) and the buttons left are the type chips, the disclosure
-carets and the switches, which are information or structure. `ACCESSORY` in
-`field-context.ts` is the one strip holding all the rest.
+**A value wears a box; a name does not.** The rule used to be "nothing at
+rest" for both, on the grounds that a value is read far more often than it
+is changed — and it was wrong about what the reader needs to know. Measured
+against Supabase's row editor (668 px drawer, 33 px controls, 86 px of
+pitch per field), the one thing of theirs that was free to copy was the
+bordered control: it says *you can type here* before anybody tries one, and
+a column of bare text says the opposite, so the panel read as a dump of a
+document rather than an editor of one. Nothing else argued otherwise
+either — the type menu, the only hint that a value's type can be changed at
+all, is under the pointer.
+
+The box genuinely costs nothing vertically: a Tailwind `ring` is painted
+with a box-shadow, so a boxed line is exactly as tall as a bare one. What
+the old rule was really protecting against was **37 boxes stacked 2 px
+apart**, which is a wall and not a list — so the air went up with the box,
+to a 28 px line and a 6 px `gap-y` (Supabase spends 53 px of air per field,
+which it can: a Postgres row is six columns and never nests). The name
+stays bare, and moved to **13 px interface face** against the value's 12 px
+mono: both in one voice gave the eye nothing to tell a label from the data
+it labels.
+
+Buttons at rest are still only the type chips, the disclosure carets and
+the switches. `ACCESSORY` in `field-context.ts` is the one strip holding
+all the rest.
 
 **The strip overlays the end of the line; it does not reserve it.** Holding
 its place cost **93 of a line's 405 px** — a quarter of every row, kept
 open at rest for buttons that are not drawn at rest — and that was exactly
-the width a 24-character timestamp was being truncated by. It is
-`absolute`, inherits the line's own ground (`bg-inherit`, and
-`bg-kumo-tint` is opaque, so there is no seam), and is
-`pointer-events-none` until shown, or an invisible button would swallow
-clicks on the end of a value. Two consequences worth knowing:
+the width a 24-character timestamp was being truncated by. It **floats**:
+its own ground, a hairline and a shadow, one line tall and pinned to the
+top of the row. It used to borrow the line's ground (`bg-inherit`), which
+was invisible while values wore nothing and became a notch cut out of the
+end of the box the moment they did — a thing that occludes has to look like
+a thing. It is `pointer-events-none` until shown, or an invisible button
+would swallow clicks on the end of a value. Three consequences worth
+knowing:
 
 - It answers to the **line**, not the row, because a row contains its
   children — `group/line`, not `group/row`. Pointing at one entry of a map
@@ -558,22 +583,25 @@ clicks on the end of a value. Two consequences worth knowing:
   pressing one of its controls. `press()` in `firestore.spec.ts` does that;
   a bare `.click()` hangs on actionability, which is the right answer —
   no person can click a control nothing is pointing at.
+- Anything the strip can cover must be a *word*, not a control. It covers
+  the end of every value box, so a control placed there is unreachable:
+  hovering to reach it is what raises the thing hiding it.
 
 The hover ground belongs to the **line**, not to each input. A column of
 twenty one-line rows has to answer "which field am I on", and grounding the
-value alone answered "which control" instead. So `valueInputClass` keeps
-focus chrome only.
+value alone answered "which control" instead.
 
-A box is how a *region* says how much room it has, so a textarea keeps its
-outline (`valueAreaClass`) while a line does not. A sized value's box follows
-its text (`field-sizing: content`, floored by the class because the
-property's floor is the `size` attribute's default of twenty characters),
-so the control saying whether it is an integer or a double stays beside the
-number instead of being stranded at the panel's edge. `valueInputClass`
-names no width at all: Tailwind orders its own utilities, so a `w-auto`
-appended by a caller loses to a `w-full` declared in the shared class and
-the caller's intent vanishes. Remember too that `html` is 14 px here, so
-`max-w-40` is 140 px, not 160.
+A line and a region are now **one column of boxes** in the same ink
+(`Line` and `valueAreaClass`); the only difference between them is how many
+lines they hold. Every line box is full width, which is what keeps the
+column a column — and that is why a value's own word (`double`, `ref`,
+`18 d ago`) is **inside** the box at its end, with `lat`/`lng` inside at
+its start. Outside, the control had to be content-wide to keep value and
+word together, which meant boxes in eight different widths; `SIZED` and
+`field-sizing: content` are gone from the line editors with it. A leading
+word is not an option for anything but a unit, because it would push the
+text right and break the value column the whole layout exists for.
+Remember that `html` is 14 px here, so `max-w-40` is 140 px, not 160.
 
 Once a panel is that quiet, **the footer's count needs somewhere to point**:
 a field the next Save will write carries a small ember dot beside its name.
@@ -586,10 +614,14 @@ keeps its ground; on a field row it lives in the strip, because **the type
 is a control and the value already says what it is** — a number is digits,
 a boolean is a switch, a map counts its own entries. Where the text alone
 is ambiguous the editor says so in a word of its own instead: `double`,
-`ref`, `lat`/`lng`, `11 bytes`, `3 dimensions`, `18 d ago`. Any value with
-a word after it is sized to its text (`SIZED` in `value-editors.tsx`), so
-the word stays beside it rather than at the far edge of the panel with a
-desert in between.
+`ref`, `lat`/`lng`, `11 bytes`, `3 dimensions`, `18 d ago`. **A word says;
+the strip changes.** The integer/double toggle was the one control that
+broke that rule, and it only worked while the end of a value was somewhere
+the strip did not reach — once values wore boxes the two wanted the same
+pixels, the strip won, and nothing could click it. It is now `NumberForm`
+in `ValueControls`, drawn as the word it covers; the word itself is a
+plain span. A control nothing can click is worse than one that is only
+there under the pointer, which is where this row keeps its controls.
 
 **Adding a field is one line, and the line knows the collection.**
 `useKnownFields` reads the grid's own page query — same key, same cache, no

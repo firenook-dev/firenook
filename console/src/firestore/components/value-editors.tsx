@@ -30,40 +30,63 @@ export interface EditorProps {
 }
 
 /**
- * A value is text you read far more often than you change, so it wears its
- * chrome one state at a time — the same rule as the path field and the
- * field name. Nothing at rest, an outline for focus. Fourteen filled boxes
- * stacked in a 420 px column is what made a document of fourteen short
- * strings read as a form to fill in.
- *
- * The ground under the pointer belongs to the line, not to this: a row of
- * one line is the unit you are pointing at, and grounding the value alone
- * answered "which control" when the question is "which field".
- *
- * Being wrong is the exception that always shows: an outline you did not
- * ask for means the value does not parse.
- */
-export function valueInputClass(invalid: boolean): string {
-  // No width: Tailwind orders its own utilities, so a `w-auto` appended by
-  // a caller loses to a `w-full` declared here, and the caller's intent is
-  // silently dropped. Each editor says how wide it is.
-  return `h-7 rounded-md px-1.5 font-mono text-[12px] text-kumo-default outline-none ${
-    invalid
-      ? 'bg-kumo-control ring ring-kumo-danger'
-      : 'bg-transparent focus:bg-kumo-control focus:ring focus:ring-kumo-focus'
-  }`
-}
-
-/**
  * The metrics a growing field and the mirror sizing it must agree on, down
  * to the pixel, or the box is the wrong height for its text. One line of
- * it is 24.5 px, the height every other editor on the line already is.
+ * it is 28 px, the height every other editor on the line already is.
  */
 // `break-word`, not `anywhere`: the two wrap a long token identically, but
 // `anywhere` counts those break opportunities towards the min-content
 // width, which collapses a content-sized field to a single character.
 const WRAP_BOX =
-  'min-w-0 px-1.5 py-[3.25px] font-mono text-[12px] leading-[18px] whitespace-pre-wrap [overflow-wrap:break-word]'
+  'min-w-0 px-1.5 py-[5px] font-mono text-[12px] leading-[18px] whitespace-pre-wrap [overflow-wrap:break-word]'
+
+/**
+ * The box a line of value lives in.
+ *
+ * A value used to wear nothing at rest, on the rule that it is text you read
+ * far more often than you change. The rule was wrong about what the reader
+ * needs to know: a bordered control says "you can type here" before anybody
+ * tries one, and a column of bare text says the opposite, so the panel read
+ * as a dump of a document rather than an editor of one. Nothing else argued
+ * otherwise either — the type menu, the only hint that a value's type can be
+ * changed at all, is under the pointer and not on the line.
+ *
+ * The box costs nothing. A ring is painted with a shadow, so a boxed line is
+ * exactly as tall as a bare one; what the old rule was really protecting
+ * against was fourteen full-width boxes stacked two pixels apart, and the
+ * answer to that is the air between them, which is now six.
+ *
+ * Focus still has a state of its own, and being wrong still always shows.
+ */
+function Line({
+  invalid,
+  lead,
+  word,
+  children,
+}: {
+  invalid: boolean
+  /** A label the value reads on from, inside the box: `lat`, `lng`. */
+  lead?: ReactNode
+  /** The value's own word, inside the box at its end. */
+  word?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={`flex min-w-0 flex-1 items-start rounded-md bg-kumo-control ring ${
+        invalid ? 'ring-kumo-danger' : 'ring-kumo-line focus-within:ring-kumo-focus'
+      }`}
+    >
+      {lead}
+      {children}
+      {word}
+    </div>
+  )
+}
+
+/** One line of value, inside the box: the box carries the ground and the ring. */
+const INPUT =
+  'h-8 min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none'
 
 /**
  * A value that can be any length wraps rather than running off the end of
@@ -73,13 +96,19 @@ const WRAP_BOX =
  * anything. An `input` cannot wrap at all, which is why this is a
  * `textarea` that happens to hold one line most of the time.
  */
-export function wrapClass(invalid: boolean): string {
-  return `${WRAP_BOX} col-start-1 row-start-1 resize-none overflow-hidden rounded-md text-kumo-default outline-none ${
-    invalid
-      ? 'bg-kumo-control ring ring-kumo-danger'
-      : 'bg-transparent focus:bg-kumo-control focus:ring focus:ring-kumo-focus'
-  }`
-}
+const WRAP_TEXT = `${WRAP_BOX} col-start-1 row-start-1 resize-none overflow-hidden bg-transparent text-kumo-default outline-none`
+
+/**
+ * A value followed by a word of its own — `double`, `ref`, `18 d ago`. The
+ * word used to sit outside the control, which meant the control had to be
+ * content-wide to keep the two together, which meant a column of boxes in
+ * eight different widths. Inside the box, at its end, the word stays beside
+ * its value and the column stays a column.
+ */
+const WORD = 'flex h-8 shrink-0 items-center pr-1.5 pl-1 font-mono text-[11px] text-kumo-subtle'
+
+/** What a value reads on from, where it takes two of them to mean anything. */
+const LEAD = 'flex h-8 shrink-0 items-center pl-2 font-mono text-[11px] text-kumo-inactive'
 
 /**
  * A field that grows with what is in it, in every browser. An invisible
@@ -87,18 +116,9 @@ export function wrapClass(invalid: boolean): string {
  * top of it. `field-sizing: content` says this in one word but not
  * everywhere yet, and a value cut short in Firefox is still cut short.
  */
-export function Grows({
-  text,
-  fit,
-  children,
-}: {
-  text: string
-  /** Content-wide until it has to wrap, for a value with a word after it. */
-  fit?: boolean | undefined
-  children: ReactNode
-}) {
+export function Grows({ text, children }: { text: string; children: ReactNode }) {
   return (
-    <div className={`grid min-w-0 ${fit === true ? 'w-fit max-w-full min-w-24' : 'flex-1'}`}>
+    <div className="grid min-w-0 flex-1">
       <span className={`${WRAP_BOX} invisible col-start-1 row-start-1`} aria-hidden="true">
         {`${text} `}
       </span>
@@ -119,8 +139,9 @@ export function valueIsRegion(node: DraftNode): boolean {
 }
 
 /**
- * A box, on the other hand, says how much room there is, so the editors
- * that are a region rather than a line keep their outline at rest.
+ * A region says how much room there is the same way a line does, in the
+ * same ink: the two are one column of boxes down the panel, and the only
+ * difference between them is how many lines they hold.
  */
 export function valueAreaClass(invalid: boolean): string {
   return `w-full resize-y rounded-md bg-kumo-control px-2 py-1 font-mono text-[12px] leading-5 text-kumo-default ring outline-none focus:ring-kumo-focus ${
@@ -128,15 +149,7 @@ export function valueAreaClass(invalid: boolean): string {
   }`
 }
 
-const NOTE = 'px-1.5 font-mono text-[11px] text-kumo-subtle'
-
-/**
- * A value that is followed by a word of its own — `double`, `ref`, `18 d
- * ago`, `11 bytes` — takes the width of its text rather than the width of
- * the line, so the word stays beside it instead of at the far edge of the
- * panel with a desert in between.
- */
-const SIZED = 'w-auto max-w-full field-sizing-content'
+const NOTE = 'px-1.5 pt-0.5 font-mono text-[11px] text-kumo-subtle'
 
 export function ValueEditor(props: EditorProps) {
   switch (props.node.type) {
@@ -178,40 +191,40 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
   const box = valueIsRegion(node)
   const line = useFocusTarget<HTMLTextAreaElement>(node.id)
   const area = useFocusTarget<HTMLTextAreaElement>(node.id)
+  if (box)
+    return (
+      <textarea
+        ref={area}
+        value={node.text}
+        onChange={(event) => onChange({ ...node, text: event.target.value })}
+        rows={Math.min(10, Math.max(2, lines))}
+        spellCheck={false}
+        className={valueAreaClass(invalid)}
+        aria-label={`${label} value`}
+      />
+    )
   return (
-    <div className="flex min-w-0 flex-1 items-start gap-1">
-      {box ? (
+    <Line invalid={invalid}>
+      <Grows text={node.text}>
         <textarea
-          ref={area}
+          ref={line}
+          rows={1}
           value={node.text}
           onChange={(event) => onChange({ ...node, text: event.target.value })}
-          rows={Math.min(10, Math.max(2, lines))}
+          // Enter still means "done with this one"; a newline — which
+          // turns the value into a region below the line — is Shift.
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.shiftKey) return
+            event.preventDefault()
+            next()
+          }}
           spellCheck={false}
-          className={valueAreaClass(invalid)}
+          placeholder={'""'}
+          className={`${WRAP_TEXT} placeholder:text-kumo-inactive`}
           aria-label={`${label} value`}
         />
-      ) : (
-        <Grows text={node.text}>
-          <textarea
-            ref={line}
-            rows={1}
-            value={node.text}
-            onChange={(event) => onChange({ ...node, text: event.target.value })}
-            // Enter still means "done with this one"; a newline — which
-            // turns the value into a region below the line — is Shift.
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey) return
-              event.preventDefault()
-              next()
-            }}
-            spellCheck={false}
-            placeholder={'""'}
-            className={`${wrapClass(invalid)} placeholder:text-kumo-inactive`}
-            aria-label={`${label} value`}
-          />
-        </Grows>
-      )}
-    </div>
+      </Grows>
+    </Line>
   )
 }
 
@@ -243,6 +256,17 @@ export function ValueControls({ node, onChange, label }: Omit<EditorProps, 'inva
         />
       )
     }
+    case 'number': {
+      const form = numberForm(node)
+      return (
+        <NumberForm
+          forced={form.forced}
+          integer={form.integer}
+          label={label}
+          onPick={() => onChange({ ...node, integer: !form.integer })}
+        />
+      )
+    }
     case 'timestamp':
       return <TimestampPicker node={node} onChange={onChange} label={label} />
     case 'reference':
@@ -257,7 +281,20 @@ function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
   const ref = useFocusTarget<HTMLInputElement>(node.id)
   const form = numberForm(node)
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
+    <Line
+      invalid={invalid}
+      word={
+        /* Firestore stores an integer and a double as different types, and
+           `3` is how both of them are written. Nothing in the text can say
+           which this is, so the editor has to — and did not: every double
+           that read whole came back an integer the moment it was touched.
+           Saying it is this word's job; changing it is the strip's, like
+           every other control a row has. */
+        <span className={WORD} data-testid="number-form">
+          {form.integer ? 'integer' : 'double'}
+        </span>
+      }
+    >
       <input
         ref={ref}
         value={node.text}
@@ -265,41 +302,56 @@ function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
         onKeyDown={onEnterNext(next)}
         spellCheck={false}
         inputMode="decimal"
-        // `field-sizing: content` floors the box at the `size` attribute,
-        // whose default is twenty characters — the floor here is the class.
-        size={1}
-        // A number is short and the control beside it says how it is
-        // stored, so the box follows the digits instead of running the
-        // width of the panel and stranding that control at the far edge.
-        className={`${valueInputClass(invalid)} ${SIZED} min-w-10`}
+        className={INPUT}
         aria-label={`${label} value`}
       />
-      {/* Firestore stores an integer and a double as different types, and
-          `3` is how both of them are written. Nothing in the text can say
-          which this is, so the editor has to — and did not: every double
-          that read whole came back an integer the moment it was touched. */}
-      <button
-        type="button"
-        disabled={form.forced}
-        onClick={() => onChange({ ...node, integer: !form.integer })}
-        className="h-7 shrink-0 rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle outline-none hover:bg-kumo-tint focus-visible:ring focus-visible:ring-kumo-focus disabled:text-kumo-inactive"
-        title={
-          form.forced
-            ? 'A number with a fraction is always a double'
-            : 'Firestore stores integers and doubles as different types'
-        }
-        aria-label={`${label} is ${form.integer ? 'an integer' : 'a double'}`}
-        data-testid="number-form"
-      >
-        {form.integer ? 'integer' : 'double'}
-      </button>
-    </div>
+    </Line>
+  )
+}
+
+/**
+ * Integer or double, where the strip is. It is drawn as the word in the box
+ * it covers, so pointing at the row lights that word up rather than putting
+ * something else in its place.
+ *
+ * It used to be the word: a button at the end of the value, which worked
+ * only while the end of the value was somewhere the strip did not reach.
+ * Once every value wore a box the two wanted the same pixels, and the strip
+ * won — a control nothing can click is worse than one that is only there
+ * under the pointer, which is where this row keeps its controls anyway.
+ */
+function NumberForm({
+  forced,
+  integer,
+  label,
+  onPick,
+}: {
+  forced: boolean
+  integer: boolean
+  label: string
+  onPick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={forced}
+      onClick={onPick}
+      className="flex h-6 shrink-0 items-center rounded px-1 font-mono text-[11px] text-kumo-subtle outline-none hover:bg-kumo-tint hover:text-kumo-default focus-visible:ring focus-visible:ring-kumo-focus disabled:text-kumo-inactive disabled:hover:bg-transparent disabled:hover:text-kumo-inactive"
+      title={
+        forced
+          ? 'A number with a fraction is always a double'
+          : 'Firestore stores integers and doubles as different types'
+      }
+      aria-label={`${label} is ${integer ? 'an integer' : 'a double'}`}
+    >
+      {integer ? 'integer' : 'double'}
+    </button>
   )
 }
 
 function BooleanEditor({ node, onChange, label }: EditorProps) {
   return (
-    <div className="flex h-7 min-w-0 flex-1 items-center">
+    <div className="flex h-8 min-w-0 flex-1 items-center">
       <Switch
         variant="neutral"
         size="sm"
@@ -312,9 +364,13 @@ function BooleanEditor({ node, onChange, label }: EditorProps) {
   )
 }
 
+/**
+ * The one value with nothing to type into. It keeps the line's height and
+ * not its box: a box that cannot be typed in is a worse lie than no box.
+ */
 function NullEditor() {
   return (
-    <span className="flex h-7 min-w-0 flex-1 items-center px-1.5 font-mono text-[12px] text-kumo-inactive">
+    <span className="flex h-8 min-w-0 flex-1 items-center px-1.5 font-mono text-[12px] text-kumo-inactive">
       null
     </span>
   )
@@ -326,23 +382,20 @@ function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
   const when = new Date(node.text.trim())
   const known = !Number.isNaN(when.getTime())
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
+    <Line
+      invalid={invalid}
+      word={known ? <span className={WORD}>{relativeTime(when.toISOString())}</span> : undefined}
+    >
       <input
         ref={ref}
         value={node.text}
         onChange={(event) => onChange({ ...node, text: event.target.value })}
         onKeyDown={onEnterNext(next)}
         spellCheck={false}
-        size={1}
-        className={`${valueInputClass(invalid)} ${SIZED} min-w-24`}
+        className={INPUT}
         aria-label={`${label} value`}
       />
-      {known && (
-        <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
-          {relativeTime(when.toISOString())}
-        </span>
-      )}
-    </div>
+    </Line>
   )
 }
 
@@ -441,8 +494,13 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
 
   return (
     <div className="min-w-0 flex-1">
-      <div className="flex items-start gap-1">
-        <Grows text={node.text} fit>
+      <Line
+        invalid={invalid}
+        /* A path is the one value that reads exactly like a string, so
+           this type keeps a word the way a double does. */
+        word={node.text.trim() === '' ? undefined : <span className={WORD}>ref</span>}
+      >
+        <Grows text={node.text}>
           <textarea
             ref={ref}
             rows={1}
@@ -464,16 +522,11 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
             spellCheck={false}
             autoComplete="off"
             placeholder="users/u_9f3k2"
-            className={`${wrapClass(invalid)} placeholder:font-sans placeholder:text-kumo-inactive`}
+            className={`${WRAP_TEXT} placeholder:font-sans placeholder:text-kumo-inactive`}
             aria-label={`${label} value`}
           />
         </Grows>
-        {/* A path is the one value that reads exactly like a string, so
-            this type keeps a word the way a double does. */}
-        {node.text.trim() !== '' && (
-          <span className={`flex h-7 shrink-0 items-center ${NOTE}`}>ref</span>
-        )}
-      </div>
+      </Line>
       {open && matches.length > 0 && (
         <Completions anchor={ref} testId="reference-completions">
           {matches.map((id) => (
@@ -516,16 +569,9 @@ function GeopointEditor({ node, onChange, label, invalid }: EditorProps) {
   const latitude = comma === -1 ? node.text : node.text.slice(0, comma)
   const longitude = comma === -1 ? '' : node.text.slice(comma + 1).trim()
   const set = (lat: string, lng: string) => onChange({ ...node, text: `${lat}, ${lng}` })
-  const part = `h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none`
-  const group = `flex h-7 w-28 min-w-0 shrink items-center rounded-md ${
-    invalid
-      ? 'bg-kumo-control ring ring-kumo-danger'
-      : 'focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus'
-  }`
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
-      <div className={group}>
-        <span className="pl-2 font-mono text-[11px] text-kumo-inactive">lat</span>
+    <div className="flex min-w-0 flex-1 items-start gap-1">
+      <Line invalid={invalid} lead={<span className={LEAD}>lat</span>}>
         <input
           ref={ref}
           value={latitude}
@@ -533,22 +579,21 @@ function GeopointEditor({ node, onChange, label, invalid }: EditorProps) {
           onKeyDown={onEnterNext(next)}
           spellCheck={false}
           inputMode="decimal"
-          className={part}
+          className={INPUT}
           aria-label={`${label} value`}
         />
-      </div>
-      <div className={group}>
-        <span className="pl-2 font-mono text-[11px] text-kumo-inactive">lng</span>
+      </Line>
+      <Line invalid={invalid} lead={<span className={LEAD}>lng</span>}>
         <input
           value={longitude}
           onChange={(event) => set(latitude, event.target.value.replace(/,/g, ''))}
           onKeyDown={onEnterNext(next)}
           spellCheck={false}
           inputMode="decimal"
-          className={part}
+          className={INPUT}
           aria-label={`${label} longitude`}
         />
-      </div>
+      </Line>
     </div>
   )
 }
@@ -559,24 +604,26 @@ function BytesEditor({ node, onChange, label, invalid }: EditorProps) {
   const text = node.text.trim()
   return (
     <div className="min-w-0 flex-1">
-      <Grows text={node.text}>
-        <textarea
-          ref={ref}
-          rows={1}
-          value={node.text}
-          onChange={(event) => onChange({ ...node, text: event.target.value })}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return
-            event.preventDefault()
-            next()
-          }}
-          spellCheck={false}
-          placeholder="base64"
-          className={`${wrapClass(invalid)} placeholder:font-sans placeholder:text-kumo-inactive`}
-          aria-label={`${label} value`}
-        />
-      </Grows>
-      {/* A word goes beside a value — `double`, `ref`, `18 d ago`. This is
+      <Line invalid={invalid}>
+        <Grows text={node.text}>
+          <textarea
+            ref={ref}
+            rows={1}
+            value={node.text}
+            onChange={(event) => onChange({ ...node, text: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              next()
+            }}
+            spellCheck={false}
+            placeholder="base64"
+            className={`${WRAP_TEXT} placeholder:font-sans placeholder:text-kumo-inactive`}
+            aria-label={`${label} value`}
+          />
+        </Grows>
+      </Line>
+      {/* A word goes inside the box — `double`, `ref`, `18 d ago`. This is
           not a word but a note, and an unbounded one: the decoded text can
           be forty characters, which is width the bytes themselves need. */}
       {text !== '' && !invalid && (

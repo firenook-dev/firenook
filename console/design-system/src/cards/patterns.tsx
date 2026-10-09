@@ -663,8 +663,12 @@ function DataGrid() {
  * offsets spread over 58 px, so reading down the values meant following a
  * staircase. `max-content` finds the width with no measuring, and each row
  * is a `subgrid` so it can still paint its own ground.
+ *
+ * The air between the rows is the other half of giving a value a box: a
+ * column of boxes two pixels apart is a wall, and the same column six
+ * pixels apart is a list.
  */
-const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-0.5'
+const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-1.5'
 
 function FieldRow({
   name,
@@ -711,15 +715,15 @@ function FieldRow({
         }`}
       >
         <div className="flex items-start gap-1 pl-0.5">
-          <span className="flex h-7 w-4 shrink-0 items-center justify-center text-kumo-subtle">
+          <span className="flex h-8 w-4 shrink-0 items-center justify-center text-kumo-subtle">
             {children ? <CaretDownIcon size={12} /> : null}
           </span>
           {index === undefined ? (
-            <span className="flex h-7 shrink-0 items-center rounded px-1.5 font-mono text-[12px] font-medium">
+            <span className="flex h-8 shrink-0 items-center rounded px-1.5 text-[13px] font-medium">
               {name}
             </span>
           ) : (
-            <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
+            <span className="flex h-8 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
               {index}
             </span>
           )}
@@ -727,7 +731,7 @@ function FieldRow({
               own accent, and this is what it is about to write. Its place
               is always kept, or the name column would widen and shift
               every value the first time one was edited. */}
-          <span className="flex h-7 w-1.5 shrink-0 items-center">
+          <span className="flex h-8 w-1.5 shrink-0 items-center">
             {unsaved && <span className="size-1.5 rounded-full bg-kumo-brand" />}
           </span>
         </div>
@@ -778,33 +782,51 @@ function Nested({ children }: { children: ReactNode }) {
  * anything. An `input` cannot wrap at all, so these are `textarea`s that
  * hold one line most of the time.
  *
- * A value is read far more often than it is changed, so at rest it is
- * text, and it takes an outline on focus alone. Filled boxes stacked down a
- * 420 px column are what made a document of a dozen short strings read as a
- * form to fill in. The ground under the pointer is the line's, not this:
- * grounding the value alone answers "which control" when the question is
- * "which field". A region keeps its box, because a box is how a region says
- * how much room there is.
+ * A value wears a box at rest. It did not, on the rule that it is text you
+ * read far more often than you change, and the rule was wrong about what
+ * the reader needs to know: a bordered control says "you can type here"
+ * before anybody tries one, and a column of bare text says the opposite.
+ * The box costs nothing — a ring is painted with a shadow, so a boxed line
+ * is exactly as tall as a bare one — and what the old rule was protecting
+ * against was boxes stacked two pixels apart, which is a question of air.
+ *
+ * The word a value is followed by — `double`, `ref`, `2 mo ago` — goes
+ * inside the box at its end, and the label two of them read on from —
+ * `lat`, `lng` — inside at its start. Outside, the control had to be
+ * content-wide to keep the two together, which meant a column of boxes in
+ * eight different widths.
  */
 function Value({
   children,
+  lead,
+  word,
   state = 'rest',
   className = '',
 }: {
   children: ReactNode
-  state?: 'rest' | 'focus' | 'area'
+  lead?: ReactNode
+  word?: ReactNode
+  state?: 'rest' | 'focus'
   className?: string
 }) {
-  const chrome = {
-    rest: '',
-    focus: 'bg-kumo-control ring ring-kumo-focus',
-    area: 'bg-kumo-control ring ring-kumo-line',
-  }[state]
+  const ring = state === 'focus' ? 'ring-kumo-focus' : 'ring-kumo-line'
   return (
     <div
-      className={`min-h-7 min-w-0 rounded-md px-1.5 py-[3.25px] font-mono text-[12px] leading-[18px] whitespace-pre-wrap text-kumo-default [overflow-wrap:break-word] ${chrome} ${className}`}
+      className={`flex min-w-0 flex-1 items-start rounded-md bg-kumo-control ring ${ring} ${className}`}
     >
-      {children}
+      {lead !== undefined && (
+        <span className="flex h-8 shrink-0 items-center pl-2 font-mono text-[11px] text-kumo-inactive">
+          {lead}
+        </span>
+      )}
+      <div className="min-w-0 flex-1 px-1.5 py-[5px] font-mono text-[12px] leading-[18px] whitespace-pre-wrap text-kumo-default [overflow-wrap:break-word]">
+        {children}
+      </div>
+      {word !== undefined && (
+        <span className="flex h-8 shrink-0 items-center pr-1.5 pl-1 font-mono text-[11px] text-kumo-subtle">
+          {word}
+        </span>
+      )}
     </div>
   )
 }
@@ -812,7 +834,7 @@ function Value({
 /** What a map or an array says on its own line, open or shut. */
 function Summary({ children }: { children: ReactNode }) {
   return (
-    <span className="flex h-7 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
+    <span className="flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
       {children}
     </span>
   )
@@ -823,7 +845,7 @@ function Inspector() {
     <Stack>
       <Section
         title="Inspector"
-        note="The selected document as one recursive row: a name, a type, a value, in two columns a list of siblings shares — the panel itself drags wider when a document wants more room. Maps and arrays open in place rather than falling back to a JSON textarea, every type gets the editor it needs, and what is typed is checked as it is typed. Fields or JSON. Subcollections beneath with counts. Copy as code emits the read or write in the SDK dialect the developer chooses."
+        note="The selected document as one recursive row: a name, a type, a value, in two columns a list of siblings shares — the panel itself drags wider when a document wants more room, and opens at a share of the window rather than a number picked on a laptop. Every value wears a box, because a value you can type into should say so before anybody tries one. Maps and arrays open in place rather than falling back to a JSON textarea, every type gets the editor it needs, and what is typed is checked as it is typed. Fields or JSON. Subcollections beneath with counts. Copy as code emits the read or write in the SDK dialect the developer chooses."
       >
         <LayerCard className="w-[520px] p-0">
           <LayerCard.Secondary className="flex items-center gap-2">
@@ -871,24 +893,19 @@ function Inspector() {
                 name="total"
                 type="number"
                 value={
-                  <>
-                    <Value>42</Value>
-                    {/* `3` is how Firestore writes an integer and a double
-                        alike, so nothing in the text can say which this is.
-                        The editor says it, and lets it be changed — beside
-                        the number, which is why the box follows its digits
-                        rather than running the width of the panel. */}
-                    <span className="flex h-7 shrink-0 items-center rounded-md px-1.5 font-mono text-[11px] text-kumo-subtle">
-                      double
-                    </span>
-                  </>
+                  /* `3` is how Firestore writes an integer and a double
+                     alike, so nothing in the text can say which this is.
+                     The editor says it, and lets it be changed — inside the
+                     box at its end, so the word stays beside its value and
+                     the column stays a column. */
+                  <Value word="double">42</Value>
                 }
               />
               <FieldRow
                 name="paid"
                 type="boolean"
                 value={
-                  <div className="flex h-7 items-center">
+                  <div className="flex h-8 items-center">
                     <Switch variant="neutral" size="sm" checked onCheckedChange={() => {}} />
                     <span className="ml-2 font-mono text-[12px] text-kumo-subtle">true</span>
                   </div>
@@ -897,14 +914,7 @@ function Inspector() {
               <FieldRow
                 name="createdAt"
                 type="timestamp"
-                value={
-                  <>
-                    <Value>2026-09-20T10:14:02.117Z</Value>
-                    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
-                      2 mo ago
-                    </span>
-                  </>
-                }
+                value={<Value word="2 mo ago">2026-09-20T10:14:02.117Z</Value>}
               />
               {/* Pointed at: the ground arrives on the line, and so does
                   every control that is not the value. */}
@@ -914,24 +924,15 @@ function Inspector() {
                 note="Renaming customer here changes this document only."
                 unsaved
                 pointed
-                value={
-                  <>
-                    <Value>users/u_9f3k2</Value>
-                    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">ref</span>
-                  </>
-                }
+                value={<Value word="ref">users/u_9f3k2</Value>}
               />
               <FieldRow
                 name="office"
                 type="geopoint"
                 value={
                   <>
-                    <Value className="w-28">
-                      <span className="mr-1.5 text-[11px] text-kumo-inactive">lat</span>3.139
-                    </Value>
-                    <Value className="w-28">
-                      <span className="mr-1.5 text-[11px] text-kumo-inactive">lng</span>101.6869
-                    </Value>
+                    <Value lead="lat">3.139</Value>
+                    <Value lead="lng">101.6869</Value>
                   </>
                 }
               />
@@ -953,9 +954,7 @@ function Inspector() {
                 in the column the names above it are in. */}
             <div className="flex items-center gap-1 border-t border-kumo-line pt-3">
               <span className="size-4 shrink-0" />
-              <Value state="area" className="flex-1 text-kumo-inactive">
-                New field name
-              </Value>
+              <Value className="text-kumo-inactive">New field name</Value>
               <TypeChip type="string" menu />
               <Button variant="ghost" size="sm" icon={<PlusIcon />}>
                 Add field
