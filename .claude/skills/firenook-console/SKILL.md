@@ -623,7 +623,15 @@ one map in it paid **18 px of nothing, thirteen times**, and its names sat
 `CARET` is `absolute -left-4` against the line, which is the positioned
 ancestor. Out of the flow it cannot push anything, so **siblings stay
 aligned for free** — the thing the column was there to buy — and a name is
-a name whether or not the field opens. Three consequences:
+a name whether or not the field opens.
+
+Removing a column means hunting the places that stood clear of it. A
+region, a rename note and a problem message all carried `pl-6` to clear
+the caret, and kept it after the caret stopped being there — so an
+expanded value sat 21 px in while its own name sat on the panel's column.
+**Whatever goes under a line starts where the line starts**, and ends
+where a line's own box ends (`pr-1`, which the value cell spends and the
+region has to spend too). Four consequences:
 
 - The panel's left padding has to **hold** the hang: `pl-5` on the list
   (17.5 px) against a 14 px caret leaves the glyph about 5 px inside the

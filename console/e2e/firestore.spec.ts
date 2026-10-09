@@ -1651,7 +1651,18 @@ test('a value too long for its line wraps rather than being cut short', async ({
   await expect(long).toHaveValue(/callback\?state=U3kVZ4r1ADid$/)
   await long.click()
   await page.keyboard.press('Shift+Enter')
-  await expect(inspector.getByLabel('redirectUri value')).toHaveValue(/\n/)
+  const region = inspector.getByLabel('redirectUri value')
+  await expect(region).toHaveValue(/\n/)
+
+  // A region goes under the line at the panel's own width: it starts
+  // where a name starts and ends where a line's own box ends. It started
+  // 21 px in, standing clear of a caret column that has not existed since
+  // the caret began hanging in the margin.
+  const box = (await region.boundingBox())!
+  const label = (await inspector.getByLabel('short name').boundingBox())!
+  const line = (await inspector.getByLabel('short value').boundingBox())!
+  expect(Math.abs(box.x - label.x)).toBeLessThan(2)
+  expect(Math.abs(box.x + box.width - (line.x + line.width))).toBeLessThan(2)
 })
 
 test('a shut container says what it holds, and a big one opens shut', async ({ page }) => {

@@ -394,8 +394,12 @@ function FieldRow({
           />
         </span>
       </div>
+      {/* No inset: whatever goes under a line starts where the line starts.
+          The 21 px that used to be here stood a region clear of the caret
+          column, and the caret has not stood in a column since it began
+          hanging in the margin. */}
       {region && (
-        <div className="col-span-2 pt-0.5 pb-1 pl-6">
+        <div className="col-span-2 pt-0.5 pr-1 pb-1">
           {raw ? (
             <textarea
               value={node.text}
@@ -420,15 +424,15 @@ function FieldRow({
           collection keeps the old name. Saying so costs one line and saves
           someone an afternoon. */}
       {renamedFrom !== undefined && (
-        <span className="col-span-2 block pl-6 text-[11px] text-kumo-subtle">
+        <span className="col-span-2 block text-[11px] text-kumo-subtle">
           Renaming <span className="font-mono">{renamedFrom}</span> here changes this document only.
         </span>
       )}
       {problem?.value !== undefined && (
-        <span className="col-span-2 block pl-6 text-[12px] text-kumo-danger">{problem.value}</span>
+        <span className="col-span-2 block text-[12px] text-kumo-danger">{problem.value}</span>
       )}
       {problem?.name !== undefined && (
-        <span className="col-span-2 block pl-6 text-[12px] text-kumo-danger">{problem.name}</span>
+        <span className="col-span-2 block text-[12px] text-kumo-danger">{problem.name}</span>
       )}
       {container && !raw && open && node.children.length > 0 && (
         // The step clears the caret that hangs off a child's name: 22 px

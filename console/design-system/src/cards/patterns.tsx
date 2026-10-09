@@ -769,7 +769,7 @@ function FieldRow({
           />
         </span>
       </div>
-      {note && <span className="col-span-2 block pl-6 text-[11px] text-kumo-subtle">{note}</span>}
+      {note && <span className="col-span-2 block text-[11px] text-kumo-subtle">{note}</span>}
       {children && <Nested>{children}</Nested>}
     </div>
   )
