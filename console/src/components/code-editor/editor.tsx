@@ -39,31 +39,31 @@ import { useEffect, useRef } from 'react'
 import type { CodeEditorProps } from './props'
 
 /**
- * What the ink means, in a console whose rule is that colour means
- * something or it is not spent.
+ * The ink, from the syntax palette in `theme.css` — see the note there
+ * for why three hues and which three.
  *
- * A rainbow would break that rule: eight hues across a document, none of
- * them ranked, is the same mistake the grid refuses when it declines to
- * colour one type chip per type. But raw JSON is the one place where the
- * type of a value is written nowhere else — a field row says "string"
- * beside it, a line of JSON says only `"269"` — so here the distinction
- * colour draws is information the reader has no other way to get, and the
- * one worth drawing is the one Firestore punishes you for: whether a
- * value is a string.
- *
- * So: keys carry weight rather than hue, strings are the baseline ink,
- * and the single hue goes on everything that is not a string. Null is the
- * absence it describes.
+ * The rule this console holds everywhere else is that colour means
+ * something or it is not spent, and the grid obeys it by refusing a
+ * colour per type. Raw JSON is the exception that earns it: a field row
+ * writes `string` beside the value, a line of JSON writes only `"269"`,
+ * so here the ink is the only thing saying what a value is. The first
+ * version of this file took the rule too far and left keys and strings
+ * two shades of the same grey, which drew nothing at all.
  */
 const INK = HighlightStyle.define([
-  { tag: tags.propertyName, color: 'var(--text-color-kumo-strong)', fontWeight: '500' },
-  { tag: tags.string, color: 'var(--text-color-kumo-default)' },
-  { tag: tags.number, color: 'var(--text-color-kumo-info)' },
-  { tag: tags.bool, color: 'var(--text-color-kumo-info)', fontWeight: '500' },
-  { tag: tags.null, color: 'var(--text-color-kumo-inactive)', fontStyle: 'italic' },
-  { tag: tags.separator, color: 'var(--text-color-kumo-subtle)' },
-  { tag: tags.squareBracket, color: 'var(--text-color-kumo-subtle)' },
-  { tag: tags.brace, color: 'var(--text-color-kumo-subtle)' },
+  { tag: tags.propertyName, color: 'var(--color-firenook-code-key)', fontWeight: '500' },
+  { tag: tags.string, color: 'var(--color-firenook-code-string)' },
+  { tag: tags.number, color: 'var(--color-firenook-code-literal)' },
+  { tag: tags.bool, color: 'var(--color-firenook-code-literal)', fontWeight: '500' },
+  {
+    tag: tags.null,
+    color: 'var(--color-firenook-code-literal)',
+    fontStyle: 'italic',
+    opacity: '0.75',
+  },
+  { tag: tags.separator, color: 'var(--color-firenook-code-punctuation)' },
+  { tag: tags.squareBracket, color: 'var(--color-firenook-code-punctuation)' },
+  { tag: tags.brace, color: 'var(--color-firenook-code-punctuation)' },
   { tag: tags.invalid, color: 'var(--text-color-kumo-danger)' },
 ])
 
@@ -162,6 +162,38 @@ const SKIN = EditorView.theme({
 const EXTRA = new Compartment()
 const EDITABLE = new Compartment()
 
+/**
+ * A document pasted over the top of this one arrives tidied.
+ *
+ * It rewrites the paste transaction rather than following it with a
+ * second one, so the undo that takes the paste back takes the
+ * re-indenting with it instead of leaving half of it behind.
+ *
+ * Only a paste over the whole document. Formatting as you type fights
+ * the cursor, and formatting around a fragment dropped into the middle
+ * moves lines nobody touched — but a minified blob pasted into an empty
+ * box is the one case anybody ever reached for a Format button for.
+ */
+function tidyOnPaste(tidy: () => CodeEditorProps['tidyPaste']): Extension {
+  return EditorState.transactionFilter.of((transaction) => {
+    const clean = tidy()
+    if (!clean || !transaction.docChanged || !transaction.isUserEvent('input.paste'))
+      return transaction
+    const was = transaction.startState.doc.length
+    let whole = 0
+    let all = 0
+    transaction.changes.iterChanges((fromA, toA) => {
+      all += 1
+      if (fromA === 0 && toA === was) whole += 1
+    })
+    if (all !== 1 || whole !== 1) return transaction
+    const pasted = transaction.newDoc.toString()
+    const tidied = clean(pasted)
+    if (tidied === undefined || tidied === pasted) return transaction
+    return { changes: { from: 0, to: was, insert: tidied }, userEvent: 'input.paste' }
+  })
+}
+
 function extraLinter(find: CodeEditorProps['annotate']): Extension {
   if (!find) return []
   return linter((view) => find(view.state.doc.toString()) as Diagnostic[], { delay: 150 })
@@ -171,6 +203,7 @@ export default function CodeEditor({
   value,
   onChange,
   annotate,
+  tidyPaste,
   readOnly = false,
   ariaLabel,
   testId,
@@ -182,9 +215,9 @@ export default function CodeEditor({
   // any of it never means tearing the editor down — and the editor is
   // built once, which is what keeps the cursor, the selection, the undo
   // history and every fold across a re-render.
-  const latest = useRef({ value, readOnly, onChange, annotate })
+  const latest = useRef({ value, readOnly, onChange, annotate, tidyPaste })
   useEffect(() => {
-    latest.current = { value, readOnly, onChange, annotate }
+    latest.current = { value, readOnly, onChange, annotate, tidyPaste }
   })
 
   useEffect(() => {
@@ -217,6 +250,7 @@ export default function CodeEditor({
             indentWithTab,
           ]),
           json(),
+          tidyOnPaste(() => latest.current.tidyPaste),
           linter(jsonParseLinter(), { delay: 150 }),
           syntaxHighlighting(INK),
           SKIN,

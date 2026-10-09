@@ -1855,6 +1855,167 @@ test('the JSON tab spends the panel on the JSON', async ({ page }) => {
   await drop(page.request, 'teams/t_tall')
 })
 
+/**
+ * The editor's three inks, as sRGB against the ground and as OKLab
+ * coordinates against each other.
+ *
+ * Both are needed. A contrast check alone passes a palette that is
+ * indistinguishable — two colours of the same lightness have a ratio of
+ * 1 against each other — and the first version of this palette was
+ * exactly that: keys and strings two greys 0.06 of a lightness step
+ * apart, each with a fine ratio against white and neither telling you
+ * anything about the other.
+ */
+async function codeInk(editor: Locator): Promise<{
+  contrast: Record<string, number>
+  gamut: Record<string, boolean>
+  apart: Record<string, number>
+}> {
+  return editor.evaluate((el) => {
+    const window = el.ownerDocument.defaultView!
+    const probe = el.ownerDocument.createElement('span')
+    el.append(probe)
+    // `getComputedStyle` hands back the `oklch()` it was given, which is
+    // not a thing to measure. Mixing in a named space makes the browser
+    // resolve it: `color(srgb r g b)` and `oklab(L a b)`, both as plain
+    // numbers, and neither of them guessed at from the other.
+    const numbers = (space: string, css: string) => {
+      probe.style.color = ''
+      probe.style.color = `color-mix(in ${space}, ${css} 100%, transparent)`
+      return window
+        .getComputedStyle(probe)
+        .color.match(/-?[\d.]+/g)!
+        .map(Number)
+    }
+    const srgb = (css: string) => {
+      const [r, g, b] = numbers('srgb', css)
+      return [r!, g!, b!] as [number, number, number]
+    }
+    const oklab = (css: string) => {
+      const [lightness, a, b] = numbers('oklab', css)
+      return [lightness!, a!, b!] as [number, number, number]
+    }
+    // This body is serialised and run in the browser, so an outer-scope
+    // helper is not there when it arrives.
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const channel = (value: number) => {
+      // Clamped, because an out-of-gamut ink reports a channel outside
+      // 0..1 and the screen shows the clipped colour, not that one.
+      const unit = Math.min(1, Math.max(0, value))
+      return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4
+    }
+    const luminance = ([r, g, b]: [number, number, number]) =>
+      0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    const ratio = (a: [number, number, number], b: [number, number, number]) => {
+      const one = luminance(a)
+      const other = luminance(b)
+      const high = Math.max(one, other)
+      const low = Math.min(one, other)
+      return Math.round(((high + 0.05) / (low + 0.05)) * 10) / 10
+    }
+    // This body is serialised and run in the browser, so an outer-scope
+    // helper is not there when it arrives.
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const distance = (a: [number, number, number], b: [number, number, number]) =>
+      Math.round(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000) / 1000
+
+    const ground = srgb('var(--color-kumo-control)')
+    const contrast: Record<string, number> = {}
+    const gamut: Record<string, boolean> = {}
+    const lab: Record<string, [number, number, number]> = {}
+    for (const name of ['key', 'string', 'literal', 'punctuation']) {
+      const ink = srgb(`var(--color-firenook-code-${name})`)
+      contrast[name] = ratio(ink, ground)
+      gamut[name] = ink.every((value) => value >= -0.001 && value <= 1.001)
+      lab[name] = oklab(`var(--color-firenook-code-${name})`)
+    }
+    const apart: Record<string, number> = {
+      'key/string': distance(lab.key!, lab.string!),
+      'string/literal': distance(lab.string!, lab.literal!),
+      'key/literal': distance(lab.key!, lab.literal!),
+    }
+    probe.remove()
+    return { contrast, gamut, apart }
+  })
+}
+
+test("the code editor's ink tells a key from a string from a number, in both modes", async ({
+  page,
+}) => {
+  await put(page.request, 'teams/t_ink', {
+    plan: { stringValue: 'enterprise' },
+    seats: { integerValue: '785' },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_ink&tab=json`)
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector.getByTestId('document-json')).toBeVisible()
+
+  for (const mode of ['light', 'dark'] as const) {
+    await inspector.evaluate((el, which) => {
+      const root = el.ownerDocument.documentElement
+      if (which === 'dark') root.setAttribute('data-mode', 'dark')
+      else root.removeAttribute('data-mode')
+    }, mode)
+    const { contrast, gamut, apart } = await codeInk(inspector.getByTestId('document-json'))
+
+    // Paintable. An `oklch()` past its hue's sRGB ceiling is not an
+    // error — the browser clips it — so an ink outside the gamut is
+    // measured as one colour and seen as another.
+    for (const [ink, inside] of Object.entries(gamut))
+      expect(inside, `${ink} is inside sRGB in ${mode}`).toBe(true)
+
+    // Readable: AAA for the three that carry meaning, AA for the
+    // punctuation, which is scaffolding and is meant to recede.
+    expect(contrast.key, `key in ${mode}`).toBeGreaterThanOrEqual(7)
+    expect(contrast.string, `string in ${mode}`).toBeGreaterThanOrEqual(7)
+    expect(contrast.literal, `literal in ${mode}`).toBeGreaterThanOrEqual(7)
+    expect(contrast.punctuation, `punctuation in ${mode}`).toBeGreaterThanOrEqual(4.5)
+
+    // Telling apart. Every pair clears a floor; the two that do real
+    // work clear a wider one — key from string is the structure of the
+    // document, and string from number is the distinction Firestore
+    // punishes you for, since `"269"` and `269` read the same. Key from
+    // number is allowed to be the closest pair: a key is always quoted
+    // and always followed by a colon, and a bare number never is, so
+    // nothing rests on the colour telling those two apart.
+    for (const [pair, far] of Object.entries(apart))
+      expect(far, `${pair} in ${mode}`).toBeGreaterThanOrEqual(0.13)
+    expect(apart['key/string'], `key/string in ${mode}`).toBeGreaterThanOrEqual(0.19)
+    expect(apart['string/literal'], `string/literal in ${mode}`).toBeGreaterThanOrEqual(0.25)
+  }
+
+  // And the editor is actually painting with them, not merely declaring
+  // them: a key, a string and a number off the screen, each its own ink.
+  await inspector.evaluate((el) => el.ownerDocument.documentElement.removeAttribute('data-mode'))
+  const painted = await inspector.getByTestId('document-json').evaluate((el) => {
+    const window = el.ownerDocument.defaultView!
+    const ink = (css: string) => {
+      const probe = el.ownerDocument.createElement('span')
+      el.append(probe)
+      probe.style.color = css
+      const value = window.getComputedStyle(probe).color
+      probe.remove()
+      return value
+    }
+    const found: Record<string, string> = {}
+    for (const span of el.querySelectorAll('span')) {
+      if (span.querySelector('span')) continue
+      const text = (span.textContent ?? '').trim()
+      if (text && !(text in found)) found[text] = window.getComputedStyle(span).color
+    }
+    return {
+      found,
+      key: ink('var(--color-firenook-code-key)'),
+      string: ink('var(--color-firenook-code-string)'),
+      literal: ink('var(--color-firenook-code-literal)'),
+    }
+  })
+  expect(painted.found['"plan"']).toBe(painted.key)
+  expect(painted.found['"enterprise"']).toBe(painted.string)
+  expect(painted.found['785']).toBe(painted.literal)
+  await drop(page.request, 'teams/t_ink')
+})
+
 test('the JSON tab is a code editor, and the types the rows carry are marked on it', async ({
   page,
 }) => {
@@ -1873,26 +2034,6 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
   await expect(editor).toBeVisible()
   await expect(inspector.locator('.cm-lineNumbers')).toBeVisible()
 
-  // Ink that separates a key from a string from a number. That is the
-  // one distinction raw JSON writes nowhere else — a field row says
-  // `string` beside the value, a line of JSON says only `"269"` — and
-  // it is the one Firestore punishes you for getting wrong, which is
-  // why this console spends colour here and nowhere else in the panel.
-  const ink = await editor.evaluate((el) => {
-    const found: Record<string, string> = {}
-    for (const span of el.querySelectorAll('span')) {
-      if (span.querySelector('span')) continue
-      const text = (span.textContent ?? '').trim()
-      const style = span.ownerDocument.defaultView!.getComputedStyle(span)
-      if (!(text in found)) found[text] = `${style.color} ${style.fontWeight}`
-    }
-    return found
-  })
-  expect(ink['"name"']).toBeTruthy()
-  expect(ink['"name"']).not.toBe(ink['"Mapping"'])
-  expect(ink['"Mapping"']).not.toBe(ink['4'])
-  expect(ink['true']).not.toBe(ink['"Mapping"'])
-
   // Two of those four values are typed more precisely than the text can
   // say, and the sentence that used to claim it of the whole document
   // now points at the two it is true of.
@@ -1910,12 +2051,29 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
   expect(tips.some((tip) => tip.includes('Stays a timestamp'))).toBe(true)
   expect(tips.some((tip) => tip.includes('Stays a double'))).toBe(true)
 
-  // Minify and Format are `JSON.stringify` with a different indent, and
-  // the editor takes the rewrite without losing what it is looking at.
-  await inspector.getByTestId('minify-json').click()
+  // A document pasted over this one arrives laid out, which is the case
+  // anybody ever reached for a Format button for. One line in, six out.
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await editor.evaluate((el, text) => {
+    const window = el.ownerDocument.defaultView!
+    const data = new window.DataTransfer()
+    data.setData('text/plain', text)
+    el.dispatchEvent(new window.ClipboardEvent('paste', { clipboardData: data, bubbles: true }))
+  }, '{"name":"Mapping","seats":4,"opened":"2026-09-20T09:00:00.000Z","active":true}')
+  await expect(inspector.locator('.cm-line')).toHaveCount(6)
+
+  // And one undo takes the paste and its laying out together, because
+  // the tidying rewrote that transaction rather than following it.
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(inspector.locator('.cm-line')).toHaveCount(6)
+  await expect(editor).toContainText('"active"')
+
+  // Format itself is still there for a document gone ragged by hand.
+  await editor.fill('{"name":"Mapping","seats":4}')
   await expect(inspector.locator('.cm-line')).toHaveCount(1)
   await inspector.getByTestId('format-json').click()
-  await expect(inspector.locator('.cm-line')).toHaveCount(6)
+  await expect(inspector.locator('.cm-line')).toHaveCount(4)
 
   // A parse error lands on the character that caused it, not in a
   // sentence under the box.

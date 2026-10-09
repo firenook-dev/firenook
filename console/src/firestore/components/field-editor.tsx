@@ -19,6 +19,15 @@ import { type FieldEditing, FieldEditingProvider, type KnownField } from './fiel
 import { COLUMNS, FieldRows } from './field-row'
 
 const NO_FIELDS: KnownField[] = []
+
+/** The document laid out, or nothing if it is not a document yet. */
+function tidyJson(text: string): string | undefined {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return undefined
+  }
+}
 const NOTHING_CHANGED: ReadonlySet<string> = new Set()
 
 export function FieldsPanel({
@@ -67,15 +76,14 @@ export function FieldsPanel({
     }
   }
 
-  // Both of these are `JSON.stringify` with a different third argument.
-  // A library for that would be a library for nothing.
-  const rewrite = (indent: number) => {
-    try {
-      setJson(JSON.stringify(JSON.parse(json), null, indent))
-      setJsonError(undefined)
-    } catch (error) {
-      setJsonError(error instanceof Error ? error.message : String(error))
+  const format = () => {
+    const tidied = tidyJson(json)
+    if (tidied === undefined) {
+      setJsonError('This is not JSON yet, so there is nothing to lay out')
+      return
     }
+    setJson(tidied)
+    setJsonError(undefined)
   }
 
   // The rows are what carry the types JSON cannot write down, so the
@@ -166,6 +174,7 @@ export function FieldsPanel({
                 value={json}
                 onChange={setJson}
                 annotate={annotate}
+                tidyPaste={tidyJson}
                 ariaLabel="Document JSON"
                 testId="document-json"
               />
@@ -185,29 +194,19 @@ export function FieldsPanel({
                 Apply to fields
               </Button>
               <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+              {/* Minify stood here too, and nobody has ever needed a
+                  Firestore document on one line: it was a button because
+                  `JSON.stringify` takes a third argument, not because
+                  the job exists. Format stays, and mostly has nothing to
+                  do — the tab opens laid out, and a document pasted over
+                  this one arrives laid out — but hand-editing can still
+                  leave it ragged, and a visible one-click fix beats a
+                  shortcut nobody is told about. */}
               <Tooltip
-                content="Re-indent at two spaces"
+                content="Lay the document out again, two spaces"
                 render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => rewrite(2)}
-                    data-testid="format-json"
-                  >
+                  <Button variant="ghost" size="sm" onClick={format} data-testid="format-json">
                     Format
-                  </Button>
-                }
-              />
-              <Tooltip
-                content="One line, no spaces"
-                render={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => rewrite(0)}
-                    data-testid="minify-json"
-                  >
-                    Minify
                   </Button>
                 }
               />
