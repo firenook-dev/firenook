@@ -561,6 +561,12 @@ an array showing brief values instead since its items have no names. A
 container with more than `LARGE` (6) descendants **opens shut**, so a
 document with a big map in it opens scannable rather than buried.
 
+**What it holds is also the way in.** The preview is a button that opens
+the container: the caret is four pixels of chevron and the words beside it
+are what the eye went to. It is `tabIndex={-1}` and `aria-hidden` — a
+redundant pointer target, so the caret keeps the semantics and anything
+that is not a pointer still sees one control rather than two.
+
 **One column for the whole document, not one per list.** A nested list used
 to build its own tracks (`COLUMNS`) and size the name column to its own
 widest name, so a map of short names inside a document of long ones started
@@ -578,6 +584,25 @@ Guarding this needs **two strings at two depths**, not any two values: a
 number shares its box with the word saying how it is stored, so it is
 legitimately narrower, and comparing one against a string fails for a
 reason that has nothing to do with the column.
+
+**The drawer has one content column, and every section is in it.** The
+path, the tabs, Subcollections, Save and Delete all sit on 12 px left and
+11 px right. The field list did not: at `pl-0` a row's hover ground began
+**1 px** from the panel's edge and its values ended **19 px** from the
+other — the asymmetry a user saw as "the field is until the end". It is
+`pl-3 pr-2` now, the smaller `pr` because the value cell already spends
+`pr-1` of its own. A **name** sits further in than everything else by the
+width of the caret column it shares the row with, and that is the column
+doing its job rather than a mistake to correct — so the guard compares a
+row's **ground** with Save, and a value's right edge with Delete, never a
+name against a value.
+
+Measuring a drawer's padding means measuring **every section, and the ink
+rather than the box**: a ghost icon button carries its own padding, so its
+box sits closer to the edge than a bordered one while the glyph lands in
+the same place. Checking one pair of numbers and calling it symmetric is
+how the first attempt at this passed while four of the six edges were
+still wrong.
 
 **A value wears a box; a name does not.** The rule used to be "nothing at
 rest" for both, on the grounds that a value is read far more often than it

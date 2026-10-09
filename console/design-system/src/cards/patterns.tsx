@@ -665,10 +665,14 @@ function DataGrid() {
  * is a `subgrid` so it can still paint its own ground.
  *
  * The air between the rows is the other half of giving a value a box: a
- * column of boxes two pixels apart is a wall, and the same column six
- * pixels apart is a list.
+ * column of boxes two pixels apart is a wall, and the same column twelve
+ * pixels apart is a list. The air goes between two fields and not inside
+ * one, though: a row holds its line, its notes and its children, and a
+ * subgrid inherits the gaps above it unless it says otherwise.
  */
-const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-1.5'
+const BETWEEN = 'gap-y-3.5'
+const WITHIN = 'gap-y-1'
+const COLUMNS = `grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 ${BETWEEN}`
 
 function FieldRow({
   name,
@@ -704,7 +708,7 @@ function FieldRow({
       </div>
     )
   return (
-    <div className="col-span-2 grid grid-cols-subgrid">
+    <div className={`col-span-2 grid grid-cols-subgrid ${WITHIN}`}>
       {/* The ground belongs to the line, not to each control. Hovering a
           row is how you see which field you are on — the question a column
           of twenty one-line rows has to answer and a column of blocks
@@ -774,7 +778,9 @@ function Nested({ children }: { children: ReactNode }) {
   // the edge track, so the indent narrows the names and every value in the
   // document stays on one rail.
   return (
-    <div className="col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5">
+    <div
+      className={`col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5 ${BETWEEN}`}
+    >
       {children}
     </div>
   )
@@ -840,13 +846,20 @@ function Value({
 /**
  * What a shut map or array says on its own line. Open, it says nothing:
  * its fields are listed directly beneath it, which is the one thing the
- * count it used to show — `{ 1 field }` — was telling anybody.
+ * count it used to show — `{ 1 field }` — was telling anybody. It is also
+ * the way in: the caret is four pixels of chevron and these are the words
+ * the eye went to, so they open it too.
  */
 function Summary({ children }: { children: ReactNode }) {
   return (
-    <span className="flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-hidden="true"
+      className="flex h-8 min-w-0 flex-1 cursor-pointer items-center truncate rounded text-left font-mono text-[12px] text-kumo-subtle hover:text-kumo-default"
+    >
       {children}
-    </span>
+    </button>
   )
 }
 

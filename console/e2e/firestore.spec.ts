@@ -1472,11 +1472,42 @@ test('every value wears a box, and the controls still arrive under the pointer',
   // line is exactly as tall as a bare one. What the old rule was really
   // protecting against was boxes stacked two pixels apart, which is a wall
   // and not a list, and the answer to that is the air between them.
-  const gap = await inspector
+  const gaps = await inspector
     .getByTestId('field-row')
     .first()
-    .evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el.parentElement!).rowGap)
-  expect(Number.parseFloat(gap)).toBeGreaterThanOrEqual(4)
+    .evaluate((el) => {
+      const view = el.ownerDocument.defaultView!
+      return {
+        between: view.getComputedStyle(el.parentElement!).rowGap,
+        within: view.getComputedStyle(el).rowGap,
+      }
+    })
+  expect(Number.parseFloat(gaps.between)).toBeGreaterThanOrEqual(10)
+
+  // But the air goes between two fields, not inside one. A row holds its
+  // line, the region under a long value, its notes and its children, and
+  // those are one thing — a subgrid inherits the gaps of the grid above
+  // it, so given the list's own gap an error message drifted a field's
+  // height below the field and read as belonging to the next one.
+  expect(Number.parseFloat(gaps.within)).toBeLessThan(Number.parseFloat(gaps.between))
+
+  // And the drawer has one content column, which the field list is in.
+  // It was not: the list sat at `pl-0`, so a row's ground began 1 px from
+  // the panel's edge and its values ended 19 px from the other, while the
+  // path, the tabs, Subcollections, Save and Delete all sat on 12 and 11.
+  // A name is further in than all of them, by the width of the caret
+  // column it shares the row with, and that is the column doing its job.
+  const panel = (await inspector.boundingBox())!
+  const inset = async (locator: Locator) => {
+    const box = (await locator.boundingBox())!
+    return { left: box.x - panel.x, right: panel.x + panel.width - (box.x + box.width) }
+  }
+  const ground = await inset(inspector.getByTestId('field-row').first().locator('> div').first())
+  const save = await inset(inspector.getByTestId('save-document'))
+  const value = await inset(inspector.getByLabel('displayName value'))
+  const destroy = await inset(inspector.getByLabel('Delete this document'))
+  expect(Math.abs(ground.left - save.left)).toBeLessThan(2)
+  expect(Math.abs(value.right - destroy.right)).toBeLessThan(2)
 
   // The controls that are not the value keep their place in the row and
   // are drawn when the row is pointed at, delete loudest among them.
@@ -1633,7 +1664,10 @@ test('a shut container says what it holds, and a big one opens shut', async ({ p
   // document opens scannable — with the keys, and how many more.
   await expect(inspector.getByLabel('alpha value')).toHaveCount(0)
   await expect(summaryOf('config')).toHaveText('{ alpha, beta, delta, +5 }')
-  await inspector.getByLabel('Expand config').click()
+
+  // And what it holds is the way in. The caret is four pixels of chevron;
+  // the words beside it are what the eye went to, so they open it too.
+  await summaryOf('config').click()
   await expect(inspector.getByLabel('alpha value')).toHaveValue('0')
   await drop(page.request, 'teams/t_shape')
 })

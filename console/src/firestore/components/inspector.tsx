@@ -121,7 +121,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       data-testid="inspector"
     >
       <WidthHandle />
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-1 pl-3">
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-1.5 pl-3">
         {/* Kumo's monospace variants are fixed at 13 px; the face is asked
             for here and the size comes from the scale. */}
         <InlineCopyText

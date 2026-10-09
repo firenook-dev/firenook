@@ -43,6 +43,30 @@ import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './val
  */
 export const GUTTER = 'flex h-8 w-4 shrink-0 items-center justify-center'
 
+/** What a container shows where a value would be. */
+const SUMMARY =
+  'flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle'
+
+/**
+ * The air between one field and the next, which is the other half of
+ * giving a value a box: a column of boxes two pixels apart is a wall, and
+ * the same column twelve pixels apart is a list. It was six and still read
+ * as cramped. Supabase spends fifty-three on the same gap, which it can,
+ * because a Postgres row is six columns and never nests; a document this
+ * tall cannot, so this is as much as a row can afford.
+ */
+const BETWEEN = 'gap-y-3.5'
+
+/**
+ * The gap *inside* one field, which is not the gap between two of them.
+ * A row holds its line, the region below a long value, its notes and its
+ * children, and those are one thing: given the list's own gap they drift
+ * apart, and an error message a field's height below the field reads as
+ * belonging to the next one. A subgrid inherits the gaps of the grid above
+ * it unless it says otherwise, so a row says otherwise.
+ */
+const WITHIN = 'gap-y-1'
+
 /**
  * A list of siblings, and the two columns they share: one sized to the
  * widest name among them, one taking the rest.
@@ -59,14 +83,8 @@ export const GUTTER = 'flex h-8 w-4 shrink-0 items-center justify-center'
  * map of short names inside a document of long ones started its values
  * left of its parent's siblings and ran wider than them, and a child read
  * as an outdent. Every depth is a `subgrid` of this one now.
- *
- * The air between the rows is the other half of giving a value a box: a
- * column of boxes two pixels apart is a wall, and the same column six
- * pixels apart is a list. Six is what a row can afford — Supabase spends
- * fifty-three on the same gap, which it can, because a Postgres row is six
- * columns and never nests.
  */
-export const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-1.5'
+export const COLUMNS = `grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 ${BETWEEN}`
 
 export function FieldRows({
   nodes,
@@ -172,7 +190,10 @@ function FieldRow({
     )
 
   return (
-    <div className={`group/row col-span-2 grid grid-cols-subgrid`} data-testid="field-row">
+    <div
+      className={`group/row col-span-2 grid grid-cols-subgrid ${WITHIN}`}
+      data-testid="field-row"
+    >
       {/* The ground is the line's, not each control's. Hovering a row is how
           you see which field you are on — the thing a column of twenty
           one-line rows has to answer and a column of blocks never had to. */}
@@ -215,12 +236,27 @@ function FieldRow({
         </div>
         <div className="flex min-w-0 items-start gap-1 pr-1">
           {container ? (
-            <span
-              className="flex h-8 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle"
-              data-testid="field-summary"
-            >
-              {raw ? 'json' : open ? '' : preview(node)}
-            </span>
+            raw || open ? (
+              <span className={SUMMARY} data-testid="field-summary">
+                {raw ? 'json' : ''}
+              </span>
+            ) : (
+              /* What it holds is also the way in. The caret is four
+                 pixels of chevron and the words beside it are the thing
+                 the eye went to; a redundant pointer target, so it stays
+                 out of the tab order and leaves the caret to say what it
+                 is to anything that is not a pointer. */
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-hidden="true"
+                onClick={() => setOpen(true)}
+                className={`${SUMMARY} cursor-pointer rounded text-left hover:text-kumo-default`}
+                data-testid="field-summary"
+              >
+                {preview(node)}
+              </button>
+            )
           ) : region ? (
             <span className="h-8 min-w-0 flex-1" />
           ) : (
@@ -390,7 +426,9 @@ function FieldRow({
         // subgrid takes its own margin and padding out of the edge track:
         // the indent narrows this list's names and leaves every value in
         // the document on one rail.
-        <div className="col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5">
+        <div
+          className={`col-span-2 ml-2.5 grid grid-cols-subgrid border-l border-kumo-line pl-2.5 ${BETWEEN}`}
+        >
           <FieldRows
             nodes={node.children}
             named={node.type === 'map'}

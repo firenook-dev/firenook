@@ -98,7 +98,13 @@ export function FieldsPanel({
       {tab === 'fields' ? (
         <>
           <div className="min-h-0 flex-1 overflow-auto">
-            <div className={`py-2 pr-1 pl-0 ${COLUMNS}`}>
+            {/* The right margin is the left one: the caret column insets
+                every name by its own width whether or not it holds a
+                caret, and nothing was answering it on the other side, so
+                a value ran to the panel's edge while its name started a
+                clear step in from it. The cell keeps its own `pr-1`, so
+                this is that step less what the cell already spends. */}
+            <div className={`py-2 pr-2 pl-3 ${COLUMNS}`}>
               <FieldRows nodes={nodes} named onChange={onNodesChange} soft />
               {nodes.length === 0 && (
                 <div className="px-2 py-1">
@@ -113,7 +119,7 @@ export function FieldsPanel({
               fields should not need scrolling to the end to gain a
               forty-first, and the one line that is always worth reaching
               is the one that adds a field. */}
-          <div className="shrink-0 border-t border-kumo-line py-1.5 pr-1 pl-0">
+          <div className="shrink-0 border-t border-kumo-line py-1.5 pr-1 pl-3">
             <AddField
               inputRef={addRef}
               known={known}
