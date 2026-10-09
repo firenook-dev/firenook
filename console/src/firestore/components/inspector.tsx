@@ -28,6 +28,7 @@ import { useCreateDialog } from '../create'
 import { type CodeTarget, documentAsCode } from '../query'
 import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
+import { clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
 import { type Subcollection, subcollectionsQuery } from '../subcollections'
 import {
   type DraftNode,
@@ -43,11 +44,62 @@ import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
 import { useWorkbench } from './workbench-context'
 
-/** The inspector's width plus the gap before it, px; the grid uses it to know what it covers. */
-export const INSPECTOR_WIDTH = 420 + 12
+/**
+ * The panel's left edge, which is also the grip for its width. A hairline
+ * at rest that lights under the pointer: the edge is already there, so the
+ * control is a place rather than a thing added to the panel.
+ */
+function WidthHandle() {
+  const { width, setWidth, remember, reset } = useInspectorWidth()
+  const nudge = (by: number) => {
+    const panel = document.querySelector('[data-testid="inspector"]')
+    const available = panel?.parentElement?.getBoundingClientRect().width ?? width
+    setWidth(clampWidth(width + by, available))
+    remember()
+  }
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Inspector width"
+      aria-valuenow={Math.round(width)}
+      aria-valuemin={INSPECTOR_MIN}
+      tabIndex={0}
+      data-testid="inspector-resize"
+      title="Drag to resize · double-click to reset"
+      className="group/grip absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize outline-none"
+      onPointerDown={(event) => {
+        event.preventDefault()
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }}
+      onPointerMove={(event) => {
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+        const panel = event.currentTarget.parentElement
+        const available = panel?.parentElement?.getBoundingClientRect().width
+        if (!panel || available === undefined) return
+        setWidth(clampWidth(panel.getBoundingClientRect().right - event.clientX, available))
+      }}
+      onPointerUp={(event) => {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+        remember()
+      }}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 64 : 16
+        if (event.key === 'ArrowLeft') nudge(step)
+        else if (event.key === 'ArrowRight') nudge(-step)
+        else return
+        event.preventDefault()
+      }}
+      onDoubleClick={reset}
+    >
+      <span className="pointer-events-none absolute inset-y-0 left-1 w-px group-hover/grip:bg-kumo-brand group-focus-visible/grip:bg-kumo-brand" />
+    </div>
+  )
+}
 
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
+  const width = useInspectorWidth((state) => state.width)
   const document = useQuery(documentQuery(workbench.scope, path))
   // Names and counts in one request, shared with the grid's column: the
   // row the inspector was opened from has usually asked already.
@@ -59,9 +111,11 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       // sits in the flow. Below that it floats over the right of the grid
       // instead, because squeezing the grid into the remaining sliver makes
       // both halves useless.
-      className="absolute inset-y-0 right-0 z-20 flex min-h-0 w-[420px] max-w-full shrink-0 flex-col border-l border-kumo-line bg-kumo-base shadow-lg xl:static xl:shadow-none"
+      className="absolute inset-y-0 right-0 z-20 flex min-h-0 max-w-full shrink-0 flex-col border-l border-kumo-line bg-kumo-base shadow-lg xl:static xl:shadow-none"
+      style={{ width }}
       data-testid="inspector"
     >
+      <WidthHandle />
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-1 pl-3">
         {/* Kumo's monospace variants are fixed at 13 px; the face is asked
             for here and the size comes from the scale. */}

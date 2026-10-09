@@ -656,6 +656,16 @@ function DataGrid() {
  * far more often than it is changed, and editing it is the rename Firestore
  * has no operation for: a delete and a set, in this document only.
  */
+/**
+ * A list of siblings and the two columns they share: one sized to the
+ * widest name among them, one taking the rest. Names were a column already
+ * and values were not — on a real document they began at eight different
+ * offsets spread over 58 px, so reading down the values meant following a
+ * staircase. `max-content` finds the width with no measuring, and each row
+ * is a `subgrid` so it can still paint its own ground.
+ */
+const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-0.5'
+
 function FieldRow({
   name,
   index,
@@ -680,7 +690,7 @@ function FieldRow({
 }) {
   if (removed)
     return (
-      <div className="flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70">
+      <div className="col-span-2 flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70">
         <span className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate font-mono text-[12px] line-through">{name}</span>
         <span className="shrink-0 text-[11px] text-kumo-subtle">Removed on save</span>
@@ -690,39 +700,38 @@ function FieldRow({
       </div>
     )
   return (
-    <div>
+    <div className="col-span-2 grid grid-cols-subgrid">
       {/* The ground belongs to the line, not to each control. Hovering a
           row is how you see which field you are on — the question a column
           of twenty one-line rows has to answer and a column of blocks
           never had to. */}
       <div
-        className={`relative flex items-start gap-1 rounded-md pr-1 pl-0.5 ${
+        className={`relative col-span-2 grid grid-cols-subgrid items-start rounded-md ${
           pointed ? 'bg-kumo-tint' : ''
         }`}
       >
-        <span className="flex h-7 w-4 shrink-0 items-center justify-center text-kumo-subtle">
-          {children ? <CaretDownIcon size={12} /> : null}
-        </span>
-        {index === undefined ? (
-          <span className="flex h-7 shrink-0 items-center rounded px-1.5 font-mono text-[12px] font-medium">
-            {name}
+        <div className="flex items-start gap-1 pl-0.5">
+          <span className="flex h-7 w-4 shrink-0 items-center justify-center text-kumo-subtle">
+            {children ? <CaretDownIcon size={12} /> : null}
           </span>
-        ) : (
-          <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
-            {index}
+          {index === undefined ? (
+            <span className="flex h-7 shrink-0 items-center rounded px-1.5 font-mono text-[12px] font-medium">
+              {name}
+            </span>
+          ) : (
+            <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
+              {index}
+            </span>
+          )}
+          {/* Which fields the footer's count is counting: Save is the row's
+              own accent, and this is what it is about to write. Its place
+              is always kept, or the name column would widen and shift
+              every value the first time one was edited. */}
+          <span className="flex h-7 w-1.5 shrink-0 items-center">
+            {unsaved && <span className="size-1.5 rounded-full bg-kumo-brand" />}
           </span>
-        )}
-        <span className="-ml-1.5 flex h-7 shrink-0 items-center font-mono text-[12px] text-kumo-inactive">
-          :
-        </span>
-        {/* Which fields the footer's count is counting: Save is the row's
-            own accent, and this is what it is about to write. */}
-        {unsaved && (
-          <span className="flex h-7 shrink-0 items-center">
-            <span className="size-1.5 rounded-full bg-kumo-brand" />
-          </span>
-        )}
-        {value}
+        </div>
+        <div className="flex min-w-0 items-start gap-1 pr-1">{value}</div>
         {/* Every control that is not the value, in one strip drawn over the
             end of the line. It overlays rather than reserves: keeping its
             place cost ninety-three of a line's four hundred and five
@@ -742,7 +751,7 @@ function FieldRow({
           />
         </span>
       </div>
-      {note && <span className="block pl-6 text-[11px] text-kumo-subtle">{note}</span>}
+      {note && <span className="col-span-2 block pl-6 text-[11px] text-kumo-subtle">{note}</span>}
       {children && <Nested>{children}</Nested>}
     </div>
   )
@@ -754,7 +763,11 @@ function FieldRow({
  * right of its parent's rather than, as it did, to the left of it.
  */
 function Nested({ children }: { children: ReactNode }) {
-  return <div className="ml-2.5 grid gap-0.5 border-l border-kumo-line pl-2.5">{children}</div>
+  return (
+    <div className={`col-span-2 ml-2.5 border-l border-kumo-line pl-2.5 ${COLUMNS}`}>
+      {children}
+    </div>
+  )
 }
 
 /**
@@ -810,7 +823,7 @@ function Inspector() {
     <Stack>
       <Section
         title="Inspector"
-        note="The selected document as one recursive row: a name, a type, a value. Maps and arrays open in place rather than falling back to a JSON textarea, every type gets the editor it needs, and what is typed is checked as it is typed. Fields or JSON. Subcollections beneath with counts. Copy as code emits the read or write in the SDK dialect the developer chooses."
+        note="The selected document as one recursive row: a name, a type, a value, in two columns a list of siblings shares — the panel itself drags wider when a document wants more room. Maps and arrays open in place rather than falling back to a JSON textarea, every type gets the editor it needs, and what is typed is checked as it is typed. Fields or JSON. Subcollections beneath with counts. Copy as code emits the read or write in the SDK dialect the developer chooses."
       >
         <LayerCard className="w-[520px] p-0">
           <LayerCard.Secondary className="flex items-center gap-2">
@@ -845,7 +858,7 @@ function Inspector() {
               ]}
               selectedValue="fields"
             />
-            <div className="grid gap-0.5">
+            <div className={COLUMNS}>
               <FieldRow name="status" type="string" value={<Value>paid</Value>} />
               {/* Two lines because it needs two, and the name stays on the
                   first of them rather than floating between both. */}

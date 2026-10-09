@@ -39,7 +39,7 @@ import { type FsDocument, formatNumber } from '../value'
 import { IdCell, ValueCell } from './cells'
 import { HeaderMenu } from './header-menu'
 import { InlineCellEditor, inlineEditable } from './inline-cell-editor'
-import { INSPECTOR_WIDTH } from './inspector'
+import { INSPECTOR_GAP, useInspectorWidth } from './inspector-width'
 import { SubcollectionsCell, subcollectionsWidth } from './subcollections-cell'
 import { useWorkbench } from './workbench-context'
 
@@ -342,7 +342,8 @@ export function Grid() {
                       cell !== null &&
                       grid !== null &&
                       cell.getBoundingClientRect().right >
-                        grid.getBoundingClientRect().right - INSPECTOR_WIDTH
+                        grid.getBoundingClientRect().right -
+                          (useInspectorWidth.getState().width + INSPECTOR_GAP)
                     if (!covered) {
                       workbench.selectDocument(document.path)
                       return

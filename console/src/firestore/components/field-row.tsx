@@ -43,6 +43,22 @@ import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './val
  */
 export const GUTTER = 'flex h-7 w-4 shrink-0 items-center justify-center'
 
+/**
+ * A list of siblings, and the two columns they share: one sized to the
+ * widest name among them, one taking the rest.
+ *
+ * Names were a column already and values were not — on a real document
+ * they began at eight different offsets spread over 58 px, so reading down
+ * the values, which is half of what anyone does with a document, meant
+ * following a staircase. The track does it with no measuring: `max-content`
+ * is the widest name, and each row is a `subgrid` so it can still paint its
+ * own ground and carry its own controls.
+ *
+ * Per list, not per document: a nested list sets its own width, which is
+ * what keeps depth readable when the names at one level are long.
+ */
+export const COLUMNS = 'grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-2 gap-y-0.5'
+
 export function FieldRows({
   nodes,
   named,
@@ -122,7 +138,7 @@ function FieldRow({
   if (node.removed === true)
     return (
       <div
-        className="flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70"
+        className="col-span-2 flex items-center gap-1 rounded-md py-0.5 pr-1 pl-0.5 opacity-70"
         data-testid="field-row"
         data-removed=""
       >
@@ -144,59 +160,63 @@ function FieldRow({
     )
 
   return (
-    <div className="group/row" data-testid="field-row">
+    <div className={`group/row col-span-2 grid grid-cols-subgrid`} data-testid="field-row">
       {/* The ground is the line's, not each control's. Hovering a row is how
           you see which field you are on — the thing a column of twenty
           one-line rows has to answer and a column of blocks never had to. */}
-      <div className="group/line relative flex items-start gap-1 rounded-md pr-1 pl-0.5 hover:bg-kumo-tint focus-within:bg-kumo-tint">
-        <span className={GUTTER}>
-          {container && (
-            <button
-              type="button"
-              className="flex size-4 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-base"
-              onClick={() => setOpen(!open)}
-              aria-expanded={open}
-              aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}
-            >
-              {open ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
-            </button>
+      <div className="group/line relative col-span-2 grid grid-cols-subgrid items-start rounded-md hover:bg-kumo-tint focus-within:bg-kumo-tint">
+        <div className="flex items-start gap-1 pl-0.5">
+          <span className={GUTTER}>
+            {container && (
+              <button
+                type="button"
+                className="flex size-4 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-base"
+                onClick={() => setOpen(!open)}
+                aria-expanded={open}
+                aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}
+              >
+                {open ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
+              </button>
+            )}
+          </span>
+          {named ? (
+            <NameInput node={node} onChange={onChange} invalid={problem?.name !== undefined} />
+          ) : (
+            <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
+              {index}
+            </span>
           )}
-        </span>
-        {named ? (
-          <NameInput node={node} onChange={onChange} invalid={problem?.name !== undefined} />
-        ) : (
-          <span className="flex h-7 min-w-4 shrink-0 items-center justify-end font-mono text-[12px] text-kumo-subtle tabular-nums">
-            {index}
+          {/* Which fields the footer's count is counting. Save is the row's
+              own accent, and this is what it is about to write. Its place is
+              always kept: appearing would otherwise widen the name column
+              and shift every value in the list the first time one is
+              edited, which is the jitter this layout is here to end. */}
+          <span className="flex h-7 w-1.5 shrink-0 items-center">
+            {unsaved && (
+              <span
+                className="size-1.5 rounded-full bg-kumo-brand"
+                title="Unsaved"
+                data-testid="unsaved-mark"
+              />
+            )}
           </span>
-        )}
-        <span className="-ml-1.5 flex h-7 shrink-0 items-center font-mono text-[12px] text-kumo-inactive">
-          :
-        </span>
-        {/* Which fields the footer's count is counting. Save is the row's
-            own accent, and this is what it is about to write. */}
-        {unsaved && (
-          <span className="flex h-7 shrink-0 items-center">
-            <span
-              className="size-1.5 rounded-full bg-kumo-brand"
-              title="Unsaved"
-              data-testid="unsaved-mark"
+        </div>
+        <div className="flex min-w-0 items-start gap-1 pr-1">
+          {container ? (
+            <span className="flex h-7 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
+              {raw ? 'json' : summary(node)}
+            </span>
+          ) : region ? (
+            <span className="h-7 min-w-0 flex-1" />
+          ) : (
+            <ValueEditor
+              node={node}
+              onChange={onChange}
+              label={label}
+              invalid={problem?.value !== undefined}
             />
-          </span>
-        )}
-        {container ? (
-          <span className="flex h-7 min-w-0 flex-1 items-center truncate font-mono text-[12px] text-kumo-subtle">
-            {raw ? 'json' : summary(node)}
-          </span>
-        ) : region ? (
-          <span className="h-7 min-w-0 flex-1" />
-        ) : (
-          <ValueEditor
-            node={node}
-            onChange={onChange}
-            label={label}
-            invalid={problem?.value !== undefined}
-          />
-        )}
+          )}
+        </div>
         <span className={ACCESSORY}>
           {!named && (
             <>
@@ -296,7 +316,7 @@ function FieldRow({
         </span>
       </div>
       {region && (
-        <div className="pt-0.5 pb-1 pl-6">
+        <div className="col-span-2 pt-0.5 pb-1 pl-6">
           {raw ? (
             <textarea
               value={node.text}
@@ -321,20 +341,20 @@ function FieldRow({
           collection keeps the old name. Saying so costs one line and saves
           someone an afternoon. */}
       {renamedFrom !== undefined && (
-        <span className="block pl-6 text-[11px] text-kumo-subtle">
+        <span className="col-span-2 block pl-6 text-[11px] text-kumo-subtle">
           Renaming <span className="font-mono">{renamedFrom}</span> here changes this document only.
         </span>
       )}
       {problem?.value !== undefined && (
-        <span className="block pl-6 text-[12px] text-kumo-danger">{problem.value}</span>
+        <span className="col-span-2 block pl-6 text-[12px] text-kumo-danger">{problem.value}</span>
       )}
       {problem?.name !== undefined && (
-        <span className="block pl-6 text-[12px] text-kumo-danger">{problem.name}</span>
+        <span className="col-span-2 block pl-6 text-[12px] text-kumo-danger">{problem.name}</span>
       )}
       {container && !raw && open && node.children.length > 0 && (
         // The step is the gutter's own width, so a child's name lands one
         // column right of its parent's — never, as it did, to the left.
-        <div className="ml-2.5 grid gap-0.5 border-l border-kumo-line pl-2.5">
+        <div className={`col-span-2 ml-2.5 border-l border-kumo-line pl-2.5 ${COLUMNS}`}>
           <FieldRows
             nodes={node.children}
             named={node.type === 'map'}

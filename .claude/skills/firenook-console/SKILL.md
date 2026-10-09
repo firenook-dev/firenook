@@ -444,6 +444,43 @@ carries the same column — it is a field row without a caret, and the name
 being typed belongs where the names above it are. A journey holds that
 column.
 
+**A list of siblings shares two columns.** Names were a column already and
+values were not: the name is content-wide so its value can sit beside it,
+which meant the values on a real document began at **eight different
+offsets spread over 58 px**. Reading down the values is half of what anyone
+does with a document, and a staircase defeats it. `COLUMNS` in
+`field-row.tsx` gives each list `grid-cols-[minmax(0,max-content)_minmax(0,1fr)]`
+and every row is `grid-cols-subgrid`, so the track finds the widest name
+with **no measuring** — no ref, no effect, no state — while each row still
+paints its own ground and carries its own absolute strip. The colon went
+with it: a column does a colon's job.
+
+It is per sibling list, not per document, so a nested list sets its own
+width and depth stays readable. Two things that only show in a browser: the
+unsaved dot has to keep its place always, or the first edit widens the name
+column and shifts every value in the list — the jitter this layout exists
+to end; and a regression that collapses the list to one column **does not**
+fail the guard, because `col-span-2` then creates an implicit `auto`
+column that sizes to the widest name anyway. The guard's regression is the
+flex layout it replaced.
+
+**Top-to-bottom was the alternative and lost on nesting.** It aligns
+everything for free and gives a value the full width — on a flat document
+of long values, genuinely better. But every leaf at every depth pays the
+doubling: `users/u_k65eq` goes 557 px → ~900 px, which stops fitting on a
+laptop, and a node becomes a ~45 px block against an 18 px indent, which is
+the ratio that made `projects` look like a sibling of `limits`. Firestore
+documents nest, so the column wins.
+
+**The panel's width is the real constraint, so it drags.**
+`inspector-width.ts` is a small store with the same localStorage pattern as
+`lib/layout.ts`: `setWidth` during the drag, `remember` at the end, so a
+drag is not sixty storage writes. It is clamped to leave the grid 360 px —
+the grid is the other half of the screen — and the panel's own left edge is
+the grip, with a double-click home and arrow keys for the keyboard. At
+620 px the pairings document stops wrapping entirely, which is more than
+any arrangement of the two columns can buy.
+
 **A value is never cut short.** A console is for reading a document before
 it is for editing one, so a value that runs past the panel's edge is the
 panel failing at its first job — and a URL truncated there loses its path,

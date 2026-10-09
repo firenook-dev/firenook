@@ -1459,6 +1459,16 @@ test('a document is a tree, and depth is the only thing that moves a name', asyn
     2,
   )
 
+  // And one value column. They began at eight different offsets spread
+  // over 58 px, so reading down the values — which is half of what anyone
+  // does with a document — meant following a staircase.
+  const values = await textLeft(inspector.getByLabel('balance value'))
+  for (const field of ['bio', 'displayName', 'email', 'plan', 'lastSeen']) {
+    expect(
+      Math.abs((await textLeft(inspector.getByLabel(`${field} value`))) - values),
+    ).toBeLessThan(1)
+  }
+
   // A row is a line, and a name and its value share it. On two lines a
   // node is a block, and an indent says nothing against a block's height.
   const name = (await inspector.getByLabel('balance name').boundingBox())!
@@ -1515,4 +1525,47 @@ test('a value too long for its line wraps rather than being cut short', async ({
   await long.click()
   await page.keyboard.press('Shift+Enter')
   await expect(inspector.getByLabel('redirectUri value')).toHaveValue(/\n/)
+})
+
+test('the inspector takes the width it is given, and remembers it', async ({ page }) => {
+  // Room to drag in, so what is measured is the behaviour and not the
+  // window: the ceiling below is what the window has to do with it.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
+  const width = async () => Math.round((await inspector.boundingBox())!.width)
+  const grip = page.getByTestId('inspector-resize')
+  const drag = async (by: number) => {
+    const box = (await grip.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + 200)
+    await page.mouse.down()
+    await page.mouse.move(box.x - by, box.y + 200, { steps: 8 })
+    await page.mouse.up()
+  }
+  expect(await width()).toBe(420)
+
+  // The panel's width is the real constraint on the field editor, not the
+  // arrangement inside it: a name column and a value column share 420 px,
+  // which leaves a value thirty-nine characters before it wraps, and a
+  // document of URLs and hashes has none that short.
+  await drag(180)
+  expect(await width()).toBeGreaterThan(560)
+
+  // However far it is dragged, the grid beside it stays worth having.
+  await drag(4000)
+  const available = await inspector.evaluate(
+    (el) => el.parentElement?.getBoundingClientRect().width ?? 0,
+  )
+  expect(await width()).toBeLessThanOrEqual(available - 360)
+
+  // What it settled on is what it opens at next time.
+  const settled = await width()
+  await page.reload()
+  await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
+  expect(await width()).toBe(settled)
+
+  // And the edge gives it back: a double-click is the way home.
+  await grip.dblclick()
+  expect(await width()).toBe(420)
 })
