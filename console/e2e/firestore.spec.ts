@@ -1515,12 +1515,15 @@ test('every value wears a box, and the controls still arrive under the pointer',
     const box = (await locator.boundingBox())!
     return { left: box.x - panel.x, right: panel.x + panel.width - (box.x + box.width) }
   }
+  // The footer's left end and its right end are the panel's two columns:
+  // the tools start where a field name starts, and Save ends where a
+  // value ends.
   const ground = await inset(inspector.getByTestId('field-row').first().locator('> div').first())
+  const tools = await inset(inspector.getByLabel('Copy this document as code'))
   const save = await inset(inspector.getByTestId('save-document'))
   const value = await inset(inspector.getByLabel('displayName value'))
-  const destroy = await inset(inspector.getByLabel('Delete this document'))
-  expect(Math.abs(ground.left - save.left)).toBeLessThan(2)
-  expect(Math.abs(value.right - destroy.right)).toBeLessThan(2)
+  expect(Math.abs(ground.left - tools.left)).toBeLessThan(2)
+  expect(Math.abs(value.right - save.right)).toBeLessThan(2)
 
   // The caret hangs in that margin; it does not stand in a column of its
   // own. It had one, given to every row whether or not it held a caret,
@@ -1532,7 +1535,7 @@ test('every value wears a box, and the controls still arrive under the pointer',
   // is a name whether or not the field opens.
   const plain = await inset(inspector.getByLabel('displayName name'))
   const holder = await inset(inspector.getByLabel('settings name'))
-  expect(Math.abs(plain.left - save.left)).toBeLessThan(2)
+  expect(Math.abs(plain.left - tools.left)).toBeLessThan(2)
   expect(Math.abs(holder.left - plain.left)).toBeLessThan(1)
 
   // And hanging is not the same as gone: it has to be inside the panel
@@ -1998,6 +2001,25 @@ test('the bottom of the drawer spends colour on what can be done, not on what is
   await expect(inspector.getByTestId('subcollections')).toContainText('Subcollections · none')
   const footer = await band(inspector.locator('footer'))
   expect(await band(inspector.getByTestId('subcollections'))).toBeLessThanOrEqual(footer)
+
+  // The action sits at the right end of the row, where a hand goes
+  // looking for the main button — and the tools went the other way, so
+  // the confirming control is not seated against the destroying one.
+  // Sending Save right without moving them would have put 3 px between
+  // Save and Delete; there are two hundred.
+  const saveBox = (await inspector.getByTestId('save-document').boundingBox())!
+  const deleteBox = (await inspector.getByLabel('Delete this document').boundingBox())!
+  const codeBox = (await inspector.getByLabel('Copy this document as code').boundingBox())!
+  expect(saveBox.x).toBeGreaterThan(edge(deleteBox))
+  expect(codeBox.x).toBeLessThan(deleteBox.x)
+  expect(saveBox.x - edge(deleteBox)).toBeGreaterThan(80)
+
+  // And delete is not a member of the group holding copy: three pixels is
+  // the rhythm within a group, so a rule puts it outside them.
+  const dupBox = (await inspector.getByTestId('duplicate-document').boundingBox())!
+  const withinGroup = dupBox.x - edge(codeBox)
+  const pastTheRule = deleteBox.x - edge(dupBox)
+  expect(pastTheRule).toBeGreaterThan(withinGroup * 2)
 
   // Every icon button down here is the one size. Kumo's extra-small
   // square renders 12 px at a 14 px root, half of every other control in

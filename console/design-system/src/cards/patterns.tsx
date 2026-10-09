@@ -1042,24 +1042,33 @@ function Inspector() {
                 </div>
               </Collapsible.DefaultPanel>
             </Collapsible.Root>
-            {/* The fill is the unsaved-changes signal, so it is absent
+            {/* Tools left, action right. A footer's main button is where
+                a hand goes looking for it, and the risk that invites —
+                the confirming control seated against the destroying one
+                — is answered by sending the tools the other way, so the
+                two coloured controls end up at opposite ends of the row.
+
+                The fill is the unsaved-changes signal, so it is absent
                 here: a brand fill drawn at all times is drawn at half
                 opacity when disabled, which makes "save now" and "nothing
                 to save" differ only by translucency while the washed
                 accent still pulls hardest in a panel you mostly read. */}
             <div className="flex items-center gap-2 border-t border-kumo-hairline pt-4">
-              <Button variant="secondary" size="sm">
-                Save
-              </Button>
               <Button variant="secondary" size="sm" icon={<CopyIcon />}>
                 Copy as code
               </Button>
+              {/* A rule, because three pixels is the rhythm of one group
+                  and delete is not a member of the group holding copy. */}
+              <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" />
+              {/* Red says what it does; the border said it twice, and
+                  made the destructive action the loudest mark in a
+                  footer whose usual business is reading. */}
+              <Button variant="ghost" size="sm" icon={<TrashIcon className="text-kumo-danger" />}>
+                <span className="text-kumo-danger">Delete</span>
+              </Button>
               <span className="ml-auto">
-                {/* Red says what it does; the border said it twice, and
-                    made the destructive action the loudest mark in a
-                    footer whose usual business is reading. */}
-                <Button variant="ghost" size="sm" icon={<TrashIcon className="text-kumo-danger" />}>
-                  <span className="text-kumo-danger">Delete</span>
+                <Button variant="secondary" size="sm">
+                  Save
                 </Button>
               </span>
             </div>

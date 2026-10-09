@@ -864,6 +864,58 @@ three compartments became 120.
 every other icon button and below any sane hit target. `sm` is 23 and
 matches the footer. See also the strip's own 21 px squares.
 
+### Copy as code earns its place by being typed, or not at all
+
+The case against the feature in 2026 is that a model writes the SDK call.
+That is right about **syntax** and wrong about **data**: what a model cannot
+produce is this document — its path, its field names, and above all its
+Firestore types. `integerValue` vs `doubleValue`, `timestampValue` vs a
+string, `referenceValue` vs a path. The console is the only thing that
+knows them, so the job moved from "remind me of the call" to "hand me this
+document, typed, for a prompt, a fixture or a seed script".
+
+`documentAsCode` was failing exactly that job. It printed
+`JSON.stringify(json)` while `literalFor` — the typed emitter for the
+query line — sat **in the same file, unused by it**. Measured against a
+real document: a timestamp came back a string, a geopoint a map, a
+reference a path, and a whole-valued double an integer. Running the
+snippet wrote a different document than the one it was copied from, which
+is the one thing the feature exists not to do. Only `rest` was right,
+because it is built from `restFields`.
+
+Rules that fall out:
+
+- **Build a snippet from the REST fields, never from the JSON beside
+  them.** The JSON shape is lossy by construction.
+- **Emit the import line from what the body uses** (`Timestamp`,
+  `GeoPoint`, `Bytes`), or the snippet does not compile where it is
+  pasted.
+- **Name what a dialect cannot express rather than losing it.** JavaScript
+  has one number type, so a double with no fractional part goes back as an
+  integer; the snippet says which field, by path. Dart has two and prints
+  `269.0`.
+- `vector` is still emitted as a plain array in the three SDK dialects —
+  a known remaining gap, left rather than guessed at, because inventing a
+  constructor name puts a call that does not exist on somebody's clipboard.
+
+### Where the main button goes in a panel footer
+
+The user's call, and it is the right one: **the action goes right, the
+tools go left.** A footer's main button is where a hand goes looking for
+it, and Save is the only control down there anyone clicks twice.
+
+The objection — that this seats the confirming action against the
+destroying one — is about *adjacency*, not about which end Save is at, and
+it is answered by sending the tools the other way rather than by keeping
+Save on the left. Measured: Save↔Delete was 303 px with Save left; it is
+**202 px** with Save right and the tools moved; it would have been **3 px**
+had only Save moved. Check that number whenever this row changes.
+
+**A destructive control is not a member of the group holding copy.** Three
+pixels is the rhythm *within* a group, so delete sat in the copy cluster's
+own rhythm. A `w-px` rule puts it outside them without moving it off the
+row: 3 px within the group, 15 px past the rule.
+
 ## Firestore workbench (built, `src/firestore/`)
 
 - Data path: the browser talks Firestore REST to the console's own origin

@@ -3,7 +3,13 @@
 // as the REST StructuredQuery the engine runs.
 
 import { quoteFieldSegment } from './rest'
-import { type FsValue, type RestValue, encodeValue } from './value'
+import {
+  type FirestoreValueType,
+  type FsValue,
+  type RestValue,
+  decodeFields,
+  encodeValue,
+} from './value'
 
 export const OPERATORS = [
   '==',
@@ -416,7 +422,12 @@ function literalFor(target: CodeTarget, value: FsValue): string {
         ? `'${value.value.replace(/'/g, "\\'")}'`
         : JSON.stringify(value.value)
     case 'number':
-      return String(value.value)
+      // A double with no fractional part is the one thing Firestore keeps
+      // that JavaScript cannot say out loud: `269` goes back as an
+      // integer. Dart has two number types and can.
+      return target === 'flutter' && !value.integer && Number.isInteger(value.value)
+        ? `${value.value}.0`
+        : String(value.value)
     case 'boolean':
       return value.value ? 'true' : 'false'
     case 'null':
@@ -451,7 +462,13 @@ function literalFor(target: CodeTarget, value: FsValue): string {
         )
         .join(', ')}}`
     case 'bytes':
-      return JSON.stringify(value.base64)
+      return target === 'web'
+        ? `Bytes.fromBase64String(${JSON.stringify(value.base64)})`
+        : target === 'admin'
+          ? `Buffer.from(${JSON.stringify(value.base64)}, 'base64')`
+          : target === 'flutter'
+            ? `Blob(base64Decode('${value.base64}'))`
+            : JSON.stringify(value.base64)
     case 'vector':
       return JSON.stringify(value.values)
   }
@@ -544,19 +561,93 @@ export function queryAsCode(
   return `curl -sS -X POST "${scope.origin}/v1/${root}${parent}:runQuery" \\\n  -H "Authorization: Bearer owner" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ structuredQuery: structured })}'\n`
 }
 
+/**
+ * One entry of a document, laid out over as many lines as it needs. A
+ * document is nested and a one-line literal is unreadable past the first
+ * map, so containers open and leaves stay where `literalFor` put them.
+ */
+function prettyLiteral(target: CodeTarget, value: FsValue, depth: number): string {
+  const pad = '  '.repeat(depth + 1)
+  const close = '  '.repeat(depth)
+  const key = (name: string) => (target === 'flutter' ? `'${name}'` : JSON.stringify(name))
+  if (value.type === 'map') {
+    const entries = Object.entries(value.fields)
+    if (entries.length === 0) return '{}'
+    const lines = entries.map(
+      ([name, item]) => `${pad}${key(name)}: ${prettyLiteral(target, item, depth + 1)}`,
+    )
+    return `{\n${lines.join(',\n')}\n${close}}`
+  }
+  if (value.type === 'array' && value.items.some((item) => item.type === 'map')) {
+    const lines = value.items.map((item) => `${pad}${prettyLiteral(target, item, depth + 1)}`)
+    return `[\n${lines.join(',\n')}\n${close}]`
+  }
+  return literalFor(target, value)
+}
+
+/** The SDK names a snippet uses, so the import line it opens with compiles. */
+const CONSTRUCTORS: ReadonlyArray<[FirestoreValueType, string]> = [
+  ['timestamp', 'Timestamp'],
+  ['geopoint', 'GeoPoint'],
+  ['bytes', 'Bytes'],
+]
+
+function usedTypes(value: FsValue, found: Set<FirestoreValueType>): Set<FirestoreValueType> {
+  found.add(value.type)
+  if (value.type === 'map') for (const item of Object.values(value.fields)) usedTypes(item, found)
+  if (value.type === 'array') for (const item of value.items) usedTypes(item, found)
+  return found
+}
+
+/**
+ * The fields a dialect cannot write back as what they are. Only one is
+ * left: JavaScript has a single number type, so a double that happens to
+ * be whole goes back to Firestore as an integer. Saying so beats being
+ * quietly wrong — the whole worth of copying a real document rather than
+ * asking somebody to write the call from memory is that the types survive.
+ */
+function lossyPaths(value: FsValue, at: string, out: string[]): string[] {
+  if (value.type === 'number' && !value.integer && Number.isInteger(value.value)) out.push(at)
+  if (value.type === 'map')
+    for (const [name, item] of Object.entries(value.fields)) lossyPaths(item, `${at}.${name}`, out)
+  if (value.type === 'array')
+    value.items.forEach((item, index) => lossyPaths(item, `${at}[${index}]`, out))
+  return out
+}
+
 export function documentAsCode(
   target: CodeTarget,
   path: string,
-  json: Record<string, unknown>,
   restFields: Record<string, RestValue>,
   scope: { project: string; database: string; origin: string },
 ): string {
-  const data = JSON.stringify(json, null, 2)
+  if (target === 'rest') {
+    const root = `projects/${scope.project}/databases/${scope.database}/documents`
+    return `curl -sS -X PATCH "${scope.origin}/v1/${root}/${path}" \\\n  -H "Authorization: Bearer owner" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ fields: restFields })}'\n`
+  }
+
+  // Built from the REST fields, which carry the types, and not from the
+  // plain JSON beside them, which does not. Printing the JSON is what
+  // this did, and it meant a timestamp came back as a string, a geopoint
+  // as a map and a reference as a path — running the snippet wrote a
+  // different document than the one it was copied from.
+  const fields = decodeFields(restFields)
+  const document: FsValue = { type: 'map', fields }
+  const body = prettyLiteral(target, document, 0)
+  const used = usedTypes(document, new Set())
+  const lossy = lossyPaths(document, '', [])
+  const note =
+    target === 'flutter' || lossy.length === 0
+      ? ''
+      : `// ${lossy.map((at) => at.slice(1)).join(', ')} ${lossy.length === 1 ? 'holds a double' : 'hold doubles'} with no fractional part.\n// JavaScript has one number type, so this writes ${lossy.length === 1 ? 'an integer' : 'integers'}.\n`
+
+  if (target === 'flutter') return `await FirebaseFirestore.instance.doc('${path}').set(${body});\n`
+  const names = [
+    'doc',
+    'setDoc',
+    ...CONSTRUCTORS.filter(([type]) => used.has(type)).map(([, name]) => name),
+  ]
   if (target === 'web')
-    return `import { doc, setDoc } from "firebase/firestore";\n\nawait setDoc(doc(db, ${JSON.stringify(path)}), ${data});\n`
-  if (target === 'admin') return `await db.doc(${JSON.stringify(path)}).set(${data});\n`
-  if (target === 'flutter')
-    return `await FirebaseFirestore.instance.doc('${path}').set(${data.replace(/"([^"]+)":/g, "'$1':").replace(/"/g, "'")});\n`
-  const root = `projects/${scope.project}/databases/${scope.database}/documents`
-  return `curl -sS -X PATCH "${scope.origin}/v1/${root}/${path}" \\\n  -H "Authorization: Bearer owner" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ fields: restFields })}'\n`
+    return `import { ${names.join(', ')} } from "firebase/firestore";\n\n${note}await setDoc(doc(db, ${JSON.stringify(path)}), ${body});\n`
+  return `${note}await db.doc(${JSON.stringify(path)}).set(${body});\n`
 }

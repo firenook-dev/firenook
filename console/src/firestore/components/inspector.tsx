@@ -30,14 +30,7 @@ import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
 import { type Subcollection, subcollectionsQuery } from '../subcollections'
-import {
-  type DraftNode,
-  diffDocument,
-  nodesFrom,
-  parseNode,
-  problemsOf,
-  toJsonValue,
-} from '../draft'
+import { type DraftNode, diffDocument, nodesFrom, parseNode, problemsOf } from '../draft'
 import { type FsDocument, type FsValue, type RestValue, encodeValue, relativeTime } from '../value'
 import { CodeBlock, firestoreOrigin } from './code-popover'
 import { FieldsPanel } from './field-editor'
@@ -342,17 +335,18 @@ function DocumentEditor({
     },
   })
 
+  // The REST shape alone: it is the one that carries the types, and the
+  // plain JSON beside it is what made three of the four dialects emit a
+  // document that is not this one.
   const forCode = useMemo(() => {
-    const plain: Record<string, unknown> = {}
     const rest: Record<string, RestValue> = {}
     for (const node of nodes) {
       if (node.removed === true) continue
       const parsed = parseNode(node)
       const value: FsValue = parsed.ok ? parsed.value : { type: 'string', value: node.text }
-      plain[node.name] = toJsonValue(value)
       rest[node.name] = encodeValue(value, root)
     }
-    return { json: plain, rest }
+    return rest
   }, [nodes, root])
 
   return (
@@ -369,38 +363,14 @@ function DocumentEditor({
       />
       {subcollections}
       <footer className="flex h-12 shrink-0 items-center gap-2 border-t border-kumo-line px-5">
-        {/* The fill says there is something to save, and says nothing
-            otherwise. It used to be the brand fill always, which a
-            disabled button draws at half opacity — so "nothing to save"
-            and "save now" differed only by translucency, and a washed
-            accent still pulled the eye hardest in a panel you mostly
-            read. Outlined at rest, filled the moment the count beside it
-            is not zero: the one saturated mark in the drawer appears
-            exactly when there is work to do. */}
-        <Button
-          variant={changed > 0 ? 'primary' : 'secondary'}
-          size="sm"
-          onClick={() => save.mutate()}
-          disabled={changed === 0 || problems.size > 0}
-          loading={save.isPending}
-          data-testid="save-document"
-        >
-          Save
-        </Button>
-        {save.isError ? (
-          <Text variant="error" size="sm" truncate>
-            {save.error.message}
-          </Text>
-        ) : problems.size > 0 ? (
-          <Text variant="error" size="sm" data-testid="save-blocked">
-            {problems.size} field{problems.size === 1 ? '' : 's'} to fix
-          </Text>
-        ) : changed > 0 ? (
-          <Text variant="secondary" size="sm" data-testid="save-pending">
-            {changed} change{changed === 1 ? '' : 's'}
-          </Text>
-        ) : null}
-        <div className="ml-auto flex items-center gap-1">
+        {/* Tools on the left, the action on the right: a footer's main
+            button is where a hand goes looking for it, and Save is the
+            one control down here anybody clicks twice. The risk that
+            invites — seating the confirming action against the
+            destroying one — is answered by sending the tools the other
+            way, so the two coloured controls sit at opposite ends of the
+            row with three hundred pixels between them. */}
+        <div className="flex shrink-0 items-center gap-1">
           <Popover>
             <Popover.Trigger
               render={
@@ -419,7 +389,7 @@ function DocumentEditor({
                 title="This document as code"
                 target={codeTarget}
                 setTarget={setCodeTarget}
-                code={documentAsCode(codeTarget, document.path, forCode.json, forCode.rest, {
+                code={documentAsCode(codeTarget, document.path, forCode, {
                   project: workbench.project,
                   database: workbench.database,
                   origin: firestoreOrigin(status.data?.services),
@@ -447,6 +417,11 @@ function DocumentEditor({
               />
             }
           />
+          {/* Three pixels is the rhythm of one group, and delete is not a
+              member of the group holding copy. A rule puts it outside
+              them without moving it off the row. */}
+
+          <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" />
           {/* Red says what it does; the border was saying it twice. A
               bordered destructive button was the strongest mark in the
               footer at rest — louder than Save, in an editor whose usual
@@ -460,6 +435,38 @@ function DocumentEditor({
             aria-label="Delete this document"
           >
             <span className="text-kumo-danger">Delete</span>
+          </Button>
+        </div>
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          {save.isError ? (
+            <Text variant="error" size="sm" truncate>
+              {save.error.message}
+            </Text>
+          ) : problems.size > 0 ? (
+            <Text variant="error" size="sm" data-testid="save-blocked">
+              {problems.size} field{problems.size === 1 ? '' : 's'} to fix
+            </Text>
+          ) : changed > 0 ? (
+            <Text variant="secondary" size="sm" data-testid="save-pending">
+              {changed} change{changed === 1 ? '' : 's'}
+            </Text>
+          ) : null}
+          {/* The fill says there is something to save, and says nothing
+              otherwise. It used to be the brand fill always, which a
+              disabled button draws at half opacity — so "nothing to save"
+              and "save now" differed only by translucency, and a washed
+              accent still pulled the eye hardest in a panel you mostly
+              read. Outlined at rest, filled the moment the count beside
+              it is not zero. */}
+          <Button
+            variant={changed > 0 ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={changed === 0 || problems.size > 0}
+            loading={save.isPending}
+            data-testid="save-document"
+          >
+            Save
           </Button>
         </div>
       </footer>

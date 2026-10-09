@@ -3,6 +3,7 @@ import {
   DEFAULT_LIMIT,
   QueryParseError,
   effectiveOrder,
+  documentAsCode,
   parseQuery,
   printQuery,
   queryAsCode,
@@ -134,5 +135,72 @@ describe('the workbench query text', () => {
     const rest = queryAsCode('rest', 'users/u1/orders', false, query, scope)
     expect(rest).toContain('documents/users/u1:runQuery')
     expect(rest).toContain('"limit":5')
+  })
+})
+
+describe('a document copied as code', () => {
+  const scope = { project: 'demo', database: '(default)', origin: 'http://127.0.0.1:8080' }
+  // Every type whose JSON shape is a lie about what Firestore holds.
+  const fields = {
+    seen: { timestampValue: '2026-08-31T09:45:54.604Z' },
+    where: { geoPointValue: { latitude: -1.2921, longitude: 36.8219 } },
+    owner: { referenceValue: `${ROOT}/users/u1` },
+    blob: { bytesValue: 'aGk=' },
+    balance: { doubleValue: 269 },
+    count: { integerValue: '785' },
+    nested: {
+      mapValue: { fields: { at: { timestampValue: '2026-01-02T03:04:05.000Z' } } },
+    },
+  }
+
+  // It used to print the plain JSON beside the REST fields, so running
+  // the snippet wrote a different document than the one it was copied
+  // from: a timestamp came back a string, a geopoint a map, a reference
+  // a path. The types are the whole reason to copy a real document
+  // rather than ask somebody to write the call from memory.
+  it('writes back the types it was copied from', () => {
+    const web = documentAsCode('web', 'users/u1', fields, scope)
+    expect(web).toContain('Timestamp.fromDate(new Date("2026-08-31T09:45:54.604Z"))')
+    expect(web).toContain('new GeoPoint(-1.2921, 36.8219)')
+    expect(web).toContain('doc(db, "users/u1")')
+    expect(web).toContain('Bytes.fromBase64String("aGk=")')
+    // Nested as well as top level: a map used to flatten to JSON whole.
+    expect(web).toContain('"at": Timestamp.fromDate(new Date("2026-01-02T03:04:05.000Z"))')
+    // And not as the bare value it used to be — the ISO string is only
+    // allowed inside the constructor that makes it a timestamp again.
+    expect(web).not.toContain('"seen": "2026-')
+    expect(web).not.toContain('"latitude"')
+    expect(web).not.toContain('"owner": "users/u1"')
+  })
+
+  // The snippet opens with an import line that covers what it uses.
+  it('imports the constructors it reaches for, and no others', () => {
+    expect(documentAsCode('web', 'users/u1', fields, scope)).toContain(
+      'import { doc, setDoc, Timestamp, GeoPoint, Bytes } from "firebase/firestore";',
+    )
+    expect(documentAsCode('web', 'users/u1', { name: { stringValue: 'Ada' } }, scope)).toContain(
+      'import { doc, setDoc } from "firebase/firestore";',
+    )
+  })
+
+  // One type cannot survive the trip, so it is named rather than lost:
+  // JavaScript has a single number type, and a double that happens to be
+  // whole goes back to Firestore as an integer. Dart has two and does
+  // not need telling.
+  it('says which field a JavaScript dialect cannot write back', () => {
+    const admin = documentAsCode('admin', 'users/u1', fields, scope)
+    expect(admin).toContain('// balance holds a double with no fractional part.')
+    expect(admin).not.toContain('count holds')
+    const flutter = documentAsCode('flutter', 'users/u1', fields, scope)
+    expect(flutter).toContain('269.0')
+    expect(flutter).not.toContain('holds a double')
+    expect(flutter).toContain("'where': GeoPoint(-1.2921, 36.8219)")
+  })
+
+  // The REST dialect was always typed, because it is the wire shape.
+  it('leaves the REST call as the wire shape', () => {
+    const rest = documentAsCode('rest', 'users/u1', fields, scope)
+    expect(rest).toContain('"timestampValue":"2026-08-31T09:45:54.604Z"')
+    expect(rest).toContain('curl -sS -X PATCH')
   })
 })
