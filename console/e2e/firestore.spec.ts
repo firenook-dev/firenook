@@ -1586,6 +1586,37 @@ test('a document is a tree, and depth is the only thing that moves a name', asyn
   expect(await left('settings')).toBeLessThan(await left('limits'))
   expect(await left('limits')).toBeLessThan(await left('projects'))
 
+  // The line that marks a list descends from the caret that opened it.
+  // It used to descend from nothing: the line sat inside the name column
+  // while the caret hangs outside it, so eleven pixels of white stood
+  // between the chevron and the rail it heads — the same eleven at every
+  // depth, because the gap is built in rather than drifting. An arrow and
+  // a line that never meet are two marks near each other, not a statement
+  // about what contains what, and the tree has to be read off the indent
+  // alone.
+  const rails = await inspector.evaluate((panel) => {
+    const view = panel.ownerDocument.defaultView!
+    return [...panel.querySelectorAll('[data-testid="field-row"] > div')]
+      .filter((el) => view.getComputedStyle(el).borderLeftWidth === '1px')
+      .map((rail) => {
+        const caret = rail
+          .closest('[data-testid="field-row"]')
+          ?.querySelector(':scope > div > div > button[aria-expanded]')
+        if (!caret) return undefined
+        const chevron = caret.getBoundingClientRect()
+        return rail.getBoundingClientRect().left + 0.5 - (chevron.left + chevron.width / 2)
+      })
+      .filter((offset) => offset !== undefined)
+  })
+  expect(rails.length).toBeGreaterThan(1)
+  expect(rails.filter((offset) => Math.abs(offset) >= 1)).toEqual([])
+
+  // Moving it there cost the indent nothing: the padding carries what the
+  // margin gave up, so the step from a name to its child is the same at
+  // every depth and the same as it was.
+  const step = (await left('city')) - (await left('address'))
+  expect(Math.abs((await left('projects')) - (await left('limits')) - step)).toBeLessThan(1)
+
   // One name column, and the line that adds a field is in it. The tree is
   // the only thing in the panel that starts right of the panel's own
   // content column, so that step is the caret's width and nothing more —

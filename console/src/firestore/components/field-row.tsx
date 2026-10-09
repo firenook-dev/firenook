@@ -423,9 +423,23 @@ function FieldRow({
         <span className="col-span-2 block text-[12px] text-kumo-danger">{problem.name}</span>
       )}
       {container && !raw && open && node.children.length > 0 && (
-        // The step clears the caret that hangs off a child's name: 22 px
-        // of indent against a 14 px hang, with the guide line at 3.5 so it
-        // runs to the left of that caret rather than through it.
+        // The guide line descends from the caret that opened this list.
+        //
+        // It used to descend from nothing. The line sat 3.5 px inside the
+        // name column and the parent's caret hangs 14 px outside it, which
+        // put eleven pixels of white between the chevron and the line it
+        // was supposed to head — measured at both depths of the same map,
+        // and the same eleven each time, because the offset is built in
+        // rather than drifting. An arrow and a rail that never touch are
+        // two marks near each other, not a statement about what contains
+        // what, and the tree they draw has to be read from the indent
+        // alone. Now the line runs down the caret's own middle: -7 px for
+        // the hang's centre, which is -2 on a 14 px root, and the padding
+        // carries the rest of the step so the indent is the 22 px it was.
+        //
+        // This also widens the only gap that was tight. A child's own
+        // caret hangs into this same margin, and it used to clear the line
+        // by three pixels; it now clears it by fourteen.
         //
         // `subgrid`, not a grid of its own: a nested list used to size a
         // name column to its own widest name, so a list of short names
@@ -437,7 +451,7 @@ function FieldRow({
         // the indent narrows this list's names and leaves every value in
         // the document on one rail.
         <div
-          className={`col-span-2 ml-1 grid grid-cols-subgrid border-l border-kumo-line pl-5 ${BETWEEN}`}
+          className={`col-span-2 -ml-2 grid grid-cols-subgrid border-l border-kumo-line pl-8 ${BETWEEN}`}
         >
           <FieldRows
             nodes={node.children}

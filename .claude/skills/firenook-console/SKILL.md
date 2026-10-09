@@ -625,6 +625,30 @@ ancestor. Out of the flow it cannot push anything, so **siblings stay
 aligned for free** — the thing the column was there to buy — and a name is
 a name whether or not the field opens.
 
+**A guide line descends from the caret that opened it, or it descends from
+nothing.** Hanging the caret moved it outside the name column while the
+nested list's rail stayed inside one: `ml-1` put the line 3.5 px into the
+column and the caret hangs 14 px out of it, leaving **11 px of white
+between the chevron and the rail it heads** — the same 11 at every depth,
+because the offset is built in rather than drifting, which is why it reads
+as a misdraw and not as a rounding slip. An arrow and a line that never
+meet are two marks near each other, not a statement about what contains
+what, and the tree then has to be read off the indent alone. The fix is
+arithmetic, not ink: the caret's centre is −7 px from the column, which
+is `-ml-2` on a 14 px root, and `pl-5` → `pl-8` gives back exactly what the
+margin took, so **the 22 px indent and every value column are untouched**.
+It also widens the one gap that was tight — a child's own caret hangs into
+the same margin and cleared the rail by 3 px; it now clears it by 14.
+
+This is the cheaper half of what an `├─` tree would say. Before adding the
+horizontal tee, note two things measured here: rows are **variable height**
+(a wrapped value is three lines and the name sits at the top), so the stub
+has to land 14 px from the row top rather than at the row's centre; and the
+stub cannot be one length, because a leaf child has 29 px of clear run from
+rail to name while a **container** child has 15 before its own chevron is in
+the way. VS Code avoids that with a reserved chevron column — the column
+this console deleted.
+
 Removing a column means hunting the places that stood clear of it. A
 region, a rename note and a problem message all carried `pl-6` to clear
 the caret, and kept it after the caret stopped being there — so an

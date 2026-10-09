@@ -790,11 +790,20 @@ function FieldRow({
 }
 
 /**
- * The entries of a map or the items of an array, under a guide line. The
- * step is the caret column's own width, so a child's name lands one column
- * right of its parent's rather than, as it did, to the left of it.
+ * The entries of a map or the items of an array, under a guide line that
+ * descends from the caret which opened them. The step is the caret's own
+ * width, so a child's name lands one column right of its parent's rather
+ * than, as it did, to the left of it.
  */
 function Nested({ children }: { children: ReactNode }) {
+  // The guide line runs down the parent caret's middle, which is −7 px
+  // from the name column and so −2 on a 14 px root. It used to sit at
+  // +3.5, inside the column, while the caret hangs outside it: eleven
+  // pixels of white between the chevron and the line it heads, the same
+  // eleven at every depth. An arrow and a rail that never meet are two
+  // marks near each other, not a statement about what contains what. The
+  // padding carries what the margin gave up, so the indent is unchanged.
+  //
   // `subgrid`, not a grid of its own: a nested list that sized a name
   // column to its own widest name started its values 26 px LEFT of its
   // parent's siblings and ran that much wider, so a child burst out of the
@@ -803,7 +812,7 @@ function Nested({ children }: { children: ReactNode }) {
   // document stays on one rail.
   return (
     <div
-      className={`col-span-2 ml-1 grid grid-cols-subgrid border-l border-kumo-line pl-5 ${BETWEEN}`}
+      className={`col-span-2 -ml-2 grid grid-cols-subgrid border-l border-kumo-line pl-8 ${BETWEEN}`}
     >
       {children}
     </div>
