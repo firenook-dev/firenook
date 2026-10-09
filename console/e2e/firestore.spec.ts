@@ -595,7 +595,7 @@ test('the New menu creates a typed root collection, and a subcollection grows fr
   expect(body.fields.createdAt).toHaveProperty('timestampValue')
 
   // The inspector's subcollections section grows the tree from here.
-  await expect(page.getByTestId('subcollections')).toContainText('None yet')
+  await expect(page.getByTestId('subcollections')).toContainText('Subcollections · none')
   await page.getByTestId('add-subcollection').click()
   await page.getByTestId('new-collection-id').fill('lines')
   await page.getByTestId('create-submit').click()
@@ -1225,6 +1225,19 @@ async function boxedValues(fields: Locator): Promise<boolean[]> {
 }
 
 /** Keys with a number each, for a map wide enough to be worth shutting. */
+/** How a control is drawn: the two properties a variant change shows up in. */
+async function paint(locator: Locator): Promise<{ background: string; opacity: string }> {
+  return await locator.evaluate((el) => {
+    const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+    return { background: style.backgroundColor, opacity: style.opacity }
+  })
+}
+
+/** The drawn height of a band of panel chrome. */
+async function band(locator: Locator): Promise<number> {
+  return (await locator.boundingBox())!.height
+}
+
 function numbered(keys: string[]): Record<string, unknown> {
   return Object.fromEntries(keys.map((key, index) => [key, { integerValue: String(index) }]))
 }
@@ -1931,4 +1944,69 @@ test('the inspector takes the width it is given, and remembers it', async ({ pag
   await page.reload()
   await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
   expect(await width()).toBeGreaterThan(640)
+})
+
+test('the bottom of the drawer spends colour on what can be done, not on what is there', async ({
+  page,
+}) => {
+  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector.getByLabel('displayName value')).toHaveValue('Ada Lovelace')
+
+  // The one action of the add line is never drawn as unavailable. It was
+  // `ghost` and `disabled` until a name was typed — which is every moment
+  // anybody is looking for it — so half opacity sat on an already subtle
+  // grey, beside a placeholder and a type chip that are subtle too, and
+  // nothing in the band was at full strength. A control that can always
+  // begin its own job has no disabled state to draw: with nothing typed
+  // it points at the field that needs filling.
+  const add = inspector.getByTestId('add-field')
+  expect((await paint(add)).opacity).toBe('1')
+  await expect(add).toBeEnabled()
+  await add.click()
+  await expect(inspector.getByTestId('new-field-name')).toBeFocused()
+
+  // The fill means there is something to save. It used to be the brand
+  // fill always, which a disabled button draws at half opacity, so "save
+  // now" and "nothing to save" differed only by translucency — and the
+  // washed accent still pulled hardest in a panel whose usual business is
+  // reading.
+  const save = inspector.getByTestId('save-document')
+  const resting = await paint(save)
+  await inspector.getByLabel('plan value').fill('team')
+  await expect(inspector.getByTestId('save-pending')).toContainText('1 change')
+  const armed = await paint(save)
+  expect(armed.background).not.toBe(resting.background)
+  expect(armed.opacity).toBe('1')
+
+  // And red is spent once. A bordered destructive button was the loudest
+  // mark in the footer at rest, louder than Save; the word keeps the
+  // colour and the box goes.
+  const destroy = inspector.getByLabel('Delete this document')
+  expect((await paint(destroy)).background).toBe('rgba(0, 0, 0, 0)')
+  await expect(destroy.locator('span').first()).toHaveText('Delete')
+
+  // Empty, the subcollections section is one line. It was the tallest
+  // band in the panel — 56 px against the footer's 42 — and the only one
+  // with nothing in it, because a 12 px label was followed by a 13 px
+  // "None yet." in the same grey: a sentence larger than its own heading.
+  // On a document that has none — the seeded user holds orders and
+  // sessions, so this needs one of its own.
+  await put(page.request, 'teams/t_bare', { name: { stringValue: 'Bare' } })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_bare`)
+  await expect(inspector.getByLabel('name value')).toHaveValue('Bare')
+  await expect(inspector.getByTestId('subcollections')).toContainText('Subcollections · none')
+  const footer = await band(inspector.locator('footer'))
+  expect(await band(inspector.getByTestId('subcollections'))).toBeLessThanOrEqual(footer)
+
+  // Every icon button down here is the one size. Kumo's extra-small
+  // square renders 12 px at a 14 px root, half of every other control in
+  // the panel and below any sane hit target.
+  const squares = await Promise.all(
+    ['add-subcollection', 'duplicate-document'].map(async (id) =>
+      Math.round((await inspector.getByTestId(id).boundingBox())!.height),
+    ),
+  )
+  expect(new Set(squares).size).toBe(1)
+  expect(Math.min(...squares)).toBeGreaterThanOrEqual(20)
 })

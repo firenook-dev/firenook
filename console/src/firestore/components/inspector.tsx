@@ -237,19 +237,29 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
   const openCreate = useCreateDialog((state) => state.open)
   return (
     <div className="shrink-0 border-t border-kumo-line px-5 py-2" data-testid="subcollections">
-      <div className="mb-1 flex items-center">
+      {/* Empty, this section is one line. It used to be the tallest band
+          in the panel — 56 px against the footer's 42 — and the only one
+          with nothing in it, because a 12 px label was followed by a
+          13 px "None yet." in the same grey: a sentence larger than its
+          own heading, so there was no heading, just two grey lines of
+          which the louder said nothing. The count says it instead, and
+          the absence of a list says it twice. */}
+      <div className={`flex items-center ${found.length > 0 ? 'mb-1' : ''}`}>
         {/* A section label in the panel's chrome, the size of the tab row
             above it rather than of the prose below. */}
         <Text variant="secondary" size="sm" as="p" DANGEROUS_className="text-[12px]">
-          Subcollections{found.length > 0 ? ` · ${found.length}` : ''}
+          Subcollections · {found.length > 0 ? found.length : 'none'}
         </Text>
         <span className="ml-auto">
+          {/* `sm`, not `xs`: Kumo's extra-small square renders 12 px at a
+              14 px root, which is below any sane hit target and half the
+              size of every other icon button in the panel. */}
           <Tooltip
             content="Add a subcollection under this document"
             render={
               <Button
                 variant="ghost"
-                size="xs"
+                size="sm"
                 shape="square"
                 icon={<PlusIcon />}
                 aria-label="Add a subcollection"
@@ -260,11 +270,6 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
           />
         </span>
       </div>
-      {found.length === 0 && (
-        <Text variant="secondary" size="sm">
-          None yet.
-        </Text>
-      )}
       <ul className="grid gap-0.5">
         {found.map((child) => (
           <li key={child.id}>
@@ -364,8 +369,16 @@ function DocumentEditor({
       />
       {subcollections}
       <footer className="flex h-12 shrink-0 items-center gap-2 border-t border-kumo-line px-5">
+        {/* The fill says there is something to save, and says nothing
+            otherwise. It used to be the brand fill always, which a
+            disabled button draws at half opacity — so "nothing to save"
+            and "save now" differed only by translucency, and a washed
+            accent still pulled the eye hardest in a panel you mostly
+            read. Outlined at rest, filled the moment the count beside it
+            is not zero: the one saturated mark in the drawer appears
+            exactly when there is work to do. */}
         <Button
-          variant="primary"
+          variant={changed > 0 ? 'primary' : 'secondary'}
           size="sm"
           onClick={() => save.mutate()}
           disabled={changed === 0 || problems.size > 0}
@@ -434,14 +447,19 @@ function DocumentEditor({
               />
             }
           />
+          {/* Red says what it does; the border was saying it twice. A
+              bordered destructive button was the strongest mark in the
+              footer at rest — louder than Save, in an editor whose usual
+              business is reading. Kumo has no ghost destructive, so the
+              colour rides on the children of a ghost. */}
           <Button
-            variant="secondary-destructive"
+            variant="ghost"
             size="sm"
-            icon={<TrashIcon />}
+            icon={<TrashIcon className="text-kumo-danger" />}
             onClick={() => onDelete(document.path)}
             aria-label="Delete this document"
           >
-            Delete
+            <span className="text-kumo-danger">Delete</span>
           </Button>
         </div>
       </footer>

@@ -1021,7 +1021,11 @@ function Inspector() {
             <div className="flex items-center gap-1 border-t border-kumo-line pt-3">
               <Value className="text-kumo-inactive">New field name</Value>
               <TypeChip type="string" menu />
-              <Button variant="ghost" size="sm" icon={<PlusIcon />}>
+              {/* Never drawn as unavailable: it was a disabled ghost until a
+                  name was typed, which is every moment anybody is looking
+                  for it. With nothing typed it points at the field that
+                  needs filling rather than refusing the click. */}
+              <Button variant="secondary" size="sm" icon={<PlusIcon />}>
                 Add field
               </Button>
             </div>
@@ -1038,16 +1042,24 @@ function Inspector() {
                 </div>
               </Collapsible.DefaultPanel>
             </Collapsible.Root>
+            {/* The fill is the unsaved-changes signal, so it is absent
+                here: a brand fill drawn at all times is drawn at half
+                opacity when disabled, which makes "save now" and "nothing
+                to save" differ only by translucency while the washed
+                accent still pulls hardest in a panel you mostly read. */}
             <div className="flex items-center gap-2 border-t border-kumo-hairline pt-4">
-              <Button variant="primary" size="sm">
+              <Button variant="secondary" size="sm">
                 Save
               </Button>
               <Button variant="secondary" size="sm" icon={<CopyIcon />}>
                 Copy as code
               </Button>
               <span className="ml-auto">
-                <Button variant="secondary-destructive" size="sm" icon={<TrashIcon />}>
-                  Delete
+                {/* Red says what it does; the border said it twice, and
+                    made the destructive action the loudest mark in a
+                    footer whose usual business is reading. */}
+                <Button variant="ghost" size="sm" icon={<TrashIcon className="text-kumo-danger" />}>
+                  <span className="text-kumo-danger">Delete</span>
                 </Button>
               </span>
             </div>

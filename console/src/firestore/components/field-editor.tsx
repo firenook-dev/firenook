@@ -253,12 +253,24 @@ function AddField({
           </DropdownMenu.RadioGroup>
         </DropdownMenu.Content>
       </DropdownMenu>
+      {/* The one action of this line is never drawn as unavailable. It was
+          `ghost` and `disabled` until a name was typed, which is every
+          moment anybody is looking for it: half opacity on an already
+          subtle grey, beside a placeholder and a type chip that are both
+          subtle too, so nothing in the band was at full strength and the
+          band that advertises "you can add a field" was the faintest ink
+          in the panel. A user said it "feels not so visible".
+
+          A border gives it a shape, and with nothing typed it points at
+          the field that needs filling rather than refusing the click. A
+          control that can always begin its own job has no disabled state
+          to draw. */}
       <Button
-        variant="ghost"
+        variant="secondary"
         size="sm"
         icon={<PlusIcon />}
-        onClick={() => add(name, type)}
-        disabled={!typed}
+        onClick={() => (typed ? add(name, type) : inputRef.current?.focus())}
+        data-testid="add-field"
       >
         Add field
       </Button>

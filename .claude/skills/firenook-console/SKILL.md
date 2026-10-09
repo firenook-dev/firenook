@@ -825,6 +825,45 @@ The component library the design tool works from is `design-system/`
 card there for every new pattern before it is designed with. Component docs: `npx @cloudflare/kumo doc <Component>`. TanStack docs:
 `npx @tanstack/cli search-docs "<query>"` / `npx @tanstack/cli doc <library> <path>`.
 
+### The bottom of a panel: colour on what can be done, height on what is there
+
+**Never draw the only action of a line as unavailable.** The add-field
+button was `ghost` + `disabled={!typed}`, which is half opacity on an
+already subtle grey — beside a placeholder and a type chip that are also
+subtle, so **nothing in the band was at full strength** and the band whose
+whole job is to advertise "you can add a field" was the faintest ink in
+the panel. A user: *"adding new field feels not so visible"*. A control
+that can always begin its own job has no disabled state to draw: give it a
+border, and with nothing typed let it focus the field that needs filling.
+
+**The brand fill is a signal, not a decoration.** A `primary` button drawn
+at all times is drawn at `opacity: 0.5` when disabled, so "save now" and
+"nothing to save" differed only by translucency and the washed accent
+still pulled hardest at rest. `variant={changed > 0 ? 'primary' :
+'secondary'}` makes the one saturated mark in the drawer appear exactly
+when there is work to do.
+
+**Red once.** `secondary-destructive` — red text, white ground, border —
+measured as the loudest control in the footer at rest, louder than Save, in
+an editor whose usual business is reading. Kumo has no ghost destructive,
+so put the colour on the children of a `ghost`: `icon={<TrashIcon
+className="text-kumo-danger" />}` and a `<span className="text-kumo-danger">`
+for the word. A child's own colour beats the button's inherited one, which
+is the one way past Kumo's `cn()` merge dropping an outer `className`.
+
+**An empty section is one line.** Subcollections was **56 px against the
+footer's 42** — the tallest band in the panel and the only one with
+nothing in it — because a 12 px label was followed by a 13 px "None yet."
+in the same grey: a sentence larger than its own heading, so there was no
+heading, just two grey lines of which the louder said nothing. `· none` in
+the label says it, and the absent list says it twice. 138 px of chrome in
+three compartments became 120.
+
+**Check the box sizes of anything you touch down here.** The subcollections
+`+` was still a Kumo `size="xs"` square — 12 px at our 14 px root, half of
+every other icon button and below any sane hit target. `sm` is 23 and
+matches the footer. See also the strip's own 21 px squares.
+
 ## Firestore workbench (built, `src/firestore/`)
 
 - Data path: the browser talks Firestore REST to the console's own origin
