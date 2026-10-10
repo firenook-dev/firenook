@@ -12,7 +12,7 @@
 // against a block forty-seven pixels tall. The one exception earns it — a
 // value that is a region of text rather than a line of it goes below.
 
-import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
+import { Button, Tooltip } from '@cloudflare/kumo'
 import {
   ArrowCounterClockwiseIcon,
   ArrowDownIcon,
@@ -24,11 +24,10 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react'
 import { useState } from 'react'
-import { TypeBadge } from '@/components/kit'
 import { type DraftNode, emptyNode, retype, toggleRaw } from '../draft'
-import { type FirestoreValueType, VALUE_TYPES } from '../value'
 import { ACCESSORY, useFieldEditing, useFocusTarget } from './field-context'
 import { StripButton } from './strip-button'
+import { TypeMenu } from './type-menu'
 import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './value-editors'
 
 /**
@@ -306,31 +305,11 @@ function FieldRow({
               number is digits, a boolean is a switch, a map counts its own
               entries. Where the text alone is ambiguous the editor says so in
               a word of its own — `double`, `ref`, `lat`, `12 bytes`. */}
-          <DropdownMenu>
-            <DropdownMenu.Trigger
-              render={
-                <button
-                  type="button"
-                  className="group flex h-6 shrink-0 items-center rounded-md px-1 outline-none hover:bg-kumo-tint focus-visible:ring focus-visible:ring-kumo-focus"
-                  aria-label={`${label} type: ${node.type}`}
-                >
-                  <TypeBadge type={node.type} menu />
-                </button>
-              }
-            />
-            <DropdownMenu.Content>
-              <DropdownMenu.RadioGroup
-                value={node.type}
-                onValueChange={(value) => onChange(retype(node, value as FirestoreValueType))}
-              >
-                {VALUE_TYPES.map((type) => (
-                  <DropdownMenu.RadioItem key={type} value={type} closeOnClick>
-                    <span className="font-mono text-[12px]">{type}</span>
-                  </DropdownMenu.RadioItem>
-                ))}
-              </DropdownMenu.RadioGroup>
-            </DropdownMenu.Content>
-          </DropdownMenu>
+          <TypeMenu
+            type={node.type}
+            label={label}
+            onPick={(type) => onChange(retype(node, type))}
+          />
           {container && (
             <>
               <Tooltip

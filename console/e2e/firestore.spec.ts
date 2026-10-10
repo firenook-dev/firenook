@@ -633,10 +633,10 @@ test('column headers sort, filter and hide; a scalar cell edits in place', async
   expect(before).toBeGreaterThan(0)
 
   // Double-clicking the cell edits it where it is; the row leaves the filter.
-  const cell = page.getByTestId('grid-row').first().locator('td').nth(5)
+  const cell = page.getByTestId('grid-row').first().locator('td[data-field="type"]')
   const id = (await page.getByTestId('grid-row').first().locator('td').nth(1).innerText()).trim()
   await cell.dblclick()
-  const editor = page.getByTestId('inline-cell-editor')
+  const editor = page.getByTestId('cell-editor').getByRole('textbox', { name: 'type value' })
   await expect(editor).toBeFocused()
   await editor.fill('payment.retried')
   await editor.press('Enter')
@@ -816,9 +816,13 @@ test('the grid loads previews of heavy documents, and says so rather than lying'
   await expect(note).toContainText('…')
   await expect(note.getByTitle(/more bytes — open the row to read it all/)).toBeVisible()
 
-  // And it refuses to be edited in place, which would save the fragment.
+  // Editing it in place reads the whole value first, so what is saved is
+  // never the fragment the page was drawn from.
   await note.dblclick()
-  await expect(note.locator('input')).toHaveCount(0)
+  const editing = page.getByTestId('cell-editor').getByRole('textbox', { name: 'note value' })
+  await expect(editing).toHaveValue(long)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('cell-editor')).toHaveCount(0)
 
   // The inspector holds the whole value, because it fetches the document.
   await row.getByRole('cell').nth(1).click()
@@ -2710,4 +2714,327 @@ test('the bottom of the drawer spends colour on what can be done, not on what is
   // A Save's own width of nothing between them, which is the least that
   // reads as the other end of the row.
   expect(Math.round(tight.x - edge(tightDelete))).toBeGreaterThanOrEqual(42)
+})
+
+/** Documents written straight to the engine, keyed by id, in batches it accepts. */
+async function seed(
+  request: { post: (url: string, options: object) => Promise<{ ok: () => boolean }> },
+  collection: string,
+  docs: Record<string, Record<string, unknown>>,
+) {
+  const writes = Object.entries(docs).map(([id, fields]) => ({
+    update: { name: `${resource()}/${collection}/${id}`, fields },
+  }))
+  for (let at = 0; at < writes.length; at += 400) {
+    const response = await request.post(`${documents()}:commit`, {
+      headers: owner,
+      data: { writes: writes.slice(at, at + 400) },
+    })
+    expect(response.ok()).toBeTruthy()
+  }
+}
+
+/**
+ * A cell, scrolled to. Columns are virtualized like rows, so one that is
+ * off screen is not in the page until the grid has been scrolled to it.
+ */
+async function reach(page: import('@playwright/test').Page, path: string, field: string) {
+  const cell = page.locator(`tr[data-path="${path}"] td[data-field="${field}"]`)
+  const grid = page.getByTestId('grid-scroll')
+  await grid.evaluate((el) => (el.scrollLeft = 0))
+  await expect(page.locator(`tr[data-path="${path}"]`)).toBeVisible()
+  for (let step = 0; step < 40 && (await cell.count()) === 0; step++) {
+    await grid.evaluate((el) => (el.scrollLeft += 240))
+    await page.waitForTimeout(40)
+  }
+  await cell.evaluate((td) => td.scrollIntoView({ inline: 'center', block: 'nearest' }))
+  return cell
+}
+
+const text = (value: string) => ({ stringValue: value })
+
+test('documents that disagree keep their columns still and say what each covers', async ({
+  page,
+}) => {
+  // A hundred documents of one shape, ten of an older one among them, and
+  // a second page that brings a field the first page never had.
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 120; at++) {
+    const id = `d${String(at).padStart(3, '0')}`
+    docs[id] = { name: text(`Name ${at}`), email: text(`${id}@example.test`) }
+    if (at < 10) docs[id].legacy = text('yes')
+    if (at >= 100) docs[id].plan = text('pro')
+  }
+  await seed(page.request, 'disagree', docs)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=disagree`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  const order = () =>
+    page
+      .locator('thead button[data-testid^="column-"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
+  await expect.poll(order).toEqual(['column-email', 'column-name', 'column-legacy'])
+
+  // The header says how much of the page has the field, and only when not
+  // all of it does: a column reads as a promise every row keeps.
+  await expect(page.getByTestId('column-legacy').getByTestId('column-coverage')).toHaveText('10%')
+  await expect(page.getByTestId('column-name').getByTestId('column-coverage')).toHaveCount(0)
+  await page.getByTestId('column-legacy').click()
+  await expect(page.getByTestId('column-present')).toHaveText('In 10 of the 100 loaded documents')
+  await page.keyboard.press('Escape')
+
+  // A document without the field says so, which an empty cell did not.
+  await expect(
+    page.locator('tr[data-path="disagree/d011"] td[data-field="legacy"]').getByTestId('not-set'),
+  ).toBeVisible()
+  await expect(
+    page.locator('tr[data-path="disagree/d001"] td[data-field="legacy"]').getByTestId('not-set'),
+  ).toHaveCount(0)
+
+  // The second page's field joins at the end. Ordered by count it went
+  // before `legacy` — twenty documents to ten — and moved a column under
+  // the reader mid-scroll.
+  await page.getByTestId('grid-scroll').evaluate((el) => (el.scrollTop = el.scrollHeight))
+  await expect(page.getByText('120 loaded')).toBeVisible()
+  await expect.poll(order).toEqual(['column-email', 'column-name', 'column-legacy', 'column-plan'])
+})
+
+test('fields only one document has fold into a column, and come back on request', async ({
+  page,
+}) => {
+  // Top-level keys per user: every document its own fifteen.
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 40; at++) {
+    const fields: Record<string, unknown> = { owner: text(`u${at}`) }
+    for (let key = 0; key < 15; key++) fields[`uid_${at}_${key}`] = { booleanValue: true }
+    docs[`p${String(at).padStart(2, '0')}`] = fields
+  }
+  await seed(page.request, 'perkey', docs)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=perkey`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await expect(page.getByTestId('column-folded')).toContainText('+600 fields')
+  await expect(page.locator('thead button[data-testid^="column-"]')).toHaveCount(2)
+  await expect(page.locator('tr[data-path="perkey/p00"]').getByTestId('cell-folded')).toContainText(
+    '+15',
+  )
+
+  await page.getByTestId('column-folded').click()
+  await expect(page.getByRole('menu')).toContainText(
+    '600 fields that only one of the 40 loaded documents have',
+  )
+  await page.getByTestId('unfold-columns').click()
+  await expect(page.getByTestId('column-folded')).toHaveCount(0)
+  await expect(page.getByTestId('column-uid_0_0')).toBeVisible()
+
+  // Six hundred columns, and only the ones in view are in the page.
+  // Drawn whole, the same grid over 1,501 fields was 143,667 elements and
+  // scrolled in frames of up to 950 ms.
+  expect(await page.locator('*').count()).toBeLessThan(6000)
+})
+
+test('the id stays in view while the fields scroll, and a flash never shows through it', async ({
+  page,
+}) => {
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 3; at++) {
+    const fields: Record<string, unknown> = {}
+    for (let key = 0; key < 14; key++) fields[`field${key}`] = text(`value ${at} ${key}`)
+    docs[`w${at}`] = fields
+  }
+  await seed(page.request, 'pinned', docs)
+  await page.setViewportSize({ width: 1400, height: 800 })
+  await page.goto(`${origin()}/console/firestore?path=pinned`)
+  const row = page.locator('tr[data-path="pinned/w0"]')
+  await expect(row).toBeVisible()
+
+  // A row is as tall as the virtualizer places it. They were 31.5 px
+  // against an estimate of 36, so every spacer was worked out wrong.
+  expect((await row.boundingBox())!.height).toBe(32)
+
+  const grid = page.getByTestId('grid-scroll')
+  const id = row.locator('td[data-field="__name__"]')
+  const shade = () =>
+    id.evaluate((td) => td.ownerDocument.defaultView!.getComputedStyle(td).boxShadow)
+  // Nothing under the id yet, so nothing to set it apart from.
+  expect(await shade()).toBe('none')
+  await grid.evaluate((el) => (el.scrollLeft = 700))
+  await expect
+    .poll(async () => (await id.boundingBox())!.x - (await grid.boundingBox())!.x)
+    .toBe(44)
+  // And once fields pass beneath it, an edge. It named a colour token that
+  // does not exist, which made the whole shadow invalid and drew nothing.
+  await expect.poll(shade).not.toBe('none')
+
+  // A write flashes the row. The tint is translucent, and painted as the
+  // pinned cell's ground it let the fields scrolling under it show
+  // through for the length of the flash.
+  await put(page.request, 'pinned/w0', { field0: text('changed') })
+  await expect(row).toHaveClass(/row-flash/)
+  const ground = await id.evaluate(
+    (td) => td.ownerDocument.defaultView!.getComputedStyle(td).backgroundColor,
+  )
+  expect(ground).not.toMatch(/rgba|\/ 0?\.\d|transparent/)
+})
+
+test('every value edits where it is, as the inspector edits it', async ({ page }) => {
+  await seed(page.request, 'inplace', {
+    k1: {
+      title: text('Hello'),
+      ratio: { doubleValue: 269 },
+      meta: { mapValue: { fields: { plan: text('pro'), seats: { integerValue: '5' } } } },
+    },
+    k2: { title: text('Second') },
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=inplace`)
+  const editor = page.getByTestId('cell-editor')
+  const stored = async (path: string) => {
+    const response = await page.request.get(`${documents()}/${path}`, { headers: owner })
+    return ((await response.json()) as { fields: Record<string, unknown> }).fields
+  }
+
+  // A double that reads whole stays a double: the editor is the
+  // inspector's, which says which of the two a number is.
+  await (await reach(page, 'inplace/k1', 'ratio')).dblclick()
+  await expect(editor).toHaveAttribute('data-layout', 'line')
+  const ratio = editor.getByRole('textbox', { name: 'ratio value' })
+  await expect(ratio).toBeFocused()
+  await ratio.fill('270')
+  await ratio.press('Enter')
+  await expect(editor).toHaveCount(0)
+  await expect.poll(async () => (await stored('inplace/k1')).ratio).toEqual({ doubleValue: 270 })
+
+  // A map is a structure, so it opens as one: the inspector's own rows.
+  await (await reach(page, 'inplace/k1', 'meta')).dblclick()
+  await expect(editor).toHaveAttribute('data-layout', 'panel')
+  const plan = editor.getByRole('textbox', { name: 'plan value' })
+  await expect(plan).toBeFocused()
+  await plan.fill('team')
+  await plan.press('Enter')
+  await expect
+    .poll(async () => (await stored('inplace/k1')).meta)
+    .toEqual({ mapValue: { fields: { plan: text('team'), seats: { integerValue: '5' } } } })
+
+  // A field this document lacks opens as its column's type. Opened and
+  // left alone, nothing is written; typed into, the field is created.
+  await (await reach(page, 'inplace/k2', 'ratio')).dblclick()
+  await expect(editor.getByRole('textbox', { name: 'ratio value' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(editor).toHaveCount(0)
+  expect(Object.keys(await stored('inplace/k2'))).toEqual(['title'])
+  await (await reach(page, 'inplace/k2', 'ratio')).dblclick()
+  await page.keyboard.type('7')
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => (await stored('inplace/k2')).ratio).toEqual({ integerValue: '7' })
+
+  // Clicking anywhere else is done, as in a sheet.
+  await (await reach(page, 'inplace/k2', 'title')).dblclick()
+  await page.keyboard.type('Clicked away')
+  await page.mouse.click(800, 700)
+  await expect(editor).toHaveCount(0)
+  await expect.poll(async () => (await stored('inplace/k2')).title).toEqual(text('Clicked away'))
+})
+
+test('the keyboard walks the cells, edits the one it is on, and copies it', async ({ page }) => {
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 5; at++)
+    docs[`p${at}`] = { email: text(`p${at}@example.test`), name: text(`Person ${at}`) }
+  await seed(page.request, 'walk', docs)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=walk`)
+  await page.locator('tr[data-path="walk/p0"] td[data-field="email"]').click()
+  await page.keyboard.press('Escape')
+
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowDown')
+  await expect(page.locator('td[data-cursor]')).toHaveCount(1)
+  await expect(page.locator('tr[data-path="walk/p1"] td[data-field="name"]')).toHaveAttribute(
+    'data-cursor',
+    '',
+  )
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('cell-editor')).toBeVisible()
+  await page.keyboard.type('Renamed')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('cell-editor')).toHaveCount(0)
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`${documents()}/walk/p1`, { headers: owner })
+      return ((await response.json()) as { fields: Record<string, unknown> }).fields.name
+    })
+    .toEqual(text('Renamed'))
+
+  const clipboard = () =>
+    page.evaluate(() =>
+      (
+        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
+      ).clipboard.readText(),
+    )
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect.poll(clipboard).toBe('p1@example.test')
+  // Left of the first field is the row's own cell, and that copies the id.
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect.poll(clipboard).toBe('p1')
+})
+
+test('a column drags wider, keeps that width, and double-click gives it back', async ({ page }) => {
+  await seed(page.request, 'widths', { w1: { email: text('a@example.test'), name: text('A') } })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=widths`)
+  const head = page.locator('th', { has: page.getByTestId('column-email') })
+  const width = async () => Math.round((await head.boundingBox())!.width)
+  const before = await width()
+  await head.hover()
+  const handle = (await page.getByTestId('resize-email').boundingBox())!
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + 120, handle.y + handle.height / 2, { steps: 6 })
+  await page.mouse.up()
+  expect(await width()).toBeGreaterThan(before + 100)
+
+  await page.reload()
+  await expect(head).toBeVisible()
+  expect(await width()).toBeGreaterThan(before + 100)
+  await page.getByTestId('resize-email').dblclick()
+  await expect.poll(width).toBe(before)
+})
+
+test('a sort that leaves documents out says how many', async ({ page }) => {
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 40; at++)
+    docs[`r${at}`] = { name: text(`R ${at}`), ...(at % 4 === 0 ? { referredBy: text('u1') } : {}) }
+  await seed(page.request, 'sparse', docs)
+  // Firestore sorts only the documents that have the field, and the grid
+  // of what is left looks complete.
+  await page.goto(
+    `${origin()}/console/firestore?path=sparse&q=${encodeURIComponent('orderBy("referredBy")')}`,
+  )
+  await expect(page.getByTestId('match-count')).toContainText('10 documents')
+  await expect(page.getByTestId('query-leaves-out')).toContainText(
+    '30 documents without referredBy are left out',
+  )
+  // Every document has `name`, so sorting by it leaves nothing out.
+  await page.goto(
+    `${origin()}/console/firestore?path=sparse&q=${encodeURIComponent('orderBy("name")')}`,
+  )
+  await expect(page.getByTestId('match-count')).toContainText('40 documents')
+  await expect(page.getByTestId('query-leaves-out')).toHaveCount(0)
+})
+
+test('shift-click ticks a run of rows, and ticking one does not open it', async ({ page }) => {
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 8; at++) docs[`t${at}`] = { name: text(`T ${at}`) }
+  await seed(page.request, 'ticks', docs)
+  await page.goto(`${origin()}/console/firestore?path=ticks`)
+  const rows = page.getByTestId('grid-row')
+  await rows.nth(1).getByRole('checkbox').click()
+  await expect(page.getByTestId('inspector')).toHaveCount(0)
+  await rows
+    .nth(5)
+    .getByRole('checkbox')
+    .click({ modifiers: ['Shift'] })
+  await expect(page.getByTestId('delete-selected')).toHaveText('Delete 5')
 })

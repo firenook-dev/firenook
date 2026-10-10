@@ -3,10 +3,17 @@
 // out of the way while browsing and opens on `f` or the filter button.
 
 import { Badge, Button, Text, Tooltip } from '@cloudflare/kumo'
-import { FunnelIcon, LightningIcon, PlayIcon, XIcon } from '@phosphor-icons/react'
+import { FunnelIcon, InfoIcon, LightningIcon, PlayIcon, XIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { type WorkbenchQuery, isEmptyQuery, printLiteral, printQuery } from '../query'
+import {
+  EMPTY_QUERY,
+  type WorkbenchQuery,
+  isEmptyQuery,
+  presenceFields,
+  printLiteral,
+  printQuery,
+} from '../query'
 import { useQueryLine } from '../query-line-store'
 import { countQueryOptions } from '../queries'
 import { findNode, schemaQuery } from '../schema'
@@ -71,6 +78,20 @@ export function QueryLine() {
     : count.data
       ? { count: count.data.count, elapsedMs: count.data.elapsedMs }
       : undefined
+
+  // Sorting by a field, or comparing it with `!=`, drops every document
+  // without it, and a grid of what is left looks complete. When sorting is
+  // all the query does, the collection's own count says exactly how many
+  // went; with a filter as well the two cannot be told apart, so the note
+  // says what happens without a number.
+  const absent = presenceFields(workbench.query)
+  const sortedOnly = workbench.query.where.length === 0
+  const whole = useQuery({
+    ...countQueryOptions(workbench.scope, workbench.collectionPath, workbench.group, EMPTY_QUERY),
+    enabled: absent.length > 0 && sortedOnly && !workbench.queryError,
+  })
+  const leftOut =
+    sortedOnly && whole.data && total ? Math.max(0, whole.data.count - total.count) : undefined
 
   const run = () => workbench.setQueryText(draft)
   const remove = (patch: (query: WorkbenchQuery) => WorkbenchQuery) =>
@@ -205,6 +226,27 @@ export function QueryLine() {
             <Tooltip content="Collection group: every collection with this id">
               <Badge variant="outline">collection group</Badge>
             </Tooltip>
+          )}
+          {absent.length > 0 && leftOut !== 0 && (
+            <span
+              className="flex items-center gap-1 pl-1 text-[12px] text-kumo-subtle"
+              data-testid="query-leaves-out"
+            >
+              <InfoIcon size={13} className="shrink-0" />
+              <span>
+                {leftOut === undefined
+                  ? 'Documents without '
+                  : `${formatNumber(leftOut)} ${leftOut === 1 ? 'document' : 'documents'} without `}
+                {absent.map((field, index) => (
+                  <span key={field}>
+                    {index > 0 && (index === absent.length - 1 ? ' or ' : ', ')}
+                    <span className="font-mono">{field}</span>
+                  </span>
+                ))}{' '}
+                {leftOut === 1 ? 'is' : 'are'} left out. Firestore only returns documents that have
+                a field the query {sortedOnly ? 'sorts' : 'sorts or compares'} by.
+              </span>
+            </span>
           )}
         </div>
       )}

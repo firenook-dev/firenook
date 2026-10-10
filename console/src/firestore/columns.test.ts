@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeTypes, inferColumns } from './columns'
+import { arrangeColumns, coverage, describeTypes, foldRare, inferColumns } from './columns'
 import type { FsDocument, FsValue } from './value'
 
 function document(fields: Record<string, FsValue>, id = 'd1'): FsDocument {
@@ -91,5 +91,130 @@ describe('inferColumns', () => {
     const widths = Object.fromEntries(columns.map((column) => [column.field, column.width]))
     // A timestamp needs more room than a boolean whatever the names are.
     expect(widths.at).toBeGreaterThan(widths.flag ?? 0)
+  })
+})
+
+describe('the shape of a collection whose documents disagree', () => {
+  it('counts out of the documents loaded, not the placeholders for missing ones', () => {
+    const placeholder: FsDocument = { ...document({}, 'gone'), missing: true }
+    const [column] = inferColumns([
+      document({ name: string('a') }, 'd1'),
+      document({ name: string('b') }, 'd2'),
+      placeholder,
+    ])
+    expect(column?.present).toBe(2)
+    expect(column?.of).toBe(2)
+    expect(coverage(column!)).toBeUndefined()
+  })
+
+  it('says how much of the page has a field, rounding down', () => {
+    expect(coverage({ present: 10, of: 100 })).toBe('10%')
+    expect(coverage({ present: 999, of: 1000 })).toBe('99%')
+    expect(coverage({ present: 1, of: 1000 })).toBe('<1%')
+    expect(coverage({ present: 4, of: 4 })).toBeUndefined()
+  })
+
+  it('makes room in the header for that share', () => {
+    const [full] = inferColumns([document({ referredBy: string('u1') }, 'd1')])
+    const sparse = inferColumns([
+      document({ referredBy: string('u1') }, 'd1'),
+      document({ other: string('x') }, 'd2'),
+    ]).find((column) => column.field === 'referredBy')
+    expect(sparse!.width).toBeGreaterThanOrEqual(full!.width)
+  })
+
+  it('names tied columns the way a person counts', () => {
+    const columns = inferColumns([
+      document({ field10: string('a'), field2: string('b'), field1: string('c') }),
+    ])
+    expect(columns.map((column) => column.field)).toEqual(['field1', 'field2', 'field10'])
+  })
+})
+
+describe('arrangeColumns', () => {
+  const page = (...shapes: string[][]) =>
+    inferColumns(
+      shapes.map((fields, index) =>
+        document(Object.fromEntries(fields.map((field) => [field, string('x')])), `d${index}`),
+      ),
+    )
+
+  it('keeps the first reading commonest first', () => {
+    const { columns } = arrangeColumns(page(['name', 'email'], ['name']), [])
+    expect(columns.map((column) => column.field)).toEqual(['name', 'email'])
+  })
+
+  // Measured: twenty documents on a second page brought three new fields,
+  // and ordering by count put them in the middle, under the reader's eye.
+  it('puts fields the next page brings at the end, however common they are', () => {
+    const first = arrangeColumns(page(['name', 'fullName'], ['name']), [])
+    const second = arrangeColumns(
+      page(['name', 'fullName'], ['name', 'plan'], ['name', 'plan'], ['name', 'plan']),
+      first.order,
+    )
+    expect(second.columns.map((column) => column.field)).toEqual(['name', 'fullName', 'plan'])
+  })
+
+  it('hands back the same order when nothing is new, so a caller can tell', () => {
+    const first = arrangeColumns(page(['a', 'b']), [])
+    const again = arrangeColumns(page(['b', 'a'], ['a']), first.order)
+    expect(again.order).toBe(first.order)
+  })
+
+  it('brings a field back where it was after a filter took it away', () => {
+    const first = arrangeColumns(page(['a', 'b', 'c']), [])
+    const filtered = arrangeColumns(page(['a', 'c']), first.order)
+    expect(filtered.columns.map((column) => column.field)).toEqual(['a', 'c'])
+    const back = arrangeColumns(page(['a', 'b', 'c']), filtered.order)
+    expect(back.columns.map((column) => column.field)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('foldRare', () => {
+  // The collection that broke the grid: forty documents, each with its own
+  // fifteen user ids as top-level keys, and an owner every one of them has.
+  const keyedByUser = () =>
+    inferColumns(
+      Array.from({ length: 40 }, (_, at) =>
+        document(
+          {
+            owner: string(`u${at}`),
+            ...Object.fromEntries(
+              Array.from({ length: 15 }, (_unused, key) => [`uid_${at}_${key}`, boolean(true)]),
+            ),
+          },
+          `p${at}`,
+        ),
+      ),
+    )
+
+  it('folds the fields only one document has, once there are too many columns', () => {
+    const { shown, folded } = foldRare(keyedByUser())
+    expect(shown.map((column) => column.field)).toEqual(['owner'])
+    expect(folded).toHaveLength(600)
+  })
+
+  it('folds nothing while the columns can still be read', () => {
+    const few = inferColumns([
+      document({ name: string('a'), legacy: string('b') }, 'd1'),
+      ...Array.from({ length: 30 }, (_, at) => document({ name: string('a') }, `n${at}`)),
+    ])
+    expect(foldRare(few).folded).toEqual([])
+  })
+
+  it('keeps a field one document in ten has, even among many', () => {
+    const docs = Array.from({ length: 100 }, (_, at) =>
+      document(
+        Object.fromEntries([
+          ...Array.from({ length: 30 }, (_unused, key) => [`common${key}`, string('x')]),
+          ...(at % 10 === 0 ? [['sometimes', string('y')]] : []),
+          ...(at === 0 ? [['once', string('z')]] : []),
+        ]),
+        `d${at}`,
+      ),
+    )
+    const { shown, folded } = foldRare(inferColumns(docs))
+    expect(shown.some((column) => column.field === 'sometimes')).toBe(true)
+    expect(folded.map((column) => column.field)).toEqual(['once'])
   })
 })

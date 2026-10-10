@@ -977,6 +977,89 @@ Import holds no field editor and keeps `lg`. The journey measures a
 78-character line against a short one: at 448 it is 53 px tall, three
 wrapped lines.
 
+### A schemaless collection's columns
+
+Measured on a collection of three shapes (90 / 10 / 20 documents across
+two pages) and on one keyed by user id (40 documents × 15 own keys = 601
+fields). Each rule below fixed something that was seen, not supposed.
+
+- **Order is decided once per collection** (`arrangeColumns`): the first
+  reading is commonest first, ties in natural order (`field2` before
+  `field10`, `Intl.Collator` numeric — the engine lists in byte order);
+  every later field joins at the end. Ordering every page by count put
+  three second-page fields in the middle, under the reader mid-scroll. The
+  order is held in `Grid` state keyed by database|collection|group (not the
+  query, so a sort keeps every column where it was) and includes fields a
+  filter took away, so they come back in place. `arrangeColumns` hands back
+  the *same array* when nothing is new — the grid sets state during render
+  on identity, and a fresh array each render is an infinite loop.
+- **Coverage is shown** when a field is not in every loaded document:
+  `25%` after the type badge (`coverage`, floored; `<1%`), and "In 10 of
+  the 100 loaded documents" in the header menu. `of` excludes placeholder
+  rows for missing ancestors. `headerWidth` reserves room for it.
+- **Not set is not empty**: a document without the field draws a short
+  rule (`data-testid="not-set"`), distinct from `null` and `""`, which are
+  words. Placeholder rows draw nothing in field cells.
+- **Rare fields fold** (`foldRare`) once there are more than `FOLD_AFTER`
+  (24) columns: a field in one document, or in no more than 5% of them,
+  goes into a trailing `+N fields` column (`FOLDED_COLUMN`) whose cells
+  list the ones each row has; the header menu says why and offers "Show
+  them as columns". 1,501 fields drawn whole was 143,667 elements and
+  250–950 ms frames; folded it is 1,196 elements at 16.7 ms, and unfolded
+  with column virtualization it still scrolls at 16.7.
+- **The id is pinned** (with the check column): `PIN_CELL` is sticky on
+  the row's own `--kumo-table-row-bg`, so it is opaque in every row state
+  (the focused row sets that variable too). The edge shadow (`PIN_EDGE`)
+  appears only once `data-scrolled` is on the scroller. Not Kumo's
+  `sticky` prop: it paints a 24 px fade over the first field at rest.
+- **A sort that drops documents says so** (`presenceFields`, the query
+  line's `query-leaves-out`): Firestore returns only documents that have
+  every `orderBy` field and the field of a `!=` / `not-in`. With only
+  sorts, the collection count minus the match count is the exact number
+  left out ("225 documents without referredBy are left out"); with a
+  filter too, the note says it without a number; when nothing is left out
+  it says nothing.
+
+### The grid edits where the value is
+
+Double-click a cell, or Enter / F2 on the cell cursor, and `CellEditor`
+(`cell-editor.tsx`) opens **over the cell**, in a portal placed from the
+cell's rectangle. Chosen over both alternatives: an input inside the cell
+is fastest but a column is too narrow for the `integer`/`double` word, a
+calendar, completions or a tree (the old in-cell editor did five types
+and sent six to the inspector); a popover below moves the value away from
+the eye and wraps a one-word change in chrome. So a value that is a line
+(string, number, boolean, timestamp, reference, geopoint, bytes, null)
+opens *on* the cell, at least as wide as it and its text where the cell's
+was, and a structure (map, array, vector, multi-line string, raw JSON)
+opens as a panel from the same corner holding the inspector's own
+`FieldRows`. Same editors (`ValueEditor`, `ValueControls`, `TypeMenu` —
+extracted from the field row so both use one), same type changes; a
+retype that changes shape swaps line ↔ panel and moves focus.
+
+- Enter saves (a map's entry Enter too, via `next`), ⌘/Ctrl+Enter saves
+  from a panel, Escape cancels, a press anywhere else saves (spreadsheet
+  rules). A nested calendar or completion list takes Escape first
+  (`preventDefault` in those editors; the editor ignores a prevented
+  Escape and keys from its own portals).
+- Only the field is written, with a mask and `exists: true`. Untouched
+  (`node === initial`) writes nothing; a value equal to the stored one
+  writes nothing.
+- A missing field, or a `null`, opens as its column's type (`string` when
+  the column is all null) and creates the field when typed into.
+- A previewed value (`isPartial`) is fetched whole first through
+  `documentQuery` — saving the fragment is the bug this guards.
+- `useSelection.editing` marks an edit in progress so the workbench's and
+  grid's shortcuts stand aside wherever focus is; the grid clears it on
+  unmount. The number box takes `formOutside` so its word is not drawn
+  twice beside the toggle.
+- The cell cursor (`useSelection.field`, `data-cursor`, a 1.5 px brand
+  inset): ←/→ move along the columns (left of the first field is the
+  row's own cell, where Enter opens the inspector), ↑/↓ keep the column,
+  ⌘/Ctrl+C copies the value (`copyText`: scalars as typed, maps/arrays as
+  JSON, the id from the row cell; partial values fetched whole) unless
+  text is selected. Shift-click ticks a range from the last row ticked.
+
 ### Size and age beside the document path
 
 The header reads `472 B · 1 mo ago` beside the name, the way a file list
@@ -1088,22 +1171,32 @@ both under the word "change".
   `field-editor.tsx` is the field tree + JSON view shared by the inspector
   and the dialog; the model is `src/firestore/draft.ts` (see below).
 - Grid interactions: `HeaderMenu` writes `orderBy` into the query (the header
-  shows the arrow) and composes `where("field", "==", )` into the query line
-  through `useQueryLine.compose` (caret placed before `)`); hidden columns
-  live in `useColumns`, reset per collection. Inline editing
-  (`InlineCellEditor`) is for string/number/boolean/timestamp/null/unset
-  cells; a click that would open the inspector over the clicked cell waits
-  `DOUBLE_CLICK_MS` so a double-click can edit instead. Columns keep their
+  shows the arrow, the `th` carries `aria-sort`) and composes
+  `where("field", "==", )` into the query line through
+  `useQueryLine.compose` (caret placed before `)`); hidden columns and the
+  `unfolded` flag live in `useColumns`, reset per collection. Rows are
+  `GridRow` (`grid-row.tsx`), a `memo` component fed values and a ref of
+  `RowActions`, because `Grid` re-renders on every scroll frame. **Rows and
+  columns are both virtualized** (two `useVirtualizer`s on one scroller; the
+  horizontal one uses `scrollMargin` for the pinned and subcollection
+  columns and is told `measure()` when widths change), so a column off
+  screen is not in the DOM — a journey reaches one with the `reach()`
+  helper. Rows are exactly 32 px (`[&_td]:h-[32px]`, `ROW_HEIGHT = 32`):
+  `h-9` is 31.5 px on the 14 px root and the virtualizer used to place rows
+  at 36. A click that would open the inspector over the clicked cell waits
+  `DOUBLE_CLICK_MS` so a double-click can edit instead; ticking a row's
+  box never opens it (`data-check` on the check cell). Columns keep their
   width (a trailing filler `<col>` takes the slack) so nothing moves when
-  the inspector opens. Column widths come from `inferColumns`: the type's own
-  width, or the header's needs when those are greater, capped at
-  `MAX_HEADER_WIDTH`. `headerWidth` counts the type badge's text as well as
-  the field name, because a two-letter field under a `boolean` badge needs
-  more room than its values ever will; the cap stops one long field name
-  from pushing every other column off the screen. Both ends are covered by
-  `columns.test.ts` and a browser journey. Reference cells and reference fields *peek*
-  (`selectDocument`) rather than navigate; the inspector shows "open in
-  grid" when the document is outside the current collection.
+  the inspector opens. Column widths come from `inferColumns`: the type's
+  own width, or the header's needs when those are greater, capped at
+  `MAX_HEADER_WIDTH`; a dragged width (`ColumnResizer` on every header,
+  double-click resets, arrows step 16 px) is kept per *shape* of collection
+  in `useColumnWidths` (`column-widths.ts`, localStorage
+  `firenook.console.column-widths`, `__name__` for the id column). Reference
+  cells and reference fields *peek* (`selectDocument`) rather than
+  navigate; the inspector shows "open in grid" when the document is outside
+  the current collection. See "A schemaless collection's columns" and "The
+  grid edits where the value is" under Design for the rest.
 - The schema panel: `GET /console/api/v1/firestore/schema?database=` is the
   engine's schema index (`SchemaIndex` in `crates/console-front/src/schema.rs`:
   patterns like `users/*/orders` with `documents` and `parents` counts, one
@@ -1232,7 +1325,19 @@ both under the word "change".
   `Popover.Trigger` through nested `render` props, keeping one `<button>`
   with hover and click both live; a Kumo toast puts the same words in its
   title and its description, so a journey matches the heading by role;
-  `Text` takes no `className` (wrap it). A Rust doc comment on a `ts-rs`
+  `Text` takes no `className` (wrap it); **Kumo's text colours are
+  `--text-color-kumo-*`, not `--color-kumo-*`** — `var(--color-kumo-default)`
+  does not exist, and a shadow naming it is invalid as a whole and draws
+  nothing, silently (the pinned-id edge did this until a journey asserted
+  its computed `box-shadow`); `Table.ResizeHandle` fixes its accessible name
+  to "Resize column" for every column and paints `bg-kumo-base`, so the grid
+  has its own `ColumnResizer`; the success and danger tints are
+  translucent, so a flash painted *as* a sticky cell's background lets the
+  scrolled content show through — `styles.css` animates a registered
+  `@property --row-flash` colour as a gradient layer over the ground
+  instead; a CSS grid track sizes to its content's minimum unless it is
+  `minmax(0, …)` (the line editor's two geopoint inputs spilled to 461 px
+  in 320). A Rust doc comment on a `ts-rs`
   type must not contain `*/` (it ends the generated JSDoc early), so
   patterns are described in words there.
 

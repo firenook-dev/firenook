@@ -21,22 +21,38 @@ body {
 
 /* A row the live channel just touched settles from the success tint (or the
    danger tint for a delete) back to the surface; no colour transitions on
-   hover, but a change that just happened deserves a moment. */
+   hover, but a change that just happened deserves a moment.
+
+   The tint is laid over the cell's ground rather than painted as it. Both
+   tints are translucent (the success one is 57% in light), and a pinned
+   cell's ground is what keeps the fields scrolling under it out of sight:
+   animating the ground itself made the id cell see-through for the length
+   of the flash, with the value beneath showing in it. A registered colour
+   property is what lets a gradient layer animate at all. */
+@property --row-flash {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: transparent;
+}
 @keyframes row-flash {
   from {
-    background-color: var(--color-kumo-success-tint);
+    --row-flash: var(--color-kumo-success-tint);
   }
   to {
-    background-color: transparent;
+    --row-flash: transparent;
   }
 }
 @keyframes row-flash-deleted {
   from {
-    background-color: var(--color-kumo-danger-tint);
+    --row-flash: var(--color-kumo-danger-tint);
   }
   to {
-    background-color: transparent;
+    --row-flash: transparent;
   }
+}
+.row-flash > td,
+.row-flash-deleted > td {
+  background-image: linear-gradient(var(--row-flash), var(--row-flash));
 }
 .row-flash > td {
   animation: row-flash 1.6s ease-out;
@@ -48,6 +64,6 @@ body {
   .row-flash > td,
   .row-flash-deleted > td {
     animation: none;
-    background-color: var(--color-kumo-tint);
+    --row-flash: var(--color-kumo-tint);
   }
 }

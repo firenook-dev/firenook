@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { generateId, parseImport, validateId } from './create'
-import { inferScalar } from './components/inline-cell-editor'
 import { recentsKey, useRecents } from './recents'
 import { fromJson } from './value'
 
@@ -57,20 +56,6 @@ describe('importing JSON', () => {
         note: { type: 'string', value: 'not 2026-09-20T09:00:00Z' },
       },
     })
-  })
-})
-
-describe('inline cell editing', () => {
-  it('infers a scalar type for a cell with no type yet', () => {
-    expect(inferScalar('true')).toEqual({ type: 'boolean', value: true })
-    expect(inferScalar('12')).toEqual({ type: 'number', value: 12, integer: true })
-    expect(inferScalar('1.5')).toEqual({ type: 'number', value: 1.5, integer: false })
-    expect(inferScalar('null')).toEqual({ type: 'null' })
-    expect(inferScalar('2026-09-20T09:00:00Z')).toEqual({
-      type: 'timestamp',
-      value: '2026-09-20T09:00:00.000Z',
-    })
-    expect(inferScalar('hello 12')).toEqual({ type: 'string', value: 'hello 12' })
   })
 })
 

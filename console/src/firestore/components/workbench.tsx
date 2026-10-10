@@ -95,6 +95,10 @@ function WorkbenchBody() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      // A value being edited in the grid owns the keyboard, wherever in it
+      // focus is — a switch, a type menu — so `f` is a letter and Escape
+      // gives up the edit rather than closing the inspector beside it.
+      if (useSelection.getState().editing) return
       const target = event.target as HTMLElement | null
       const typing =
         target &&

@@ -25,6 +25,26 @@ export const OPERATORS = [
 ] as const
 export type Operator = (typeof OPERATORS)[number]
 
+/**
+ * The fields a query leaves out every document *without*, where that is
+ * not what a reader of the query would expect.
+ *
+ * Firestore returns only documents that have every field the query sorts
+ * by, and only documents that have the field a `!=` or `not-in` compares —
+ * so `orderBy("referredBy")` on a collection where a quarter of the
+ * documents have it shows a quarter of the collection, and says nothing.
+ * Measured: 250 documents of 1,000, and a grid that looked complete. An
+ * equality or a range on a field leaves out the same documents, but there
+ * nobody expected them back.
+ */
+export function presenceFields(query: WorkbenchQuery): string[] {
+  const fields = new Set<string>()
+  for (const order of query.orderBy) if (order.field !== '__name__') fields.add(order.field)
+  for (const clause of query.where)
+    if (clause.op === '!=' || clause.op === 'not-in') fields.add(clause.field)
+  return [...fields]
+}
+
 export interface WhereClause {
   field: string
   op: Operator

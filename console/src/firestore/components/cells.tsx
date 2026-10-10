@@ -50,7 +50,21 @@ export function ValueCell({
   value: FsValue | undefined
   onOpenReference: (path: string) => void
 }) {
-  if (!value) return <span className="text-kumo-inactive" aria-label="not set" />
+  // Not set is not empty. A document without the field drew nothing at all,
+  // which is also what a row that has not loaded yet looks like and close
+  // to what `""` looks like, so ten rows of an older shape read as ten
+  // empty rows. A short rule says "nothing here" in a way no value can:
+  // `null` and `""` are words, and every value is text.
+  if (!value)
+    return (
+      <span
+        className="block h-px w-3 bg-kumo-line"
+        role="img"
+        aria-label="not set"
+        title="This document has no such field"
+        data-testid="not-set"
+      />
+    )
   switch (value.type) {
     case 'string':
       return (

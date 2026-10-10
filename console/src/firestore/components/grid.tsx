@@ -1,8 +1,16 @@
 // The grid: documents are rows, fields are columns inferred from what is
-// loaded, every header carries its type, every cell is exact. Rows are
-// virtualized; changed rows flash; the keyboard moves through them.
+// loaded, every header carries its type, every cell is exact. Rows and
+// columns are both virtualized; changed rows flash; a cell cursor moves
+// through them and any value edits where it stands.
+//
+// Columns are virtualized as well as rows because a schemaless collection
+// sets no bound on them. Measured on one keyed by user id — 1,501 fields
+// over 100 documents — rendering every column cost 143,667 DOM nodes and
+// frames of 250 to 950 ms; the same grid over thirteen columns scrolled at
+// a flat 16.7. Most such fields fold into one column now (`foldRare`), but
+// the way back to having all of them as columns has to stay fast too.
 
-import { Button, Empty, Table, Text } from '@cloudflare/kumo'
+import { Button, Empty, Table, Text, useKumoToastManager } from '@cloudflare/kumo'
 import {
   ClockCounterClockwiseIcon,
   DatabaseIcon,
@@ -15,12 +23,22 @@ import {
   PlusIcon,
   WarningIcon,
 } from '@phosphor-icons/react'
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { TypeBadge } from '@/components/kit'
-import { inferColumns } from '../columns'
+import { shapeKey, useColumnWidths } from '../column-widths'
+import { arrangeColumns, foldRare, inferColumns } from '../columns'
 import { useCreateDialog } from '../create'
+import { copyText } from '../draft'
 import { useExportDialog } from '../export'
 import { useLive } from '../live'
 import { EMPTY_QUERY } from '../query'
@@ -28,6 +46,7 @@ import { useColumns } from '../query-line-store'
 import {
   collectionsQuery,
   countQueryOptions,
+  documentQuery,
   missingDocumentsQuery,
   pageQueryOptions,
 } from '../queries'
@@ -35,31 +54,52 @@ import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
 import { childrenOf, describeChildren, schemaQuery } from '../schema'
 import { useSelection } from '../selection'
-import { type FsDocument, formatNumber } from '../value'
-import { IdCell, ValueCell } from './cells'
-import { HeaderMenu } from './header-menu'
-import { InlineCellEditor, inlineEditable } from './inline-cell-editor'
+import { type FsDocument, formatNumber, isPartial } from '../value'
+import { CellEditor } from './cell-editor'
+import { ColumnResizer } from './column-resizer'
+import {
+  CHECK_WIDTH,
+  FOLDED_COLUMN,
+  type GridColumn,
+  GridRow,
+  ID_COLUMN,
+  PIN_EDGE,
+  PIN_HEAD,
+  type RowActions,
+} from './grid-row'
+import { FoldedHeader, HeaderMenu } from './header-menu'
 import { INSPECTOR_GAP, useInspectorWidth } from './inspector-width'
-import { SubcollectionsCell, subcollectionsWidth } from './subcollections-cell'
+import { subcollectionsWidth } from './subcollections-cell'
 import { useWorkbench } from './workbench-context'
 
-const ROW_HEIGHT = 36
+/**
+ * A row's height, px, and the virtualizer's estimate of it — which have to
+ * be the same number. They were not: rows were `h-9`, which is 2.25 rem
+ * and so 31.5 px on this console's 14 px root, while the virtualizer
+ * placed them at 36, and every spacer and every scroll-to-row was worked
+ * out on a height no row had.
+ */
+const ROW_HEIGHT = 32
 const ID_WIDTH = 220
 /** A group shows whole paths in the first column, so it gets more room. */
 const PATH_WIDTH = 340
+/** Room for `+600` and a line of the field names it stands for. */
+const FOLDED_WIDTH = 260
 /** How long a click waits for its double, when opening at once would hide the cell. */
 const DOUBLE_CLICK_MS = 260
 /** Collections up to this size are walked for missing ancestor documents. */
 const MISSING_SCAN_LIMIT = 5_000
+const NO_ORDER: readonly string[] = []
 
 export function Grid() {
-  'use no memo' // the virtualizer hands out functions the compiler cannot memoize safely
+  'use no memo' // the virtualizers hand out functions the compiler cannot memoize safely
   const workbench = useWorkbench()
+  const queryClient = useQueryClient()
+  const toasts = useKumoToastManager()
   const openCreate = useCreateDialog((state) => state.open)
   const hidden = useColumns((state) => state.hidden)
   const showAll = useColumns((state) => state.showAll)
-  // The cell being edited in place, if any.
-  const [editing, setEditing] = useState<{ path: string; field: string } | null>(null)
+  const unfolded = useColumns((state) => state.unfolded)
   // A click that would open the inspector over the clicked cell waits for a
   // possible second click, so a double-click can edit the cell instead.
   const pendingOpen = useRef<number | undefined>(undefined)
@@ -103,17 +143,77 @@ export function Grid() {
     return [...loaded, ...missing.data]
   }, [page.data, missing.data, workbench.queryText, workbench.group])
 
-  const allColumns = useMemo(() => inferColumns(documents), [documents])
+  // The columns, in the order this collection has been showing them. The
+  // order is held per collection, not per query, so sorting by a column —
+  // which loads a different first page — leaves every column where it was.
+  const inferred = useMemo(() => inferColumns(documents), [documents])
+  const scope = `${workbench.database}|${workbench.collectionPath}|${workbench.group}`
+  const [remembered, setRemembered] = useState({ scope: '', order: NO_ORDER })
+  const previous = remembered.scope === scope ? remembered.order : NO_ORDER
+  const arranged = useMemo(() => arrangeColumns(inferred, previous), [inferred, previous])
+  if (arranged.order !== previous) setRemembered({ scope, order: arranged.order })
+  const visible = useMemo(
+    () => arranged.columns.filter((column) => !hidden.has(column.field)),
+    [arranged.columns, hidden],
+  )
+  const { shown, folded } = useMemo(
+    () => (unfolded ? { shown: visible, folded: [] } : foldRare(visible)),
+    [visible, unfolded],
+  )
+  const hiddenCount = arranged.columns.length - visible.length
   // A missing ancestor exists only because of its subcollections, so it
   // always earns the column, even before the schema answers.
   const subcolumn = known.length > 0 || documents.some((document) => document.missing)
   const subWidth = subcollectionsWidth(known)
-  const columns = useMemo(
-    () => allColumns.filter((column) => !hidden.has(column.field)),
-    [allColumns, hidden],
+
+  // Widths: the column's own, unless somebody dragged it, and the drag in
+  // progress over both.
+  const shape = shapeKey(
+    workbench.project,
+    workbench.database,
+    workbench.collectionPath,
+    workbench.group,
   )
-  const hiddenCount = allColumns.length - columns.length
+  const dragged = useColumnWidths((state) => state.widths[shape])
+  const keepWidth = useColumnWidths((state) => state.set)
+  const forgetWidth = useColumnWidths((state) => state.reset)
+  const [resizing, setResizing] = useState<{ key: string; width: number } | null>(null)
+  const idWidth =
+    resizing?.key === ID_COLUMN
+      ? resizing.width
+      : (dragged?.[ID_COLUMN] ?? (workbench.group ? PATH_WIDTH : ID_WIDTH))
+  const gridColumns = useMemo(() => {
+    const width = (key: string, own: number) =>
+      resizing?.key === key ? resizing.width : (dragged?.[key] ?? own)
+    const list: GridColumn[] = shown.map((column) => ({
+      key: column.field,
+      kind: 'field',
+      column,
+      width: width(column.field, column.width),
+    }))
+    if (folded.length > 0)
+      list.push({
+        key: FOLDED_COLUMN,
+        kind: 'folded',
+        folded,
+        fields: new Set(folded.map((column) => column.field)),
+        width: width(FOLDED_COLUMN, FOLDED_WIDTH),
+      })
+    return list
+  }, [shown, folded, dragged, resizing])
+  // Where each column starts, from the first field; the last entry is the total.
+  const offsets = useMemo(() => {
+    const starts = [0]
+    for (const column of gridColumns) starts.push((starts.at(-1) ?? 0) + column.width)
+    return starts
+  }, [gridColumns])
+  const dataWidth = offsets.at(-1) ?? 0
+  /** What stays put on the left while the fields scroll. */
+  const pinned = CHECK_WIDTH + idWidth
+  const leading = pinned + (subcolumn ? subWidth : 0)
+
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrolledX, setScrolledX] = useState(false)
   // oxlint-disable-next-line react/incompatible-library -- the directive above opts this component out of the compiler
   const virtualizer = useVirtualizer({
     count: documents.length,
@@ -121,50 +221,179 @@ export function Grid() {
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   })
+  const columnVirtualizer = useVirtualizer({
+    horizontal: true,
+    count: gridColumns.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => gridColumns[index]?.width ?? 120,
+    getItemKey: (index) => gridColumns[index]?.key ?? index,
+    // The fields start after the pinned columns and the subcollections.
+    scrollMargin: leading,
+    overscan: 3,
+  })
+  // A width changed: the virtualizer keeps sizes it has read, so it is told.
+  useLayoutEffect(() => {
+    columnVirtualizer.measure()
+  }, [columnVirtualizer, gridColumns, leading])
 
   const checked = useSelection((state) => state.checked)
   const focused = useSelection((state) => state.focused)
+  const cursorField = useSelection((state) => state.field)
+  const editing = useSelection((state) => state.editing)
   const toggle = useSelection((state) => state.toggle)
   const setChecked = useSelection((state) => state.setChecked)
+  const setRange = useSelection((state) => state.setRange)
   const focus = useSelection((state) => state.focus)
+  const edit = useSelection((state) => state.edit)
   const flashes = useLive((state) => state.flashes)
 
-  // Keyboard: arrows move the focused row, Enter opens it, Escape closes.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      )
-        return
-      if (documents.length === 0) return
-      const index = documents.findIndex((document) => document.path === focused)
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault()
-        const next = Math.min(
-          documents.length - 1,
-          Math.max(0, index === -1 ? 0 : index + (event.key === 'ArrowDown' ? 1 : -1)),
-        )
-        const document = documents[next]
-        if (!document) return
-        focus(document.path)
-        virtualizer.scrollToIndex(next, { align: 'auto' })
-        if (workbench.selectedDocument) workbench.selectDocument(document.path)
-      } else if (event.key === 'Enter' && focused) {
-        event.preventDefault()
-        workbench.selectDocument(focused)
-      } else if (event.key === ' ' && focused) {
-        event.preventDefault()
-        toggle(focused)
-      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
-        event.preventDefault()
-        setChecked(documents.map((document) => document.path))
-      }
+  /** Scrolls a column fully into view beside the pinned ones. */
+  const reveal = (key: string) => {
+    const element = scrollRef.current
+    const index = gridColumns.findIndex((column) => column.key === key)
+    if (!element || index === -1) return
+    const start = leading + (offsets[index] ?? 0)
+    const end = leading + (offsets[index + 1] ?? 0)
+    if (start < element.scrollLeft + pinned) element.scrollLeft = start - pinned
+    else if (end > element.scrollLeft + element.clientWidth)
+      element.scrollLeft = Math.min(start - pinned, end - element.clientWidth)
+  }
+
+  /** A cell's value to the clipboard — the whole value, fetched if the page has only part of it. */
+  const copy = async (document: FsDocument, field: string | undefined) => {
+    let text: string
+    if (field === undefined) text = workbench.group ? document.path : document.id
+    else {
+      let value = document.fields[field]
+      if (value && isPartial(value))
+        value = (await queryClient.fetchQuery(documentQuery(workbench.scope, document.path)))
+          ?.fields[field]
+      if (!value) return
+      text = copyText(value)
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [documents, focused, focus, toggle, setChecked, virtualizer, workbench])
+    try {
+      await navigator.clipboard.writeText(text)
+      toasts.add({ title: `Copied ${field ?? (workbench.group ? 'path' : 'id')}` })
+    } catch {
+      toasts.add({ title: 'Could not copy', variant: 'error' })
+    }
+  }
+
+  // What a row asks of the grid, through a ref so that no row re-renders
+  // because a closure was re-created.
+  const actions = useRef<RowActions | null>(null)
+  useLayoutEffect(() => {
+    actions.current = {
+      click: (document, cell) => {
+        // Ticking a row selects it; it does not also open it.
+        if (cell?.dataset.check !== undefined) return
+        const field = cell?.dataset.field
+        focus(document.path, field === ID_COLUMN ? undefined : field)
+        const grid = scrollRef.current
+        const covered =
+          !workbench.selectedDocument &&
+          cell !== null &&
+          grid !== null &&
+          cell.getBoundingClientRect().right >
+            grid.getBoundingClientRect().right -
+              (useInspectorWidth.getState().width + INSPECTOR_GAP)
+        if (!covered) {
+          workbench.selectDocument(document.path)
+          return
+        }
+        window.clearTimeout(pendingOpen.current)
+        pendingOpen.current = window.setTimeout(
+          () => workbench.selectDocument(document.path),
+          DOUBLE_CLICK_MS,
+        )
+      },
+      check: (document, index, next, shift) => {
+        // Shift ticks every row between this one and the last one ticked.
+        const anchor = useSelection.getState().anchor
+        const from = anchor === undefined ? -1 : documents.findIndex((item) => item.path === anchor)
+        if (shift && from !== -1) {
+          const [low, high] = from < index ? [from, index] : [index, from]
+          setRange(
+            documents.slice(low, high + 1).map((item) => item.path),
+            next,
+          )
+          return
+        }
+        toggle(document.path)
+      },
+      edit: (document, field) => {
+        if (document.missing) return
+        window.clearTimeout(pendingOpen.current)
+        focus(document.path, field)
+        reveal(field)
+        edit({ path: document.path, field })
+      },
+      openReference: (path) => workbench.selectDocument(path),
+    }
+  })
+
+  // Keyboard: arrows move the cell cursor, Enter edits the cell it is on —
+  // or opens the document from its id — and Escape closes. An effect event,
+  // so the listener is added once rather than on every frame of a scroll.
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (useSelection.getState().editing) return
+    const target = event.target as HTMLElement | null
+    if (
+      target &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+    )
+      return
+    if (documents.length === 0) return
+    const index = documents.findIndex((document) => document.path === focused)
+    const current = documents[index]
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const next = Math.min(
+        documents.length - 1,
+        Math.max(0, index === -1 ? 0 : index + (event.key === 'ArrowDown' ? 1 : -1)),
+      )
+      const document = documents[next]
+      if (!document) return
+      focus(document.path, cursorField)
+      virtualizer.scrollToIndex(next, { align: 'auto' })
+      if (workbench.selectedDocument) workbench.selectDocument(document.path)
+    } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && current) {
+      // The id is the row's own cell, left of the first field.
+      event.preventDefault()
+      const keys = gridColumns.map((column) => column.key)
+      const at = cursorField === undefined ? -1 : keys.indexOf(cursorField)
+      const next = event.key === 'ArrowRight' ? Math.min(keys.length - 1, at + 1) : at - 1
+      const field = next < 0 ? undefined : keys[next]
+      focus(current.path, field)
+      if (field !== undefined) reveal(field)
+    } else if ((event.key === 'Enter' || event.key === 'F2') && current) {
+      event.preventDefault()
+      if (cursorField !== undefined && cursorField !== FOLDED_COLUMN)
+        actions.current?.edit(current, cursorField)
+      else if (event.key === 'Enter') workbench.selectDocument(current.path)
+    } else if (event.key === ' ' && focused) {
+      event.preventDefault()
+      toggle(focused)
+    } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+      event.preventDefault()
+      setChecked(documents.map((document) => document.path))
+    } else if (
+      (event.metaKey || event.ctrlKey) &&
+      event.key.toLowerCase() === 'c' &&
+      current &&
+      cursorField !== FOLDED_COLUMN &&
+      // Text somebody selected on purpose is what they meant to copy.
+      !window.getSelection()?.toString()
+    ) {
+      event.preventDefault()
+      void copy(current, cursorField)
+    }
+  })
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => onKeyDown(event)
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [])
 
   // Fetch the next page as the last rows come into view.
   const items = virtualizer.getVirtualItems()
@@ -178,6 +407,40 @@ export function Grid() {
     )
       void page.fetchNextPage()
   }, [lastVisible, documents.length, page])
+
+  // The cell being edited, found in the page each render: a live change can
+  // replace the document under it, and a delete can take it away.
+  const editingDocument = editing
+    ? documents.find((document) => document.path === editing.path)
+    : undefined
+  useEffect(() => {
+    if (editing && !editingDocument && !page.isFetching) edit(null)
+  }, [editing, editingDocument, page.isFetching, edit])
+  const editingAnchor = useCallback(() => {
+    if (!editing) return null
+    return (
+      scrollRef.current?.querySelector<HTMLElement>(
+        `tr[data-path="${CSS.escape(editing.path)}"] td[data-field="${CSS.escape(editing.field)}"]`,
+      ) ?? null
+    )
+  }, [editing])
+  const gridBounds = useCallback(() => {
+    const element = scrollRef.current
+    if (!element) return null
+    const box = element.getBoundingClientRect()
+    const head = element.querySelector('thead')?.getBoundingClientRect().height ?? 0
+    return new DOMRect(box.left + pinned, box.top + head, box.width - pinned, box.height - head)
+  }, [pinned])
+  const closeEditor = useCallback(() => edit(null), [edit])
+  // Leaving the grid mid-edit — the browser's back button, another section
+  // of the console — drops the edit. Left set, it would hold the
+  // workbench's shortcuts aside for an editor that is no longer there.
+  useEffect(() => () => edit(null), [edit])
+
+  const virtualColumns = columnVirtualizer.getVirtualItems()
+  const first = virtualColumns[0]?.index ?? 0
+  const last = virtualColumns.at(-1)?.index ?? -1
+  const cells = useMemo(() => gridColumns.slice(first, last + 1), [gridColumns, first, last])
 
   if (!workbench.collectionPath) return <RootLanding />
   // The page query is switched off while the query text does not parse, and a
@@ -242,29 +505,55 @@ export function Grid() {
   const someChecked = documents.some((document) => checked.has(document.path))
   const top = items[0]?.start ?? 0
   const bottom = virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0)
-  const idWidth = workbench.group ? PATH_WIDTH : ID_WIDTH
-  const width =
-    44 +
-    idWidth +
-    (subcolumn ? subWidth : 0) +
-    columns.reduce((sum, column) => sum + column.width, 0)
-  const span = columns.length + 3 + (subcolumn ? 1 : 0)
+  const before = offsets[first] ?? 0
+  const after = dataWidth - (offsets[last + 1] ?? dataWidth)
+  const span = 3 + (subcolumn ? 1 : 0) + (before > 0 ? 1 : 0) + cells.length + (after > 0 ? 1 : 0)
+  const sortOf = (field: string) =>
+    workbench.query.orderBy.find((order) => order.field === field)?.direction
+
+  const resizer = (key: string, label: string, width: number, testId?: string) => (
+    <ColumnResizer
+      label={label}
+      width={width}
+      onResize={(px) => setResizing(px === null ? null : { key, width: px })}
+      onCommit={(px) => {
+        keepWidth(shape, key, px)
+        setResizing(null)
+      }}
+      onReset={() => {
+        forgetWidth(shape, key)
+        setResizing(null)
+      }}
+      testId={testId}
+    />
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-kumo-base">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto" data-testid="grid-scroll">
+      <div
+        ref={scrollRef}
+        className="group/grid min-h-0 flex-1 overflow-auto"
+        data-testid="grid-scroll"
+        data-scrolled={scrolledX ? '' : undefined}
+        onScroll={(event) => {
+          const moved = event.currentTarget.scrollLeft > 0
+          if (moved !== scrolledX) setScrolledX(moved)
+        }}
+      >
         <Table
           layout="fixed"
           className="border-separate border-spacing-0"
-          style={{ width, minWidth: '100%' }}
+          style={{ width: leading + dataWidth, minWidth: '100%' }}
         >
           <colgroup>
-            <col style={{ width: 44 }} />
+            <col style={{ width: CHECK_WIDTH }} />
             <col style={{ width: idWidth }} />
             {subcolumn && <col style={{ width: subWidth }} />}
-            {columns.map((column) => (
-              <col key={column.field} style={{ width: column.width }} />
+            {before > 0 && <col style={{ width: before }} />}
+            {cells.map((column) => (
+              <col key={column.key} style={{ width: column.width }} />
             ))}
+            {after > 0 && <col style={{ width: after }} />}
             {/* Slack goes here, so columns keep their width when the inspector opens. */}
             <col />
           </colgroup>
@@ -277,15 +566,20 @@ export function Grid() {
                   setChecked(next ? documents.map((document) => document.path) : [])
                 }
                 aria-label="Select every loaded document"
-                className="border-b border-kumo-line"
+                className={`border-b border-kumo-line ${PIN_HEAD}`}
+                style={{ left: 0 }}
               />
-              <Table.Head className="border-b border-kumo-line">
+              <Table.Head
+                className={`border-b border-kumo-line ${PIN_HEAD} ${PIN_EDGE}`}
+                style={{ left: CHECK_WIDTH }}
+              >
                 <span className="flex items-center gap-1.5">
                   <span className="font-mono text-[12px] font-medium text-kumo-default">
                     {workbench.group ? 'path' : 'id'}
                   </span>
                   <TypeBadge type="doc" />
                 </span>
+                {resizer(ID_COLUMN, workbench.group ? 'path' : 'id', idWidth, 'resize-id')}
               </Table.Head>
               {subcolumn && (
                 <Table.Head className="border-b border-kumo-line" data-testid="subcollections-head">
@@ -302,15 +596,36 @@ export function Grid() {
                   </span>
                 </Table.Head>
               )}
-              {columns.map((column) => (
-                <Table.Head key={column.field} className="border-b border-kumo-line !px-1">
-                  <HeaderMenu column={column} />
-                </Table.Head>
-              ))}
+              {before > 0 && <Table.Head className="border-b border-kumo-line" aria-hidden />}
+              {cells.map((column) => {
+                const sorted = column.kind === 'field' ? sortOf(column.key) : undefined
+                return (
+                  <Table.Head
+                    key={column.key}
+                    className="border-b border-kumo-line !px-1"
+                    aria-sort={
+                      sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined
+                    }
+                  >
+                    {column.kind === 'field' ? (
+                      <HeaderMenu column={column.column} />
+                    ) : (
+                      <FoldedHeader folded={column.folded} />
+                    )}
+                    {resizer(
+                      column.key,
+                      column.kind === 'field' ? column.key : 'rare fields',
+                      column.width,
+                      `resize-${column.kind === 'field' ? column.key : 'folded'}`,
+                    )}
+                  </Table.Head>
+                )
+              })}
+              {after > 0 && <Table.Head className="border-b border-kumo-line" aria-hidden />}
               <Table.Head className="border-b border-kumo-line" aria-hidden />
             </Table.Row>
           </Table.Header>
-          <Table.Body className="[&_td]:h-9 [&_td]:py-0">
+          <Table.Body className="[&_td]:h-[32px] [&_td]:py-0">
             {top > 0 && (
               <tr aria-hidden>
                 <td colSpan={span} style={{ height: top, padding: 0, border: 0 }} />
@@ -319,119 +634,25 @@ export function Grid() {
             {items.map((item) => {
               const document = documents[item.index]
               if (!document) return null
-              const flash = flashes.get(document.path)
               const isFocused =
                 focused === document.path || workbench.selectedDocument === document.path
-              const isChecked = checked.has(document.path)
               return (
-                <Table.Row
+                <GridRow
                   key={document.path}
-                  data-index={item.index}
-                  variant={isChecked ? 'selected' : 'default'}
-                  className={`cursor-default ${
-                    isFocused
-                      ? 'bg-kumo-tint [&>td:first-child]:shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
-                      : ''
-                  } ${flash ? (flash.kind === 'deleted' ? 'row-flash-deleted' : 'row-flash') : ''}`}
-                  onClick={(event) => {
-                    focus(document.path)
-                    const cell = (event.target as HTMLElement).closest('td')
-                    const grid = scrollRef.current
-                    const covered =
-                      !workbench.selectedDocument &&
-                      cell !== null &&
-                      grid !== null &&
-                      cell.getBoundingClientRect().right >
-                        grid.getBoundingClientRect().right -
-                          (useInspectorWidth.getState().width + INSPECTOR_GAP)
-                    if (!covered) {
-                      workbench.selectDocument(document.path)
-                      return
-                    }
-                    window.clearTimeout(pendingOpen.current)
-                    pendingOpen.current = window.setTimeout(
-                      () => workbench.selectDocument(document.path),
-                      DOUBLE_CLICK_MS,
-                    )
-                  }}
-                  data-testid="grid-row"
-                >
-                  <Table.CheckCell
-                    checked={isChecked}
-                    onCheckedChange={() => toggle(document.path)}
-                    aria-label={`Select ${document.id}`}
-                  />
-                  <Table.Cell>
-                    <span className="flex items-center gap-1.5">
-                      {document.missing && (
-                        <span
-                          className="flex h-lh items-center text-kumo-subtle"
-                          title="No document here, only subcollections"
-                        >
-                          <WarningIcon size={14} />
-                        </span>
-                      )}
-                      <IdCell
-                        id={workbench.group ? document.path : document.id}
-                        missing={document.missing}
-                      />
-                    </span>
-                  </Table.Cell>
-                  {subcolumn && (
-                    <Table.Cell className="!px-2">
-                      <SubcollectionsCell path={document.path} known={known} />
-                    </Table.Cell>
-                  )}
-                  {columns.map((column) => {
-                    const value = document.fields[column.field]
-                    // A value whose type differs from the column's is the odd
-                    // one out — but only in a column that holds two real
-                    // types. An unset field is written `null` on purpose, and
-                    // tinting every one of those marks ordinary data as a
-                    // fault; the muted `null` in the cell already says it.
-                    const odd =
-                      column.mixed === true &&
-                      value !== undefined &&
-                      value.type !== 'null' &&
-                      value.type !== column.type
-                    const isEditing =
-                      editing?.path === document.path && editing.field === column.field
-                    return (
-                      <Table.Cell
-                        key={column.field}
-                        data-testid={`cell-${column.field}`}
-                        className={`${odd ? 'bg-kumo-warning-tint' : ''} ${isEditing ? '!px-1' : ''}`}
-                        title={
-                          odd
-                            ? `${value.type}, where most documents have ${column.type}`
-                            : undefined
-                        }
-                        onDoubleClick={(event) => {
-                          if (document.missing || !inlineEditable(value)) return
-                          event.preventDefault()
-                          event.stopPropagation()
-                          window.clearTimeout(pendingOpen.current)
-                          setEditing({ path: document.path, field: column.field })
-                        }}
-                      >
-                        {isEditing ? (
-                          <InlineCellEditor
-                            document={document}
-                            field={column.field}
-                            value={value}
-                            onDone={() => setEditing(null)}
-                          />
-                        ) : (
-                          <ValueCell
-                            value={value}
-                            onOpenReference={(path) => workbench.selectDocument(path)}
-                          />
-                        )}
-                      </Table.Cell>
-                    )
-                  })}
-                  <Table.Cell aria-hidden />
-                </Table.Row>
+                  document={document}
+                  index={item.index}
+                  cells={cells}
+                  before={before > 0}
+                  after={after > 0}
+                  subcolumn={subcolumn}
+                  known={known}
+                  group={workbench.group}
+                  checked={checked.has(document.path)}
+                  focused={isFocused}
+                  cursor={focused === document.path ? cursorField : undefined}
+                  flash={flashes.get(document.path)?.kind}
+                  actions={actions}
+                />
               )
             })}
             {bottom > 0 && (
@@ -442,6 +663,17 @@ export function Grid() {
           </Table.Body>
         </Table>
       </div>
+      {editing && editingDocument && (
+        <CellEditor
+          key={`${editing.path}\u0000${editing.field}`}
+          document={editingDocument}
+          field={editing.field}
+          column={arranged.columns.find((column) => column.field === editing.field)}
+          anchor={editingAnchor}
+          bounds={gridBounds}
+          onDone={closeEditor}
+        />
+      )}
       <GridFooter
         loaded={documents.length}
         hasMore={Boolean(page.hasNextPage)}

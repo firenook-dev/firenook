@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_LIMIT,
+  EMPTY_QUERY,
   QueryParseError,
   effectiveOrder,
   documentAsCode,
   parseQuery,
+  presenceFields,
   printQuery,
   queryAsCode,
   toStructuredQuery,
@@ -202,5 +204,21 @@ describe('a document copied as code', () => {
     const rest = documentAsCode('rest', 'users/u1', fields, scope)
     expect(rest).toContain('"timestampValue":"2026-08-31T09:45:54.604Z"')
     expect(rest).toContain('curl -sS -X PATCH')
+  })
+})
+
+describe('presenceFields', () => {
+  it('names the fields a sort or a != quietly requires', () => {
+    expect(presenceFields(parseQuery('orderBy("referredBy")'))).toEqual(['referredBy'])
+    expect(
+      presenceFields(parseQuery('where("plan", "!=", "pro").orderBy("createdAt", "desc")')),
+    ).toEqual(['createdAt', 'plan'])
+    expect(presenceFields(parseQuery('where("tier", "not-in", ["a", "b"])'))).toEqual(['tier'])
+  })
+
+  it('stays quiet where nobody expected the missing documents back', () => {
+    expect(presenceFields(parseQuery('where("plan", "==", "pro")'))).toEqual([])
+    expect(presenceFields(parseQuery('where("age", ">", 3)'))).toEqual([])
+    expect(presenceFields(EMPTY_QUERY)).toEqual([])
   })
 })

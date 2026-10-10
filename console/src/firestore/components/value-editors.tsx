@@ -23,6 +23,13 @@ export interface EditorProps {
   /** What the screen reader calls this value: the field name, or an index. */
   label: string
   invalid: boolean
+  /**
+   * A number's `integer` / `double` word is drawn by the control beside the
+   * box, so the box leaves it out. The inspector's row draws that control
+   * over the word, on hover; the grid's editor keeps it in view while you
+   * type, and the same word twice side by side read as a stutter.
+   */
+  formOutside?: boolean | undefined
 }
 
 /**
@@ -268,23 +275,25 @@ export function ValueControls({ node, onChange, label }: Omit<EditorProps, 'inva
   }
 }
 
-function NumberEditor({ node, onChange, label, invalid }: EditorProps) {
+function NumberEditor({ node, onChange, label, invalid, formOutside }: EditorProps) {
   const { next } = useFieldEditing()
   const ref = useFocusTarget<HTMLInputElement>(node.id)
   const form = numberForm(node)
   return (
     <Line
       invalid={invalid}
+      /* Firestore stores an integer and a double as different types, and
+         `3` is how both of them are written. Nothing in the text can say
+         which this is, so the editor has to — and did not: every double
+         that read whole came back an integer the moment it was touched.
+         Saying it is this word's job; changing it is the strip's, like
+         every other control a row has. */
       word={
-        /* Firestore stores an integer and a double as different types, and
-           `3` is how both of them are written. Nothing in the text can say
-           which this is, so the editor has to — and did not: every double
-           that read whole came back an integer the moment it was touched.
-           Saying it is this word's job; changing it is the strip's, like
-           every other control a row has. */
-        <span className={WORD} data-testid="number-form">
-          {form.integer ? 'integer' : 'double'}
-        </span>
+        formOutside ? undefined : (
+          <span className={WORD} data-testid="number-form">
+            {form.integer ? 'integer' : 'double'}
+          </span>
+        )
       }
     >
       <input
@@ -421,8 +430,12 @@ function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
           onChange={(event) => onChange({ ...node, text: event.target.value })}
           onFocus={() => setOpen(true)}
           onKeyDown={(event) => {
-            if (event.key === 'Escape') setOpen(false)
-            else if (event.key === 'Enter') {
+            // An open calendar is what Escape shuts first; whatever holds
+            // this field — the grid's cell editor — waits for the next one.
+            if (event.key === 'Escape') {
+              if (open) event.preventDefault()
+              setOpen(false)
+            } else if (event.key === 'Enter') {
               event.preventDefault()
               next()
             }
@@ -555,7 +568,10 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
                 // A path has no newline in it, whatever is pressed.
                 event.preventDefault()
                 next()
-              } else if (event.key === 'Escape') setOpen(false)
+              } else if (event.key === 'Escape') {
+                if (open && matches.length > 0) event.preventDefault()
+                setOpen(false)
+              }
             }}
             spellCheck={false}
             autoComplete="off"

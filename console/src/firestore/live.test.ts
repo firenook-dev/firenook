@@ -56,14 +56,15 @@ describe('column inference', () => {
         createdAt: { type: 'timestamp', value: '2026-09-20T09:00:00Z' },
       }),
     ])
-    expect(columns.map((column) => column.field)).toEqual(['type', 'createdAt', 'extra'])
-    expect(columns[1]).toMatchObject({
+    // Tied on count, so named in the order a person counts.
+    expect(columns.map((column) => column.field)).toEqual(['createdAt', 'type', 'extra'])
+    expect(columns[0]).toMatchObject({
       type: 'timestamp',
       present: 3,
       mixed: true,
       holds: { timestamp: 2, string: 1 },
     })
-    expect(columns[0]?.mixed).toBeUndefined()
+    expect(columns[1]?.mixed).toBeUndefined()
   })
 })
 

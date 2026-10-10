@@ -383,6 +383,17 @@ export function toJsonValue(value: FsValue): unknown {
   }
 }
 
+/**
+ * A value as text for the clipboard: a scalar as it is typed in an editor —
+ * the string itself, an ISO instant, a path — and a map or array as the
+ * JSON the document's JSON view would show for it.
+ */
+export function copyText(value: FsValue): string {
+  if (value.type === 'map' || value.type === 'array')
+    return JSON.stringify(toJsonValue(value), null, 2)
+  return editorText(value)
+}
+
 /** The tree as one JSON object; a node that does not parse contributes its text. */
 export function nodesToJson(nodes: readonly DraftNode[]): Record<string, unknown> {
   const plain: Record<string, unknown> = {}

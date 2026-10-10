@@ -1,5 +1,5 @@
 // Ephemeral grid state: which rows are checked for a bulk action, and which
-// row the keyboard is on. Neither belongs in the URL.
+// cell the keyboard is on. Neither belongs in the URL.
 
 import { create } from 'zustand'
 
@@ -7,31 +7,69 @@ interface SelectionState {
   /** The collection the selection belongs to. */
   scope: string
   checked: Set<string>
+  /** The row the keyboard is on. */
   focused: string | undefined
+  /**
+   * The column the keyboard is on within that row, or `undefined` for the
+   * row itself — its id — where Enter opens the document rather than
+   * editing a value.
+   */
+  field: string | undefined
+  /** The row a shift-click selects a range from: the last one toggled. */
+  anchor: string | undefined
+  /**
+   * The cell being edited. Held here rather than in the grid so that the
+   * workbench's own shortcuts — `f`, `e`, Escape closing the inspector —
+   * can stand aside while a value is being typed, wherever focus is.
+   */
+  editing: { path: string; field: string } | null
   toggle: (path: string) => void
   setChecked: (paths: Iterable<string>) => void
+  /** Checks or clears every path given, leaving the rest as they are. */
+  setRange: (paths: readonly string[], checked: boolean) => void
   clear: () => void
-  focus: (path: string | undefined) => void
+  focus: (path: string | undefined, field?: string | undefined) => void
+  edit: (cell: { path: string; field: string } | null) => void
 }
 
 /** Clears the selection when the grid moves to another collection. */
 export function resetSelection(scope: string) {
   if (useSelection.getState().scope === scope) return
-  useSelection.setState({ scope, checked: new Set(), focused: undefined })
+  useSelection.setState({
+    scope,
+    checked: new Set(),
+    focused: undefined,
+    field: undefined,
+    anchor: undefined,
+    editing: null,
+  })
 }
 
 export const useSelection = create<SelectionState>((set) => ({
   scope: '',
   checked: new Set(),
   focused: undefined,
+  field: undefined,
+  anchor: undefined,
+  editing: null,
   toggle: (path) =>
     set((state) => {
       const checked = new Set(state.checked)
       if (checked.has(path)) checked.delete(path)
       else checked.add(path)
-      return { checked }
+      return { checked, anchor: path }
     }),
   setChecked: (paths) => set({ checked: new Set(paths) }),
-  clear: () => set({ checked: new Set(), focused: undefined }),
-  focus: (focused) => set({ focused }),
+  setRange: (paths, on) =>
+    set((state) => {
+      const checked = new Set(state.checked)
+      for (const path of paths) {
+        if (on) checked.add(path)
+        else checked.delete(path)
+      }
+      return { checked, anchor: paths.at(-1) ?? state.anchor }
+    }),
+  clear: () => set({ checked: new Set(), focused: undefined, field: undefined }),
+  focus: (focused, field) => set({ focused, field }),
+  edit: (editing) => set({ editing }),
 }))

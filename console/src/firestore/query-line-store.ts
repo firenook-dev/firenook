@@ -34,18 +34,23 @@ export const useQueryLine = create<QueryLineState>((set) => ({
 interface ColumnsState {
   scope: string
   hidden: Set<string>
+  /** The rare fields asked for as columns rather than folded into one. */
+  unfolded: boolean
   hide: (field: string) => void
   showAll: () => void
+  unfold: () => void
 }
 
 export function resetColumns(scope: string) {
   if (useColumns.getState().scope === scope) return
-  useColumns.setState({ scope, hidden: new Set() })
+  useColumns.setState({ scope, hidden: new Set(), unfolded: false })
 }
 
 export const useColumns = create<ColumnsState>((set) => ({
   scope: '',
   hidden: new Set(),
+  unfolded: false,
   hide: (field) => set((state) => ({ hidden: new Set([...state.hidden, field]) })),
   showAll: () => set({ hidden: new Set() }),
+  unfold: () => set({ unfolded: true }),
 }))
