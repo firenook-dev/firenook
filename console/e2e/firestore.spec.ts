@@ -1917,6 +1917,38 @@ test('the chip beside the path times the write, not anything in the document', a
   await drop(page.request, 'teams/t_when')
 })
 
+test('the new-document dialog is wide enough for the editor it holds', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
+  await page.getByTestId('inspector').getByTestId('add-subcollection').click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  // What the width is for: a line of JSON the length of a real one fits
+  // on one line. At Kumo's largest size the tab held 43 columns —
+  // exactly `  "createdAt": "2026-10-10T18:32:32.415Z",` — and a hash or
+  // a URL from an ordinary document wrapped. A 78-character line is
+  // measured against a short one; wrapped, it would be twice the height.
+  await dialog.getByRole('tab', { name: 'JSON' }).click()
+  const editor = dialog.getByTestId('document-json')
+  await expect(editor).toBeVisible()
+  const long = `  "secretHash": "${'x'.repeat(78 - '  "secretHash": "",'.length)}",`
+  expect(long).toHaveLength(78)
+  await editor.fill(`{\n${long}\n  "n": 1\n}`)
+  const heights = await dialog
+    .locator('.cm-line')
+    .evaluateAll((lines) => lines.map((line) => Math.round(line.getBoundingClientRect().height)))
+  expect(heights).toHaveLength(4)
+  expect(heights[1]).toBe(heights[2])
+
+  // And Kumo's own bound still holds on a small window: the override
+  // widens the dialog, it does not let it leave the screen.
+  await page.setViewportSize({ width: 600, height: 900 })
+  const box = (await dialog.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(8)
+  expect(box.x + box.width).toBeLessThanOrEqual(600 - 8)
+})
+
 test('the JSON tab spends the panel on the JSON', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
   // Eighteen fields: twenty lines of JSON, which the old box showed

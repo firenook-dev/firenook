@@ -31,7 +31,18 @@ export function CreateDialog() {
   if (request !== null && request !== shown) setShown(request)
   return (
     <Dialog.Root open={request !== null} onOpenChange={(next) => !next && close()}>
-      <Dialog size="lg" className="p-6">
+      {/* Wide enough for the editor it now holds. Kumo's largest size
+          is 32 rem — 448 px against this console's 14 px root — which
+          left the JSON tab 43 columns: exactly the length of
+          `  "createdAt": "2026-10-10T18:32:32.415Z",`, so every longer
+          line wrapped, and a value box 222 px wide with its type chip
+          drawn over the end of a timestamp. 720 px is 80 columns,
+          measured, and about what the inspector opens to on a wide
+          display, so the same field editor gets the same room in both
+          places. Import holds no field editor and keeps the size it was
+          reviewed at. Kumo's own `max-w-[calc(100vw-2rem)]` still
+          bounds it on a small window. */}
+      <Dialog size="lg" className={shown?.kind === 'import' ? 'p-6' : 'p-6 sm:w-[720px]'}>
         {shown &&
           (shown.kind === 'import' ? (
             <ImportForm key={session} collection={shown.collection} onClose={close} />

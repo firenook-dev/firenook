@@ -958,6 +958,25 @@ one render prop in the other — `Tooltip render={<Popover.Trigger
 render={<Button/>} />}`. Verified: one `<button>`, tooltip on hover,
 popover on click.
 
+### The create dialog is 720 px
+
+Kumo's largest `Dialog` size is `lg` = `sm:w-[32rem]`, which is **448 px**
+against this console's 14 px root (its runtime map has an `xl` at 48 rem,
+but the typings do not expose it). That was sized before the dialog held
+the field editor and the JSON tab: the JSON tab got **43 columns** —
+exactly the length of `  "createdAt": "2026-10-10T18:32:32.415Z",` — the
+value box was 222 px with the type chip over the end of a timestamp, and
+a long parent path wrapped the title to three lines.
+
+`className="p-6 sm:w-[720px]"` overrides it for the forms that hold the
+field editor: **80 columns**, measured (640 → 69, 720 → 80, 800 → 91),
+and about what the inspector opens to on a wide display, so the same
+editor gets the same room in both places. Kumo's own
+`max-w-[calc(100vw-2rem)]` still bounds it (600 px window → 572 px).
+Import holds no field editor and keeps `lg`. The journey measures a
+78-character line against a short one: at 448 it is 53 px tall, three
+wrapped lines.
+
 ### Size and age beside the document path
 
 The header reads `472 B · 1 mo ago` beside the name, the way a file list
