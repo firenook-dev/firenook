@@ -3,7 +3,6 @@
 // detail view; getting around happens in the path bar and the grid.
 
 import {
-  Badge,
   Button,
   InlineCopyText,
   Popover,
@@ -30,7 +29,15 @@ import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { CODE_LABEL_AT, clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
 import { type Subcollection, subcollectionsQuery } from '../subcollections'
-import { type DraftNode, diffDocument, nodesFrom, parseNode, problemsOf } from '../draft'
+import {
+  type DraftNode,
+  diffDocument,
+  draftFields,
+  nodesFrom,
+  parseNode,
+  problemsOf,
+} from '../draft'
+import { type SizeReading, anyElided, documentBytes, sizeReading } from '../size'
 import {
   type FsDocument,
   type FsValue,
@@ -97,10 +104,29 @@ function WidthHandle() {
   )
 }
 
+/** A draft's size as the header says it. */
+function readSize(path: string, nodes: readonly DraftNode[]): SizeReading {
+  const fields = draftFields(nodes)
+  return sizeReading(documentBytes(path, fields), anyElided(fields))
+}
+
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
   const width = useInspectorWidth((state) => state.width)
   const document = useQuery(documentQuery(workbench.scope, path))
+  // The editor below holds the draft; the header up here says how big it
+  // is. What the editor last reported is kept against the editor it came
+  // from, so a document switched to — or rewritten by another client,
+  // which remounts the editor under a new key — shows its stored size
+  // rather than the last draft's until it is edited, and a stored
+  // document and its untouched draft are the same size anyway.
+  const editorKey = `${path}:${document.data?.updateTime ?? ''}`
+  const [drafted, setDrafted] = useState<{ key: string; reading: SizeReading }>()
+  const stored = useMemo(
+    () => (document.data ? readSize(path, nodesFrom(document.data.fields, true)) : undefined),
+    [path, document.data],
+  )
+  const size = drafted?.key === editorKey ? drafted.reading : stored
   // Names and counts in one request, shared with the grid's column: the
   // row the inspector was opened from has usually asked already.
   const subcollections = useQuery(subcollectionsQuery(workbench.database, path))
@@ -133,27 +159,51 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
         >
           {path}
         </InlineCopyText>
-        {/* `updateTime` is the engine's own record of the last write,
-            not one of the document's fields — a document whose
-            `createdAt` says August can have been written to since, and
-            this is the one that says so. "1 mo ago" beside a path does
-            not say which event it counts from, so the tooltip names
-            it. A Kumo one, not the browser's `title`: everything else
-            in this panel answers in about a tenth of a second and in
-            the console's own skin, and a native tooltip waits a second
-            to arrive in the platform's. */}
-        {document.data?.updateTime && (
-          <Tooltip
-            content={`Last changed ${compactIso(document.data.updateTime)}`}
-            render={
-              // The span is the handle: Kumo's Badge does not forward
-              // `data-*` to the element it draws, so a testid put on it
-              // never reaches the page.
-              <span data-testid="document-changed">
-                <Badge variant="neutral">{relativeTime(document.data.updateTime)}</Badge>
-              </span>
-            }
-          />
+        {/* Size and age beside the name, the way a file list writes them.
+            Both quiet: neither is a thing to act on until the size is
+            near the ceiling, and then the size alone takes colour. */}
+        {(size || document.data?.updateTime) && (
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-kumo-subtle tabular-nums">
+            {size && (
+              // Firestore refuses a document over 1 MiB and this engine
+              // does not, so a document that writes happily here can
+              // fail on the first deploy. This is the only warning
+              // there is.
+              <Tooltip
+                content={size.title}
+                render={
+                  <span
+                    data-testid="document-size"
+                    className={`cursor-default ${
+                      size.tone === 'over'
+                        ? 'text-kumo-danger'
+                        : size.tone === 'crowded'
+                          ? 'text-kumo-warning'
+                          : ''
+                    }`}
+                  >
+                    {size.text}
+                  </span>
+                }
+              />
+            )}
+            {size && document.data?.updateTime && <span aria-hidden>·</span>}
+            {/* `updateTime` is the engine's record of the last write, not
+                one of the document's fields: a document whose `createdAt`
+                says August can have been written to since, and this is
+                the one that says so. It names itself on hover because a
+                bare "1 mo ago" does not say which event it counts from. */}
+            {document.data?.updateTime && (
+              <Tooltip
+                content={`Last changed ${compactIso(document.data.updateTime)}`}
+                render={
+                  <span data-testid="document-changed" className="cursor-default">
+                    {relativeTime(document.data.updateTime)}
+                  </span>
+                }
+              />
+            )}
+          </span>
         )}
         {parentCollection(path) !== workbench.collectionPath && (
           <Tooltip
@@ -196,9 +246,10 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
         <MissingDocument path={path} subcollections={subcollections.data ?? []} />
       ) : (
         <DocumentEditor
-          key={`${path}:${document.data.updateTime ?? ''}`}
+          key={editorKey}
           document={document.data}
           onDelete={onDelete}
+          onSize={(reading) => setDrafted({ key: editorKey, reading })}
           // Subcollections belong with the document, above the actions: a
           // footer that is not the last thing in the panel reads as a divider.
           subcollections={<Subcollections parent={path} found={subcollections.data ?? []} />}
@@ -311,10 +362,13 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
 function DocumentEditor({
   document,
   onDelete,
+  onSize,
   subcollections,
 }: {
   document: FsDocument
   onDelete: (path: string) => void
+  /** The draft's size, each time the draft changes. */
+  onSize: (reading: SizeReading) => void
   subcollections: React.ReactNode
 }) {
   const workbench = useWorkbench()
@@ -328,6 +382,13 @@ function DocumentEditor({
   // The footer is as wide as the panel, so the panel's own width is the
   // footer's measurement and no observer of its own is needed.
   const roomForTheWord = useInspectorWidth((state) => state.width) >= CODE_LABEL_AT
+  // Every change to the draft goes through here, so the size the header
+  // shows moves as you type rather than after Save — which is the only
+  // moment it can save you anything.
+  const changeNodes = (next: DraftNode[]) => {
+    setNodes(next)
+    onSize(readSize(document.path, next))
+  }
   const known = useKnownFields(document.collection)
 
   // Both run on every keystroke, which is the point: a value that will not
@@ -381,7 +442,7 @@ function DocumentEditor({
     <>
       <FieldsPanel
         nodes={nodes}
-        onNodesChange={setNodes}
+        onNodesChange={changeNodes}
         problems={problems}
         known={known}
         changed={changedNames}

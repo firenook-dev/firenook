@@ -1843,6 +1843,52 @@ test('a map and its JSON are the same subtree, written two ways', async ({ page 
   await drop(page.request, 'teams/t_json')
 })
 
+test('the header counts the document against the 1 MiB a document may hold', async ({ page }) => {
+  await put(page.request, 'teams/t_size', { note: { stringValue: 'small' } })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_size`)
+  const inspector = page.getByTestId('inspector')
+  const size = inspector.getByTestId('document-size')
+  // By Firestore's own rule: the name is `teams` (6) + `t_size` (7) +
+  // 16 = 29, the one field is `note` (5) + "small" (6) = 11, and a
+  // document carries 32 over. 72 bytes.
+  await expect(size).toHaveText('72 B')
+
+  // It counts the draft, not the stored document, which is the whole
+  // point of having it: the number moves while you type, before there
+  // is anything to save.
+  await inspector.getByLabel('note value').fill('small'.padEnd(2000, '!'))
+  await expect(size).toHaveText('2.0 KB')
+  await expect(inspector.getByTestId('save-pending')).toContainText('1 change')
+
+  // And it says what it is counting against.
+  await size.hover()
+  await expect(page.getByText('of 1,048,576 bytes a document may hold')).toBeVisible()
+
+  // Quiet while there is nothing to warn about: colour here is spent on
+  // what can be done, and a document using a fifth of a per cent of its
+  // room is not news.
+  const quiet = await size.evaluate(
+    (el) => el.ownerDocument.defaultView!.getComputedStyle(el).color,
+  )
+  await drop(page.request, 'teams/t_size')
+
+  // Over the limit it is a different colour and a different sentence,
+  // because this engine will store what Firestore would refuse — there
+  // is no document-size check anywhere in the crates, so without this
+  // the first anybody hears of it is a failed write in production.
+  await put(page.request, 'teams/t_big', {
+    blob: { stringValue: 'x'.repeat(1_100_000) },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_big`)
+  // And how full it is, now that that is the news.
+  await expect(size).toHaveText('1.05 MB · 105%')
+  const loud = await size.evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el).color)
+  expect(loud).not.toBe(quiet)
+  await size.hover()
+  await expect(page.getByText('Firestore will reject it')).toBeVisible()
+  await drop(page.request, 'teams/t_big')
+})
+
 test('the chip beside the path times the write, not anything in the document', async ({ page }) => {
   // A document carrying a `createdAt` field years before the write that
   // put it in the engine. The chip reads `updateTime` — the engine's own

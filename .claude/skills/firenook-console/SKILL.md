@@ -958,20 +958,56 @@ one render prop in the other — `Tooltip render={<Popover.Trigger
 render={<Button/>} />}`. Verified: one `<button>`, tooltip on hover,
 popover on click.
 
-### The chip beside the document path
+### Size and age beside the document path
 
-It reads `updateTime` — the **engine's** record of the last write — not
-any field of the document. The two can disagree by years: a journey
-seeds `createdAt: 2020-01-01` and the chip says *just now* while the row
-beneath it says *7 y ago*, both right about different things. That is
-exactly why it has to name itself; a bare relative time beside a path
-does not say which event it counts from, and the question got asked.
+The header reads `472 B · 1 mo ago` beside the name, the way a file list
+writes size and modified time. Both are quiet subtle text — the age was a
+filled `Badge` and the darkest mark in the header, louder than the path
+it belongs to, for a fact you glance at twice a session.
 
-It names itself in a Kumo tooltip, not a native `title`. Everything else
-in this panel answers in about a tenth of a second in the console's own
-skin; a `title` waits about a second and arrives in the platform's.
-`src/firestore/components/requests-drawer.tsx` still uses a native
-`title` on its times — the same gap, not yet closed.
+**The age** is `updateTime`, the engine's record of the last write — not
+any field of the document. The two can disagree by years: a journey seeds
+`createdAt: 2020-01-01` and the header says *just now* while the row
+beneath says *7 y ago*. It names itself in a Kumo tooltip ("Last changed
+…", `compactIso`), not a native `title`. `requests-drawer.tsx` still uses
+a native `title` on its times — the same gap, not yet closed.
+
+**The size** is `src/firestore/size.ts`, Firestore's own rule: strings
+and field names are UTF-8 bytes + 1, numbers and timestamps 8 whatever
+they read, a geopoint 16, a vector 8 a dimension (not the map it is
+spelled as in JSON), a reference priced as the name it points at, a
+document its name + fields + 32. Google's worked example
+(`users/jeff/tasks/my_task_id` = 44 + 71 + 32 = **147**) is a unit test,
+line by line. A map does *not* carry its own 32; the docs leave that
+implicit and the worked example adds it exactly once.
+
+It counts the **draft**, live: every draft change goes through one
+`changeNodes`, which reports up to `Inspector`, keyed to the editor that
+reported it so a switched-to or remotely rewritten document shows its
+stored size until edited. Quiet below 90%; from there it adds the share
+and turns amber (`973 KB · 94%`); over the limit red (`1.05 MB · 105%`),
+rounding up so one byte over never reads 100%, with a tooltip that says
+the engine will store it and Firestore will not.
+
+**The engine does not enforce the 1 MiB limit** — no crate holds a
+document-size check, and neither `COMPATIBILITY.md` nor `ROADMAP.md`
+mentions it. Until it does, this header is the only warning before a
+deploy.
+
+Two placements were tried and measured before this one:
+
+- **A progress ring** (asked about) — a real 11-field record is 472
+  bytes, 0.045% of the limit: 0.02 px of arc on a 16 px ring, and a bar
+  would need 2,222 px to show one pixel. A ring is the instrument for a
+  quantity that spans its range in normal use; document size lives in the
+  bottom tenth of a percent, so it would read empty — or as a spinner
+  that never started — for nearly every document, and it moves the number
+  behind a hover. The share appears in text once it is news instead.
+- **The footer, beside Save** — semantically neat, and it broke the floor:
+  at 320–350 px an over-limit size pushed Save 39–47 px off the footer's
+  edge, and at 350 Code's word came back and made it worse. That footer is
+  tuned to the controls it has; check overflow at 320 and 350 whenever
+  anything is added to it.
 
 ### The write log and its undo were taken out
 

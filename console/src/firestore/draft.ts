@@ -308,6 +308,21 @@ export function diffDocument(
   return { write, clear: Object.keys(original).filter((name) => !live.has(name)) }
 }
 
+/**
+ * Every field the draft would write, under the name it would write it
+ * under. A field whose text does not parse yet is left out, the same
+ * way `diffDocument` leaves it out of a write.
+ */
+export function draftFields(nodes: readonly DraftNode[]): Record<string, FsValue> {
+  const fields: Record<string, FsValue> = {}
+  for (const node of nodes) {
+    if (node.removed === true) continue
+    const parsed = parseNode(node)
+    if (parsed.ok) fields[node.name.trim()] = parsed.value
+  }
+  return fields
+}
+
 /** Whether two values are the same value, map key order aside. */
 export function sameValue(a: FsValue, b: FsValue): boolean {
   return canonical(a) === canonical(b)
