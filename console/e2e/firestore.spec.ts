@@ -1479,7 +1479,7 @@ test('every value wears a box, and the controls still arrive under the pointer',
   // the tools start where a field name starts, and Save ends where a
   // value ends.
   const ground = await inset(inspector.getByTestId('field-row').first().locator('> div').first())
-  const tools = await inset(inspector.getByLabel('Copy this document as code'))
+  const tools = await inset(inspector.getByTestId('document-code'))
   const save = await inset(inspector.getByTestId('save-document'))
   const value = await inset(inspector.getByLabel('displayName value'))
   expect(Math.abs(ground.left - tools.left)).toBeLessThan(2)
@@ -2542,26 +2542,53 @@ test('the bottom of the drawer spends colour on what can be done, not on what is
   // Save and Delete; there are two hundred.
   const saveBox = (await inspector.getByTestId('save-document').boundingBox())!
   const deleteBox = (await inspector.getByLabel('Delete this document').boundingBox())!
-  const codeBox = (await inspector.getByLabel('Copy this document as code').boundingBox())!
+  const codeBox = (await inspector.getByTestId('document-code').boundingBox())!
   expect(saveBox.x).toBeGreaterThan(edge(deleteBox))
   expect(codeBox.x).toBeLessThan(deleteBox.x)
   expect(saveBox.x - edge(deleteBox)).toBeGreaterThan(80)
 
-  // And delete is not a member of the group holding copy: three pixels is
-  // the rhythm within a group, so a rule puts it outside them.
+  // The rule divides the row by what the controls do, not by which one
+  // is frightening. Code opens a panel and changes nothing; Duplicate
+  // and Delete both change which documents exist, so they are the group
+  // and Code is the one outside it. Three pixels is the rhythm within a
+  // group, so the gap past the rule is several times it.
   const dupBox = (await inspector.getByTestId('duplicate-document').boundingBox())!
-  const withinGroup = dupBox.x - edge(codeBox)
-  const pastTheRule = deleteBox.x - edge(dupBox)
+  const pastTheRule = dupBox.x - edge(codeBox)
+  const withinGroup = deleteBox.x - edge(dupBox)
   expect(pastTheRule).toBeGreaterThan(withinGroup * 2)
+
+  // Code carries the glyph alone; the two that act on the document
+  // carry a word. It was the other way round, and the only bare glyph
+  // was a copy icon — the same glyph the header above uses to copy the
+  // path, so the one control nobody could name was also the one most
+  // easily taken for something else.
+  await expect(inspector.getByTestId('document-code')).toHaveText('')
+  await expect(inspector.getByTestId('duplicate-document')).toContainText('Duplicate')
 
   // Every icon button down here is the one size. Kumo's extra-small
   // square renders 12 px at a 14 px root, half of every other control in
   // the panel and below any sane hit target.
   const squares = await Promise.all(
-    ['add-subcollection', 'duplicate-document'].map(async (id) =>
+    ['add-subcollection', 'document-code'].map(async (id) =>
       Math.round((await inspector.getByTestId(id).boundingBox())!.height),
     ),
   )
   expect(new Set(squares).size).toBe(1)
   expect(Math.min(...squares)).toBeGreaterThanOrEqual(20)
+
+  // And the row still holds at the narrowest the panel goes, which is
+  // where a third label would have told: Save sits clear of Delete with
+  // room to spare, not pressed against it.
+  await inspector.evaluate((el) => {
+    try {
+      el.ownerDocument.defaultView!.localStorage.setItem('firenook.console.inspector-width', '320')
+    } catch {
+      /* a private window has no storage, and the default width still holds */
+    }
+  })
+  await page.reload()
+  await expect(inspector.getByTestId('save-document')).toBeVisible()
+  const tight = (await inspector.getByTestId('save-document').boundingBox())!
+  const tightDelete = (await inspector.getByLabel('Delete this document').boundingBox())!
+  expect(Math.round(tight.x - edge(tightDelete))).toBeGreaterThan(24)
 })

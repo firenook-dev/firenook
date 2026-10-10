@@ -373,17 +373,28 @@ function DocumentEditor({
             way, so the two coloured controls sit at opposite ends of the
             row with three hundred pixels between them. */}
         <div className="flex shrink-0 items-center gap-1">
+          {/* The only control down here that changes nothing — it opens
+              a panel showing how to fetch this document in code. It is
+              also the one the row can least afford a word for, so it
+              keeps the glyph and gives the word to the two that act on
+              the document. The collection toolbar's Code keeps its
+              label: that row has the room, this one does not. */}
           <Popover>
-            <Popover.Trigger
+            <Tooltip
+              content="This document as code"
               render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<CodeIcon />}
-                  aria-label="Copy this document as code"
-                >
-                  Code
-                </Button>
+                <Popover.Trigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      shape="square"
+                      icon={<CodeIcon />}
+                      aria-label="This document as code"
+                      data-testid="document-code"
+                    />
+                  }
+                />
               }
             />
             <Popover.Content className="w-[560px] max-w-[calc(100vw-2rem)]">
@@ -399,15 +410,25 @@ function DocumentEditor({
               />
             </Popover.Content>
           </Popover>
+          {/* The rule divides the row by what the controls do, not by
+              which one is frightening: looking at this document on one
+              side, changing which documents exist on the other. Delete
+              confirms in a dialog, so seating it beside Duplicate costs
+              nothing a misclick could not take back. */}
+          <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" />
+          {/* Carries its word now. It was the one bare glyph in a row of
+              labelled controls, and a bare copy glyph in particular: the
+              header above has one too, which copies the path. The
+              tooltip says what duplicating means here, which a label
+              cannot — the fields are carried into a new document that
+              does not exist until it is saved. */}
           <Tooltip
-            content="New document with these fields"
+            content="Opens a new document with these fields"
             render={
               <Button
                 variant="ghost"
                 size="sm"
-                shape="square"
                 icon={<CopyIcon />}
-                aria-label="Duplicate this document"
                 onClick={() =>
                   openCreate({
                     kind: 'document',
@@ -416,14 +437,11 @@ function DocumentEditor({
                   })
                 }
                 data-testid="duplicate-document"
-              />
+              >
+                Duplicate
+              </Button>
             }
           />
-          {/* Three pixels is the rhythm of one group, and delete is not a
-              member of the group holding copy. A rule puts it outside
-              them without moving it off the row. */}
-
-          <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" />
           {/* Red says what it does; the border was saying it twice. A
               bordered destructive button was the strongest mark in the
               footer at rest — louder than Save, in an editor whose usual

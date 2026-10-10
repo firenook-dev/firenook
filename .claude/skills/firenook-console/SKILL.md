@@ -914,12 +914,33 @@ destroying one — is about *adjacency*, not about which end Save is at, and
 it is answered by sending the tools the other way rather than by keeping
 Save on the left. Measured: Save↔Delete was 303 px with Save left; it is
 **202 px** with Save right and the tools moved; it would have been **3 px**
-had only Save moved. Check that number whenever this row changes.
+had only Save moved.
 
-**A destructive control is not a member of the group holding copy.** Three
-pixels is the rhythm *within* a group, so delete sat in the copy cluster's
-own rhythm. A `w-px` rule puts it outside them without moving it off the
-row: 3 px within the group, 15 px past the rule.
+**Group a footer's tools by what they do, not by which one is
+frightening.** The first cut put the rule before Delete, isolating it for
+being destructive — which grouped a read-only helper (Code, which opens a
+panel and changes nothing) with an action that creates a document. The
+honest line is between *looking at this document* and *changing which
+documents exist*: `Code │ Duplicate Delete`. Delete confirms in a dialog,
+so sitting it beside Duplicate costs nothing a misclick could not take
+back. Three pixels is the rhythm *within* a group, and the gap past the
+rule is several times it.
+
+**Label by weight, and count the labels.** Code had a word and Duplicate
+had none, which was backwards: Duplicate acts on data and deserves one,
+Code is a peek. Worse, the one bare glyph was a *copy* icon, and the
+header above has one too that copies the path — so the control nobody
+could name was also the one most easily taken for something else. Code
+keeps the glyph alone here and keeps its word in the collection toolbar,
+which has the room. Measured at the panel's 320 px floor: Save↔Delete is
+**51 px**; keeping all three labels would have left **19 px**, and the
+objection this whole row is built around is adjacency between Save and
+Delete. Check that number whenever this row changes.
+
+**Kumo's `Tooltip` wraps a `Popover.Trigger` through `render`**, nesting
+one render prop in the other — `Tooltip render={<Popover.Trigger
+render={<Button/>} />}`. Verified: one `<button>`, tooltip on hover,
+popover on click.
 
 ### The write log and its undo were built, then taken out
 
