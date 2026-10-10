@@ -1983,9 +1983,11 @@ test('the JSON view reads the types the text can tell it, and no more', async ({
   // could read it, and `3.0` went in as an integer.
   await expect(editor).toContainText('3.0')
 
-  // Four values are typed by something other than the plain reading,
-  // and each is marked on its own line.
-  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(4)
+  // Four values are typed by something other than the plain reading —
+  // and not one of them is marked, because the text is what types them,
+  // so editing any of them costs nothing. A mark here would be a box
+  // and three lines of prose beside a value in no danger.
+  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(0)
 
   await inspector.getByTestId('save-document').click()
   await expect(page.getByText('Document saved')).toBeVisible()
@@ -2224,7 +2226,9 @@ async function markPaint(
 test("a mark is painted from the console's own palette, in both modes", async ({ page }) => {
   await put(page.request, 'teams/t_mark', {
     name: { stringValue: 'Marks' },
-    opened: { timestampValue: '2026-09-20T09:00:00Z' },
+    // Bytes, because that is one of the three the text cannot hold, and
+    // so one of the three that is marked at all.
+    blob: { bytesValue: 'aGVsbG8=' },
   })
   await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_mark&tab=json`)
   const inspector = page.getByTestId('inspector')
@@ -2277,12 +2281,12 @@ test("a mark is painted from the console's own palette, in both modes", async ({
   await drop(page.request, 'teams/t_mark')
 })
 
-test('a mark promises only what editing the value actually does', async ({ page }) => {
-  // The two halves of the claim, side by side in one document: a
-  // timestamp, which the text can hold on its own, and bytes and a
-  // reference, which nothing in the text can say. An earlier version of
-  // this copy warned about all three, so a reader was told that editing
-  // a date would cost them the type. It would not.
+test('a mark appears only where editing the value would cost something', async ({ page }) => {
+  // One document, both halves of the rule. A timestamp the text holds
+  // on its own, and bytes and a reference that nothing in the text can
+  // say. An earlier version marked all three and explained the
+  // mechanism behind each, which on a document of dates put a box and
+  // three lines of prose beside values in no danger at all.
   await put(page.request, 'teams/t_promise', {
     when: { timestampValue: '2026-08-05T03:27:55.046Z' },
     blob: { bytesValue: 'aGVsbG8=' },
@@ -2292,20 +2296,29 @@ test('a mark promises only what editing the value actually does', async ({ page 
   const inspector = page.getByTestId('inspector')
   const editor = inspector.getByTestId('document-json')
   await expect(editor).toBeVisible()
-  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(3)
+  // Two of the three, not three of the three.
+  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(2)
 
   const tips: string[] = []
-  for (const index of [0, 1, 2]) {
+  for (const index of [0, 1]) {
     await inspector.locator('.cm-lint-marker').nth(index).hover()
     await expect(page.locator('.cm-tooltip-lint')).toBeVisible()
     tips.push((await page.locator('.cm-tooltip-lint').textContent()) ?? '')
     await inspector.getByTestId('json-actions').hover()
   }
-  const reassured = tips.filter((tip) => tip.includes('reads as one'))
-  const warned = tips.filter((tip) => tip.includes('only the saved field still knows'))
-  expect(reassured).toHaveLength(1)
-  expect(warned).toHaveLength(2)
-  expect(reassured[0]).toContain('A timestamp')
+  expect(tips.some((tip) => tip.includes('Bytes — one base64 string looks like any other'))).toBe(
+    true,
+  )
+  expect(
+    tips.some((tip) => tip.includes('A reference — one document path looks like any other')),
+  ).toBe(true)
+  // Every mark names the cost and the way round it, and none mentions
+  // the draft model the JSON tab does not show.
+  for (const tip of tips) {
+    expect(tip).toContain('saves it as a string')
+    expect(tip).toContain('The Fields tab keeps the type')
+    expect(tip).not.toContain('row')
+  }
 
   // Now do the thing the marks describe: replace every value with
   // another that looks exactly as valid, and save.
@@ -2321,10 +2334,10 @@ test('a mark promises only what editing the value actually does', async ({ page 
 
   const stored = await page.request.get(`${documents()}/teams/t_promise`, { headers: owner })
   const saved = (await stored.json()) as { fields: Record<string, Record<string, unknown>> }
-  // The one that was reassured kept its type, and kept the new value.
+  // The unmarked one kept its type, and took the new value.
   expect(Object.keys(saved.fields.when ?? {})).toEqual(['timestampValue'])
   expect(saved.fields.when?.timestampValue).toBe('2027-01-01T00:00:00Z')
-  // The two that were warned came back as the strings they looked like,
+  // The two that were marked came back as the strings they looked like,
   // although `d29ybGQ=` is valid base64 and `users/u_2` a valid path.
   expect(Object.keys(saved.fields.blob ?? {})).toEqual(['stringValue'])
   expect(Object.keys(saved.fields.who ?? {})).toEqual(['stringValue'])
@@ -2337,8 +2350,10 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
   await page.setViewportSize({ width: 1600, height: 900 })
   await put(page.request, 'teams/t_code', {
     name: { stringValue: 'Mapping' },
-    // A double that reads whole, and a timestamp: two of Firestore's six
-    // types that JSON has no way of writing down.
+    // A double that reads whole, and a timestamp. Both are types JSON
+    // has no way of writing down, but only one of them is at risk: the
+    // text reads an ISO date back as a date, and reads `4` as an
+    // integer whatever the stored field says.
     seats: { doubleValue: 4 },
     opened: { timestampValue: '2026-09-20T09:00:00Z' },
     active: { booleanValue: true },
@@ -2349,28 +2364,14 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
   await expect(editor).toBeVisible()
   await expect(inspector.locator('.cm-lineNumbers')).toBeVisible()
 
-  // Two of those four values are typed more precisely than the text can
-  // say, and the sentence that used to claim it of the whole document
-  // now points at the two it is true of.
-  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(2)
-  // Which of the two comes first is the engine's field order, not ours,
-  // so both are read rather than the first one guessed at.
-  const tips: string[] = []
-  for (const index of [0, 1]) {
-    await inspector.locator('.cm-lint-marker').nth(index).hover()
-    await expect(page.locator('.cm-tooltip-lint')).toBeVisible()
-    tips.push((await page.locator('.cm-tooltip-lint').textContent()) ?? '')
-    await inspector.getByTestId('json-actions').hover()
-  }
-  // A timestamp is held by the text itself, so its mark reassures; a
-  // whole double is held by nothing but the stored field, so its mark
-  // warns. The journey below proves both sentences on the wire.
-  expect(tips.some((tip) => tip.includes('A timestamp, not the string it looks like'))).toBe(true)
-  expect(tips.some((tip) => tip.includes('The value is written so that it reads as one'))).toBe(
-    true,
-  )
-  expect(tips.some((tip) => tip.includes('A double, not the integer it looks like'))).toBe(true)
-  expect(tips.some((tip) => tip.includes('only the saved field still knows'))).toBe(true)
+  // One mark, on the one value editing would cost something.
+  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(1)
+  await inspector.locator('.cm-lint-marker').hover()
+  await expect(page.locator('.cm-tooltip-lint')).toBeVisible()
+  const tip = (await page.locator('.cm-tooltip-lint').textContent()) ?? ''
+  expect(tip).toContain('A double — 4 is also how an integer is written')
+  expect(tip).toContain('saves it as an integer')
+  await inspector.getByTestId('json-actions').hover()
 
   // A document pasted over this one arrives laid out, which is the case
   // anybody ever reached for a Format button for. One line in, six out.

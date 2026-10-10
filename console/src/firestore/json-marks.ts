@@ -6,27 +6,26 @@
 // reads whole — 269.0 — is written `269`, which is also how an integer is
 // written.
 //
-// Two different things rescue those types, and the difference is the only
-// thing a reader of the JSON actually needs, because it decides what
-// happens when they edit the line. Measured, by editing each one and
-// saving:
+// Most of them need no help, because the editor reads them back out of
+// the text. Measured, by editing each one in this tab and saving: a
+// timestamp written as an ISO date, a geopoint written as a
+// `{latitude, longitude}` pair, a vector written with its marker and a
+// double written `3.0` all come back as themselves, and so does the
+// whole document if you edit some other field or press Format.
 //
-//   The text holds it. The value is written in a way the editor reads
-//   back — an ISO date, a `{latitude, longitude}` pair, a `.0` on the
-//   end. Edit it to another date and it is still a timestamp; rename the
-//   key and it is still a timestamp. Nothing to warn about.
+// Three do not. Nothing in the text says that one base64 string is
+// bytes rather than a string, that one path is a reference, or that
+// `269` is a double. Edit one of those values here and it saves as what
+// it looks like — `d29ybGQ=` is perfectly good base64 and still comes
+// back a string.
 //
-//   Only the saved field holds it. Nothing in the text says so — one
-//   base64 string looks like any other, one document path like any
-//   other, `269` like an integer. The stored field is the last thing
-//   that knows, and *any* change to the value loses it, including
-//   replacing it with an equally valid base64 string.
-//
-// Both are marked, and the second one is the only one that carries a
-// warning. An earlier version gave every mark the warning, which told a
-// reader that editing a timestamp would cost them the type when it would
-// not, and said it in terms of "the row behind this line" — a thing the
-// JSON tab does not show.
+// So a mark means exactly one thing: **edit this value here and it will
+// not be this type any more.** Nothing else is marked, because nothing
+// else has anything to tell. An earlier version marked all six and
+// explained the mechanism behind each, which on a document of
+// timestamps put a box and three lines of prose beside four values that
+// were in no danger at all — and taught a reader to ignore the mark
+// before meeting the one case that mattered.
 
 import type { CodeMark } from '@/components/code-editor/props'
 import { type DraftNode, parseNode } from './draft'
@@ -44,16 +43,46 @@ const KINDS: Partial<Record<FirestoreValueType, Kind>> = {
 }
 
 /**
- * For each kind: what to call it, what a reader would otherwise take it
- * for, and what it comes back as once nothing is holding it.
+ * For each kind: what to call it, why the text cannot say so — the
+ * concrete reason, which is the half that makes it land — and what the
+ * value comes back as once nothing is holding the type.
+ *
+ * Only bytes, a reference and a whole double reach a reader in the
+ * ordinary way. The other three are here for the one case that can
+ * still raise them: a value hand-edited until the editor no longer
+ * reads it back, a `{latitude, longitude}` pair given a third key.
  */
-const SAYS: Record<Kind, { is: string; looks: string; plain: string }> = {
-  timestamp: { is: 'A timestamp', looks: 'the string it looks like', plain: 'a string' },
-  reference: { is: 'A reference', looks: 'the string it looks like', plain: 'a string' },
-  bytes: { is: 'Bytes', looks: 'the string they look like', plain: 'a string' },
-  geopoint: { is: 'A geopoint', looks: 'the map it looks like', plain: 'a map' },
-  vector: { is: 'A vector', looks: 'the map it looks like', plain: 'a map' },
-  double: { is: 'A double', looks: 'the integer it looks like', plain: 'an integer' },
+const SAYS: Record<Kind, { is: string; because: (literal: string) => string; plain: string }> = {
+  bytes: {
+    is: 'Bytes',
+    because: () => 'one base64 string looks like any other',
+    plain: 'a string',
+  },
+  reference: {
+    is: 'A reference',
+    because: () => 'one document path looks like any other',
+    plain: 'a string',
+  },
+  double: {
+    is: 'A double',
+    because: (literal) => `${literal} is also how an integer is written`,
+    plain: 'an integer',
+  },
+  timestamp: {
+    is: 'A timestamp',
+    because: () => 'this no longer reads as a date',
+    plain: 'a string',
+  },
+  geopoint: {
+    is: 'A geopoint',
+    because: () => 'this is no longer a plain latitude and longitude',
+    plain: 'a map',
+  },
+  vector: {
+    is: 'A vector',
+    because: () => 'this no longer carries the marker that says so',
+    plain: 'a map',
+  },
 }
 
 /**
@@ -165,22 +194,23 @@ function compare(
 }
 
 /**
- * The marks for one document: one on each value whose type the plain
- * reading of the text would not give it, saying which of the two things
- * is holding it — because only one of them survives being edited.
+ * The marks for one document: one on each value whose stored type the
+ * text cannot hold on its own, which is the only case where editing the
+ * line costs something.
+ *
+ * Worked out by subtraction rather than from a list of three, so that
+ * teaching the editor to read one of these back out of the text also
+ * stops it being marked, with nothing here to keep in step.
  */
 export function typeMarks(text: string, nodes: readonly DraftNode[]): CodeMark[] {
   const carried = carriedTypes(nodes)
+  if (carried.size === 0) return []
   const inferred = inferredTypes(text)
-  if (carried.size === 0 && inferred.size === 0) return []
   const marks: CodeMark[] = []
   for (const [path, span] of valueSpans(text)) {
-    // The text wins where it has something to say, because the text is
-    // what will be read back on Save: a timestamp whose value has been
-    // replaced with a `{latitude, longitude}` pair saves as a geopoint,
-    // whatever the stored field still says.
-    const kind = inferred.get(path) ?? carried.get(path)
-    if (kind === undefined) continue
+    const kind = carried.get(path)
+    // Held by the text, so editing it keeps it. Nothing to say.
+    if (kind === undefined || inferred.has(path)) continue
     const says = SAYS[kind]
     // A geopoint and a vector are written over several lines, so their
     // span covers every line of them; underlining four lines to say one
@@ -193,9 +223,10 @@ export function typeMarks(text: string, nodes: readonly DraftNode[]): CodeMark[]
       from: span.from,
       to,
       severity: 'info',
-      message: inferred.has(path)
-        ? `${says.is}, not ${says.looks}. The value is written so that it reads as one, so that is what it saves as.`
-        : `${says.is}, not ${says.looks}. JSON has no way of writing that down, so only the saved field still knows — change this value and it saves as ${says.plain}.`,
+      message:
+        `${says.is} — ${says.because(text.slice(span.from, to))}, ` +
+        `so editing this value here saves it as ${says.plain}. ` +
+        'The Fields tab keeps the type.',
     })
   }
   return marks

@@ -1256,20 +1256,33 @@ cannot write down (timestamp, reference, bytes, geopoint, vector, and a
 double that reads whole) marked on the values that carry them, which
 replaced a sentence of prose that was true of three lines in thirty.
 
-**A mark says one of two things, and the difference is the whole point.**
-Measured by editing each type and saving: a **timestamp**, **geopoint**,
-**vector** and a double written `3.0` are held by the text itself, so
-editing the value keeps the type and the mark only names it. **Bytes**, a
-**reference** and a double that reads whole (`269`) are held by nothing
-but the stored field, so *any* change to the value loses them — even
-replacing base64 with other valid base64. `typeMarks` picks the sentence
-on `inferred.has(path)`, and `inferred` also wins the kind, because the
-text is what Save reads back. The first version gave every mark the
-warning and phrased it as "the row behind this line", which told readers
-that editing a date would cost them the type (it does not) in terms of a
-thing the JSON tab does not show. Copy about behaviour has to be checked
-against the behaviour, on the wire, not against the code that was true
-when it was written. Its
+**A mark means exactly one thing: edit this value here and it will not be
+this type any more.** Measured by editing each type in the JSON tab and
+saving — a **timestamp**, **geopoint**, **vector** and a double written
+`3.0` all come back as themselves, and so does everything if you edit
+another field or press Format. Only **bytes**, a **reference** and a
+double that reads whole (`269`) are lost, and lost on *any* change to
+that value: `d29ybGQ=` is valid base64 and still saves as a string. So
+only those three are marked, the condition being `carried && !inferred`
+rather than a list of three, so teaching the editor to read one back out
+of the text also stops it being marked. Each message names the concrete
+reason ("one base64 string looks like any other") and the way round it
+("The Fields tab keeps the type" — verified; editing bytes there
+preserves `bytesValue`).
+
+Two earlier versions of this copy were wrong, and the user caught both.
+The first marked all six types with one sentence about "the row behind
+this line" — jargon for the draft model, on a tab that shows no rows —
+and warned that editing would cost the type when for most of them it
+would not. The second split the sentence in two but still marked all
+six, so a document of timestamps carried four boxes and three lines of
+prose beside values in no danger, which teaches a reader to ignore the
+mark before they ever meet the one that matters. **A mark that fires on
+everything is a mark nobody reads.** Copy about behaviour gets checked
+against the behaviour, on the wire — and a mark gets shown only where
+something is actually at stake.
+
+Its
 `valueSpans` is a forgiving scanner — the text is being typed, so it stops
 at the first thing it cannot read and records only what it actually read;
 an empty span at the end of a half-typed document is a marker on nothing.

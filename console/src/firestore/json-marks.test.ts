@@ -106,16 +106,22 @@ describe('typeMarks', () => {
     expect(
       marked({
         name: { type: 'string', value: 'Ada' },
-        when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' },
+        blob: { type: 'bytes', base64: 'aGk=' },
       }),
-    ).toEqual(['"2026-09-20T09:00:00.000Z"'])
+    ).toEqual(['"aGk="'])
   })
 
   it('stops a container mark at the end of its first line', () => {
     // A geopoint is written as a two-key map over four lines. Underlining
     // all four to say one thing about the value they make up reads as
-    // damage; the mark stops where the line does.
-    expect(marked({ here: { type: 'geopoint', latitude: 1, longitude: 2 } })).toEqual(['{'])
+    // damage; the mark stops where the line does. A geopoint is only
+    // marked once the text stops reading as one, so this one is given a
+    // third key.
+    const { nodes } = document({ here: { type: 'geopoint', latitude: 1, longitude: 2 } })
+    const text = '{\n  "here": {\n    "latitude": 1,\n    "longitude": 2,\n    "label": "x"\n  }\n}'
+    const marks = typeMarks(text, nodes)
+    expect(marks).toHaveLength(1)
+    expect(text.slice(marks[0]!.from, marks[0]!.to)).toBe('{')
   })
 
   it('says nothing about a document that carries nothing', () => {
@@ -123,21 +129,19 @@ describe('typeMarks', () => {
   })
 
   it('drops the mark while the value it describes is being retyped', () => {
-    // The rows still say `when` is a timestamp, but the text no longer
-    // has a `when` to mark. A mark at a stale offset would sit on some
-    // other field's value.
-    const { nodes } = document({ when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' } })
-    expect(typeMarks('{\n  "whe\n}', nodes)).toEqual([])
+    // The rows still say `blob` is bytes, but the text no longer has a
+    // `blob` to mark. A mark at a stale offset would sit on some other
+    // field's value.
+    const { nodes } = document({ blob: { type: 'bytes', base64: 'aGk=' } })
+    expect(typeMarks('{\n  "blo\n}', nodes)).toEqual([])
   })
 
   it('marks it again once the text agrees', () => {
-    const { nodes, text } = document({
-      when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' },
-    })
+    const { nodes, text } = document({ blob: { type: 'bytes', base64: 'aGk=' } })
     const marks = typeMarks(text, nodes)
     expect(marks).toHaveLength(1)
     expect(marks[0]?.severity).toBe('info')
-    expect(marks[0]?.message).toContain('A timestamp, not the string it looks like')
+    expect(marks[0]?.message).toContain('Bytes —')
   })
 })
 
@@ -250,75 +254,70 @@ describe('nodesFromJson, reading types out of the text', () => {
     // Through the rows, which is the path the editor actually takes, it
     // survives — and is marked as being carried rather than read.
     expect(parseNode(nodesFromJson(text, nodes)[0]!)).toMatchObject({ value: { integer: false } })
-    expect(typeMarks(text, nodes)[0]?.message).toContain('only the saved field still knows')
+    expect(typeMarks(text, nodes)[0]?.message).toContain('is also how an integer is written')
   })
 })
 
-describe('typeMarks warns only where a warning is true', () => {
-  // The distinction the message turns on, confirmed on the wire by
-  // editing each of these and saving: a timestamp and a geopoint come
-  // back as themselves, bytes and a reference come back as strings, and
-  // a whole double comes back as an integer — even when the new value
-  // is a perfectly good base64 string or document path.
-  const held = 'The value is written so that it reads as one'
-  const lost = 'only the saved field still knows'
-
-  it('reassures where the text can hold the type on its own', () => {
-    const { nodes, text } = document({
-      when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' },
-    })
-    const message = typeMarks(text, nodes)[0]?.message ?? ''
-    expect(message).toContain('A timestamp, not the string it looks like')
-    expect(message).toContain(held)
-    expect(message).not.toContain(lost)
+describe('typeMarks marks only what editing would cost', () => {
+  // Confirmed on the wire by editing each of these in the JSON tab and
+  // saving. A timestamp, a geopoint, a vector and a double written
+  // `3.0` all come back as themselves, so there is nothing to say about
+  // them; bytes, a reference and a whole double come back as a string,
+  // a string and an integer, even when the new value is perfectly good
+  // base64 or a perfectly good document path.
+  it('says nothing about a timestamp, which the text holds on its own', () => {
+    expect(marked({ when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' } })).toEqual([])
   })
 
-  it('reassures a geopoint too, which is held by its shape', () => {
-    const { nodes, text } = document({
-      at: { type: 'geopoint', latitude: 1.5, longitude: 2.5 },
-    })
-    const message = typeMarks(text, nodes)[0]?.message ?? ''
-    expect(message).toContain('A geopoint, not the map it looks like')
-    expect(message).toContain(held)
+  it('says nothing about a geopoint, which its shape holds', () => {
+    expect(marked({ at: { type: 'geopoint', latitude: 1.5, longitude: 2.5 } })).toEqual([])
   })
 
-  it('warns where nothing but the saved field knows', () => {
+  it('says nothing about a vector, which its marker holds', () => {
+    expect(marked({ v: { type: 'vector', values: [0.1, 0.2] } })).toEqual([])
+  })
+
+  it('marks bytes, and says what editing them costs and where not to', () => {
     const { nodes, text } = document({ blob: { type: 'bytes', base64: 'aGk=' } })
     const message = typeMarks(text, nodes)[0]?.message ?? ''
-    expect(message).toContain('Bytes, not the string they look like')
-    expect(message).toContain(lost)
-    expect(message).toContain('it saves as a string')
+    expect(message).toBe(
+      'Bytes — one base64 string looks like any other, so editing this value here saves it ' +
+        'as a string. The Fields tab keeps the type.',
+    )
   })
 
-  it('warns on a reference, and says what it would become', () => {
+  it('marks a reference, and names a string as what it would become', () => {
     const { nodes, text } = document({
       who: { type: 'reference', value: 'users/u1', path: 'users/u1' },
     })
-    expect(typeMarks(text, nodes)[0]?.message).toContain('it saves as a string')
+    const message = typeMarks(text, nodes)[0]?.message ?? ''
+    expect(message).toContain('A reference — one document path looks like any other')
+    expect(message).toContain('saves it as a string')
   })
 
-  it('warns on a whole double, which comes back an integer', () => {
+  it('marks a whole double, and quotes the literal that gives it away', () => {
     const { nodes, text } = document({ total: { type: 'number', value: 269, integer: false } })
-    expect(typeMarks(text, nodes)[0]?.message).toContain('it saves as an integer')
+    const message = typeMarks(text, nodes)[0]?.message ?? ''
+    expect(message).toContain('A double — 269 is also how an integer is written')
+    expect(message).toContain('saves it as an integer')
   })
 
-  it('says the same thing for a value no field stands behind', () => {
-    // No rows at all: the text alone is making it a timestamp, which
-    // from the reader's side is the same situation and the same
-    // sentence — the field it did or did not come from is not
-    // something the JSON tab shows them.
-    const marks = typeMarks('{"when": "2026-09-20T09:00:00.000Z"}', [])
-    expect(marks).toHaveLength(1)
-    expect(marks[0]?.message).toContain('A timestamp, not the string it looks like')
-    expect(marks[0]?.message).toContain(held)
+  it('says nothing about a double already written with its point', () => {
+    // `1.5` is a double to JSON as well, so nothing is at risk.
+    expect(marked({ ratio: { type: 'number', value: 1.5, integer: false } })).toEqual([])
   })
 
-  it('describes what the text will save as, not what the field used to be', () => {
-    // The stored field is a timestamp; the value has been replaced with
-    // a geopoint. Save takes the geopoint, so that is what the mark says.
-    const { nodes } = document({ when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' } })
-    const marks = typeMarks('{\n  "when": {\n    "latitude": 1,\n    "longitude": 2\n  }\n}', nodes)
-    expect(marks[0]?.message).toContain('A geopoint')
+  it('says nothing about a value no field stands behind', () => {
+    // Typed straight into the JSON with no row behind it. The text is
+    // the only thing holding it either way, so editing costs nothing.
+    expect(typeMarks('{"when": "2026-09-20T09:00:00.000Z"}', [])).toEqual([])
+  })
+
+  it('speaks up once a geopoint has been edited past reading', () => {
+    const { nodes } = document({ at: { type: 'geopoint', latitude: 1.5, longitude: 2.5 } })
+    const text =
+      '{\n  "at": {\n    "latitude": 1.5,\n    "longitude": 2.5,\n    "label": "x"\n  }\n}'
+    expect(typeMarks(text, nodes)[0]?.message).toContain('A geopoint —')
   })
 })
 
