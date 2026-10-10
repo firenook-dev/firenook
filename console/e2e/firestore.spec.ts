@@ -2391,6 +2391,10 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
   // Format itself is still there for a document gone ragged by hand.
   await editor.fill('{"name":"Mapping","seats":4}')
   await expect(inspector.locator('.cm-line')).toHaveCount(1)
+  // Named for what it lays out. It is the only control in its band and
+  // sits under a document that may be JSON or may be rows, so "Format"
+  // alone left the reader to work out which of the two it meant.
+  await expect(inspector.getByTestId('format-json')).toHaveText('Format JSON')
   await inspector.getByTestId('format-json').click()
   await expect(inspector.locator('.cm-line')).toHaveCount(4)
 

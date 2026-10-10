@@ -237,7 +237,7 @@ export function FieldsPanel({
                 content="Lay the document out again, two spaces"
                 render={
                   <Button variant="ghost" size="sm" onClick={format} data-testid="format-json">
-                    Format
+                    Format JSON
                   </Button>
                 }
               />
