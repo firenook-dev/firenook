@@ -2557,13 +2557,13 @@ test('the bottom of the drawer spends colour on what can be done, not on what is
   const withinGroup = deleteBox.x - edge(dupBox)
   expect(pastTheRule).toBeGreaterThan(withinGroup * 2)
 
-  // Code carries the glyph alone; the two that act on the document
-  // carry a word. It was the other way round, and the only bare glyph
-  // was a copy icon — the same glyph the header above uses to copy the
-  // path, so the one control nobody could name was also the one most
-  // easily taken for something else.
-  await expect(inspector.getByTestId('document-code')).toHaveText('')
+  // Duplicate carries a word. It was the one bare glyph in a row of
+  // labelled controls, and a copy glyph at that — the header above has
+  // one too, which copies the path — so the control nobody could name
+  // was also the one most easily taken for something else.
   await expect(inspector.getByTestId('duplicate-document')).toContainText('Duplicate')
+  // And at any width the panel opens at, Code carries one as well.
+  await expect(inspector.getByTestId('document-code')).toHaveText('Code')
 
   // Every icon button down here is the one size. Kumo's extra-small
   // square renders 12 px at a 14 px root, half of every other control in
@@ -2576,9 +2576,11 @@ test('the bottom of the drawer spends colour on what can be done, not on what is
   expect(new Set(squares).size).toBe(1)
   expect(Math.min(...squares)).toBeGreaterThanOrEqual(20)
 
-  // And the row still holds at the narrowest the panel goes, which is
-  // where a third label would have told: Save sits clear of Delete with
-  // room to spare, not pressed against it.
+  // Dragged to the floor, the row gives up one word rather than
+  // crowding Save against Delete. Measured with the word kept: Save
+  // sits 13 px from Delete at 320, which is the adjacency this row's
+  // whole layout exists to prevent. The word is the first thing to go
+  // because Code is the one control down here that changes nothing.
   await inspector.evaluate((el) => {
     try {
       el.ownerDocument.defaultView!.localStorage.setItem('firenook.console.inspector-width', '320')
@@ -2588,7 +2590,14 @@ test('the bottom of the drawer spends colour on what can be done, not on what is
   })
   await page.reload()
   await expect(inspector.getByTestId('save-document')).toBeVisible()
+  await expect(inspector.getByTestId('document-code')).toHaveText('')
+  // The two that act on the document keep theirs: a word is given up
+  // to buy room, and only as much of it as the room needs.
+  await expect(inspector.getByTestId('duplicate-document')).toContainText('Duplicate')
+  await expect(inspector.getByLabel('Delete this document')).toContainText('Delete')
   const tight = (await inspector.getByTestId('save-document').boundingBox())!
   const tightDelete = (await inspector.getByLabel('Delete this document').boundingBox())!
-  expect(Math.round(tight.x - edge(tightDelete))).toBeGreaterThan(24)
+  // A Save's own width of nothing between them, which is the least that
+  // reads as the other end of the row.
+  expect(Math.round(tight.x - edge(tightDelete))).toBeGreaterThanOrEqual(42)
 })

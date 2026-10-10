@@ -37,6 +37,24 @@ export function defaultWidth(): number {
   if (wide === undefined) return INSPECTOR_FLOOR
   return Math.min(INSPECTOR_CEILING, Math.max(INSPECTOR_FLOOR, Math.round(wide * SHARE)))
 }
+/**
+ * Below this, the footer's Code control drops its word and keeps the
+ * glyph.
+ *
+ * Measured on the row it is in, with the word shown: Save sits 13 px
+ * from Delete at the 320 px floor, 33 at 340, 53 at 360 and 409 at the
+ * 716 the panel opens to on a wide display. Adjacency between the
+ * confirming control and the destroying one is the thing this row's
+ * layout exists to prevent, and a Save's own width of clear space — 42
+ * px — is the least that reads as "the other end of the row". The word
+ * crosses that at about 349.
+ *
+ * So the glyph alone is the fallback, not the normal state: every width
+ * the panel opens at carries the word, and only a deliberate drag to the
+ * last thirty pixels takes it away.
+ */
+export const CODE_LABEL_AT = 350
+
 /** The gap the grid leaves beside the panel when both are in the flow. */
 export const INSPECTOR_GAP = 12
 /** The grid is the other half of the screen and has to stay worth having. */

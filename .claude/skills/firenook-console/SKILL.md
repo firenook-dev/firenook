@@ -926,16 +926,32 @@ so sitting it beside Duplicate costs nothing a misclick could not take
 back. Three pixels is the rhythm *within* a group, and the gap past the
 rule is several times it.
 
-**Label by weight, and count the labels.** Code had a word and Duplicate
-had none, which was backwards: Duplicate acts on data and deserves one,
-Code is a peek. Worse, the one bare glyph was a *copy* icon, and the
-header above has one too that copies the path — so the control nobody
-could name was also the one most easily taken for something else. Code
-keeps the glyph alone here and keeps its word in the collection toolbar,
-which has the room. Measured at the panel's 320 px floor: Save↔Delete is
-**51 px**; keeping all three labels would have left **19 px**, and the
-objection this whole row is built around is adjacency between Save and
-Delete. Check that number whenever this row changes.
+**Label by weight.** Code had a word and Duplicate had none, which was
+backwards: Duplicate acts on data and deserves one, Code is a peek.
+Worse, the one bare glyph was a *copy* icon, and the header above has
+one too that copies the path — so the control nobody could name was also
+the one most easily taken for something else.
+
+**Then drop a label by width, not by rule.** The first fix took Code's
+word away at every width, which was over-corrective: measured with the
+word kept, Save↔Delete is 13 px at the 320 px floor but **113 px at 420
+and 409 px at the 716 the panel opens to on a wide display** — the word
+only ever cost anything in a thirty-pixel band just above the floor,
+and `defaultWidth()` is a *share of the window*, so most people never
+go near it. The word is now shown down to `CODE_LABEL_AT` (350) and
+dropped below it, Code being the first word the row gives up because it
+is the one control down there that changes nothing. The threshold is a
+Save's own width — 42 px — of clear space between Save and Delete,
+which is the least that reads as "the other end of the row".
+
+The panel's width *is* the footer's width, so the footer reads
+`useInspectorWidth` rather than growing a `ResizeObserver` or a
+container query of its own. Kumo draws a labelled button and an
+icon-only one from different shapes of props, so that is two JSX
+branches, not one element with a conditional `children` — under
+`exactOptionalPropertyTypes` a `children` that is sometimes `undefined`
+satisfies neither. The tooltip stands in both, because a glyph alone has
+to be hoverable to be nameable.
 
 **Kumo's `Tooltip` wraps a `Popover.Trigger` through `render`**, nesting
 one render prop in the other — `Tooltip render={<Popover.Trigger

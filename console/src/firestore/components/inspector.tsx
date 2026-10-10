@@ -28,7 +28,7 @@ import { useCreateDialog } from '../create'
 import { type CodeTarget, documentAsCode } from '../query'
 import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
-import { clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
+import { CODE_LABEL_AT, clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
 import { type Subcollection, subcollectionsQuery } from '../subcollections'
 import { type DraftNode, diffDocument, nodesFrom, parseNode, problemsOf } from '../draft'
 import { type FsDocument, type FsValue, type RestValue, encodeValue, relativeTime } from '../value'
@@ -301,6 +301,9 @@ function DocumentEditor({
   const [nodes, setNodes] = useState<DraftNode[]>(() => nodesFrom(document.fields, true))
   const [jsonError, setJsonError] = useState<string | undefined>()
   const [codeTarget, setCodeTarget] = useState<CodeTarget>('web')
+  // The footer is as wide as the panel, so the panel's own width is the
+  // footer's measurement and no observer of its own is needed.
+  const roomForTheWord = useInspectorWidth((state) => state.width) >= CODE_LABEL_AT
   const known = useKnownFields(document.collection)
 
   // Both run on every keystroke, which is the point: a value that will not
@@ -374,25 +377,42 @@ function DocumentEditor({
             row with three hundred pixels between them. */}
         <div className="flex shrink-0 items-center gap-1">
           {/* The only control down here that changes nothing — it opens
-              a panel showing how to fetch this document in code. It is
-              also the one the row can least afford a word for, so it
-              keeps the glyph and gives the word to the two that act on
-              the document. The collection toolbar's Code keeps its
-              label: that row has the room, this one does not. */}
+              a panel showing how to fetch this document in code — so it
+              is the first word the row gives up when the row runs out
+              of them. It gives it up late: see CODE_LABEL_AT. The
+              tooltip stands either way, because a glyph on its own has
+              to be hoverable to be nameable. */}
           <Popover>
             <Tooltip
               content="This document as code"
               render={
                 <Popover.Trigger
                   render={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      shape="square"
-                      icon={<CodeIcon />}
-                      aria-label="This document as code"
-                      data-testid="document-code"
-                    />
+                    // Two elements rather than one with the word
+                    // conditional on it: Kumo draws a labelled button
+                    // and an icon-only one from different shapes of
+                    // props, a square among them, and a `children` that
+                    // is sometimes undefined satisfies neither.
+                    roomForTheWord ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<CodeIcon />}
+                        aria-label="This document as code"
+                        data-testid="document-code"
+                      >
+                        Code
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        shape="square"
+                        icon={<CodeIcon />}
+                        aria-label="This document as code"
+                        data-testid="document-code"
+                      />
+                    )
                   }
                 />
               }
