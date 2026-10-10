@@ -2277,6 +2277,60 @@ test("a mark is painted from the console's own palette, in both modes", async ({
   await drop(page.request, 'teams/t_mark')
 })
 
+test('a mark promises only what editing the value actually does', async ({ page }) => {
+  // The two halves of the claim, side by side in one document: a
+  // timestamp, which the text can hold on its own, and bytes and a
+  // reference, which nothing in the text can say. An earlier version of
+  // this copy warned about all three, so a reader was told that editing
+  // a date would cost them the type. It would not.
+  await put(page.request, 'teams/t_promise', {
+    when: { timestampValue: '2026-08-05T03:27:55.046Z' },
+    blob: { bytesValue: 'aGVsbG8=' },
+    who: { referenceValue: `${resource()}/users/u_1` },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_promise&tab=json`)
+  const inspector = page.getByTestId('inspector')
+  const editor = inspector.getByTestId('document-json')
+  await expect(editor).toBeVisible()
+  await expect(inspector.locator('.cm-lint-marker')).toHaveCount(3)
+
+  const tips: string[] = []
+  for (const index of [0, 1, 2]) {
+    await inspector.locator('.cm-lint-marker').nth(index).hover()
+    await expect(page.locator('.cm-tooltip-lint')).toBeVisible()
+    tips.push((await page.locator('.cm-tooltip-lint').textContent()) ?? '')
+    await inspector.getByTestId('json-actions').hover()
+  }
+  const reassured = tips.filter((tip) => tip.includes('reads as one'))
+  const warned = tips.filter((tip) => tip.includes('only the saved field still knows'))
+  expect(reassured).toHaveLength(1)
+  expect(warned).toHaveLength(2)
+  expect(reassured[0]).toContain('A timestamp')
+
+  // Now do the thing the marks describe: replace every value with
+  // another that looks exactly as valid, and save.
+  await editor.fill(
+    JSON.stringify(
+      { when: '2027-01-01T00:00:00.000Z', blob: 'd29ybGQ=', who: 'users/u_2' },
+      undefined,
+      2,
+    ),
+  )
+  await inspector.getByTestId('save-document').click()
+  await expect(page.getByText('Document saved')).toBeVisible()
+
+  const stored = await page.request.get(`${documents()}/teams/t_promise`, { headers: owner })
+  const saved = (await stored.json()) as { fields: Record<string, Record<string, unknown>> }
+  // The one that was reassured kept its type, and kept the new value.
+  expect(Object.keys(saved.fields.when ?? {})).toEqual(['timestampValue'])
+  expect(saved.fields.when?.timestampValue).toBe('2027-01-01T00:00:00Z')
+  // The two that were warned came back as the strings they looked like,
+  // although `d29ybGQ=` is valid base64 and `users/u_2` a valid path.
+  expect(Object.keys(saved.fields.blob ?? {})).toEqual(['stringValue'])
+  expect(Object.keys(saved.fields.who ?? {})).toEqual(['stringValue'])
+  await drop(page.request, 'teams/t_promise')
+})
+
 test('the JSON tab is a code editor, and the types the rows carry are marked on it', async ({
   page,
 }) => {
@@ -2308,8 +2362,15 @@ test('the JSON tab is a code editor, and the types the rows carry are marked on 
     tips.push((await page.locator('.cm-tooltip-lint').textContent()) ?? '')
     await inspector.getByTestId('json-actions').hover()
   }
-  expect(tips.some((tip) => tip.includes('Stays a timestamp'))).toBe(true)
-  expect(tips.some((tip) => tip.includes('Stays a double'))).toBe(true)
+  // A timestamp is held by the text itself, so its mark reassures; a
+  // whole double is held by nothing but the stored field, so its mark
+  // warns. The journey below proves both sentences on the wire.
+  expect(tips.some((tip) => tip.includes('A timestamp, not the string it looks like'))).toBe(true)
+  expect(tips.some((tip) => tip.includes('The value is written so that it reads as one'))).toBe(
+    true,
+  )
+  expect(tips.some((tip) => tip.includes('A double, not the integer it looks like'))).toBe(true)
+  expect(tips.some((tip) => tip.includes('only the saved field still knows'))).toBe(true)
 
   // A document pasted over this one arrives laid out, which is the case
   // anybody ever reached for a Format button for. One line in, six out.

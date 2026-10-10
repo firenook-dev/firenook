@@ -1254,7 +1254,22 @@ Rules the editor follows:
 `src/firestore/json-marks.ts` is the Firestore half: the six types JSON
 cannot write down (timestamp, reference, bytes, geopoint, vector, and a
 double that reads whole) marked on the values that carry them, which
-replaced a sentence of prose that was true of three lines in thirty. Its
+replaced a sentence of prose that was true of three lines in thirty.
+
+**A mark says one of two things, and the difference is the whole point.**
+Measured by editing each type and saving: a **timestamp**, **geopoint**,
+**vector** and a double written `3.0` are held by the text itself, so
+editing the value keeps the type and the mark only names it. **Bytes**, a
+**reference** and a double that reads whole (`269`) are held by nothing
+but the stored field, so *any* change to the value loses them — even
+replacing base64 with other valid base64. `typeMarks` picks the sentence
+on `inferred.has(path)`, and `inferred` also wins the kind, because the
+text is what Save reads back. The first version gave every mark the
+warning and phrased it as "the row behind this line", which told readers
+that editing a date would cost them the type (it does not) in terms of a
+thing the JSON tab does not show. Copy about behaviour has to be checked
+against the behaviour, on the wire, not against the code that was true
+when it was written. Its
 `valueSpans` is a forgiving scanner — the text is being typed, so it stops
 at the first thing it cannot read and records only what it actually read;
 an empty span at the end of a half-typed document is a marker on nothing.

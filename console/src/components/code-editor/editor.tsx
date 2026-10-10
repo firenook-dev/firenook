@@ -141,6 +141,11 @@ const SKIN = EditorView.theme({
     padding: '2px 6px',
   },
   '.cm-tooltip': {
+    // Wraps inside the panel rather than running the width of a
+    // sentence: a mark is about one line of this document, and a
+    // tooltip that reaches out across the grid behind it reads as
+    // belonging to neither.
+    maxWidth: '20rem',
     backgroundColor: 'var(--color-kumo-elevated)',
     color: 'var(--text-color-kumo-default)',
     border: '1px solid var(--color-kumo-line)',

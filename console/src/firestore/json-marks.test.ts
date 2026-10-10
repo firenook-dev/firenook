@@ -67,12 +67,12 @@ describe('carriedTypes', () => {
       total: { type: 'number', value: 269, integer: false },
     })
     expect([...carriedTypes(nodes).values()].toSorted()).toEqual([
-      'a double',
-      'a geopoint',
-      'a reference',
-      'a timestamp',
-      'a vector',
       'bytes',
+      'double',
+      'geopoint',
+      'reference',
+      'timestamp',
+      'vector',
     ])
   })
 
@@ -137,7 +137,7 @@ describe('typeMarks', () => {
     const marks = typeMarks(text, nodes)
     expect(marks).toHaveLength(1)
     expect(marks[0]?.severity).toBe('info')
-    expect(marks[0]?.message).toContain('Stays a timestamp')
+    expect(marks[0]?.message).toContain('A timestamp, not the string it looks like')
   })
 })
 
@@ -156,16 +156,16 @@ describe('inferredTypes', () => {
     // The one `JSON.parse` destroys: 3.0 and 3 are the same number to
     // it, and different types to Firestore.
     expect(read('{"a": 3.0, "b": 3, "c": 1.5, "d": 3e2}')).toEqual({
-      a: 'a double',
-      c: 'a double',
-      d: 'a double',
+      a: 'double',
+      c: 'double',
+      d: 'double',
     })
   })
 
   it('reads back the shapes this console writes', () => {
-    expect(read('{"at": {"latitude": 1.5, "longitude": 2.5}}')).toEqual({ at: 'a geopoint' })
+    expect(read('{"at": {"latitude": 1.5, "longitude": 2.5}}')).toEqual({ at: 'geopoint' })
     expect(read('{"v": {"__type__": "__vector__", "value": [0.1, 0.2]}}')).toEqual({
-      v: 'a vector',
+      v: 'vector',
     })
   })
 
@@ -179,7 +179,7 @@ describe('inferredTypes', () => {
 
   it('reads an ISO 8601 string as a timestamp, and nothing else as one', () => {
     expect(read('{"when": "2026-09-20T09:00:00.000Z", "what": "2026 was a year"}')).toEqual({
-      when: 'a timestamp',
+      when: 'timestamp',
     })
   })
 
@@ -250,23 +250,75 @@ describe('nodesFromJson, reading types out of the text', () => {
     // Through the rows, which is the path the editor actually takes, it
     // survives — and is marked as being carried rather than read.
     expect(parseNode(nodesFromJson(text, nodes)[0]!)).toMatchObject({ value: { integer: false } })
-    expect(typeMarks(text, nodes)[0]?.message).toContain('Stays a double')
+    expect(typeMarks(text, nodes)[0]?.message).toContain('only the saved field still knows')
   })
 })
 
-describe('typeMarks tells carrying from reading', () => {
-  it('says the row is holding it when the row is', () => {
+describe('typeMarks warns only where a warning is true', () => {
+  // The distinction the message turns on, confirmed on the wire by
+  // editing each of these and saving: a timestamp and a geopoint come
+  // back as themselves, bytes and a reference come back as strings, and
+  // a whole double comes back as an integer — even when the new value
+  // is a perfectly good base64 string or document path.
+  const held = 'The value is written so that it reads as one'
+  const lost = 'only the saved field still knows'
+
+  it('reassures where the text can hold the type on its own', () => {
     const { nodes, text } = document({
       when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' },
     })
-    expect(typeMarks(text, nodes)[0]?.message).toContain('Stays a timestamp')
+    const message = typeMarks(text, nodes)[0]?.message ?? ''
+    expect(message).toContain('A timestamp, not the string it looks like')
+    expect(message).toContain(held)
+    expect(message).not.toContain(lost)
   })
 
-  it('says the text is saying it when nothing else is', () => {
-    const text = '{"when": "2026-09-20T09:00:00.000Z"}'
-    const marks = typeMarks(text, [])
+  it('reassures a geopoint too, which is held by its shape', () => {
+    const { nodes, text } = document({
+      at: { type: 'geopoint', latitude: 1.5, longitude: 2.5 },
+    })
+    const message = typeMarks(text, nodes)[0]?.message ?? ''
+    expect(message).toContain('A geopoint, not the map it looks like')
+    expect(message).toContain(held)
+  })
+
+  it('warns where nothing but the saved field knows', () => {
+    const { nodes, text } = document({ blob: { type: 'bytes', base64: 'aGk=' } })
+    const message = typeMarks(text, nodes)[0]?.message ?? ''
+    expect(message).toContain('Bytes, not the string they look like')
+    expect(message).toContain(lost)
+    expect(message).toContain('it saves as a string')
+  })
+
+  it('warns on a reference, and says what it would become', () => {
+    const { nodes, text } = document({
+      who: { type: 'reference', value: 'users/u1', path: 'users/u1' },
+    })
+    expect(typeMarks(text, nodes)[0]?.message).toContain('it saves as a string')
+  })
+
+  it('warns on a whole double, which comes back an integer', () => {
+    const { nodes, text } = document({ total: { type: 'number', value: 269, integer: false } })
+    expect(typeMarks(text, nodes)[0]?.message).toContain('it saves as an integer')
+  })
+
+  it('says the same thing for a value no field stands behind', () => {
+    // No rows at all: the text alone is making it a timestamp, which
+    // from the reader's side is the same situation and the same
+    // sentence — the field it did or did not come from is not
+    // something the JSON tab shows them.
+    const marks = typeMarks('{"when": "2026-09-20T09:00:00.000Z"}', [])
     expect(marks).toHaveLength(1)
-    expect(marks[0]?.message).toContain('Read as a timestamp')
+    expect(marks[0]?.message).toContain('A timestamp, not the string it looks like')
+    expect(marks[0]?.message).toContain(held)
+  })
+
+  it('describes what the text will save as, not what the field used to be', () => {
+    // The stored field is a timestamp; the value has been replaced with
+    // a geopoint. Save takes the geopoint, so that is what the mark says.
+    const { nodes } = document({ when: { type: 'timestamp', value: '2026-09-20T09:00:00.000Z' } })
+    const marks = typeMarks('{\n  "when": {\n    "latitude": 1,\n    "longitude": 2\n  }\n}', nodes)
+    expect(marks[0]?.message).toContain('A geopoint')
   })
 })
 
