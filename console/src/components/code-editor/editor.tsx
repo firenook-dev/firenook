@@ -151,7 +151,68 @@ const SKIN = EditorView.theme({
   '.cm-diagnostic': { padding: '4px 8px', borderLeft: 'none' },
   '.cm-diagnostic-error': { borderLeft: '3px solid var(--color-kumo-danger)' },
   '.cm-diagnostic-info': { borderLeft: '3px solid var(--color-kumo-info)' },
-  '.cm-lintRange-error': { backgroundImage: 'none', textDecoration: 'underline wavy' },
+  // A mark paints in two places — the squiggle under the value and the
+  // shape out in the gutter — and CodeMirror draws both in colours
+  // written into the library: `#aaf` on `#77e` for the info square,
+  // `#999` for its underline, with a dark theme that changes neither. A
+  // pale lilac box on this console's dark ground was the one thing in
+  // the editor still outside the palette, so both are taken over here.
+  '.cm-lintRange': { backgroundImage: 'none', textDecorationSkipInk: 'none' },
+  '.cm-lintRange-error': {
+    textDecoration: 'underline wavy',
+    textDecorationColor: 'var(--color-kumo-danger)',
+  },
+  '.cm-lintRange-warning': {
+    textDecoration: 'underline wavy',
+    textDecorationColor: 'var(--color-kumo-warning)',
+  },
+  '.cm-lintRange-info': {
+    textDecoration: 'underline wavy',
+    textDecorationColor: 'var(--color-kumo-info)',
+  },
+  '.cm-lintRange-hint': {
+    textDecoration: 'underline wavy',
+    textDecorationColor: 'var(--text-color-kumo-subtle)',
+  },
+  '.cm-lintRange-active': { backgroundColor: 'var(--color-kumo-warning-tint)' },
+  // The gutter shapes are a CSS `content` holding an SVG with the colour
+  // written into it, which no variable can reach. Handing `content` back
+  // its normal value empties the element, and the shape is drawn instead
+  // with a background and a border, which do take tokens — a tinted fill
+  // inside a solid edge, the structure that makes the library's own
+  // markers read as marks rather than blobs.
+  // Centred by the gutter cell rather than by a margin tuned to one
+  // line height, so the shape stays on the line's middle if the density
+  // ever changes.
+  '.cm-gutter-lint .cm-gutterElement': {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0',
+  },
+  '.cm-lint-marker': {
+    content: 'normal',
+    boxSizing: 'border-box',
+    width: '0.75em',
+    height: '0.75em',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+  },
+  '.cm-lint-marker-info': {
+    backgroundColor: 'var(--color-kumo-info-tint)',
+    borderColor: 'var(--color-kumo-info)',
+    borderRadius: '2px',
+  },
+  '.cm-lint-marker-warning': {
+    backgroundColor: 'var(--color-kumo-warning-tint)',
+    borderColor: 'var(--color-kumo-warning)',
+    borderRadius: '2px',
+  },
+  '.cm-lint-marker-error': {
+    backgroundColor: 'var(--color-kumo-danger-tint)',
+    borderColor: 'var(--color-kumo-danger)',
+    borderRadius: '50%',
+  },
 })
 
 /**

@@ -2155,6 +2155,128 @@ test("the code editor's ink tells a key from a string from a number, in both mod
   await drop(page.request, 'teams/t_ink')
 })
 
+/**
+ * What a mark is actually painted in. Both halves of it: the shape out
+ * in the gutter and the squiggle under the value.
+ *
+ * Every colour comes back resolved through the same mix, because
+ * `getComputedStyle` hands back the `oklch()` it was given while a
+ * token read straight off `:root` comes back as its own notation — two
+ * spellings of one colour, which compare unequal. Mixed in `srgb` both
+ * arrive as `color(srgb r g b)` and can simply be told apart or equal.
+ */
+async function markPaint(
+  inspector: Locator,
+  severity: 'info' | 'error',
+): Promise<{
+  edge: string
+  fill: string
+  squiggle: string
+  token: string
+  tint: string
+  shape: string
+  image: string
+  offCentre: number
+}> {
+  return inspector.evaluate((el, which) => {
+    const page = el.ownerDocument
+    const window = page.defaultView!
+    const probe = page.createElement('span')
+    el.append(probe)
+    const resolve = (css: string) => {
+      probe.style.color = ''
+      probe.style.color = `color-mix(in srgb, ${css} 100%, transparent)`
+      return window.getComputedStyle(probe).color
+    }
+
+    const marker = el.querySelector(`.cm-lint-marker-${which}`)!
+    const onMarker = window.getComputedStyle(marker)
+    // A parse error can land between two characters rather than on
+    // one, and CodeMirror draws a point there instead of a range, so
+    // the squiggle is reported as absent rather than assumed.
+    const range = el.querySelector(`.cm-lintRange-${which}`)
+    const onRange = range ? window.getComputedStyle(range) : undefined
+    const name = which === 'error' ? 'danger' : 'info'
+
+    // Sitting on its line's middle, not resting wherever a margin tuned
+    // to one line height happens to drop it.
+    const box = marker.getBoundingClientRect()
+    const line = marker.closest('.cm-gutterElement')!.getBoundingClientRect()
+
+    const measured = {
+      edge: resolve(onMarker.borderTopColor),
+      fill: resolve(onMarker.backgroundColor),
+      squiggle: onRange ? resolve(onRange.textDecorationColor) : 'no range',
+      token: resolve(`var(--color-kumo-${name})`),
+      tint: resolve(`var(--color-kumo-${name}-tint)`),
+      // `normal`, not a `url(data:image/svg+xml…)`: the library paints
+      // its shapes as a CSS `content` with the colour written into the
+      // SVG, where no variable can reach it.
+      shape: onMarker.content,
+      image: onRange ? onRange.backgroundImage : 'none',
+      offCentre: Math.round((box.top + box.height / 2 - (line.top + line.height / 2)) * 100) / 100,
+    }
+    probe.remove()
+    return measured
+  }, severity)
+}
+
+test("a mark is painted from the console's own palette, in both modes", async ({ page }) => {
+  await put(page.request, 'teams/t_mark', {
+    name: { stringValue: 'Marks' },
+    opened: { timestampValue: '2026-09-20T09:00:00Z' },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_mark&tab=json`)
+  const inspector = page.getByTestId('inspector')
+  const editor = inspector.getByTestId('document-json')
+  await expect(editor).toBeVisible()
+  // One mark, on the one value whose type the text cannot write down.
+  await expect(inspector.locator('.cm-lint-marker-info')).toHaveCount(1)
+
+  for (const mode of ['light', 'dark'] as const) {
+    await inspector.evaluate((el, which) => {
+      const root = el.ownerDocument.documentElement
+      if (which === 'dark') root.setAttribute('data-mode', 'dark')
+      else root.removeAttribute('data-mode')
+    }, mode)
+    const mark = await markPaint(inspector, 'info')
+
+    // CodeMirror draws both halves itself, in colours written into the
+    // library — `#aaf` on `#77e` for the square, `#999` for the
+    // squiggle — and its dark theme changes neither. Both are the
+    // console's now, which is the whole claim: a mark that follows the
+    // theme rather than sitting outside it in pale lilac.
+    expect(mark.shape, `the gutter SVG is gone in ${mode}`).toBe('normal')
+    expect(mark.image, `the squiggle image is gone in ${mode}`).toBe('none')
+    expect(mark.edge, `the gutter edge in ${mode}`).toBe(mark.token)
+    expect(mark.fill, `the gutter fill in ${mode}`).toBe(mark.tint)
+    expect(mark.squiggle, `the squiggle in ${mode}`).toBe(mark.token)
+    expect(Math.abs(mark.offCentre), `the shape is on the line in ${mode}`).toBeLessThanOrEqual(1)
+  }
+
+  // And the one mark that means a problem rather than a note takes the
+  // other end of the palette, so the two are never read for each other.
+  await editor.fill('{"name": "Marks",,}')
+  await expect(inspector.locator('.cm-lint-marker-error')).toHaveCount(1)
+  const broken = await markPaint(inspector, 'error')
+  expect(broken.shape).toBe('normal')
+  expect(broken.edge).toBe(broken.token)
+  expect(broken.edge).not.toBe(
+    await inspector.evaluate((el) => {
+      const window = el.ownerDocument.defaultView!
+      const probe = el.ownerDocument.createElement('span')
+      el.append(probe)
+      probe.style.color = 'color-mix(in srgb, var(--color-kumo-info) 100%, transparent)'
+      const value = window.getComputedStyle(probe).color
+      probe.remove()
+      return value
+    }),
+  )
+
+  await inspector.evaluate((el) => el.ownerDocument.documentElement.removeAttribute('data-mode'))
+  await drop(page.request, 'teams/t_mark')
+})
+
 test('the JSON tab is a code editor, and the types the rows carry are marked on it', async ({
   page,
 }) => {

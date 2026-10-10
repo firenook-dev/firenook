@@ -1226,7 +1226,18 @@ Rules the editor follows:
   content with `min-h`/`max-h` — and the editor came out three lines tall
   inside it. `'&': { flex: 1, minHeight: 0 }` in the theme, and a flex
   column all the way up.
-- **Every colour is a Kumo token**, so dark mode needs no second palette.
+- **Every colour is a Kumo token**, so dark mode needs no second palette
+  — and that has to include the colours CodeMirror paints *for* you.
+  `@codemirror/lint` writes its own into the library (`#aaf` on `#77e`
+  for the info square, `#999` for its squiggle) and its dark theme
+  changes neither, so a pale lilac box sat on the console's dark ground
+  for a whole release. The gutter shapes are a CSS `content` holding an
+  SVG with the colour inside it, which no variable can reach: hand
+  `content` back its `normal` value and draw the shape with a background
+  and a border instead. Centre it with `display: flex` on
+  `.cm-gutter-lint .cm-gutterElement`, not a margin tuned to one line
+  height. When taking a library's paint over, check what else it draws
+  — `grep` its `baseTheme` for literal colours.
 - **`lineHeight: '1.25rem'`**, the console's own `leading-5`.
 - **The palette is restrained on purpose.** The grid refuses a colour per
   type because colour in this console means something or it is not spent.
