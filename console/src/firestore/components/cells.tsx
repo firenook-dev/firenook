@@ -10,7 +10,14 @@
 
 import { InlineCopyText } from '@cloudflare/kumo'
 import { ArrowSquareInIcon } from '@phosphor-icons/react'
-import { type FsValue, displayValue, entryCount, formatNumber, relativeTime } from '../value'
+import {
+  type FsValue,
+  compactIso,
+  displayValue,
+  entryCount,
+  formatNumber,
+  relativeTime,
+} from '../value'
 
 export function IdCell({ id, missing }: { id: string; missing?: boolean | undefined }) {
   // A whole path (a group's row) keeps its own id in view and lets the
@@ -144,11 +151,4 @@ export function ValueCell({
     case 'null':
       return <span className="font-mono text-[12px] text-kumo-inactive">null</span>
   }
-}
-
-function compactIso(iso: string): string {
-  return iso
-    .replace('T', ' ')
-    .replace(/\.\d+Z$/, 'Z')
-    .replace(/Z$/, '')
 }

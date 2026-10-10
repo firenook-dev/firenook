@@ -958,7 +958,22 @@ one render prop in the other — `Tooltip render={<Popover.Trigger
 render={<Button/>} />}`. Verified: one `<button>`, tooltip on hover,
 popover on click.
 
-### The write log and its undo were built, then taken out
+### The chip beside the document path
+
+It reads `updateTime` — the **engine's** record of the last write — not
+any field of the document. The two can disagree by years: a journey
+seeds `createdAt: 2020-01-01` and the chip says *just now* while the row
+beneath it says *7 y ago*, both right about different things. That is
+exactly why it has to name itself; a bare relative time beside a path
+does not say which event it counts from, and the question got asked.
+
+It names itself in a Kumo tooltip, not a native `title`. Everything else
+in this panel answers in about a tenth of a second in the console's own
+skin; a `title` waits about a second and arrives in the platform's.
+`src/firestore/components/requests-drawer.tsx` still uses a native
+`title` on its times — the same gap, not yet closed.
+
+### The write log and its undo were taken out
 
 They are not in the console. `ROADMAP.md` carries the entry and the
 reasoning; the implementation is one commit back in history rather than
@@ -1156,8 +1171,12 @@ both under the word "change".
   `CommandPalette.Results`/`Items` render functions must return keyed
   elements; a `Tooltip` inside a `<button>` nests buttons (use `title`);
   `Popover.Content` drops unknown props, so a test id goes on a div inside
-  it; a Kumo toast puts the same words in its title and its description, so
-  a journey matches the heading by role;
+  it; **`Badge` drops `data-*` too** — it renders a span and nothing of
+  yours reaches it, so a test id goes on a wrapper around it (which is
+  also what the tooltip attaches to); a `Tooltip` *does* wrap a
+  `Popover.Trigger` through nested `render` props, keeping one `<button>`
+  with hover and click both live; a Kumo toast puts the same words in its
+  title and its description, so a journey matches the heading by role;
   `Text` takes no `className` (wrap it). A Rust doc comment on a `ts-rs`
   type must not contain `*/` (it ends the generated JSDoc early), so
   patterns are described in words there.

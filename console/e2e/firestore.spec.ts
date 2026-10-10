@@ -1843,6 +1843,34 @@ test('a map and its JSON are the same subtree, written two ways', async ({ page 
   await drop(page.request, 'teams/t_json')
 })
 
+test('the chip beside the path times the write, not anything in the document', async ({ page }) => {
+  // A document carrying a `createdAt` field years before the write that
+  // put it in the engine. The chip reads `updateTime` — the engine's own
+  // record — so the two are allowed to disagree, and a reader who takes
+  // the chip for the field would read it wrong by six years.
+  await put(page.request, 'teams/t_when', {
+    createdAt: { timestampValue: '2020-01-01T00:00:00Z' },
+    name: { stringValue: 'When' },
+  })
+  await page.goto(`${origin()}/console/firestore?path=teams&doc=teams%2Ft_when`)
+  const inspector = page.getByTestId('inspector')
+  await expect(inspector.getByLabel('name value')).toHaveValue('When')
+  const chip = inspector.getByTestId('document-changed')
+  // The chip says the write happened a moment ago; the `createdAt` row
+  // under it says seven years. Both are right, about different things,
+  // and the chip is the one nothing in the document can tell you.
+  await expect(chip).toHaveText('just now')
+  await expect(inspector.getByTestId('field-row').first()).toContainText('7 y ago')
+
+  // And it names the event it counts from, which "just now" beside a
+  // path does not. In the console's own tooltip, not the browser's: a
+  // native `title` waits about a second and arrives in the platform's
+  // skin, beside Kumo tooltips that do neither.
+  await chip.hover()
+  await expect(page.getByText('Last changed 2026-', { exact: false })).toBeVisible()
+  await drop(page.request, 'teams/t_when')
+})
+
 test('the JSON tab spends the panel on the JSON', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
   // Eighteen fields: twenty lines of JSON, which the old box showed

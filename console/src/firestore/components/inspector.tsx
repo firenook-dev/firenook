@@ -31,7 +31,14 @@ import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { CODE_LABEL_AT, clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
 import { type Subcollection, subcollectionsQuery } from '../subcollections'
 import { type DraftNode, diffDocument, nodesFrom, parseNode, problemsOf } from '../draft'
-import { type FsDocument, type FsValue, type RestValue, encodeValue, relativeTime } from '../value'
+import {
+  type FsDocument,
+  type FsValue,
+  type RestValue,
+  compactIso,
+  encodeValue,
+  relativeTime,
+} from '../value'
 import { CodeBlock, firestoreOrigin } from './code-popover'
 import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
@@ -126,10 +133,27 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
         >
           {path}
         </InlineCopyText>
+        {/* `updateTime` is the engine's own record of the last write,
+            not one of the document's fields — a document whose
+            `createdAt` says August can have been written to since, and
+            this is the one that says so. "1 mo ago" beside a path does
+            not say which event it counts from, so the tooltip names
+            it. A Kumo one, not the browser's `title`: everything else
+            in this panel answers in about a tenth of a second and in
+            the console's own skin, and a native tooltip waits a second
+            to arrive in the platform's. */}
         {document.data?.updateTime && (
-          <span title={`Updated ${document.data.updateTime}`}>
-            <Badge variant="neutral">{relativeTime(document.data.updateTime)}</Badge>
-          </span>
+          <Tooltip
+            content={`Last changed ${compactIso(document.data.updateTime)}`}
+            render={
+              // The span is the handle: Kumo's Badge does not forward
+              // `data-*` to the element it draws, so a testid put on it
+              // never reaches the page.
+              <span data-testid="document-changed">
+                <Badge variant="neutral">{relativeTime(document.data.updateTime)}</Badge>
+              </span>
+            }
+          />
         )}
         {parentCollection(path) !== workbench.collectionPath && (
           <Tooltip

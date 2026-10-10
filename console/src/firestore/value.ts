@@ -546,6 +546,18 @@ export function emptyValue(type: FirestoreValueType): FsValue {
 }
 
 /** Relative time in the shortest honest form; exact time stays a hover away. */
+/**
+ * A timestamp with the machinery taken out: no `T`, no sub-second, no
+ * `Z`. What is left is the part a reader checks — the day and the time
+ * — in the order the rest of the console writes them.
+ */
+export function compactIso(iso: string): string {
+  return iso
+    .replace('T', ' ')
+    .replace(/\.\d+Z$/, 'Z')
+    .replace(/Z$/, '')
+}
+
 export function relativeTime(iso: string, now = Date.now()): string {
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return iso
