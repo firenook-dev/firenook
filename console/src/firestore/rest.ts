@@ -18,8 +18,6 @@ export interface FirestoreScope {
 export interface QueryPage {
   documents: FsDocument[]
   readTime: string
-  /** Query wall time as measured from the browser, ms. */
-  elapsedMs: number
 }
 
 export interface RulesDenied {
@@ -101,7 +99,6 @@ export async function runQuery(
   structuredQuery: StructuredQuery,
   preview?: Preview,
 ): Promise<QueryPage> {
-  const started = performance.now()
   const suffix = parent ? `/${parent}` : ''
   const rows = await call<Array<{ document?: RestDocument; readTime?: string }>>(
     scope,
@@ -118,7 +115,7 @@ export async function runQuery(
     if (row.readTime) readTime = row.readTime
     if (row.document) documents.push(decodeDocument(row.document))
   }
-  return { documents, readTime, elapsedMs: performance.now() - started }
+  return { documents, readTime }
 }
 
 /** The index-backed count of a query. */

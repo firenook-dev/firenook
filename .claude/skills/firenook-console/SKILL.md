@@ -1159,8 +1159,11 @@ chips, and a swap moved the rows under a shift-click — the journey fails
 on a 1 px move. Unticking any row drops `everything`.
 
 The grid's own footer (`GridFooter`) is a status bar: what is loaded on the
-left ("N loaded · more on scroll · first page N ms", with "N hidden columns ·
-show all" beside it), Export alone at the right end (`ml-auto`). Everything
+left ("N loaded · more on scroll", with "N hidden columns · show all"
+beside it), Export alone at the right end (`ml-auto`). **No "first page N
+ms"**: it timed one request and stood beside every later count, and it was
+the browser's wall time (transfer and decode) read as the engine's speed;
+the count's tooltip ("Counted in N ms") is the timing kept. Everything
 used to sit on the left with the right half always empty. **There is no Load
 more button**: the next page is fetched while the last twenty rows are still
 ahead (an effect on the virtualizer's last visible index, so a short page or

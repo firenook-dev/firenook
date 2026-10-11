@@ -675,7 +675,6 @@ export function Grid() {
       <GridFooter
         loaded={documents.length}
         hasMore={Boolean(page.hasNextPage)}
-        elapsedMs={page.data?.pages[0]?.elapsedMs ?? 0}
         hiddenCount={hiddenCount}
         onShowAll={showAll}
       />
@@ -686,13 +685,11 @@ export function Grid() {
 function GridFooter({
   loaded,
   hasMore,
-  elapsedMs,
   hiddenCount,
   onShowAll,
 }: {
   loaded: number
   hasMore: boolean
-  elapsedMs: number
   hiddenCount: number
   onShowAll: () => void
 }) {
@@ -712,10 +709,11 @@ function GridFooter({
               twenty rows are still ahead, so a Load more button only
               ever arrived after the rows it would have loaded. */}
           {hasMore ? ' · more on scroll' : ''}
-          <span className="text-kumo-inactive">
-            {' '}
-            · first page {Math.max(1, Math.round(elapsedMs))} ms
-          </span>
+          {/* No "first page N ms". It timed one request and went on
+              standing beside "300 loaded" as if it described them, and it
+              was the browser's wall time — transfer and decoding — read
+              as the engine's speed. The count's tooltip says how long
+              counting took, where somebody asking looks. */}
         </Text>
       </span>
       {hiddenCount > 0 && (

@@ -3146,8 +3146,10 @@ test('documents that disagree keep their columns still and say what each covers'
 
   // More is said, not offered. The next page arrives while the last twenty
   // rows are still ahead, so a Load more button only ever came after the
-  // rows it would have loaded.
-  await expect(page.getByText('100 loaded · more on scroll')).toBeVisible()
+  // rows it would have loaded. And that is all the status says: "first page
+  // N ms" timed one request and stood beside every later count as if it
+  // described those rows.
+  await expect(page.getByText('100 loaded · more on scroll', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0)
 
   // The second page's field joins at the end. Ordered by count it went
