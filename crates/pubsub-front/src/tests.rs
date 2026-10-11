@@ -396,6 +396,177 @@ fn frozen_fixture_covers_every_rpc_over_both_transports() {
     );
 }
 
+#[tokio::test]
+async fn dead_lettered_messages_reach_functions() {
+    let background = TriggerRegistry::default();
+    let (observer, mut deliveries) = TriggerObserver::channel(background.clone());
+    let dead = format!("projects/{PROJECT}/topics/orders-dead");
+    let orders = format!("projects/{PROJECT}/topics/orders");
+    let worker = format!("projects/{PROJECT}/subscriptions/orders-worker");
+    let mut functions = inventory();
+    for function in &mut functions.backends[0].function_triggers {
+        if function.name == "topicEcho" {
+            function
+                .event_trigger
+                .as_mut()
+                .expect("event trigger")
+                .resource
+                .clone_from(&dead);
+        }
+    }
+    let runtime = router(PROJECT, &functions, observer.queue(), background);
+    let broker = runtime.broker();
+    broker
+        .create_topic(google::pubsub::v1::Topic {
+            name: orders.clone(),
+            ..Default::default()
+        })
+        .expect("topic");
+    broker
+        .create_subscription(google::pubsub::v1::Subscription {
+            name: worker.clone(),
+            topic: orders.clone(),
+            dead_letter_policy: Some(google::pubsub::v1::DeadLetterPolicy {
+                dead_letter_topic: dead.clone(),
+                max_delivery_attempts: 5,
+            }),
+            ..Default::default()
+        })
+        .expect("subscription");
+    broker
+        .publish(
+            &orders,
+            vec![google::pubsub::v1::PubsubMessage {
+                data: b"{\"order\":1}".to_vec(),
+                ..Default::default()
+            }],
+        )
+        .expect("publish");
+    for _ in 0..5 {
+        let received = broker.pull(&worker, 1).expect("pull");
+        let ack_ids: Vec<String> = received.into_iter().map(|message| message.ack_id).collect();
+        broker
+            .modify_ack_deadline(&worker, &ack_ids, 0)
+            .expect("nack");
+    }
+    let dispatch = tokio::time::timeout(std::time::Duration::from_secs(5), deliveries.recv())
+        .await
+        .expect("a dispatch within the timeout")
+        .expect("dispatch");
+    assert_eq!(
+        dispatch.path,
+        format!("/functions/projects/{PROJECT}/triggers/us-central1-topicEcho-0")
+    );
+    let event: JsonValue = serde_json::from_slice(&dispatch.body).expect("CloudEvent");
+    assert_eq!(event["source"], format!("//pubsub.googleapis.com/{dead}"));
+    assert_eq!(
+        event["data"]["message"]["attributes"]["CloudPubSubDeadLetterSourceSubscription"],
+        "orders-worker"
+    );
+    assert_eq!(
+        event["data"]["message"]["data"],
+        BASE64.encode("{\"order\":1}")
+    );
+    // The functions consumer drained its subscription on the dead-letter topic.
+    let functions_subscription =
+        format!("projects/{PROJECT}/subscriptions/emulator-sub-orders-dead");
+    let counts = broker
+        .subscription_counts(&functions_subscription)
+        .expect("counts");
+    assert_eq!(counts.available + counts.outstanding + counts.pushing, 0);
+    assert_eq!(
+        broker
+            .subscription_counts(&worker)
+            .expect("counts")
+            .dead_lettered_total,
+        1
+    );
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_ticker_stops_on_shutdown() {
+    let (runtime, _deliveries, _background) = runtime_and_deliveries();
+    assert!(runtime.ticker_running());
+    runtime.shutdown().await;
+    assert!(!runtime.ticker_running());
+    // A codebase reload restarts the scheduler, never the stopped timer.
+    let scheduler = runtime.start_scheduler().expect("scheduler");
+    assert!(!runtime.ticker_running());
+    scheduler.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_emulator_subscription_whose_function_left_is_orphaned() {
+    let background = TriggerRegistry::default();
+    let (observer, mut deliveries) = TriggerObserver::channel(background.clone());
+    let current = inventory();
+    let mut runtime = router(PROJECT, &current, observer.queue(), background);
+    let mut scheduler = runtime.start_scheduler().expect("scheduler");
+    let functions_subscription =
+        format!("projects/{PROJECT}/subscriptions/emulator-sub-phase4-topic");
+    assert_eq!(runtime.managed(&functions_subscription), Managed::Functions);
+    assert_eq!(
+        runtime.managed(&format!("projects/{PROJECT}/subscriptions/other")),
+        Managed::No
+    );
+    let backlog = |runtime: &PubsubRuntime| {
+        runtime
+            .broker()
+            .subscription_counts(&functions_subscription)
+            .expect("the subscription is never deleted")
+            .available
+    };
+
+    let empty = firenook_functions_bridge::FunctionsInventory {
+        generation: 0,
+        backends: Vec::new(),
+    };
+    runtime
+        .refresh_inventory(PROJECT, &empty, &mut scheduler)
+        .await
+        .expect("refresh");
+    assert_eq!(runtime.managed(&functions_subscription), Managed::Orphaned);
+    let response = runtime
+        .application()
+        .oneshot(publish_request(
+            "phase4-topic",
+            &json!({ "messages": [{ "data": "e30=" }] }),
+        ))
+        .await
+        .expect("publish");
+    assert_eq!(response.status(), StatusCode::OK);
+    // Nothing drains it and nothing reaches a function.
+    assert_eq!(backlog(&runtime), 1);
+    assert!(deliveries.try_recv().is_err());
+
+    runtime
+        .refresh_inventory(PROJECT, &current, &mut scheduler)
+        .await
+        .expect("refresh");
+    assert_eq!(runtime.managed(&functions_subscription), Managed::Functions);
+    let response = runtime
+        .application()
+        .oneshot(publish_request(
+            "phase4-topic",
+            &json!({ "messages": [{ "data": "e30=" }] }),
+        ))
+        .await
+        .expect("publish");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(backlog(&runtime), 0);
+    assert!(
+        deliveries
+            .recv()
+            .await
+            .expect("dispatch")
+            .path
+            .ends_with("/us-central1-topicEcho-0")
+    );
+    scheduler.shutdown().await;
+    runtime.shutdown().await;
+}
+
 /// The broker's cost model and memory bounds: one transition keeps counts,
 /// indexes and holder counters equal to a scan; acknowledged messages stay
 /// only while something can revive them; history rings stay bounded.

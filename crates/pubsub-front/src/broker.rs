@@ -527,7 +527,15 @@ struct State {
     limits: HistoryLimits,
     /// When the tick next prunes retention windows and retained acknowledgements.
     next_slow_tick: Instant,
+    /// Dead-letter forwards waiting for the runtime's ticker to hand them to
+    /// the functions on the dead-letter topic; kept only while a ticker
+    /// drains it.
+    outbox: VecDeque<Published>,
+    outbox_open: bool,
 }
+
+/// Dead-letter forwards the outbox holds at most between two ticks.
+const OUTBOX_CAPACITY: usize = 100_000;
 
 /// A push the loop must attempt.
 #[derive(Debug, Clone)]
@@ -685,6 +693,8 @@ impl Broker {
                     history_bytes: 0,
                     limits,
                     next_slow_tick: Instant::now() + SLOW_TICK,
+                    outbox: VecDeque::new(),
+                    outbox_open: false,
                 }),
                 changed,
                 in_flight: Mutex::new(HashMap::new()),
@@ -1924,6 +1934,26 @@ impl Broker {
         });
     }
 
+    /// Keeps dead-letter forwards for [`Broker::take_outbox`] while `open`
+    /// (the runtime's ticker drains it); closing it drops what it holds.
+    pub fn set_outbox_open(&self, open: bool) {
+        let mut state = lock(&self.inner.state);
+        state.outbox_open = open;
+        if !open {
+            state.outbox.clear();
+        }
+    }
+
+    /// Dead-letter forwards since the last call, for function delivery.
+    #[must_use]
+    pub fn take_outbox(&self) -> Vec<Published> {
+        let mut state = lock(&self.inner.state);
+        if state.outbox.is_empty() {
+            return Vec::new();
+        }
+        state.outbox.drain(..).collect()
+    }
+
     /// Creates the topic when it does not exist yet (function targets).
     pub fn ensure_topic(&self, name: &str) {
         let _ = self.create_topic(Topic {
@@ -2015,7 +2045,18 @@ impl State {
                 published_at: now,
                 size,
             });
-            self.deliver(&policy.dead_letter_topic, &[stored]);
+            self.deliver(&policy.dead_letter_topic, std::slice::from_ref(&stored));
+            // The forward is a publish to the dead-letter topic: the
+            // functions listening there receive it like any other.
+            if self.outbox_open {
+                if self.outbox.len() >= OUTBOX_CAPACITY {
+                    self.outbox.pop_front();
+                }
+                self.outbox.push_back(Published {
+                    topic: policy.dead_letter_topic.clone(),
+                    messages: vec![stored],
+                });
+            }
         }
     }
 

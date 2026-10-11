@@ -22,7 +22,7 @@ pub mod scheduler;
 pub use broker::Broker;
 pub use error::PubsubError;
 pub use functions::ScheduleDefinition;
-pub use runtime::PubsubRuntime;
+pub use runtime::{Managed, PubsubRuntime};
 pub use schedule_control::{
     RunOutcome, RunScheduleError, RunTrigger, ScheduleControl, ScheduleRun, ScheduleView,
 };

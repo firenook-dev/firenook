@@ -1,9 +1,10 @@
 //! The Pub/Sub runtime: the broker plus function delivery (every discovered
 //! function topic keeps the official `emulator-sub-<topic>` subscription and
-//! publishes reach the Functions host through the delivery queue), the
-//! lease/push timer and the `onSchedule` scheduler.
+//! publishes, dead-letter forwards included, reach the Functions host through
+//! the delivery queue), the lease/push timer and the `onSchedule` scheduler.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -30,6 +31,31 @@ struct Inner {
     schedules: Mutex<Vec<ScheduleDefinition>>,
     http: reqwest::Client,
     ticker: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Set by [`PubsubRuntime::shutdown`]: the timer never starts again.
+    stopped: AtomicBool,
+    managed: Mutex<ManagedSubscriptions>,
+}
+
+/// The functions consumer's `emulator-sub-<topic>` subscriptions: the ones
+/// whose topic has function targets now, and every one ever installed.
+#[derive(Default)]
+struct ManagedSubscriptions {
+    current: BTreeSet<String>,
+    installed: BTreeSet<String>,
+}
+
+/// Whether a subscription belongs to the functions consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Managed {
+    /// An ordinary subscription.
+    No,
+    /// `emulator-sub-<topic>` while its topic has function targets: drained
+    /// at every publish, as the functions consumer takes everything.
+    Functions,
+    /// `emulator-sub-<topic>` whose topic lost its function targets: nothing
+    /// drains it any more, so it keeps every later message, as the official
+    /// emulator's does once its consumer stops.
+    Orphaned,
 }
 
 /// Shared Pub/Sub state; cheap to clone.
@@ -70,6 +96,8 @@ impl PubsubRuntime {
                 schedules: Mutex::new(schedules),
                 http,
                 ticker: Mutex::new(None),
+                stopped: AtomicBool::new(false),
+                managed: Mutex::new(ManagedSubscriptions::default()),
             }),
         };
         runtime.install_targets(targets);
@@ -144,21 +172,46 @@ impl PubsubRuntime {
         Ok(())
     }
 
+    /// Whether `subscription` belongs to the functions consumer: it does
+    /// while its topic has function targets, not because of its name.
+    #[must_use]
+    pub fn managed(&self, subscription: &str) -> Managed {
+        let managed = lock(&self.inner.managed);
+        if managed.current.contains(subscription) {
+            Managed::Functions
+        } else if managed.installed.contains(subscription) {
+            Managed::Orphaned
+        } else {
+            Managed::No
+        }
+    }
+
     fn install_targets(&self, targets: BTreeMap<String, Vec<Target>>) {
+        let mut current = BTreeSet::new();
         for topic in targets.keys() {
             self.inner.broker.ensure_topic(topic);
             if let Some((project, short)) = crate::functions::parse_topic_resource(topic) {
+                let name = format!("projects/{project}/subscriptions/emulator-sub-{short}");
                 let _ = self.inner.broker.create_subscription(Subscription {
-                    name: format!("projects/{project}/subscriptions/emulator-sub-{short}"),
+                    name: name.clone(),
                     topic: topic.clone(),
                     ..Subscription::default()
                 });
+                current.insert(name);
             }
         }
         *lock(&self.inner.targets) = targets;
+        // A subscription whose topic lost its targets stays where it is
+        // (deleting it would be visible on the wire); it is orphaned.
+        let mut managed = lock(&self.inner.managed);
+        managed.installed.extend(current.iter().cloned());
+        managed.current = current;
     }
 
     fn start_ticker(&self) {
+        if self.inner.stopped.load(Ordering::Acquire) {
+            return;
+        }
         let mut slot = lock(&self.inner.ticker);
         if slot.as_ref().is_some_and(|task| !task.is_finished()) {
             return;
@@ -166,16 +219,51 @@ impl PubsubRuntime {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             return;
         };
+        self.inner.broker.set_outbox_open(true);
         let runtime = self.clone();
         *slot = Some(handle.spawn(async move {
+            // The push requests belong to the timer: stopping it aborts them.
+            let mut pushes = tokio::task::JoinSet::new();
             loop {
                 tokio::time::sleep(TICK).await;
+                while pushes.try_join_next().is_some() {}
                 for job in runtime.inner.broker.tick() {
                     let runtime = runtime.clone();
-                    tokio::spawn(async move { runtime.push(job).await });
+                    pushes.spawn(async move { runtime.push(job).await });
                 }
+                runtime.deliver_dead_letters();
             }
         }));
+    }
+
+    /// Hands the dead-letter forwards since the last tick to the functions
+    /// listening on their dead-letter topics.
+    fn deliver_dead_letters(&self) {
+        for published in self.inner.broker.take_outbox() {
+            self.deliver_to_functions(&published);
+        }
+    }
+
+    /// Stops the lease and push timer for good (the push requests it started
+    /// with it), after handing pending dead-letter forwards to functions.
+    /// The broker keeps answering; leases no longer expire and pushes stop.
+    pub async fn shutdown(&self) {
+        self.inner.stopped.store(true, Ordering::Release);
+        let task = lock(&self.inner.ticker).take();
+        if let Some(task) = task {
+            task.abort();
+            let _ = task.await;
+        }
+        self.deliver_dead_letters();
+        self.inner.broker.set_outbox_open(false);
+    }
+
+    /// Whether the lease and push timer is running.
+    #[cfg(test)]
+    pub(crate) fn ticker_running(&self) -> bool {
+        lock(&self.inner.ticker)
+            .as_ref()
+            .is_some_and(|task| !task.is_finished())
     }
 
     async fn push(&self, job: PushJob) {
