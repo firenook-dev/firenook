@@ -33,17 +33,25 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
+mod changes;
 mod console;
 mod download;
 mod listing;
+mod log;
 mod metadata;
 mod rules;
 mod staging;
+pub use changes::{
+    Actor, ChangeContext, ChangeEvent, EventDelivery, ObjectChangeKind, ObjectChangeRecord,
+};
+use changes::{ChangeFeed, via_console};
 pub use console::StorageConsoleApi;
 use download::file_response;
 #[cfg(test)]
 use listing::ObjectListPage;
 use listing::list_objects;
+use log::LogHandle;
+pub use log::{LogSink, StorageLogLevel, StorageLogLine};
 pub use rules::{
     BucketRules, FirestoreDocuments, NativeRulesConfig, NoFirestoreDocuments, RulesFile,
     RulesSource,
@@ -51,6 +59,8 @@ pub use rules::{
 use rules::{NativeRules, Operation, Verdict};
 pub use staging::InFlight;
 use staging::{StagedFile, StagingGauge, staging_path};
+#[cfg(test)]
+mod changes_tests;
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]
@@ -83,6 +93,22 @@ pub struct StorageConfig {
 
 pub use metadata::StorageDurability;
 
+/// What the suite knows about Storage's surroundings that a `firebase.json`
+/// Storage section does not say.
+#[derive(Debug, Clone)]
+pub struct StorageOptions {
+    /// The suite runs the Functions emulator. Without it no Storage event is
+    /// queued at all, as the official emulator sends none then.
+    pub functions: bool,
+}
+
+impl Default for StorageOptions {
+    /// Today's behaviour for a caller that says nothing: events are queued.
+    fn default() -> Self {
+        Self { functions: true }
+    }
+}
+
 /// Shared Storage state and HTTP application.
 pub struct StorageRuntime {
     application: Router,
@@ -101,6 +127,17 @@ impl StorageRuntime {
     /// failure.
     pub async fn start(
         config: StorageConfig,
+        queue: DispatchQueue,
+        background: TriggerRegistry,
+    ) -> Result<Self, StorageError> {
+        Self::start_with(config, StorageOptions::default(), queue, background).await
+    }
+
+    /// [`Self::start`] with what the suite knows about Storage's
+    /// surroundings.
+    pub async fn start_with(
+        config: StorageConfig,
+        options: StorageOptions,
         queue: DispatchQueue,
         background: TriggerRegistry,
     ) -> Result<Self, StorageError> {
@@ -127,18 +164,22 @@ impl StorageRuntime {
             started_at: now_rfc3339(),
             metadata: Arc::new(metadata),
             config: Arc::new(config),
+            options: Arc::new(options),
+            feed: Arc::clone(&data.feed),
             inner: Arc::new(Mutex::new(data)),
             mutation: Arc::new(tokio::sync::Mutex::new(())),
             rules,
             queue,
             background,
             staging: Arc::new(StagingGauge::default()),
+            log: LogHandle::default(),
         };
         let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
             // A weak handle: the flusher never keeps the metadata database
             // open after the runtime's last owner drops it.
             let metadata = Arc::downgrade(&state.metadata);
+            let log = state.log.clone();
             let (stop, mut stop_signal) = tokio::sync::watch::channel(false);
             let task = tokio::spawn(async move {
                 let mut ticker = tokio::time::interval(interval);
@@ -153,7 +194,11 @@ impl StorageRuntime {
                     };
                     let flushed = tokio::task::spawn_blocking(move || store.flush()).await;
                     if let Ok(Err(error)) = flushed {
-                        eprintln!("firenook Storage: write-behind flush failed: {error}");
+                        log.emit(
+                            StorageLogLevel::Error,
+                            log::FLUSH,
+                            format!("write-behind flush failed: {error}"),
+                        );
                     }
                 }
             });
@@ -179,6 +224,12 @@ impl StorageRuntime {
     /// Cloneable Axum application.
     pub fn application(&self) -> Router {
         self.application.clone()
+    }
+
+    /// Where rules runtime errors and failed flushes go from now on, instead
+    /// of standard error.
+    pub fn set_log_sink(&self, sink: LogSink) {
+        self.state.log.set(sink);
     }
 
     /// The handle the console's routes, topics and search call: a cheap
@@ -290,6 +341,10 @@ struct StorageState {
     started_at: String,
     metadata: Arc<metadata::MetadataStore>,
     config: Arc<StorageConfig>,
+    options: Arc<StorageOptions>,
+    /// The change broadcast and activity ring the object map writes under
+    /// `inner`; read here without it.
+    feed: Arc<ChangeFeed>,
     inner: Arc<Mutex<StorageData>>,
     mutation: Arc<tokio::sync::Mutex<()>>,
     rules: Option<NativeRules>,
@@ -297,6 +352,7 @@ struct StorageState {
     background: TriggerRegistry,
     /// Bytes staged by uploads in progress, per bucket.
     staging: Arc<StagingGauge>,
+    log: LogHandle,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -307,6 +363,12 @@ struct StorageData {
     uploads: BTreeMap<String, UploadSession>,
     #[serde(default)]
     next_id: u64,
+    /// Orders every change in this process; never persisted, never goes
+    /// back (a reset moves it on).
+    #[serde(skip)]
+    revision: u64,
+    #[serde(skip)]
+    feed: Arc<ChangeFeed>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -604,6 +666,7 @@ async fn v0_upload(
             object_metadata: &upload.object_metadata,
             authorization: authorization_header(&headers),
             firebase: true,
+            console: via_console(&headers),
         },
         upload.uploaded,
     )
@@ -713,7 +776,7 @@ async fn firebase_resumable(
         {
             session.cancelled = true;
             let mut data = lock(&state.inner);
-            data.uploads.insert(id.clone(), session.clone());
+            data.put_session(session.clone());
             persist_change(state, &data, metadata::Change::Upload(id))?;
         }
         let _ = tokio::fs::remove_file(state.config.data_dir.join(&session.staging_file)).await;
@@ -730,7 +793,7 @@ async fn firebase_resumable(
             .await?,
         );
         let mut data = lock(&state.inner);
-        data.uploads.insert(id.clone(), session.clone());
+        data.put_session(session.clone());
         persist_change(state, &data, metadata::Change::Upload(id))?;
     }
     if !command.contains("finalize") {
@@ -753,6 +816,7 @@ async fn firebase_resumable(
             object_metadata: &session.object_metadata,
             authorization: session.authorization.as_deref(),
             firebase: true,
+            console: via_console(headers),
         },
         summarize_file(StagedFile::session(
             state.config.data_dir.join(&session.staging_file),
@@ -765,7 +829,7 @@ async fn firebase_resumable(
         Err(error) if error.status == StatusCode::FORBIDDEN => {
             session.denied = true;
             let mut data = lock(&state.inner);
-            data.uploads.insert(id.clone(), session);
+            data.put_session(session);
             persist_change(state, &data, metadata::Change::Upload(id))?;
             return Err(error);
         }
@@ -773,7 +837,7 @@ async fn firebase_resumable(
     };
     {
         let mut data = lock(&state.inner);
-        data.uploads.remove(id);
+        data.remove_session(id);
         persist_change(state, &data, metadata::Change::Upload(id))?;
     }
     Ok((
@@ -915,17 +979,23 @@ async fn v0_token_action(
     object.metageneration = object.metageneration.saturating_add(1);
     object.updated = now_rfc3339();
     object.etag = etag(object.generation, object.metageneration);
-    {
+    let revision = {
         let mut data = lock(&state.inner);
-        data.objects
-            .insert(object_key(&bucket, &object_name), object.clone());
+        data.put(
+            object.clone(),
+            &ChangeContext::from_authorization(
+                authorization_header(&headers),
+                via_console(&headers),
+            ),
+        );
         persist_change(
             &state,
             &data,
             metadata::Change::Object(&object_key(&bucket, &object_name)),
         )?;
-    }
-    state.dispatch(StorageEvent::Metadata, &object);
+        data.revision
+    };
+    state.dispatch_change(revision, StorageEvent::Metadata, &object);
     Ok(Json(firebase_metadata(&object)))
 }
 
@@ -989,6 +1059,7 @@ async fn gcs_multipart_upload(
             object_metadata: &multipart.metadata,
             authorization: authorization_header(headers),
             firebase: false,
+            console: via_console(headers),
         },
         summarize_file(staged).await?,
     )
@@ -1040,22 +1111,19 @@ async fn gcs_resumable_start(
             &data.next_id.to_string(),
         ]);
         let staging_file = format!("uploads/{id}.part");
-        data.uploads.insert(
-            id.clone(),
-            UploadSession {
-                id: id.clone(),
-                bucket: bucket.to_owned(),
-                name: name.clone(),
-                content_type: object_content_type,
-                metadata,
-                object_metadata: request.clone(),
-                received: 0,
-                staging_file: staging_file.clone(),
-                authorization: authorization_header(headers).map(str::to_owned),
-                denied: false,
-                cancelled: false,
-            },
-        );
+        data.put_session(UploadSession {
+            id: id.clone(),
+            bucket: bucket.to_owned(),
+            name: name.clone(),
+            content_type: object_content_type,
+            metadata,
+            object_metadata: request.clone(),
+            received: 0,
+            staging_file: staging_file.clone(),
+            authorization: authorization_header(headers).map(str::to_owned),
+            denied: false,
+            cancelled: false,
+        });
         persist_change(state, &data, metadata::Change::Upload(&id))?;
         (id, staging_file)
     };
@@ -1094,6 +1162,7 @@ async fn gcs_media_upload(
             object_metadata: &JsonValue::Null,
             authorization: authorization_header(headers),
             firebase: false,
+            console: via_console(headers),
         },
         uploaded,
     )
@@ -1146,7 +1215,7 @@ async fn gcs_resumable_chunk(
         .unwrap_or(session.received);
     if session.received < total {
         let mut data = lock(&state.inner);
-        data.uploads.insert(id.clone(), session.clone());
+        data.put_session(session.clone());
         persist_change(&state, &data, metadata::Change::Upload(&id))?;
         let range = format!("bytes=0-{}", session.received.saturating_sub(1));
         return Ok((StatusCode::PERMANENT_REDIRECT, [(header::RANGE, range)]).into_response());
@@ -1157,7 +1226,7 @@ async fn gcs_resumable_chunk(
     .await?;
     {
         let mut data = lock(&state.inner);
-        data.uploads.remove(&id);
+        data.remove_session(&id);
         persist_change(&state, &data, metadata::Change::Upload(&id))?;
     }
     // No session names the bytes now: they go unless the commit takes them.
@@ -1172,6 +1241,7 @@ async fn gcs_resumable_chunk(
             object_metadata: &session.object_metadata,
             authorization: session.authorization.as_deref(),
             firebase: false,
+            console: via_console(&headers),
         },
         uploaded,
     )
@@ -1354,6 +1424,7 @@ async fn gcs_alias_copy(
             object_metadata: &copy_metadata,
             authorization: authorization_header(&headers),
             firebase: false,
+            console: via_console(&headers),
         },
         uploaded,
     )
@@ -1391,7 +1462,7 @@ async fn internal_reset(
                     .map(|upload| upload.staging_file.clone()),
             )
             .collect::<Vec<_>>();
-        *data = StorageData::default();
+        data.clear();
         persist_state(&state, &data)?;
         files
     };
@@ -1443,17 +1514,20 @@ async fn update_metadata(
     object.metageneration = object.metageneration.saturating_add(1);
     object.updated = now_rfc3339();
     object.etag = etag(object.generation, object.metageneration);
-    {
+    let revision = {
         let mut data = lock(&state.inner);
-        data.objects
-            .insert(object_key(bucket, name), object.clone());
+        data.put(
+            object.clone(),
+            &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
+        );
         persist_change(
             state,
             &data,
             metadata::Change::Object(&object_key(bucket, name)),
         )?;
-    }
-    state.dispatch(StorageEvent::Metadata, &object);
+        data.revision
+    };
+    state.dispatch_change(revision, StorageEvent::Metadata, &object);
     Ok(object)
 }
 
@@ -1484,19 +1558,23 @@ async fn delete_object(
             error
         }
     })?;
-    {
+    let revision = {
         let mut data = lock(&state.inner);
-        data.objects.remove(&object_key(bucket, name));
+        data.remove(
+            &object_key(bucket, name),
+            &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
+        );
         persist_change(
             state,
             &data,
             metadata::Change::Object(&object_key(bucket, name)),
         )?;
-    }
+        data.revision
+    };
     tokio::fs::remove_file(state.config.data_dir.join(&object.data_file))
         .await
         .map_err(io_error)?;
-    state.dispatch(StorageEvent::Delete, &object);
+    state.dispatch_change(revision, StorageEvent::Delete, &object);
     Ok(())
 }
 
@@ -1797,6 +1875,8 @@ struct CommitSpec<'a> {
     /// Authorization header value evaluated by the rules.
     authorization: Option<&'a str>,
     firebase: bool,
+    /// The request came from the console (`x-firenook-console`).
+    console: bool,
 }
 
 async fn commit_staging(
@@ -1885,22 +1965,25 @@ async fn commit_staging(
     uploaded.staged.committed();
     // The bytes were recorded under the staging path; sync the published one.
     state.metadata.note_unsynced_file(final_path.clone());
-    {
+    let revision = {
         let mut data = lock(&state.inner);
-        data.objects
-            .insert(object_key(spec.bucket, spec.name), object.clone());
+        data.put(
+            object.clone(),
+            &ChangeContext::from_authorization(spec.authorization, spec.console),
+        );
         persist_change(
             state,
             &data,
             metadata::Change::Object(&object_key(spec.bucket, spec.name)),
         )?;
-    }
+        data.revision
+    };
     if disposition_defaulted {
         let mut event_object = object.clone();
         event_object.content_disposition = None;
-        state.dispatch(StorageEvent::Finalize, &event_object);
+        state.dispatch_change(revision, StorageEvent::Finalize, &event_object);
     } else {
-        state.dispatch(StorageEvent::Finalize, &object);
+        state.dispatch_change(revision, StorageEvent::Finalize, &object);
     }
     Ok(object)
 }
@@ -1951,7 +2034,14 @@ fn authorize(
         Verdict::Allowed => Ok(()),
         Verdict::Denied(error) => {
             if let Some(error) = error {
-                eprintln!("firenook Storage rules: {error}");
+                state.log.emit(
+                    StorageLogLevel::Warn,
+                    log::RULES,
+                    format!(
+                        "{} on gs://{bucket}/{name} failed in the rules: {error}",
+                        operation.method()
+                    ),
+                );
             }
             Err(permission_denied(operation.permission()))
         }
@@ -2018,7 +2108,7 @@ async fn internal_set_rules(
         )
             .into_response()),
         Err(error) => {
-            eprintln!("firenook Storage rules: {error}");
+            state.log.emit(StorageLogLevel::Error, log::RULES, error.0);
             Ok((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
@@ -2038,9 +2128,22 @@ enum StorageEvent {
 }
 
 impl StorageState {
-    fn dispatch(&self, event: StorageEvent, object: &StoredObject) {
+    /// Dispatches the event of the change committed at `revision` and
+    /// records on its activity record what became of it.
+    fn dispatch_change(&self, revision: u64, event: StorageEvent, object: &StoredObject) {
+        let delivery = self.dispatch(event, object);
+        self.feed.settle(revision, delivery);
+    }
+
+    /// Queues the v1 and v2 trigger requests of one Storage event, and says
+    /// what happened: nothing at all without Functions in the suite (as the
+    /// official emulator), nothing while background triggers are paused.
+    fn dispatch(&self, event: StorageEvent, object: &StoredObject) -> EventDelivery {
+        if !self.options.functions {
+            return EventDelivery::NoFunctions;
+        }
         if !self.background.background_enabled() {
-            return;
+            return EventDelivery::Paused;
         }
         let (legacy, cloud) = match event {
             StorageEvent::Finalize => (
@@ -2062,6 +2165,7 @@ impl StorageState {
             "//storage.googleapis.com/projects/_/buckets/{}/objects/{}",
             object.bucket, object.name
         );
+        let mut failed = false;
         for (generation, body, content_type) in [
             (
                 "v1",
@@ -2100,7 +2204,7 @@ impl StorageState {
                 &object.generation.to_string(),
                 &object.metageneration.to_string(),
             ]);
-            let _ = self.queue.enqueue(DispatchRequest {
+            let enqueued = self.queue.enqueue(DispatchRequest {
                 path: format!(
                     "/functions/projects/{}/trigger_multicast",
                     self.config.project
@@ -2109,6 +2213,14 @@ impl StorageState {
                 body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
                 event_id,
             });
+            if enqueued.is_err() {
+                failed = true;
+            }
+        }
+        if failed {
+            EventDelivery::Failed
+        } else {
+            EventDelivery::Sent
         }
     }
 }
@@ -2289,9 +2401,9 @@ async fn import_directory(state: &StorageState, root: &FilePath) -> Result<usize
         .await?;
     let count = imported.len();
     let mut data = lock(&state.inner);
+    let system = ChangeContext::system();
     for object in imported {
-        data.objects
-            .insert(object_key(&object.bucket, &object.name), object);
+        data.put(object, &system);
     }
     state.metadata.replace(&data)?;
     write_json_atomic(&state.config.data_dir.join("metadata.json"), &*data)?;

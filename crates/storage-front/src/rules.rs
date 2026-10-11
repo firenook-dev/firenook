@@ -125,6 +125,17 @@ pub(crate) enum Operation {
 }
 
 impl Operation {
+    /// The rules' `request.method` name.
+    pub(crate) const fn method(self) -> &'static str {
+        match self {
+            Self::Get => "get",
+            Self::List => "list",
+            Self::Create => "create",
+            Self::Update => "update",
+            Self::Delete => "delete",
+        }
+    }
+
     pub(crate) const fn permission(self) -> &'static str {
         match self {
             Self::Get => "READ",
