@@ -753,6 +753,13 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await expect(page.locator('header').getByTestId('panel-toggle')).toHaveCount(0)
   const toggle = page.getByTestId('panel-toggle')
   const open = await toggle.boundingBox()
+  // Its key is a key, as the Filter button's `f` is — not "(t)" spelt out.
+  await toggle.hover()
+  const tip = page.locator('.kumo-tooltip-popup').filter({ hasText: 'Hide the schema panel' })
+  await expect(tip).toBeVisible()
+  await expect(tip.locator('kbd')).toHaveText('t')
+  await expect(tip).not.toContainText('(t)')
+  await page.mouse.move(700, 600)
   await expect(panel.getByTestId('panel-toggle')).toBeVisible()
   await page.keyboard.press('t')
   await expect(panel).toBeHidden()

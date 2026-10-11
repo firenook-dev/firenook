@@ -41,7 +41,16 @@ export function PanelToggle({ where }: { where: 'panel' | 'toolbar' }) {
   const name = `the ${panel.label.toLowerCase()} panel`
   return (
     <Tooltip
-      content={`${open ? 'Hide' : 'Show'} ${name} (t)`}
+      // The key as a key, the way the Filter button shows its `f`, not
+      // spelt out in brackets after the words.
+      content={
+        <span className="flex items-center gap-1.5">
+          {open ? 'Hide' : 'Show'} {name}
+          <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
+            t
+          </kbd>
+        </span>
+      }
       render={
         <Button
           variant="ghost"

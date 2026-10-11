@@ -190,7 +190,14 @@ function NavToggle() {
   const { open } = useSidebar()
   return (
     <Tooltip
-      content={open ? 'Collapse the sidebar ([)' : 'Expand the sidebar ([)'}
+      content={
+        <span className="flex items-center gap-1.5">
+          {open ? 'Collapse the sidebar' : 'Expand the sidebar'}
+          <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
+            [
+          </kbd>
+        </span>
+      }
       side="right"
       render={<Sidebar.Trigger data-testid="nav-toggle" />}
     />
