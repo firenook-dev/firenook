@@ -317,9 +317,14 @@ belongs in row one.
 **The query field is the path field's twin**, a row below: one box (`h-8
 rounded-lg`), the funnel inside it, flat at rest, `bg-kumo-tint` under the
 pointer (`hover:not-focus-within:`), `bg-kumo-control` and the focus ring
-on `focus-within`, and the one control that acts on the whole query —
-clearing it (`query-clear`) — inside against the right edge, where the path
-keeps copy. A query that did not parse keeps a `ring-kumo-danger` outline
+on `focus-within`, and the one control that acts on the whole query
+inside against the right edge, where the path keeps copy: an × that is
+**always there while the line is**. With text or a query it clears
+(`query-clear`); with nothing to clear it shuts the line (`query-close`,
+"Close the filter"), as Escape does — before, an opened empty line had no
+way back to the Filter button but that key. Shutting from inside hands
+focus to the Filter button (`refocus`), and a line held open only by its
+query shuts when the query is cleared. A query that did not parse keeps a `ring-kumo-danger` outline
 at rest. The row scrolls sideways when narrow, and **a scroller clips at its
 padding edge**, so the padding is the scroller's own (`px-3 py-1.5`), not
 the line's: with it outside, the field was 28 px in a 28 px scroller and

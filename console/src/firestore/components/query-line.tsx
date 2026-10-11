@@ -35,6 +35,10 @@ export function QueryLine() {
   const [base, setBase] = useState(workbench.queryText)
   const [seenPrefill, setSeenPrefill] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const filterRef = useRef<HTMLButtonElement>(null)
+  // Set when the line is shut from inside it, so focus goes to the Filter
+  // button that takes its place rather than to nowhere.
+  const refocus = useRef(false)
 
   // A new query in the URL replaces the draft (derived during render).
   if (base !== workbench.queryText) {
@@ -48,6 +52,8 @@ export function QueryLine() {
   }
   useEffect(() => {
     if (open) inputRef.current?.focus()
+    else if (refocus.current) filterRef.current?.focus()
+    refocus.current = false
   }, [open])
   // ...with the caret where the composer wanted it.
   useEffect(() => {
@@ -79,6 +85,11 @@ export function QueryLine() {
     workbench.setQuery(patch(workbench.query))
 
   const active = !isEmptyQuery(workbench.query)
+  const clearing = active || draft !== ''
+  const close = () => {
+    refocus.current = true
+    setOpen(false)
+  }
   return (
     <div className="grid shrink-0 border-b border-kumo-line bg-kumo-base" data-testid="query-line">
       {/* The padding is the scroller's own, not the line's: a scroller clips
@@ -116,7 +127,7 @@ export function QueryLine() {
                       run()
                     } else if (event.key === 'Escape') {
                       event.preventDefault()
-                      if (!active && !draft) setOpen(false)
+                      if (!active && !draft) close()
                       else setDraft(workbench.queryText)
                     }
                   }}
@@ -128,27 +139,32 @@ export function QueryLine() {
                   data-testid="query-input"
                 />
               </label>
-              {(active || draft) && (
-                <Tooltip
-                  content="Clear the query"
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      shape="square"
-                      icon={<XIcon />}
-                      aria-label="Clear the query"
-                      className="h-7 w-7 shrink-0"
-                      onClick={() => {
-                        setDraft('')
-                        workbench.setQueryText('')
-                        inputRef.current?.focus()
-                      }}
-                      data-testid="query-clear"
-                    />
-                  }
-                />
-              )}
+              {/* Always there while the line is: it clears what is in the
+                  field, and once there is nothing to clear it shuts the line
+                  — as Escape does. Without it an empty line had no way
+                  back to the Filter button but a key nobody is told about. */}
+              <Tooltip
+                content={clearing ? 'Clear the query' : 'Close the filter'}
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    shape="square"
+                    icon={<XIcon />}
+                    aria-label={clearing ? 'Clear the query' : 'Close the filter'}
+                    className="h-7 w-7 shrink-0"
+                    onClick={() => {
+                      if (!clearing) return close()
+                      setDraft('')
+                      workbench.setQueryText('')
+                      // A line held open only by its query shuts with it.
+                      if (openState) inputRef.current?.focus()
+                      else refocus.current = true
+                    }}
+                    data-testid={clearing ? 'query-clear' : 'query-close'}
+                  />
+                }
+              />
             </div>
             <Button variant="primary" size="sm" icon={<PlayIcon />} onClick={run}>
               Run
@@ -173,6 +189,7 @@ export function QueryLine() {
           </div>
         ) : (
           <Button
+            ref={filterRef}
             variant={active ? 'secondary' : 'ghost'}
             size="sm"
             icon={<FunnelIcon />}

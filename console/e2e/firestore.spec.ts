@@ -91,6 +91,48 @@ test('the query field is built like the path field, and nothing cuts its outline
   await expect(input).toHaveValue('')
 })
 
+test('an open filter shuts from its own ×, and clears first when there is text', async ({
+  page,
+}) => {
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  const first = page.getByTestId('grid-row').first()
+  await expect(first).toBeVisible()
+  const top = (await first.boundingBox())?.y
+  const filter = page.getByRole('button', { name: 'Filter', exact: true })
+  const input = page.getByTestId('query-input')
+
+  // Empty, the × shuts the line: the Filter button comes back, holding
+  // the focus, and the grid has not moved. Escape did this already, and
+  // was the only way.
+  await filter.click()
+  await expect(input).toBeFocused()
+  const close = page.getByTestId('query-close')
+  await close.hover()
+  await expect(page.getByText('Close the filter', { exact: true })).toBeVisible()
+  await close.click()
+  await expect(input).toHaveCount(0)
+  await expect(filter).toBeFocused()
+  expect((await first.boundingBox())?.y).toBe(top)
+
+  // With text in it, the same × clears the text and the line stays.
+  await filter.click()
+  await input.fill('where("plan", "==", "pro")')
+  await expect(page.getByTestId('query-close')).toHaveCount(0)
+  await page.getByTestId('query-clear').click()
+  await expect(input).toHaveValue('')
+  await expect(input).toBeFocused()
+  await page.getByTestId('query-close').click()
+  await expect(input).toHaveCount(0)
+
+  // A line open only because a query is in force shuts when it is cleared.
+  await page.goto(
+    `${origin()}/console/firestore?path=users&q=where(%22plan%22%2C%22%3D%3D%22%2C%22pro%22)`,
+  )
+  await page.getByTestId('query-clear').click()
+  await expect(input).toHaveCount(0)
+  await expect(filter).toBeFocused()
+})
+
 test('the count names itself on hover, and Run stays put however long it is', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
