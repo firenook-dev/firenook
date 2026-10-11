@@ -36,6 +36,15 @@ the project's rules for every database as it does on the official emulator. The 
 database (`Cloud Firestore Emulator does not support multiple databases yet.`)
 and then loads no rules at all.
 
+Each configured Firestore rules file is watched while the suite runs and
+reloaded on change, as the official CLI watches the configured rules file
+(chokidar) and re-uploads it. One second after the last change in a burst the
+file is compiled and installed for the database that configures it. A file
+identical to the rules in force is left alone (the console's own save lands
+there), and a file that does not compile leaves the rules in force serving
+requests: the diagnostics are logged and the console shows them beside the
+file.
+
 The package supports only its enumerated native targets after their exact
 candidate checks pass. Linux musl, Windows ARM64/32-bit, network-filesystem
 durability and Windows power-loss recovery are not qualified.

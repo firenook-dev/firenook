@@ -944,6 +944,7 @@ dependencies = [
  "firenook-tasks-front",
  "firenook-webchannel-front",
  "futures-util",
+ "notify",
  "reqwest",
  "serde",
  "serde_json",

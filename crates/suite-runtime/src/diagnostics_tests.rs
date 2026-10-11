@@ -139,7 +139,7 @@ fn applications(enabled: bool, shutdown: &watch::Sender<bool>) -> StaticApplicat
     }
 }
 
-fn test_config() -> SuiteConfig {
+pub(super) fn test_config() -> SuiteConfig {
     let root = std::env::temp_dir();
     SuiteConfig {
         host: "127.0.0.1".into(),
