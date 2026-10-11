@@ -1,0 +1,1 @@
+["firestore", "auth", "storage", "functions", "extensions", "pubsub", "eventarc", "tasks", "logs"]

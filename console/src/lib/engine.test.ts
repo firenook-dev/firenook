@@ -6,6 +6,7 @@ const RELEASED: EngineInfo = {
   name: 'Firenook',
   version: '0.2.0-next.2',
   revision: '63d554c15f2699cf623c7fac19a4d1393c77f322',
+  consoleBuild: '9a8b7c6d5e4f3a2b',
 }
 
 describe('how the console names the engine', () => {
@@ -15,7 +16,12 @@ describe('how the console names the engine', () => {
   })
 
   it('says a build is unreleased rather than inventing a version', () => {
-    const built: EngineInfo = { name: 'Firenook', version: null, revision: null }
+    const built: EngineInfo = {
+      name: 'Firenook',
+      version: null,
+      revision: null,
+      consoleBuild: 'unbuilt',
+    }
     expect(engineVersion(built)).toBe('unreleased build')
     expect(engineVersion(built)).not.toContain('0.0.1')
     expect(engineBuild(built)).toBeUndefined()

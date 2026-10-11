@@ -229,6 +229,22 @@ export function inspectProject(options, cwd = process.cwd()) {
   return {config, directory, rc, data, project, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, minimumFunctions, errors, warnings};
 }
 
+// What the engine is told about this launch (--launch-context), so the
+// console can say why a section is absent and how to turn it on: why each of
+// the five data services is not started (`not-configured` when firebase.json
+// does not configure it, `excluded-by-only` when --only left it out), the
+// firebase.json emulator entries skipped because Firenook does not emulate
+// them, and the command line as typed, which a fix reprints with one name
+// added to --only. The engine shows it; it never runs it.
+export function launchContext(project, {command = 'firenook emulators:start', args = []} = {}) {
+  const services = {};
+  for (const name of SERVICES) {
+    if (project.services.includes(name)) continue;
+    services[name] = project.configured.includes(name) ? 'excluded-by-only' : 'not-configured';
+  }
+  return {services, skipped:[...project.skipped], command, args:[...args]};
+}
+
 export function loadProject(options, cwd = process.cwd()) {
   const project = inspectProject(options, cwd);
   if (project.errors.length) throw new Error(project.errors[0].message);

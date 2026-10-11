@@ -18,8 +18,9 @@ use axum::routing::get;
 use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
-    AllowedHosts, CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole,
-    QueryExplainer, RulesEditor, RulesEvaluator, SchemaIndex, Shutdown, console_router,
+    AllowedHosts, CONSOLE_PATH, ChangeFeed, ComputeParts, ConsoleFeatures, ConsoleServices,
+    DatabaseCatalog, FirestoreConsole, ForeignProjects, Late, QueryExplainer, RulesEditor,
+    RulesEvaluator, SchemaIndex, Shutdown, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -64,13 +65,18 @@ const EXPORT_VERSION: &str = "15.22.0";
 const IMPORT_BATCH_SIZE: usize = 500;
 const IMPORT_BATCH_LOGICAL_BYTES: u64 = 8 * 1024 * 1024;
 
+mod console_wiring;
 mod control;
 mod functions_readiness;
+mod launch;
 mod native_state;
 mod project_scope;
 mod rules_watch;
 mod shutdown_io;
 pub use control::wait_for_shutdown;
+pub use launch::{LaunchContext, LaunchReason};
+
+use console_wiring::{FunctionsConsoleOptions, HookContext};
 
 #[cfg(test)]
 mod console_rules_tests;
@@ -305,6 +311,11 @@ pub struct SuiteConfig {
     pub export_on_exit: Option<PathBuf>,
     pub ports: SuitePorts,
     pub minimum_functions: usize,
+    /// `--launch-context`: what the npm CLI knew when it started the engine
+    /// (why each service is not started, the `firebase.json` entries it
+    /// skipped, the command as typed), so the console can say why a section
+    /// is absent and how to turn it on. `None` for an engine run directly.
+    pub launch: Option<LaunchContext>,
 }
 
 impl SuiteConfig {
@@ -458,6 +469,13 @@ struct PreparedSuite {
     ui: Option<Router>,
     export_receiver: mpsc::Receiver<ExportCommand>,
     background_receiver: mpsc::UnboundedReceiver<BackgroundRequest>,
+    /// The hub's export and background channels, for the console's suite
+    /// controls, which do exactly what the hub's routes do.
+    export_sender: mpsc::Sender<ExportCommand>,
+    background_sender: mpsc::UnboundedSender<BackgroundRequest>,
+    /// Project ids requests named that are not the configured one, recorded
+    /// by every front an app talks to.
+    foreign: ForeignProjects,
 }
 
 /// The console's Firestore pieces before the Requests feed exists (it needs
@@ -493,6 +511,12 @@ struct ShutdownSuite {
     functions: Option<FunctionsRuntime>,
     scheduler: Option<SchedulerRuntime>,
     tasks: Option<TasksRuntime>,
+    /// What the console's `before_finish` hooks read.
+    logging: LoggingRuntime,
+    triggers: TriggerRegistry,
+    foreign: ForeignProjects,
+    compute: Option<ComputeParts>,
+    pubsub: Option<firenook_pubsub_front::PubsubRuntime>,
     servers: Vec<JoinHandle<()>>,
     shutdown: watch::Sender<bool>,
     function_count: usize,
@@ -565,11 +589,14 @@ fn spawn_functions_servers(
 // startup order this function documents.
 #[allow(clippy::too_many_lines)]
 pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError> {
+    // The selection before a project without any Functions turns them off,
+    // so the console can say why its Functions section is absent.
+    let functions_requested = config.services.functions;
     let config = without_absent_functions(config)?;
     validate_config(&config)?;
     // Keep the OS lock alive through every service's shutdown. It is released
     // automatically on process death, without deleting/replacing the lock inode.
-    let (_native_state, prepared) = prepare_native_suite(&config).await?;
+    let (native_state, prepared) = prepare_native_suite(&config).await?;
     let PreparedSuite {
         store,
         triggers,
@@ -585,7 +612,18 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         ui,
         export_receiver,
         background_receiver,
+        export_sender,
+        background_sender,
+        foreign,
     } = prepared;
+    // What every console lifecycle hook can read; the later services are
+    // filled in at each call.
+    let hooks = HookContext {
+        auth: auth.as_ref(),
+        storage: storage.as_ref(),
+        ..HookContext::new(&config, &logging, &foreign, &triggers)
+    };
+    console_wiring::prepared(&hooks);
     let mut listeners = bind_listeners(&config).await?;
     let (shutdown, _) = watch::channel(false);
     // Each configured rules file reloads on change, as the official CLI's
@@ -611,6 +649,22 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             config.host
         );
     }
+    // The sections whose services start after the console: compute's parts
+    // exist before Functions start, and each late runtime has one `Late`,
+    // which the console shares between the sections that use it.
+    let compute_parts = config
+        .services
+        .functions
+        .then(|| console_wiring::compute::parts(&config));
+    let tasks_late = config
+        .services
+        .functions
+        .then(|| Late::pending("Cloud Tasks"));
+    let pubsub_late = config.services.pubsub.then(|| Late::pending("Pub/Sub"));
+    let hooks = HookContext {
+        compute: compute_parts.as_ref(),
+        ..hooks
+    };
     let ui = ui.map(|official| {
         official.nest(
             CONSOLE_PATH,
@@ -618,6 +672,9 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                 directory,
                 release: EngineRelease::from_environment(),
                 shutdown: Shutdown::new(shutdown.subscribe()),
+                features: ConsoleFeatures {
+                    diagnostics: config.diagnostics,
+                },
                 firestore: console_firestore.map(|parts| FirestoreConsole {
                     rest: parts.rest,
                     changes: parts.changes,
@@ -628,7 +685,30 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     rules_evaluator: parts.rules_evaluator,
                     requests: requests.clone(),
                 }),
-                auth: auth.as_ref().map(|auth| auth.application()),
+                auth: auth
+                    .as_ref()
+                    .map(|auth| console_wiring::auth::auth_console(auth, &config, &logging)),
+                storage: storage.as_ref().map(|storage| {
+                    console_wiring::storage::storage_console(storage, &config, &logging)
+                }),
+                compute: compute_parts.clone(),
+                pubsub: pubsub_late.clone(),
+                tasks: tasks_late.clone(),
+                observe: console_wiring::observe::observe_console(&logging, &config),
+                absent: console_wiring::absent_reasons(
+                    &config,
+                    config.launch.as_ref(),
+                    functions_requested,
+                ),
+                unsupported: console_wiring::unsupported(config.launch.as_ref()),
+                suite: console_wiring::suite::suite_controls(
+                    &config,
+                    &triggers,
+                    Some(background_sender.clone()),
+                    export_sender.clone(),
+                    native_state.reusing(),
+                ),
+                foreign: foreign.clone(),
                 allowed_hosts,
             }),
         )
@@ -646,6 +726,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             logging: logging.application_with_shutdown(shutdown.subscribe()),
         },
         &logging,
+        &foreign,
         &shutdown,
         &server_failure,
     )?;
@@ -665,7 +746,9 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         backends: Vec::new(),
     };
     if config.services.functions {
-        let runtime = start_functions_runtime(&config, triggers.clone(), &logging).await?;
+        let mut console = FunctionsConsoleOptions::default();
+        console_wiring::functions_options(&hooks, &mut console);
+        let runtime = start_functions_runtime(&config, triggers.clone(), &logging, console).await?;
         spawn_functions_servers(
             &runtime,
             &mut listeners,
@@ -679,6 +762,11 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             auth.set_blocking_functions(Arc::new(BlockingBridge(runtime.blocking_handle())));
         }
         functions = Some(runtime);
+        console_wiring::compute::ready(&HookContext {
+            functions: functions.as_ref(),
+            inventory: Some(&inventory),
+            ..hooks
+        });
         // The Cloud Tasks emulator registers a queue per onTaskDispatched
         // export, as the official Functions emulator does at startup.
         let tasks_logging = logging.clone();
@@ -698,17 +786,37 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         servers.push(spawn_axum(
             "tasks",
             listeners.take("tasks")?,
-            tasks_runtime.application(),
+            project_scope::apply(
+                tasks_runtime.application(),
+                &config,
+                &logging,
+                &foreign,
+                "tasks",
+            ),
             shutdown.subscribe(),
             server_failure.clone(),
         ));
+        if let Some(late) = &tasks_late {
+            console_wiring::messaging::tasks_ready(
+                late,
+                &tasks_runtime,
+                compute_parts.as_ref(),
+                &config,
+                &logging,
+            );
+        }
         tasks = Some(tasks_runtime);
     }
     let mut pubsub = None;
     let mut scheduler = None;
     let mut schedule_count = 0;
     if config.services.pubsub {
-        let runtime = pubsub_router(&config.project_id, &inventory, delivery.queue(), triggers);
+        let runtime = pubsub_router(
+            &config.project_id,
+            &inventory,
+            delivery.queue(),
+            triggers.clone(),
+        );
         schedule_count = runtime.schedules().len();
         scheduler = Some(
             runtime
@@ -720,13 +828,29 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         servers.push(spawn_firestore(
             "pubsub",
             listeners.take("pubsub")?,
-            runtime.routes(),
+            project_scope::apply_routes(runtime.routes(), &config, &logging, &foreign, "pubsub"),
             shutdown.subscribe(),
             server_failure.clone(),
         ));
+        if let Some(late) = &pubsub_late {
+            console_wiring::messaging::pubsub_ready(
+                late,
+                &runtime,
+                compute_parts.as_ref(),
+                &config,
+                &logging,
+            );
+        }
         pubsub = Some(runtime);
     }
     drop(server_failure);
+    console_wiring::ready(&HookContext {
+        functions: functions.as_ref(),
+        inventory: Some(&inventory),
+        pubsub: pubsub.as_ref(),
+        tasks: tasks.as_ref(),
+        ..hooks
+    });
 
     announce_ready(&logging, function_count);
 
@@ -736,8 +860,8 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             Some(failed.unwrap_or_else(|| "service monitor closed".to_owned()))
         }
         error = follow_functions_inventory(
-            functions.as_ref(), background_receiver, &config,
-            pubsub.as_mut(), scheduler.as_mut(), tasks.as_ref(), &logging,
+            functions.as_ref(), background_receiver, hooks,
+            pubsub.as_mut(), scheduler.as_mut(), tasks.as_ref(),
         ) => Some(error),
     };
 
@@ -753,6 +877,11 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             functions,
             scheduler,
             tasks,
+            logging,
+            triggers,
+            foreign,
+            compute: compute_parts,
+            pubsub,
             servers,
             shutdown,
             function_count,
@@ -772,15 +901,20 @@ fn announce_ready(logging: &LoggingRuntime, function_count: usize) {
     println!("All emulators ready");
 }
 
+/// Follows Functions reloads (refreshing Pub/Sub schedules, Cloud Tasks
+/// queues and the console's `inventory_refreshed` hooks) and the hub's
+/// background-trigger switches, until something fails. `hooks` carries the
+/// configuration and the log.
 async fn follow_functions_inventory(
     functions: Option<&FunctionsRuntime>,
     mut background: mpsc::UnboundedReceiver<BackgroundRequest>,
-    config: &SuiteConfig,
+    hooks: HookContext<'_>,
     mut pubsub: Option<&mut firenook_pubsub_front::PubsubRuntime>,
     mut scheduler: Option<&mut SchedulerRuntime>,
     tasks: Option<&TasksRuntime>,
-    logging: &LoggingRuntime,
 ) -> String {
+    let config = hooks.config;
+    let logging = hooks.logging;
     let project = config.project_id.as_str();
     let Some(functions) = functions else {
         // Without Functions the hub's background-trigger switches are
@@ -823,6 +957,16 @@ async fn follow_functions_inventory(
         if let Some(tasks) = tasks {
             tasks.refresh_inventory(&inventory, &config.origin(config.ports.functions));
         }
+        console_wiring::inventory_refreshed(
+            &HookContext {
+                functions: Some(functions),
+                inventory: Some(&inventory),
+                pubsub: pubsub.as_deref(),
+                tasks,
+                ..hooks
+            },
+            &inventory,
+        );
         let count = inventory.functions().count();
         logging.record(
             "INFO",
@@ -928,8 +1072,9 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
     };
     import_suite(config, &store, auth.as_deref(), storage.as_deref()).await?;
 
+    let foreign = ForeignProjects::default();
     let (firestore_routes, console_firestore, request_history) =
-        match prepare_firestore(config, &store, &triggers, &logging)? {
+        match prepare_firestore(config, &store, &triggers, &logging, &foreign)? {
             Some(parts) => (
                 Some(parts.routes),
                 Some(parts.console),
@@ -938,23 +1083,8 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
             None => (None, None, None),
         };
 
-    // Auth's operational lines (OOB links, verification codes, server
-    // errors) reach the console and the Emulator UI log like the official
-    // CLI's `i  auth: ...` output.
     if let Some(auth) = &auth {
-        let auth_logging = logging.clone();
-        auth.set_log_sink(Arc::new(move |kind: &str, text: &str| {
-            let level = match kind {
-                "BULLET" | "SUCCESS" => "INFO",
-                other => other,
-            };
-            if level == "WARN" || level == "ERROR" {
-                eprintln!("firenook auth: {text}");
-            } else {
-                println!("firenook auth: {text}");
-            }
-            auth_logging.record(level, Some("auth"), text.to_owned());
-        }));
+        forward_auth_log(auth, &logging);
     }
     let directory = suite_directory(config)?;
     let (export_sender, export_receiver) = mpsc::channel(4);
@@ -963,9 +1093,9 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         directory: directory.clone(),
         locator_file: locator_path(config),
         pid: std::process::id(),
-        exporter: export_sender,
+        exporter: export_sender.clone(),
         triggers: triggers.clone(),
-        background: Some(background_sender),
+        background: Some(background_sender.clone()),
     })
     .map_err(|error| failure(format!("Hub failed to start: {error}")))?;
     let ui = match ui_client {
@@ -989,7 +1119,29 @@ async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRunti
         ui,
         export_receiver,
         background_receiver,
+        export_sender,
+        background_sender,
+        foreign,
     })
+}
+
+/// Auth's operational lines (OOB links, verification codes, server errors)
+/// reach the console and the Emulator UI log like the official CLI's
+/// `i  auth: ...` output.
+fn forward_auth_log(auth: &AuthRuntime, logging: &LoggingRuntime) {
+    let auth_logging = logging.clone();
+    auth.set_log_sink(Arc::new(move |kind: &str, text: &str| {
+        let level = match kind {
+            "BULLET" | "SUCCESS" => "INFO",
+            other => other,
+        };
+        if level == "WARN" || level == "ERROR" {
+            eprintln!("firenook auth: {text}");
+        } else {
+            println!("firenook auth: {text}");
+        }
+        auth_logging.record(level, Some("auth"), text.to_owned());
+    }));
 }
 
 /// The log runtime with the `--debug-log` sink and the startup lines.
@@ -1024,6 +1176,7 @@ fn prepare_firestore(
     store: &Store,
     triggers: &TriggerRegistry,
     logging: &LoggingRuntime,
+    foreign: &ForeignProjects,
 ) -> Result<Option<FirestoreParts>, SuiteRuntimeError> {
     if !config.services.firestore {
         return Ok(None);
@@ -1049,7 +1202,6 @@ fn prepare_firestore(
         service.clone(),
     )
     .merge(webchannel_router(FirestoreBackend::new(service.clone())));
-    let firestore_http = project_scope::apply(firestore_http, config, logging);
     let schema = SchemaIndex::attach(store, &config.project_id);
     let console = ConsoleFirestoreParts {
         rest: rest_router(
@@ -1097,11 +1249,29 @@ fn prepare_firestore(
         rules_evaluator: RulesEvaluator::new(&rules_for_console, store, &config.project_id),
         rules_runtime: rules_for_console,
     };
+    // REST, WebChannel and gRPC each name the project their own way; one
+    // scope covers the three.
+    let routes = tonic::service::Routes::from(firestore_http).add_service(service.into_server());
     Ok(Some(FirestoreParts {
-        routes: tonic::service::Routes::from(firestore_http).add_service(service.into_server()),
+        routes: project_scope::apply_routes(routes, config, logging, foreign, "firestore"),
         console,
         request_history,
     }))
+}
+
+impl ShutdownSuite {
+    /// What the console's `before_finish` hooks read.
+    fn hooks(&self) -> HookContext<'_> {
+        HookContext {
+            compute: self.compute.as_ref(),
+            auth: self.auth.as_ref(),
+            storage: self.storage.as_ref(),
+            functions: self.functions.as_ref(),
+            pubsub: self.pubsub.as_ref(),
+            tasks: self.tasks.as_ref(),
+            ..HookContext::new(&self.config, &self.logging, &self.foreign, &self.triggers)
+        }
+    }
 }
 
 async fn finish_suite(
@@ -1142,6 +1312,9 @@ async fn finish_suite(
         }
         None => 0,
     };
+    // Each console stream's last work, in the fixed order, while every
+    // service it may need is still up.
+    console_wiring::before_finish(&suite.hooks()).await;
     // Drain background delivery while both the Node workers and the Rust data
     // services they call remain available. The scheduler is stopped first, and
     // a coordinated suite shutdown has no external clients admitting new work.
@@ -1727,6 +1900,7 @@ fn spawn_static_servers(
     listeners: &mut ListenerSet,
     applications: StaticApplications,
     logging: &LoggingRuntime,
+    foreign: &ForeignProjects,
     shutdown: &watch::Sender<bool>,
     failed: &mpsc::UnboundedSender<String>,
 ) -> Result<Vec<JoinHandle<()>>, SuiteRuntimeError> {
@@ -1759,7 +1933,7 @@ fn spawn_static_servers(
         servers.push(spawn_axum(
             "auth",
             listeners.take("auth")?,
-            project_scope::apply(auth, config, logging),
+            project_scope::apply(auth, config, logging, foreign, "auth"),
             shutdown.subscribe(),
             failed.clone(),
         ));
@@ -1920,11 +2094,15 @@ impl firenook_auth_front::BlockingResolver for BlockingBridge {
     }
 }
 
+/// Starts the owned Functions runtime with what the console's
+/// `functions_options` hooks put in `console`.
 async fn start_functions_runtime(
     config: &SuiteConfig,
     triggers: TriggerRegistry,
     logging: &LoggingRuntime,
+    console: FunctionsConsoleOptions,
 ) -> Result<FunctionsRuntime, SuiteRuntimeError> {
+    let FunctionsConsoleOptions {} = console;
     let firebase_json: serde_json::Value = serde_json::from_slice(
         &tokio::fs::read(&config.firebase_json)
             .await

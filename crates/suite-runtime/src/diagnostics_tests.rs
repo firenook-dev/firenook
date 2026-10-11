@@ -35,6 +35,7 @@ async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_c
             &mut ListenerSet(listeners),
             applications,
             &logging,
+            &firenook_console_front::ForeignProjects::default(),
             &shutdown,
             &failed,
         )
@@ -179,5 +180,6 @@ pub(super) fn test_config() -> SuiteConfig {
             tasks: 11,
         },
         minimum_functions: 0,
+        launch: None,
     }
 }

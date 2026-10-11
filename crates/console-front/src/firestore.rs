@@ -32,11 +32,14 @@ use ts_rs::TS;
 use crate::api_error::ApiError;
 use crate::databases::DatabaseCatalog;
 use crate::explain::QueryExplainer;
+use crate::http::forwarded;
+use crate::live::badges::{BadgeKind, BadgeNoun};
 use crate::live::replay::{ReplayOptions, replay_topic};
 use crate::live::{LiveTopic, ResetReason, TopicEvent, TopicStream, topic_params};
 use crate::rules::RulesEditor;
 use crate::rules_eval::RulesEvaluator;
 use crate::schema::SchemaIndex;
+use crate::section::{Section, SectionContext, SectionStatus, SectionSummary};
 use crate::time::rfc3339;
 
 /// What the change ring keeps: 20,000 batches or 4 MiB of paths, and never
@@ -61,6 +64,7 @@ const KEYS_PER_WINDOW: usize = 1_000;
 pub(crate) const REST_PREFIXES: [&str; 2] = ["/v1", "/emulator"];
 
 /// The Firestore services the console mounts.
+#[derive(Clone)]
 pub struct FirestoreConsole {
     /// A REST front sharing the engine's service, nested under
     /// `/api/v1/firestore` so the Firestore REST protocol is same-origin.
@@ -534,10 +538,15 @@ fn merged_kind(first: ChangeKind, last: ChangeKind) -> ChangeKind {
     }
 }
 
+/// Where the Firestore REST front is mounted, as the browser sees it.
+const REST_MOUNT: &str = "/console/api/v1/firestore";
+
 /// The console's Firestore routes: the schema index, the database list, the
 /// query explainer, the rules, the Requests feed and the REST front, mounted
 /// together under `/api/v1/firestore`. The change feed is not a route: it is
-/// the live channel's `firestore.changes` topic.
+/// the live channel's `firestore.changes` topic. The REST front is a
+/// service's own application on the console origin, so it goes through
+/// `forwarded`.
 pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
     let mut router = console
         .schema
@@ -549,7 +558,45 @@ pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
     if let Some(requests) = console.requests {
         router = router.merge(requests);
     }
-    router.merge(console.rest)
+    router.merge(forwarded(console.rest, REST_MOUNT))
+}
+
+/// The Firestore section: the data page and the rules page.
+pub(crate) struct FirestoreSection(pub(crate) FirestoreConsole);
+
+/// What the `firestore.rules` badge counts.
+fn rules_badge_noun() -> BadgeNoun {
+    BadgeNoun::new("rules file does not compile", "rules files do not compile")
+}
+
+impl Section for FirestoreSection {
+    fn statuses(&self) -> Vec<SectionStatus> {
+        vec![SectionStatus::ready("firestore")]
+    }
+
+    fn router(&self, context: &SectionContext) -> Router {
+        // The badge task lives as long as the suite: it counts the
+        // configured databases whose rules file the watcher last found
+        // broken, from now on every file check.
+        self.0.rules.spawn_badge(
+            context
+                .badges
+                .handle("firestore.rules", BadgeKind::Gauge, rules_badge_noun()),
+            context.shutdown.clone(),
+        );
+        Router::new().nest("/firestore", firestore_router(self.0.clone()))
+    }
+
+    fn topics(&self, _context: &SectionContext) -> Vec<Arc<dyn LiveTopic>> {
+        vec![
+            Arc::new(self.0.changes.topic()),
+            Arc::new(self.0.rules.topic()),
+        ]
+    }
+
+    fn summary(&self, _id: &str) -> Option<SectionSummary> {
+        crate::observe::firestore_data::summary(&self.0)
+    }
 }
 
 #[cfg(test)]

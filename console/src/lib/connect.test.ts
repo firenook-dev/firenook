@@ -18,7 +18,7 @@ const PORTS: Record<string, number> = {
 function status(project = 'demo-shop', host = '127.0.0.1'): ConsoleStatus {
   return {
     projectId: project,
-    engine: { name: 'Firenook', version: null, revision: null },
+    engine: { name: 'Firenook', version: null, revision: null, consoleBuild: 'test' },
     services: Object.entries(PORTS).map(([name, port]) => ({
       name,
       host,
@@ -26,6 +26,21 @@ function status(project = 'demo-shop', host = '127.0.0.1'): ConsoleStatus {
       listening: true,
       pid: null,
     })),
+    instance: 'test-instance',
+    startedAt: '2026-01-01T00:00:00Z',
+    sections: [],
+    features: { diagnostics: true },
+    unsupported: [],
+    backgroundTriggers: { enabled: true },
+    data: {
+      mode: 'memory',
+      stateDir: null,
+      resumed: false,
+      importedFrom: null,
+      exportOnExit: null,
+      durability: 'write-behind',
+    },
+    foreignProjects: [],
   }
 }
 

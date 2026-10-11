@@ -20,7 +20,9 @@
 //! - `end`: [`LiveEnd`], the engine closed one subscription;
 //! - `stopping`: `{}`, the engine is stopping; the stream ends after it.
 
+pub(crate) mod badges;
 pub(crate) mod replay;
+pub(crate) mod shell;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -788,6 +790,7 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     LiveSubscriptionsResponse::export_all(config).expect("TypeScript bindings written");
     LiveReset::export_all(config).expect("TypeScript bindings written");
     LiveEnd::export_all(config).expect("TypeScript bindings written");
+    badges::BadgeSet::export_all(config).expect("TypeScript bindings written");
 }
 
 #[cfg(test)]

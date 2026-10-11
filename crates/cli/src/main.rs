@@ -26,8 +26,8 @@ use firenook_rest_front::{
 use firenook_rules_runtime::RulesRuntime;
 use firenook_suite_front::EngineRelease;
 use firenook_suite_runtime::{
-    DEFAULT_FIRESTORE_DATABASE, FirestoreDatabaseConfig, ServiceSelection, StorageBucketConfig,
-    StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
+    DEFAULT_FIRESTORE_DATABASE, FirestoreDatabaseConfig, LaunchContext, ServiceSelection,
+    StorageBucketConfig, StorageRulesConfig, SuiteConfig, SuitePorts, run as run_suite,
 };
 use firenook_webchannel_front::{FirestoreBackend, router as webchannel_router};
 use serde::Deserialize;
@@ -345,6 +345,12 @@ struct SuiteArgs {
     /// or `::` without this flag, the console answers any host name.
     #[arg(long = "allowed-hosts", value_delimiter = ',')]
     allowed_hosts: Vec<String>,
+    /// What the npm launcher knew when it started the engine, as JSON: why
+    /// each service is not started, the firebase.json entries it skipped
+    /// and the command as typed, so the console can say why a section is
+    /// absent and how to turn it on. Optional; never executed.
+    #[arg(long = "launch-context", value_name = "JSON")]
+    launch_context: Option<String>,
     /// The data services to start (comma-separated: firestore, auth,
     /// storage, functions, pubsub; `extensions` means functions). Default:
     /// every service. Eventarc and Tasks follow Functions; the hub always runs.
@@ -814,6 +820,11 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
             .transpose()?,
         ports,
         minimum_functions: arguments.minimum_functions,
+        launch: arguments
+            .launch_context
+            .as_deref()
+            .map(LaunchContext::from_flag)
+            .transpose()?,
     })
 }
 
@@ -1927,6 +1938,56 @@ mod tests {
             panic!("expected suite command");
         };
         assert!(disabled.no_diagnostics);
+    }
+
+    #[test]
+    fn the_launch_context_reaches_the_suite_and_invalid_json_names_the_flag() {
+        let project = std::env::temp_dir().join(format!(
+            "firenook-cli-launch-{}-{}",
+            std::process::id(),
+            TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&project).expect("project");
+        fs::write(project.join("firebase.json"), "{}").expect("firebase.json");
+        let resolve = |context: &str| {
+            let project_dir = project.display().to_string();
+            let state = project.join("state").display().to_string();
+            let cli = Cli::try_parse_from([
+                "firenook",
+                "suite",
+                "--project-dir",
+                &project_dir,
+                "--project-id",
+                "demo-launch",
+                "--node",
+                "node",
+                "--ui-archive",
+                "ui.zip",
+                "--state-dir",
+                &state,
+                "--launch-context",
+                context,
+            ])
+            .expect("suite command should parse");
+            let Command::Suite(arguments) = cli.command else {
+                panic!("expected suite command");
+            };
+            resolve_suite_config(&arguments)
+        };
+        let config = resolve(
+            r#"{"services":{"storage":"not-configured"},"skipped":["database"],"command":"firenook emulators:start","args":["--only","firestore"]}"#,
+        )
+        .expect("resolved");
+        let launch = config.launch.expect("a launch context");
+        assert_eq!(
+            launch.services["storage"],
+            firenook_suite_runtime::LaunchReason::NotConfigured
+        );
+        assert_eq!(launch.skipped, ["database"]);
+        assert_eq!(launch.args, ["--only", "firestore"]);
+        let error = resolve("{oops").expect_err("refused");
+        assert!(error.starts_with("--launch-context "), "{error}");
+        let _ = fs::remove_dir_all(&project);
     }
 
     #[test]

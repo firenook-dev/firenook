@@ -384,7 +384,8 @@ async fn readiness() -> Json<JsonValue> {
 
 // Inventory for the local UI: configured buckets and buckets with native objects.
 // This does not implement the cloud bucket-management/lifecycle API.
-async fn list_buckets(State(state): State<StorageState>) -> Json<JsonValue> {
+async fn list_buckets(State(state): State<StorageState>, headers: HeaderMap) -> Json<JsonValue> {
+    let origin = request_origin(&headers, &state.config.origin);
     let mut names = BTreeSet::new();
     if let Some(NativeRulesConfig {
         source: RulesSource::PerBucket(buckets),
@@ -407,7 +408,7 @@ async fn list_buckets(State(state): State<StorageState>) -> Json<JsonValue> {
         .map(|name| {
             json!({
                 "kind":"storage#bucket", "name":name, "id":name,
-                "selfLink":format!("{}/v1/b/{}", state.config.origin, percent_encode(&name)),
+                "selfLink":format!("{origin}/v1/b/{}", percent_encode(&name)),
                 "timeCreated":state.started_at, "updated":state.started_at,
                 "projectNumber":"000000000000", "metageneration":"1", "location":"US",
                 "storageClass":"STANDARD", "etag":"====", "locationType":"multi-region"
@@ -959,7 +960,11 @@ async fn gcs_multipart_upload(
         summarize_file(path).await?,
     )
     .await?;
-    Ok(Json(gcs_metadata(state, &object)).into_response())
+    Ok(Json(gcs_metadata(
+        &request_origin(headers, &state.config.origin),
+        &object,
+    ))
+    .into_response())
 }
 
 async fn gcs_resumable_start(
@@ -1030,7 +1035,7 @@ async fn gcs_resumable_start(
         .map_err(io_error)?;
     let location = format!(
         "{}/upload/storage/v1/b/{}/o?name={}&uploadType=resumable&upload_id={}",
-        state.config.origin.trim_end_matches('/'),
+        request_origin(headers, &state.config.origin),
         percent_encode(bucket),
         percent_encode(&name),
         percent_encode(&id)
@@ -1064,7 +1069,11 @@ async fn gcs_media_upload(
         uploaded,
     )
     .await?;
-    Ok(Json(gcs_metadata(state, &object)).into_response())
+    Ok(Json(gcs_metadata(
+        &request_origin(headers, &state.config.origin),
+        &object,
+    ))
+    .into_response())
 }
 
 async fn gcs_resumable_chunk(
@@ -1136,15 +1145,20 @@ async fn gcs_resumable_chunk(
         uploaded,
     )
     .await?;
-    Ok(Json(gcs_metadata(&state, &object)).into_response())
+    Ok(Json(gcs_metadata(
+        &request_origin(&headers, &state.config.origin),
+        &object,
+    ))
+    .into_response())
 }
 
 async fn gcs_list(
     State(state): State<StorageState>,
     Path(bucket): Path<String>,
     RawQuery(query): RawQuery,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<JsonValue>, StorageApiError> {
+    let origin = request_origin(&headers, &state.config.origin);
     let query = query_fields(query.as_deref());
     let prefix = query.get("prefix").map_or("", String::as_str);
     let delimiter = query.get("delimiter").map(String::as_str);
@@ -1158,7 +1172,7 @@ async fn gcs_list(
     let items = page
         .items
         .into_iter()
-        .map(|object| gcs_metadata(&state, object))
+        .map(|object| gcs_metadata(&origin, object))
         .collect::<Vec<_>>();
     let mut response = JsonMap::from_iter([(
         "kind".to_owned(),
@@ -1271,7 +1285,11 @@ async fn gcs_metadata_or_copy(
     if media {
         file_response(&state, &stored, &headers).await
     } else {
-        Ok(Json(gcs_metadata(&state, &stored)).into_response())
+        Ok(Json(gcs_metadata(
+            &request_origin(&headers, &state.config.origin),
+            &stored,
+        ))
+        .into_response())
     }
 }
 
@@ -1307,7 +1325,10 @@ async fn gcs_patch(
         false,
     )
     .await?;
-    Ok(Json(gcs_metadata(&state, &object)))
+    Ok(Json(gcs_metadata(
+        &request_origin(&headers, &state.config.origin),
+        &object,
+    )))
 }
 
 async fn gcs_delete(
@@ -1379,7 +1400,10 @@ async fn gcs_alias_copy(
         uploaded,
     )
     .await?;
-    Ok(Json(gcs_metadata(&state, &object)))
+    Ok(Json(gcs_metadata(
+        &request_origin(&headers, &state.config.origin),
+        &object,
+    )))
 }
 
 async fn internal_export(
@@ -2087,7 +2111,47 @@ fn firebase_metadata(object: &StoredObject) -> JsonValue {
     value
 }
 
-fn gcs_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
+/// The origin a response's URLs point at: the forwarded host, scheme and
+/// prefix when the console's mount sent them (`x-forwarded-host`,
+/// `x-forwarded-proto`, `x-forwarded-prefix`), else the configured origin.
+/// A direct client of the Storage port sends no such headers and sees the
+/// configured origin; one that sends them itself changes only the URLs in
+/// its own answers.
+fn request_origin(headers: &HeaderMap, configured: &str) -> String {
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    let Some(host) = header("x-forwarded-host").filter(|host| {
+        host.len() <= 255
+            && host.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(byte, b'.' | b'-' | b'_' | b':' | b'[' | b']')
+            })
+    }) else {
+        return configured.trim_end_matches('/').to_owned();
+    };
+    let scheme = match header("x-forwarded-proto") {
+        Some("https") => "https",
+        _ => "http",
+    };
+    let prefix = header("x-forwarded-prefix")
+        .filter(|prefix| {
+            prefix.starts_with('/')
+                && prefix.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'-' | b'_')
+                })
+        })
+        .map_or("", |prefix| prefix.trim_end_matches('/'));
+    format!("{scheme}://{host}{prefix}")
+}
+
+/// Object metadata as the JSON API writes it, with its links under `origin`
+/// (`request_origin`, or the configured origin for an event).
+fn gcs_metadata(origin: &str, object: &StoredObject) -> JsonValue {
     let mut value = base_metadata(object, true);
     value["crc32c"] = json!(BASE64.encode(object.crc32c.to_be_bytes()));
     value["timeStorageClassUpdated"] = json!(object.time_created);
@@ -2096,7 +2160,7 @@ fn gcs_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
         object.bucket, object.name, object.generation
     ));
     let encoded = percent_encode(&object.name);
-    let origin = state.config.origin.trim_end_matches('/');
+    let origin = origin.trim_end_matches('/');
     value["selfLink"] = json!(format!(
         "{origin}/storage/v1/b/{}/o/{encoded}",
         percent_encode(&object.bucket)
@@ -2113,7 +2177,9 @@ fn gcs_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
 }
 
 fn event_metadata(state: &StorageState, object: &StoredObject) -> JsonValue {
-    let mut value = gcs_metadata(state, object);
+    // A function's event is not an answer to a request: its links name the
+    // configured origin, as before.
+    let mut value = gcs_metadata(&state.config.origin, object);
     let mut metadata = object.custom_metadata.clone();
     if !object.download_tokens.is_empty() {
         metadata.insert(
@@ -2955,6 +3021,143 @@ mod tests {
         assert!(reopened.checkpoint_native_state().is_err());
         reopened.shutdown().await.expect("clean stop");
         std::fs::remove_dir_all(root).expect("remove owned test state");
+    }
+
+    #[tokio::test]
+    async fn urls_follow_the_console_mount_that_forwarded_the_request() {
+        const MOUNT: &str = "/console/api/v1/storage/native";
+        let (runtime, _dispatches, _root) = runtime("forwarded", None).await;
+        let forwarded = |builder: axum::http::request::Builder| {
+            builder
+                .header("x-forwarded-host", "localhost:4000")
+                .header("x-forwarded-proto", "http")
+                .header("x-forwarded-prefix", MOUNT)
+        };
+        let start = runtime
+            .application()
+            .oneshot(
+                forwarded(Request::builder().method(Method::POST).uri(format!(
+                    "/upload/storage/v1/b/{ASSETS_BUCKET}/o?uploadType=resumable&name=notes.txt"
+                )))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .expect("start"),
+            )
+            .await
+            .expect("start response");
+        assert_eq!(start.status(), StatusCode::OK);
+        let location = start.headers()[header::LOCATION]
+            .to_str()
+            .expect("header")
+            .to_owned();
+        let through_mount = format!("http://localhost:4000{MOUNT}/upload/storage/v1/b/");
+        assert!(location.starts_with(&through_mount), "{location}");
+        // The upload continues through the mount: the path under it is the
+        // Storage application's own.
+        let path = location.trim_start_matches(&format!("http://localhost:4000{MOUNT}"));
+        let finish = runtime
+            .application()
+            .oneshot(
+                forwarded(Request::builder().method(Method::PUT).uri(path))
+                    .header(header::CONTENT_RANGE, "bytes 0-4/5")
+                    .body(Body::from("hello"))
+                    .expect("finish"),
+            )
+            .await
+            .expect("finish response");
+        assert_eq!(finish.status(), StatusCode::OK);
+        let object = json(finish).await;
+        let base = format!("http://localhost:4000{MOUNT}");
+        assert!(
+            object["selfLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with(&base)),
+            "{object}"
+        );
+        assert!(
+            object["mediaLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with(&base)),
+            "{object}"
+        );
+        // A direct client sees the configured origin, as before.
+        let direct = runtime
+            .application()
+            .oneshot(request(
+                Method::GET,
+                &format!("/storage/v1/b/{ASSETS_BUCKET}/o"),
+                Body::empty(),
+            ))
+            .await
+            .expect("list response");
+        let listed = json(direct).await;
+        assert!(
+            listed["items"][0]["selfLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with("http://127.0.0.1:21002/storage/v1/b/")),
+            "{listed}"
+        );
+        let buckets = runtime
+            .application()
+            .oneshot(
+                forwarded(Request::builder().method(Method::GET).uri("/b"))
+                    .body(Body::empty())
+                    .expect("buckets"),
+            )
+            .await
+            .expect("buckets response");
+        let buckets = json(buckets).await;
+        assert!(
+            buckets["items"][0]["selfLink"]
+                .as_str()
+                .is_some_and(|link| link.starts_with(&format!("{base}/v1/b/"))),
+            "{buckets}"
+        );
+    }
+
+    #[test]
+    fn a_forwarded_origin_is_used_only_when_it_is_a_plain_address() {
+        let headers = |pairs: &[(&'static str, &'static str)]| {
+            let mut map = HeaderMap::new();
+            for (name, value) in pairs {
+                map.insert(*name, HeaderValue::from_static(value));
+            }
+            map
+        };
+        let configured = "http://127.0.0.1:9199/";
+        assert_eq!(
+            request_origin(&headers(&[]), configured),
+            "http://127.0.0.1:9199"
+        );
+        assert_eq!(
+            request_origin(
+                &headers(&[
+                    ("x-forwarded-host", "console.example.test"),
+                    ("x-forwarded-proto", "https"),
+                    ("x-forwarded-prefix", "/console/api/v1/storage/native/"),
+                ]),
+                configured
+            ),
+            "https://console.example.test/console/api/v1/storage/native"
+        );
+        assert_eq!(
+            request_origin(
+                &headers(&[("x-forwarded-host", "evil.example/x?")]),
+                configured
+            ),
+            "http://127.0.0.1:9199"
+        );
+        assert_eq!(
+            request_origin(
+                &headers(&[
+                    ("x-forwarded-host", "localhost:4000"),
+                    ("x-forwarded-proto", "gopher"),
+                    ("x-forwarded-prefix", "no-slash"),
+                ]),
+                configured
+            ),
+            "http://localhost:4000"
+        );
     }
 
     #[tokio::test]
