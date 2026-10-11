@@ -15,6 +15,7 @@ base64.workspace = true
 crc32c.workspace = true
 firenook-functions-bridge = { path = "../functions-bridge" }
 firenook-rules-engine = { path = "../rules-engine" }
+firenook-rules-runtime = { path = "../rules-runtime" }
 flate2.workspace = true
 futures-util.workspace = true
 md-5.workspace = true

@@ -9,6 +9,8 @@ use time::OffsetDateTime;
 use tokio::sync::broadcast;
 
 use crate::folder_index::{self, FolderIndexError, FolderStats};
+use crate::rules::RulesMode;
+use crate::rules_manager::StorageRulesHandle;
 use crate::staging::{self, InFlight};
 use crate::{ChangeEvent, ObjectChangeRecord, StorageState, known_buckets, lock};
 
@@ -33,6 +35,32 @@ pub struct StorageConsoleApi {
 impl StorageConsoleApi {
     pub(crate) const fn new(state: StorageState) -> Self {
         Self { state }
+    }
+
+    /// The bucket `getStorage()` uses when given none.
+    #[must_use]
+    pub fn default_bucket(&self) -> String {
+        self.state.default_bucket()
+    }
+
+    /// How `firebase.json` assigns rules to buckets; `None` when the
+    /// service runs without rules (every request allowed).
+    #[must_use]
+    pub fn rules_mode(&self) -> Option<RulesMode> {
+        self.state
+            .rules
+            .as_ref()
+            .map(crate::rules::NativeRules::mode)
+    }
+
+    /// The Storage rules: what is in force, installs, history, decisions,
+    /// dry runs and coverage; `None` when the service runs without rules.
+    #[must_use]
+    pub fn rules(&self) -> Option<StorageRulesHandle> {
+        self.state
+            .rules
+            .is_some()
+            .then(|| StorageRulesHandle::new(self.state.clone()))
     }
 
     /// The suite runs Functions, so object changes send Storage events.
@@ -70,7 +98,9 @@ impl StorageConsoleApi {
     pub fn summary(&self) -> StorageSummaryCounts {
         folder_index::ensure_built(&self.state);
         let data = lock(&self.state.inner);
-        let buckets = known_buckets(&self.state, &data).len();
+        let mut buckets = known_buckets(&self.state, &data);
+        buckets.insert(self.state.default_bucket());
+        let buckets = buckets.len();
         match &data.folders {
             Some(index) if index.is_built() => {
                 let (objects, bytes) =

@@ -35,12 +35,15 @@ use tokio::io::{AsyncWriteExt as _, BufReader};
 
 mod changes;
 mod console;
+mod decisions;
 mod download;
+mod dry_run;
 mod folder_index;
 mod listing;
 mod log;
 mod metadata;
 mod rules;
+mod rules_manager;
 mod staging;
 mod tasks;
 pub use changes::{
@@ -48,19 +51,33 @@ pub use changes::{
 };
 use changes::{ChangeFeed, via_console};
 pub use console::{StorageConsoleApi, StorageSummaryCounts};
+pub use decisions::{DecisionLog, RE_RUNNABLE_BYTES, RE_RUNNABLE_DECISIONS, StorageDecisionRecord};
+use decisions::{RulesCheck, judge};
 use download::file_response;
+pub use dry_run::{
+    DOCUMENT_ACCESS_LIMIT, DecisionAllow, DryRunRequest, DryRunResult, ProposedObject,
+    RecordedObject, RulesAuth, RulesObjectView,
+};
+pub use firenook_rules_runtime::coverage::CoverageError;
+pub use firenook_rules_runtime::{DecisionOutcome, InstalledVersion, LoadError, RulesOrigin};
 use folder_index::{FolderIndex, IndexControl};
-pub use folder_index::{FolderIndexError, FolderStats};
+pub use folder_index::{
+    FolderIndexError, FolderShape, FolderStats, SHAPE_DEPTH, SHAPE_GROUP, SHAPE_PATTERNS,
+};
 #[cfg(test)]
 use listing::ObjectListPage;
 use listing::list_objects;
 use log::LogHandle;
 pub use log::{LogSink, StorageLogLevel, StorageLogLine};
 pub use rules::{
-    BucketRules, FirestoreDocuments, NativeRulesConfig, NoFirestoreDocuments, RulesFile,
-    RulesSource,
+    BucketRules, FirestoreDocuments, InstalledRules, NativeRulesConfig, NoFirestoreDocuments,
+    Operation, RulesFile, RulesFiles, RulesMode, RulesScope, RulesSource, StorageRulesEvent,
 };
-use rules::{NativeRules, Operation, Verdict};
+use rules::{NativeRules, Verdict};
+pub use rules_manager::{
+    ACCESS_NAMES, ACCESS_OPERATIONS, AccessRow, AccessVerdict, ConsoleRefusal, DecisionDetail,
+    FolderRules, Impact, ImpactFlip, StorageRulesHandle, StorageRulesMap,
+};
 pub use staging::InFlight;
 use staging::{StagedFile, StagingGauge, staging_path};
 use tasks::ConsoleTasks;
@@ -78,6 +95,8 @@ mod pagination_tests;
 mod persistence_tests;
 #[cfg(test)]
 mod rules_replay_tests;
+#[cfg(test)]
+mod rules_tests;
 #[cfg(test)]
 mod staging_tests;
 
@@ -105,12 +124,28 @@ pub struct StorageOptions {
     /// The suite runs the Functions emulator. Without it no Storage event is
     /// queued at all, as the official emulator sends none then.
     pub functions: bool,
+    /// The bucket `getStorage()` uses when given none; the project's
+    /// `<project>.appspot.com` when not said.
+    pub default_bucket: Option<String>,
+    /// The rules files `firebase.json` names (none for a demo project's
+    /// open default); `None` when not said, which leaves the rules mode to
+    /// the shape of the configured sources and no file to save to.
+    pub rules_files: Option<RulesFiles>,
+    /// Record every rules decision, its re-runnable context and coverage
+    /// (the suite's diagnostics, on by default there).
+    pub diagnostics: bool,
 }
 
 impl Default for StorageOptions {
-    /// Today's behaviour for a caller that says nothing: events are queued.
+    /// Today's behaviour for a caller that says nothing: events are queued,
+    /// nothing is recorded.
     fn default() -> Self {
-        Self { functions: true }
+        Self {
+            functions: true,
+            default_bucket: None,
+            rules_files: None,
+            diagnostics: false,
+        }
     }
 }
 
@@ -164,7 +199,13 @@ impl StorageRuntime {
                 staging::format_bytes(orphan_bytes)
             );
         }
-        let rules = config.rules.as_ref().map(NativeRules::start).transpose()?;
+        let rules = config
+            .rules
+            .as_ref()
+            .map(|rules| NativeRules::start(rules, options.rules_files.as_ref()))
+            .transpose()?;
+        let decisions = (options.diagnostics && rules.is_some())
+            .then(|| Arc::new(decisions::DecisionLog::default()));
         let state = StorageState {
             started_at: now_rfc3339(),
             metadata: Arc::new(metadata),
@@ -174,12 +215,14 @@ impl StorageRuntime {
             inner: Arc::new(Mutex::new(data)),
             mutation: Arc::new(tokio::sync::Mutex::new(())),
             rules,
+            decisions,
             queue,
             background,
             staging: Arc::new(StagingGauge::default()),
             log: LogHandle::default(),
             tasks: Arc::new(ConsoleTasks::default()),
             index: Arc::new(IndexControl::default()),
+            shapes: Arc::default(),
         };
         let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
@@ -363,6 +406,8 @@ struct StorageState {
     inner: Arc<Mutex<StorageData>>,
     mutation: Arc<tokio::sync::Mutex<()>>,
     rules: Option<NativeRules>,
+    /// Every rules decision, kept while diagnostics are on.
+    decisions: Option<Arc<DecisionLog>>,
     queue: DispatchQueue,
     background: TriggerRegistry,
     /// Bytes staged by uploads in progress, per bucket.
@@ -372,6 +417,8 @@ struct StorageState {
     tasks: Arc<ConsoleTasks>,
     /// The folder index walk's wake-up and failures.
     index: Arc<IndexControl>,
+    /// Folder shapes the rules map last walked, per bucket.
+    shapes: Arc<Mutex<std::collections::HashMap<String, rules_manager::CachedShapes>>>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -670,7 +717,15 @@ async fn v0_upload(
     body: Body,
 ) -> Result<Response, StorageApiError> {
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
+    ensure_ruleset(
+        &state,
+        &bucket,
+        Some((
+            Operation::Create,
+            query.get("name").map_or("", String::as_str),
+        )),
+        &headers,
+    )?;
     if headers.contains_key("x-goog-upload-command") {
         return firebase_resumable(&state, &bucket, &query, &headers, body).await;
     }
@@ -706,7 +761,7 @@ async fn v0_object(
 ) -> Result<Response, StorageApiError> {
     let object = decoded_object(&object);
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
+    ensure_ruleset(&state, &bucket, Some((Operation::Get, &object)), &headers)?;
     // Rules run before the existence check: a missing object is 403 when the
     // rules deny or error and 404 when they allow.
     let stored = get_object(&state, &bucket, &object).ok();
@@ -718,12 +773,15 @@ async fn v0_object(
     if !token_matches {
         authorize(
             &state,
-            &bucket,
-            &object,
-            Operation::Get,
-            stored.as_ref(),
-            None,
-            authorization_header(&headers),
+            &RulesCheck {
+                bucket: &bucket,
+                name: &object,
+                operation: Operation::Get,
+                before: stored.as_ref(),
+                after: None,
+                authorization: authorization_header(&headers),
+                console: via_console(&headers),
+            },
         )?;
     }
     let Some(stored) = stored else {
@@ -911,8 +969,8 @@ async fn v0_list(
     headers: HeaderMap,
 ) -> Result<Json<JsonValue>, StorageApiError> {
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
     let prefix = query.get("prefix").map_or("", String::as_str);
+    ensure_ruleset(&state, &bucket, Some((Operation::List, prefix)), &headers)?;
     if !prefix.is_empty() && !prefix.ends_with('/') {
         return Err(bad_request(
             "The prefix parameter is required to be empty or ends with a single / character.",
@@ -920,12 +978,15 @@ async fn v0_list(
     }
     authorize(
         &state,
-        &bucket,
-        prefix,
-        Operation::List,
-        None,
-        None,
-        authorization_header(&headers),
+        &RulesCheck {
+            bucket: &bucket,
+            name: prefix,
+            operation: Operation::List,
+            before: None,
+            after: None,
+            authorization: authorization_header(&headers),
+            console: via_console(&headers),
+        },
     )?;
     let delimiter = query.get("delimiter").map(String::as_str);
     let page_token = query.get("pageToken").map(String::as_str);
@@ -959,16 +1020,9 @@ async fn v0_patch(
     headers: HeaderMap,
     Json(request): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, StorageApiError> {
-    ensure_ruleset(&state, &bucket)?;
-    let object = update_metadata(
-        &state,
-        &bucket,
-        &decoded_object(&object),
-        &headers,
-        &request,
-        true,
-    )
-    .await?;
+    let name = decoded_object(&object);
+    ensure_ruleset(&state, &bucket, Some((Operation::Update, &name)), &headers)?;
+    let object = update_metadata(&state, &bucket, &name, &headers, &request, true).await?;
     Ok(Json(firebase_metadata(&object)))
 }
 
@@ -980,7 +1034,7 @@ async fn v0_token_action(
 ) -> Result<Json<JsonValue>, StorageApiError> {
     let object_name = decoded_object(&object);
     let query = query_fields(query.as_deref());
-    ensure_ruleset(&state, &bucket)?;
+    ensure_ruleset(&state, &bucket, None, &headers)?;
     // Download-token routes are admin-only in the official emulator, whatever
     // the rules say (storage-rules-v1 bypass-owner-and-download-tokens).
     if !is_owner(&headers) {
@@ -1028,8 +1082,9 @@ async fn v0_delete(
     Path((bucket, object)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, StorageApiError> {
-    ensure_ruleset(&state, &bucket)?;
-    delete_object(&state, &bucket, &decoded_object(&object), &headers, true).await?;
+    let name = decoded_object(&object);
+    ensure_ruleset(&state, &bucket, Some((Operation::Delete, &name)), &headers)?;
+    delete_object(&state, &bucket, &name, &headers, true).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1519,12 +1574,15 @@ async fn update_metadata(
         });
         authorize(
             state,
-            bucket,
-            name,
-            Operation::Update,
-            stored.as_ref().ok(),
-            proposed.as_ref(),
-            authorization_header(headers),
+            &RulesCheck {
+                bucket,
+                name,
+                operation: Operation::Update,
+                before: stored.as_ref().ok(),
+                after: proposed.as_ref(),
+                authorization: authorization_header(headers),
+                console: via_console(headers),
+            },
         )?;
     }
     let mut object = stored.map_err(|error| {
@@ -1567,12 +1625,15 @@ async fn delete_object(
     if enforce_rules {
         authorize(
             state,
-            bucket,
-            name,
-            Operation::Delete,
-            stored.as_ref().ok(),
-            None,
-            authorization_header(headers),
+            &RulesCheck {
+                bucket,
+                name,
+                operation: Operation::Delete,
+                before: stored.as_ref().ok(),
+                after: None,
+                authorization: authorization_header(headers),
+                console: via_console(headers),
+            },
         )?;
     }
     let object = stored.map_err(|error| {
@@ -1964,12 +2025,15 @@ async fn commit_staging(
     if spec.firebase
         && let Err(error) = authorize(
             state,
-            spec.bucket,
-            spec.name,
-            Operation::Create,
-            before.as_ref(),
-            Some(&object),
-            spec.authorization,
+            &RulesCheck {
+                bucket: spec.bucket,
+                name: spec.name,
+                operation: Operation::Create,
+                before: before.as_ref(),
+                after: Some(&object),
+                authorization: spec.authorization,
+                console: spec.console,
+            },
         )
     {
         uploaded.staged.discard();
@@ -2026,52 +2090,80 @@ fn get_object(
 
 /// Refuses every request on a bucket without a loaded ruleset, owner
 /// included, exactly as the official emulator does before any other check.
-fn ensure_ruleset(state: &StorageState, bucket: &str) -> Result<(), StorageApiError> {
+/// A client request refused here is recorded as a decision (`request`
+/// names its operation and object) while diagnostics are on.
+fn ensure_ruleset(
+    state: &StorageState,
+    bucket: &str,
+    request: Option<(Operation, &str)>,
+    headers: &HeaderMap,
+) -> Result<(), StorageApiError> {
     match &state.rules {
-        Some(rules) if !rules.has_ruleset(bucket) => Err(StorageApiError::json(
-            StatusCode::FORBIDDEN,
-            "Permission denied. Storage Emulator has no loaded ruleset.",
-        )),
+        Some(rules) if !rules.has_ruleset(bucket) => {
+            if let Some((operation, name)) = request
+                && !is_owner(headers)
+            {
+                judge(
+                    rules,
+                    state.decisions.as_deref(),
+                    &RulesCheck {
+                        bucket,
+                        name,
+                        operation,
+                        before: None,
+                        after: None,
+                        authorization: authorization_header(headers),
+                        console: via_console(headers),
+                    },
+                );
+            }
+            Err(StorageApiError::json(
+                StatusCode::FORBIDDEN,
+                decisions::NO_RULESET_MESSAGE,
+            ))
+        }
         _ => Ok(()),
     }
 }
 
 /// Evaluates one Firebase (v0) operation. Owner credentials and open mode
 /// skip the rules; a denial or runtime error is 403 with the official
-/// message for the operation's permission class.
+/// message for the operation's permission class. Answers the decision
+/// recorded for an allowed request, while diagnostics are on.
 fn authorize(
     state: &StorageState,
-    bucket: &str,
-    name: &str,
-    operation: Operation,
-    before: Option<&StoredObject>,
-    after: Option<&StoredObject>,
-    authorization: Option<&str>,
-) -> Result<(), StorageApiError> {
+    check: &RulesCheck<'_>,
+) -> Result<Option<String>, StorageApiError> {
     let Some(rules) = &state.rules else {
-        return Ok(());
+        return Ok(None);
     };
-    if authorization.is_some_and(|value| value == "Bearer owner" || value == "Firebase owner") {
-        return Ok(());
+    if check
+        .authorization
+        .is_some_and(|value| value == "Bearer owner" || value == "Firebase owner")
+    {
+        return Ok(None);
     }
-    match rules.verify(bucket, name, operation, before, after, authorization) {
-        Verdict::Allowed => Ok(()),
+    let judged = judge(rules, state.decisions.as_deref(), check);
+    match judged.verdict {
+        Verdict::Allowed => Ok(judged.decision),
         Verdict::Denied(error) => {
             if let Some(error) = error {
                 state.log.emit(
                     StorageLogLevel::Warn,
                     log::RULES,
                     format!(
-                        "{} on gs://{bucket}/{name} failed in the rules: {error}",
-                        operation.method()
+                        "{} on gs://{}/{} failed in the rules: {error}",
+                        check.operation.method(),
+                        check.bucket,
+                        check.name
                     ),
                 );
             }
-            Err(permission_denied(operation.permission()))
+            Err(permission_denied(check.operation.permission()))
         }
         Verdict::NoRuleset => Err(StorageApiError::json(
             StatusCode::FORBIDDEN,
-            "Permission denied. Storage Emulator has no loaded ruleset.",
+            decisions::NO_RULESET_MESSAGE,
         )),
     }
 }
@@ -2152,6 +2244,14 @@ enum StorageEvent {
 }
 
 impl StorageState {
+    /// The bucket `getStorage()` uses when given none.
+    fn default_bucket(&self) -> String {
+        self.options
+            .default_bucket
+            .clone()
+            .unwrap_or_else(|| format!("{}.appspot.com", self.config.project))
+    }
+
     /// Dispatches the event of the change committed at `revision` and
     /// records on its activity record what became of it.
     fn dispatch_change(&self, revision: u64, event: StorageEvent, object: &StoredObject) {

@@ -330,7 +330,15 @@ async fn kinds_and_actors() {
 #[tokio::test]
 async fn delivery_is_reported() {
     // Functions is not in the suite: nothing is queued at all.
-    let mut harness = start("no-functions", StorageOptions { functions: false }, None).await;
+    let mut harness = start(
+        "no-functions",
+        StorageOptions {
+            functions: false,
+            ..StorageOptions::default()
+        },
+        None,
+    )
+    .await;
     assert_eq!(
         harness.upload("a.txt", &[OWNER]).await.status(),
         StatusCode::OK

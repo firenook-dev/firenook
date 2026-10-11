@@ -2,17 +2,23 @@
 //! and evaluated in process with the request model recorded from the official
 //! emulator (`conformance/fixtures/storage-rules-v1`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use firenook_rules_engine::{
-    Auth, DocumentAccess, DocumentAccessError, EvaluationRequest, RequestOperation, Resource,
-    Ruleset, StorageObject, Timestamp, Value, compile,
+    AllowLocation, Auth, Diagnostic, DocumentAccess, DocumentAccessError, EvaluationRequest,
+    RequestOperation, Resource, Ruleset, SourceSpan, StorageObject, Timestamp, Value, compile,
+};
+use firenook_rules_runtime::{
+    InstalledVersion, LoadError, MAXIMUM_VERSIONS, RulesOrigin, source_hash,
 };
 use serde_json::Value as JsonValue;
+use time::OffsetDateTime;
+use tokio::sync::broadcast;
 
 use crate::{StorageError, StoredObject};
 
@@ -89,20 +95,228 @@ impl fmt::Debug for NativeRulesConfig {
     }
 }
 
-#[derive(Clone)]
-enum RulesetTable {
-    Single(Arc<Ruleset>),
-    PerBucket(BTreeMap<String, Arc<Ruleset>>),
+/// Which buckets one installed ruleset governs.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum RulesScope {
+    /// One ruleset for every bucket: `firebase.json` `storage: { rules }`,
+    /// or the open default of a demo project.
+    AllBuckets,
+    /// One bucket's own ruleset: `firebase.json` Storage targets.
+    Bucket(String),
 }
 
-/// Installed rulesets and the document lookup they evaluate against.
+impl RulesScope {
+    /// What a scope's coverage and decisions are filed under: `storage/*`
+    /// or `storage/<bucket>`.
+    #[must_use]
+    pub fn key(&self) -> String {
+        match self {
+            Self::AllBuckets => "storage/*".to_owned(),
+            Self::Bucket(bucket) => format!("storage/{bucket}"),
+        }
+    }
+
+    /// The bucket of a per-bucket scope.
+    #[must_use]
+    pub fn bucket(&self) -> Option<&str> {
+        match self {
+            Self::AllBuckets => None,
+            Self::Bucket(bucket) => Some(bucket),
+        }
+    }
+
+    /// Whether requests to `bucket` are judged by this scope's rules.
+    #[must_use]
+    pub fn governs(&self, bucket: &str) -> bool {
+        match self {
+            Self::AllBuckets => true,
+            Self::Bucket(own) => own == bucket,
+        }
+    }
+}
+
+/// How `firebase.json` assigns Storage rules to buckets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RulesMode {
+    /// `storage: { rules }`: one file governs every bucket.
+    Single,
+    /// `storage: [{ target, rules }]`: each targeted bucket has its own file.
+    PerBucket,
+    /// No `storage` section in a demo project: the emulator's open default
+    /// rules govern every bucket.
+    OpenDefault,
+}
+
+/// The rules files `firebase.json` names, so a console can say which file
+/// governs a scope and save to it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RulesFiles {
+    /// No `storage` section in a demo project: the open default, no file.
+    None,
+    /// One file for every bucket.
+    Single(PathBuf),
+    /// Each targeted bucket's file.
+    PerBucket(BTreeMap<String, PathBuf>),
+}
+
+/// The ruleset in force for a scope, with where it came from.
+#[derive(Debug)]
+pub struct InstalledRules {
+    pub ruleset: Arc<Ruleset>,
+    /// Stable hash of the source, as the Firestore runtime computes it.
+    pub hash: String,
+    pub origin: RulesOrigin,
+    pub installed_at: OffsetDateTime,
+    /// Each allow statement's condition as an editor places it, by the byte
+    /// offset of its `allow`, so a decision's trace names lines and ranges
+    /// without rescanning the source per request.
+    conditions: BTreeMap<usize, SourceSpan>,
+}
+
+impl InstalledRules {
+    fn new(ruleset: Ruleset, origin: RulesOrigin) -> Self {
+        let conditions = condition_spans(&ruleset);
+        Self {
+            hash: source_hash(ruleset.source()),
+            ruleset: Arc::new(ruleset),
+            origin,
+            installed_at: OffsetDateTime::now_utc(),
+            conditions,
+        }
+    }
+
+    /// Compiles `source`, or says why it does not compile.
+    pub(crate) fn compile(source: &str, origin: RulesOrigin) -> Result<Self, Vec<Diagnostic>> {
+        compile(source).map(|ruleset| Self::new(ruleset, origin))
+    }
+
+    /// The source in force.
+    #[must_use]
+    pub fn source(&self) -> &str {
+        self.ruleset.source()
+    }
+
+    /// The condition of the allow statement an evaluation trace names.
+    pub(crate) fn condition(&self, location: AllowLocation) -> SourceSpan {
+        self.conditions
+            .get(&location.byte_offset)
+            .copied()
+            .unwrap_or(SourceSpan {
+                line: location.line,
+                from: 0,
+                to: 0,
+            })
+    }
+
+    fn version(&self) -> Arc<InstalledVersion> {
+        Arc::new(InstalledVersion {
+            hash: self.hash.clone(),
+            source: self.ruleset.shared_source(),
+            origin: self.origin,
+            installed_at: self.installed_at,
+        })
+    }
+}
+
+/// The condition range of every allow statement, by its statement's byte
+/// offset (the offset an evaluation trace carries).
+fn condition_spans(ruleset: &Ruleset) -> BTreeMap<usize, SourceSpan> {
+    let source = ruleset.source();
+    let line_starts = std::iter::once(0)
+        .chain(source.match_indices('\n').map(|(offset, _)| offset + 1))
+        .collect::<Vec<_>>();
+    let mut spans = BTreeMap::new();
+    for block in ruleset.outline().matches {
+        for allow in block.allows {
+            let Some(start) = line_starts.get(allow.statement.line - 1) else {
+                continue;
+            };
+            let Some((offset, _)) = source[*start..]
+                .char_indices()
+                .nth(allow.statement.column - 1)
+            else {
+                continue;
+            };
+            spans.insert(
+                start + offset,
+                SourceSpan {
+                    line: allow.condition_range.line,
+                    from: allow.condition_range.from,
+                    to: allow.condition_range.to,
+                },
+            );
+        }
+    }
+    spans
+}
+
 #[derive(Clone)]
-pub(crate) struct NativeRules {
+enum RulesetTable {
+    Single(Arc<InstalledRules>),
+    PerBucket(BTreeMap<String, Arc<InstalledRules>>),
+}
+
+/// What changed about the Storage rules in force.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StorageRulesEvent {
+    /// A ruleset was installed for the scope.
+    Installed {
+        scope: RulesScope,
+        origin: RulesOrigin,
+    },
+    /// A reload through `/internal/setRules` did not compile, so no ruleset
+    /// is in force and every request is refused until a valid one loads (as
+    /// the official emulator does).
+    Dropped { scope: RulesScope },
+    /// The rules file watcher finished a pass for the scope; its problems,
+    /// if any, are in `file_problems`.
+    FileChecked { scope: RulesScope },
+}
+
+/// Versions of one scope, oldest first, bounded, consecutive identical
+/// sources collapsed.
+type History = VecDeque<Arc<InstalledVersion>>;
+
+#[derive(Default)]
+struct RulesState {
     /// `None` after a failed reload: the official emulator drops the
     /// previous ruleset and refuses every request until a valid one loads
     /// (storage-rules-v1 lifecycle-set-rules).
-    table: Arc<RwLock<Option<RulesetTable>>>,
+    table: Option<RulesetTable>,
+    /// Recorded under the same lock as the install, so a scope's newest
+    /// version is always the ruleset in force.
+    versions: BTreeMap<RulesScope, History>,
+    file_problems: BTreeMap<RulesScope, LoadError>,
+}
+
+impl RulesState {
+    fn record(&mut self, scope: RulesScope, version: &Arc<InstalledVersion>) {
+        let history = self.versions.entry(scope).or_default();
+        if history.back().is_some_and(|last| last.hash == version.hash) {
+            return;
+        }
+        if history.len() == MAXIMUM_VERSIONS {
+            history.pop_front();
+        }
+        history.push_back(Arc::clone(version));
+    }
+}
+
+/// Change notifications retained for a slow subscriber before it is told it
+/// lagged (and re-reads).
+const EVENT_CAPACITY: usize = 64;
+
+/// Installed rulesets, their versions, and the document lookup they
+/// evaluate against.
+#[derive(Clone)]
+pub(crate) struct NativeRules {
+    state: Arc<RwLock<RulesState>>,
     documents: Arc<dyn FirestoreDocuments>,
+    mode: RulesMode,
+    files: Arc<Option<RulesFiles>>,
+    /// The file names the startup sources carried, by scope.
+    names: Arc<BTreeMap<RulesScope, String>>,
+    events: broadcast::Sender<StorageRulesEvent>,
 }
 
 /// Outcome of one rules evaluation.
@@ -114,9 +328,9 @@ pub(crate) enum Verdict {
     NoRuleset,
 }
 
-/// Which service operation a request performs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Operation {
+/// Which Storage operation a request performs, as the rules see it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum Operation {
     Get,
     List,
     Create,
@@ -126,7 +340,8 @@ pub(crate) enum Operation {
 
 impl Operation {
     /// The rules' `request.method` name.
-    pub(crate) const fn method(self) -> &'static str {
+    #[must_use]
+    pub const fn method(self) -> &'static str {
         match self {
             Self::Get => "get",
             Self::List => "list",
@@ -144,7 +359,7 @@ impl Operation {
         }
     }
 
-    const fn request_operation(self) -> RequestOperation {
+    pub(crate) const fn request_operation(self) -> RequestOperation {
         match self {
             Self::Get => RequestOperation::Get,
             Self::List => RequestOperation::List,
@@ -153,50 +368,334 @@ impl Operation {
             Self::Delete => RequestOperation::Delete,
         }
     }
+
+    pub(crate) const fn of_request(operation: RequestOperation) -> Self {
+        match operation {
+            RequestOperation::Get => Self::Get,
+            RequestOperation::List => Self::List,
+            RequestOperation::Create => Self::Create,
+            RequestOperation::Update => Self::Update,
+            RequestOperation::Delete => Self::Delete,
+        }
+    }
 }
 
+/// The message the evaluator's refusal of a list below version 2 carries.
+pub(crate) const LIST_V1_MESSAGE: &str =
+    "Permission denied. List operations are only allowed for rules_version='2'.";
+
 impl NativeRules {
-    pub(crate) fn start(config: &NativeRulesConfig) -> Result<Self, StorageError> {
-        let table = compile_table(&config.source)?;
+    /// Compiles every configured ruleset (a failure is a startup failure)
+    /// and records each as the scope's first version.
+    pub(crate) fn start(
+        config: &NativeRulesConfig,
+        files: Option<&RulesFiles>,
+    ) -> Result<Self, StorageError> {
+        let table = compile_table(&config.source, RulesOrigin::Startup)?;
+        let mode = match (files, &config.source) {
+            (Some(RulesFiles::None), _) => RulesMode::OpenDefault,
+            (Some(RulesFiles::Single(_)), _) | (None, RulesSource::Single(_)) => RulesMode::Single,
+            (Some(RulesFiles::PerBucket(_)), _) | (None, RulesSource::PerBucket(_)) => {
+                RulesMode::PerBucket
+            }
+        };
+        let names = match &config.source {
+            RulesSource::Single(file) => {
+                BTreeMap::from([(RulesScope::AllBuckets, file_name(&file.name))])
+            }
+            RulesSource::PerBucket(buckets) => buckets
+                .iter()
+                .map(|rules| {
+                    (
+                        RulesScope::Bucket(rules.bucket.clone()),
+                        file_name(&rules.name),
+                    )
+                })
+                .collect(),
+        };
+        let mut state = RulesState::default();
+        match &table {
+            RulesetTable::Single(rules) => state.record(RulesScope::AllBuckets, &rules.version()),
+            RulesetTable::PerBucket(buckets) => {
+                for (bucket, rules) in buckets {
+                    state.record(RulesScope::Bucket(bucket.clone()), &rules.version());
+                }
+            }
+        }
+        state.table = Some(table);
         Ok(Self {
-            table: Arc::new(RwLock::new(Some(table))),
+            state: Arc::new(RwLock::new(state)),
             documents: Arc::clone(&config.documents),
+            mode,
+            files: Arc::new(files.cloned()),
+            names: Arc::new(names),
+            events: broadcast::channel(EVENT_CAPACITY).0,
         })
     }
 
-    /// Replaces every ruleset. A compile failure leaves no ruleset installed.
-    pub(crate) fn replace(&self, source: &RulesSource) -> Result<(), StorageError> {
-        let compiled = compile_table(source);
-        let mut table = self
-            .table
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, RulesState> {
+        self.state
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, RulesState> {
+        self.state
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match compiled {
-            Ok(compiled) => {
-                *table = Some(compiled);
-                Ok(())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) const fn mode(&self) -> RulesMode {
+        self.mode
+    }
+
+    pub(crate) fn scope_of(&self, bucket: &str) -> RulesScope {
+        match self.mode {
+            RulesMode::Single | RulesMode::OpenDefault => RulesScope::AllBuckets,
+            RulesMode::PerBucket => RulesScope::Bucket(bucket.to_owned()),
+        }
+    }
+
+    /// Buckets `firebase.json` or an install has given rules of their own.
+    fn known_buckets(&self, state: &RulesState) -> BTreeSet<String> {
+        let mut buckets = BTreeSet::new();
+        if let Some(RulesFiles::PerBucket(files)) = &*self.files {
+            buckets.extend(files.keys().cloned());
+        }
+        if let Some(RulesetTable::PerBucket(table)) = &state.table {
+            buckets.extend(table.keys().cloned());
+        }
+        buckets.extend(
+            state
+                .versions
+                .keys()
+                .filter_map(|scope| scope.bucket().map(str::to_owned)),
+        );
+        buckets
+    }
+
+    /// Every scope: the one of every bucket in single-file mode, else each
+    /// bucket with rules of its own.
+    pub(crate) fn scopes(&self) -> Vec<RulesScope> {
+        match self.mode {
+            RulesMode::Single | RulesMode::OpenDefault => vec![RulesScope::AllBuckets],
+            RulesMode::PerBucket => self
+                .known_buckets(&self.read())
+                .into_iter()
+                .map(RulesScope::Bucket)
+                .collect(),
+        }
+    }
+
+    /// The ruleset that judges requests to `bucket`, if any.
+    pub(crate) fn installed(&self, bucket: &str) -> Option<Arc<InstalledRules>> {
+        match self.read().table.as_ref()? {
+            RulesetTable::Single(rules) => Some(Arc::clone(rules)),
+            RulesetTable::PerBucket(buckets) => buckets.get(bucket).cloned(),
+        }
+    }
+
+    /// The ruleset in force for `scope`; `None` when its requests are
+    /// refused (no ruleset, or one dropped by a failed reload).
+    pub(crate) fn current(&self, scope: &RulesScope) -> Option<Arc<InstalledRules>> {
+        match (self.read().table.as_ref()?, scope) {
+            (RulesetTable::Single(rules), _) => Some(Arc::clone(rules)),
+            (RulesetTable::PerBucket(buckets), RulesScope::Bucket(bucket)) => {
+                buckets.get(bucket).cloned()
             }
-            Err(error) => {
-                *table = None;
-                Err(error)
-            }
+            (RulesetTable::PerBucket(_), RulesScope::AllBuckets) => None,
         }
     }
 
     /// Whether `bucket` currently has a ruleset.
     pub(crate) fn has_ruleset(&self, bucket: &str) -> bool {
-        self.ruleset(bucket).is_some()
+        self.installed(bucket).is_some()
     }
 
-    fn ruleset(&self, bucket: &str) -> Option<Arc<Ruleset>> {
-        let table = self
-            .table
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match table.as_ref()? {
-            RulesetTable::Single(ruleset) => Some(Arc::clone(ruleset)),
-            RulesetTable::PerBucket(buckets) => buckets.get(bucket).cloned(),
+    /// Compiles `source` and makes it the scope's ruleset; a source that
+    /// does not compile changes nothing and says why.
+    pub(crate) fn install(
+        &self,
+        scope: &RulesScope,
+        source: &str,
+        origin: RulesOrigin,
+    ) -> Result<Arc<InstalledRules>, Vec<Diagnostic>> {
+        let rules = Arc::new(InstalledRules::compile(source, origin)?);
+        let version = rules.version();
+        {
+            let mut state = self.write();
+            match scope {
+                RulesScope::AllBuckets => {
+                    state.table = Some(RulesetTable::Single(Arc::clone(&rules)));
+                    state.record(RulesScope::AllBuckets, &version);
+                    if self.mode == RulesMode::PerBucket {
+                        for bucket in self.known_buckets(&state) {
+                            state.record(RulesScope::Bucket(bucket), &version);
+                        }
+                    }
+                }
+                RulesScope::Bucket(bucket) => {
+                    let mut table = match state.table.take() {
+                        Some(RulesetTable::PerBucket(table)) => table,
+                        // One ruleset governed every bucket (a reload of a
+                        // single file): each keeps it, this one changes.
+                        Some(RulesetTable::Single(single)) => self
+                            .known_buckets(&state)
+                            .into_iter()
+                            .map(|known| (known, Arc::clone(&single)))
+                            .collect(),
+                        // Dropped by a failed reload: the table starts again.
+                        None => BTreeMap::new(),
+                    };
+                    table.insert(bucket.clone(), Arc::clone(&rules));
+                    state.table = Some(RulesetTable::PerBucket(table));
+                    state.record(scope.clone(), &version);
+                }
+            }
         }
+        let _ = self.events.send(StorageRulesEvent::Installed {
+            scope: scope.clone(),
+            origin,
+        });
+        Ok(rules)
+    }
+
+    /// Replaces every ruleset, `/internal/setRules`'s way: a compile failure
+    /// leaves no ruleset installed; a success records origin `Reload`.
+    pub(crate) fn replace(&self, source: &RulesSource) -> Result<(), StorageError> {
+        let compiled = compile_table(source, RulesOrigin::Reload);
+        let mut affected = Vec::new();
+        let outcome = {
+            let mut state = self.write();
+            match compiled {
+                Ok(table) => {
+                    match &table {
+                        RulesetTable::Single(rules) => {
+                            let version = rules.version();
+                            affected.push(RulesScope::AllBuckets);
+                            if self.mode == RulesMode::PerBucket {
+                                affected.extend(
+                                    self.known_buckets(&state)
+                                        .into_iter()
+                                        .map(RulesScope::Bucket),
+                                );
+                            }
+                            for scope in &affected {
+                                state.record(scope.clone(), &version);
+                            }
+                        }
+                        RulesetTable::PerBucket(buckets) => {
+                            for (bucket, rules) in buckets {
+                                let scope = RulesScope::Bucket(bucket.clone());
+                                state.record(scope.clone(), &rules.version());
+                                affected.push(scope);
+                            }
+                        }
+                    }
+                    state.table = Some(table);
+                    Ok(())
+                }
+                Err(error) => {
+                    affected = self.scopes_locked(&state);
+                    state.table = None;
+                    Err(error)
+                }
+            }
+        };
+        for scope in affected {
+            let _ = self.events.send(match outcome {
+                Ok(()) => StorageRulesEvent::Installed {
+                    scope,
+                    origin: RulesOrigin::Reload,
+                },
+                Err(_) => StorageRulesEvent::Dropped { scope },
+            });
+        }
+        outcome
+    }
+
+    fn scopes_locked(&self, state: &RulesState) -> Vec<RulesScope> {
+        match self.mode {
+            RulesMode::Single | RulesMode::OpenDefault => vec![RulesScope::AllBuckets],
+            RulesMode::PerBucket => self
+                .known_buckets(state)
+                .into_iter()
+                .map(RulesScope::Bucket)
+                .collect(),
+        }
+    }
+
+    /// The rulesets that governed `scope`, newest first, at most fifty.
+    pub(crate) fn history(&self, scope: &RulesScope) -> Vec<InstalledVersion> {
+        self.read()
+            .versions
+            .get(scope)
+            .map(|history| {
+                history
+                    .iter()
+                    .rev()
+                    .map(|version| (**version).clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The file `firebase.json` names for `scope`.
+    pub(crate) fn file(&self, scope: &RulesScope) -> Option<PathBuf> {
+        match (&*self.files, scope) {
+            (Some(RulesFiles::Single(path)), RulesScope::AllBuckets) => Some(path.clone()),
+            (Some(RulesFiles::PerBucket(files)), RulesScope::Bucket(bucket)) => {
+                files.get(bucket).cloned()
+            }
+            _ => None,
+        }
+    }
+
+    /// The name a report gives the scope's source: its file's name.
+    pub(crate) fn file_name(&self, scope: &RulesScope) -> String {
+        self.file(scope)
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .or_else(|| self.names.get(scope).cloned())
+            .unwrap_or_else(|| "storage.rules".to_owned())
+    }
+
+    /// Records the outcome of one rules file check for `scope`.
+    pub(crate) fn set_file_problems(&self, scope: &RulesScope, problems: Option<LoadError>) {
+        {
+            let mut state = self.write();
+            match problems {
+                Some(problems) => {
+                    state.file_problems.insert(scope.clone(), problems);
+                }
+                None => {
+                    state.file_problems.remove(scope);
+                }
+            }
+        }
+        let _ = self.events.send(StorageRulesEvent::FileChecked {
+            scope: scope.clone(),
+        });
+    }
+
+    /// Why the last rules file check for `scope` did not install it.
+    pub(crate) fn file_problems(&self, scope: &RulesScope) -> Vec<Diagnostic> {
+        self.read()
+            .file_problems
+            .get(scope)
+            .map(|problems| problems.diagnostics.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<StorageRulesEvent> {
+        self.events.subscribe()
+    }
+
+    /// What `firestore.get()` and `firestore.exists()` read.
+    pub(crate) fn access(&self) -> Documents<'_> {
+        Documents(&*self.documents)
     }
 
     /// Evaluates one operation on `/b/{bucket}/o/{name}` (or the list prefix).
@@ -209,25 +708,22 @@ impl NativeRules {
         after: Option<&StoredObject>,
         authorization: Option<&str>,
     ) -> Verdict {
-        let Some(ruleset) = self.ruleset(bucket) else {
+        let Some(installed) = self.installed(bucket) else {
             return Verdict::NoRuleset;
         };
-        if operation == Operation::List && ruleset.rules_version() < 2 {
-            return Verdict::Denied(Some(
-                "Permission denied. List operations are only allowed for rules_version='2'."
-                    .to_owned(),
-            ));
+        if operation == Operation::List && installed.ruleset.rules_version() < 2 {
+            return Verdict::Denied(Some(LIST_V1_MESSAGE.to_owned()));
         }
-        let mut request =
-            EvaluationRequest::storage(operation.request_operation(), rules_path(bucket, name), {
-                let now = time::OffsetDateTime::now_utc();
-                Timestamp::new(now.unix_timestamp(), now.nanosecond())
-            });
-        request.auth = auth_from_authorization(authorization);
-        request.storage_resource = before.map(rules_object);
-        request.storage_request_resource = after.map(rules_object);
-        let access = Documents(&*self.documents);
-        let result = ruleset.evaluate(&request, &access);
+        let request = evaluation_request(
+            operation,
+            bucket,
+            name,
+            before.map(rules_object),
+            after.map(rules_object),
+            auth_from_authorization(authorization),
+            now(),
+        );
+        let result = installed.ruleset.evaluate(&request, &self.access());
         if result.allowed {
             Verdict::Allowed
         } else {
@@ -236,7 +732,40 @@ impl NativeRules {
     }
 }
 
-struct Documents<'a>(&'a dyn FirestoreDocuments);
+/// The request the rules judge for one operation, built one way for real
+/// requests, dry runs, access checks and replays, so a dry run's verdict is
+/// the one a client would get.
+pub(crate) fn evaluation_request(
+    operation: Operation,
+    bucket: &str,
+    name: &str,
+    before: Option<StorageObject>,
+    after: Option<StorageObject>,
+    auth: Option<Auth>,
+    time: Timestamp,
+) -> EvaluationRequest {
+    let mut request = EvaluationRequest::storage(
+        operation.request_operation(),
+        rules_path(bucket, name),
+        time,
+    );
+    request.auth = auth;
+    request.storage_resource = before;
+    request.storage_request_resource = after;
+    request
+}
+
+pub(crate) fn now() -> Timestamp {
+    let now = time::OffsetDateTime::now_utc();
+    Timestamp::new(now.unix_timestamp(), now.nanosecond())
+}
+
+/// The last path segment of a rules file name.
+fn file_name(name: &str) -> String {
+    name.rsplit(['/', '\\']).next().unwrap_or(name).to_owned()
+}
+
+pub(crate) struct Documents<'a>(&'a dyn FirestoreDocuments);
 
 impl DocumentAccess for Documents<'_> {
     fn get(&self, path: &str) -> Result<Option<Resource>, DocumentAccessError> {
@@ -255,21 +784,23 @@ impl DocumentAccess for Documents<'_> {
     }
 }
 
-fn compile_table(source: &RulesSource) -> Result<RulesetTable, StorageError> {
+fn compile_table(source: &RulesSource, origin: RulesOrigin) -> Result<RulesetTable, StorageError> {
     let compile_file = |name: &str, content: &str| {
-        compile(content).map(Arc::new).map_err(|diagnostics| {
-            StorageError(format!(
-                "Storage rules {name} failed to compile: {}",
-                diagnostics
-                    .iter()
-                    .map(|diagnostic| format!(
-                        "{name}:{}:{}: {}",
-                        diagnostic.line, diagnostic.column, diagnostic.message
-                    ))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ))
-        })
+        InstalledRules::compile(content, origin)
+            .map(Arc::new)
+            .map_err(|diagnostics| {
+                StorageError(format!(
+                    "Storage rules {name} failed to compile: {}",
+                    diagnostics
+                        .iter()
+                        .map(|diagnostic| format!(
+                            "{name}:{}:{}: {}",
+                            diagnostic.line, diagnostic.column, diagnostic.message
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ))
+            })
     };
     match source {
         RulesSource::Single(file) => Ok(RulesetTable::Single(compile_file(
@@ -352,7 +883,7 @@ pub(crate) fn auth_from_authorization(authorization: Option<&str>) -> Option<Aut
     })
 }
 
-fn json_value(value: &JsonValue) -> Value {
+pub(crate) fn json_value(value: &JsonValue) -> Value {
     match value {
         JsonValue::Null => Value::Null,
         JsonValue::Bool(value) => Value::Bool(*value),

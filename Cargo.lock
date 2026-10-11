@@ -887,6 +887,7 @@ dependencies = [
  "crc32c",
  "firenook-functions-bridge",
  "firenook-rules-engine",
+ "firenook-rules-runtime",
  "flate2",
  "futures-util",
  "md-5",

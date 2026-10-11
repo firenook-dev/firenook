@@ -104,6 +104,26 @@ enum Change {
     Walked { updated_ms: Option<i64> },
 }
 
+/// One folder shape of a bucket, for the rules map: real folder names, with
+/// a star segment standing for every folder at a level holding many.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderShape {
+    /// `users/*/avatars/`; `''` for the bucket root.
+    pub pattern: String,
+    /// Files directly in the folders the pattern stands for.
+    pub files: u64,
+    /// The pattern is at the analysis depth and folders below it hold
+    /// files that were not probed.
+    pub deeper: bool,
+}
+
+/// Folder levels a rules map probes, at most.
+pub const SHAPE_DEPTH: usize = 6;
+/// Folder shapes a rules map lists, at most.
+pub const SHAPE_PATTERNS: usize = 500;
+/// Child folders above which a level is written as one star segment.
+pub const SHAPE_GROUP: usize = 20;
+
 #[derive(Debug, Default)]
 struct BucketIndex {
     root: FolderStats,
@@ -223,6 +243,97 @@ impl FolderIndex {
             .get(&prefix[..parent])?
             .get(&prefix[parent..])
             .copied()
+    }
+
+    /// The folder shapes of `bucket` whose folders directly hold files, each
+    /// at its real depth, at most [`SHAPE_DEPTH`] levels and
+    /// [`SHAPE_PATTERNS`] shapes; a level of more than [`SHAPE_GROUP`] child
+    /// folders becomes one star segment. Also whether any level was grouped.
+    pub(crate) fn shapes(&self, bucket: &str) -> (Vec<FolderShape>, bool) {
+        // A folder as the walk carries it: its figures, and its own prefix
+        // when it has subfolders (the key of its child map, borrowed, so no
+        // folder's name is copied).
+        type Folder<'a> = (&'a FolderStats, Option<&'a str>);
+        let Some(index) = self.buckets.get(bucket) else {
+            return (Vec::new(), false);
+        };
+        let own = |prefix: &str| {
+            index
+                .children
+                .get_key_value(prefix)
+                .map(|(key, _)| key.as_str())
+        };
+        let mut shapes = Vec::new();
+        let mut grouped = false;
+        let mut buffer = String::new();
+        let mut level: Vec<(String, Vec<Folder<'_>>)> =
+            vec![(String::new(), vec![(&index.root, own(""))])];
+        for depth in 0..=SHAPE_DEPTH {
+            let mut next = Vec::new();
+            for (pattern, folders) in level {
+                let files = folders
+                    .iter()
+                    .map(|(stats, _)| stats.direct_files)
+                    .sum::<u64>();
+                let deeper = depth == SHAPE_DEPTH
+                    && folders
+                        .iter()
+                        .any(|(stats, _)| stats.objects > stats.direct_files);
+                if files > 0 || deeper {
+                    shapes.push(FolderShape {
+                        pattern: pattern.clone(),
+                        files,
+                        deeper,
+                    });
+                    if shapes.len() == SHAPE_PATTERNS {
+                        return (shapes, grouped);
+                    }
+                }
+                if depth == SHAPE_DEPTH {
+                    continue;
+                }
+                // Grouped by name until the level proves wide; from then on
+                // every child goes to one star pattern, unsorted.
+                let mut children: BTreeMap<&str, Vec<Folder<'_>>> = BTreeMap::new();
+                let mut star: Option<Vec<Folder<'_>>> = None;
+                for (_, key) in &folders {
+                    let Some(key) = key else {
+                        continue;
+                    };
+                    for (segment, stats) in &index.children[*key] {
+                        buffer.clear();
+                        buffer.push_str(key);
+                        buffer.push_str(segment);
+                        let folder = (stats, own(&buffer));
+                        if let Some(star) = &mut star {
+                            star.push(folder);
+                            continue;
+                        }
+                        children.entry(segment.as_str()).or_default().push(folder);
+                        if children.len() > SHAPE_GROUP {
+                            star = Some(
+                                std::mem::take(&mut children)
+                                    .into_values()
+                                    .flatten()
+                                    .collect(),
+                            );
+                        }
+                    }
+                }
+                if let Some(star) = star {
+                    grouped = true;
+                    next.push((format!("{pattern}*/"), star));
+                } else {
+                    next.extend(
+                        children
+                            .into_iter()
+                            .map(|(segment, folders)| (format!("{pattern}{segment}"), folders)),
+                    );
+                }
+            }
+            level = next;
+        }
+        (shapes, grouped)
     }
 
     /// Every bucket holding something, with its root's figures.
@@ -1014,12 +1125,17 @@ mod tests {
                 assert_eq!(figures(index, "b"), expected);
             }
             let mut saw_ready = false;
-            while let Ok(event) = events.try_recv() {
-                saw_ready |= event == ChangeEvent::IndexReady;
+            loop {
+                match events.try_recv() {
+                    Ok(event) => saw_ready |= event == ChangeEvent::IndexReady,
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+                    Err(_) => break,
+                }
             }
             assert!(saw_ready, "the build is announced");
             let summary = console.summary();
-            assert_eq!(summary.buckets, 1);
+            // The bucket holding objects and the project's default bucket.
+            assert_eq!(summary.buckets, 2);
             assert_eq!(
                 summary.objects,
                 Some(sizes(&runtime).len() as u64),
@@ -1159,6 +1275,51 @@ mod tests {
             runtime.shutdown().await.expect("shutdown");
             std::fs::remove_dir_all(root).expect("remove");
         }
+    }
+
+    #[test]
+    fn shapes_group_wide_levels_and_stop_at_the_depth_cap() {
+        let mut index = FolderIndex::built();
+        let file = Some(Shape {
+            size: 1,
+            marker: false,
+        });
+        let mut revision = 0;
+        let mut add = |index: &mut FolderIndex, name: &str| {
+            revision += 1;
+            index.observe(
+                &format!("b\0{name}"),
+                ("b", name),
+                None,
+                file,
+                (revision, 1),
+            );
+        };
+        add(&mut index, "root.txt");
+        for user in 0..25 {
+            add(&mut index, &format!("users/u{user:02}/avatar.png"));
+            add(&mut index, &format!("users/u{user:02}/avatars/a.png"));
+        }
+        add(&mut index, "misc/a.bin");
+        add(&mut index, "misc/b.bin");
+        add(&mut index, "deep/1/2/3/4/5/6/7/far.txt");
+        let (shapes, grouped) = index.shapes("b");
+        assert!(grouped);
+        let summary = shapes
+            .iter()
+            .map(|shape| (shape.pattern.as_str(), shape.files, shape.deeper))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            [
+                ("", 1, false),
+                ("misc/", 2, false),
+                ("users/*/", 25, false),
+                ("users/*/avatars/", 25, false),
+                ("deep/1/2/3/4/5/", 0, true),
+            ]
+        );
+        assert_eq!(index.shapes("other"), (Vec::new(), false));
     }
 
     #[test]
