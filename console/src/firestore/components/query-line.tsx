@@ -151,16 +151,23 @@ export function QueryLine() {
             <Button variant="primary" size="sm" icon={<PlayIcon />} onClick={run}>
               Run
             </Button>
-            <Button
-              variant={explain ? 'secondary' : 'ghost'}
-              size="sm"
-              icon={<LightningIcon />}
-              onClick={() => setExplain(!explain)}
-              aria-label="Explain this query"
-              data-testid="explain-toggle"
-            >
-              Explain
-            </Button>
+            {/* Firestore's own name for it, which says nothing to anyone
+                who has not met Query Explain; the tip says what it finds. */}
+            <Tooltip
+              content="What this query reads, and the index production needs"
+              render={
+                <Button
+                  variant={explain ? 'secondary' : 'ghost'}
+                  size="sm"
+                  icon={<LightningIcon />}
+                  onClick={() => setExplain(!explain)}
+                  aria-label="Explain this query"
+                  data-testid="explain-toggle"
+                >
+                  Explain
+                </Button>
+              }
+            />
           </div>
         ) : (
           <Button
@@ -179,32 +186,21 @@ export function QueryLine() {
           </Button>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2 whitespace-nowrap">
-          {workbench.collectionPath && !workbench.queryError && (
-            <Text
-              variant="secondary"
-              size="sm"
-              as="span"
-              DANGEROUS_className="text-[12px]"
-              data-testid="match-count"
-            >
-              {total ? (
-                <>
-                  <span className="font-mono text-[0.95em] text-kumo-default tabular-nums">
-                    {formatNumber(total.count)}
-                  </span>{' '}
-                  {total.count === 1 ? 'document' : 'documents'}
-                  <span className="text-kumo-inactive">
-                    {total.elapsedMs === undefined
-                      ? ' · from the schema'
-                      : ` · count ${Math.max(1, Math.round(total.elapsedMs))} ms`}
-                  </span>
-                </>
-              ) : failed ? (
-                <span className="text-kumo-danger">Count unavailable</span>
-              ) : (
-                '…'
-              )}
-            </Text>
+          {workbench.collectionPath && (
+            // A query that did not parse has nothing to count, but the slot
+            // stays, so Run does not move while the text is fixed.
+            <MatchCount
+              total={total}
+              failed={failed}
+              hidden={Boolean(workbench.queryError)}
+              scope={
+                active
+                  ? 'Every document this query matches'
+                  : workbench.group || workbench.isPattern
+                    ? 'Every document in this collection group'
+                    : 'Every document in this collection'
+              }
+            />
           )}
           <CodePopover />
         </div>
@@ -289,6 +285,70 @@ export function useMatchCount(): {
       ? { count: count.data.count, elapsedMs: count.data.elapsedMs }
       : undefined
   return { total, failed: count.isError || schema.isError }
+}
+
+/**
+ * How many documents the query matches, in a slot as wide as a seven-digit
+ * count. The field beside it takes whatever the row has left, so a count
+ * that grew or shrank moved Run and Explain with it: 240 to 67 documents
+ * slid Run 12 px under the pointer. The slot is sized by an invisible
+ * `0,000,000 documents` in the same cell, in the same type, so it holds
+ * whatever the font; a count past seven digits still widens it.
+ *
+ * How long the count took is in the tip. It was printed beside the figure
+ * as `count 19 ms`, which read as a second number nobody could place.
+ */
+function MatchCount({
+  total,
+  failed,
+  hidden,
+  scope,
+}: {
+  total: { count: number; elapsedMs: number | undefined } | undefined
+  failed: boolean
+  hidden: boolean
+  /** What the figure counts, for the tip. */
+  scope: string
+}) {
+  return (
+    <span className="grid justify-items-end">
+      <span aria-hidden className="invisible col-start-1 row-start-1">
+        <Figure number="0,000,000" noun="documents" />
+      </span>
+      {hidden ? null : total ? (
+        <Tooltip
+          content={`${scope}, not only the rows loaded. ${
+            total.elapsedMs === undefined
+              ? "From the schema tree's count."
+              : `Counted in ${Math.max(1, Math.round(total.elapsedMs))} ms.`
+          }`}
+          render={
+            <span className="col-start-1 row-start-1 cursor-default" data-testid="match-count">
+              <Figure
+                number={formatNumber(total.count)}
+                noun={total.count === 1 ? 'document' : 'documents'}
+              />
+            </span>
+          }
+        />
+      ) : (
+        <span className="col-start-1 row-start-1" data-testid="match-count">
+          <Text variant="secondary" size="sm" as="span" DANGEROUS_className="text-[12px]">
+            {failed ? <span className="text-kumo-danger">Count unavailable</span> : '…'}
+          </Text>
+        </span>
+      )}
+    </span>
+  )
+}
+
+function Figure({ number, noun }: { number: string; noun: string }) {
+  return (
+    <Text variant="secondary" size="sm" as="span" DANGEROUS_className="text-[12px]">
+      <span className="font-mono text-[0.95em] text-kumo-default tabular-nums">{number}</span>{' '}
+      {noun}
+    </Text>
+  )
 }
 
 interface ClauseChip {

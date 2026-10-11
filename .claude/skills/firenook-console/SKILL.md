@@ -326,6 +326,21 @@ focus drew two brackets with no top or bottom. The journey measures the
 room every clipping ancestor leaves the field (`ringRoom`, ≥ 1 px) and
 compares its focused look with the path field's.
 
+**The count is the figure alone** — `240 documents` — in a Kumo tooltip
+that says what it counts ("Every document this query matches, not only
+the rows loaded. Counted in 3 ms.", or "From the schema tree's count."
+for a pattern). It printed `· count 19 ms` beside the figure, which read
+as a second number nobody could place. Explain has a tip too ("What this
+query reads, and the index production needs"): it is Firestore's own name
+for the feature, which says nothing to anyone who has not met Query
+Explain. **The count sits in a slot as wide as `0,000,000 documents`**
+(`MatchCount`: an invisible sizer in the same grid cell, in the same type),
+and the slot stays, empty, while the query does not parse. The field
+takes whatever the row has left, so a count that changed width moved Run
+and Explain under the pointer — 240 to 67 documents was 12 px with the
+timing, 6.8 px without it. The journey holds Run's `x` across 240, 67, 0
+and a parse error.
+
 ### Colour means something, or it is not spent
 
 The type badge is one quiet chip for every type — 11 px mono,

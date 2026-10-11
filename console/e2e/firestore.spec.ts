@@ -84,6 +84,46 @@ test('the query field is built like the path field, and nothing cuts its outline
   await expect(input).toHaveValue('')
 })
 
+test('the count names itself on hover, and Run stays put however long it is', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.keyboard.press('f')
+  const input = page.getByTestId('query-input')
+  const count = page.getByTestId('match-count')
+  const run = page.getByRole('button', { name: 'Run' })
+  // The figure alone: the time it took is the tip's, with what it counts.
+  await expect(count).toHaveText('240 documents')
+  await count.hover()
+  await expect(
+    page.getByText(
+      /^Every document in this collection, not only the rows loaded\. Counted in \d+ ms\.$/,
+    ),
+  ).toBeVisible()
+  await page.getByTestId('explain-toggle').hover()
+  await expect(
+    page.getByText('What this query reads, and the index production needs'),
+  ).toBeVisible()
+
+  // The field takes what the row has left, so a count that changed width
+  // used to carry Run with it: 240 to 67 documents moved it 12 px.
+  const at = (await run.boundingBox())?.x
+  for (const [query, figure] of [
+    ['where("plan", "==", "pro")', /^\d+ documents$/],
+    ['where("plan", "==", "nobody")', /^0 documents$/],
+  ] as const) {
+    await input.fill(query)
+    await input.press('Enter')
+    await expect(count).toHaveText(figure)
+    expect((await run.boundingBox())?.x).toBe(at)
+  }
+  // A query that does not parse has no count, and the slot stays.
+  await input.fill('where("plan", "==", "pro')
+  await input.press('Enter')
+  await expect(page.getByTestId('query-unparsed')).toBeVisible()
+  await expect(count).toHaveCount(0)
+  expect((await run.boundingBox())?.x).toBe(at)
+})
+
 test('viewing as a user applies the rules the app would hit', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users&as=u_k65eq%3Aada%40example.test`)
   await expect(page.getByText('Denied by security rules')).toBeVisible()
