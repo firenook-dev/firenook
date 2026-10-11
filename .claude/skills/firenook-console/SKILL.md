@@ -1158,6 +1158,15 @@ not swapped for it**: the line is one or two rows tall depending on
 chips, and a swap moved the rows under a shift-click — the journey fails
 on a 1 px move. Unticking any row drops `everything`.
 
+The grid's own footer (`GridFooter`) is a status bar: what is loaded on the
+left ("N loaded · more on scroll · first page N ms", with "N hidden columns ·
+show all" beside it), Export alone at the right end (`ml-auto`). Everything
+used to sit on the left with the right half always empty. **There is no Load
+more button**: the next page is fetched while the last twenty rows are still
+ahead (an effect on the virtualizer's last visible index, so a short page or
+keyboard walking fetches too), so the button only ever arrived after the
+rows it would have loaded. "More on scroll" is said, not offered.
+
 - Delete everything: an unfiltered collection goes in one request to the
   engine's path delete (`deletePath(collection, recursive)`), anything
   else is read for its paths and deleted per path (recursive) or in

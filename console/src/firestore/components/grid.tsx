@@ -675,9 +675,7 @@ export function Grid() {
       <GridFooter
         loaded={documents.length}
         hasMore={Boolean(page.hasNextPage)}
-        fetching={page.isFetchingNextPage}
         elapsedMs={page.data?.pages[0]?.elapsedMs ?? 0}
-        onLoadMore={() => void page.fetchNextPage()}
         hiddenCount={hiddenCount}
         onShowAll={showAll}
       />
@@ -688,17 +686,13 @@ export function Grid() {
 function GridFooter({
   loaded,
   hasMore,
-  fetching,
   elapsedMs,
-  onLoadMore,
   hiddenCount,
   onShowAll,
 }: {
   loaded: number
   hasMore: boolean
-  fetching: boolean
   elapsedMs: number
-  onLoadMore: () => void
   hiddenCount: number
   onShowAll: () => void
 }) {
@@ -714,6 +708,9 @@ function GridFooter({
       <span className="shrink-0">
         <Text variant="secondary" size="sm" as="span">
           <span className="tabular-nums">{loaded.toLocaleString('en-US')}</span> loaded
+          {/* Said, not offered: the next page is fetched while the last
+              twenty rows are still ahead, so a Load more button only
+              ever arrived after the rows it would have loaded. */}
           {hasMore ? ' · more on scroll' : ''}
           <span className="text-kumo-inactive">
             {' '}
@@ -721,13 +718,6 @@ function GridFooter({
           </span>
         </Text>
       </span>
-      {hasMore && (
-        <span className="shrink-0">
-          <Button variant="ghost" size="xs" onClick={onLoadMore} loading={fetching}>
-            Load more
-          </Button>
-        </span>
-      )}
       {hiddenCount > 0 && (
         <span className="shrink-0">
           <Button variant="ghost" size="xs" onClick={onShowAll} data-testid="show-all-columns">
@@ -735,8 +725,12 @@ function GridFooter({
           </Button>
         </span>
       )}
+      {/* What is shown on the left, with its one remedy beside it; the
+          thing to do with it at the right end, under the count on the
+          filter line. Everything here sat on the left and the bar's right
+          half was always empty. */}
       {!selecting && (
-        <span className="shrink-0">
+        <span className="ml-auto shrink-0">
           <Button
             variant="ghost"
             size="xs"

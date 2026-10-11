@@ -1141,8 +1141,20 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
   await page.goto(`${origin()}/console/firestore?path=products`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
 
+  // The footer says what is loaded on its left and offers Export at its
+  // right end. Everything sat on the left, and the right half of the bar
+  // was always empty.
+  const open = page.getByTestId('export-open')
+  const bar = await open.locator('xpath=ancestor::div[1]').boundingBox()
+  const button = await open.boundingBox()
+  expect(bar && button).toBeTruthy()
+  if (bar && button) {
+    expect(bar.x + bar.width - (button.x + button.width)).toBeLessThan(14)
+    expect(button.x).toBeGreaterThan(bar.x + bar.width / 2)
+  }
+
   // The whole collection, keyed by id, as the console's own import reads it.
-  await page.getByTestId('export-open').click()
+  await open.click()
   await expect(page.getByTestId('export-scope')).toHaveText('Every document in products')
   const jsonDownload = page.waitForEvent('download')
   await page.getByTestId('confirm-export').click()
@@ -3131,6 +3143,12 @@ test('documents that disagree keep their columns still and say what each covers'
   await expect(
     page.locator('tr[data-path="disagree/d001"] td[data-field="legacy"]').getByTestId('not-set'),
   ).toHaveCount(0)
+
+  // More is said, not offered. The next page arrives while the last twenty
+  // rows are still ahead, so a Load more button only ever came after the
+  // rows it would have loaded.
+  await expect(page.getByText('100 loaded · more on scroll')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0)
 
   // The second page's field joins at the end. Ordered by count it went
   // before `legacy` — twenty documents to ten — and moved a column under
