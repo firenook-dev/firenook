@@ -80,3 +80,42 @@ export const useColumnWidths = create<ColumnWidthsState>((set) => ({
       return { widths }
     }),
 }))
+
+const UNFROZEN_KEY = 'firenook.console.unfrozen-ids'
+
+interface IdFreezeState {
+  /** Shapes whose id column scrolls with the fields. Frozen is the default. */
+  unfrozen: ReadonlySet<string>
+  setFrozen: (shape: string, frozen: boolean) => void
+}
+
+function readUnfrozen(): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(UNFROZEN_KEY) ?? '[]')
+    return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+/**
+ * Whether the id column stays put while the fields scroll, per shape of
+ * collection like the widths. Frozen by default, because a row of values
+ * nobody can name is the worse failure; unfrozen for a collection whose
+ * ids are long and say nothing, where the room is worth more than the name.
+ */
+export const useIdFreeze = create<IdFreezeState>((set) => ({
+  unfrozen: readUnfrozen(),
+  setFrozen: (shape, frozen) =>
+    set((state) => {
+      const unfrozen = new Set(state.unfrozen)
+      if (frozen) unfrozen.delete(shape)
+      else unfrozen.add(shape)
+      try {
+        localStorage.setItem(UNFROZEN_KEY, JSON.stringify([...unfrozen].slice(-SHAPES)))
+      } catch {
+        // Private windows and full storage keep the choice for this visit only.
+      }
+      return { unfrozen }
+    }),
+}))

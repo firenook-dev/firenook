@@ -34,8 +34,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { TypeBadge } from '@/components/kit'
-import { shapeKey, useColumnWidths } from '../column-widths'
+import { shapeKey, useColumnWidths, useIdFreeze } from '../column-widths'
 import { arrangeColumns, foldRare, inferColumns } from '../columns'
 import { useCreateDialog } from '../create'
 import { copyText } from '../draft'
@@ -67,7 +66,7 @@ import {
   PIN_HEAD,
   type RowActions,
 } from './grid-row'
-import { FoldedHeader, HeaderMenu } from './header-menu'
+import { FoldedHeader, HeaderMenu, IdHeaderMenu } from './header-menu'
 import { subcollectionsWidth } from './subcollections-cell'
 import { useWorkbench } from './workbench-context'
 
@@ -171,6 +170,8 @@ export function Grid() {
   const keepWidth = useColumnWidths((state) => state.set)
   const forgetWidth = useColumnWidths((state) => state.reset)
   const [resizing, setResizing] = useState<{ key: string; width: number } | null>(null)
+  const frozen = useIdFreeze((state) => !state.unfrozen.has(shape))
+  const setFrozen = useIdFreeze((state) => state.setFrozen)
   const idWidth =
     resizing?.key === ID_COLUMN
       ? resizing.width
@@ -201,8 +202,8 @@ export function Grid() {
     return starts
   }, [gridColumns])
   const dataWidth = offsets.at(-1) ?? 0
-  /** What stays put on the left while the fields scroll. */
-  const pinned = CHECK_WIDTH + idWidth
+  /** What stays put on the left while the fields scroll: the box, and the id unless unfrozen. */
+  const pinned = CHECK_WIDTH + (frozen ? idWidth : 0)
   const leading = pinned + (subcolumn ? subWidth : 0)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -559,19 +560,18 @@ export function Grid() {
                   setChecked(next ? documents.map((document) => document.path) : [])
                 }
                 aria-label="Select every loaded document"
-                className={`border-b border-kumo-line ${PIN_HEAD}`}
+                className={`border-b border-kumo-line ${PIN_HEAD} ${frozen ? '' : PIN_EDGE}`}
                 style={{ left: 0 }}
               />
               <Table.Head
-                className={`border-b border-kumo-line ${PIN_HEAD} ${PIN_EDGE}`}
-                style={{ left: CHECK_WIDTH }}
+                className={`border-b border-kumo-line !px-1 ${frozen ? `${PIN_HEAD} ${PIN_EDGE}` : ''}`}
+                style={frozen ? { left: CHECK_WIDTH } : undefined}
               >
-                <span className="flex items-center gap-1.5">
-                  <span className="font-mono text-[12px] font-medium text-kumo-default">
-                    {workbench.group ? 'path' : 'id'}
-                  </span>
-                  <TypeBadge type="doc" />
-                </span>
+                <IdHeaderMenu
+                  label={workbench.group ? 'path' : 'id'}
+                  frozen={frozen}
+                  onFreeze={(next) => setFrozen(shape, next)}
+                />
                 {resizer(ID_COLUMN, workbench.group ? 'path' : 'id', idWidth, 'resize-id')}
               </Table.Head>
               {subcolumn && (
@@ -641,6 +641,7 @@ export function Grid() {
                   checked={everything || checked.has(document.path)}
                   focused={focused === document.path}
                   open={workbench.selectedDocument === document.path}
+                  frozen={frozen}
                   cursor={focused === document.path ? cursorField : undefined}
                   flash={flashes.get(document.path)?.kind}
                   actions={actions}

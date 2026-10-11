@@ -2887,6 +2887,32 @@ test('the id stays in view while the fields scroll, and a flash never shows thro
   // does not exist, which made the whole shadow invalid and drew nothing.
   await expect.poll(shade).not.toBe('none')
 
+  // Unfrozen from its own header menu, the id scrolls with the fields and
+  // only the box stays, with the edge moving to it. The choice is kept.
+  await page.getByTestId('id-header').click()
+  await page.getByTestId('unfreeze-id').click()
+  const check = row.locator('td[data-check]')
+  await expect
+    .poll(async () => (await id.boundingBox())!.x - (await grid.boundingBox())!.x)
+    .toBeLessThan(0)
+  expect((await check.boundingBox())!.x - (await grid.boundingBox())!.x).toBe(0)
+  expect(await shade()).toBe('none')
+  await expect
+    .poll(() =>
+      check.evaluate((td) => td.ownerDocument.defaultView!.getComputedStyle(td).boxShadow),
+    )
+    .not.toBe('none')
+  await page.reload()
+  await grid.evaluate((el) => (el.scrollLeft = 700))
+  await expect
+    .poll(async () => (await id.boundingBox())!.x - (await grid.boundingBox())!.x)
+    .toBeLessThan(0)
+  await page.getByTestId('id-header').click()
+  await page.getByTestId('freeze-id').click()
+  await expect
+    .poll(async () => (await id.boundingBox())!.x - (await grid.boundingBox())!.x)
+    .toBe(64)
+
   // A write flashes the row. The tint is translucent, and painted as the
   // pinned cell's ground it let the fields scrolling under it show
   // through for the length of the flash.

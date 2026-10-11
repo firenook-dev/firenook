@@ -1007,6 +1007,13 @@ fields). Each rule below fixed something that was seen, not supposed.
   them as columns". 1,501 fields drawn whole was 143,667 elements and
   250–950 ms frames; folded it is 1,196 elements at 16.7 ms, and unfolded
   with column virtualization it still scrolls at 16.7.
+- **The id can be frozen or not** from its own header menu
+  (`IdHeaderMenu`, `id-header` — not `column-id`, which a field named `id` would also be —: "Freeze column" / "Unfreeze column"),
+  frozen by default and remembered per shape in `useIdFreeze`
+  (`column-widths.ts`, localStorage `firenook.console.unfrozen-ids`).
+  Unfrozen, the id scrolls with the fields and only the check column stays,
+  carrying the edge; `pinned` (what `reveal` and the editor's bounds keep
+  clear) is then the check column alone.
 - **The id is pinned** (with the check column): `PIN_CELL` is sticky on
   the row's own `--kumo-table-row-bg`, so it is opaque in every row state
   (the focused row sets that variable too). The edge shadow (`PIN_EDGE`)

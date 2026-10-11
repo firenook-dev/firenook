@@ -8,6 +8,8 @@ import {
   ArrowUpIcon,
   CaretDownIcon,
   ColumnsIcon,
+  PushPinSimpleIcon,
+  PushPinSimpleSlashIcon,
   EyeSlashIcon,
   FunnelIcon,
   SortAscendingIcon,
@@ -185,6 +187,63 @@ export function FoldedHeader({ folded }: { folded: readonly InferredColumn[] }) 
         <DropdownMenu.Item icon={ColumnsIcon} onClick={unfold} data-testid="unfold-columns">
           Show them as columns
         </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu>
+  )
+}
+
+/**
+ * The id column's header, as a menu like every other header's — with the
+ * one thing the id column has that a field does not: it can stay put while
+ * the fields scroll, or scroll with them.
+ */
+export function IdHeaderMenu({
+  label,
+  frozen,
+  onFreeze,
+}: {
+  /** `id`, or `path` in a collection group. */
+  label: string
+  frozen: boolean
+  onFreeze: (frozen: boolean) => void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenu.Trigger
+        render={
+          <button
+            type="button"
+            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-kumo-tint"
+            aria-label={`${label} column`}
+            data-testid="id-header"
+          >
+            <span className="font-mono text-[12px] font-medium text-kumo-default">{label}</span>
+            <TypeBadge type="doc" />
+            <CaretDownIcon
+              size={12}
+              className="ml-auto shrink-0 text-kumo-subtle opacity-0 group-hover:opacity-100 group-aria-expanded:opacity-100"
+            />
+          </button>
+        }
+      />
+      <DropdownMenu.Content align="start">
+        {frozen ? (
+          <DropdownMenu.Item
+            icon={PushPinSimpleSlashIcon}
+            onClick={() => onFreeze(false)}
+            data-testid="unfreeze-id"
+          >
+            Unfreeze column
+          </DropdownMenu.Item>
+        ) : (
+          <DropdownMenu.Item
+            icon={PushPinSimpleIcon}
+            onClick={() => onFreeze(true)}
+            data-testid="freeze-id"
+          >
+            Freeze column
+          </DropdownMenu.Item>
+        )}
       </DropdownMenu.Content>
     </DropdownMenu>
   )

@@ -80,6 +80,7 @@ export const GridRow = memo(function GridRow({
   checked,
   focused,
   open,
+  frozen,
   cursor,
   flash,
   actions,
@@ -97,6 +98,8 @@ export const GridRow = memo(function GridRow({
   focused: boolean
   /** This document is the one open in the panel. */
   open: boolean
+  /** The id stays put while the fields scroll; unfrozen, only the box does. */
+  frozen: boolean
   /** The column the keyboard is on, when it is on this row. */
   cursor: string | undefined
   flash: ChangeKind | undefined
@@ -119,7 +122,7 @@ export const GridRow = memo(function GridRow({
       data-testid="grid-row"
     >
       <Table.Cell
-        className={`${PIN_CELL} !py-0 !pr-1 !pl-3`}
+        className={`${PIN_CELL} ${frozen ? '' : PIN_EDGE} !py-0 !pr-1 !pl-3`}
         style={{ left: 0 }}
         data-check=""
         // Shift on a press is also the browser's own "extend the text
@@ -172,8 +175,8 @@ export const GridRow = memo(function GridRow({
         </span>
       </Table.Cell>
       <Table.Cell
-        className={`${PIN_CELL} ${PIN_EDGE}`}
-        style={{ left: CHECK_WIDTH }}
+        className={frozen ? `${PIN_CELL} ${PIN_EDGE}` : undefined}
+        style={frozen ? { left: CHECK_WIDTH } : undefined}
         data-field={ID_COLUMN}
       >
         <span className="flex items-center gap-1.5">
