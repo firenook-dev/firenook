@@ -27,6 +27,7 @@ import { engineBuild, engineVersion } from '@/lib/engine'
 import { useLayout } from '@/lib/layout'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
+import { consoleToasts } from '@/lib/toasts'
 import { CommandPalette } from './command-palette'
 import { ThemePicker } from './theme-picker'
 
@@ -77,7 +78,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [togglePalette, toggleNav, togglePanel, panel.present])
 
   return (
-    <Toasty>
+    // Toasts raised outside React (a timer, a live handler) reach the same
+    // stack through `consoleToasts`, under the one policy in `lib/toasts.ts`.
+    <Toasty toastManager={consoleToasts}>
       <TooltipProvider>
         <div className="flex h-full">
           {/* Only the navigation lives inside Kumo's provider, and the

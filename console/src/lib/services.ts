@@ -29,6 +29,12 @@ export interface ConsoleSection {
    * the sidebar. The first is where the section's own entry leads.
    */
   pages?: readonly SectionPage[]
+  /**
+   * The section's API and topics accept a `project`, so a link with
+   * `?project=` can show the data of another project the app used
+   * (`useConsoleProject`). Storage buckets are not per project.
+   */
+  projectScope?: boolean
 }
 
 export interface SectionPage {
@@ -54,6 +60,7 @@ export const SECTIONS: readonly ConsoleSection[] = [
       { to: '/firestore', label: 'Data', exact: true },
       { to: '/firestore/rules', label: 'Rules' },
     ],
+    projectScope: true,
   },
   {
     to: '/auth',
@@ -61,6 +68,7 @@ export const SECTIONS: readonly ConsoleSection[] = [
     services: ['auth'],
     area: 'data',
     icon: UsersIcon,
+    projectScope: true,
     summary:
       'Users table with real columns and actions, an inbox for every code and link the emulator would have sent, and a sign-in timeline with the exact error.',
   },
@@ -97,6 +105,7 @@ export const SECTIONS: readonly ConsoleSection[] = [
     services: ['pubsub'],
     area: 'messaging',
     icon: BroadcastIcon,
+    projectScope: true,
     summary:
       'Topics and subscriptions, publish and pull messages, ack and seek, snapshots and schemas, delivery status to functions.',
   },
@@ -114,6 +123,7 @@ export const SECTIONS: readonly ConsoleSection[] = [
     services: ['tasks'],
     area: 'messaging',
     icon: QueueIcon,
+    projectScope: true,
     summary:
       'Queues with stats, pending and running tasks with their retry attempt and next dispatch, and enqueue a task by hand.',
   },

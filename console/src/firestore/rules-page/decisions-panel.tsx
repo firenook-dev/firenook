@@ -26,7 +26,8 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { rulesQuery } from '../rules'
-import { relativeTime } from '../value'
+import { useNow } from '@/lib/clock'
+import { relativeTime } from '@/lib/format'
 import { DecisionDetail } from './decision-detail'
 import {
   type DecisionOutcome,
@@ -66,16 +67,6 @@ export function Verdict({ outcome }: { outcome: DecisionOutcome }) {
   )
 }
 
-/** Re-render on a slow clock, so "just now" does not stay just now. */
-function useMinuteClock(): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(timer)
-  }, [])
-  return now
-}
-
 export function DecisionsPanel({
   database,
   source,
@@ -98,7 +89,8 @@ export function DecisionsPanel({
   const clear = useDecisions((state) => state.clear)
   const rules = useQuery(rulesQuery(database))
   const [text, setText] = useState('')
-  const now = useMinuteClock()
+  // The console's shared minute clock, so "just now" does not stay just now.
+  const now = useNow('minute')
 
   const flipped = new Map((flips ?? []).map((flip) => [flip.requestId, flip]))
   const narrowed = filterDecisions(all, database, {

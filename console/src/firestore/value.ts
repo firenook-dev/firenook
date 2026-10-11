@@ -2,6 +2,12 @@
 // decoded once into typed values, with everything the grid, the inspector
 // and the editors need (type names, display text, parsing) in one place.
 
+import { formatNumber } from '@/lib/format'
+
+// The console-wide formats moved to `lib/format.ts`; Firestore's callers
+// keep importing them from here.
+export { compactIso, formatNumber, relativeTime } from '@/lib/format'
+
 export type FirestoreValueType =
   | 'string'
   | 'number'
@@ -298,11 +304,6 @@ export function displayValue(value: FsValue): string {
   }
 }
 
-export function formatNumber(value: number): string {
-  if (Number.isInteger(value)) return value.toLocaleString('en-US')
-  return String(value)
-}
-
 /** How a value is written in the editor: what you type to get it back. */
 export function editorText(value: FsValue): string {
   switch (value.type) {
@@ -553,41 +554,4 @@ export function emptyValue(type: FirestoreValueType): FsValue {
     case 'null':
       return { type }
   }
-}
-
-/** Relative time in the shortest honest form; exact time stays a hover away. */
-/**
- * A timestamp with the machinery taken out: no `T`, no sub-second, no
- * `Z`. What is left is the part a reader checks — the day and the time
- * — in the order the rest of the console writes them.
- */
-export function compactIso(iso: string): string {
-  return iso
-    .replace('T', ' ')
-    .replace(/\.\d+Z$/, 'Z')
-    .replace(/Z$/, '')
-}
-
-export function relativeTime(iso: string, now = Date.now()): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return iso
-  const seconds = Math.round((now - then) / 1000)
-  const future = seconds < 0
-  const abs = Math.abs(seconds)
-  const text =
-    abs < 45
-      ? 'just now'
-      : abs < 90
-        ? '1 min'
-        : abs < 3600
-          ? `${Math.round(abs / 60)} min`
-          : abs < 86_400
-            ? `${Math.round(abs / 3600)} h`
-            : abs < 86_400 * 30
-              ? `${Math.round(abs / 86_400)} d`
-              : abs < 86_400 * 365
-                ? `${Math.round(abs / (86_400 * 30))} mo`
-                : `${Math.round(abs / (86_400 * 365))} y`
-  if (text === 'just now') return text
-  return future ? `in ${text}` : `${text} ago`
 }
