@@ -7,20 +7,16 @@
 //! port, a reverse proxy, an HTTPS alias); nothing in the browser needs the
 //! Firestore port.
 
-use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Query, State};
-use axum::response::sse::{Event, KeepAlive, Sse};
-use firenook_core_store::{CommitObservation, CommitObserver, Store, Timestamp};
-use futures_util::Stream;
+use axum::response::IntoResponse;
+use axum::response::sse::Event;
+use firenook_core_store::{CommitObservation, CommitObserver, Store};
 use futures_util::stream::{self, StreamExt as _};
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use ts_rs::TS;
@@ -30,6 +26,8 @@ use crate::explain::QueryExplainer;
 use crate::rules::RulesEditor;
 use crate::rules_eval::RulesEvaluator;
 use crate::schema::SchemaIndex;
+use crate::sse::{Shutdown, json_event, sse_response};
+use crate::time::rfc3339;
 
 /// Commits retained for a slow console before it is told to resync.
 const FEED_CAPACITY: usize = 512;
@@ -54,10 +52,6 @@ pub struct FirestoreConsole {
     /// The Requests diagnostics feed (`/requests` upgrades to a websocket),
     /// when the Firestore front records evaluations.
     pub requests: Option<Router>,
-    /// Flips to `true` when the suite stops. Every open change stream ends
-    /// then; a stream that stayed open would hold the UI listener's graceful
-    /// shutdown for as long as a console tab was open.
-    pub shutdown: watch::Receiver<bool>,
 }
 
 /// One atomic commit as the console sees it.
@@ -111,11 +105,13 @@ pub struct ChangeFeed {
     store: Store,
 }
 
-/// What the change stream handler needs: the feed and the suite's stop flag.
+/// What the change stream handler needs: the feed and the suite's stop
+/// signal, which ends every open stream so a console tab never holds the UI
+/// listener's graceful shutdown open.
 #[derive(Clone)]
 struct ChangeStreams {
     feed: ChangeFeed,
-    shutdown: watch::Receiver<bool>,
+    shutdown: Shutdown,
 }
 
 impl ChangeFeed {
@@ -131,7 +127,7 @@ impl ChangeFeed {
         feed
     }
 
-    fn router(self, shutdown: watch::Receiver<bool>) -> Router {
+    fn router(self, shutdown: Shutdown) -> Router {
         Router::new()
             .route("/changes", axum::routing::get(changes))
             .with_state(ChangeStreams {
@@ -166,14 +162,6 @@ impl CommitObserver for ChangeFeed {
         // A send only fails when no stream is open; nothing to retain then.
         let _ = self.sender.send(Arc::new(batch));
     }
-}
-
-fn rfc3339(value: Timestamp) -> String {
-    OffsetDateTime::from_unix_timestamp(value.seconds())
-        .and_then(|timestamp| timestamp.replace_nanosecond(value.nanos()))
-        .ok()
-        .and_then(|timestamp| timestamp.format(&Rfc3339).ok())
-        .unwrap_or_default()
 }
 
 /// Which changes one stream wants.
@@ -214,12 +202,12 @@ impl ChangeScope {
 async fn changes(
     State(streams): State<ChangeStreams>,
     Query(scope): Query<ChangeScope>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> impl IntoResponse {
     let receiver = streams.feed.sender.subscribe();
     let hello = ChangeHello {
         revision: streams.feed.store.revision().get(),
     };
-    let first = stream::once(async move { Ok(json_event("hello", &hello)) });
+    let first = stream::once(async move { json_event("hello", &hello) });
     let rest = BroadcastStream::new(receiver).filter_map(move |item| {
         let event = match item {
             Ok(batch) => {
@@ -244,39 +232,23 @@ async fn changes(
             }
             Err(BroadcastStreamRecvError::Lagged(_)) => Some(Event::default().event("reset")),
         };
-        async move { event.map(Ok) }
+        async move { event }
     });
-    let mut shutdown = streams.shutdown;
-    let stopped = async move {
-        // A dropped sender means the suite is gone too.
-        while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
-    };
-    Sse::new(first.chain(rest).take_until(stopped)).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("keep-alive"),
-    )
-}
-
-fn json_event(name: &str, data: &impl Serialize) -> Event {
-    Event::default()
-        .event(name)
-        .json_data(data)
-        .unwrap_or_else(|_| Event::default().event(name))
+    sse_response(first.chain(rest), streams.shutdown)
 }
 
 /// The console's Firestore routes: the change feed, the schema index, the
 /// database list, the Requests feed and the REST front, mounted together
 /// under `/api/v1/firestore`.
-pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
+pub(crate) fn firestore_router(console: FirestoreConsole, shutdown: Shutdown) -> Router {
     let mut router = console
         .changes
-        .router(console.shutdown.clone())
+        .router(shutdown.clone())
         .merge(console.schema.router())
         .merge(console.databases.router())
         .merge(console.explain.router())
         .merge(console.rules_evaluator.router())
-        .merge(console.rules.with_shutdown(console.shutdown).router());
+        .merge(console.rules.router(shutdown));
     if let Some(requests) = console.requests {
         router = router.merge(requests);
     }
@@ -285,8 +257,11 @@ pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use axum::body::Body;
     use axum::http::Request;
+    use tokio::sync::watch;
     use tower::ServiceExt as _;
 
     use super::*;
@@ -321,7 +296,7 @@ mod tests {
     async fn a_change_stream_ends_when_the_suite_stops() {
         let store = Store::default();
         let (stop, shutdown) = watch::channel(false);
-        let router = ChangeFeed::attach(&store).router(shutdown);
+        let router = ChangeFeed::attach(&store).router(Shutdown::new(shutdown));
         let response = router
             .oneshot(
                 Request::get("/changes?database=(default)")

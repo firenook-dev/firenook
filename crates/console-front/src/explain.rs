@@ -18,8 +18,6 @@ use std::time::Instant;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use firenook_core_store::{DatabaseName, Store};
 use firenook_query_engine::{
     DatabaseEdition, IndexAdvice, IndexCatalog, IndexDirection, IndexMode, IndexScope, Limit,
@@ -28,6 +26,9 @@ use firenook_query_engine::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use ts_rs::TS;
+
+use crate::api_error::ApiError;
+use crate::blocking::blocking;
 
 /// What the console asks about.
 #[derive(Debug, Deserialize)]
@@ -176,25 +177,25 @@ impl QueryExplainer {
             .with_state(self)
     }
 
-    fn explain(&self, request: &ExplainRequest) -> Result<Explanation, ExplainError> {
+    fn explain(&self, request: &ExplainRequest) -> Result<Explanation, ApiError> {
         let database_id = request.database.as_deref().unwrap_or("(default)");
         let database = DatabaseName::new(self.project.as_ref(), database_id)
-            .map_err(|error| ExplainError::invalid(error.to_string()))?;
+            .map_err(|error| ApiError::invalid(error.to_string()))?;
         let query = firenook_rest_front::structured_query(
             &request.structured_query,
             request.parent.as_deref(),
         )
-        .map_err(ExplainError::invalid)?;
+        .map_err(ApiError::invalid)?;
 
         let snapshot = self.store.snapshot();
         let planned = plan(&snapshot, &database, &query)
-            .map_err(|error| ExplainError::invalid(error.to_string()))?;
+            .map_err(|error| ApiError::invalid(error.to_string()))?;
         // The same query the grid would issue, timed as the engine answers
         // it. Nothing is cached between the plan and the run, so the elapsed
         // time is the cost of the whole answer.
         let started = Instant::now();
         let documents = execute(&snapshot, &database, &query, self.edition)
-            .map_err(|error| ExplainError::invalid(error.to_string()))?;
+            .map_err(|error| ApiError::invalid(error.to_string()))?;
         let elapsed = started.elapsed();
 
         Ok(Explanation {
@@ -294,50 +295,22 @@ fn index(advice: &IndexAdvice) -> ExplainIndex {
     }
 }
 
-struct ExplainError {
-    status: StatusCode,
-    message: String,
-}
-
-impl ExplainError {
-    fn invalid(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
-        }
-    }
-}
-
-impl IntoResponse for ExplainError {
-    fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(serde_json::json!({ "error": { "message": self.message } })),
-        )
-            .into_response()
-    }
-}
-
 /// `POST /explain`: how this query runs, and what it needs in production.
 async fn explain(
     State(explainer): State<QueryExplainer>,
     Json(request): Json<ExplainRequest>,
-) -> Result<Json<Explanation>, ExplainError> {
+) -> Result<Json<Explanation>, ApiError> {
     // Planning reads the store and running the query reads every candidate,
     // which is work the async workers must not block on.
-    tokio::task::spawn_blocking(move || explainer.explain(&request))
+    blocking("the explain task", move || explainer.explain(&request))
         .await
-        .map_err(|_| ExplainError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "the explain task did not finish".to_owned(),
-        })?
         .map(Json)
 }
 
 #[cfg(test)]
 mod tests {
     use axum::body::{Body, to_bytes};
-    use axum::http::Request;
+    use axum::http::{Request, StatusCode};
     use firenook_core_store::{DocumentKey, Fields, Value, Write};
     use tower::ServiceExt as _;
 

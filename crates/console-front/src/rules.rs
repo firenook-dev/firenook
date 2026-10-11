@@ -26,38 +26,32 @@
 //! and that is how it counts.
 
 use std::collections::BTreeMap;
-use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Json;
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{IntoResponse, Response};
+use axum::extract::{FromRef, Query, State};
+use axum::response::IntoResponse;
 use firenook_core_store::DatabaseName;
 use firenook_rules_engine::{
     Diagnostic, DiagnosticSeverity, GoverningMap, LintCode, RequestOperation,
 };
 use firenook_rules_runtime::{InstalledVersion, LoadError, RulesEvent, RulesRuntime};
-use futures_util::Stream;
 use futures_util::stream::{self, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
-use tokio::sync::watch;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use ts_rs::TS;
 
+use crate::api_error::ApiError;
+use crate::blocking::blocking;
 use crate::schema::{SchemaIndex, SchemaNode};
+use crate::sse::{Shutdown, json_event, sse_response};
 
 /// The largest ruleset the console will accept, matching the engine's own
 /// compiler limit closely enough to refuse early with a clear message.
 const MAX_SOURCE_BYTES: usize = 256 * 1024;
-
-/// How often an idle live stream says it is still there.
-const KEEPALIVE: Duration = Duration::from_secs(15);
 
 /// How serious a diagnostic is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
@@ -334,8 +328,27 @@ pub struct RulesEditor {
     files: Arc<BTreeMap<String, PathBuf>>,
     /// The console's schema index, which a check maps the rules against.
     schema: Option<SchemaIndex>,
-    /// Flips to `true` when the suite stops; live streams end then.
-    shutdown: Option<watch::Receiver<bool>>,
+}
+
+/// The editor's routes' state: the editor, and the stop signal its live
+/// stream ends on. The signal is required to build the routes at all, so no
+/// stream can be opened that never ends.
+#[derive(Clone)]
+struct RulesRoutes {
+    editor: RulesEditor,
+    shutdown: Shutdown,
+}
+
+impl FromRef<RulesRoutes> for RulesEditor {
+    fn from_ref(routes: &RulesRoutes) -> Self {
+        routes.editor.clone()
+    }
+}
+
+impl FromRef<RulesRoutes> for Shutdown {
+    fn from_ref(routes: &RulesRoutes) -> Self {
+        routes.shutdown.clone()
+    }
 }
 
 impl RulesEditor {
@@ -348,7 +361,6 @@ impl RulesEditor {
             project: Arc::from(project),
             files: Arc::new(files),
             schema: None,
-            shutdown: None,
         }
     }
 
@@ -359,29 +371,26 @@ impl RulesEditor {
         self
     }
 
-    /// Ends live streams when `shutdown` flips, so a console tab never holds
-    /// the listener's graceful shutdown open.
-    #[must_use]
-    pub(crate) fn with_shutdown(mut self, shutdown: watch::Receiver<bool>) -> Self {
-        self.shutdown = Some(shutdown);
-        self
-    }
-
-    pub(crate) fn router(self) -> axum::Router {
+    /// The editor's routes. Live streams end when `shutdown` fires, so a
+    /// console tab never holds the listener's graceful shutdown open.
+    pub(crate) fn router(self, shutdown: Shutdown) -> axum::Router {
         axum::Router::new()
             .route("/rules", axum::routing::get(read_rules).put(write_rules))
             .route("/rules/check", axum::routing::post(check_rules))
             .route("/rules/history", axum::routing::get(rules_history))
             .route("/rules/live", axum::routing::get(rules_live))
-            .with_state(self)
+            .with_state(RulesRoutes {
+                editor: self,
+                shutdown,
+            })
     }
 
-    fn database(&self, database_id: &str) -> Result<DatabaseName, RulesError> {
+    fn database(&self, database_id: &str) -> Result<DatabaseName, ApiError> {
         DatabaseName::new(self.project.as_ref(), database_id)
-            .map_err(|error| RulesError::invalid(error.to_string()))
+            .map_err(|error| ApiError::invalid(error.to_string()))
     }
 
-    async fn read(&self, database_id: &str) -> Result<RulesDocument, RulesError> {
+    async fn read(&self, database_id: &str) -> Result<RulesDocument, ApiError> {
         let database = self.database(database_id)?;
         // One read gives source and hash from the same install.
         let current = self.rules.current_version(&database);
@@ -418,11 +427,11 @@ impl RulesEditor {
             .map(|path| path.display().to_string())
     }
 
-    fn write(&self, request: &WriteRules) -> Result<RulesInstalled, RulesError> {
+    fn write(&self, request: &WriteRules) -> Result<RulesInstalled, ApiError> {
         let database_id = request.database.as_deref().unwrap_or("(default)");
         let database = self.database(database_id)?;
         if request.source.len() > MAX_SOURCE_BYTES {
-            return Err(RulesError::invalid(format!(
+            return Err(ApiError::invalid(format!(
                 "a ruleset is at most {MAX_SOURCE_BYTES} bytes"
             )));
         }
@@ -435,7 +444,7 @@ impl RulesEditor {
                 &request.source,
                 firenook_rules_runtime::RulesOrigin::Console,
             )
-            .map_err(|error| RulesError::Diagnostics(diagnostics(&error)))?;
+            .map_err(|error| not_compiled(&diagnostics(&error)))?;
         let Some(path) = self.files.get(database_id) else {
             return Ok(RulesInstalled {
                 database: database_id.to_owned(),
@@ -453,7 +462,7 @@ impl RulesEditor {
         // The file watcher sees this write, finds the text already in force
         // and installs nothing, so a save records one version, not two.
         std::fs::write(path, &request.source).map_err(|error| {
-            RulesError::NotSaved(format!(
+            ApiError::conflict(format!(
                 "the rules are in force but {} could not be written: {error}",
                 path.display()
             ))
@@ -465,26 +474,25 @@ impl RulesEditor {
         })
     }
 
-    async fn check(&self, request: CheckRules) -> Result<RulesCheck, RulesError> {
+    async fn check(&self, request: CheckRules) -> Result<RulesCheck, ApiError> {
         let database_id = request.database.unwrap_or_else(|| "(default)".to_owned());
         self.database(&database_id)?;
         if request.source.len() > MAX_SOURCE_BYTES {
-            return Err(RulesError::invalid(format!(
+            return Err(ApiError::invalid(format!(
                 "a ruleset is at most {MAX_SOURCE_BYTES} bytes"
             )));
         }
         // Compiling and reading a large ruleset is CPU work; keep it off
         // the request workers.
         let source = request.source;
-        let compiled = tokio::task::spawn_blocking(move || {
-            firenook_rules_engine::compile(&source).map(|ruleset| {
+        let compiled = blocking("the rules task", move || {
+            Ok(firenook_rules_engine::compile(&source).map(|ruleset| {
                 let lints = ruleset.lints();
                 let outline = ruleset.outline();
                 (ruleset, lints, outline)
-            })
+            }))
         })
-        .await
-        .map_err(|_| RulesError::invalid("the rules task did not finish"))?;
+        .await?;
         let (ruleset, lints, outline) = match compiled {
             Ok(compiled) => compiled,
             Err(errors) => {
@@ -639,45 +647,13 @@ const fn origin(origin: firenook_rules_runtime::RulesOrigin) -> RulesOrigin {
     }
 }
 
-/// Why a change was refused.
-#[derive(Debug)]
-pub enum RulesError {
-    Invalid(String),
-    /// The rules did not compile; nothing changed.
-    Diagnostics(Vec<RulesDiagnostic>),
-    /// The rules are in force, but the file could not be written.
-    NotSaved(String),
-}
-
-impl RulesError {
-    fn invalid(message: impl Into<String>) -> Self {
-        Self::Invalid(message.into())
-    }
-}
-
-impl IntoResponse for RulesError {
-    fn into_response(self) -> Response {
-        match self {
-            Self::Invalid(message) => (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": { "message": message } })),
-            )
-                .into_response(),
-            Self::Diagnostics(diagnostics) => (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": { "message": "these rules did not compile; nothing changed" },
-                    "diagnostics": diagnostics,
-                })),
-            )
-                .into_response(),
-            Self::NotSaved(message) => (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({ "error": { "message": message } })),
-            )
-                .into_response(),
-        }
-    }
+/// A change refused because the rules did not compile: nothing changed, and
+/// the compiler's diagnostics ride beside the error.
+fn not_compiled(diagnostics: &[RulesDiagnostic]) -> ApiError {
+    ApiError::invalid("these rules did not compile; nothing changed").with_extra(
+        "diagnostics",
+        serde_json::to_value(diagnostics).unwrap_or_default(),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -704,7 +680,7 @@ pub(crate) struct CheckRules {
 async fn read_rules(
     State(editor): State<RulesEditor>,
     Query(request): Query<ReadRules>,
-) -> Result<Json<RulesDocument>, RulesError> {
+) -> Result<Json<RulesDocument>, ApiError> {
     editor
         .read(request.database.as_deref().unwrap_or("(default)"))
         .await
@@ -715,11 +691,10 @@ async fn read_rules(
 async fn write_rules(
     State(editor): State<RulesEditor>,
     Json(request): Json<WriteRules>,
-) -> Result<Json<RulesInstalled>, RulesError> {
+) -> Result<Json<RulesInstalled>, ApiError> {
     // Compiling and writing a file are both blocking.
-    tokio::task::spawn_blocking(move || editor.write(&request))
+    blocking("the rules task", move || editor.write(&request))
         .await
-        .map_err(|_| RulesError::invalid("the rules task did not finish"))?
         .map(Json)
 }
 
@@ -729,7 +704,7 @@ async fn write_rules(
 async fn check_rules(
     State(editor): State<RulesEditor>,
     Json(request): Json<CheckRules>,
-) -> Result<Json<RulesCheck>, RulesError> {
+) -> Result<Json<RulesCheck>, ApiError> {
     editor.check(request).await.map(Json)
 }
 
@@ -738,7 +713,7 @@ async fn check_rules(
 async fn rules_history(
     State(editor): State<RulesEditor>,
     Query(request): Query<ReadRules>,
-) -> Result<Json<Vec<RulesVersion>>, RulesError> {
+) -> Result<Json<Vec<RulesVersion>>, ApiError> {
     let database = editor.database(request.database.as_deref().unwrap_or("(default)"))?;
     Ok(Json(
         editor
@@ -756,8 +731,9 @@ async fn rules_history(
 /// stops, like `/changes`.
 async fn rules_live(
     State(editor): State<RulesEditor>,
+    State(shutdown): State<Shutdown>,
     Query(request): Query<ReadRules>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, RulesError> {
+) -> Result<impl IntoResponse, ApiError> {
     let database_id = request.database.unwrap_or_else(|| "(default)".to_owned());
     let database = editor.database(&database_id)?;
     // Subscribe before reading what is in force, so no change can fall
@@ -768,7 +744,7 @@ async fn rules_live(
         .current_version(&database)
         .map(|version| version.hash);
     let rules = editor.rules.clone();
-    let first = stream::once(async { Ok(json_event("hello", &serde_json::json!({}))) });
+    let first = stream::once(async { json_event("hello", &serde_json::json!({})) });
     let rest = BroadcastStream::new(receiver).flat_map(move |item| {
         let mut events = Vec::new();
         let (recheck, file) = match &item {
@@ -803,32 +779,20 @@ async fn rules_live(
                 },
             ));
         }
-        stream::iter(events.into_iter().map(Ok))
+        stream::iter(events)
     });
-    let shutdown = editor.shutdown.clone();
-    let stopped = async move {
-        let Some(mut shutdown) = shutdown else {
-            return std::future::pending().await;
-        };
-        // A dropped sender means the suite is gone too.
-        while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
-    };
-    Ok(Sse::new(first.chain(rest).take_until(stopped))
-        .keep_alive(KeepAlive::new().interval(KEEPALIVE).text("keepalive")))
-}
-
-fn json_event(name: &str, data: &impl Serialize) -> Event {
-    Event::default()
-        .event(name)
-        .json_data(data)
-        .unwrap_or_else(|_| Event::default().event(name))
+    Ok(sse_response(first.chain(rest), shutdown))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use axum::body::{Body, to_bytes};
-    use axum::http::Request;
+    use axum::http::{Request, StatusCode};
     use firenook_core_store::{DocumentKey, Fields, Store, Write};
+    use futures_util::Stream;
+    use tokio::sync::watch;
     use tower::ServiceExt as _;
 
     use super::*;
@@ -882,7 +846,11 @@ mod tests {
         editor: RulesEditor,
         request: Request<Body>,
     ) -> (StatusCode, serde_json::Value) {
-        let response = editor.router().oneshot(request).await.expect("response");
+        let response = editor
+            .router(crate::tests::running())
+            .oneshot(request)
+            .await
+            .expect("response");
         let status = response.status();
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1277,10 +1245,9 @@ mod tests {
     async fn the_live_stream_tells_of_every_change_and_ends_with_the_suite() {
         let (runtime, editor) = editor(None);
         let (stop, shutdown) = watch::channel(false);
-        let editor = editor.with_shutdown(shutdown);
         let response = editor
             .clone()
-            .router()
+            .router(Shutdown::new(shutdown))
             .oneshot(get("/rules/live?database=(default)"))
             .await
             .expect("response");

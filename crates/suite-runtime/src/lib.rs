@@ -19,7 +19,7 @@ use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
     CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, QueryExplainer,
-    RulesEditor, RulesEvaluator, SchemaIndex, console_router,
+    RulesEditor, RulesEvaluator, SchemaIndex, Shutdown, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -606,6 +606,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             console_router(ConsoleServices {
                 directory,
                 release: EngineRelease::from_environment(),
+                shutdown: Shutdown::new(shutdown.subscribe()),
                 firestore: console_firestore.map(|parts| FirestoreConsole {
                     rest: parts.rest,
                     changes: parts.changes,
@@ -615,7 +616,6 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     rules: parts.rules,
                     rules_evaluator: parts.rules_evaluator,
                     requests: requests.clone(),
-                    shutdown: shutdown.subscribe(),
                 }),
                 auth: auth.as_ref().map(|auth| auth.application()),
             }),

@@ -8,12 +8,16 @@
 //! `/console` on the Emulator UI port; every asset and API call is
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
+mod api_error;
+mod blocking;
 mod databases;
 mod explain;
 mod firestore;
 mod rules;
 mod rules_eval;
 mod schema;
+mod sse;
+mod time;
 
 use axum::Json;
 use axum::Router;
@@ -24,9 +28,9 @@ use axum::routing::{any, get};
 use firenook_suite_front::{EngineRelease, SuiteDirectory};
 use rust_embed::{Embed, EmbeddedFile};
 use serde::Serialize;
-use serde_json::json;
 use ts_rs::TS;
 
+pub use api_error::{ApiError, ApiErrorBody, ApiErrorDetail, ErrorCode};
 pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
 pub use explain::{
     ExplainCandidates, ExplainIndex, ExplainIndexField, ExplainOrder, ExplainStrategy, Explanation,
@@ -37,9 +41,8 @@ pub use firestore::{
 };
 pub use rules::{
     CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
-    RulesDiagnostic, RulesDocument, RulesEditor, RulesError, RulesFileStatus, RulesInstalled,
-    RulesLintCode, RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity,
-    RulesVersion, UnusedMatch,
+    RulesDiagnostic, RulesDocument, RulesEditor, RulesFileStatus, RulesInstalled, RulesLintCode,
+    RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity, RulesVersion, UnusedMatch,
 };
 pub use rules_eval::{
     AllowTrace, DecisionDetail, EvaluateAuth, EvaluateFieldReference, EvaluateOrder, EvaluateQuery,
@@ -51,6 +54,7 @@ pub use schema::{
     ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
     SubcollectionsSnapshot,
 };
+pub use sse::Shutdown;
 
 /// Built console assets. `build.rs` guarantees the folder exists, so a
 /// checkout without a console build still compiles and the router answers
@@ -145,6 +149,8 @@ pub struct ConsoleServices {
     pub directory: SuiteDirectory,
     /// The release this engine ships as, read once at startup.
     pub release: EngineRelease,
+    /// Flips when the suite stops; every stream the console opens ends on it.
+    pub shutdown: Shutdown,
     /// Firestore, when the suite runs it.
     pub firestore: Option<FirestoreConsole>,
     /// The Auth emulator's HTTP application, when the suite runs it, so the
@@ -154,12 +160,13 @@ pub struct ConsoleServices {
 
 impl ConsoleServices {
     /// A console with the directory alone (no data services), reporting the
-    /// release the environment declares.
+    /// release the environment declares, ending its streams on `shutdown`.
     #[must_use]
-    pub fn new(directory: SuiteDirectory) -> Self {
+    pub fn new(directory: SuiteDirectory, shutdown: Shutdown) -> Self {
         Self {
             directory,
             release: EngineRelease::from_environment(),
+            shutdown,
             firestore: None,
             auth: None,
         }
@@ -176,7 +183,10 @@ pub fn console_router(services: ConsoleServices) -> Router {
             release: services.release,
         });
     if let Some(firestore) = services.firestore {
-        api = api.nest("/firestore", firestore::firestore_router(firestore));
+        api = api.nest(
+            "/firestore",
+            firestore::firestore_router(firestore, services.shutdown),
+        );
     }
     if let Some(auth) = services.auth {
         // The Auth application is one fallback handler, so it mounts as a
@@ -193,16 +203,8 @@ async fn status(State(state): State<ConsoleState>) -> Json<ConsoleStatus> {
     Json(ConsoleStatus::new(&state.directory, &state.release))
 }
 
-async fn unknown_api(uri: Uri) -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({
-            "error": {
-                "message": format!("unknown console API route: {}", uri.path()),
-            }
-        })),
-    )
-        .into_response()
+async fn unknown_api(uri: Uri) -> ApiError {
+    ApiError::not_found(format!("unknown console API route: {}", uri.path()))
 }
 
 /// Serves a built file, or the application shell for any path the client
@@ -282,8 +284,16 @@ mod tests {
     fn services(release: EngineRelease) -> ConsoleServices {
         ConsoleServices {
             release,
-            ..ConsoleServices::new(directory())
+            ..ConsoleServices::new(directory(), running())
         }
+    }
+
+    /// A stop signal that never fires: its sender lives as long as the test
+    /// process, so streams opened in a test end only when dropped.
+    pub(crate) fn running() -> Shutdown {
+        let (stop, receiver) = tokio::sync::watch::channel(false);
+        std::mem::forget(stop);
+        Shutdown::new(receiver)
     }
 
     async fn call(uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
@@ -332,6 +342,7 @@ mod tests {
         RulesVersion::export_all(&config).expect("TypeScript bindings written");
         RulesChanged::export_all(&config).expect("TypeScript bindings written");
         RulesFileStatus::export_all(&config).expect("TypeScript bindings written");
+        ApiErrorBody::export_all(&config).expect("TypeScript bindings written");
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(
@@ -389,6 +400,7 @@ mod tests {
             value["error"]["message"],
             "unknown console API route: /api/v1/nothing"
         );
+        assert_eq!(value["error"]["code"], "not-found");
     }
 
     #[tokio::test]
