@@ -77,6 +77,8 @@ test('options preserve argv; no ignored flags, duplicate options or shell interp
   assert.deepEqual(parsed.command,['echo','hello;touch nope']);
   assert.deepEqual(parsed.positionals,[]);
   assert.equal(parseOptions(['--no-diagnostics']).options['no-diagnostics'], true);
+  assert.equal(parseOptions(['--allowed-hosts', 'console.example.test']).options['allowed-hosts'], 'console.example.test');
+  assert.throws(() => parseOptions(['--allowed-hosts']));
   assert.throws(() => parseOptions(['--no-diagnostics=false']));
   for (const args of [['--wat'],['-x'],['--project'],['--project=a','--project=b'],['--resume-state=false'],['--durability','eventually'],['--log-verbosity','LOUD'],['-r','--shallow'],['--functions','--no-functions']]) assert.throws(()=>parseOptions(args));
   assert.equal(parseOptions(['--durability=per-commit']).options.durability, 'per-commit');
@@ -292,6 +294,9 @@ test('state and credential isolation stay outside original config and seed', () 
   assert.ok(!launch.args.includes('--firestore-memory'));
   assert.ok(!launch.args.includes('--no-diagnostics'));
   assert.ok(prepareLaunch(diagnostic, {...options, 'no-diagnostics': true}).args.includes('--no-diagnostics'));
+  assert.ok(!launch.args.includes('--allowed-hosts'));
+  const named = prepareLaunch(diagnostic, {...options, 'allowed-hosts': 'console.example.test,dev.example.test'}).args;
+  assert.equal(named[named.indexOf('--allowed-hosts') + 1], 'console.example.test,dev.example.test');
   assert.ok(!launch.args.includes('--durability'));
   const perCommit = prepareLaunch(diagnostic, {...options, durability: 'per-commit'}).args;
   assert.equal(perCommit[perCommit.indexOf('--durability') + 1], 'per-commit');

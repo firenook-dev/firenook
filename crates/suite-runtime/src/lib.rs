@@ -18,8 +18,8 @@ use axum::routing::get;
 use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
-    CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, QueryExplainer,
-    RulesEditor, RulesEvaluator, SchemaIndex, console_router,
+    AllowedHosts, CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole,
+    QueryExplainer, RulesEditor, RulesEvaluator, SchemaIndex, Shutdown, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -263,6 +263,10 @@ pub struct SuiteConfig {
     /// Listen address of every listener (`--host`); `0.0.0.0`/`::` are
     /// accepted and `connect_host` names the loopback address clients use.
     pub host: String,
+    /// `--allowed-hosts`: host names the console answers for besides the
+    /// loopback names and `host`, for a deployment reached by another name.
+    /// Bound to a wildcard with none given, the console answers any host.
+    pub allowed_hosts: Vec<String>,
     pub project_id: String,
     /// `--only` selection; `ServiceSelection::ALL` by default.
     pub services: ServiceSelection,
@@ -600,12 +604,20 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let requests = firestore
         .is_some()
         .then(|| requests_router(request_history, shutdown.subscribe()));
+    let allowed_hosts = AllowedHosts::new(&config.host, &config.allowed_hosts);
+    if ui.is_some() && allowed_hosts.accepts_any() {
+        eprintln!(
+            "firenook: the console answers requests for any host name because every listener is bound to {}; pass --allowed-hosts with the names it is reached by to refuse the others",
+            config.host
+        );
+    }
     let ui = ui.map(|official| {
         official.nest(
             CONSOLE_PATH,
             console_router(ConsoleServices {
                 directory,
                 release: EngineRelease::from_environment(),
+                shutdown: Shutdown::new(shutdown.subscribe()),
                 firestore: console_firestore.map(|parts| FirestoreConsole {
                     rest: parts.rest,
                     changes: parts.changes,
@@ -615,9 +627,9 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     rules: parts.rules,
                     rules_evaluator: parts.rules_evaluator,
                     requests: requests.clone(),
-                    shutdown: shutdown.subscribe(),
                 }),
                 auth: auth.as_ref().map(|auth| auth.application()),
+                allowed_hosts,
             }),
         )
     });

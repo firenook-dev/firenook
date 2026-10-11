@@ -56,7 +56,6 @@ fn prepared(name: &str) -> Prepared {
             rules: console.rules,
             rules_evaluator: console.rules_evaluator,
             requests: None,
-            shutdown,
         }),
         ..ConsoleServices::new(
             SuiteDirectory::new(
@@ -67,6 +66,7 @@ fn prepared(name: &str) -> Prepared {
                 ],
             )
             .expect("directory"),
+            Shutdown::new(shutdown),
         )
     });
     Prepared {

@@ -8,8 +8,10 @@
 
 mod logging;
 mod release;
+pub mod replay;
 mod requests;
 pub use logging::LoggingRuntime;
+pub use replay::{Cursor, Entry, Follow, ReplayRing, RingBudget, RingLimits, RingSize};
 #[cfg(test)]
 mod logging_tests;
 pub use release::{ENGINE_REVISION_VARIABLE, EngineRelease, RELEASE_VERSION_VARIABLE};
@@ -667,14 +669,14 @@ mod tests {
             logging.record("info", Some("functions"), format!("record-{index}-火🔥"));
         }
         assert_eq!(logging.len(), LOG_REPLAY_CAPACITY);
-        let history = lock(&logging.state.history);
+        let history = logging.state.history.snapshot();
         let decode = |record: &str| serde_json::from_str::<LogRecord>(record).unwrap();
         assert_eq!(
-            decode(history.front().expect("first")).message,
+            decode(&history.first().expect("first").json).message,
             "record-10-火🔥"
         );
         assert_eq!(
-            decode(history.back().expect("last")).message,
+            decode(&history.last().expect("last").json).message,
             format!("record-{}-火🔥", LOG_REPLAY_CAPACITY + 9)
         );
     }

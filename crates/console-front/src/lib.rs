@@ -8,12 +8,23 @@
 //! `/console` on the Emulator UI port; every asset and API call is
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
+mod api_error;
+mod blocking;
 mod databases;
 mod explain;
 mod firestore;
+mod guard;
+mod instance;
+mod live;
 mod rules;
 mod rules_eval;
 mod schema;
+mod sse;
+mod time;
+
+use std::collections::BTreeMap;
+use std::hash::{Hash as _, Hasher as _};
+use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
@@ -24,22 +35,30 @@ use axum::routing::{any, get};
 use firenook_suite_front::{EngineRelease, SuiteDirectory};
 use rust_embed::{Embed, EmbeddedFile};
 use serde::Serialize;
-use serde_json::json;
 use ts_rs::TS;
 
+pub use api_error::{ApiError, ApiErrorBody, ApiErrorDetail, ErrorCode};
 pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
 pub use explain::{
     ExplainCandidates, ExplainIndex, ExplainIndexField, ExplainOrder, ExplainStrategy, Explanation,
     QueryExplainer,
 };
 pub use firestore::{
-    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
+    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, ChangedCollection, DocumentChange,
+    FirestoreConsole,
+};
+pub use guard::{
+    ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
+    KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
+};
+pub use live::{
+    LiveEnd, LiveHello, LiveLimits, LiveProbe, LiveRefusal, LiveReset, LiveSubscribe,
+    LiveSubscriptionsRequest, LiveSubscriptionsResponse, ResetReason,
 };
 pub use rules::{
     CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
-    RulesDiagnostic, RulesDocument, RulesEditor, RulesError, RulesFileStatus, RulesInstalled,
-    RulesLintCode, RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity,
-    RulesVersion, UnusedMatch,
+    RulesDiagnostic, RulesDocument, RulesEditor, RulesFileStatus, RulesInstalled, RulesLintCode,
+    RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity, RulesVersion, UnusedMatch,
 };
 pub use rules_eval::{
     AllowTrace, DecisionDetail, EvaluateAuth, EvaluateFieldReference, EvaluateOrder, EvaluateQuery,
@@ -51,6 +70,7 @@ pub use schema::{
     ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
     SubcollectionsSnapshot,
 };
+pub use sse::Shutdown;
 
 /// Built console assets. `build.rs` guarantees the folder exists, so a
 /// checkout without a console build still compiles and the router answers
@@ -145,64 +165,125 @@ pub struct ConsoleServices {
     pub directory: SuiteDirectory,
     /// The release this engine ships as, read once at startup.
     pub release: EngineRelease,
+    /// Flips when the suite stops; every stream the console opens ends on it.
+    pub shutdown: Shutdown,
     /// Firestore, when the suite runs it.
     pub firestore: Option<FirestoreConsole>,
     /// The Auth emulator's HTTP application, when the suite runs it, so the
     /// console reaches Identity Toolkit same-origin under `/api/v1/auth`.
     pub auth: Option<Router>,
+    /// Hosts the console answers for; every other `Host` is refused, so a
+    /// page that rebinds its own name to this machine reaches nothing.
+    pub allowed_hosts: AllowedHosts,
 }
 
 impl ConsoleServices {
     /// A console with the directory alone (no data services), reporting the
-    /// release the environment declares.
+    /// release the environment declares, ending its streams on `shutdown`.
     #[must_use]
-    pub fn new(directory: SuiteDirectory) -> Self {
+    pub fn new(directory: SuiteDirectory, shutdown: Shutdown) -> Self {
         Self {
             directory,
             release: EngineRelease::from_environment(),
+            shutdown,
             firestore: None,
             auth: None,
+            allowed_hosts: AllowedHosts::loopback(),
         }
     }
 }
 
 /// The console router: the Console API under `/api/v1` and the embedded
 /// application for every other path. Mount it under [`CONSOLE_PATH`].
+///
+/// One request guard covers the whole mount (`guard.rs`): the `Host` must be
+/// one the console answers for, and the Console API takes calls only from
+/// the console itself, mutations only with JSON or the console header, and
+/// streams and sockets only from its own origin. A service's own application
+/// mounted here (Firestore REST, Identity Toolkit) keeps that service's
+/// semantics and gets the `Host` rule only.
+///
+/// The live channel (`/api/v1/live`) is the only route that streams: every
+/// page's live updates are topics on it (`live/`).
 pub fn console_router(services: ConsoleServices) -> Router {
+    let mut natives = guard::NativeMounts::default();
+    let mut topics: Vec<Arc<dyn live::LiveTopic>> = Vec::new();
+    let mut absent = BTreeMap::new();
+    match &services.firestore {
+        Some(firestore) => {
+            topics.push(Arc::new(firestore.changes.topic()));
+            topics.push(Arc::new(firestore.rules.topic()));
+        }
+        None => {
+            absent.insert("firestore", "Firestore");
+        }
+    }
+    if services.auth.is_none() {
+        absent.insert("auth", "Authentication");
+    }
+    let hub = live::LiveHub::new(
+        topics,
+        absent,
+        live::HelloFacts {
+            instance: instance::Instance::new(),
+            console_build: console_build(),
+            engine_revision: services.release.revision().map(str::to_owned),
+        },
+        services.shutdown.clone(),
+    );
     let mut api = Router::new()
         .route("/status", get(status))
         .with_state(ConsoleState {
             directory: services.directory,
             release: services.release,
-        });
+        })
+        .merge(hub.router());
     if let Some(firestore) = services.firestore {
-        api = api.nest("/firestore", firestore::firestore_router(firestore));
+        api = api.nest(
+            "/firestore",
+            firestore::firestore_router(firestore, services.shutdown),
+        );
+        for prefix in firestore::REST_PREFIXES {
+            natives.add(&format!("/api/v1/firestore{prefix}"));
+        }
     }
     if let Some(auth) = services.auth {
         // The Auth application is one fallback handler, so it mounts as a
         // service: every path under the prefix reaches it, prefix stripped.
         api = api.nest_service("/auth", auth);
+        natives.add("/api/v1/auth");
     }
+    let policy = guard::GuardPolicy {
+        hosts: services.allowed_hosts,
+        natives: Arc::new(natives),
+    };
     Router::new()
         .nest("/api/v1", api)
         .route("/api/{*rest}", any(unknown_api))
         .fallback(asset)
+        .layer(axum::middleware::from_fn_with_state(policy, guard::guard))
+}
+
+/// A hash of the console application this engine serves (its `index.html`,
+/// which names every hashed asset), so a page can tell an engine that was
+/// updated from one that restarted.
+fn console_build() -> String {
+    Assets::get("index.html").map_or_else(
+        || "unbuilt".to_owned(),
+        |index| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            index.data.hash(&mut hasher);
+            format!("{:016x}", hasher.finish())
+        },
+    )
 }
 
 async fn status(State(state): State<ConsoleState>) -> Json<ConsoleStatus> {
     Json(ConsoleStatus::new(&state.directory, &state.release))
 }
 
-async fn unknown_api(uri: Uri) -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({
-            "error": {
-                "message": format!("unknown console API route: {}", uri.path()),
-            }
-        })),
-    )
-        .into_response()
+async fn unknown_api(uri: Uri) -> ApiError {
+    ApiError::not_found(format!("unknown console API route: {}", uri.path()))
 }
 
 /// Serves a built file, or the application shell for any path the client
@@ -254,6 +335,9 @@ const NOT_BUILT_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>Fire
 or work on the console with <code>npm run dev --prefix console</code>, which proxies this engine's console API.</p>";
 
 #[cfg(test)]
+mod router_tests;
+
+#[cfg(test)]
 mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
@@ -282,8 +366,16 @@ mod tests {
     fn services(release: EngineRelease) -> ConsoleServices {
         ConsoleServices {
             release,
-            ..ConsoleServices::new(directory())
+            ..ConsoleServices::new(directory(), running())
         }
+    }
+
+    /// A stop signal that never fires: its sender lives as long as the test
+    /// process, so streams opened in a test end only when dropped.
+    pub(crate) fn running() -> Shutdown {
+        let (stop, receiver) = tokio::sync::watch::channel(false);
+        std::mem::forget(stop);
+        Shutdown::new(receiver)
     }
 
     async fn call(uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
@@ -332,12 +424,18 @@ mod tests {
         RulesVersion::export_all(&config).expect("TypeScript bindings written");
         RulesChanged::export_all(&config).expect("TypeScript bindings written");
         RulesFileStatus::export_all(&config).expect("TypeScript bindings written");
+        ApiErrorBody::export_all(&config).expect("TypeScript bindings written");
+        live::export_bindings(&config);
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(
             written.contains("services: Array<ServiceStatus>"),
             "{written}"
         );
+        // Live types live in their own directory and import root types
+        // with a relative path.
+        let refusal = std::fs::read_to_string(format!("{out}/live/LiveRefusal.ts")).expect("read");
+        assert!(refusal.contains("from \"../ApiErrorDetail\""), "{refusal}");
     }
 
     #[tokio::test]
@@ -389,6 +487,7 @@ mod tests {
             value["error"]["message"],
             "unknown console API route: /api/v1/nothing"
         );
+        assert_eq!(value["error"]["code"], "not-found");
     }
 
     #[tokio::test]

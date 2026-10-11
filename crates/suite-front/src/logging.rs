@@ -1,5 +1,8 @@
 //! Bounded log replay with an atomic replay/live boundary and owned lifetimes.
-use std::collections::VecDeque;
+//!
+//! The history is a [`ReplayRing`]: one sequenced buffer that the official
+//! Logging WebSocket replays from (the newest 1,024 records, byte for byte)
+//! and that the console's log feed reads with cursors.
 use std::io::Write as _;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -18,8 +21,17 @@ use time::format_description::well_known::Rfc3339;
 use tokio::sync::{Semaphore, broadcast, watch};
 
 use super::{LOG_REPLAY_CAPACITY, LogRecord, lock};
+use crate::replay::{ReplayRing, RingBudget, RingLimits, random_epoch};
 
 pub(super) const MAXIMUM_RECORD_BYTES: usize = 8192;
+/// What the log ring keeps: the records the official UI replays, each at
+/// most [`MAXIMUM_RECORD_BYTES`], as `benchmarks/phase-b-logging.json` bounds
+/// them.
+const LOG_RING: RingLimits = RingLimits {
+    entries: LOG_REPLAY_CAPACITY,
+    bytes: LOG_REPLAY_CAPACITY * MAXIMUM_RECORD_BYTES,
+    floor: 256,
+};
 pub(super) const MAXIMUM_SUBSCRIBERS: usize = 4;
 const SEND_DEADLINE: Duration = Duration::from_secs(30);
 
@@ -42,12 +54,10 @@ impl LoggingRuntime {
     /// Creates an empty bounded log buffer.
     #[must_use]
     pub fn new() -> Self {
-        let (live, _) = broadcast::channel(LOG_REPLAY_CAPACITY);
         let (owner, shutdown) = watch::channel(false);
         Self {
             state: LoggingState {
-                history: Arc::new(Mutex::new(VecDeque::new())),
-                live,
+                history: ReplayRing::new("logs", LOG_RING, random_epoch(), &RingBudget::shared()),
                 shutdown,
                 slots: Arc::new(Semaphore::new(MAXIMUM_SUBSCRIBERS)),
                 file: Arc::new(Mutex::new(None)),
@@ -113,20 +123,16 @@ impl LoggingRuntime {
             // in-memory replay keeps serving the UI.
             let _ = file.write_all(line.as_bytes());
         }
-        let mut history = lock(&self.state.history);
-        if history.len() == LOG_REPLAY_CAPACITY {
-            history.pop_front();
-        }
-        history.push_back(encoded.clone());
-        // Subscription+snapshot uses this same lock: no gap or duplicate at the
-        // boundary, and producers never wait on network I/O.
-        let _ = self.state.live.send(encoded);
+        // The ring snapshots and subscribes under the lock it pushes with:
+        // no gap or duplicate at the boundary, and producers never wait on
+        // network I/O.
+        self.state.history.push((), encoded);
     }
 
     /// Current bounded record count.
     #[must_use]
     pub fn len(&self) -> usize {
-        lock(&self.state.history).len()
+        self.state.history.len()
     }
 
     /// Whether no entries have been recorded.
@@ -162,8 +168,7 @@ fn omitted() -> LogRecord {
 
 #[derive(Clone)]
 pub(super) struct LoggingState {
-    pub(super) history: Arc<Mutex<VecDeque<Arc<str>>>>,
-    pub(super) live: broadcast::Sender<Arc<str>>,
+    pub(super) history: ReplayRing<()>,
     pub(super) slots: Arc<Semaphore>,
     shutdown: watch::Receiver<bool>,
     file: Arc<Mutex<Option<std::fs::File>>>,
@@ -192,18 +197,15 @@ async fn upgrade(State(state): State<LoggingState>, websocket: WebSocketUpgrade)
 }
 
 async fn session(mut state: LoggingState, socket: WebSocket) {
-    let (replay, mut live) = {
-        let history = lock(&state.history);
-        (
-            history.iter().cloned().collect::<Vec<_>>(),
-            state.live.subscribe(),
-        )
-    };
+    let follow = state.history.follow(None);
+    let mut live = follow.live;
+    // The official UI replays the newest records, as many as it always has.
+    let skip = follow.replay.len().saturating_sub(LOG_REPLAY_CAPACITY);
     let (mut output, mut input) = socket.split();
-    for record in replay {
+    for record in follow.replay.into_iter().skip(skip) {
         if !send(
             &mut output,
-            Message::Text(record.as_ref().into()),
+            Message::Text(record.json.as_ref().into()),
             &mut state.shutdown,
         )
         .await
@@ -222,7 +224,7 @@ async fn session(mut state: LoggingState, socket: WebSocket) {
                 _=>return,
             },
             record=live.recv()=>match record {
-                Ok(record)=>if !send(&mut output,Message::Text(record.as_ref().into()),&mut state.shutdown).await {return;},
+                Ok(record)=>if !send(&mut output,Message::Text(record.json.as_ref().into()),&mut state.shutdown).await {return;},
                 Err(broadcast::error::RecvError::Lagged(_))=>{
                     let close=Message::Close(Some(CloseFrame {code:1013,reason:"Log history overrun; reconnect for retained history".into()}));
                     let _=send(&mut output,close,&mut state.shutdown).await;return;

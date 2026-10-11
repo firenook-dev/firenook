@@ -29,15 +29,14 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use firenook_core_store::{CommitObservation, CommitObserver, DatabaseName, Snapshot, Store};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tokio::sync::Notify;
 use tokio::sync::futures::OwnedNotified;
 use ts_rs::TS;
+
+use crate::api_error::ApiError;
 
 /// The shape of one database.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -596,32 +595,26 @@ struct SubcollectionsRequest {
 async fn subcollections(
     State(index): State<SchemaIndex>,
     Json(request): Json<SubcollectionsRequest>,
-) -> Response {
+) -> Result<Json<SubcollectionsSnapshot>, ApiError> {
     if request.paths.len() > PATH_LIMIT {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": { "message":
-                format!("at most {PATH_LIMIT} paths per request; {} were asked for", request.paths.len()) } })),
-        )
-            .into_response();
+        return Err(ApiError::invalid(format!(
+            "at most {PATH_LIMIT} paths per request; {} were asked for",
+            request.paths.len()
+        )));
     }
     if let Some(path) = request
         .paths
         .iter()
         .find(|path| !path.is_empty() && !is_document_path(path))
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": { "message":
-                format!("not a document path: {path}") } })),
-        )
-            .into_response();
+        return Err(ApiError::invalid(format!("not a document path: {path}")));
     }
     let database = request.database.as_deref().unwrap_or("(default)");
-    match index.subcollections(database, &request.paths).await {
-        Ok(snapshot) => Json(snapshot).into_response(),
-        Err(error) => schema_error(error),
-    }
+    index
+        .subcollections(database, &request.paths)
+        .await
+        .map(Json)
+        .map_err(schema_error)
 }
 
 /// A document path alternates collection and document ids, so it has an
@@ -633,36 +626,33 @@ fn is_document_path(path: &str) -> bool {
     segments.len() % 2 == 0 && segments.iter().all(|segment| !segment.is_empty())
 }
 
-fn schema_error(error: SchemaError) -> Response {
+fn schema_error(error: SchemaError) -> ApiError {
     match error {
-        SchemaError::InvalidDatabase(message) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": { "message": message } })),
-        )
-            .into_response(),
-        SchemaError::BuildFailed => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": { "message": "the schema walk did not finish" } })),
-        )
-            .into_response(),
+        SchemaError::InvalidDatabase(message) => ApiError::invalid(message),
+        SchemaError::BuildFailed => ApiError::internal("the schema walk did not finish"),
     }
 }
 
 /// `GET /schema?database=(default)`: the tree of collection patterns with
 /// live counts.
-async fn schema(State(index): State<SchemaIndex>, Query(params): Query<SchemaParams>) -> Response {
+async fn schema(
+    State(index): State<SchemaIndex>,
+    Query(params): Query<SchemaParams>,
+) -> Result<Json<SchemaSnapshot>, ApiError> {
     let database = params.database.as_deref().unwrap_or("(default)");
-    match index.snapshot(database).await {
-        Ok(snapshot) => Json(snapshot).into_response(),
-        Err(error) => schema_error(error),
-    }
+    index
+        .snapshot(database)
+        .await
+        .map(Json)
+        .map_err(schema_error)
 }
 
 #[cfg(test)]
 mod tests {
     use axum::body::{Body, to_bytes};
-    use axum::http::Request;
+    use axum::http::{Request, StatusCode};
     use firenook_core_store::{DocumentKey, Fields, Precondition, Write};
+    use serde_json::json;
     use tower::ServiceExt as _;
 
     use super::*;
