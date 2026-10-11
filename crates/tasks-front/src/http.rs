@@ -17,12 +17,14 @@ use crate::config::{
     ConfigError, INVALID_QUEUE_ID, OVER_CONCURRENCY_LIMIT, QueueConfig, queue_key, valid_queue_id,
 };
 use crate::json::{OrderedJson, decode_base64_forgiving};
-use crate::queue::{TaskRecord, dispatch_deadline};
-use crate::runtime::{EnqueueError, RemoveError, TasksRuntime};
+use crate::queue::{TaskOrigin, TaskRecord, dispatch_deadline, parse_schedule_time};
+use crate::runtime::{
+    ConsoleTask, EnqueueError, QueueOrigin, QueueParts, QueueSource, RemoveError, TasksRuntime,
+};
 
 const EXPRESS: &str = "Express";
 /// `express.json()`'s default `limit`.
-const JSON_LIMIT: usize = 100 * 1024;
+pub(crate) const JSON_LIMIT: usize = 100 * 1024;
 /// The most compressed bytes read before the inflated limit applies.
 const COMPRESSED_LIMIT: usize = 16 * 1024 * 1024;
 /// The two-to-the-fifty-three ceiling of `Math.random() * MAX_SAFE_INTEGER`.
@@ -249,7 +251,19 @@ fn register(
     match QueueConfig::from_body(body) {
         Ok(config) => {
             let document = config.document().clone();
-            runtime.register_queue(&key, config);
+            runtime.register_queue(
+                &key,
+                config,
+                QueueSource {
+                    parts: QueueParts {
+                        project: project.to_owned(),
+                        location: location.to_owned(),
+                        queue: queue.to_owned(),
+                    },
+                    origin: QueueOrigin::Client,
+                    function: None,
+                },
+            );
             let mut envelope = IndexMap::new();
             envelope.insert("taskQueueConfig".to_owned(), document);
             json_response(StatusCode::OK, &OrderedJson::Object(envelope).stringify())
@@ -299,23 +313,28 @@ fn enqueue(
             );
         }
     };
-    let generated = format!(
-        "/projects/{project}/locations/{location}/queues/{queue}/tasks/{}",
-        random_safe_integer()
-    );
-    let record = match prepare_task(&mut task, generated, default_uri.as_ref()) {
+    let generated = generated_name(&QueueParts {
+        project: project.to_owned(),
+        location: location.to_owned(),
+        queue: queue.to_owned(),
+    });
+    let record = match build_task(&mut task, generated, default_uri.as_ref()) {
         Ok(record) => record,
-        Err(response) => return *response,
+        Err(error) => return error_page(StatusCode::INTERNAL_SERVER_ERROR, &error.0),
     };
     let name = record.name.clone();
     match runtime.enqueue(&key, record) {
-        Ok(()) => {
+        Ok(_) => {
             runtime.log("DEBUG", &format!("Enqueueing task {name} onto {key}"));
             let mut envelope = IndexMap::new();
             envelope.insert("task".to_owned(), OrderedJson::Object(task));
             json_response(StatusCode::OK, &OrderedJson::Object(envelope).stringify())
         }
-        Err(EnqueueError::UnknownQueue) => {
+        Err(EnqueueError::NameReserved | EnqueueError::QueueFull { .. }) => text_response(
+            StatusCode::CONFLICT,
+            "A task with the same name already exists",
+        ),
+        Err(_) => {
             // The queue was replaced or is gone between the two locks; the
             // official app answers as if it had never existed.
             runtime.log("WARN", "Tried to queue a task into a non-existent queue");
@@ -324,21 +343,37 @@ fn enqueue(
                 "Tried to queue a task from a non-existent queue",
             )
         }
-        Err(EnqueueError::Conflict) => text_response(
-            StatusCode::CONFLICT,
-            "A task with the same name already exists",
-        ),
     }
 }
 
+/// The exception the official handler throws while it prepares a task,
+/// which Express turns into a 500 page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskError(pub String);
+
+/// The name the emulator gives a task enqueued without one:
+/// `/projects/{project}/locations/{location}/queues/{queue}/tasks/{random}`,
+/// with the official leading slash.
+#[must_use]
+pub fn generated_name(parts: &QueueParts) -> String {
+    format!(
+        "/projects/{}/locations/{}/queues/{}/tasks/{}",
+        parts.project,
+        parts.location,
+        parts.queue,
+        random_safe_integer()
+    )
+}
+
 /// The handler's mutations of `req.body.task` (name default, decoded body,
-/// default URL) and the record the engine dispatches; the errors are the
-/// exceptions the official handler lets Express turn into a 500 page.
-fn prepare_task(
+/// default URL) and the record the engine dispatches, for the wire's enqueue
+/// and the console's alike; the errors are the exceptions the official
+/// handler lets Express turn into a 500 page.
+pub fn build_task(
     task: &mut IndexMap<String, OrderedJson>,
     generated_name: String,
     default_uri: Option<&OrderedJson>,
-) -> Result<TaskRecord, Box<Response>> {
+) -> Result<TaskRecord, TaskError> {
     let name = match task.get("name") {
         Some(value) if !value.is_null() => value.js_string(),
         _ => {
@@ -355,24 +390,18 @@ fn prepare_task(
         .map(OrderedJson::js_string);
     let deadline = dispatch_deadline(task.get("dispatchDeadline"));
     let Some(OrderedJson::Object(http_request)) = task.get_mut("httpRequest") else {
-        return Err(Box::new(error_page(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "TypeError: Cannot read properties of undefined (reading 'body')",
-        )));
+        return Err(TaskError(
+            "TypeError: Cannot read properties of undefined (reading 'body')".to_owned(),
+        ));
     };
     let Some(encoded) = http_request.get("body").and_then(OrderedJson::as_str) else {
-        return Err(Box::new(error_page(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "TypeError: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object.",
-        )));
+        return Err(TaskError(
+            "TypeError: The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object.".to_owned(),
+        ));
     };
     let decoded = String::from_utf8_lossy(&decode_base64_forgiving(encoded)).into_owned();
-    let parsed = OrderedJson::parse(&decoded).map_err(|error| {
-        Box::new(error_page(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &format!("SyntaxError: {error}"),
-        ))
-    })?;
+    let parsed =
+        OrderedJson::parse(&decoded).map_err(|error| TaskError(format!("SyntaxError: {error}")))?;
     let body_text = parsed.stringify();
     http_request.insert("body".to_owned(), parsed);
     if http_request.get("url").and_then(OrderedJson::as_str) == Some("") {
@@ -401,14 +430,152 @@ fn prepare_task(
             .collect(),
         _ => Vec::new(),
     };
+    let scheduled = schedule_time.as_deref().and_then(parse_schedule_time);
     Ok(TaskRecord {
+        id: 0,
         name,
         url,
         headers,
         body: body_text,
         schedule_time,
         deadline,
+        enqueued_at: std::time::SystemTime::now(),
+        origin: TaskOrigin::Wire,
+        scheduled,
     })
+}
+
+/// The task object `firebase-admin`'s `TaskQueue.enqueue` sends for the
+/// console's options (`validateTaskOptions`, with the emulator's
+/// service-account placeholder), refused where the SDK refuses them.
+pub(crate) fn console_task(
+    parts: &QueueParts,
+    task: ConsoleTask,
+) -> Result<IndexMap<String, OrderedJson>, EnqueueError> {
+    use base64::Engine as _;
+    let body = console_body(task.data, task.raw_body)?;
+    let mut headers = IndexMap::new();
+    headers.insert(
+        "Content-Type".to_owned(),
+        OrderedJson::String("application/json".to_owned()),
+    );
+    for (name, value) in task.headers {
+        headers.insert(name, OrderedJson::String(value));
+    }
+    let mut oidc = IndexMap::new();
+    oidc.insert(
+        "serviceAccountEmail".to_owned(),
+        OrderedJson::String("emulated-service-acct@email.com".to_owned()),
+    );
+    let mut http_request = IndexMap::new();
+    http_request.insert("url".to_owned(), OrderedJson::String(String::new()));
+    http_request.insert("oidcToken".to_owned(), OrderedJson::Object(oidc));
+    http_request.insert(
+        "body".to_owned(),
+        OrderedJson::String(base64::engine::general_purpose::STANDARD.encode(body)),
+    );
+    http_request.insert("headers".to_owned(), OrderedJson::Object(headers));
+    if let Some(url) = task.url {
+        let parsed = reqwest::Url::parse(&url).ok();
+        if !parsed.is_some_and(|url| matches!(url.scheme(), "http" | "https")) {
+            return Err(EnqueueError::Invalid(
+                "uri must be a valid URL string.".to_owned(),
+            ));
+        }
+        http_request.insert("url".to_owned(), OrderedJson::String(url));
+    }
+    let mut object = IndexMap::new();
+    object.insert("httpRequest".to_owned(), OrderedJson::Object(http_request));
+    if let Some(at) = schedule_time(task.schedule_delay_seconds)? {
+        object.insert("scheduleTime".to_owned(), OrderedJson::String(at));
+    }
+    if let Some(deadline) = task.dispatch_deadline_seconds {
+        if !(15..=1_800).contains(&deadline) {
+            return Err(EnqueueError::Invalid(
+                "dispatchDeadlineSeconds must be a non-negative duration in seconds and must be in the range of 15s to 30 mins.".to_owned(),
+            ));
+        }
+        object.insert(
+            "dispatchDeadline".to_owned(),
+            OrderedJson::String(format!("{deadline}s")),
+        );
+    }
+    if let Some(id) = task.id {
+        let valid = !id.is_empty()
+            && id.len() <= 500
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+        if !valid {
+            return Err(EnqueueError::Invalid(
+                "id can contain only letters ([A-Za-z]), numbers ([0-9]), hyphens (-), or underscores (_). The maximum length is 500 characters.".to_owned(),
+            ));
+        }
+        object.insert(
+            "name".to_owned(),
+            OrderedJson::String(format!(
+                "projects/{}/locations/{}/queues/{}/tasks/{id}",
+                parts.project, parts.location, parts.queue
+            )),
+        );
+    }
+    Ok(object)
+}
+
+/// The body the Admin SDK base64-encodes: `JSON.stringify({ data })`, or a
+/// raw JSON body as it is.
+fn console_body(data: Option<String>, raw: Option<String>) -> Result<String, EnqueueError> {
+    match (data, raw) {
+        (Some(_), Some(_)) => Err(EnqueueError::Invalid(
+            "Send the task's data or a raw body, not both.".to_owned(),
+        )),
+        (Some(data), None) => {
+            let data = OrderedJson::parse(&data).map_err(|error| {
+                EnqueueError::Invalid(format!("The data is not valid JSON: {error}."))
+            })?;
+            let mut wrapper = IndexMap::new();
+            wrapper.insert("data".to_owned(), data);
+            Ok(OrderedJson::Object(wrapper).stringify())
+        }
+        (None, Some(raw)) => Ok(OrderedJson::parse(&raw)
+            .map_err(|error| {
+                EnqueueError::Invalid(format!("The raw body is not valid JSON: {error}."))
+            })?
+            .stringify()),
+        // `JSON.stringify({ data: undefined })`.
+        (None, None) => Ok("{}".to_owned()),
+    }
+}
+
+/// `scheduleTime` for a delay: now plus the delay, as `toISOString` writes
+/// it, when the delay is above zero (the Admin SDK skips a zero one).
+fn schedule_time(delay: Option<f64>) -> Result<Option<String>, EnqueueError> {
+    let invalid = || {
+        EnqueueError::Invalid(
+            "scheduleDelaySeconds must be a non-negative duration in seconds.".to_owned(),
+        )
+    };
+    let Some(delay) = delay else {
+        return Ok(None);
+    };
+    if !delay.is_finite() || delay < 0.0 {
+        return Err(invalid());
+    }
+    if delay == 0.0 {
+        return Ok(None);
+    }
+    let delay = std::time::Duration::try_from_secs_f64(delay).map_err(|_| invalid())?;
+    Ok(Some(crate::rfc3339::format_millis(
+        std::time::SystemTime::now() + delay,
+    )))
+}
+
+/// The size of the request `{"task": …}` the Admin SDK sends for a task
+/// object, which the Tasks port holds to `express.json`'s 100 KiB.
+pub(crate) fn request_size(task: &IndexMap<String, OrderedJson>) -> usize {
+    let mut envelope = IndexMap::new();
+    envelope.insert("task".to_owned(), OrderedJson::Object(task.clone()));
+    OrderedJson::Object(envelope).stringify().len()
 }
 /// `DELETE /projects/:project_id/locations/:location_id/queues/:queue_name/tasks/:task_id`.
 fn remove(

@@ -51,13 +51,22 @@ pub mod functions;
 mod http;
 pub mod json;
 pub mod queue;
+mod rfc3339;
 pub mod runtime;
 
 pub use config::{QueueConfig, queue_key};
 pub use functions::{DiscoveredQueue, discover};
+pub use http::{TaskError, build_task, generated_name};
 pub use json::OrderedJson;
-pub use queue::{Outcome, RunRequest, Statistics, TaskQueue, TaskRecord};
-pub use runtime::{EnqueueError, LogSink, RemoveError, TasksRuntime};
+pub use queue::{
+    AttemptLog, AttemptRecord, Controls, Finished, Outcome, RunNow, RunRequest, Statistics,
+    Stopped, TaskOrigin, TaskOutcome, TaskQueue, TaskRecord,
+};
+pub use runtime::{
+    AttemptSink, ConsoleTask, ControlError, EnqueueError, EnqueuedTask, FinishedTask, LogSink,
+    QueueFunction, QueueOrigin, QueueParts, QueueSource, RejectedQueue, RemoveError, Replaced,
+    TasksRuntime,
+};
 
 #[cfg(test)]
 mod tests;
