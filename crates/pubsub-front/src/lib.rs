@@ -18,6 +18,7 @@ pub mod names;
 pub mod runtime;
 pub mod schedule_control;
 pub mod scheduler;
+pub mod templates;
 
 pub use broker::Broker;
 pub use error::PubsubError;

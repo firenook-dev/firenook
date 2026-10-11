@@ -2636,3 +2636,592 @@ mod console {
         );
     }
 }
+
+/// The console's diagnostics: filter positions, schema reasons and paths,
+/// JSON written as Avro binary, examples and templates.
+mod diagnostics {
+    use std::collections::BTreeMap;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use crate::avro::{
+        definition_problem, encode_json, example_json, explain_json, parse_definition,
+        validate_binary, validate_json,
+    };
+    use crate::filter::Filter;
+    use crate::templates::{Draft, DraftData, TemplateError, expand, prepare, prepare_all};
+
+    /// The matcher the wire used before `explain_json`, kept verbatim so
+    /// the rewrite is held to the same answers.
+    mod reference {
+        use apache_avro::Schema;
+        use apache_avro::schema::{Name, ResolvedSchema};
+        use serde_json::Value as JsonValue;
+
+        pub(super) fn accepts(schema: &Schema, message: &[u8]) -> bool {
+            let Ok(value) = serde_json::from_slice::<JsonValue>(message) else {
+                return false;
+            };
+            let Ok(resolved) = ResolvedSchema::try_from(schema) else {
+                return false;
+            };
+            matches_json(schema, &value, &resolved, None)
+        }
+
+        fn matches_json(
+            schema: &Schema,
+            value: &JsonValue,
+            resolved: &ResolvedSchema<'_>,
+            namespace: Option<&str>,
+        ) -> bool {
+            match schema {
+                Schema::Null => value.is_null(),
+                Schema::Boolean => value.is_boolean(),
+                Schema::Int | Schema::Date | Schema::TimeMillis => value
+                    .as_i64()
+                    .is_some_and(|number| i32::try_from(number).is_ok()),
+                Schema::Long
+                | Schema::TimeMicros
+                | Schema::TimestampMillis
+                | Schema::TimestampMicros
+                | Schema::TimestampNanos
+                | Schema::LocalTimestampMillis
+                | Schema::LocalTimestampMicros
+                | Schema::LocalTimestampNanos => value.as_i64().is_some(),
+                Schema::Float | Schema::Double => value.is_number(),
+                Schema::Bytes
+                | Schema::String
+                | Schema::BigDecimal
+                | Schema::Uuid(_)
+                | Schema::Decimal(_) => value.is_string(),
+                Schema::Duration(fixed) | Schema::Fixed(fixed) => value
+                    .as_str()
+                    .is_some_and(|text| text.chars().count() == fixed.size),
+                Schema::Array(array) => value.as_array().is_some_and(|items| {
+                    items
+                        .iter()
+                        .all(|item| matches_json(&array.items, item, resolved, namespace))
+                }),
+                Schema::Map(map) => value.as_object().is_some_and(|entries| {
+                    entries
+                        .values()
+                        .all(|item| matches_json(&map.types, item, resolved, namespace))
+                }),
+                Schema::Union(union) => {
+                    if value.is_null() {
+                        return union
+                            .variants()
+                            .iter()
+                            .any(|variant| matches!(variant, Schema::Null));
+                    }
+                    let Some(object) = value.as_object() else {
+                        return false;
+                    };
+                    if object.len() != 1 {
+                        return false;
+                    }
+                    let (branch, inner) = object.iter().next().expect("one entry");
+                    union.variants().iter().any(|variant| {
+                        json_type_name(variant, resolved, namespace)
+                            .is_some_and(|name| name == *branch)
+                            && matches_json(variant, inner, resolved, namespace)
+                    })
+                }
+                Schema::Record(record) => {
+                    let Some(object) = value.as_object() else {
+                        return false;
+                    };
+                    let record_namespace = record
+                        .name
+                        .namespace()
+                        .map(str::to_owned)
+                        .or_else(|| namespace.map(str::to_owned));
+                    let scope = record_namespace.as_deref();
+                    if object.len() != record.fields.len() {
+                        return false;
+                    }
+                    record.fields.iter().all(|field| {
+                        object
+                            .get(&field.name)
+                            .is_some_and(|item| matches_json(&field.schema, item, resolved, scope))
+                    })
+                }
+                Schema::Enum(symbols) => value
+                    .as_str()
+                    .is_some_and(|text| symbols.symbols.iter().any(|symbol| symbol == text)),
+                Schema::Ref { name } => {
+                    let Some(target) = lookup(name, resolved, namespace) else {
+                        return false;
+                    };
+                    matches_json(target, value, resolved, namespace)
+                }
+            }
+        }
+
+        fn lookup<'s>(
+            name: &Name,
+            resolved: &ResolvedSchema<'s>,
+            namespace: Option<&str>,
+        ) -> Option<&'s Schema> {
+            let full = name.fullname(namespace);
+            resolved
+                .get_names()
+                .iter()
+                .find(|(candidate, _)| {
+                    candidate.fullname(None) == full || candidate.name() == name.name()
+                })
+                .map(|(_, schema)| *schema)
+        }
+
+        /// The union branch label a JSON value carries for `schema`.
+        fn json_type_name(
+            schema: &Schema,
+            resolved: &ResolvedSchema<'_>,
+            namespace: Option<&str>,
+        ) -> Option<String> {
+            Some(match schema {
+                Schema::Null => "null".to_owned(),
+                Schema::Boolean => "boolean".to_owned(),
+                Schema::Int | Schema::Date | Schema::TimeMillis => "int".to_owned(),
+                Schema::Long
+                | Schema::TimeMicros
+                | Schema::TimestampMillis
+                | Schema::TimestampMicros
+                | Schema::TimestampNanos
+                | Schema::LocalTimestampMillis
+                | Schema::LocalTimestampMicros
+                | Schema::LocalTimestampNanos => "long".to_owned(),
+                Schema::Float => "float".to_owned(),
+                Schema::Double => "double".to_owned(),
+                Schema::Bytes | Schema::BigDecimal | Schema::Decimal(_) => "bytes".to_owned(),
+                Schema::String | Schema::Uuid(_) => "string".to_owned(),
+                Schema::Array(_) => "array".to_owned(),
+                Schema::Map(_) => "map".to_owned(),
+                Schema::Union(_) => return None,
+                Schema::Record(record) => record.name.fullname(namespace),
+                Schema::Enum(symbols) => symbols.name.fullname(namespace),
+                Schema::Fixed(fixed) | Schema::Duration(fixed) => fixed.name.fullname(namespace),
+                Schema::Ref { name } => {
+                    let target = lookup(name, resolved, namespace)?;
+                    return json_type_name(target, resolved, namespace);
+                }
+            })
+        }
+    }
+
+    const READING: &str = r#"{"type":"record","name":"Reading","fields":[{"name":"sensor","type":"string"},{"name":"value","type":"double"}]}"#;
+    const ORDER: &str = r#"{"type":"record","name":"Order","namespace":"shop","fields":[
+        {"name":"id","type":"string"},
+        {"name":"customer","type":{"type":"record","name":"Customer","fields":[{"name":"name","type":"string"},{"name":"vip","type":"boolean"}]}},
+        {"name":"items","type":{"type":"array","items":{"type":"record","name":"Item","fields":[{"name":"sku","type":"string"},{"name":"price","type":"double"},{"name":"count","type":"int"}]}}},
+        {"name":"tags","type":{"type":"map","values":"string"}},
+        {"name":"note","type":["null","string"]},
+        {"name":"status","type":{"type":"enum","name":"Status","symbols":["NEW","PAID","SHIPPED"]}},
+        {"name":"hash","type":{"type":"fixed","name":"Hash","size":4}},
+        {"name":"day","type":{"type":"int","logicalType":"date"}},
+        {"name":"at","type":{"type":"long","logicalType":"timestamp-millis"}},
+        {"name":"total","type":{"type":"bytes","logicalType":"decimal","precision":8,"scale":2}},
+        {"name":"ref","type":{"type":"string","logicalType":"uuid"}}
+    ]}"#;
+    const NODE: &str = r#"{"type":"record","name":"Node","fields":[{"name":"value","type":"int"},{"name":"next","type":["null","Node"]}]}"#;
+    const ENVELOPE: &str = r#"{"type":"record","name":"Envelope","namespace":"com.example","fields":[
+        {"name":"inner","type":{"type":"record","name":"Inner","fields":[{"name":"id","type":"long"}]}},
+        {"name":"kind","type":{"type":"enum","name":"Kind","symbols":["A","B"]}},
+        {"name":"choice","type":["Inner","string"]}
+    ]}"#;
+    const NUMBERS: &str = r#"{"type":"array","items":{"type":"map","values":"int"}}"#;
+    const CHOICE: &str = r#"["null","int","string"]"#;
+
+    const GOOD_ORDER: &str = r#"{"id":"o-1","customer":{"name":"Ada","vip":true},"items":[{"sku":"a","price":2.5,"count":2}],"tags":{"channel":"web"},"note":{"string":"leave at door"},"status":"PAID","hash":"abcd","day":20000,"at":1728000000000,"total":"\u0001","ref":"00000000-0000-4000-8000-000000000000"}"#;
+
+    #[allow(clippy::too_many_lines)]
+    fn corpus() -> Vec<(&'static str, String)> {
+        let order = |change: &dyn Fn(&mut serde_json::Value)| {
+            let mut value: serde_json::Value = serde_json::from_str(GOOD_ORDER).expect("order");
+            change(&mut value);
+            value.to_string()
+        };
+        vec![
+            (READING, r#"{"sensor":"s1","value":1.5}"#.to_owned()),
+            (READING, r#"{"sensor":"s1","value":2}"#.to_owned()),
+            (READING, r#"{"sensor":1,"value":1.5}"#.to_owned()),
+            (READING, r#"{"sensor":"s1"}"#.to_owned()),
+            (
+                READING,
+                r#"{"sensor":"s1","value":1.5,"extra":true}"#.to_owned(),
+            ),
+            (READING, "not json".to_owned()),
+            (READING, "[]".to_owned()),
+            (ORDER, GOOD_ORDER.to_owned()),
+            (
+                ORDER,
+                order(&|value| value["note"] = serde_json::Value::Null),
+            ),
+            (
+                ORDER,
+                order(&|value| value["note"] = serde_json::json!("plain")),
+            ),
+            (
+                ORDER,
+                order(&|value| value["note"] = serde_json::json!({"int": 1})),
+            ),
+            (
+                ORDER,
+                order(&|value| value["items"][0]["price"] = serde_json::json!("free")),
+            ),
+            (
+                ORDER,
+                order(&|value| value["items"][0]["count"] = serde_json::json!(3_000_000_000_u64)),
+            ),
+            (
+                ORDER,
+                order(&|value| value["items"] = serde_json::json!([])),
+            ),
+            (
+                ORDER,
+                order(&|value| value["tags"] = serde_json::json!({"a": 1})),
+            ),
+            (
+                ORDER,
+                order(&|value| value["status"] = serde_json::json!("LOST")),
+            ),
+            (
+                ORDER,
+                order(&|value| value["hash"] = serde_json::json!("abc")),
+            ),
+            (ORDER, order(&|value| value["day"] = serde_json::json!(1.5))),
+            (
+                ORDER,
+                order(&|value| value["at"] = serde_json::json!("now")),
+            ),
+            (
+                ORDER,
+                order(&|value| value["customer"]["vip"] = serde_json::json!("yes")),
+            ),
+            (
+                ORDER,
+                order(&|value| {
+                    value.as_object_mut().expect("object").remove("ref");
+                }),
+            ),
+            (ORDER, order(&|value| value["total"] = serde_json::json!(1))),
+            (NODE, r#"{"value":1,"next":null}"#.to_owned()),
+            (
+                NODE,
+                r#"{"value":1,"next":{"Node":{"value":2,"next":null}}}"#.to_owned(),
+            ),
+            (
+                NODE,
+                r#"{"value":1,"next":{"Node":{"value":"two","next":null}}}"#.to_owned(),
+            ),
+            (
+                NODE,
+                r#"{"value":1,"next":{"Leaf":{"value":2}}}"#.to_owned(),
+            ),
+            (
+                ENVELOPE,
+                r#"{"inner":{"id":1},"kind":"A","choice":{"com.example.Inner":{"id":2}}}"#
+                    .to_owned(),
+            ),
+            (
+                ENVELOPE,
+                r#"{"inner":{"id":1},"kind":"B","choice":{"string":"x"}}"#.to_owned(),
+            ),
+            (
+                ENVELOPE,
+                r#"{"inner":{"id":1},"kind":"C","choice":{"string":"x"}}"#.to_owned(),
+            ),
+            (
+                ENVELOPE,
+                r#"{"inner":{"id":1},"kind":"A","choice":{"Inner":{"id":2}}}"#.to_owned(),
+            ),
+            (NUMBERS, r#"[{"a":1},{"b":2,"c":3}]"#.to_owned()),
+            (NUMBERS, r#"[{"a":1},{"b":"two"}]"#.to_owned()),
+            (NUMBERS, r"[[1]]".to_owned()),
+            (CHOICE, "null".to_owned()),
+            (CHOICE, r#"{"int":7}"#.to_owned()),
+            (CHOICE, r#"{"string":"x"}"#.to_owned()),
+            (CHOICE, "7".to_owned()),
+            (CHOICE, r#"{"int":7,"string":"x"}"#.to_owned()),
+            (r#""string""#, r#""x""#.to_owned()),
+            (r#""long""#, "12.5".to_owned()),
+        ]
+    }
+
+    #[test]
+    fn filter_check_reports_the_position() {
+        let syntax = Filter::check("attributes.k = ").expect_err("no value");
+        assert_eq!(syntax.position, 15);
+        assert_eq!(syntax.message, "Expected a quoted value after =.");
+        let syntax = Filter::check(r#"data = "x""#).expect_err("data");
+        assert_eq!(syntax.position, 0);
+        assert!(
+            syntax.message.contains("attributes only"),
+            "{}",
+            syntax.message
+        );
+        let syntax = Filter::check(r#"attributes.k = "x" attributes.j = "y""#).expect_err("no AND");
+        assert_eq!(syntax.position, 19);
+        let syntax = Filter::check(r#"(attributes.k = "x""#).expect_err("open group");
+        assert_eq!(syntax.position, 19);
+        let syntax = Filter::check(r#"attributes.k = "x"#).expect_err("open string");
+        assert_eq!(syntax.position, 15);
+        // Offsets count UTF-16 units, as the browser does: the emoji is two.
+        let syntax = Filter::check("attributes.k = \"😀\" x").expect_err("trailing word");
+        assert_eq!(syntax.position, 20);
+        let syntax = Filter::check("attributes.é😀").expect_err("not a key character");
+        assert_eq!(syntax.position, 12);
+        assert!(
+            Filter::check(r#"attributes.k = "x" AND NOT hasPrefix(attributes.sku, "t")"#).is_ok()
+        );
+        // The wire's answer is the recorded application error, whatever the reason.
+        for text in ["attributes.k = ", r#"data = "x""#, "", "attributes.k = \"x"] {
+            let error = Filter::parse(text).expect_err("refused");
+            assert_eq!(error.message, "Application error processing RPC");
+            assert_eq!(error.code, tonic::Code::Unknown);
+        }
+    }
+
+    #[test]
+    fn explain_json_agrees_with_validate_json() {
+        let corpus = corpus();
+        assert_eq!(corpus.len(), 40);
+        for (definition, message) in &corpus {
+            let schema = parse_definition(definition).expect("definition");
+            let explained = explain_json(&schema, message.as_bytes());
+            assert_eq!(
+                explained.is_ok(),
+                validate_json(&schema, message.as_bytes()).is_ok(),
+                "{message}"
+            );
+            assert_eq!(
+                explained.is_ok(),
+                reference::accepts(&schema, message.as_bytes()),
+                "the rewrite changed the wire's answer for {message}"
+            );
+        }
+        let path = |definition: &str, message: &str| {
+            let schema = parse_definition(definition).expect("definition");
+            explain_json(&schema, message.as_bytes()).expect_err("refused")
+        };
+        let order = |change: &dyn Fn(&mut serde_json::Value)| {
+            let mut value: serde_json::Value = serde_json::from_str(GOOD_ORDER).expect("order");
+            change(&mut value);
+            value.to_string()
+        };
+        let cases = [
+            (
+                READING,
+                r#"{"sensor":1,"value":1.5}"#.to_owned(),
+                "$.sensor",
+            ),
+            (READING, r#"{"sensor":"s1"}"#.to_owned(), "$.value"),
+            (
+                READING,
+                r#"{"sensor":"s1","value":1.5,"extra":true}"#.to_owned(),
+                "$.extra",
+            ),
+            (READING, "not json".to_owned(), "$"),
+            (
+                ORDER,
+                order(&|value| value["items"][0]["price"] = serde_json::json!("free")),
+                "$.items[0].price",
+            ),
+            (
+                ORDER,
+                order(&|value| value["note"] = serde_json::json!({"int": 1})),
+                "$.note",
+            ),
+            (
+                ORDER,
+                order(&|value| value["tags"] = serde_json::json!({"a": 1})),
+                "$.tags.a",
+            ),
+            (
+                ORDER,
+                order(&|value| value["status"] = serde_json::json!("LOST")),
+                "$.status",
+            ),
+            (
+                NODE,
+                r#"{"value":1,"next":{"Node":{"value":"two","next":null}}}"#.to_owned(),
+                "$.next.Node.value",
+            ),
+            (NUMBERS, r#"[{"a":1},{"b":"two"}]"#.to_owned(), "$[1].b"),
+        ];
+        for (definition, message, expected) in cases {
+            assert_eq!(path(definition, &message).path, expected, "{message}");
+        }
+        let problem = path(
+            ORDER,
+            &order(&|value| value["status"] = serde_json::json!("LOST")),
+        );
+        assert_eq!(problem.expected, "one of NEW, PAID, SHIPPED");
+        assert_eq!(problem.found, "string \"LOST\"");
+        let problem = path(READING, r#"{"sensor":"s1"}"#);
+        assert!(problem.found.starts_with("nothing"), "{}", problem.found);
+    }
+
+    #[test]
+    fn encode_json_round_trips_through_validate_binary() {
+        for (definition, message) in [
+            (READING, r#"{"sensor":"s1","value":1.5}"#),
+            (ORDER, GOOD_ORDER),
+            (
+                NODE,
+                r#"{"value":1,"next":{"Node":{"value":2,"next":{"Node":{"value":3,"next":null}}}}}"#,
+            ),
+            (
+                ENVELOPE,
+                r#"{"inner":{"id":1},"kind":"B","choice":{"com.example.Inner":{"id":2}}}"#,
+            ),
+            (CHOICE, r#"{"string":"x"}"#),
+            (NUMBERS, r#"[{"a":1},{"b":2}]"#),
+        ] {
+            let schema = parse_definition(definition).expect("definition");
+            let binary = encode_json(&schema, message.as_bytes()).expect("encoded");
+            validate_binary(&schema, &binary).expect("the binary decodes");
+        }
+        // Reading (s1, 1.5) as the binary encoding writes it.
+        let schema = parse_definition(READING).expect("definition");
+        assert_eq!(
+            encode_json(&schema, br#"{"sensor":"s1","value":1.5}"#).expect("encoded"),
+            vec![4, b's', b'1', 0, 0, 0, 0, 0, 0, 248, 63]
+        );
+        let problem = encode_json(&schema, br#"{"sensor":1,"value":1.5}"#).expect_err("refused");
+        assert_eq!(problem.path, "$.sensor");
+    }
+
+    #[test]
+    fn definition_problem_names_the_reason() {
+        assert_eq!(definition_problem(READING), None);
+        let missing = definition_problem(r#"{"type":"record","fields":[]}"#).expect("refused");
+        assert!(
+            missing.reason.to_lowercase().contains("name"),
+            "{}",
+            missing.reason
+        );
+        assert_eq!((missing.line, missing.column), (None, None));
+        let syntax =
+            definition_problem("{\n  \"type\": \"record\",\n  \"name\": }").expect("refused");
+        assert_eq!((syntax.line, syntax.column), (Some(3), Some(11)));
+        assert!(!syntax.reason.contains("line"), "{}", syntax.reason);
+        let empty = definition_problem("  ").expect("refused");
+        assert_eq!(empty.reason, "The definition is empty.");
+        // The wire keeps its fixed answer.
+        assert_eq!(
+            parse_definition(r#"{"type":"record","fields":[]}"#)
+                .expect_err("refused")
+                .message,
+            "Could not parse schema definition"
+        );
+    }
+
+    #[test]
+    fn templates_and_examples_come_from_the_engine() {
+        let now = UNIX_EPOCH + Duration::from_millis(1_728_000_000_123);
+        let draft = Draft {
+            data: DraftData::Json(
+                r#"{"n":{{i}},"id":"{{uuid}}","at":"{{now}}","ts":{{ts}}}"#.to_owned(),
+            ),
+            attributes: BTreeMap::from([("batch".to_owned(), "b-{{i}}".to_owned())]),
+            ordering_key: "{{i}}".to_owned(),
+        };
+        let first = expand(&draft, 1, now).expect("expanded");
+        let DraftData::Json(text) = &first.data else {
+            panic!("JSON stays JSON");
+        };
+        let value: serde_json::Value = serde_json::from_str(text).expect("valid JSON");
+        assert_eq!(value["n"], 1);
+        assert_eq!(value["at"], "2024-10-04T00:00:00.123Z");
+        assert_eq!(value["ts"], 1_728_000_000_123_u64);
+        assert_eq!(first.attributes["batch"], "b-1");
+        assert_eq!(
+            first.ordering_key, "{{i}}",
+            "the ordering key is not a template"
+        );
+        let messages =
+            prepare_all(&[draft.clone(), draft.clone(), draft], now, true, None).expect("prepared");
+        let ids: Vec<String> = messages
+            .iter()
+            .map(|message| {
+                let value: serde_json::Value = serde_json::from_slice(&message.data).expect("JSON");
+                value["id"].as_str().expect("uuid").to_owned()
+            })
+            .collect();
+        assert_eq!(ids.len(), 3);
+        assert!(ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2]);
+        assert!(ids.iter().all(|id| id.len() == 36 && &id[14..15] == "4"));
+        assert_eq!(messages[2].attributes["batch"], "b-3");
+
+        // JSON that breaks only once expanded says so, against message 1.
+        let broken = Draft {
+            data: DraftData::Json(r#"{"n": {{i}}x}"#.to_owned()),
+            attributes: BTreeMap::new(),
+            ordering_key: String::new(),
+        };
+        let error = prepare(&broken, 1, now, true, None).expect_err("invalid after expansion");
+        assert!(
+            matches!(
+                error,
+                TemplateError::InvalidJson {
+                    message: 1,
+                    expanded: true,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+        assert!(
+            error
+                .to_string()
+                .starts_with("Message 1 is not valid JSON after expansion")
+        );
+        let unknown = Draft {
+            data: DraftData::Text("{{nope}}".to_owned()),
+            attributes: BTreeMap::new(),
+            ordering_key: String::new(),
+        };
+        assert!(matches!(
+            expand(&unknown, 1, now),
+            Err(TemplateError::UnknownPlaceholder { .. })
+        ));
+        // Without the template switch the text is sent as written.
+        let literal = prepare(&unknown, 1, now, false, None).expect("literal");
+        assert_eq!(literal.data, b"{{nope}}");
+
+        // Avro JSON for a binary topic, written through the schema.
+        let schema = parse_definition(READING).expect("definition");
+        let avro = Draft {
+            data: DraftData::AvroJson(r#"{"sensor":"s{{i}}","value":1.5}"#.to_owned()),
+            attributes: BTreeMap::new(),
+            ordering_key: String::new(),
+        };
+        let encoded = prepare(&avro, 1, now, true, Some(&schema)).expect("encoded");
+        validate_binary(&schema, &encoded.data).expect("binary");
+        assert!(matches!(
+            prepare(&avro, 1, now, true, None),
+            Err(TemplateError::NoSchema)
+        ));
+
+        // Examples pass the wire's own check, for every kind of type.
+        for definition in [READING, ORDER, NODE, ENVELOPE, NUMBERS, CHOICE] {
+            let schema = parse_definition(definition).expect("definition");
+            let example = example_json(&schema).expect("an example");
+            explain_json(&schema, example.as_bytes()).expect("accepted");
+            validate_json(&schema, example.as_bytes()).expect("accepted by the wire");
+        }
+        let schema = parse_definition(ORDER).expect("definition");
+        let example: serde_json::Value =
+            serde_json::from_str(&example_json(&schema).expect("example")).expect("JSON");
+        assert_eq!(example["status"], "NEW");
+        assert_eq!(example["note"], serde_json::json!({"string": "note"}));
+        assert_eq!(example["hash"], "aaaa");
+        let impossible = parse_definition(
+            r#"{"type":"record","name":"Loop","fields":[{"name":"again","type":"Loop"}]}"#,
+        );
+        if let Ok(schema) = impossible {
+            assert!(example_json(&schema).is_err());
+        }
+        let _ = SystemTime::now();
+    }
+}
