@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use firenook_functions_runtime::{Definition, ExtensionBackend, LogEvent, LogSink, dotenv};
 use serde_json::{Map, Value};
 
+pub mod control;
 pub mod params;
 pub mod refs;
 pub mod registry;
@@ -77,6 +78,8 @@ pub struct Instance {
     pub system_params: Params,
     pub allowed_event_types: Option<Vec<String>>,
     pub eventarc_channel: Option<String>,
+    /// Param → the file that set it (`extensions/<file>`).
+    pub param_sources: BTreeMap<String, String>,
 }
 
 /// Where an instance's source came from (reported by `doctor`).
@@ -94,6 +97,32 @@ pub struct LoadedExtension {
     pub backend: ExtensionBackend,
     pub source_dir: PathBuf,
     pub origin: SourceOrigin,
+    /// The value in `firebase.json`.
+    pub written: String,
+    /// Param → the file that set it (`extensions/<file>`).
+    pub param_sources: BTreeMap<String, String>,
+    /// Params no file set, filled from the spec's defaults.
+    pub defaults_applied: Vec<String>,
+    /// The spec as shown: the instance's params substituted and console
+    /// links pointed at the UI (`toBackendInfo`).
+    pub spec: Value,
+}
+
+/// What loading every instance produced.
+#[derive(Debug, Clone, Default)]
+pub struct LoadOutcome {
+    pub loaded: Vec<LoadedExtension>,
+    pub dropped: Vec<DroppedExtension>,
+}
+
+/// An instance left out because it includes triggers on services the suite
+/// does not emulate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedExtension {
+    pub instance_id: String,
+    pub written: String,
+    /// The services, by their official names (`database`, `remote config`).
+    pub services: Vec<String>,
 }
 
 /// Reads and resolves every instance of `firebase.json`, in order, into
@@ -103,6 +132,17 @@ pub async fn load(
     config: &ExtensionsConfig,
     log: &LogSink,
 ) -> Result<Vec<LoadedExtension>, ExtensionsError> {
+    load_outcome(config, log)
+        .await
+        .map(|outcome| outcome.loaded)
+}
+
+/// [`load`] that also reports the instances dropped for triggers the suite
+/// does not emulate.
+pub async fn load_outcome(
+    config: &ExtensionsConfig,
+    log: &LogSink,
+) -> Result<LoadOutcome, ExtensionsError> {
     let instances = want(config, log).await?;
     let mut loaded = Vec::with_capacity(instances.len());
     let client = RegistryClient::new(config.endpoints.clone(), config.credential.clone());
@@ -110,62 +150,113 @@ pub async fn load(
         loaded.push(to_backend(config, &client, instance, log).await?);
     }
     warn_unemulated_apis(config, &loaded, log);
-    Ok(filter_unemulated_triggers(loaded, log))
+    let (loaded, dropped) = filter_unemulated_triggers(loaded, log);
+    Ok(LoadOutcome { loaded, dropped })
+}
+
+/// Loads one instance again (after its parameters or source changed): the
+/// same reading, resolution and conversion as a start, for that instance
+/// alone. An instance the start would drop is an error that says why.
+pub async fn load_instance(
+    config: &ExtensionsConfig,
+    instance_id: &str,
+    log: &LogSink,
+) -> Result<LoadedExtension, ExtensionsError> {
+    let written = config
+        .extensions
+        .iter()
+        .find(|(id, _)| id == instance_id)
+        .map(|(_, written)| written.clone())
+        .ok_or_else(|| {
+            ExtensionsError(format!(
+                "There is no extension instance {instance_id} in firebase.json."
+            ))
+        })?;
+    let client = RegistryClient::new(config.endpoints.clone(), config.credential.clone());
+    let project_params = params::project_params(
+        &config.project_id,
+        &config.database_url,
+        &config.storage_bucket,
+    );
+    let instance = want_one(config, &client, &project_params, instance_id, &written, log).await?;
+    let loaded = to_backend(config, &client, &instance, log).await?;
+    let services = unemulated_services(&loaded);
+    if !services.is_empty() {
+        let list = services.join(", ");
+        return Err(ExtensionsError(format!(
+            "{instance_id} includes {list} triggered functions, and the {list} emulator does not exist or is not running, so none of its functions can be emulated."
+        )));
+    }
+    Ok(loaded)
+}
+
+/// `Constants.getServiceName` of each service an instance triggers on that
+/// the suite does not emulate.
+fn unemulated_services(extension: &LoadedExtension) -> Vec<String> {
+    let mut services: Vec<String> = Vec::new();
+    for definition in &extension.backend.definitions {
+        if definition.https_trigger().is_some() || definition.event_trigger().is_none() {
+            continue;
+        }
+        let service = definition.service();
+        let name = match service.as_str() {
+            "firestore.googleapis.com"
+            | "pubsub.googleapis.com"
+            | "firebaseauth.googleapis.com"
+            | "storage.googleapis.com"
+            | "eventarc.googleapis.com" => continue,
+            "firebaseio.com" => "database".to_owned(),
+            "app-measurement.com" => "analytics".to_owned(),
+            "crashlytics.googleapis.com" => "crashlytics".to_owned(),
+            "firebaseremoteconfig.googleapis.com" => "remote config".to_owned(),
+            "testlab.googleapis.com" => "test lab".to_owned(),
+            "cloudtasks.googleapis.com" => "tasks".to_owned(),
+            other => other.to_owned(),
+        };
+        if !services.contains(&name) {
+            services.push(name);
+        }
+    }
+    services
 }
 
 /// `filterUnemulatedTriggers`: an instance with a trigger on a service the
 /// suite does not emulate (Realtime Database, or anything outside the
 /// emulated set) is dropped whole, with the official warnings.
-fn filter_unemulated_triggers(loaded: Vec<LoadedExtension>, log: &LogSink) -> Vec<LoadedExtension> {
-    let mut found = false;
-    let kept: Vec<LoadedExtension> = loaded
-        .into_iter()
-        .filter(|extension| {
-            let mut services: Vec<String> = Vec::new();
-            for definition in &extension.backend.definitions {
-                if definition.https_trigger().is_some() || definition.event_trigger().is_none() {
-                    continue;
-                }
-                let service = definition.service();
-                // `Constants.getServiceName` for the services the suite lacks.
-                let name = match service.as_str() {
-                    "firestore.googleapis.com" | "pubsub.googleapis.com" | "firebaseauth.googleapis.com"
-                    | "storage.googleapis.com" | "eventarc.googleapis.com" => continue,
-                    "firebaseio.com" => "database".to_owned(),
-                    "app-measurement.com" => "analytics".to_owned(),
-                    "crashlytics.googleapis.com" => "crashlytics".to_owned(),
-                    "firebaseremoteconfig.googleapis.com" => "remote config".to_owned(),
-                    "testlab.googleapis.com" => "test lab".to_owned(),
-                    "cloudtasks.googleapis.com" => "tasks".to_owned(),
-                    other => other.to_owned(),
-                };
-                if !services.contains(&name) {
-                    services.push(name);
-                }
-            }
-            if services.is_empty() {
-                return true;
-            }
-            found = true;
-            let list = services.join(", ");
-            log.record(LogEvent::new(
-                "WARN",
-                &format!("extensions[{}]", extension.backend.instance_id),
-                format!(
-                    " ignored becuase it includes {list} triggered functions, and the {list} emulator does not exist or is not running."
-                ),
-            ));
-            false
-        })
-        .collect();
-    if found {
+fn filter_unemulated_triggers(
+    loaded: Vec<LoadedExtension>,
+    log: &LogSink,
+) -> (Vec<LoadedExtension>, Vec<DroppedExtension>) {
+    let mut kept = Vec::with_capacity(loaded.len());
+    let mut dropped = Vec::new();
+    for extension in loaded {
+        let services = unemulated_services(&extension);
+        if services.is_empty() {
+            kept.push(extension);
+            continue;
+        }
+        let list = services.join(", ");
+        log.record(LogEvent::new(
+            "WARN",
+            &format!("extensions[{}]", extension.backend.instance_id),
+            format!(
+                " ignored becuase it includes {list} triggered functions, and the {list} emulator does not exist or is not running."
+            ),
+        ));
+        dropped.push(DroppedExtension {
+            instance_id: extension.backend.instance_id.clone(),
+            written: extension.written.clone(),
+            services,
+        });
+    }
+    if !dropped.is_empty() {
         log.record(LogEvent::new(
             "WARN",
             "extensions",
             "No Cloud Functions for these instances will be emulated, because partially emulating an Extension can lead to unexpected behavior. ".to_owned(),
         ));
     }
-    kept
+    (kept, dropped)
 }
 
 /// `planner.want` for the emulator: parameters read and substituted,
@@ -209,7 +300,7 @@ async fn want_one(
     written: &str,
     log: &LogSink,
 ) -> Result<Instance, ExtensionsError> {
-    let raw = params::read_instance_params(
+    let (raw, param_sources) = params::read_instance_params_with_sources(
         &config.project_dir,
         instance_id,
         &config.project_id,
@@ -239,6 +330,7 @@ async fn want_one(
             system_params,
             allowed_event_types,
             eventarc_channel,
+            param_sources,
         });
     }
     let mut reference = ExtensionRef::parse(written)?;
@@ -252,6 +344,7 @@ async fn want_one(
         system_params,
         allowed_event_types,
         eventarc_channel,
+        param_sources,
     })
 }
 
@@ -321,6 +414,7 @@ async fn resolve_version(
 }
 
 /// `ensureSourceCode` + `toEmulatableBackend`.
+#[allow(clippy::too_many_lines)]
 async fn to_backend(
     config: &ExtensionsConfig,
     client: &RegistryClient,
@@ -367,6 +461,12 @@ async fn to_backend(
         .cloned()
         .unwrap_or_default();
     let params = params::populate_default_params(&instance.params, &spec_params);
+    let defaults_applied: Vec<String> = spec_params
+        .iter()
+        .filter_map(|param| param.get("param").and_then(Value::as_str))
+        .filter(|name| !instance.params.contains(name) && params.contains(name))
+        .map(str::to_owned)
+        .collect();
     let mut env = auto_populated_params(config, instance);
     env.extend(&params);
     let resources = spec::function_resources(&spec, &env)?;
@@ -399,11 +499,8 @@ async fn to_backend(
         }
         Ok(substituted)
     };
-    let extension_spec = if instance.local_path.is_some() {
-        Some(display(&spec)?)
-    } else {
-        None
-    };
+    let shown_spec = display(&spec)?;
+    let extension_spec = instance.local_path.is_some().then(|| shown_spec.clone());
     let extension_version = match &sidecar {
         Some(sidecar) => Some(display(&sidecar.extension_version)?),
         None => None,
@@ -424,6 +521,10 @@ async fn to_backend(
         backend,
         source_dir,
         origin,
+        written: instance.written.clone(),
+        param_sources: instance.param_sources.clone(),
+        defaults_applied,
+        spec: shown_spec,
     })
 }
 
@@ -995,6 +1096,64 @@ mod tests {
                 .message
                 .contains("Function 'httpFn' is missing a trigger")
         }));
+    }
+
+    #[tokio::test]
+    async fn load_outcomes_report_dropped_instances_and_single_loads() {
+        let directory = tempfile::tempdir().unwrap();
+        write_synthetic(directory.path());
+        let realtime = directory.path().join("extensions-local/realtime");
+        std::fs::create_dir_all(realtime.join("functions")).unwrap();
+        std::fs::write(
+            realtime.join("extension.yaml"),
+            "name: realtime\nversion: 0.1.0\nspecVersion: v1beta\nresources:\n  - name: onWrite\n    type: firebaseextensions.v1beta.function\n    properties:\n      location: us-central1\n      eventTrigger:\n        eventType: providers/google.firebase.database/eventTypes/ref.write\n        resource: projects/_/instances/x/refs/a\n",
+        )
+        .unwrap();
+        std::fs::write(realtime.join("POSTINSTALL.md"), "# Realtime\n").unwrap();
+        std::fs::write(realtime.join("functions/package.json"), "{}").unwrap();
+        std::fs::write(directory.path().join("extensions/realtime.env"), "A=1\n").unwrap();
+        let config = config(
+            directory.path(),
+            vec![
+                (
+                    "synthetic".to_owned(),
+                    "./extensions-local/synthetic".to_owned(),
+                ),
+                (
+                    "realtime".to_owned(),
+                    "./extensions-local/realtime".to_owned(),
+                ),
+            ],
+        );
+        let (log, _events) = LogSink::recording();
+        let outcome = load_outcome(&config, &log).await.unwrap();
+        assert_eq!(outcome.loaded.len(), 1);
+        assert_eq!(outcome.dropped.len(), 1);
+        assert_eq!(outcome.dropped[0].instance_id, "realtime");
+        assert_eq!(outcome.dropped[0].written, "./extensions-local/realtime");
+        assert_ne!(outcome.dropped[0].services, Vec::<String>::new());
+        let synthetic = &outcome.loaded[0];
+        assert_eq!(
+            synthetic.param_sources["LOCATION"],
+            "extensions/synthetic.env"
+        );
+        assert_eq!(
+            synthetic.param_sources["NOTE"],
+            "extensions/synthetic.env.local"
+        );
+        assert!(synthetic.defaults_applied.contains(&"BUCKET".to_owned()));
+        assert_eq!(synthetic.spec["postinstallContent"], "# Synthetic\n");
+        // One instance at a time, and an instance a start would drop is an
+        // error that says why.
+        let again = load_instance(&config, "synthetic", &log).await.unwrap();
+        assert_eq!(again.backend.env["LOCATION"], "europe-west1");
+        let refused = load_instance(&config, "realtime", &log).await.unwrap_err();
+        assert!(
+            refused.0.contains("none of its functions can be emulated"),
+            "{}",
+            refused.0
+        );
+        assert!(load_instance(&config, "missing", &log).await.is_err());
     }
 
     #[tokio::test]

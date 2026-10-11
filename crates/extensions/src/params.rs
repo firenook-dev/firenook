@@ -2,6 +2,7 @@
 //! project-derived auto parameters, `${param:X}` substitution and defaults,
 //! following `extensions/manifest.ts`, `extensionsHelper.ts` and
 //! `paramHelper.ts`.
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use firenook_functions_runtime::dotenv;
@@ -89,6 +90,27 @@ pub fn read_instance_params(
     aliases: &[String],
     check_local: bool,
 ) -> Result<Params, ExtensionsError> {
+    read_instance_params_with_sources(
+        project_dir,
+        instance_id,
+        project_id,
+        project_number,
+        aliases,
+        check_local,
+    )
+    .map(|(params, _)| params)
+}
+
+/// [`read_instance_params`] that also names, per key, the last file in the
+/// official order that set it (`extensions/<file>`, relative to the project).
+pub fn read_instance_params_with_sources(
+    project_dir: &Path,
+    instance_id: &str,
+    project_id: &str,
+    project_number: Option<&str>,
+    aliases: &[String],
+    check_local: bool,
+) -> Result<(Params, BTreeMap<String, String>), ExtensionsError> {
     let mut files = vec![format!("{instance_id}.env")];
     files.extend(
         aliases
@@ -104,6 +126,7 @@ pub fn read_instance_params(
     }
     let mut found = false;
     let mut combined = Params::new();
+    let mut sources = BTreeMap::new();
     for file in files {
         let path = project_dir.join(ENV_DIRECTORY).join(&file);
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -111,6 +134,9 @@ pub fn read_instance_params(
         };
         let params = parse_env_file(&path, &text)?;
         found = true;
+        for (key, _) in params.iter() {
+            sources.insert(key.to_owned(), format!("{ENV_DIRECTORY}/{file}"));
+        }
         combined.extend(&params);
     }
     if !found {
@@ -118,7 +144,87 @@ pub fn read_instance_params(
             "No params file found for {instance_id}"
         )));
     }
-    Ok(combined)
+    Ok((combined, sources))
+}
+
+/// Why `value` is not acceptable for a spec param, when it is not: a
+/// missing required value, a value outside a select's options (each of a
+/// multi-select's), or one the `validationRegex` refuses (with the spec's
+/// own message when it has one). A pattern only JavaScript can compile is
+/// not checked here ([`unchecked_pattern`] says so).
+#[must_use]
+pub fn validate(param: &Value, value: Option<&str>) -> Option<String> {
+    let required = param
+        .get("required")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let Some(value) = value.filter(|value| !value.is_empty()) else {
+        return required.then(|| "A value is required.".to_owned());
+    };
+    let kind = param
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("string")
+        .to_ascii_lowercase();
+    let options: Vec<&str> = param
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|option| option.get("value").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    match kind.as_str() {
+        "select" if !options.is_empty() && !options.contains(&value) => {
+            return Some(format!("Choose one of: {}.", options.join(", ")));
+        }
+        "multiselect" if !options.is_empty() => {
+            if let Some(unknown) = value
+                .split(',')
+                .map(str::trim)
+                .find(|entry| !entry.is_empty() && !options.contains(entry))
+            {
+                return Some(format!(
+                    "{unknown} is not an option; choose from: {}.",
+                    options.join(", ")
+                ));
+            }
+        }
+        _ => {}
+    }
+    let pattern = param
+        .get("validationRegex")
+        .and_then(Value::as_str)
+        .filter(|pattern| !pattern.is_empty())?;
+    let regex = Regex::new(pattern).ok()?;
+    if regex.is_match(value) {
+        return None;
+    }
+    Some(
+        param
+            .get("validationErrorMessage")
+            .and_then(Value::as_str)
+            .filter(|message| !message.is_empty())
+            .map_or_else(
+                || format!("Does not match the pattern {pattern}."),
+                str::to_owned,
+            ),
+    )
+}
+
+/// The note for a `validationRegex` this engine cannot compile (it uses
+/// syntax only JavaScript's regular expressions accept).
+#[must_use]
+pub fn unchecked_pattern(param: &Value) -> Option<&'static str> {
+    let pattern = param
+        .get("validationRegex")
+        .and_then(Value::as_str)
+        .filter(|pattern| !pattern.is_empty())?;
+    Regex::new(pattern)
+        .is_err()
+        .then_some("Not checked here: the pattern uses JavaScript-only syntax.")
 }
 
 /// `readEnvFile`: the official dotenv dialect on the trimmed file.
@@ -319,6 +425,80 @@ mod tests {
         );
         assert_eq!(user.get("LOCATION"), Some("us-central1"));
         assert!(!user.contains("firebaseextensions.v1beta.function/location"));
+    }
+
+    #[test]
+    fn sources_name_the_last_file_in_the_official_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let env = directory.path().join(ENV_DIRECTORY);
+        std::fs::create_dir_all(&env).unwrap();
+        std::fs::write(env.join("greeter.env"), "A=1\nB=1\nC=1\n").unwrap();
+        std::fs::write(env.join("greeter.env.staging"), "B=2\n").unwrap();
+        std::fs::write(env.join("greeter.env.demo"), "C=3\n").unwrap();
+        std::fs::write(env.join("greeter.env.local"), "D=4\n").unwrap();
+        let (params, sources) = read_instance_params_with_sources(
+            directory.path(),
+            "greeter",
+            "demo",
+            None,
+            &["staging".to_owned()],
+            true,
+        )
+        .unwrap();
+        assert_eq!(params.get("B"), Some("2"));
+        assert_eq!(sources["A"], "extensions/greeter.env");
+        assert_eq!(sources["B"], "extensions/greeter.env.staging");
+        assert_eq!(sources["C"], "extensions/greeter.env.demo");
+        assert_eq!(sources["D"], "extensions/greeter.env.local");
+    }
+
+    #[test]
+    fn validation_reads_required_options_and_patterns() {
+        let required = serde_json::json!({"param": "NAME", "required": true});
+        assert_eq!(
+            validate(&required, None).as_deref(),
+            Some("A value is required.")
+        );
+        assert_eq!(
+            validate(&required, Some("")).as_deref(),
+            Some("A value is required.")
+        );
+        assert_eq!(validate(&required, Some("x")), None);
+        assert_eq!(
+            validate(&serde_json::json!({"param": "OPTIONAL"}), None),
+            None
+        );
+        let select = serde_json::json!({"param": "LOCATION", "type": "select",
+            "options": [{"value": "us-central1"}, {"value": "europe-west1", "label": "Belgium"}]});
+        assert_eq!(validate(&select, Some("europe-west1")), None);
+        assert_eq!(
+            validate(&select, Some("mars")).as_deref(),
+            Some("Choose one of: us-central1, europe-west1.")
+        );
+        let multi = serde_json::json!({"param": "EVENTS", "type": "multiSelect",
+            "options": [{"value": "a"}, {"value": "b"}]});
+        assert_eq!(validate(&multi, Some("a,b")), None);
+        assert_eq!(
+            validate(&multi, Some("a,c")).as_deref(),
+            Some("c is not an option; choose from: a, b.")
+        );
+        let pattern = serde_json::json!({"param": "COLLECTION", "validationRegex": "^[a-z]+$",
+            "validationErrorMessage": "Lowercase letters only."});
+        assert_eq!(validate(&pattern, Some("users")), None);
+        assert_eq!(
+            validate(&pattern, Some("Users")).as_deref(),
+            Some("Lowercase letters only.")
+        );
+        let plain = serde_json::json!({"param": "N", "validationRegex": "^[0-9]+$"});
+        assert_eq!(
+            validate(&plain, Some("x")).as_deref(),
+            Some("Does not match the pattern ^[0-9]+$.")
+        );
+        // A lookahead only JavaScript compiles is skipped, and says so.
+        let javascript = serde_json::json!({"param": "P", "validationRegex": "^(?=.*[0-9]).+$"});
+        assert_eq!(validate(&javascript, Some("letters")), None);
+        assert!(unchecked_pattern(&javascript).is_some());
+        assert_eq!(unchecked_pattern(&plain), None);
     }
 
     #[test]
