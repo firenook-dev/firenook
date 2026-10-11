@@ -143,6 +143,7 @@ pub(super) fn test_config() -> SuiteConfig {
     let root = std::env::temp_dir();
     SuiteConfig {
         host: "127.0.0.1".into(),
+        allowed_hosts: Vec::new(),
         project_id: "demo-diagnostics".into(),
         services: ServiceSelection::ALL,
         ui_enabled: true,

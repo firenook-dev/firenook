@@ -13,11 +13,14 @@ mod blocking;
 mod databases;
 mod explain;
 mod firestore;
+mod guard;
 mod rules;
 mod rules_eval;
 mod schema;
 mod sse;
 mod time;
+
+use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
@@ -38,6 +41,10 @@ pub use explain::{
 };
 pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
+};
+pub use guard::{
+    ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
+    KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
 };
 pub use rules::{
     CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
@@ -156,6 +163,9 @@ pub struct ConsoleServices {
     /// The Auth emulator's HTTP application, when the suite runs it, so the
     /// console reaches Identity Toolkit same-origin under `/api/v1/auth`.
     pub auth: Option<Router>,
+    /// Hosts the console answers for; every other `Host` is refused, so a
+    /// page that rebinds its own name to this machine reaches nothing.
+    pub allowed_hosts: AllowedHosts,
 }
 
 impl ConsoleServices {
@@ -169,13 +179,22 @@ impl ConsoleServices {
             shutdown,
             firestore: None,
             auth: None,
+            allowed_hosts: AllowedHosts::loopback(),
         }
     }
 }
 
 /// The console router: the Console API under `/api/v1` and the embedded
 /// application for every other path. Mount it under [`CONSOLE_PATH`].
+///
+/// One request guard covers the whole mount (`guard.rs`): the `Host` must be
+/// one the console answers for, and the Console API takes calls only from
+/// the console itself, mutations only with JSON or the console header, and
+/// streams and sockets only from its own origin. A service's own application
+/// mounted here (Firestore REST, Identity Toolkit) keeps that service's
+/// semantics and gets the `Host` rule only.
 pub fn console_router(services: ConsoleServices) -> Router {
+    let mut natives = guard::NativeMounts::default();
     let mut api = Router::new()
         .route("/status", get(status))
         .with_state(ConsoleState {
@@ -187,16 +206,25 @@ pub fn console_router(services: ConsoleServices) -> Router {
             "/firestore",
             firestore::firestore_router(firestore, services.shutdown),
         );
+        for prefix in firestore::REST_PREFIXES {
+            natives.add(&format!("/api/v1/firestore{prefix}"));
+        }
     }
     if let Some(auth) = services.auth {
         // The Auth application is one fallback handler, so it mounts as a
         // service: every path under the prefix reaches it, prefix stripped.
         api = api.nest_service("/auth", auth);
+        natives.add("/api/v1/auth");
     }
+    let policy = guard::GuardPolicy {
+        hosts: services.allowed_hosts,
+        natives: Arc::new(natives),
+    };
     Router::new()
         .nest("/api/v1", api)
         .route("/api/{*rest}", any(unknown_api))
         .fallback(asset)
+        .layer(axum::middleware::from_fn_with_state(policy, guard::guard))
 }
 
 async fn status(State(state): State<ConsoleState>) -> Json<ConsoleStatus> {
@@ -254,6 +282,9 @@ const NOT_BUILT_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>Fire
 <p>This binary was compiled without the console's build output. From the repository root run \
 <code>npm ci --prefix console &amp;&amp; npm run build --prefix console</code> and rebuild the engine, \
 or work on the console with <code>npm run dev --prefix console</code>, which proxies this engine's console API.</p>";
+
+#[cfg(test)]
+mod router_tests;
 
 #[cfg(test)]
 mod tests {

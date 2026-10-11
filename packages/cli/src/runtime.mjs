@@ -75,6 +75,9 @@ export function prepareLaunch(diagnostic, options, mode = 'start') {
   if (p.exported) args.push('--export-on-exit', p.exported);
   if (options['resume-state']) args.push('--resume-state');
   if (options['no-diagnostics']) args.push('--no-diagnostics');
+  // The console answers only the names it is reached by (loopback and
+  // --host by default); a proxy or cloud name is added here.
+  if (options['allowed-hosts']) args.push('--allowed-hosts', options['allowed-hosts']);
   if (options.durability) args.push('--durability', options.durability);
   const host = connectHost(p.host);
   // The engine cannot know its own release: this wrapper's version is set by

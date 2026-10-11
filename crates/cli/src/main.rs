@@ -339,6 +339,12 @@ struct SuiteArgs {
     /// (clients are told the loopback address).
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
+    /// Host names the console answers for besides `localhost`, `127.0.0.1`,
+    /// `::1` and `--host` (comma-separated), for a console reached by another
+    /// name (a reverse proxy, a container, a cloud host). Bound to `0.0.0.0`
+    /// or `::` without this flag, the console answers any host name.
+    #[arg(long = "allowed-hosts", value_delimiter = ',')]
+    allowed_hosts: Vec<String>,
     /// The data services to start (comma-separated: firestore, auth,
     /// storage, functions, pubsub; `extensions` means functions). Default:
     /// every service. Eventarc and Tasks follow Functions; the hub always runs.
@@ -758,6 +764,12 @@ fn resolve_suite_config(arguments: &SuiteArgs) -> Result<SuiteConfig, String> {
             .unwrap_or(true);
     Ok(SuiteConfig {
         host: arguments.host.clone(),
+        allowed_hosts: arguments
+            .allowed_hosts
+            .iter()
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .collect(),
         project_id: arguments.project_id.clone(),
         services,
         ui_enabled,

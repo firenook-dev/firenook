@@ -32,6 +32,12 @@ use crate::time::rfc3339;
 /// Commits retained for a slow console before it is told to resync.
 const FEED_CAPACITY: usize = 512;
 
+/// Where the Firestore REST front answers under `/firestore`: the protocol's
+/// own paths (`/v1/projects/…`) and the emulator's (`/emulator/v1/…`). They
+/// are a native mount, which the request guard leaves to the REST front's
+/// own semantics.
+pub(crate) const REST_PREFIXES: [&str; 2] = ["/v1", "/emulator"];
+
 /// The Firestore services the console mounts.
 pub struct FirestoreConsole {
     /// A REST front sharing the engine's service, nested under
