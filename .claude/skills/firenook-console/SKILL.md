@@ -413,6 +413,12 @@ on a white row) — a hover that changed nothing.
   opaque `kumo-tint` that disappears on anything at or below it. Menu items
   and palette results (`data-highlighted`) take the fill too; Kumo's
   `kumo-overlay` highlight is four levels below a white menu.
+- **An icon says what happens, and one icon means one thing.** The
+  open-row button is `SidebarSimpleIcon mirrored` — a window with a pane on
+  its right, the panel it opens — and `weight="fill"` while its row is the
+  one in the panel. It was `ArrowsOutSimpleIcon`, the diagonal "expand"
+  arrows, which say maximise and which the field rows already use for
+  putting a value in a box. The un-mirrored glyph is the nav sidebar's.
 - **An icon button is Kumo's ghost `Button`** (`size="sm" shape="square"`),
   as the path's copy is. The open-row control was a bare button with a
   hover and a browser tooltip of its own, and in a dense row it read as no

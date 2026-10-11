@@ -7,7 +7,7 @@
 // only moves the window over the rows re-renders the rows that entered it.
 
 import { Button, Checkbox, Table } from '@cloudflare/kumo'
-import { ArrowsOutSimpleIcon, WarningIcon } from '@phosphor-icons/react'
+import { SidebarSimpleIcon, WarningIcon } from '@phosphor-icons/react'
 import { memo } from 'react'
 import type { ChangeKind } from '@/api/generated/ChangeKind'
 import type { InferredColumn } from '../columns'
@@ -164,12 +164,18 @@ export const GridRow = memo(function GridRow({
               on, and pressed on the row the panel holds. Kumo's own ghost
               button, as the path's copy is, so it hovers and names itself
               the way every other icon button does — it was a bare button
-              with a browser tooltip and a hover of its own. */}
+              with a browser tooltip and a hover of its own.
+              The glyph is the panel it opens: a window with a pane on its
+              right, filled while this row is the one in it. It was the
+              diagonal "expand" arrows, which say maximise, and which the
+              field rows already use for putting a value in a box. */}
           <Button
             variant="ghost"
             size="sm"
             shape="square"
-            icon={<ArrowsOutSimpleIcon />}
+            icon={
+              open ? <SidebarSimpleIcon mirrored weight="fill" /> : <SidebarSimpleIcon mirrored />
+            }
             aria-label={`Open ${document.id}`}
             aria-pressed={open}
             title={open ? 'Close the panel' : 'Open in the panel'}
