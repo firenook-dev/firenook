@@ -116,13 +116,22 @@ test('documents are added and deleted from the workbench', async ({ page }) => {
   await expect(page.getByTestId('inspector')).toContainText('teams/t_journey')
   await expect(page.getByTestId('grid-row').filter({ hasText: 't_journey' })).toBeVisible()
 
+  // With something beneath it, which "Also delete subcollections
+  // underneath" — ticked by default — is there to take along.
+  await put(page.request, 'teams/t_journey/notes/n1', { body: { stringValue: 'beneath' } })
   await page.getByLabel('Select t_journey').click()
   await page.getByTestId('delete-selected').click()
   await page.getByTestId('confirm-delete').click()
-  await expect(page.getByText('Document deleted')).toBeVisible()
+  await expect(page.getByText('2 documents deleted')).toBeVisible()
   await expect(page.getByTestId('grid-row').filter({ hasText: 't_journey' })).toHaveCount(0)
   const gone = await page.request.get(`${documents()}/teams/t_journey`, { headers: owner })
   expect(gone.status()).toBe(404)
+  // It sent no mode, which the engine reads as the document alone, and the
+  // subcollection outlived the document it belonged to.
+  const beneath = await page.request.get(`${documents()}/teams/t_journey/notes/n1`, {
+    headers: owner,
+  })
+  expect(beneath.status()).toBe(404)
 })
 
 test('rows show their subcollections and the tree walks three levels deep', async ({ page }) => {
@@ -192,7 +201,7 @@ test('a screen of rows asks for its subcollections once, not once a row', async 
     .getByTestId('grid-row')
     .filter({ has: page.getByTestId('subcollections-chip') })
     .first()
-  await nested.getByRole('cell').nth(1).click()
+  await nested.getByTestId('open-row').click()
   await expect(page.getByTestId('inspector')).toBeVisible()
   await expect(page.getByTestId('subcollections')).toContainText('Subcollections')
   expect(batches).toHaveLength(1)
@@ -264,7 +273,7 @@ test('the toolbar groups hold, and never overlap, as it narrows', async ({ page 
 test('one type scale holds across the grid and the panel beside it', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users%2Fu_k65eq%2Forders`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
-  await page.getByTestId('grid-row').first().click()
+  await page.getByTestId('grid-row').first().getByTestId('open-row').click()
   await expect(page.getByTestId('inspector')).toBeVisible()
 
   // Every rendered run of text, as `<size> <face>`. A block that names no
@@ -569,7 +578,7 @@ test('the path bar completes collections and shows missing ancestors', async ({ 
   await page.goto(`${origin()}/console/firestore?path=teams`)
   const ghost = page.getByTestId('grid-row').filter({ hasText: 't_ghost' })
   await expect(ghost).toBeVisible()
-  await ghost.click()
+  await ghost.getByTestId('open-row').click()
   await expect(page.getByTestId('inspector')).toContainText('No document here')
   await expect(page.getByTestId('inspector')).toContainText('members')
 })
@@ -825,7 +834,7 @@ test('the grid loads previews of heavy documents, and says so rather than lying'
   await expect(page.getByTestId('cell-editor')).toHaveCount(0)
 
   // The inspector holds the whole value, because it fetches the document.
-  await row.getByRole('cell').nth(1).click()
+  await row.getByTestId('open-row').click()
   const inspector = page.getByTestId('inspector')
   await expect(inspector).toBeVisible()
   await expect(inspector.getByRole('textbox', { name: 'note value' })).toHaveValue(long)
@@ -859,7 +868,7 @@ test('a long field name keeps its column, and its controls, in bounds', async ({
 
   // In the inspector the same name truncates rather than carrying the type
   // badge and the remove button out past the panel's edge.
-  await page.getByTestId('grid-row').first().click()
+  await page.getByTestId('grid-row').first().getByTestId('open-row').click()
   const panel = page.getByTestId('inspector')
   const remove = panel.getByRole('button', { name: `Remove ${field}` })
   await expect(remove).toBeVisible()
@@ -930,6 +939,18 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
   expect(json.suggestedFilename()).toMatch(/^products-[\d-]+\.json$/)
   const exported = JSON.parse(await readDownload(json)) as Record<string, Record<string, unknown>>
   expect(Object.keys(exported)).toHaveLength(60)
+
+  // Past one page of the grid, still all of it. The grid's page size was
+  // read as a limit, and 240 users exported as 100.
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.getByTestId('export-open').click()
+  const usersDownload = page.waitForEvent('download')
+  await page.getByTestId('confirm-export').click()
+  const users = JSON.parse(await readDownload(await usersDownload)) as Record<string, unknown>
+  expect(Object.keys(users)).toHaveLength(240)
+  await page.goto(`${origin()}/console/firestore?path=products`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
   const [, first] = Object.entries(exported)[0] ?? []
   expect(typeof first?.name).toBe('string')
 
@@ -2861,7 +2882,7 @@ test('the id stays in view while the fields scroll, and a flash never shows thro
   await grid.evaluate((el) => (el.scrollLeft = 700))
   await expect
     .poll(async () => (await id.boundingBox())!.x - (await grid.boundingBox())!.x)
-    .toBe(44)
+    .toBe(64)
   // And once fields pass beneath it, an edge. It named a colour token that
   // does not exist, which made the whole shadow invalid and drew nothing.
   await expect.poll(shade).not.toBe('none')
@@ -3042,4 +3063,103 @@ test('shift-click ticks a run of rows, and ticking one does not open it', async 
   const selected = () =>
     page.locator('body').evaluate((body) => body.ownerDocument.getSelection()?.toString() ?? '')
   expect(await selected()).toBe('')
+})
+
+test('a click picks the cell; the open button opens the row, and an open panel follows', async ({
+  page,
+}) => {
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 4; at++) docs[`c${at}`] = { name: text(`C ${at}`), email: text(`c${at}@x`) }
+  await seed(page.request, 'clicks', docs)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=clicks`)
+  const first = page.locator('tr[data-path="clicks/c0"]')
+  const second = page.locator('tr[data-path="clicks/c1"]')
+  const inspector = page.getByTestId('inspector')
+
+  // A click is the cell's: the cursor lands on it and nothing else opens.
+  // It used to open the panel, which took 40% of a 1600 px grid away.
+  await first.locator('td[data-field="name"]').click()
+  await expect(first.locator('td[data-field="name"]')).toHaveAttribute('data-cursor', '')
+  await page.waitForTimeout(400)
+  await expect(inspector).toHaveCount(0)
+
+  // The way in shows on the row, and opens it.
+  const open = first.getByTestId('open-row')
+  await expect(open).toHaveCSS('opacity', '1')
+  await expect(second.getByTestId('open-row')).toHaveCSS('opacity', '0')
+  await open.click()
+  await expect(inspector).toContainText('clicks/c0')
+  await expect(open).toHaveAttribute('aria-pressed', 'true')
+
+  // While it is open, the panel follows the row being worked on.
+  await second.locator('td[data-field="email"]').click()
+  await expect(inspector).toContainText('clicks/c1')
+  // And the pressed button closes it again.
+  await second.getByTestId('open-row').click()
+  await expect(inspector).toHaveCount(0)
+})
+
+test('ticked rows turn the query line into their own bar, which reaches every document', async ({
+  page,
+}) => {
+  // More than a page, and one document with a subcollection under it.
+  const docs: Record<string, Record<string, unknown>> = {}
+  for (let at = 0; at < 130; at++)
+    docs[`s${String(at).padStart(3, '0')}`] = {
+      name: text(`S ${at}`),
+      at: { integerValue: `${at}` },
+    }
+  await seed(page.request, 'bulk', docs)
+  await put(page.request, 'bulk/s000/notes/n1', { body: text('beneath') })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=bulk`)
+  const rows = page.getByTestId('grid-row')
+  await expect(rows.first()).toBeVisible()
+  const bar = page.getByTestId('selection-bar')
+  await expect(bar).toHaveCount(0)
+
+  // Ticking does not move the rows: the bar lies over the query line at
+  // its height, so a shift-click aimed at the next row still lands on it.
+  const before = (await rows.nth(2).boundingBox())!.y
+  await rows.nth(1).getByRole('checkbox').click()
+  await rows
+    .nth(2)
+    .getByRole('checkbox')
+    .click({ modifiers: ['Shift'] })
+  await expect(bar).toBeVisible()
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+  expect((await rows.nth(2).boundingBox())!.y).toBe(before)
+  // Delete has left the toolbar for the bar.
+  await expect(page.getByTestId('toolbar').getByTestId('delete-selected')).toHaveCount(0)
+
+  // Copy reads the two whole, by path.
+  await page.getByTestId('copy-selection').click()
+  await page.getByTestId('copy-json').click()
+  await expect(page.getByText('Copied 2 documents as JSON')).toBeVisible()
+  const copied = JSON.parse(
+    await page.evaluate(() =>
+      (
+        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
+      ).clipboard.readText(),
+    ),
+  ) as Record<string, unknown>
+  expect(Object.keys(copied)).toEqual(['s001', 's002'])
+
+  // Every document, not the loaded hundred.
+  await page.getByTestId('select-everything').click()
+  await expect(page.getByTestId('selection-count')).toHaveText('All 130 selected')
+  await page.getByTestId('delete-selected').click()
+  await expect(
+    page.getByRole('dialog').filter({ hasText: 'Delete all 130 documents' }),
+  ).toBeVisible()
+  await page.getByTestId('confirm-delete').click()
+  await expect(page.getByText('131 documents deleted')).toBeVisible()
+  await expect(bar).toHaveCount(0)
+  const left = await page.request.get(`${documents()}/bulk/s129`, { headers: owner })
+  expect(left.status()).toBe(404)
+  // "Also delete subcollections underneath" now does: it sent no mode, and
+  // the engine read that as the document alone.
+  const beneath = await page.request.get(`${documents()}/bulk/s000/notes/n1`, { headers: owner })
+  expect(beneath.status()).toBe(404)
 })

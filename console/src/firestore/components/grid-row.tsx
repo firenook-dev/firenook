@@ -6,8 +6,8 @@
 // is either a value it shows or a ref it calls through, so a scroll that
 // only moves the window over the rows re-renders the rows that entered it.
 
-import { Table } from '@cloudflare/kumo'
-import { WarningIcon } from '@phosphor-icons/react'
+import { Checkbox, Table } from '@cloudflare/kumo'
+import { ArrowsOutSimpleIcon, WarningIcon } from '@phosphor-icons/react'
 import { memo } from 'react'
 import type { ChangeKind } from '@/api/generated/ChangeKind'
 import type { InferredColumn } from '../columns'
@@ -16,7 +16,11 @@ import type { FsDocument } from '../value'
 import { IdCell, ValueCell } from './cells'
 import { SubcollectionsCell } from './subcollections-cell'
 
-export const CHECK_WIDTH = 44
+/**
+ * The box and the way into the row, side by side: the check cell's own
+ * twelve pixels, the box, and the open button that shows on hover.
+ */
+export const CHECK_WIDTH = 64
 /** The id column's key wherever columns are keyed. Firestore reserves `__…__`. */
 export const ID_COLUMN = '__name__'
 /** The key of the column the rare fields are folded into. */
@@ -35,6 +39,8 @@ export type GridColumn =
 /** What a row asks the grid to do. Called through a ref, so it never changes a row's props. */
 export interface RowActions {
   click: (document: FsDocument, cell: HTMLTableCellElement | null) => void
+  /** The open button: the document into the panel, or out of it again. */
+  open: (document: FsDocument) => void
   check: (document: FsDocument, index: number, checked: boolean, shift: boolean) => void
   edit: (document: FsDocument, field: string) => void
   openReference: (path: string) => void
@@ -73,6 +79,7 @@ export const GridRow = memo(function GridRow({
   group,
   checked,
   focused,
+  open,
   cursor,
   flash,
   actions,
@@ -88,6 +95,8 @@ export const GridRow = memo(function GridRow({
   group: boolean
   checked: boolean
   focused: boolean
+  /** This document is the one open in the panel. */
+  open: boolean
   /** The column the keyboard is on, when it is on this row. */
   cursor: string | undefined
   flash: ChangeKind | undefined
@@ -99,8 +108,8 @@ export const GridRow = memo(function GridRow({
       data-index={index}
       data-path={document.path}
       variant={checked ? 'selected' : 'default'}
-      className={`cursor-default ${
-        focused
+      className={`group/row cursor-default ${
+        focused || open
           ? 'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)] [&>td:first-child]:shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
           : ''
       } ${flash ? (flash === 'deleted' ? 'row-flash-deleted' : 'row-flash') : ''}`}
@@ -109,18 +118,8 @@ export const GridRow = memo(function GridRow({
       }
       data-testid="grid-row"
     >
-      <Table.CheckCell
-        checked={checked}
-        onCheckedChange={(next, details) =>
-          actions.current?.check(
-            document,
-            index,
-            next,
-            (details?.event as MouseEvent | undefined)?.shiftKey === true,
-          )
-        }
-        aria-label={`Select ${document.id}`}
-        className={PIN_CELL}
+      <Table.Cell
+        className={`${PIN_CELL} !py-0 !pr-1 !pl-3`}
         style={{ left: 0 }}
         data-check=""
         // Shift on a press is also the browser's own "extend the text
@@ -131,7 +130,47 @@ export const GridRow = memo(function GridRow({
         onMouseDown={(event) => {
           if (event.shiftKey) event.preventDefault()
         }}
-      />
+      >
+        <span className="flex items-center gap-1">
+          <Checkbox
+            checked={checked}
+            onCheckedChange={(next, details) =>
+              actions.current?.check(
+                document,
+                index,
+                next,
+                (details?.event as MouseEvent | undefined)?.shiftKey === true,
+              )
+            }
+            aria-label={`Select ${document.id}`}
+            className="relative before:absolute before:-inset-y-2 before:-right-0.5 before:-left-3 before:content-['']"
+          />
+          {/* The one way into the panel by pointer. A click on a cell is
+              the cell's — the cursor lands there, ready to copy or edit —
+              and opening a 400-pixel panel on every one of them took
+              forty per cent of the grid away to answer a click that only
+              meant "this one". Shown on hover, on the row being worked
+              on, and pressed on the row the panel holds. */}
+          <button
+            type="button"
+            aria-label={`Open ${document.id}`}
+            aria-pressed={open}
+            title={open ? 'Close the panel' : 'Open in the panel'}
+            data-testid="open-row"
+            onClick={(event) => {
+              event.stopPropagation()
+              actions.current?.open(document)
+            }}
+            className={`flex size-6 shrink-0 items-center justify-center rounded-md outline-none hover:bg-kumo-base hover:text-kumo-default focus-visible:opacity-100 focus-visible:ring focus-visible:ring-kumo-focus ${
+              open
+                ? 'text-kumo-brand opacity-100'
+                : `text-kumo-subtle ${focused ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`
+            }`}
+          >
+            <ArrowsOutSimpleIcon size={14} />
+          </button>
+        </span>
+      </Table.Cell>
       <Table.Cell
         className={`${PIN_CELL} ${PIN_EDGE}`}
         style={{ left: CHECK_WIDTH }}

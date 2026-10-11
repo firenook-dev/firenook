@@ -5,7 +5,7 @@
 // engine's change feed.
 
 import { Button, Text } from '@cloudflare/kumo'
-import { ShieldCheckIcon, TrashIcon } from '@phosphor-icons/react'
+import { ShieldCheckIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
@@ -19,17 +19,18 @@ import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
 import { CreateDialog } from './create-dialog'
-import { DeleteDialog } from './delete-dialog'
+import { DeleteDialog, type DeleteTarget } from './delete-dialog'
 import { ExplainPanel } from './explain-panel'
 import { ExportDialog } from './export-dialog'
 import { Grid } from './grid'
 import { Inspector } from './inspector'
 import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
-import { QueryLine } from './query-line'
+import { QueryLine, useMatchCount } from './query-line'
 import { RequestsDrawer } from './requests-drawer'
 import { RulesEditorPanel } from './rules-editor'
 import { SchemaPanel } from './schema-panel'
+import { SelectionBar } from './selection-bar'
 import { ViewAsPicker } from './view-as-picker'
 import { WorkbenchProvider, useWorkbench, useWorkbenchState } from './workbench-context'
 
@@ -62,6 +63,8 @@ function WorkbenchBody() {
   useFirestorePalette()
   const live = useLive((state) => state.status)
   const checked = useSelection((state) => state.checked)
+  const everything = useSelection((state) => state.everything)
+  const { total } = useMatchCount()
   const clearSelection = useSelection((state) => state.clear)
   const openQuery = useQueryLine((state) => state.setOpen)
   const explain = useQueryLine((state) => state.explain)
@@ -70,7 +73,7 @@ function WorkbenchBody() {
   const [requestsOpen, setRequestsOpen] = useState(false)
   const exportOpen = useExportDialog((state) => state.open)
   const setExportOpen = useExportDialog((state) => state.setOpen)
-  const [deleting, setDeleting] = useState<string[]>([])
+  const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
 
   // The selection and hidden columns belong to one collection.
   const selectionScope = `${workbench.database}|${workbench.collectionPath}|${workbench.group}`
@@ -116,7 +119,11 @@ function WorkbenchBody() {
         else if (checked.size > 0) clearSelection()
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && checked.size > 0) {
         event.preventDefault()
-        setDeleting([...checked])
+        setDeleting(
+          everything
+            ? { kind: 'everything', count: total?.count ?? checked.size }
+            : { kind: 'paths', paths: [...checked] },
+        )
       } else if (event.key === 'e' && workbench.collectionPath) {
         event.preventDefault()
         setExplain(!useQueryLine.getState().explain)
@@ -132,7 +139,7 @@ function WorkbenchBody() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench, checked, clearSelection, openQuery, openCreate, setExplain])
+  }, [workbench, checked, everything, total, clearSelection, openQuery, openCreate, setExplain])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">
@@ -142,7 +149,6 @@ function WorkbenchBody() {
         <RulesEditorPanel />
       ) : (
         <WorkbenchData
-          checked={checked}
           live={live}
           onDelete={setDeleting}
           explain={explain}
@@ -152,7 +158,7 @@ function WorkbenchBody() {
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <RequestsDrawer open={requestsOpen} setOpen={setRequestsOpen} />
       <CreateDialog />
-      <DeleteDialog paths={deleting} onOpenChange={(open) => !open && setDeleting([])} />
+      <DeleteDialog target={deleting} onOpenChange={(open) => !open && setDeleting(null)} />
     </div>
   )
 }
@@ -164,19 +170,18 @@ function Divider() {
 
 /** The data view: the toolbar, the query line and the grid. */
 function WorkbenchData({
-  checked,
   live,
   onDelete,
   explain,
   setExplain,
 }: {
-  checked: ReadonlySet<string>
   live: string
-  onDelete: (paths: string[]) => void
+  onDelete: (target: DeleteTarget) => void
   explain: boolean
   setExplain: (explain: boolean) => void
 }) {
   const workbench = useWorkbench()
+  const selecting = useSelection((state) => state.checked.size > 0 || state.everything)
   return (
     <>
       <div
@@ -200,18 +205,6 @@ function WorkbenchData({
         {/* Not a property of the query below: the identity applies to every
             read the workbench makes, the schema tree and inspector included. */}
         <ViewAsPicker />
-        {checked.size > 0 && (
-          <Button
-            variant="secondary-destructive"
-            size="sm"
-            icon={<TrashIcon />}
-            onClick={() => onDelete([...checked])}
-            data-testid="delete-selected"
-            className="ml-1"
-          >
-            Delete {checked.size}
-          </Button>
-        )}
         {/* A view, not an action on the grid: it belongs with what you are
             reading as, and the rule is the divider — only the control that
             writes stands on the other side of it. */}
@@ -228,7 +221,16 @@ function WorkbenchData({
         <Divider />
         <NewMenu />
       </div>
-      {workbench.collectionPath && <QueryLine />}
+      {workbench.collectionPath && (
+        // The selection bar lies over the query line rather than swapping
+        // places with it, so it is exactly as tall and nothing below moves.
+        <div className="relative shrink-0">
+          <div inert={selecting || undefined}>
+            <QueryLine />
+          </div>
+          {selecting && <SelectionBar onDelete={onDelete} />}
+        </div>
+      )}
       {explain && workbench.collectionPath && !workbench.queryError && (
         <ExplainPanel onClose={() => setExplain(false)} />
       )}
@@ -238,7 +240,10 @@ function WorkbenchData({
           <Grid />
         </div>
         {workbench.selectedDocument && (
-          <Inspector path={workbench.selectedDocument} onDelete={(path) => onDelete([path])} />
+          <Inspector
+            path={workbench.selectedDocument}
+            onDelete={(path) => onDelete({ kind: 'paths', paths: [path] })}
+          />
         )}
       </div>
     </>

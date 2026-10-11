@@ -12,20 +12,14 @@ import { useRef, useState } from 'react'
 import {
   EXPORT_FORMATS,
   type ExportFormat,
-  type ExportOptions,
-  csvCell,
-  csvColumns,
-  csvRow,
-  documentToJson,
   download,
   exportFilename,
-  exportPages,
   formatInfo,
+  renderExport,
 } from '../export'
 import { printQuery } from '../query'
-import { documentRoot } from '../rest'
 import { useSelection } from '../selection'
-import { fieldsToJson, formatNumber } from '../value'
+import { formatNumber } from '../value'
 import { useWorkbench } from './workbench-context'
 
 type Progress = { documents: number; done: boolean } | null
@@ -40,13 +34,16 @@ export function ExportDialog({
   const workbench = useWorkbench()
   const toasts = useKumoToastManager()
   const checked = useSelection((state) => state.checked)
+  const everything = useSelection((state) => state.everything)
   const [format, setFormat] = useState<ExportFormat>('json')
   const [typed, setTyped] = useState(false)
   const [progress, setProgress] = useState<Progress>(null)
   const [error, setError] = useState<string | undefined>()
   const abort = useRef<AbortController | null>(null)
 
-  const selected = [...checked]
+  // Everything matching is the whole result, which is what an export with
+  // no selection reads anyway.
+  const selected = everything ? [] : [...checked]
   const only = selected.length > 0 ? selected : undefined
   const info = formatInfo(format)
   const running = progress !== null && !progress.done
@@ -66,64 +63,19 @@ export function ExportDialog({
     abort.current = controller
     setError(undefined)
     setProgress({ documents: 0, done: false })
-    const options: ExportOptions = { format, typed }
-    const root = documentRoot(workbench.scope)
-    // Parts, not one growing string: a large collection would otherwise be
-    // held twice over while the file is assembled.
-    const parts: string[] = []
-    let count = 0
     try {
-      if (format === 'csv') {
-        // A CSV needs its columns before its first row, and the rows are
-        // only known as they arrive, so the whole set is collected first.
-        const all = []
-        for await (const batch of exportPages(
-          {
-            scope: workbench.scope,
-            collectionPath: workbench.collectionPath,
-            group: workbench.group,
-            query: workbench.query,
-            only,
-          },
-          controller.signal,
-        )) {
-          all.push(...batch)
-          count += batch.length
-          setProgress({ documents: count, done: false })
-        }
-        const columns = csvColumns(all)
-        parts.push(csvRow(['__id__', ...columns]))
-        for (const item of all) {
-          const fields = fieldsToJson(item.fields)
-          parts.push(csvRow([item.id, ...columns.map((column) => csvCell(fields, column))]))
-        }
-      } else {
-        if (format === 'json') parts.push('{\n')
-        let first = true
-        for await (const batch of exportPages(
-          {
-            scope: workbench.scope,
-            collectionPath: workbench.collectionPath,
-            group: workbench.group,
-            query: workbench.query,
-            only,
-          },
-          controller.signal,
-        )) {
-          for (const item of batch) {
-            const body = JSON.stringify(documentToJson(item, options, root))
-            if (format === 'json') {
-              parts.push(`${first ? '' : ',\n'}  ${JSON.stringify(item.id)}: ${body}`)
-            } else {
-              parts.push(`${body}\n`)
-            }
-            first = false
-          }
-          count += batch.length
-          setProgress({ documents: count, done: false })
-        }
-        if (format === 'json') parts.push('\n}\n')
-      }
+      const { parts, count } = await renderExport(
+        {
+          scope: workbench.scope,
+          collectionPath: workbench.collectionPath,
+          group: workbench.group,
+          query: workbench.query,
+          only,
+        },
+        { format, typed },
+        (documents) => setProgress({ documents, done: false }),
+        controller.signal,
+      )
       if (controller.signal.aborted) return
       download(
         new Blob(parts, { type: info.mediaType }),

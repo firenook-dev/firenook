@@ -281,17 +281,65 @@ export async function commit(
   return { commitTime: result.commitTime ?? '' }
 }
 
-/** Deletes a document or collection with everything under it, like the CLI's `firestore:delete -r`. */
-export async function deleteRecursively(scope: FirestoreScope, path: string): Promise<void> {
+/**
+ * Deletes a document or a collection through the emulator's own route,
+ * like the CLI's `firestore:delete`. `recursive` takes everything beneath
+ * as well; without it a document path is the document alone and a
+ * collection path is the documents directly in it. Answers how many
+ * documents went.
+ *
+ * The mode is always sent. It used to be left off, and the engine reads a
+ * document path with no mode as shallow — so the delete dialog's "Also
+ * delete subcollections underneath", ticked by default, removed the
+ * document and left every subcollection standing.
+ */
+export async function deletePath(
+  scope: FirestoreScope,
+  path: string,
+  recursive: boolean,
+): Promise<number> {
   const headers: Record<string, string> = {}
   if (scope.authorization) headers.authorization = scope.authorization
-  const response = await fetch(`${API_BASE}/firestore/emulator/v1/${documentRoot(scope)}/${path}`, {
-    method: 'DELETE',
-    headers,
-  })
+  const response = await fetch(
+    `${API_BASE}/firestore/emulator/v1/${documentRoot(scope)}/${path}?mode=${recursive ? 'recursive' : 'shallow'}`,
+    { method: 'DELETE', headers },
+  )
   if (!response.ok)
     throw new FirestoreError(response.status, `${response.status} ${response.statusText}`)
+  const body = (await response.json().catch(() => ({}))) as { deleted?: number }
+  return body.deleted ?? 0
 }
+
+/**
+ * Whole documents by path, in the order asked for; a path with no document
+ * is left out. One request per hundred, rather than a query over the whole
+ * collection filtered down to the few that were ticked.
+ */
+export async function batchGetDocuments(
+  scope: FirestoreScope,
+  paths: readonly string[],
+): Promise<FsDocument[]> {
+  const root = documentRoot(scope)
+  const found = new Map<string, FsDocument>()
+  for (let at = 0; at < paths.length; at += BATCH_GET) {
+    const names = paths.slice(at, at + BATCH_GET).map((path) => `${root}/${path}`)
+    // Sequential: a selection is a handful, and an export of thousands
+    // should not open thousands of requests at once.
+    // oxlint-disable-next-line no-await-in-loop
+    const rows = await call<Array<{ found?: RestDocument }>>(scope, ':batchGet', {
+      method: 'POST',
+      body: JSON.stringify({ documents: names }),
+    })
+    for (const row of rows) {
+      if (!row.found) continue
+      const document = decodeDocument(row.found)
+      found.set(document.path, document)
+    }
+  }
+  return paths.flatMap((path) => found.get(path) ?? [])
+}
+
+const BATCH_GET = 100
 
 /** Quotes a field path segment for the REST/SDK dotted syntax when needed. */
 export function quoteFieldSegment(segment: string): string {

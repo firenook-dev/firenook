@@ -11,9 +11,9 @@
 // the question is "what does my app see".
 
 import { create } from 'zustand'
-import { type WorkbenchQuery, toStructuredQuery } from './query'
+import { DEFAULT_LIMIT, type WorkbenchQuery, toStructuredQuery } from './query'
 import { cursorAfter, splitCollection } from './queries'
-import { type FirestoreScope, documentRoot, runQuery } from './rest'
+import { type FirestoreScope, batchGetDocuments, documentRoot, runQuery } from './rest'
 import { type FsDocument, type RestValue, encodeFields, fieldsToJson } from './value'
 
 /** Documents per request while exporting. Larger than the grid's page: no
@@ -157,16 +157,36 @@ export async function* exportPages(
   source: ExportSource,
   signal?: AbortSignal,
 ): AsyncGenerator<FsDocument[]> {
-  const only = source.only?.length ? new Set(source.only) : undefined
+  // A selection is read by path. It used to page the whole result and keep
+  // the ticked few, which on a collection of 182,000 documents read every
+  // one of them to copy two.
+  if (source.only?.length) {
+    for (let at = 0; at < source.only.length; at += EXPORT_PAGE) {
+      if (signal?.aborted) return
+      // oxlint-disable-next-line no-await-in-loop
+      const documents = await batchGetDocuments(
+        source.scope,
+        source.only.slice(at, at + EXPORT_PAGE),
+      )
+      if (documents.length > 0) yield documents
+    }
+    return
+  }
   const { parent, collectionId } = splitCollection(source.collectionPath, source.group)
   const root = documentRoot(source.scope)
   // The export is not the grid: it reads as much per request as the engine
   // will give, and a limit the person wrote is still theirs to keep.
+  //
+  // `DEFAULT_LIMIT` is the grid's page size, not a limit anyone wrote — the
+  // query line does not even print it. Read as one, it ended every export
+  // at the first hundred documents: 100 of `users`' 240, under a dialog
+  // that said "Every document in users".
+  const written = source.query.limit === DEFAULT_LIMIT ? undefined : source.query.limit
   const paged: WorkbenchQuery = {
     ...source.query,
-    limit: Math.min(source.query.limit, EXPORT_PAGE),
+    limit: Math.min(written ?? EXPORT_PAGE, EXPORT_PAGE),
   }
-  let remaining = source.query.limit
+  let remaining = written ?? Number.POSITIVE_INFINITY
   let cursor: RestValue[] | undefined
   for (;;) {
     if (signal?.aborted) return
@@ -178,16 +198,64 @@ export async function* exportPages(
       parent,
       toStructuredQuery(collectionId, source.group, paged, root, cursor),
     )
-    const documents = only
-      ? page.documents.filter((document) => only.has(document.path))
-      : page.documents
-    if (documents.length > 0) yield documents
+    if (page.documents.length > 0) yield page.documents
     remaining -= page.documents.length
     if (page.documents.length < paged.limit || remaining <= 0) return
     const tail = page.documents.at(-1)
     if (!tail) return
     cursor = cursorAfter(tail, source.query, root)
   }
+}
+
+/**
+ * The export as text, in parts: everything the source names, read whole,
+ * in the format asked for. The dialog saves it as a file and the selection
+ * bar's Copy puts it on the clipboard, so the two can never disagree about
+ * what a JSON or CSV of these documents is.
+ */
+export async function renderExport(
+  source: ExportSource,
+  options: ExportOptions,
+  onProgress: (documents: number) => void = () => {},
+  signal?: AbortSignal,
+): Promise<{ parts: string[]; count: number }> {
+  const root = documentRoot(source.scope)
+  // Parts, not one growing string: a large collection would otherwise be
+  // held twice over while the file is assembled.
+  const parts: string[] = []
+  let count = 0
+  if (options.format === 'csv') {
+    // A CSV needs its columns before its first row, and the rows are only
+    // known as they arrive, so the whole set is collected first.
+    const all: FsDocument[] = []
+    for await (const batch of exportPages(source, signal)) {
+      all.push(...batch)
+      count += batch.length
+      onProgress(count)
+    }
+    const columns = csvColumns(all)
+    parts.push(csvRow(['__id__', ...columns]))
+    for (const item of all) {
+      const fields = fieldsToJson(item.fields)
+      parts.push(csvRow([item.id, ...columns.map((column) => csvCell(fields, column))]))
+    }
+    return { parts, count }
+  }
+  if (options.format === 'json') parts.push('{\n')
+  let first = true
+  for await (const batch of exportPages(source, signal)) {
+    for (const item of batch) {
+      const body = JSON.stringify(documentToJson(item, options, root))
+      if (options.format === 'json')
+        parts.push(`${first ? '' : ',\n'}  ${JSON.stringify(item.id)}: ${body}`)
+      else parts.push(`${body}\n`)
+      first = false
+    }
+    count += batch.length
+    onProgress(count)
+  }
+  if (options.format === 'json') parts.push('\n}\n')
+  return { parts, count }
 }
 
 /** Hands the finished file to the browser. */

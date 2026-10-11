@@ -1020,6 +1020,39 @@ fields). Each rule below fixed something that was seen, not supposed.
   filter too, the note says it without a number; when nothing is left out
   it says nothing.
 
+### Ticked rows get their own bar, over the query line
+
+`SelectionBar` (`selection-bar.tsx`) appears while any row is ticked and
+holds everything about the selection: clear (×), the count, "Select all
+N" (`selectEverything` sets `useSelection.everything`; "matching" when a
+query is in force, because the bar covers the line that shows it), Copy
+(JSON keyed by id or CSV, through `renderExport`), Export, and Delete N.
+Before, Delete sat in the toolbar beside the identity picker and Export
+and the count in the footer; the footer's Export now hides while
+selecting so there is one of each. **It is laid over the query line
+(`absolute inset-0` in a `relative` wrapper, the line `inert` under it),
+not swapped for it**: the line is one or two rows tall depending on
+chips, and a swap moved the rows under a shift-click — the journey fails
+on a 1 px move. Unticking any row drops `everything`.
+
+- Delete everything: an unfiltered collection goes in one request to the
+  engine's path delete (`deletePath(collection, recursive)`), anything
+  else is read for its paths and deleted per path (recursive) or in
+  commits of 500, with "N of M deleted…" while it runs.
+- `deletePath` **always sends `mode=`**: the engine reads a document path
+  with no mode as shallow, and "Also delete subcollections underneath"
+  (ticked by default) deleted the document and left its subcollections —
+  measured, 200 on the subdocument after the delete.
+- A selection is read by path (`batchGetDocuments`, `:batchGet` in
+  hundreds) for Copy and Export, not by paging the whole result and
+  keeping the ticked few — on 182,000 documents that read everything to
+  copy two.
+- `exportPages` treats `DEFAULT_LIMIT` as the grid's page size, not a
+  written limit: it used to end every export at 100 (100 of `users`' 240,
+  under "Every document in users").
+- Kumo toasts have `role="dialog"`, so a journey looking for a dialog
+  while a toast is up filters by its text.
+
 ### The grid edits where the value is
 
 Double-click a cell, or Enter / F2 on the cell cursor, and `CellEditor`
@@ -1186,9 +1219,16 @@ both under the word "change".
   screen is not in the DOM — a journey reaches one with the `reach()`
   helper. Rows are exactly 32 px (`[&_td]:h-[32px]`, `ROW_HEIGHT = 32`):
   `h-9` is 31.5 px on the 14 px root and the virtualizer used to place rows
-  at 36. A click that would open the inspector over the clicked cell waits
-  `DOUBLE_CLICK_MS` so a double-click can edit instead; ticking a row's
-  box never opens it (`data-check` on the check cell). Columns keep their
+  at 36. **A click is the cell's** — it moves the cell cursor and opens
+  nothing; the row's **open button** (`open-row`, beside the checkbox in
+  the 64 px pinned check cell, shown on hover, on the focused row, and
+  pressed on the row the panel holds) opens the inspector and closes it
+  again, as does Enter on the row's own cell. While the panel is open, a
+  click on another row moves it there, as ↑/↓ always did. Clicking opened
+  the panel on every click until then — 40% of a 1600 px grid gone to say
+  "this one" — with a 260 ms wait wherever the panel would cover the cell
+  so a double-click could still land; both are gone. Ticking a row's box
+  never moves the cursor (`data-check`). Columns keep their
   width (a trailing filler `<col>` takes the slack) so nothing moves when
   the inspector opens. Column widths come from `inferColumns`: the type's
   own width, or the header's needs when those are greater, capped at

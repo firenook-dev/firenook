@@ -68,7 +68,6 @@ import {
   type RowActions,
 } from './grid-row'
 import { FoldedHeader, HeaderMenu } from './header-menu'
-import { INSPECTOR_GAP, useInspectorWidth } from './inspector-width'
 import { subcollectionsWidth } from './subcollections-cell'
 import { useWorkbench } from './workbench-context'
 
@@ -85,8 +84,6 @@ const ID_WIDTH = 220
 const PATH_WIDTH = 340
 /** Room for `+600` and a line of the field names it stands for. */
 const FOLDED_WIDTH = 260
-/** How long a click waits for its double, when opening at once would hide the cell. */
-const DOUBLE_CLICK_MS = 260
 /** Collections up to this size are walked for missing ancestor documents. */
 const MISSING_SCAN_LIMIT = 5_000
 const NO_ORDER: readonly string[] = []
@@ -100,10 +97,6 @@ export function Grid() {
   const hidden = useColumns((state) => state.hidden)
   const showAll = useColumns((state) => state.showAll)
   const unfolded = useColumns((state) => state.unfolded)
-  // A click that would open the inspector over the clicked cell waits for a
-  // possible second click, so a double-click can edit the cell instead.
-  const pendingOpen = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(pendingOpen.current), [])
   const page = useInfiniteQuery({
     ...pageQueryOptions(
       workbench.scope,
@@ -237,6 +230,7 @@ export function Grid() {
   }, [columnVirtualizer, gridColumns, leading])
 
   const checked = useSelection((state) => state.checked)
+  const everything = useSelection((state) => state.everything)
   const focused = useSelection((state) => state.focused)
   const cursorField = useSelection((state) => state.field)
   const editing = useSelection((state) => state.editing)
@@ -285,27 +279,26 @@ export function Grid() {
   useLayoutEffect(() => {
     actions.current = {
       click: (document, cell) => {
-        // Ticking a row selects it; it does not also open it.
+        // Ticking a row selects it; it does not also put the cursor there.
         if (cell?.dataset.check !== undefined) return
+        // A click is the cell's: the cursor lands on it, ready to copy or
+        // to edit. It used to open the panel as well — a quarter of the
+        // window, every click — and to wait 260 ms first wherever the panel
+        // would have covered the cell, so a double-click could still land.
         const field = cell?.dataset.field
         focus(document.path, field === ID_COLUMN ? undefined : field)
-        const grid = scrollRef.current
-        const covered =
-          !workbench.selectedDocument &&
-          cell !== null &&
-          grid !== null &&
-          cell.getBoundingClientRect().right >
-            grid.getBoundingClientRect().right -
-              (useInspectorWidth.getState().width + INSPECTOR_GAP)
-        if (!covered) {
+        // An open panel follows the row being worked on, as the arrows
+        // already had it do; a closed one stays closed.
+        if (workbench.selectedDocument && workbench.selectedDocument !== document.path)
           workbench.selectDocument(document.path)
+      },
+      open: (document) => {
+        if (workbench.selectedDocument === document.path) {
+          workbench.selectDocument(undefined)
           return
         }
-        window.clearTimeout(pendingOpen.current)
-        pendingOpen.current = window.setTimeout(
-          () => workbench.selectDocument(document.path),
-          DOUBLE_CLICK_MS,
-        )
+        if (useSelection.getState().focused !== document.path) focus(document.path, undefined)
+        workbench.selectDocument(document.path)
       },
       check: (document, index, next, shift) => {
         // Shift ticks every row between this one and the last one ticked.
@@ -323,7 +316,6 @@ export function Grid() {
       },
       edit: (document, field) => {
         if (document.missing) return
-        window.clearTimeout(pendingOpen.current)
         focus(document.path, field)
         reveal(field)
         edit({ path: document.path, field })
@@ -501,8 +493,9 @@ export function Grid() {
     )
 
   const allChecked =
-    documents.length > 0 && documents.every((document) => checked.has(document.path))
-  const someChecked = documents.some((document) => checked.has(document.path))
+    everything ||
+    (documents.length > 0 && documents.every((document) => checked.has(document.path)))
+  const someChecked = everything || documents.some((document) => checked.has(document.path))
   const top = items[0]?.start ?? 0
   const bottom = virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0)
   const before = offsets[first] ?? 0
@@ -634,8 +627,6 @@ export function Grid() {
             {items.map((item) => {
               const document = documents[item.index]
               if (!document) return null
-              const isFocused =
-                focused === document.path || workbench.selectedDocument === document.path
               return (
                 <GridRow
                   key={document.path}
@@ -647,8 +638,9 @@ export function Grid() {
                   subcolumn={subcolumn}
                   known={known}
                   group={workbench.group}
-                  checked={checked.has(document.path)}
-                  focused={isFocused}
+                  checked={everything || checked.has(document.path)}
+                  focused={focused === document.path}
+                  open={workbench.selectedDocument === document.path}
                   cursor={focused === document.path ? cursorField : undefined}
                   flash={flashes.get(document.path)?.kind}
                   actions={actions}
@@ -704,7 +696,10 @@ function GridFooter({
   hiddenCount: number
   onShowAll: () => void
 }) {
-  const checked = useSelection((state) => state.checked)
+  // While rows are ticked, everything about them is in the selection bar
+  // over the query line — the count, Export, Delete — rather than spread
+  // between this footer and the toolbar.
+  const selecting = useSelection((state) => state.checked.size > 0 || state.everything)
   const openExport = useExportDialog((state) => state.setOpen)
   return (
     // Nothing here wraps: the bar is one row high, so a narrow grid scrolls
@@ -734,22 +729,17 @@ function GridFooter({
           </Button>
         </span>
       )}
-      <span className="shrink-0">
-        <Button
-          variant="ghost"
-          size="xs"
-          icon={<DownloadSimpleIcon />}
-          onClick={() => openExport(true)}
-          data-testid="export-open"
-        >
-          {checked.size > 0 ? `Export ${checked.size}` : 'Export'}
-        </Button>
-      </span>
-      {checked.size > 0 && (
-        <span className="ml-auto shrink-0 pl-3">
-          <Text variant="secondary" size="sm" as="span">
-            <span className="tabular-nums">{checked.size}</span> selected
-          </Text>
+      {!selecting && (
+        <span className="shrink-0">
+          <Button
+            variant="ghost"
+            size="xs"
+            icon={<DownloadSimpleIcon />}
+            onClick={() => openExport(true)}
+            data-testid="export-open"
+          >
+            Export
+          </Button>
         </span>
       )}
     </div>

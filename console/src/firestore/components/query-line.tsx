@@ -59,25 +59,7 @@ export function QueryLine() {
     input.setSelectionRange(current.caret, current.caret)
   }, [seenPrefill])
 
-  // An unfiltered pattern is counted by the schema tree, which already has
-  // the exact figure; counting the group index again would walk every entry.
-  const fromSchema = workbench.isPattern && !workbench.queryText
-  const count = useQuery({
-    ...countQueryOptions(
-      workbench.scope,
-      workbench.collectionPath,
-      workbench.group,
-      workbench.query,
-    ),
-    enabled: Boolean(workbench.collectionPath) && !workbench.queryError && !fromSchema,
-  })
-  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: fromSchema })
-  const known = fromSchema ? findNode(schema.data, workbench.collectionPath) : undefined
-  const total = known
-    ? { count: known.documents, elapsedMs: undefined }
-    : count.data
-      ? { count: count.data.count, elapsedMs: count.data.elapsedMs }
-      : undefined
+  const { total, failed } = useMatchCount()
 
   // Sorting by a field, or comparing it with `!=`, drops every document
   // without it, and a grid of what is left looks complete. When sorting is
@@ -195,7 +177,7 @@ export function QueryLine() {
                       : ` · count ${Math.max(1, Math.round(total.elapsedMs))} ms`}
                   </span>
                 </>
-              ) : count.isError || schema.isError ? (
+              ) : failed ? (
                 <span className="text-kumo-danger">Count unavailable</span>
               ) : (
                 '…'
@@ -252,6 +234,37 @@ export function QueryLine() {
       )}
     </div>
   )
+}
+
+/**
+ * How many documents the query in the URL matches — the figure beside the
+ * query line, and what the selection bar's "Select all" selects.
+ */
+export function useMatchCount(): {
+  total: { count: number; elapsedMs: number | undefined } | undefined
+  failed: boolean
+} {
+  const workbench = useWorkbench()
+  // An unfiltered pattern is counted by the schema tree, which already has
+  // the exact figure; counting the group index again would walk every entry.
+  const fromSchema = workbench.isPattern && !workbench.queryText
+  const count = useQuery({
+    ...countQueryOptions(
+      workbench.scope,
+      workbench.collectionPath,
+      workbench.group,
+      workbench.query,
+    ),
+    enabled: Boolean(workbench.collectionPath) && !workbench.queryError && !fromSchema,
+  })
+  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: fromSchema })
+  const known = fromSchema ? findNode(schema.data, workbench.collectionPath) : undefined
+  const total = known
+    ? { count: known.documents, elapsedMs: undefined }
+    : count.data
+      ? { count: count.data.count, elapsedMs: count.data.elapsedMs }
+      : undefined
+  return { total, failed: count.isError || schema.isError }
 }
 
 interface ClauseChip {

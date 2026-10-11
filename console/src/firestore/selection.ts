@@ -7,6 +7,13 @@ interface SelectionState {
   /** The collection the selection belongs to. */
   scope: string
   checked: Set<string>
+  /**
+   * Every document the query matches is selected, loaded or not — the
+   * selection bar's "Select all". `checked` holds the loaded ones so the
+   * rows on screen show ticked; an action reads this flag for the rest.
+   * Unticking any row drops back to the rows ticked by hand.
+   */
+  everything: boolean
   /** The row the keyboard is on. */
   focused: string | undefined
   /**
@@ -27,6 +34,8 @@ interface SelectionState {
   setChecked: (paths: Iterable<string>) => void
   /** Checks or clears every path given, leaving the rest as they are. */
   setRange: (paths: readonly string[], checked: boolean) => void
+  /** Everything the query matches; `loaded` are the rows to show ticked. */
+  selectEverything: (loaded: Iterable<string>) => void
   clear: () => void
   focus: (path: string | undefined, field?: string | undefined) => void
   edit: (cell: { path: string; field: string } | null) => void
@@ -38,6 +47,7 @@ export function resetSelection(scope: string) {
   useSelection.setState({
     scope,
     checked: new Set(),
+    everything: false,
     focused: undefined,
     field: undefined,
     anchor: undefined,
@@ -48,6 +58,7 @@ export function resetSelection(scope: string) {
 export const useSelection = create<SelectionState>((set) => ({
   scope: '',
   checked: new Set(),
+  everything: false,
   focused: undefined,
   field: undefined,
   anchor: undefined,
@@ -57,9 +68,9 @@ export const useSelection = create<SelectionState>((set) => ({
       const checked = new Set(state.checked)
       if (checked.has(path)) checked.delete(path)
       else checked.add(path)
-      return { checked, anchor: path }
+      return { checked, anchor: path, everything: false }
     }),
-  setChecked: (paths) => set({ checked: new Set(paths) }),
+  setChecked: (paths) => set({ checked: new Set(paths), everything: false }),
   setRange: (paths, on) =>
     set((state) => {
       const checked = new Set(state.checked)
@@ -67,9 +78,10 @@ export const useSelection = create<SelectionState>((set) => ({
         if (on) checked.add(path)
         else checked.delete(path)
       }
-      return { checked, anchor: paths.at(-1) ?? state.anchor }
+      return { checked, anchor: paths.at(-1) ?? state.anchor, everything: false }
     }),
-  clear: () => set({ checked: new Set(), focused: undefined, field: undefined }),
+  selectEverything: (loaded) => set({ checked: new Set(loaded), everything: true }),
+  clear: () => set({ checked: new Set(), everything: false, focused: undefined, field: undefined }),
   focus: (focused, field) => set({ focused, field }),
   edit: (editing) => set({ editing }),
 }))
