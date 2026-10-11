@@ -2772,6 +2772,20 @@ async function reach(page: import('@playwright/test').Page, path: string, field:
   return cell
 }
 
+/**
+ * A pinned column's edge: a strip on the cell's far side, shown, and as
+ * tall as the cell, so each row's meets the next and the column has one
+ * edge.
+ */
+const edgeOf = (cell: Locator) =>
+  cell.evaluate((td) => {
+    const strip = td.ownerDocument.defaultView!.getComputedStyle(td, '::after')
+    return {
+      shown: strip.content !== 'none' && strip.opacity === '1',
+      full: Number.parseFloat(strip.height) === (td as { offsetHeight: number }).offsetHeight,
+    }
+  })
+
 const text = (value: string) => ({ stringValue: value })
 
 test('documents that disagree keep their columns still and say what each covers', async ({
@@ -2875,17 +2889,17 @@ test('the id stays in view while the fields scroll, and a flash never shows thro
 
   const grid = page.getByTestId('grid-scroll')
   const id = row.locator('td[data-field="__name__"]')
-  const shade = () =>
-    id.evaluate((td) => td.ownerDocument.defaultView!.getComputedStyle(td).boxShadow)
   // Nothing under the id yet, so nothing to set it apart from.
-  expect(await shade()).toBe('none')
+  expect((await edgeOf(id)).shown).toBe(false)
   await grid.evaluate((el) => (el.scrollLeft = 700))
   await expect
     .poll(async () => (await id.boundingBox())!.x - (await grid.boundingBox())!.x)
     .toBe(64)
-  // And once fields pass beneath it, an edge. It named a colour token that
-  // does not exist, which made the whole shadow invalid and drew nothing.
-  await expect.poll(shade).not.toBe('none')
+  // And once fields pass beneath it, an edge, the full height of the row.
+  // It was a shadow with a negative spread, which stopped short of every
+  // row's top and bottom and drew the edge as a stack of pills; before that
+  // it named a colour token that does not exist and drew nothing at all.
+  await expect.poll(() => edgeOf(id)).toEqual({ shown: true, full: true })
 
   // Unfrozen from its own header menu, the id scrolls with the fields and
   // only the box stays, with the edge moving to it. The choice is kept.
@@ -2896,12 +2910,8 @@ test('the id stays in view while the fields scroll, and a flash never shows thro
     .poll(async () => (await id.boundingBox())!.x - (await grid.boundingBox())!.x)
     .toBeLessThan(0)
   expect((await check.boundingBox())!.x - (await grid.boundingBox())!.x).toBe(0)
-  expect(await shade()).toBe('none')
-  await expect
-    .poll(() =>
-      check.evaluate((td) => td.ownerDocument.defaultView!.getComputedStyle(td).boxShadow),
-    )
-    .not.toBe('none')
+  expect((await edgeOf(id)).shown).toBe(false)
+  await expect.poll(() => edgeOf(check)).toEqual({ shown: true, full: true })
   await page.reload()
   await grid.evaluate((el) => (el.scrollLeft = 700))
   await expect

@@ -1016,8 +1016,13 @@ fields). Each rule below fixed something that was seen, not supposed.
   clear) is then the check column alone.
 - **The id is pinned** (with the check column): `PIN_CELL` is sticky on
   the row's own `--kumo-table-row-bg`, so it is opaque in every row state
-  (the focused row sets that variable too). The edge shadow (`PIN_EDGE`)
-  appears only once `data-scrolled` is on the scroller. Not Kumo's
+  (the focused row sets that variable too). The edge (`PIN_EDGE`) appears
+  only once `data-scrolled` is on the scroller, and is a full-height
+  `::after` gradient strip, never a `box-shadow`: a shadow with a negative
+  spread shrinks on every side, so each row's stopped short of its top and
+  bottom and the edge read as a stack of pills (222 mid-row, 254 at every
+  boundary, sampled beside it); and the check cell's one `box-shadow`
+  already belongs to the focused row's accent bar. Not Kumo's
   `sticky` prop: it paints a 24 px fade over the first field at rest.
 - **A sort that drops documents says so** (`presenceFields`, the query
   line's `query-leaves-out`): Firestore returns only documents that have

@@ -61,9 +61,17 @@ export const PIN_HEAD = 'sticky z-[2] bg-kumo-elevated'
  * The pinned edge, drawn only once something has scrolled under it. At
  * rest there is nothing under the id to separate it from, and a shadow
  * there would be a line through the first field.
+ *
+ * A strip the full height of the cell, so one row's meets the next and
+ * the column has one edge. It was a `box-shadow` of `6px 0 6px -6px`, and
+ * the negative spread pulls a shadow in on every side, not only the far
+ * one: each cell's shade stopped short of its own top and bottom, and the
+ * edge read as a stack of pills — measured beside it, 222 in a row's
+ * middle and 254 at every boundary. A cell has one `box-shadow`, too, and
+ * the focused row's accent bar already wants the check cell's.
  */
 export const PIN_EDGE =
-  'group-data-[scrolled]/grid:shadow-[6px_0_6px_-6px_color-mix(in_srgb,var(--text-color-kumo-default)_35%,transparent)]'
+  "after:pointer-events-none after:absolute after:inset-y-0 after:-right-[6px] after:w-[6px] after:bg-linear-to-r after:from-kumo-line after:to-transparent after:opacity-0 after:content-[''] group-data-[scrolled]/grid:after:opacity-100"
 
 /** The cell the keyboard is on: the console's accent, inside the cell, so nothing moves. */
 const CURSOR = 'shadow-[inset_0_0_0_1.5px_var(--color-kumo-brand)]'
