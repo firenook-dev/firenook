@@ -47,6 +47,43 @@ test('the query line runs the SDK chain and pages with cursors', async ({ page }
   expect(ids.length).toBeGreaterThan(20)
 })
 
+test('the query field is built like the path field, and nothing cuts its outline', async ({
+  page,
+}) => {
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.keyboard.press('f')
+  const field = page.getByTestId('query-field')
+  const input = page.getByTestId('query-input')
+  await expect(input).toBeFocused()
+  // Focused, the two fields wear the same outline and ground.
+  const focused = await fieldLook(field)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('/')
+  expect(await fieldLook(page.getByTestId('path-field'))).toEqual(focused)
+  expect(focused.ring).toBe(true)
+  // The ring is painted outside the box, so whatever clips the field has
+  // to leave it room on every side. It used to be 28 px in a 28 px
+  // scroller: focus drew two brackets and no top or bottom.
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('f')
+  await expect(input).toBeFocused()
+  expect(await ringRoom(field)).toBeGreaterThanOrEqual(1)
+
+  // At rest it is a line to read, like the path.
+  await page.getByTestId('grid-row').first().locator('td').nth(2).click()
+  expect((await fieldLook(field)).ring).toBe(false)
+
+  // Clearing is the field's own control, and leaves the caret in it.
+  await input.fill('where("plan", "==", "pro")')
+  await input.press('Enter')
+  await expect(page).toHaveURL(/q=where/)
+  await page.getByTestId('query-clear').click()
+  await expect(page).not.toHaveURL(/q=where/)
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('')
+})
+
 test('viewing as a user applies the rules the app would hit', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users&as=u_k65eq%3Aada%40example.test`)
   await expect(page.getByText('Denied by security rules')).toBeVisible()
@@ -1044,6 +1081,43 @@ test('a typed export imports back as the same documents', async ({ page }) => {
     count: { integerValue: '42' },
   })
 })
+
+/** A field's outline and ground, as the eye sees them. */
+const fieldLook = (field: Locator) =>
+  field.evaluate((el) => {
+    const style = el.ownerDocument.defaultView!.getComputedStyle(el)
+    return {
+      ring: style.boxShadow
+        .split(/,(?![^(]*\))/)
+        .some(
+          (layer: string) =>
+            layer.trim().endsWith(' 0px 0px 0px 1px') && !layer.includes('rgba(0, 0, 0, 0)'),
+        ),
+      shadow: style.boxShadow,
+      background: style.backgroundColor,
+      height: (el as { offsetHeight: number }).offsetHeight,
+      radius: style.borderRadius,
+    }
+  })
+
+/** The least room any ancestor that clips leaves around a box, px. */
+const ringRoom = (field: Locator) =>
+  field.evaluate((el) => {
+    const view = el.ownerDocument.defaultView!
+    const box = el.getBoundingClientRect()
+    let room = Infinity
+    for (let up = el.parentElement; up; up = up.parentElement) {
+      const style = view.getComputedStyle(up)
+      if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+      const clip = up.getBoundingClientRect()
+      // A scroller clips at its padding edge, inside its border.
+      const top = clip.top + Number.parseFloat(style.borderTopWidth)
+      const bottom = clip.bottom - Number.parseFloat(style.borderBottomWidth)
+      const left = clip.left + Number.parseFloat(style.borderLeftWidth)
+      room = Math.min(room, box.top - top, bottom - box.bottom, box.left - left)
+    }
+    return room
+  })
 
 /** A download's bytes, as text. */
 async function readDownload(download: { path(): Promise<string> }): Promise<string> {

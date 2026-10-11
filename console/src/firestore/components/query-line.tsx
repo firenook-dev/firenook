@@ -81,39 +81,73 @@ export function QueryLine() {
 
   const active = !isEmptyQuery(workbench.query)
   return (
-    <div
-      className="grid shrink-0 gap-1.5 border-b border-kumo-line bg-kumo-base px-3 py-1.5"
-      data-testid="query-line"
-    >
-      <div className="flex min-h-8 items-center gap-2 overflow-x-auto">
+    <div className="grid shrink-0 border-b border-kumo-line bg-kumo-base" data-testid="query-line">
+      {/* The padding is the scroller's own, not the line's: a scroller clips
+          at its padding edge, and the field's outline is a ring painted
+          outside its box. With the padding outside, the field was exactly
+          as tall as the box clipping it — 28 px in 28 px — and focus showed
+          as two brackets with no top or bottom. */}
+      <div className="flex min-h-8 items-center gap-2 overflow-x-auto px-3 py-1.5">
         {open ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="flex h-lh items-center text-kumo-subtle">
-              <FunnelIcon size={16} />
-            </span>
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  run()
-                } else if (event.key === 'Escape') {
-                  event.preventDefault()
-                  if (!active && !draft) setOpen(false)
-                  else setDraft(workbench.queryText)
-                }
-              }}
-              placeholder='where("status", "==", "paid").orderBy("createdAt", "desc").limit(50)'
-              spellCheck={false}
-              autoComplete="off"
-              className={`h-8 min-w-0 flex-1 rounded-md bg-kumo-control px-2.5 font-mono text-[12px] text-kumo-default ring outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus ${
-                workbench.queryError ? 'ring-kumo-danger' : 'ring-kumo-line'
+            {/* The field is built like the path field a row above: one box,
+                with no chrome at rest — the funnel and the chain say what it
+                is — a ground under the pointer, and the outline kept for
+                focus, or for a query that did not parse. The one control
+                that acts on the whole query, clearing it, sits inside
+                against the right edge, where the path keeps its copy. */}
+            <div
+              className={`flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus hover:not-focus-within:bg-kumo-tint ${
+                workbench.queryError ? 'ring ring-kumo-danger' : ''
               }`}
-              aria-label="Query"
-              data-testid="query-input"
-            />
+              data-testid="query-field"
+            >
+              <label className="flex h-full min-w-0 flex-1 cursor-text items-center pl-2">
+                <FunnelIcon size={14} className="shrink-0 text-kumo-subtle" />
+                <input
+                  ref={inputRef}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      run()
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      if (!active && !draft) setOpen(false)
+                      else setDraft(workbench.queryText)
+                    }
+                  }}
+                  placeholder='where("status", "==", "paid").orderBy("createdAt", "desc").limit(50)'
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none placeholder:text-kumo-inactive"
+                  aria-label="Query"
+                  data-testid="query-input"
+                />
+              </label>
+              {(active || draft) && (
+                <Tooltip
+                  content="Clear the query"
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      shape="square"
+                      icon={<XIcon />}
+                      aria-label="Clear the query"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => {
+                        setDraft('')
+                        workbench.setQueryText('')
+                        inputRef.current?.focus()
+                      }}
+                      data-testid="query-clear"
+                    />
+                  }
+                />
+              )}
+            </div>
             <Button variant="primary" size="sm" icon={<PlayIcon />} onClick={run}>
               Run
             </Button>
@@ -127,18 +161,6 @@ export function QueryLine() {
             >
               Explain
             </Button>
-            {(active || draft) && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setDraft('')
-                  workbench.setQueryText('')
-                }}
-              >
-                Clear
-              </Button>
-            )}
           </div>
         ) : (
           <Button
@@ -188,12 +210,14 @@ export function QueryLine() {
         </div>
       </div>
       {workbench.queryError && (
-        <Text variant="error" size="sm">
-          {workbench.queryError}
-        </Text>
+        <div className="px-3 pb-1.5">
+          <Text variant="error" size="sm">
+            {workbench.queryError}
+          </Text>
+        </div>
       )}
       {open && active && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5">
           {chips(workbench.query).map((chip) => (
             <Chip key={chip.key} onRemove={() => remove(chip.without)}>
               {chip.label}

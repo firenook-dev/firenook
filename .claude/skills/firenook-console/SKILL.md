@@ -313,6 +313,19 @@ property of the query), and what acts on the whole section (`Rules`,
 `Explain`, what came back, and `Code`. A control that belongs to both rows
 belongs in row one.
 
+**The query field is the path field's twin**, a row below: one box (`h-8
+rounded-lg`), the funnel inside it, flat at rest, `bg-kumo-tint` under the
+pointer (`hover:not-focus-within:`), `bg-kumo-control` and the focus ring
+on `focus-within`, and the one control that acts on the whole query —
+clearing it (`query-clear`) — inside against the right edge, where the path
+keeps copy. A query that did not parse keeps a `ring-kumo-danger` outline
+at rest. The row scrolls sideways when narrow, and **a scroller clips at its
+padding edge**, so the padding is the scroller's own (`px-3 py-1.5`), not
+the line's: with it outside, the field was 28 px in a 28 px scroller and
+focus drew two brackets with no top or bottom. The journey measures the
+room every clipping ancestor leaves the field (`ringRoom`, ≥ 1 px) and
+compares its focused look with the path field's.
+
 ### Colour means something, or it is not spent
 
 The type badge is one quiet chip for every type — 11 px mono,
