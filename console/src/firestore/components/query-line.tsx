@@ -99,7 +99,7 @@ export function QueryLine() {
                 that acts on the whole query, clearing it, sits inside
                 against the right edge, where the path keeps its copy. */}
             <div
-              className={`flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus hover:not-focus-within:bg-kumo-tint ${
+              className={`flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus hover:not-focus-within:bg-firenook-hover ${
                 workbench.queryError ? 'ring ring-kumo-danger' : ''
               }`}
               data-testid="query-field"
@@ -399,7 +399,7 @@ function Chip({ children, onRemove }: { children: React.ReactNode; onRemove: () 
       <button
         type="button"
         onClick={onRemove}
-        className="flex size-5 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-base hover:text-kumo-default"
+        className="flex size-5 items-center justify-center rounded text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-default"
         aria-label="Remove clause"
       >
         <XIcon size={12} />

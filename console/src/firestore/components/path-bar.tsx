@@ -117,7 +117,7 @@ export function PathBar() {
           for the completions.) */}
       <div
         className={`group relative flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 pl-1 ${
-          editing === null ? 'hover:bg-kumo-tint' : 'bg-kumo-control ring ring-kumo-focus'
+          editing === null ? 'hover:bg-firenook-hover' : 'bg-kumo-control ring ring-kumo-focus'
         }`}
         data-testid="path-field"
       >
@@ -249,7 +249,7 @@ export function PathBar() {
                 <li>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] hover:bg-kumo-tint"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] hover:bg-firenook-hover"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={create}
                     data-testid="path-create-collection"
@@ -275,7 +275,7 @@ export function PathBar() {
                   <li key={id}>
                     <button
                       type="button"
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[13px] hover:bg-kumo-tint"
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[13px] hover:bg-firenook-hover"
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => commit(full)}
                     >
@@ -342,8 +342,9 @@ function PathSegment({
         // Where you are is the segment that is not faded, so it needs no tag
         // of its own — and a tag would have to fight whatever ground the
         // field is showing. Hovering anything in here lights the field, so a
-        // segment's own hover reads against that ground, not against the bar.
-        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[12px] hover:bg-kumo-base hover:text-kumo-default ${
+        // segment's own hover is a step darker than that ground — it was
+        // white, which on the lit field read as a hole in it.
+        className={`flex h-7 items-center gap-1.5 rounded-md px-1.5 font-mono text-[12px] hover:bg-firenook-hover hover:text-kumo-default ${
           current ? 'text-kumo-default' : 'text-kumo-subtle'
         }`}
         aria-current={current ? 'location' : undefined}

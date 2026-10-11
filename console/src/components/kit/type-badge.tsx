@@ -50,15 +50,17 @@ export function TypeBadge({
 }) {
   return (
     <span
-      // Both places this sits are hover targets that light up in the same
-      // tint, which would swallow the chip; it takes the ground back by
-      // going the other way. The amber keeps its own, being the point.
+      // Both places this sits are hover targets that light up, which
+      // would swallow the chip; it keeps its ground by going a step darker
+      // with them (it used to go white, a light chip on a grey ground). In
+      // a menu trigger it has no ground of its own: the trigger's hover is
+      // the chip's. The amber keeps its own, being the point.
       className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
         mixed
           ? 'bg-kumo-warning-tint text-kumo-default'
           : menu
-            ? 'text-kumo-subtle group-hover:bg-kumo-tint'
-            : 'bg-kumo-tint text-kumo-subtle group-hover:bg-kumo-base'
+            ? 'text-kumo-subtle'
+            : 'bg-kumo-tint text-kumo-subtle group-hover:bg-firenook-hover'
       }`}
       title={mixed ? `More than one type here: ${mixed}` : undefined}
       data-testid="type-badge"

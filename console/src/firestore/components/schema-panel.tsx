@@ -205,7 +205,7 @@ function TreeNode({
         className={`group flex h-7 items-center rounded-md pr-1.5 ${
           isCurrent
             ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
-            : 'hover:bg-kumo-tint'
+            : 'hover:bg-firenook-hover'
         }`}
         data-testid="schema-node"
         data-pattern={node.pattern}
@@ -219,7 +219,7 @@ function TreeNode({
         {children.length > 0 ? (
           <button
             type="button"
-            className="flex size-5 shrink-0 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-elevated hover:text-kumo-default"
+            className="flex size-5 shrink-0 items-center justify-center rounded text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-default"
             onClick={() => onToggle(node.pattern, expanded)}
             aria-label={expanded ? `Collapse ${node.id}` : `Expand ${node.id}`}
             data-testid="schema-node-toggle"

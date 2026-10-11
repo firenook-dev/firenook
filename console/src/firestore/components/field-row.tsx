@@ -57,7 +57,7 @@ import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './val
  * left of a name is the margin the panel already had.
  */
 const CARET =
-  'absolute top-0 -left-4 flex h-8 w-4 items-center justify-center rounded-l-md text-kumo-subtle group-hover/line:bg-kumo-tint group-focus-within/line:bg-kumo-tint hover:text-kumo-default'
+  'absolute top-0 -left-4 flex h-8 w-4 items-center justify-center rounded-l-md text-kumo-subtle group-hover/line:bg-firenook-hover group-focus-within/line:bg-kumo-tint hover:text-kumo-default'
 
 /** What a container shows where a value would be. */
 const SUMMARY =
@@ -213,7 +213,7 @@ function FieldRow({
           you see which field you are on — the thing a column of twenty
           one-line rows has to answer and a column of blocks never had to. */}
       <div
-        className={`group/line relative col-span-2 grid grid-cols-subgrid items-start hover:bg-kumo-tint focus-within:bg-kumo-tint ${
+        className={`group/line relative col-span-2 grid grid-cols-subgrid items-start hover:bg-firenook-hover focus-within:bg-kumo-tint ${
           container ? 'rounded-r-md' : 'rounded-md'
         }`}
       >

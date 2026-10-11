@@ -50,7 +50,7 @@ export function HeaderMenu({ column }: { column: InferredColumn }) {
         render={
           <button
             type="button"
-            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-kumo-tint"
+            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-firenook-hover"
             aria-label={`${column.field} column`}
             data-testid={`column-${column.field}`}
           >
@@ -154,7 +154,7 @@ export function FoldedHeader({ folded }: { folded: readonly InferredColumn[] }) 
         render={
           <button
             type="button"
-            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-kumo-tint"
+            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-firenook-hover"
             aria-label={`${folded.length} rare fields`}
             data-testid="column-folded"
           >
@@ -213,7 +213,7 @@ export function IdHeaderMenu({
         render={
           <button
             type="button"
-            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-kumo-tint"
+            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-firenook-hover"
             aria-label={`${label} column`}
             data-testid="id-header"
           >

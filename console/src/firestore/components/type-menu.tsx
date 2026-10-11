@@ -26,7 +26,7 @@ export function TypeMenu({
         render={
           <button
             type="button"
-            className="group flex h-6 shrink-0 items-center rounded-md px-1 outline-none hover:bg-kumo-tint focus-visible:ring focus-visible:ring-kumo-focus"
+            className="group flex h-6 shrink-0 items-center rounded-md px-1 outline-none hover:bg-firenook-hover focus-visible:ring focus-visible:ring-kumo-focus"
             aria-label={`${label} type: ${type}`}
           >
             <TypeBadge type={type} menu />

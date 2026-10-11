@@ -283,8 +283,9 @@ ground under it moves. **Where you are is the segment that is not faded** —
 ancestors `text-kumo-subtle`, the last one `text-kumo-default` — not a
 tagged chip; a chip has to be light on the bar and dark on the hover ground,
 and flipping it as the pointer arrives reads as a fault. A segment's own
-hover is `bg-kumo-base`, which only ever appears while the field is lit, so
-it always has the ground to stand against.
+hover is the hover fill (`bg-firenook-hover`, below), which only ever
+appears while the field is lit, so it lands a step darker than that
+ground.
 
 A toolbar must degrade, never overlap. A `shrink-0` group inside a
 `flex-1` parent paints over its neighbour when the parent runs out of room,
@@ -377,11 +378,29 @@ is nothing wrong with it. The muted `null` already in the cell is the only
 mark that case needs, and an absent field stays blank, which is a different
 thing again.
 
-A chip on a row that lights up on hover has to move the other way or it is
-swallowed: `TypeBadge` takes `group-hover:bg-kumo-base`, and both the
-header button and the inspector's type trigger carry `group`. A journey
-holds every settled badge to one ground and the mixed one to a different
-one, and fails the moment a second colour appears.
+A chip on a row that lights up on hover has to keep a ground or it is
+swallowed: `TypeBadge` takes `group-hover:bg-firenook-hover`, a step
+darker than the lit header (it went white, the other way, until hovers
+were made one rule), and the header button carries `group`. In a menu
+trigger the chip has no ground of its own and the trigger's hover is its.
+A journey holds every settled badge to one ground and the mixed one to a
+different one, and fails the moment a second colour appears.
+
+**A hover is one step of ink over whatever is under it**: `bg-firenook-hover`
+(`theme.css`), black at 4 % in light mode and white at 9.6 % in dark — the
+alphas that land exactly on `kumo-tint` over `kumo-base`, so on a white
+surface it is Kumo's own ghost hover. Never an opaque surface token as a
+hover. Kumo's ladder in light mode is base 255, overlay 251, elevated 248,
+tint 245, recessed 243, and the zebra rows, the grid header, chips and the
+lit path field all sit at 245–248: `hover:bg-kumo-base` (the open-row
+button, the chip ×, path segments) went **white** there, and
+`hover:bg-kumo-elevated` (the tree's chevrons, the subcollection link) went
+lighter or vanished; `hover:bg-kumo-tint` on the 248 header was a 3-level
+step nobody sees. The exception is a control with an opaque ground of its
+own at rest (a white card with a ring): it keeps `hover:bg-kumo-tint`, as
+Kumo's secondary button does, because a translucent fill would replace its
+white with the surface under it. A journey hovers one control of each kind
+in both modes and holds the fill to the right side of its ground.
 
 Count each figure once. The path bar prints a count for every collection on
 the way *except* the one in view, because row two already counts that one

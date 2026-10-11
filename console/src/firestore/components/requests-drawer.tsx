@@ -36,7 +36,7 @@ export function RequestsDrawer({
     >
       <button
         type="button"
-        className="flex h-9 shrink-0 items-center gap-3 px-3 text-left hover:bg-kumo-tint"
+        className="flex h-9 shrink-0 items-center gap-3 px-3 text-left hover:bg-firenook-hover"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
@@ -151,7 +151,7 @@ function RequestRow({
   const deciding = event.lines.filter((line) => line.outcome === (event.outcome === 'allow'))
   return (
     <>
-      <tr className="cursor-pointer hover:bg-kumo-tint" onClick={onToggle}>
+      <tr className="cursor-pointer hover:bg-firenook-hover" onClick={onToggle}>
         <td className="w-20 border-b border-kumo-hairline px-3 py-1.5 whitespace-nowrap text-kumo-subtle tabular-nums">
           <span title={event.time}>{relativeTime(event.time)}</span>
         </td>

@@ -131,6 +131,53 @@ test('the count names itself on hover, and Run stays put however long it is', as
   expect((await run.boundingBox())?.x).toBe(at)
 })
 
+for (const scheme of ['light', 'dark'] as const)
+  test(`a hover is a step of ink over its ground, never a lighter fill (${scheme})`, async ({
+    page,
+  }) => {
+    // Kumo's surfaces in light mode run white 255, elevated 248, tint 245:
+    // the zebra rows, the header, chips and the lit path field sit at the
+    // bottom of that, and the opaque fills this console hovered with went
+    // white on them or vanished. One of each kind of control, each held to
+    // a visible step the right way: darker in light mode, lighter in dark.
+    await page.emulateMedia({ colorScheme: scheme })
+    const toward = scheme === 'light' ? -1 : 1
+    const steps: Record<string, number> = {}
+    const measure = async (name: string, control: Locator) => {
+      await control.hover()
+      await page.waitForTimeout(160)
+      steps[name] = toward * (await hoverStep(control))
+    }
+    await page.goto(
+      `${origin()}/console/firestore?path=users&q=where(%22plan%22%2C%22%3D%3D%22%2C%22pro%22)`,
+    )
+    const rows = page.getByTestId('grid-row')
+    await expect(rows.first()).toBeVisible()
+    await measure('open, white row', rows.nth(0).getByTestId('open-row'))
+    await measure('open, zebra row', rows.nth(1).getByTestId('open-row'))
+    await measure("a chip's ×", page.getByRole('button', { name: 'Remove clause' }).first())
+    await measure('column header', page.getByTestId('column-email'))
+    await measure('subcollection link', page.getByTestId('subcollection-link').first())
+    await measure('tree arrow', page.getByTestId('schema-node-toggle').first())
+    await page.goto(`${origin()}/console/firestore?path=users/u_k65eq/orders`)
+    await measure(
+      'path segment, field lit',
+      page.getByTestId('path-field').getByRole('button', { name: /^users/ }),
+    )
+    await page.goto(`${origin()}/console/firestore?path=users`)
+    await expect(rows.first()).toBeVisible()
+    await page.getByTestId('column-email').click()
+    await measure('menu item', page.getByRole('menuitem', { name: 'Sort descending' }))
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Meta+k')
+    await measure('palette result', page.getByRole('option').nth(1))
+    // Soft, so a regression names every kind of control it reaches.
+    for (const [name, step] of Object.entries(steps))
+      expect
+        .soft(step, `${name}: ${scheme === 'light' ? 'darker' : 'lighter'} than its ground`)
+        .toBeGreaterThanOrEqual(6)
+  })
+
 test('viewing as a user applies the rules the app would hit', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users&as=u_k65eq%3Aada%40example.test`)
   await expect(page.getByText('Denied by security rules')).toBeVisible()
@@ -1128,6 +1175,53 @@ test('a typed export imports back as the same documents', async ({ page }) => {
     count: { integerValue: '42' },
   })
 })
+
+/**
+ * How far a control's fill moves from the ground it sits on, in luminance
+ * levels (0–255): negative is darker. Every layer from the first opaque
+ * ancestor down is composited, so a translucent fill on a lit field is
+ * measured against the lit field, not the bar beneath it.
+ */
+const hoverStep = (control: Locator) =>
+  control.evaluate((el) => {
+    const view = el.ownerDocument.defaultView!
+    const canvas = el.ownerDocument.createElement('canvas') as unknown as {
+      width: number
+      height: number
+      getContext: (kind: '2d') => {
+        clearRect: (...xs: number[]) => void
+        fillRect: (...xs: number[]) => void
+        fillStyle: string
+        getImageData: (...xs: number[]) => { data: ArrayLike<number> }
+      }
+    }
+    canvas.width = canvas.height = 1
+    const ink = canvas.getContext('2d')
+    const rgba = (css: string) => {
+      ink.clearRect(0, 0, 1, 1)
+      ink.fillStyle = css
+      ink.fillRect(0, 0, 1, 1)
+      const [r = 0, g = 0, b = 0, a = 0] = Array.from(ink.getImageData(0, 0, 1, 1).data)
+      return [r, g, b, a / 255]
+    }
+    const layers: number[][] = []
+    for (let at: typeof el | null = el; at; at = at.parentElement) {
+      const layer = rgba(view.getComputedStyle(at).backgroundColor)
+      layers.push(layer)
+      // The ground is the first opaque layer behind the control, even
+      // when the control's own fill is opaque.
+      if (at !== el && (layer[3] ?? 0) > 0.99) break
+    }
+    // Paint the stack from the opaque ground up, with and without the control.
+    const composite = (from: number) => {
+      let colour = [255, 255, 255]
+      for (const [r = 0, g = 0, b = 0, a = 0] of layers.slice(from).toReversed())
+        colour = [r, g, b].map((value, i) => value * a + (colour[i] ?? 0) * (1 - a))
+      const [r = 0, g = 0, b = 0] = colour
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    return Math.round(composite(0) - composite(1))
+  })
 
 /** A field's outline and ground, as the eye sees them. */
 const fieldLook = (field: Locator) =>

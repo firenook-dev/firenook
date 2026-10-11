@@ -916,7 +916,7 @@ function RootLanding() {
             <button
               type="button"
               onClick={() => openCreate({ kind: 'collection', parent: '' })}
-              className={`flex w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-3 text-left text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default ${
+              className={`flex w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-3 text-left text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-default ${
                 anyNested ? 'h-14' : 'h-11'
               }`}
               data-testid="root-new-collection"

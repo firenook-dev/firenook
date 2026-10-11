@@ -20,6 +20,18 @@
   --color-firenook-ember: oklch(0.55 0.19 35);
   --color-firenook-ember-hover: oklch(0.48 0.17 35);
   --color-firenook-ember-bright: oklch(0.68 0.17 40);
+  /*
+   * The hover fill: a step of ink laid over whatever is under it, so a
+   * hover is darker than its ground in light mode and lighter in dark,
+   * on every surface. Kumo's ghost buttons hover to `kumo-tint`, an
+   * opaque grey that is only a step down from white: on the zebra rows,
+   * the grid header and the lit path field — all at or below it — the
+   * opaque fills this console had picked (`kumo-base`, `kumo-elevated`)
+   * went white or vanished. The alpha is the one that lands exactly on
+   * `kumo-tint` over `kumo-base` in both modes, so a hover on white is
+   * Kumo's own.
+   */
+  --color-firenook-hover: oklch(0% 0 0 / 0.04);
 }
 
 /*
@@ -96,6 +108,7 @@
 [data-theme='kumo'] [data-mode='dark'] {
   --color-kumo-brand: oklch(0.58 0.19 35);
   --color-kumo-brand-hover: var(--color-firenook-ember);
+  --color-firenook-hover: oklch(100% 0 0 / 0.096);
   --text-color-kumo-brand: var(--color-firenook-ember-bright);
   --text-color-kumo-link: var(--color-firenook-ember-bright);
 }
@@ -130,4 +143,15 @@
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: 'calt', 'cv02', 'cv03', 'cv04';
   }
+}
+
+/*
+ * A highlighted menu item or palette result is a hover, so it takes the
+ * hover fill. Kumo draws it in `kumo-overlay`, which in light mode is 251
+ * on a 255 menu: a four-level step that reads as no highlight at all
+ * (dark mode's is 23 to 38). Unlayered, so it beats Kumo's utility.
+ */
+[data-kumo-component='DropdownMenu'][data-kumo-part][data-highlighted],
+[role='listbox'] [role='option'][data-highlighted] {
+  background-color: var(--color-firenook-hover);
 }

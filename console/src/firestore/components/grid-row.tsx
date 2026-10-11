@@ -172,7 +172,7 @@ export const GridRow = memo(function GridRow({
               event.stopPropagation()
               actions.current?.open(document)
             }}
-            className={`flex size-6 shrink-0 items-center justify-center rounded-md outline-none hover:bg-kumo-base hover:text-kumo-default focus-visible:opacity-100 focus-visible:ring focus-visible:ring-kumo-focus ${
+            className={`flex size-6 shrink-0 items-center justify-center rounded-md outline-none hover:bg-firenook-hover hover:text-kumo-default focus-visible:opacity-100 focus-visible:ring focus-visible:ring-kumo-focus ${
               open
                 ? 'text-kumo-brand opacity-100'
                 : `text-kumo-subtle ${focused ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`

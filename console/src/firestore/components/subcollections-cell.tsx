@@ -56,7 +56,7 @@ export function SubcollectionsCell({
             workbench.setPath(`${path}/${child.id}`)
           }}
           onDoubleClick={(event) => event.stopPropagation()}
-          className="flex h-5 min-w-0 shrink items-center gap-1 rounded bg-kumo-tint pr-1.5 pl-1 font-mono text-[11px] text-kumo-default hover:bg-kumo-elevated"
+          className="flex h-5 min-w-0 shrink items-center gap-1 rounded bg-kumo-tint pr-1.5 pl-1 font-mono text-[11px] text-kumo-default hover:bg-firenook-hover"
           title={`Open ${path}/${child.id}`}
           data-testid="subcollection-link"
           data-id={child.id}
@@ -76,7 +76,7 @@ export function SubcollectionsCell({
                 type="button"
                 onClick={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.stopPropagation()}
-                className="flex h-5 shrink-0 items-center gap-0.5 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle tabular-nums hover:bg-kumo-elevated hover:text-kumo-default"
+                className="flex h-5 shrink-0 items-center gap-0.5 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle tabular-nums hover:bg-firenook-hover hover:text-kumo-default"
                 title={`${rest.length} more: ${rest.map((child) => child.id).join(', ')}`}
                 aria-label={`${rest.length} more subcollections under ${path}`}
                 data-testid="subcollections-more"

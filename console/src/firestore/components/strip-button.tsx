@@ -40,8 +40,8 @@ export function StripButton({
 }) {
   const rest =
     tone === 'danger'
-      ? 'text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-danger'
-      : 'text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default'
+      ? 'text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-danger'
+      : 'text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-default'
   return (
     <button
       type="button"

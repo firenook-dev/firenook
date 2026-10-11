@@ -343,7 +343,7 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
           <li key={child.id}>
             <button
               type="button"
-              className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-kumo-tint"
+              className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-firenook-hover"
               onClick={() => workbench.setPath(`${parent}/${child.id}`)}
             >
               <FolderIcon size={14} className="text-kumo-subtle" />
