@@ -1058,7 +1058,10 @@ retype that changes shape swaps line ↔ panel and moves focus.
   row's own cell, where Enter opens the inspector), ↑/↓ keep the column,
   ⌘/Ctrl+C copies the value (`copyText`: scalars as typed, maps/arrays as
   JSON, the id from the row cell; partial values fetched whole) unless
-  text is selected. Shift-click ticks a range from the last row ticked.
+  text is selected. Shift-click ticks a range from the last row ticked;
+  the check cell cancels a *shift* mouse-down, because shift on a press is
+  also the browser's "extend the text selection" and painted every cell
+  between the two rows (the journey asserts the selection stays empty).
 
 ### Size and age beside the document path
 

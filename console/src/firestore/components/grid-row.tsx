@@ -123,6 +123,14 @@ export const GridRow = memo(function GridRow({
         className={PIN_CELL}
         style={{ left: 0 }}
         data-check=""
+        // Shift on a press is also the browser's own "extend the text
+        // selection", so a range of ticks painted every id and value
+        // between the two rows. Only here: selecting text in a cell with
+        // shift still works everywhere else, and the click that ticks the
+        // box still arrives.
+        onMouseDown={(event) => {
+          if (event.shiftKey) event.preventDefault()
+        }}
       />
       <Table.Cell
         className={`${PIN_CELL} ${PIN_EDGE}`}

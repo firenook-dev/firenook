@@ -3037,4 +3037,9 @@ test('shift-click ticks a run of rows, and ticking one does not open it', async 
     .getByRole('checkbox')
     .click({ modifiers: ['Shift'] })
   await expect(page.getByTestId('delete-selected')).toHaveText('Delete 5')
+  // Shift on a press is also the browser's "extend the text selection",
+  // and it painted every id, value and chip between the two rows.
+  const selected = () =>
+    page.locator('body').evaluate((body) => body.ownerDocument.getSelection()?.toString() ?? '')
+  expect(await selected()).toBe('')
 })
