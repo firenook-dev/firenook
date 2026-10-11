@@ -16,6 +16,7 @@ use futures_util::stream::BoxStream;
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::foreign::ForeignProjects;
 use crate::instance::Instance;
 use crate::live::LiveTopic;
 use crate::live::badges::BadgeBoard;
@@ -73,7 +74,7 @@ pub(crate) fn section_service(id: &str) -> &str {
 #[derive(Clone)]
 #[allow(
     dead_code,
-    reason = "the section streams read the project, the instance and the ring budget"
+    reason = "the section streams read the project, the instance and the foreign-project recorder"
 )]
 pub(crate) struct SectionContext {
     /// The configured project id.
@@ -86,6 +87,8 @@ pub(crate) struct SectionContext {
     pub(crate) instance: Instance,
     /// The process's ring budget, for a section's own feeds.
     pub(crate) rings: RingBudget,
+    /// Project ids requests named that are not the configured one.
+    pub(crate) foreign: ForeignProjects,
 }
 
 /// One stream's part of the console.

@@ -278,6 +278,54 @@ mod tests {
         );
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_new_foreign_project_and_a_background_flip_each_send_a_status() {
+        let foreign = crate::ForeignProjects::default();
+        let triggers = firenook_functions_bridge::TriggerRegistry::default();
+        let (exporter, _exports) = tokio::sync::mpsc::channel(1);
+        let suite = crate::SuiteControls::new(crate::SuiteSettings {
+            triggers,
+            background: None,
+            exporter,
+            data: crate::SuiteControls::detached().data(),
+            destinations: Vec::new(),
+        });
+        let services = ConsoleServices {
+            foreign: foreign.clone(),
+            suite: suite.clone(),
+            ..directory_services()
+        };
+        let topic = ShellTopic::new(StatusSource::for_tests(services), BadgeBoard::default());
+        let mut stream = topic.open(&json!({}), None).expect("opened");
+        next(&mut stream).await;
+        next(&mut stream).await;
+        foreign.record("my-prod", "auth");
+        let (name, status) = next(&mut stream).await;
+        assert_eq!(name, "status");
+        assert_eq!(status["foreignProjects"][0]["projectId"], "my-prod");
+        // Another request of the same project and service is not news.
+        foreign.record("my-prod", "auth");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), stream.next())
+                .await
+                .is_err()
+        );
+        // The console's switch: the status follows.
+        let response = tower::ServiceExt::oneshot(
+            suite.router(),
+            axum::http::Request::post("/suite/background")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(r#"{"enabled":false}"#))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let (name, status) = next(&mut stream).await;
+        assert_eq!(name, "status");
+        assert_eq!(status["backgroundTriggers"]["enabled"], false);
+    }
+
     #[test]
     fn unknown_parameters_are_refused() {
         let topic = ShellTopic::new(

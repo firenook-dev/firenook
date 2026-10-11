@@ -243,9 +243,10 @@ async fn the_console_reports_the_suites_reasons_and_late_sections_until_they_are
     // Compute's ready hook needs the running Functions runtime; without
     // one it hands nothing over and the sections keep starting.
     let triggers = TriggerRegistry::default();
+    let foreign = firenook_console_front::ForeignProjects::default();
     compute::ready(&HookContext {
         compute: Some(&parts),
-        ..HookContext::new(&config, &logging, &triggers)
+        ..HookContext::new(&config, &logging, &foreign, &triggers)
     });
     assert!(!parts.late.is_ready());
     // Cloud Tasks is handed over by its own hook.
@@ -326,7 +327,8 @@ async fn every_hook_runs_once_and_finishing_follows_the_fixed_order() {
     let config = test_config();
     let logging = LoggingRuntime::new();
     let triggers = TriggerRegistry::default();
-    let context = HookContext::new(&config, &logging, &triggers);
+    let foreign = firenook_console_front::ForeignProjects::default();
+    let context = HookContext::new(&config, &logging, &foreign, &triggers);
     let _ = recorded();
     prepared(&context);
     let mut options = FunctionsConsoleOptions::default();
@@ -363,4 +365,97 @@ async fn every_hook_runs_once_and_finishing_follows_the_fixed_order() {
             .map(|stream| format!("{stream}.inventory_refreshed")),
     );
     assert_eq!(recorded(), expected);
+}
+
+#[test]
+fn data_facts_say_where_the_data_lives() {
+    let memory = test_config();
+    let facts = suite::data_facts(&memory, false);
+    assert_eq!(facts.mode, firenook_console_front::DataMode::Memory);
+    assert_eq!(facts.state_dir, None);
+    assert_eq!(facts.durability, "write-behind");
+    let disk = SuiteConfig {
+        firestore_in_memory: false,
+        import: Some(std::path::PathBuf::from("/work/seed")),
+        export_on_exit: Some(std::path::PathBuf::from("/work/out")),
+        durability: firenook_core_store::DiskDurability::PerCommit,
+        ..test_config()
+    };
+    let facts = suite::data_facts(&disk, false);
+    assert_eq!(facts.mode, firenook_console_front::DataMode::Disk);
+    assert_eq!(
+        facts.state_dir.as_deref(),
+        Some(disk.state_dir.display().to_string().as_str())
+    );
+    assert_eq!(facts.imported_from.as_deref(), Some("/work/seed"));
+    assert_eq!(facts.export_on_exit.as_deref(), Some("/work/out"));
+    assert_eq!(facts.durability, "per-commit");
+    // A resumed start did not import the seed.
+    let resumed = suite::data_facts(&disk, true);
+    assert!(resumed.resumed);
+    assert_eq!(resumed.imported_from, None);
+}
+
+#[test]
+fn export_destinations_refuse_the_seed_while_the_engine_resumes_from_it() {
+    let root = std::env::temp_dir().join(format!("firenook-destinations-{}", std::process::id()));
+    // The seed and the state directory exist, as they do when the engine
+    // resumes.
+    for folder in ["seed", "state", "project"] {
+        std::fs::create_dir_all(root.join(folder)).expect("folder");
+    }
+    std::fs::write(
+        root.join("seed").join("firebase-export-metadata.json"),
+        r#"{"version":"15.22.0"}"#,
+    )
+    .expect("seed metadata");
+    let config = SuiteConfig {
+        project_dir: root.join("project"),
+        state_dir: root.join("state"),
+        import: Some(root.join("seed")),
+        export_on_exit: Some(root.join("out")),
+        ..test_config()
+    };
+    let listed = suite::destinations(&config);
+    let ids: Vec<&str> = listed
+        .iter()
+        .map(|destination| destination.id.as_str())
+        .collect();
+    assert_eq!(ids, ["export-on-exit", "seed", "project"]);
+    assert!(
+        listed
+            .iter()
+            .all(|destination| destination.refused.is_none())
+    );
+    assert_eq!(
+        listed[2].path,
+        root.join("project")
+            .join("firenook-export")
+            .display()
+            .to_string()
+    );
+    let resuming = SuiteConfig {
+        resume_state: true,
+        ..config
+    };
+    let listed = suite::destinations(&resuming);
+    assert_eq!(
+        listed[1].refused.as_deref(),
+        Some("The engine resumed its state, so the seed must not change.")
+    );
+    assert_eq!(listed[0].refused, None);
+    assert_eq!(listed[2].refused, None);
+    // A folder inside the state directory is refused with the engine's reason.
+    let nested = SuiteConfig {
+        export_on_exit: Some(resuming.state_dir.join("inside")),
+        ..resuming
+    };
+    let listed = suite::destinations(&nested);
+    assert!(
+        listed[0].refused.as_deref().is_some_and(|reason| reason
+            .starts_with("The engine will not export there:")
+            && !reason.ends_with("..")),
+        "{listed:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }

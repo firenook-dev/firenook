@@ -41,6 +41,7 @@ fn prepared(name: &str) -> Prepared {
         &store,
         &TriggerRegistry::default(),
         &LoggingRuntime::new(),
+        &ForeignProjects::default(),
     )
     .expect("firestore prepares")
     .expect("firestore is selected");

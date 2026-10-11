@@ -24,13 +24,15 @@ pub(crate) mod compute;
 pub(crate) mod messaging;
 pub(crate) mod observe;
 pub(crate) mod storage;
+pub(crate) mod suite;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
-    AbsentKind, AbsentReason, ComputeParts, SectionFix, SectionFixKind, UnsupportedService,
+    AbsentKind, AbsentReason, ComputeParts, ForeignProjects, SectionFix, SectionFixKind,
+    UnsupportedService,
 };
 use firenook_functions_bridge::{FunctionsInventory, TriggerRegistry};
 use firenook_functions_runtime::FunctionsRuntime;
@@ -52,6 +54,7 @@ use crate::launch::{LaunchContext, LaunchReason};
 pub(crate) struct HookContext<'a> {
     pub(crate) config: &'a SuiteConfig,
     pub(crate) logging: &'a LoggingRuntime,
+    pub(crate) foreign: &'a ForeignProjects,
     pub(crate) triggers: &'a TriggerRegistry,
     pub(crate) compute: Option<&'a ComputeParts>,
     pub(crate) auth: Option<&'a Arc<AuthRuntime>>,
@@ -67,11 +70,13 @@ impl<'a> HookContext<'a> {
     pub(crate) const fn new(
         config: &'a SuiteConfig,
         logging: &'a LoggingRuntime,
+        foreign: &'a ForeignProjects,
         triggers: &'a TriggerRegistry,
     ) -> Self {
         Self {
             config,
             logging,
+            foreign,
             triggers,
             compute: None,
             auth: None,

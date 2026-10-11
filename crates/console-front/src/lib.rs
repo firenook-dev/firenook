@@ -15,6 +15,7 @@ mod compute;
 mod databases;
 mod explain;
 mod firestore;
+mod foreign;
 mod guard;
 mod http;
 mod instance;
@@ -28,6 +29,7 @@ mod schema;
 mod section;
 mod sse;
 mod storage;
+mod suite;
 mod time;
 
 use std::collections::BTreeMap;
@@ -45,6 +47,7 @@ use futures_util::StreamExt as _;
 use futures_util::stream::BoxStream;
 use rust_embed::{Embed, EmbeddedFile};
 use serde::Serialize;
+use tokio_stream::wrappers::WatchStream;
 use ts_rs::TS;
 
 pub use api_error::{ApiError, ApiErrorBody, ApiErrorDetail, ErrorCode};
@@ -59,6 +62,7 @@ pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, ChangedCollection, DocumentChange,
     FirestoreConsole,
 };
+pub use foreign::{ForeignProject, ForeignProjects};
 pub use guard::{
     ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
     KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
@@ -92,6 +96,10 @@ pub use section::{
 };
 pub use sse::Shutdown;
 pub use storage::StorageConsole;
+pub use suite::{
+    BackgroundTriggers, DataFacts, DataMode, ExportDestination, ExportResult, MemoryReport,
+    RingSize, SuiteControls, SuiteSettings,
+};
 
 use instance::Instance;
 use live::badges::BadgeBoard;
@@ -131,6 +139,14 @@ pub struct ConsoleStatus {
     /// Services firebase.json configures that Firenook does not emulate
     /// (Realtime Database, Hosting, Data Connect, App Hosting).
     pub unsupported: Vec<UnsupportedService>,
+    /// Whether background triggers are delivered; a test harness can pause
+    /// them through the hub, which changes what every section does.
+    pub background_triggers: BackgroundTriggers,
+    /// Where the data lives and whether it survives a restart.
+    pub data: DataFacts,
+    /// Project ids requests named that are not this emulator's, newest
+    /// first, at most 8: the usual reason the console looks empty.
+    pub foreign_projects: Vec<ForeignProject>,
 }
 
 /// The engine serving the console.
@@ -226,6 +242,11 @@ pub struct ConsoleServices {
     pub absent: BTreeMap<String, AbsentReason>,
     /// Services `firebase.json` configures that Firenook does not emulate.
     pub unsupported: Vec<UnsupportedService>,
+    /// Background triggers, persistence facts and export.
+    pub suite: SuiteControls,
+    /// Project ids requests named that are not the configured one; the
+    /// suite's services record into it.
+    pub foreign: ForeignProjects,
     /// Hosts the console answers for; every other `Host` is refused, so a
     /// page that rebinds its own name to this machine reaches nothing.
     pub allowed_hosts: AllowedHosts,
@@ -250,6 +271,8 @@ impl ConsoleServices {
             observe: ObserveConsole::detached(),
             absent: BTreeMap::new(),
             unsupported: Vec::new(),
+            suite: SuiteControls::detached(),
+            foreign: ForeignProjects::default(),
             allowed_hosts: AllowedHosts::loopback(),
         }
     }
@@ -299,6 +322,8 @@ struct StatusInner {
     instance: Instance,
     features: ConsoleFeatures,
     unsupported: Vec<UnsupportedService>,
+    suite: SuiteControls,
+    foreign: ForeignProjects,
     sections: Vec<Arc<dyn Section>>,
     /// Every section id no module answers for, with why.
     absent: Vec<(String, AbsentReason)>,
@@ -350,6 +375,8 @@ impl StatusSource {
                 instance,
                 features: services.features,
                 unsupported: services.unsupported.clone(),
+                suite: services.suite.clone(),
+                foreign: services.foreign.clone(),
                 sections,
                 absent,
             }),
@@ -384,16 +411,26 @@ impl StatusSource {
             sections,
             features: inner.features,
             unsupported: inner.unsupported.clone(),
+            background_triggers: inner.suite.background_triggers(),
+            data: inner.suite.data(),
+            foreign_projects: inner.foreign.snapshot(),
         }
     }
 
     /// Ticks whenever the status may have changed.
     pub(crate) fn changes(&self) -> BoxStream<'static, ()> {
+        let suite = WatchStream::from_changes(self.inner.suite.changes())
+            .map(|_| ())
+            .boxed();
+        let foreign = WatchStream::from_changes(self.inner.foreign.changes())
+            .map(|_| ())
+            .boxed();
         futures_util::stream::select_all(
             self.inner
                 .sections
                 .iter()
-                .filter_map(|section| section.status_changes()),
+                .filter_map(|section| section.status_changes())
+                .chain([suite, foreign]),
         )
         .boxed()
     }
@@ -441,7 +478,9 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         badges: BadgeBoard::default(),
         instance: instance.clone(),
         rings: RingBudget::shared(),
+        foreign: services.foreign.clone(),
     };
+    spawn_foreign_badge(&context);
     let sections = assemble(&mut services);
     let status = StatusSource::new(&services, instance.clone(), sections.clone());
     let mut topics: Vec<Arc<dyn live::LiveTopic>> = vec![Arc::new(live::shell::ShellTopic::new(
@@ -464,6 +503,8 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
     let mut api = Router::new()
         .route("/status", get(status_route))
         .with_state(status)
+        .merge(suite::memory_router(context.rings.clone()))
+        .merge(services.suite.router())
         .merge(hub.router());
     for section in &sections {
         api = api.merge(section.router(&context));
@@ -484,6 +525,47 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         .route("/api/{*rest}", any(unknown_api))
         .fallback(asset)
         .layer(axum::middleware::from_fn_with_state(policy, guard::guard))
+}
+
+/// Keeps the `shell.foreign` badge at the number of foreign project ids
+/// seen, from now until the suite stops.
+fn spawn_foreign_badge(context: &SectionContext) {
+    let badge = context.badges.handle(
+        "shell.foreign",
+        BadgeKind::Gauge,
+        BadgeNoun::new(
+            "project your app uses is not this emulator's",
+            "projects your app uses are not this emulator's",
+        ),
+    );
+    let foreign = context.foreign.clone();
+    let publish = move |badge: &live::badges::BadgeHandle| {
+        let count = u64::try_from(foreign.count()).unwrap_or(u64::MAX);
+        let tone = if count == 0 {
+            BadgeTone::Neutral
+        } else {
+            BadgeTone::Danger
+        };
+        badge.set(count, tone);
+    };
+    let mut changes = context.foreign.changes();
+    publish(&badge);
+    let stopped = context.shutdown.clone().stopped();
+    tokio::spawn(async move {
+        tokio::pin!(stopped);
+        loop {
+            tokio::select! {
+                biased;
+                () = &mut stopped => break,
+                news = changes.changed() => {
+                    if news.is_err() {
+                        break;
+                    }
+                    publish(&badge);
+                }
+            }
+        }
+    });
 }
 
 /// A hash of the console application this engine serves (its `index.html`,
@@ -652,6 +734,9 @@ mod tests {
         RulesChanged::export_all(&config).expect("TypeScript bindings written");
         RulesFileStatus::export_all(&config).expect("TypeScript bindings written");
         ApiErrorBody::export_all(&config).expect("TypeScript bindings written");
+        ExportDestination::export_all(&config).expect("TypeScript bindings written");
+        ExportResult::export_all(&config).expect("TypeScript bindings written");
+        MemoryReport::export_all(&config).expect("TypeScript bindings written");
         live::export_bindings(&config);
         auth::export_bindings(&config);
         storage::export_bindings(&config);
@@ -715,6 +800,55 @@ mod tests {
             serde_json::json!({ "diagnostics": false })
         );
         assert_eq!(value["unsupported"], serde_json::json!([]));
+        // A console without a suite: triggers on, data in memory, no
+        // foreign project.
+        assert_eq!(
+            value["backgroundTriggers"],
+            serde_json::json!({ "enabled": true })
+        );
+        assert_eq!(value["data"]["mode"], "memory");
+        assert_eq!(value["data"]["stateDir"], serde_json::Value::Null);
+        assert_eq!(value["foreignProjects"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn the_status_carries_the_suites_switches_data_and_foreign_projects() {
+        let triggers = firenook_functions_bridge::TriggerRegistry::default();
+        let (exporter, _exports) = tokio::sync::mpsc::channel(1);
+        let foreign = ForeignProjects::default();
+        foreign.record("my-prod", "firestore");
+        let services = || ConsoleServices {
+            suite: SuiteControls::new(SuiteSettings {
+                triggers: triggers.clone(),
+                background: None,
+                exporter: exporter.clone(),
+                data: DataFacts {
+                    mode: DataMode::Disk,
+                    state_dir: Some("/work/state".to_owned()),
+                    resumed: true,
+                    imported_from: None,
+                    export_on_exit: Some("/work/export".to_owned()),
+                    durability: "per-commit".to_owned(),
+                },
+                destinations: Vec::new(),
+            }),
+            foreign: foreign.clone(),
+            ..directory_services()
+        };
+        triggers.set_background_enabled(false);
+        let status = status_of(services()).await;
+        assert_eq!(status["backgroundTriggers"]["enabled"], false);
+        assert_eq!(status["data"]["mode"], "disk");
+        assert_eq!(status["data"]["stateDir"], "/work/state");
+        assert_eq!(status["data"]["resumed"], true);
+        assert_eq!(status["data"]["exportOnExit"], "/work/export");
+        assert_eq!(status["data"]["durability"], "per-commit");
+        assert_eq!(status["foreignProjects"][0]["projectId"], "my-prod");
+        assert_eq!(
+            status["foreignProjects"][0]["services"],
+            serde_json::json!(["firestore"])
+        );
+        assert_eq!(status["foreignProjects"][0]["requests"], 1);
     }
 
     async fn status_of(services: ConsoleServices) -> serde_json::Value {
