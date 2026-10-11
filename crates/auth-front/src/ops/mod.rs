@@ -114,10 +114,18 @@ pub fn fake_salt() -> String {
     format!("fakeSalt{}", random_id(20))
 }
 
+/// The length the 1,000 limit applies to: `claims.length` in the official
+/// emulator, the JavaScript string length, which counts UTF-16 code units —
+/// `é` is one, `🔥` (a surrogate pair) two — not UTF-8 bytes.
+#[must_use]
+pub fn custom_claims_length(claims: &str) -> usize {
+    claims.encode_utf16().count()
+}
+
 /// `validateSerializedCustomClaims`.
 pub fn validate_serialized_custom_claims(claims: &str) -> Result<(), ApiError> {
     ensure!(
-        claims.len() <= CUSTOM_ATTRIBUTES_MAX_LENGTH,
+        custom_claims_length(claims) <= CUSTOM_ATTRIBUTES_MAX_LENGTH,
         "CLAIMS_TOO_LARGE"
     );
     let parsed: JsonValue =

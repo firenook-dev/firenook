@@ -1099,3 +1099,101 @@ async fn batch_get_pages_through_every_account_once() {
     assert_eq!(pages, 3);
     assert_eq!(seen, created);
 }
+
+// ------------------------------------------------------------------
+// Custom claims are measured as the official emulator measures them:
+// `claims.length`, UTF-16 code units, not UTF-8 bytes. The captured case is
+// `conformance/fixtures/auth-claims-length-v1`.
+
+/// `{"k":"é…é<last>"}` of exactly `length` UTF-16 code units.
+fn claims_of_length(length: usize, last: &str) -> String {
+    let fill = length - r#"{"k":""}"#.len() - last.encode_utf16().count();
+    let claims = json!({ "k": format!("{}{last}", "é".repeat(fill)) }).to_string();
+    assert_eq!(claims.encode_utf16().count(), length);
+    claims
+}
+
+#[test]
+fn custom_claims_length_counts_utf16_code_units() {
+    assert_eq!(ops::custom_claims_length("é"), 1);
+    assert_eq!(ops::custom_claims_length("🔥"), 2);
+    assert_eq!(ops::custom_claims_length(r#"{"a":1}"#), 7);
+    let accented = claims_of_length(1000, "");
+    assert!(
+        accented.len() > 1900,
+        "about 1,990 UTF-8 bytes: {}",
+        accented.len()
+    );
+    assert!(ops::validate_serialized_custom_claims(&accented).is_ok());
+    let refused = ops::validate_serialized_custom_claims(&claims_of_length(1001, ""))
+        .expect_err("1,001 code units");
+    assert_eq!(refused.message, "CLAIMS_TOO_LARGE");
+    // 🔥 is two code units: 999 characters that measure 1,001.
+    let emoji = claims_of_length(1001, "🔥");
+    assert_eq!(emoji.chars().count(), 1000);
+    assert!(ops::validate_serialized_custom_claims(&emoji).is_err());
+    assert!(ops::validate_serialized_custom_claims(&claims_of_length(1000, "🔥")).is_ok());
+}
+
+#[tokio::test]
+async fn custom_claims_of_a_thousand_accented_characters_are_stored_and_minted() {
+    let runtime = test_runtime();
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts",
+        &json!({ "localId": "claims-length", "email": "claims@example.test", "password": "password1" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let update = |claims: String| json!({ "localId": "claims-length", "customAttributes": claims });
+    let uri = "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:update";
+    let accented = claims_of_length(1000, "");
+    let (status, body) = call(&runtime, Method::POST, uri, &update(accented.clone())).await;
+    assert_eq!(status, 200, "1,000 code units are accepted: {body}");
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        uri,
+        &update(claims_of_length(1001, "")),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"]["message"], "CLAIMS_TOO_LARGE");
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        uri,
+        &update(claims_of_length(1001, "🔥")),
+    )
+    .await;
+    assert_eq!(status, 400, "🔥 counts two: {body}");
+    // The stored claims are the accepted ones, and a sign-in mints them.
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake",
+        &json!({ "email": "claims@example.test", "password": "password1", "returnSecureToken": true }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (_, payload) = decode_jwt(body["idToken"].as_str().expect("id token")).expect("JWT");
+    let stored: JsonValue = serde_json::from_str(&accented).expect("claims");
+    assert_eq!(payload["k"], stored["k"]);
+    // batchCreate validates each user the same way.
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchCreate",
+        &json!({ "users": [
+            { "localId": "imported-1000", "customAttributes": claims_of_length(1000, "🔥") },
+            { "localId": "imported-1001", "customAttributes": claims_of_length(1001, "🔥") },
+        ] }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["error"],
+        json!([{ "index": 1, "message": "Custom claims provided are too large." }])
+    );
+}

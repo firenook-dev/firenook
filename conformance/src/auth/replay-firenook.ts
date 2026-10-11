@@ -1,21 +1,23 @@
-// Phase I4: replay the frozen Auth corpus against Firenook's standalone
-// `firenook auth` service (one fresh process per program) with the same
-// functions stub and the same normalization as the capture, and report every
-// step that is not parity or a named divergence.
+// Phase I4: replay the frozen Auth corpora (`corpora.ts`) against Firenook's
+// standalone `firenook auth` service (one fresh process per program) with the
+// same functions stub and the same normalization as the capture, and report
+// every step that is not parity or a named divergence. Every corpus is
+// replayed unless `--corpus=<id>` names one.
 //
 //   node --import tsx src/auth/replay-firenook.ts --binary ../target/release/firenook \
-//     [--programs=a,b] [--report-only] [--output report.json]
+//     [--corpus=auth-v1] [--programs=a,b] [--report-only] [--output report.json]
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { API_KEY, PROGRAMS, PROJECT_ID, type Json, type Program } from "./emulator-plan.ts";
+import { CORPORA, type Corpus, corpusById } from "./corpora.ts";
+import { API_KEY, PROJECT_ID, type Json, type Program } from "./emulator-plan.ts";
 import { Registry, canonicalize } from "./normalize.ts";
 import { FunctionsStub, HOST, type LogLine, type RecordedStep, collectConstants, executeStep, reserveAvailablePort, waitForReady } from "./runner.ts";
 
-const fixtureRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/auth-v1");
+const fixturesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures");
 
 interface Fixture {
   readonly programs: readonly {
@@ -80,8 +82,16 @@ const DIVERGENCES: readonly Divergence[] = [
   },
 ];
 
-function parseArguments(argv: readonly string[]): { binary: string; programs: readonly string[]; reportOnly: boolean; output?: string | undefined; debug: boolean } {
+function parseArguments(argv: readonly string[]): {
+  binary: string;
+  corpora: readonly Corpus[];
+  programs: readonly string[];
+  reportOnly: boolean;
+  output?: string | undefined;
+  debug: boolean;
+} {
   let binary = "";
+  let corpora: readonly Corpus[] = CORPORA;
   let programs: readonly string[] = [];
   let reportOnly = false;
   let output: string | undefined;
@@ -89,6 +99,7 @@ function parseArguments(argv: readonly string[]): { binary: string; programs: re
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index] ?? "";
     if (argument === "--binary") binary = argv[++index] ?? "";
+    else if (argument.startsWith("--corpus=")) corpora = [corpusById(argument.slice("--corpus=".length))];
     else if (argument.startsWith("--programs=")) programs = argument.slice("--programs=".length).split(",").filter(Boolean);
     else if (argument === "--report-only") reportOnly = true;
     else if (argument === "--output") output = argv[++index];
@@ -96,14 +107,11 @@ function parseArguments(argv: readonly string[]): { binary: string; programs: re
     else throw new Error(`unknown argument ${argument}`);
   }
   if (!binary) throw new Error("--binary is required");
-  return { binary, programs, reportOnly, output, debug };
+  return { binary, corpora, programs, reportOnly, output, debug };
 }
 
 const args = parseArguments(process.argv.slice(2));
 const binary = resolve(args.binary);
-const fixture = JSON.parse(await readFile(join(fixtureRoot, "emulator-programs.json"), "utf8")) as Fixture;
-const constants = new Set<string>([PROJECT_ID, API_KEY]);
-collectConstants(PROGRAMS, constants);
 const runRoot = await mkdtemp(join(tmpdir(), "firenook-auth-replay-"));
 
 const stub = new FunctionsStub();
@@ -113,24 +121,34 @@ const divergencesObserved: { program: string; step: string; path: string; reason
 let compared = 0;
 let steps = 0;
 let programsRun = 0;
+const corporaRun: { id: string; programs: number; steps: number; mismatched: number }[] = [];
 try {
-  for (const program of PROGRAMS) {
-    if (args.programs.length > 0 && !args.programs.includes(program.id)) continue;
-    const recorded = fixture.programs.find((candidate) => candidate.id === program.id);
-    if (!recorded) throw new Error(`program ${program.id} is not in the fixture; re-record first`);
-    programsRun += 1;
-    const actual = await replayProgram(program);
-    for (const [index, expectedStep] of recorded.steps.entries()) {
-      const actualStep = actual[index];
-      steps += 1;
-      if (!actualStep) {
-        mismatches.push({ program: program.id, step: expectedStep.id, path: "step", expected: "recorded", actual: "missing" });
-        continue;
+  for (const corpus of args.corpora) {
+    const fixture = JSON.parse(await readFile(join(fixturesRoot, corpus.id, "emulator-programs.json"), "utf8")) as Fixture;
+    const constants = new Set<string>([PROJECT_ID, API_KEY]);
+    collectConstants(corpus.programs, constants);
+    const before = { programs: programsRun, steps, mismatched: mismatches.length };
+    for (const program of corpus.programs) {
+      if (args.programs.length > 0 && !args.programs.includes(program.id)) continue;
+      const recorded = fixture.programs.find((candidate) => candidate.id === program.id);
+      if (!recorded) throw new Error(`program ${program.id} is not in the ${corpus.id} fixture; re-record first`);
+      programsRun += 1;
+      const actual = await replayProgram(program, constants);
+      for (const [index, expectedStep] of recorded.steps.entries()) {
+        const actualStep = actual[index];
+        steps += 1;
+        if (!actualStep) {
+          mismatches.push({ program: program.id, step: expectedStep.id, path: "step", expected: "recorded", actual: "missing" });
+          continue;
+        }
+        compareStep(program.id, expectedStep, actualStep);
       }
-      compareStep(program.id, expectedStep, actualStep);
+      const bad = mismatches.filter((mismatch) => mismatch.program === program.id).length;
+      console.log(`${bad === 0 ? "ok  " : "FAIL"} ${program.id}: ${recorded.steps.length} steps${bad ? `, ${String(bad)} mismatches` : ""}`);
     }
-    const bad = mismatches.filter((mismatch) => mismatch.program === program.id).length;
-    console.log(`${bad === 0 ? "ok  " : "FAIL"} ${program.id}: ${recorded.steps.length} steps${bad ? `, ${String(bad)} mismatches` : ""}`);
+    if (programsRun > before.programs) {
+      corporaRun.push({ id: corpus.id, programs: programsRun - before.programs, steps: steps - before.steps, mismatched: mismatches.length - before.mismatched });
+    }
   }
 } finally {
   await stub.stop();
@@ -139,6 +157,7 @@ try {
 
 const report = {
   binary,
+  corpora: corporaRun,
   programs: programsRun,
   steps,
   compared,
@@ -150,6 +169,9 @@ if (args.output) {
   await mkdir(dirname(args.output), { recursive: true });
   await writeFile(args.output, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 }
+for (const corpus of corporaRun) {
+  console.log(`\n${corpus.id}: ${String(corpus.programs)} programs, ${String(corpus.steps)} steps, ${String(corpus.mismatched)} mismatches`);
+}
 console.log(`\n${String(programsRun)} programs, ${String(steps)} steps, ${String(compared)} values compared, ${String(mismatches.length)} mismatches, ${String(divergencesObserved.length)} named divergences observed`);
 for (const mismatch of mismatches.slice(0, args.reportOnly ? 500 : 80)) {
   console.log(`  ${mismatch.program}/${mismatch.step} ${mismatch.path}: expected ${short(mismatch.expected)} got ${short(mismatch.actual)}`);
@@ -158,7 +180,7 @@ if (mismatches.length > 0 && !args.reportOnly) process.exit(1);
 
 // ---------------------------------------------------------------- replay
 
-async function replayProgram(program: Program): Promise<RecordedStep[]> {
+async function replayProgram(program: Program, constants: ReadonlySet<string>): Promise<RecordedStep[]> {
   const port = await reserveAvailablePort();
   const origin = `http://${HOST}:${String(port)}`;
   const stateFile = join(runRoot, `${program.id}.json`);
