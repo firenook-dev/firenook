@@ -12,6 +12,7 @@ mod databases;
 mod explain;
 mod firestore;
 mod rules;
+mod rules_eval;
 mod schema;
 
 use axum::Json;
@@ -35,6 +36,12 @@ pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
 };
 pub use rules::{RulesDiagnostic, RulesDocument, RulesEditor, RulesError, RulesInstalled};
+pub use rules_eval::{
+    AllowTrace, DecisionDetail, EvaluateAuth, EvaluateFieldReference, EvaluateOrder, EvaluateQuery,
+    EvaluateRequest, EvaluateResult, ExplainStep, FirestoreRestValue, ImpactFlip, RecordedResource,
+    RulesEvaluateBody, RulesEvaluation, RulesEvaluator, RulesImpact, RulesImpactBody, RulesMethod,
+    RulesOutcome,
+};
 pub use schema::{
     ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
     SubcollectionsSnapshot,

@@ -19,7 +19,7 @@ use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
     CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, QueryExplainer,
-    RulesEditor, SchemaIndex, console_router,
+    RulesEditor, RulesEvaluator, SchemaIndex, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -462,6 +462,7 @@ struct ConsoleFirestoreParts {
     databases: DatabaseCatalog,
     explain: QueryExplainer,
     rules: RulesEditor,
+    rules_evaluator: RulesEvaluator,
 }
 
 /// What `prepare_firestore` builds when Firestore is selected.
@@ -596,6 +597,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     databases: parts.databases,
                     explain: parts.explain,
                     rules: parts.rules,
+                    rules_evaluator: parts.rules_evaluator,
                     requests: requests.clone(),
                     shutdown: shutdown.subscribe(),
                 }),
@@ -1059,6 +1061,9 @@ fn prepare_firestore(
                 })
                 .collect(),
         ),
+        // Dry runs and explanations read the same runtime and store, and
+        // never record or commit anything.
+        rules_evaluator: RulesEvaluator::new(&rules_for_console, store, &config.project_id),
     };
     Ok(Some(FirestoreParts {
         routes: tonic::service::Routes::from(firestore_http).add_service(service.into_server()),

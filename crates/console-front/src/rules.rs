@@ -165,7 +165,7 @@ impl RulesEditor {
     }
 }
 
-fn diagnostics(error: &firenook_rules_runtime::LoadError) -> Vec<RulesDiagnostic> {
+pub(crate) fn diagnostics(error: &firenook_rules_runtime::LoadError) -> Vec<RulesDiagnostic> {
     error
         .diagnostics
         .iter()
