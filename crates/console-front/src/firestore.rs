@@ -268,11 +268,11 @@ fn json_event(name: &str, data: &impl Serialize) -> Event {
 pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
     let mut router = console
         .changes
-        .router(console.shutdown)
+        .router(console.shutdown.clone())
         .merge(console.schema.router())
         .merge(console.databases.router())
         .merge(console.explain.router())
-        .merge(console.rules.router());
+        .merge(console.rules.with_shutdown(console.shutdown).router());
     if let Some(requests) = console.requests {
         router = router.merge(requests);
     }
