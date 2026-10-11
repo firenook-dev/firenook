@@ -2,7 +2,7 @@
 // first, scoped to the path on screen. The rule line that decided each one
 // is right there, which is the answer to "why was this denied".
 
-import { Badge, Button, Switch, Text } from '@cloudflare/kumo'
+import { Badge, Button, Switch, Text, Tooltip } from '@cloudflare/kumo'
 import { CaretDownIcon, CaretUpIcon, TrashIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { type RequestEvent, useRequests, useRequestsFeed } from '../requests'
@@ -36,7 +36,7 @@ export function RequestsDrawer({
     >
       <button
         type="button"
-        className="flex h-9 shrink-0 items-center gap-3 px-3 text-left hover:bg-firenook-hover"
+        className="flex h-9 shrink-0 items-center gap-3 px-3 text-left hover:ink"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
@@ -49,11 +49,16 @@ export function RequestsDrawer({
           </Badge>
         )}
         {open && status === 'unavailable' && (
-          <span title={detail ?? ''}>
-            <Badge variant="error" appearance="dot">
-              Unavailable
-            </Badge>
-          </span>
+          <Tooltip
+            content={detail ?? 'The request feed is unavailable'}
+            render={
+              <span>
+                <Badge variant="error" appearance="dot">
+                  Unavailable
+                </Badge>
+              </span>
+            }
+          />
         )}
         {events.length > 0 && (
           <Text as="span" variant="secondary" size="sm">
@@ -151,7 +156,7 @@ function RequestRow({
   const deciding = event.lines.filter((line) => line.outcome === (event.outcome === 'allow'))
   return (
     <>
-      <tr className="cursor-pointer hover:bg-firenook-hover" onClick={onToggle}>
+      <tr className="cursor-pointer hover:ink" onClick={onToggle}>
         <td className="w-20 border-b border-kumo-hairline px-3 py-1.5 whitespace-nowrap text-kumo-subtle tabular-nums">
           <span title={event.time}>{relativeTime(event.time)}</span>
         </td>

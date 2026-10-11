@@ -10,7 +10,7 @@
 // a flat 16.7. Most such fields fold into one column now (`foldRare`), but
 // the way back to having all of them as columns has to stay fast too.
 
-import { Button, Empty, Table, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { Button, Empty, Table, Text, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import {
   ClockCounterClockwiseIcon,
   DatabaseIcon,
@@ -835,7 +835,7 @@ function RootLanding() {
                 <button
                   type="button"
                   onClick={() => workbench.setPath(recent.path)}
-                  className="flex h-7 items-center gap-1.5 rounded-md bg-kumo-base px-2 font-mono text-[12px] ring ring-kumo-hairline hover:bg-kumo-tint"
+                  className="flex h-7 items-center gap-1.5 rounded-md bg-kumo-base px-2 font-mono text-[12px] ring ring-kumo-hairline hover:ink"
                 >
                   {recent.kind === 'document' ? (
                     <FileIcon size={12} className="text-kumo-subtle" />
@@ -873,7 +873,7 @@ function RootLanding() {
               <button
                 type="button"
                 onClick={() => workbench.setPath(id)}
-                className={`flex w-full items-center gap-2 rounded-lg bg-kumo-base px-3 text-left ring ring-kumo-hairline hover:bg-kumo-tint ${
+                className={`flex w-full items-center gap-2 rounded-lg bg-kumo-base px-3 text-left ring ring-kumo-hairline hover:ink ${
                   anyNested ? 'h-14' : 'h-11'
                 }`}
                 data-testid="root-collection"
@@ -891,20 +891,23 @@ function RootLanding() {
                     )}
                   </span>
                   {anyNested && (
-                    <span
-                      className="truncate font-mono text-[11px] text-kumo-subtle"
-                      title={shape ? describeChildren(shape, 20) : undefined}
-                    >
-                      {/* The line keeps every card the same height; only the
+                    <Tooltip
+                      content={shape ? describeChildren(shape, 20) : ''}
+                      disabled={!shape}
+                      render={
+                        <span className="truncate font-mono text-[11px] text-kumo-subtle">
+                          {/* The line keeps every card the same height; only the
                           ones that actually nest say anything, so the eye
                           catches those instead of the word "no" 17 times. */}
-                      {shape && shape.children.length > 0 && (
-                        <span className="flex items-center gap-1">
-                          <FolderIcon size={11} className="shrink-0" />
-                          <span className="truncate">{describeChildren(shape)}</span>
+                          {shape && shape.children.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              <FolderIcon size={11} className="shrink-0" />
+                              <span className="truncate">{describeChildren(shape)}</span>
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </span>
+                      }
+                    />
                   )}
                 </span>
               </button>
@@ -916,7 +919,7 @@ function RootLanding() {
             <button
               type="button"
               onClick={() => openCreate({ kind: 'collection', parent: '' })}
-              className={`flex w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-3 text-left text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-default ${
+              className={`flex w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-3 text-left text-kumo-subtle hover:ink hover:text-kumo-default ${
                 anyNested ? 'h-14' : 'h-11'
               }`}
               data-testid="root-new-collection"

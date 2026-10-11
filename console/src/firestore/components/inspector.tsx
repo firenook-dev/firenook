@@ -65,42 +65,47 @@ function WidthHandle() {
     remember()
   }
   return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Inspector width"
-      aria-valuenow={Math.round(width)}
-      aria-valuemin={INSPECTOR_MIN}
-      tabIndex={0}
-      data-testid="inspector-resize"
-      title="Drag to resize · double-click to reset"
-      className="group/grip absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize outline-none"
-      onPointerDown={(event) => {
-        event.preventDefault()
-        event.currentTarget.setPointerCapture(event.pointerId)
-      }}
-      onPointerMove={(event) => {
-        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-        const panel = event.currentTarget.parentElement
-        const available = panel?.parentElement?.getBoundingClientRect().width
-        if (!panel || available === undefined) return
-        setWidth(clampWidth(panel.getBoundingClientRect().right - event.clientX, available))
-      }}
-      onPointerUp={(event) => {
-        event.currentTarget.releasePointerCapture(event.pointerId)
-        remember()
-      }}
-      onKeyDown={(event) => {
-        const step = event.shiftKey ? 64 : 16
-        if (event.key === 'ArrowLeft') nudge(step)
-        else if (event.key === 'ArrowRight') nudge(-step)
-        else return
-        event.preventDefault()
-      }}
-      onDoubleClick={reset}
-    >
-      <span className="pointer-events-none absolute inset-y-0 left-1 w-px group-hover/grip:bg-kumo-brand group-focus-visible/grip:bg-kumo-brand" />
-    </div>
+    <Tooltip
+      content="Drag to resize · double-click to reset"
+      side="left"
+      render={
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Inspector width"
+          aria-valuenow={Math.round(width)}
+          aria-valuemin={INSPECTOR_MIN}
+          tabIndex={0}
+          data-testid="inspector-resize"
+          className="group/grip absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize outline-none"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            const panel = event.currentTarget.parentElement
+            const available = panel?.parentElement?.getBoundingClientRect().width
+            if (!panel || available === undefined) return
+            setWidth(clampWidth(panel.getBoundingClientRect().right - event.clientX, available))
+          }}
+          onPointerUp={(event) => {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+            remember()
+          }}
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 64 : 16
+            if (event.key === 'ArrowLeft') nudge(step)
+            else if (event.key === 'ArrowRight') nudge(-step)
+            else return
+            event.preventDefault()
+          }}
+          onDoubleClick={reset}
+        >
+          <span className="pointer-events-none absolute inset-y-0 left-1 w-px group-hover/grip:bg-kumo-brand group-focus-visible/grip:bg-kumo-brand" />
+        </div>
+      }
+    />
   )
 }
 
@@ -150,15 +155,19 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-3 pl-5">
         {/* Kumo's monospace variants are fixed at 13 px; the face is asked
             for here and the size comes from the scale. */}
-        <InlineCopyText
-          value={path}
-          variant="body"
-          size="xs"
-          className="min-w-0 flex-1 truncate font-mono"
-          title={path}
-        >
-          {path}
-        </InlineCopyText>
+        <Tooltip
+          content={path}
+          render={
+            <InlineCopyText
+              value={path}
+              variant="body"
+              size="xs"
+              className="min-w-0 flex-1 truncate font-mono"
+            >
+              {path}
+            </InlineCopyText>
+          }
+        />
         {/* Size and age beside the name, the way a file list writes them.
             Both quiet: neither is a thing to act on until the size is
             near the ceiling, and then the size alone takes colour. */}
@@ -343,7 +352,7 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
           <li key={child.id}>
             <button
               type="button"
-              className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-firenook-hover"
+              className="flex h-7 w-full items-center gap-2 rounded-md px-1.5 text-left hover:ink"
               onClick={() => workbench.setPath(`${parent}/${child.id}`)}
             >
               <FolderIcon size={14} className="text-kumo-subtle" />

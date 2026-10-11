@@ -99,7 +99,7 @@ export function Completion({
     <li>
       <button
         type="button"
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-firenook-hover"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:ink"
         onMouseDown={(event) => event.preventDefault()}
         onClick={onPick}
       >

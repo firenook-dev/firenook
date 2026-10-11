@@ -6,6 +6,7 @@
 // the first route for 10 KB — a third of the budget's headroom to hide
 // three icons behind a click.
 
+import { Tooltip } from '@cloudflare/kumo'
 import { MonitorIcon, MoonIcon, SunIcon } from '@phosphor-icons/react'
 import { type ThemeChoice, describeTheme, useTheme } from '@/lib/color-mode'
 
@@ -29,28 +30,30 @@ export function ThemePicker() {
     >
       {THEME_CHOICES.map((option) => {
         const active = option.choice === choice
+        const name =
+          option.choice === 'system' ? describeTheme('system', mode) : `${option.label} theme`
         return (
-          <button
+          <Tooltip
             key={option.choice}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            aria-label={
-              option.choice === 'system' ? describeTheme('system', mode) : `${option.label} theme`
+            content={name}
+            render={
+              <button
+                type="button"
+                role="radio"
+                aria-checked={active}
+                aria-label={name}
+                onClick={() => setChoice(option.choice)}
+                className={`flex size-6 items-center justify-center rounded ${
+                  active
+                    ? 'bg-kumo-base text-kumo-default shadow-sm'
+                    : 'text-kumo-inactive hover:text-kumo-default hover:ink'
+                }`}
+                data-testid={`theme-${option.choice}`}
+              >
+                <option.icon size={14} />
+              </button>
             }
-            title={
-              option.choice === 'system' ? describeTheme('system', mode) : `${option.label} theme`
-            }
-            onClick={() => setChoice(option.choice)}
-            className={`flex size-6 items-center justify-center rounded ${
-              active
-                ? 'bg-kumo-base text-kumo-default shadow-sm'
-                : 'text-kumo-inactive hover:text-kumo-default'
-            }`}
-            data-testid={`theme-${option.choice}`}
-          >
-            <option.icon size={14} />
-          </button>
+          />
         )
       })}
     </div>

@@ -1,3 +1,4 @@
+import { Tooltip } from '@cloudflare/kumo'
 import { CaretDownIcon } from '@phosphor-icons/react'
 
 export type FirestoreValueType =
@@ -49,26 +50,31 @@ export function TypeBadge({
   menu?: boolean | undefined
 }) {
   return (
-    <span
-      // Both places this sits are hover targets that light up, which
-      // would swallow the chip; it keeps its ground by going a step darker
-      // with them (it used to go white, a light chip on a grey ground). In
-      // a menu trigger it has no ground of its own: the trigger's hover is
-      // the chip's. The amber keeps its own, being the point.
-      className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
-        mixed
-          ? 'bg-kumo-warning-tint text-kumo-default'
-          : menu
-            ? 'text-kumo-subtle'
-            : 'bg-kumo-tint text-kumo-subtle group-hover:bg-firenook-hover'
-      }`}
-      title={mixed ? `More than one type here: ${mixed}` : undefined}
-      data-testid="type-badge"
-      data-mixed={mixed ? '' : undefined}
-    >
-      {mixed && <span className="size-1.5 shrink-0 rounded-full bg-kumo-warning" />}
-      {type}
-      {menu && <CaretDownIcon size={9} className="-mr-0.5 shrink-0 opacity-70" />}
-    </span>
+    <Tooltip
+      content={mixed ? `More than one type here: ${mixed}` : ''}
+      disabled={!mixed}
+      render={
+        <span
+          // Both places this sits are hover targets that light up, which
+          // would swallow the chip; it keeps its ground by going a step darker
+          // with them (it used to go white, a light chip on a grey ground). In
+          // a menu trigger it has no ground of its own: the trigger's hover is
+          // the chip's. The amber keeps its own, being the point.
+          className={`flex h-4.5 shrink-0 items-center gap-1 rounded px-1 font-mono text-[11px] ${
+            mixed
+              ? 'bg-kumo-warning-tint text-kumo-default'
+              : menu
+                ? 'text-kumo-subtle'
+                : 'bg-kumo-tint text-kumo-subtle group-hover:ink'
+          }`}
+          data-testid="type-badge"
+          data-mixed={mixed ? '' : undefined}
+        >
+          {mixed && <span className="size-1.5 shrink-0 rounded-full bg-kumo-warning" />}
+          {type}
+          {menu && <CaretDownIcon size={9} className="-mr-0.5 shrink-0 opacity-70" />}
+        </span>
+      }
+    />
   )
 }

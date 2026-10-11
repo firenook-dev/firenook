@@ -8,7 +8,7 @@
 // `em` to measure against: one did, and the same class rendered 14.4 px in
 // the toolbar, 12.6 px here and 10.8 px where 12 was meant.
 
-import { InlineCopyText } from '@cloudflare/kumo'
+import { InlineCopyText, Tooltip } from '@cloudflare/kumo'
 import { ArrowSquareInIcon } from '@phosphor-icons/react'
 import {
   type FsValue,
@@ -26,20 +26,24 @@ export function IdCell({ id, missing }: { id: string; missing?: boolean | undefi
   const parent = slash === -1 ? '' : id.slice(0, slash + 1)
   const own = slash === -1 ? id : id.slice(slash + 1)
   return (
-    <span
-      className={`flex min-w-0 items-center ${missing ? 'italic text-kumo-subtle' : ''}`}
-      title={id}
-    >
-      {parent && (
-        <span className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle">{parent}</span>
-      )}
-      {/* Kumo locks its monospace variants to 13 px, which is a size above
+    <Tooltip
+      content={id}
+      render={
+        <span className={`flex min-w-0 items-center ${missing ? 'italic text-kumo-subtle' : ''}`}>
+          {parent && (
+            <span className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle">
+              {parent}
+            </span>
+          )}
+          {/* Kumo locks its monospace variants to 13 px, which is a size above
           the rest of the row, so the face is asked for here and the size is
           taken from the body scale. */}
-      <InlineCopyText value={id} variant="body" size="xs" className="shrink-0 font-mono" title={id}>
-        {own}
-      </InlineCopyText>
-    </span>
+          <InlineCopyText value={id} variant="body" size="xs" className="shrink-0 font-mono">
+            {own}
+          </InlineCopyText>
+        </span>
+      }
+    />
   )
 }
 
@@ -116,18 +120,22 @@ export function ValueCell({
       )
     case 'reference':
       return (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenReference(value.path)
-          }}
-          className="group flex max-w-full items-center gap-1 font-mono text-[12px] text-kumo-link hover:underline"
-          title={value.path}
-        >
-          <span className="truncate">{value.path}</span>
-          <ArrowSquareInIcon size={12} className="shrink-0 opacity-0 group-hover:opacity-100" />
-        </button>
+        <Tooltip
+          content={value.path}
+          render={
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenReference(value.path)
+              }}
+              className="group flex max-w-full items-center gap-1 font-mono text-[12px] text-kumo-link hover:underline"
+            >
+              <span className="truncate">{value.path}</span>
+              <ArrowSquareInIcon size={12} className="shrink-0 opacity-0 group-hover:opacity-100" />
+            </button>
+          }
+        />
       )
     case 'geopoint':
       return (

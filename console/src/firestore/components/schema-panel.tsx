@@ -8,7 +8,7 @@
 // without walking through a user first. The foot says what the open shape
 // holds.
 
-import { InputGroup, Select, Text } from '@cloudflare/kumo'
+import { InputGroup, Select, Text, Tooltip } from '@cloudflare/kumo'
 import {
   CaretRightIcon,
   DatabaseIcon,
@@ -203,9 +203,7 @@ function TreeNode({
     >
       <div
         className={`group flex h-7 items-center rounded-md pr-1.5 ${
-          isCurrent
-            ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
-            : 'hover:bg-firenook-hover'
+          isCurrent ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]' : 'hover:ink'
         }`}
         data-testid="schema-node"
         data-pattern={node.pattern}
@@ -219,7 +217,7 @@ function TreeNode({
         {children.length > 0 ? (
           <button
             type="button"
-            className="flex size-5 shrink-0 items-center justify-center rounded text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-default"
+            className="flex size-5 shrink-0 items-center justify-center rounded-md text-kumo-subtle hover:ink hover:text-kumo-default"
             onClick={() => onToggle(node.pattern, expanded)}
             aria-label={expanded ? `Collapse ${node.id}` : `Expand ${node.id}`}
             data-testid="schema-node-toggle"
@@ -233,43 +231,48 @@ function TreeNode({
         ) : (
           <span className="size-5 shrink-0" />
         )}
-        <button
-          type="button"
-          className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-0.5 text-left"
-          onClick={() => onOpen(node)}
-          data-testid="schema-node-open"
-          title={`${node.pattern} · ${formatNumber(node.documents)} ${
+        <Tooltip
+          content={`${node.pattern} · ${formatNumber(node.documents)} ${
             node.documents === 1 ? 'document' : 'documents'
-          }${parents}`}
-        >
-          {depth === 0 ? (
-            <DatabaseIcon
-              size={13}
-              className={onPath ? 'shrink-0 text-kumo-default' : 'shrink-0 text-kumo-subtle'}
-            />
-          ) : (
-            <FolderIcon
-              size={13}
-              className={onPath ? 'shrink-0 text-kumo-default' : 'shrink-0 text-kumo-subtle'}
-            />
-          )}
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-default">
-            {node.id}
-          </span>
-          {!expanded && node.children.length > 0 && (
-            <span
-              className="shrink-0 font-mono text-[10px] text-kumo-inactive tabular-nums"
-              title={`${node.children.length} ${
-                node.children.length === 1 ? 'subcollection' : 'subcollections'
-              } below`}
+          }${parents}${
+            !expanded && node.children.length > 0
+              ? ` · ${node.children.length} ${
+                  node.children.length === 1 ? 'subcollection' : 'subcollections'
+                } below`
+              : ''
+          }`}
+          render={
+            <button
+              type="button"
+              className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-0.5 text-left"
+              onClick={() => onOpen(node)}
+              data-testid="schema-node-open"
             >
-              +{node.children.length}
-            </span>
-          )}
-          <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
-            {formatNumber(node.documents)}
-          </span>
-        </button>
+              {depth === 0 ? (
+                <DatabaseIcon
+                  size={13}
+                  className={onPath ? 'shrink-0 text-kumo-default' : 'shrink-0 text-kumo-subtle'}
+                />
+              ) : (
+                <FolderIcon
+                  size={13}
+                  className={onPath ? 'shrink-0 text-kumo-default' : 'shrink-0 text-kumo-subtle'}
+                />
+              )}
+              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-kumo-default">
+                {node.id}
+              </span>
+              {!expanded && node.children.length > 0 && (
+                <span className="shrink-0 font-mono text-[10px] text-kumo-inactive tabular-nums">
+                  +{node.children.length}
+                </span>
+              )}
+              <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
+                {formatNumber(node.documents)}
+              </span>
+            </button>
+          }
+        />
       </div>
       {expanded && (
         <ul role="group" className="grid grid-cols-[minmax(0,1fr)] gap-px">

@@ -10,6 +10,7 @@
 // accessible name to "Resize column" on every column alike and paints the
 // page's white behind itself, a stripe across a header that is not white.
 
+import { Tooltip } from '@cloudflare/kumo'
 import { useRef } from 'react'
 import { clampColumn } from '../column-widths'
 
@@ -36,50 +37,54 @@ export function ColumnResizer({
 }) {
   const drag = useRef<{ x: number; width: number; last: number } | null>(null)
   return (
-    <button
-      type="button"
-      aria-label={`Resize ${label}`}
-      title="Drag to resize · double-click to fit"
-      data-testid={testId}
-      className="group/edge absolute top-0 right-0 z-[3] flex h-full w-2.5 cursor-col-resize touch-none items-center justify-center outline-none select-none focus-visible:ring-2 focus-visible:ring-kumo-focus"
-      // Not the header's menu: the press is the drag's.
-      onClick={(event) => event.stopPropagation()}
-      onPointerDown={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        event.currentTarget.setPointerCapture(event.pointerId)
-        drag.current = { x: event.clientX, width, last: width }
-      }}
-      onPointerMove={(event) => {
-        const start = drag.current
-        if (!start) return
-        const next = clampColumn(start.width + event.clientX - start.x)
-        start.last = next
-        onResize(next)
-      }}
-      onPointerUp={() => {
-        const start = drag.current
-        drag.current = null
-        if (start && start.last !== start.width) onCommit(start.last)
-        else onResize(null)
-      }}
-      onPointerCancel={() => {
-        drag.current = null
-        onResize(null)
-      }}
-      onDoubleClick={(event) => {
-        event.stopPropagation()
-        onReset()
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-        event.preventDefault()
-        event.stopPropagation()
-        onCommit(clampColumn(width + (event.key === 'ArrowRight' ? STEP : -STEP)))
-      }}
-    >
-      {/* The line itself, drawn on hover or while it has the keyboard. */}
-      <span className="h-4 w-0.5 rounded-full bg-kumo-line opacity-0 group-hover:opacity-100 group-hover/edge:bg-kumo-subtle group-focus-visible/edge:opacity-100" />
-    </button>
+    <Tooltip
+      content="Drag to resize · double-click to fit"
+      render={
+        <button
+          type="button"
+          aria-label={`Resize ${label}`}
+          data-testid={testId}
+          className="group/edge absolute top-0 right-0 z-[3] flex h-full w-2.5 cursor-col-resize touch-none items-center justify-center outline-none select-none focus-visible:ring-2 focus-visible:ring-kumo-focus"
+          // Not the header's menu: the press is the drag's.
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            drag.current = { x: event.clientX, width, last: width }
+          }}
+          onPointerMove={(event) => {
+            const start = drag.current
+            if (!start) return
+            const next = clampColumn(start.width + event.clientX - start.x)
+            start.last = next
+            onResize(next)
+          }}
+          onPointerUp={() => {
+            const start = drag.current
+            drag.current = null
+            if (start && start.last !== start.width) onCommit(start.last)
+            else onResize(null)
+          }}
+          onPointerCancel={() => {
+            drag.current = null
+            onResize(null)
+          }}
+          onDoubleClick={(event) => {
+            event.stopPropagation()
+            onReset()
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            event.stopPropagation()
+            onCommit(clampColumn(width + (event.key === 'ArrowRight' ? STEP : -STEP)))
+          }}
+        >
+          {/* The line itself, drawn on hover or while it has the keyboard. */}
+          <span className="h-4 w-0.5 rounded-full bg-kumo-line opacity-0 group-hover:opacity-100 group-hover/edge:bg-kumo-subtle group-focus-visible/edge:opacity-100" />
+        </button>
+      }
+    />
   )
 }

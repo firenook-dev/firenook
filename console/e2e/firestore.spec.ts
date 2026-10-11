@@ -132,21 +132,28 @@ test('the count names itself on hover, and Run stays put however long it is', as
 })
 
 for (const scheme of ['light', 'dark'] as const)
-  test(`a hover is a step of ink over its ground, never a lighter fill (${scheme})`, async ({
+  test(`every button hovers a visible step from its own resting colour (${scheme})`, async ({
     page,
   }) => {
     // Kumo's surfaces in light mode run white 255, elevated 248, tint 245:
-    // the zebra rows, the header, chips and the lit path field sit at the
-    // bottom of that, and the opaque fills this console hovered with went
-    // white on them or vanished. One of each kind of control, each held to
-    // a visible step the right way: darker in light mode, lighter in dark.
+    // the zebra rows, a focused row, the header, chips and the lit path
+    // field sit at the bottom of that. Opaque hover fills went white on
+    // them or vanished, and a fill painted as the background colour turned
+    // a grey chip into the same grey. Each control is measured against
+    // itself, at rest and under the pointer, everything beneath composited
+    // in: a visible step, darker in light mode, lighter in dark.
     await page.emulateMedia({ colorScheme: scheme })
+    await page.setViewportSize({ width: 1440, height: 900 })
     const toward = scheme === 'light' ? -1 : 1
     const steps: Record<string, number> = {}
-    const measure = async (name: string, control: Locator) => {
+    const measure = async (name: string, control: Locator, away?: Locator) => {
+      if (away) await away.hover()
+      else await page.mouse.move(700, 895)
+      await page.waitForTimeout(120)
+      const rest = await paintOf(control)
       await control.hover()
       await page.waitForTimeout(160)
-      steps[name] = toward * (await hoverStep(control))
+      steps[name] = toward * ((await paintOf(control)) - rest)
     }
     await page.goto(
       `${origin()}/console/firestore?path=users&q=where(%22plan%22%2C%22%3D%3D%22%2C%22pro%22)`,
@@ -157,24 +164,55 @@ for (const scheme of ['light', 'dark'] as const)
     await measure('open, zebra row', rows.nth(1).getByTestId('open-row'))
     await measure("a chip's ×", page.getByRole('button', { name: 'Remove clause' }).first())
     await measure('column header', page.getByTestId('column-email'))
-    await measure('subcollection link', page.getByTestId('subcollection-link').first())
     await measure('tree arrow', page.getByTestId('schema-node-toggle').first())
+    await measure('ghost button', page.getByTestId('explain-toggle'))
+    // The row the keyboard is on is tinted, and its open button shows.
+    const fields = rows.nth(2).locator('td[data-field]:not([data-field="__name__"])')
+    await fields.first().click()
+    const open = rows.nth(2).getByTestId('open-row')
+    await expect(open).toBeVisible()
+    await measure('open, focused row', open, fields.nth(1))
+    // It names itself in the console's tooltip, not the browser's.
+    await open.hover()
+    await expect.soft(page.getByText('Open in the panel', { exact: true })).toBeVisible()
+    expect.soft(await open.getAttribute('title')).toBeNull()
     await page.goto(`${origin()}/console/firestore?path=users/u_k65eq/orders`)
     await measure(
       'path segment, field lit',
       page.getByTestId('path-field').getByRole('button', { name: /^users/ }),
+      page.getByTestId('path-field').getByRole('button', { name: /^\(default\)/ }),
     )
     await page.goto(`${origin()}/console/firestore?path=users`)
     await expect(rows.first()).toBeVisible()
+    // A chip has a grey of its own: one on a white row, one on a zebra row.
+    const chips = page.getByTestId('subcollection-link')
+    await expect(chips.first()).toBeVisible()
+    const striped = await chips.evaluateAll((links) =>
+      links.map(
+        (link) =>
+          link.ownerDocument.defaultView!.getComputedStyle(link.closest('tr')!).backgroundColor !==
+          'rgba(0, 0, 0, 0)',
+      ),
+    )
+    await measure('subcollection chip, white row', chips.nth(striped.indexOf(false)))
+    await measure('subcollection chip, zebra row', chips.nth(striped.indexOf(true)))
     await page.getByTestId('column-email').click()
-    await measure('menu item', page.getByRole('menuitem', { name: 'Sort descending' }))
+    await measure(
+      'menu item',
+      page.getByRole('menuitem', { name: 'Sort descending' }),
+      page.getByRole('menuitem', { name: 'Sort ascending' }),
+    )
     await page.keyboard.press('Escape')
     await page.keyboard.press('Meta+k')
-    await measure('palette result', page.getByRole('option').nth(1))
+    await measure(
+      'palette result',
+      page.getByRole('option').nth(2),
+      page.getByRole('option').nth(4),
+    )
     // Soft, so a regression names every kind of control it reaches.
     for (const [name, step] of Object.entries(steps))
       expect
-        .soft(step, `${name}: ${scheme === 'light' ? 'darker' : 'lighter'} than its ground`)
+        .soft(step, `${name}: ${scheme === 'light' ? 'darker' : 'lighter'} on hover`)
         .toBeGreaterThanOrEqual(6)
   })
 
@@ -1177,12 +1215,12 @@ test('a typed export imports back as the same documents', async ({ page }) => {
 })
 
 /**
- * How far a control's fill moves from the ground it sits on, in luminance
- * levels (0–255): negative is darker. Every layer from the first opaque
- * ancestor down is composited, so a translucent fill on a lit field is
- * measured against the lit field, not the bar beneath it.
+ * A control's colour as the eye sees it, as one luminance level (0–255):
+ * its own fill and every layer under it down to the first opaque ground,
+ * composited — background images (the hover's ink is one) above
+ * background colours, as the browser paints them.
  */
-const hoverStep = (control: Locator) =>
+const paintOf = (control: Locator) =>
   control.evaluate((el) => {
     const view = el.ownerDocument.defaultView!
     const canvas = el.ownerDocument.createElement('canvas') as unknown as {
@@ -1204,23 +1242,34 @@ const hoverStep = (control: Locator) =>
       const [r = 0, g = 0, b = 0, a = 0] = Array.from(ink.getImageData(0, 0, 1, 1).data)
       return [r, g, b, a / 255]
     }
+    // A flat gradient's first stop, which is the colour it paints.
+    const stopColour = (image: string) => {
+      const start = image.indexOf('linear-gradient(')
+      if (start === -1) return undefined
+      let depth = 0
+      for (let at = start + 16; at < image.length; at++) {
+        if (image[at] === '(') depth++
+        else if (image[at] === ')') depth--
+        if (depth === 0 && (image[at] === ',' || image[at] === ')'))
+          return rgba(image.slice(start + 16, at).trim())
+        if (depth < 0) break
+      }
+      return undefined
+    }
     const layers: number[][] = []
     for (let at: typeof el | null = el; at; at = at.parentElement) {
-      const layer = rgba(view.getComputedStyle(at).backgroundColor)
-      layers.push(layer)
-      // The ground is the first opaque layer behind the control, even
-      // when the control's own fill is opaque.
-      if (at !== el && (layer[3] ?? 0) > 0.99) break
+      const style = view.getComputedStyle(at)
+      const stop = stopColour(style.backgroundImage)
+      if (stop) layers.push(stop)
+      const colour = rgba(style.backgroundColor)
+      layers.push(colour)
+      if (at !== el && (colour[3] ?? 0) > 0.99) break
     }
-    // Paint the stack from the opaque ground up, with and without the control.
-    const composite = (from: number) => {
-      let colour = [255, 255, 255]
-      for (const [r = 0, g = 0, b = 0, a = 0] of layers.slice(from).toReversed())
-        colour = [r, g, b].map((value, i) => value * a + (colour[i] ?? 0) * (1 - a))
-      const [r = 0, g = 0, b = 0] = colour
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b
-    }
-    return Math.round(composite(0) - composite(1))
+    let colour = [255, 255, 255]
+    for (const [r = 0, g = 0, b = 0, a = 0] of layers.toReversed())
+      colour = [r, g, b].map((value, i) => value * a + (colour[i] ?? 0) * (1 - a))
+    const [r = 0, g = 0, b = 0] = colour
+    return Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b)
   })
 
 /** A field's outline and ground, as the eye sees them. */

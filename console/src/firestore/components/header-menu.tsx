@@ -2,7 +2,7 @@
 // hide it. Sorting writes the orderBy clause the query line shows, so the
 // grid and the query text never disagree.
 
-import { DropdownMenu } from '@cloudflare/kumo'
+import { DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -50,16 +50,18 @@ export function HeaderMenu({ column }: { column: InferredColumn }) {
         render={
           <button
             type="button"
-            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-firenook-hover"
+            className="group flex h-full w-full items-center gap-1.5 rounded-md px-1 text-left hover:ink"
             aria-label={`${column.field} column`}
             data-testid={`column-${column.field}`}
           >
-            <span
-              className="truncate font-mono text-[12px] font-medium text-kumo-default"
-              title={column.field}
-            >
-              {column.field}
-            </span>
+            <Tooltip
+              content={column.field}
+              render={
+                <span className="truncate font-mono text-[12px] font-medium text-kumo-default">
+                  {column.field}
+                </span>
+              }
+            />
             <TypeBadge
               type={column.type}
               mixed={column.mixed && column.holds ? describeTypes(column.holds) : undefined}
@@ -154,7 +156,7 @@ export function FoldedHeader({ folded }: { folded: readonly InferredColumn[] }) 
         render={
           <button
             type="button"
-            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-firenook-hover"
+            className="group flex h-full w-full items-center gap-1.5 rounded-md px-1 text-left hover:ink"
             aria-label={`${folded.length} rare fields`}
             data-testid="column-folded"
           >
@@ -213,7 +215,7 @@ export function IdHeaderMenu({
         render={
           <button
             type="button"
-            className="group flex h-full w-full items-center gap-1.5 rounded px-1 text-left hover:bg-firenook-hover"
+            className="group flex h-full w-full items-center gap-1.5 rounded-md px-1 text-left hover:ink"
             aria-label={`${label} column`}
             data-testid="id-header"
           >

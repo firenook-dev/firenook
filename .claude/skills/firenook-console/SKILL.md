@@ -283,7 +283,7 @@ ground under it moves. **Where you are is the segment that is not faded** —
 ancestors `text-kumo-subtle`, the last one `text-kumo-default` — not a
 tagged chip; a chip has to be light on the bar and dark on the hover ground,
 and flipping it as the pointer arrives reads as a fault. A segment's own
-hover is the hover fill (`bg-firenook-hover`, below), which only ever
+hover is `hover:ink` (below), which only ever
 appears while the field is lit, so it lands a step darker than that
 ground.
 
@@ -379,28 +379,55 @@ mark that case needs, and an absent field stays blank, which is a different
 thing again.
 
 A chip on a row that lights up on hover has to keep a ground or it is
-swallowed: `TypeBadge` takes `group-hover:bg-firenook-hover`, a step
-darker than the lit header (it went white, the other way, until hovers
-were made one rule), and the header button carries `group`. In a menu
+swallowed: `TypeBadge` takes `group-hover:ink`, a step darker with the
+lit header (it went white, the other way, until hovers were made one
+rule), and the header button carries `group`. In a menu
 trigger the chip has no ground of its own and the trigger's hover is its.
 A journey holds every settled badge to one ground and the mixed one to a
 different one, and fails the moment a second colour appears.
 
-**A hover is one step of ink over whatever is under it**: `bg-firenook-hover`
-(`theme.css`), black at 4 % in light mode and white at 9.6 % in dark — the
-alphas that land exactly on `kumo-tint` over `kumo-base`, so on a white
-surface it is Kumo's own ghost hover. Never an opaque surface token as a
-hover. Kumo's ladder in light mode is base 255, overlay 251, elevated 248,
-tint 245, recessed 243, and the zebra rows, the grid header, chips and the
-lit path field all sit at 245–248: `hover:bg-kumo-base` (the open-row
-button, the chip ×, path segments) went **white** there, and
-`hover:bg-kumo-elevated` (the tree's chevrons, the subcollection link) went
-lighter or vanished; `hover:bg-kumo-tint` on the 248 header was a 3-level
-step nobody sees. The exception is a control with an opaque ground of its
-own at rest (a white card with a ring): it keeps `hover:bg-kumo-tint`, as
-Kumo's secondary button does, because a translucent fill would replace its
-white with the surface under it. A journey hovers one control of each kind
-in both modes and holds the fill to the right side of its ground.
+**Every button hovers the same way: one step of ink over its own resting
+colour.** The class is `hover:ink` (`@utility ink` in `theme.css`): the
+hover fill `--color-firenook-hover` — black at 4 % in light mode, white at
+9.6 % in dark, the alphas that land exactly on `kumo-tint` over
+`kumo-base` — laid as a **background image** above the control's
+background colour. As an image it adds to what is there, so a grey chip
+goes a step greyer, a white card a step down from white, a bare icon a
+step down from its row. Never an opaque surface token as a hover, and never
+the hover fill as a background *colour*: Kumo's ladder in light mode is
+base 255, overlay 251, elevated 248, tint 245, and the zebra rows, a
+focused row, the header, chips and the lit path field sit at 245–248.
+`hover:bg-kumo-base` went **white** there (the open-row button, the chip ×,
+path segments), `hover:bg-kumo-elevated` went lighter or vanished, and the
+fill painted as a colour turned a grey chip into the same grey (245 → 245
+on a white row) — a hover that changed nothing.
+
+- **Kumo's ghost `Button`** is held to the same step by one unlayered rule
+  (`[data-kumo-component='Button'].bg-inherit:hover` — `bg-inherit` is the
+  ghost variant's mark): its resting ground plus ink, where Kumo paints an
+  opaque `kumo-tint` that disappears on anything at or below it. Menu items
+  and palette results (`data-highlighted`) take the fill too; Kumo's
+  `kumo-overlay` highlight is four levels below a white menu.
+- **An icon button is Kumo's ghost `Button`** (`size="sm" shape="square"`),
+  as the path's copy is. The open-row control was a bare button with a
+  hover and a browser tooltip of its own, and in a dense row it read as no
+  hover at all. Square icon controls that stay hand-made (the strip, the
+  tree's arrow, a chip's ×) take `rounded-md` and `hover:ink`.
+- **A tooltip on anything clickable is Kumo's `Tooltip`**, never `title`:
+  the browser's waits about a second and arrives in the platform's skin.
+  A Kumo `Button` turns its `title` into one; elsewhere wrap the element
+  with `Tooltip render={…}`, a disabled one in a span (as Kumo's `Button`
+  does), and `disabled` the tip where there is nothing to say. Closed
+  tooltips add no DOM: scrolling the grid measured the same frames (p50
+  16.6 ms, p95 22–24 ms) with one on every row's open button and id. The
+  request log's per-row time, path and uid keep `title` — up to 500 rows,
+  not virtualised, three tips each.
+
+A journey hovers one control of each kind in both modes — including a
+chip on a white and a zebra row and the open button on a focused row —
+and measures each against itself at rest, every layer composited
+(`paintOf`, images above colours): a six-level step, darker in light mode,
+lighter in dark. It also checks the open button's tip is the console's.
 
 Count each figure once. The path bar prints a count for every collection on
 the way *except* the one in view, because row two already counts that one

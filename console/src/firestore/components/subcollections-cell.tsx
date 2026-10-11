@@ -7,7 +7,7 @@
 // column costs one round trip per screen rather than one per chip. When a
 // row has more than fit, the rest are a menu.
 
-import { DropdownMenu } from '@cloudflare/kumo'
+import { DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import { DotsThreeIcon, FolderIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import type { SchemaNode } from '../schema'
@@ -48,42 +48,50 @@ export function SubcollectionsCell({
   return (
     <span className="flex min-w-0 items-center gap-1" data-testid="subcollections-chip">
       {inline.map((child) => (
-        <button
+        <Tooltip
           key={child.id}
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            workbench.setPath(`${path}/${child.id}`)
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-          className="flex h-5 min-w-0 shrink items-center gap-1 rounded bg-kumo-tint pr-1.5 pl-1 font-mono text-[11px] text-kumo-default hover:bg-firenook-hover"
-          title={`Open ${path}/${child.id}`}
-          data-testid="subcollection-link"
-          data-id={child.id}
-        >
-          <FolderIcon size={11} className="shrink-0 text-kumo-subtle" />
-          <span className="truncate">{child.id}</span>
-          <span className="shrink-0 text-kumo-subtle tabular-nums">
-            {formatNumber(child.documents)}
-          </span>
-        </button>
+          content={`Open ${path}/${child.id}`}
+          render={
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                workbench.setPath(`${path}/${child.id}`)
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              className="flex h-5 min-w-0 shrink items-center gap-1 rounded bg-kumo-tint pr-1.5 pl-1 font-mono text-[11px] text-kumo-default hover:ink"
+              data-testid="subcollection-link"
+              data-id={child.id}
+            >
+              <FolderIcon size={11} className="shrink-0 text-kumo-subtle" />
+              <span className="truncate">{child.id}</span>
+              <span className="shrink-0 text-kumo-subtle tabular-nums">
+                {formatNumber(child.documents)}
+              </span>
+            </button>
+          }
+        />
       ))}
       {rest.length > 0 && (
         <DropdownMenu>
-          <DropdownMenu.Trigger
+          <Tooltip
+            content={`${rest.length} more: ${rest.map((child) => child.id).join(', ')}`}
             render={
-              <button
-                type="button"
-                onClick={(event) => event.stopPropagation()}
-                onDoubleClick={(event) => event.stopPropagation()}
-                className="flex h-5 shrink-0 items-center gap-0.5 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle tabular-nums hover:bg-firenook-hover hover:text-kumo-default"
-                title={`${rest.length} more: ${rest.map((child) => child.id).join(', ')}`}
-                aria-label={`${rest.length} more subcollections under ${path}`}
-                data-testid="subcollections-more"
-              >
-                <DotsThreeIcon size={12} weight="bold" />
-                {rest.length}
-              </button>
+              <DropdownMenu.Trigger
+                render={
+                  <button
+                    type="button"
+                    onClick={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    className="flex h-5 shrink-0 items-center gap-0.5 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle tabular-nums hover:ink hover:text-kumo-default"
+                    aria-label={`${rest.length} more subcollections under ${path}`}
+                    data-testid="subcollections-more"
+                  >
+                    <DotsThreeIcon size={12} weight="bold" />
+                    {rest.length}
+                  </button>
+                }
+              />
             }
           />
           <DropdownMenu.Content align="start">

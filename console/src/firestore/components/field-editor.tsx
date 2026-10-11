@@ -317,7 +317,7 @@ function AddField({
           render={
             <button
               type="button"
-              className="group flex h-8 shrink-0 items-center rounded px-0.5 hover:bg-firenook-hover"
+              className="group flex h-8 shrink-0 items-center rounded px-0.5 hover:ink"
               aria-label={`New field type: ${type}`}
             >
               <TypeBadge type={type} menu />

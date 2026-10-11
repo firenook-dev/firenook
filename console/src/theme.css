@@ -146,6 +146,31 @@
 }
 
 /*
+ * The hover itself, as a class: `hover:ink`. The hover fill is laid over
+ * whatever the control already paints, as an image above its background
+ * colour, so the step is taken from the control's own resting colour — a
+ * grey chip goes a step greyer, a white card a step down from white, a
+ * bare icon a step down from the row it sits on. Painted *as* the
+ * background colour it replaced a chip's grey with a 4 % wash over the row,
+ * which on a white row is the same grey: a hover that changed nothing.
+ */
+@utility ink {
+  background-image: linear-gradient(var(--color-firenook-hover), var(--color-firenook-hover));
+}
+
+/*
+ * Kumo's ghost button — `bg-inherit` is its mark — hovers to `kumo-tint`,
+ * an opaque grey a step below white and invisible on the zebra rows, the
+ * grid header or a focused row, which sit at or below it. It takes the
+ * same step as everything else instead: its resting ground, plus ink.
+ * On white that is exactly `kumo-tint`, so nothing on a white bar moves.
+ */
+[data-kumo-component='Button'].bg-inherit:not(:disabled):hover {
+  background-color: inherit;
+  background-image: linear-gradient(var(--color-firenook-hover), var(--color-firenook-hover));
+}
+
+/*
  * A highlighted menu item or palette result is a hover, so it takes the
  * hover fill. Kumo draws it in `kumo-overlay`, which in light mode is 251
  * on a 255 menu: a four-level step that reads as no highlight at all

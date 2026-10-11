@@ -209,7 +209,7 @@ export function RulesEditorPanel() {
               <button
                 type="button"
                 onClick={() => jumpTo(diagnostic)}
-                className="flex w-full items-start gap-2 px-3 py-1.5 text-left hover:bg-firenook-hover"
+                className="flex w-full items-start gap-2 px-3 py-1.5 text-left hover:ink"
               >
                 <span className="flex h-lh shrink-0 items-center text-kumo-danger">
                   <WarningIcon size={14} />

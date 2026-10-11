@@ -6,7 +6,7 @@
 // is either a value it shows or a ref it calls through, so a scroll that
 // only moves the window over the rows re-renders the rows that entered it.
 
-import { Checkbox, Table } from '@cloudflare/kumo'
+import { Button, Checkbox, Table } from '@cloudflare/kumo'
 import { ArrowsOutSimpleIcon, WarningIcon } from '@phosphor-icons/react'
 import { memo } from 'react'
 import type { ChangeKind } from '@/api/generated/ChangeKind'
@@ -161,9 +161,15 @@ export const GridRow = memo(function GridRow({
               and opening a 400-pixel panel on every one of them took
               forty per cent of the grid away to answer a click that only
               meant "this one". Shown on hover, on the row being worked
-              on, and pressed on the row the panel holds. */}
-          <button
-            type="button"
+              on, and pressed on the row the panel holds. Kumo's own ghost
+              button, as the path's copy is, so it hovers and names itself
+              the way every other icon button does — it was a bare button
+              with a browser tooltip and a hover of its own. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={<ArrowsOutSimpleIcon />}
             aria-label={`Open ${document.id}`}
             aria-pressed={open}
             title={open ? 'Close the panel' : 'Open in the panel'}
@@ -172,14 +178,12 @@ export const GridRow = memo(function GridRow({
               event.stopPropagation()
               actions.current?.open(document)
             }}
-            className={`flex size-6 shrink-0 items-center justify-center rounded-md outline-none hover:bg-firenook-hover hover:text-kumo-default focus-visible:opacity-100 focus-visible:ring focus-visible:ring-kumo-focus ${
+            className={`shrink-0 focus-visible:opacity-100 ${
               open
-                ? 'text-kumo-brand opacity-100'
-                : `text-kumo-subtle ${focused ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`
+                ? '!text-kumo-brand opacity-100'
+                : `!text-kumo-subtle hover:!text-kumo-default ${focused ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`
             }`}
-          >
-            <ArrowsOutSimpleIcon size={14} />
-          </button>
+          />
         </span>
       </Table.Cell>
       <Table.Cell

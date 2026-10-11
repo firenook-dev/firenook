@@ -13,6 +13,7 @@
 // something you can see. It is the same plain-button idiom the row
 // already used for the integer/double word.
 
+import { Tooltip } from '@cloudflare/kumo'
 import type { ReactNode } from 'react'
 
 export function StripButton({
@@ -40,9 +41,9 @@ export function StripButton({
 }) {
   const rest =
     tone === 'danger'
-      ? 'text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-danger'
-      : 'text-kumo-subtle hover:bg-firenook-hover hover:text-kumo-default'
-  return (
+      ? 'text-kumo-subtle hover:ink hover:text-kumo-danger'
+      : 'text-kumo-subtle hover:ink hover:text-kumo-default'
+  const button = (
     <button
       type="button"
       aria-label={label}
@@ -50,15 +51,24 @@ export function StripButton({
       // to be unpressed would be read out as a toggle that is off.
       aria-pressed={on}
       disabled={disabled}
-      title={title}
       onClick={onClick}
       data-testid={testId}
-      className={`flex h-6 shrink-0 items-center justify-center gap-1 rounded-md px-1 font-mono text-[11px] outline-none focus-visible:ring focus-visible:ring-kumo-focus disabled:text-kumo-inactive disabled:hover:bg-transparent disabled:hover:text-kumo-inactive ${
+      className={`flex h-6 shrink-0 items-center justify-center gap-1 rounded-md px-1 font-mono text-[11px] outline-none focus-visible:ring focus-visible:ring-kumo-focus disabled:text-kumo-inactive disabled:hover:bg-none disabled:hover:text-kumo-inactive ${
         children === undefined ? 'w-6' : ''
       } ${on === true ? 'bg-kumo-control text-kumo-default ring ring-kumo-line' : rest}`}
     >
       {icon}
       {children}
     </button>
+  )
+  if (title === undefined) return button
+  // The console's tooltip, not the browser's. A disabled button takes no
+  // pointer events, so its tip hangs on a wrapper, as Kumo's Button does.
+  return disabled ? (
+    <Tooltip content={title} render={<span className="inline-flex shrink-0" />}>
+      {button}
+    </Tooltip>
+  ) : (
+    <Tooltip content={title} render={button} />
   )
 }
