@@ -8,6 +8,7 @@ use std::ops::Bound;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
+use crate::console::index::UserIndex;
 use crate::error::{ApiError, ensure};
 use crate::util::{
     is_valid_phone, mirror_field, now_millis, random_base64url, random_digits, random_id,
@@ -111,6 +112,10 @@ pub struct ProjectState {
     pending_local_ids: BTreeSet<String>,
     #[serde(skip)]
     pub events: Vec<(Lifecycle, UserRecord)>,
+    /// What the console reads: a digest of every account, kept beside the
+    /// maps above (`console::index`).
+    #[serde(skip)]
+    user_index: UserIndex,
     /// Bumped by every persisted-state mutation, so a request that only read
     /// the state is not written back to disk. Never serialized.
     #[serde(skip)]
@@ -140,6 +145,11 @@ impl ProjectState {
         self.mutations = self.mutations.wrapping_add(1);
     }
 
+    /// The console's index of these accounts.
+    pub(crate) const fn user_index(&self) -> &UserIndex {
+        &self.user_index
+    }
+
     /// Rebuilds the derived indexes after loading persisted records.
     pub fn rebuild_indexes(&mut self) {
         self.local_id_for_email.clear();
@@ -152,6 +162,7 @@ impl ProjectState {
         for user in users {
             self.index_user(&user);
         }
+        self.user_index = UserIndex::build(&self.users);
     }
 
     fn index_user(&mut self, user: &UserRecord) {
@@ -219,14 +230,16 @@ impl ProjectState {
         self.users.insert(local_id.to_owned(), record);
         self.pending_local_ids.remove(local_id);
         let providers = provider_infos_of(props);
-        let user = self.update_user_by_local_id(
-            local_id,
-            props,
-            UpdateOptions {
-                upsert_providers: providers,
-                delete_providers: Vec::new(),
-            },
-        )?;
+        let user = self
+            .update_user_by_local_id(
+                local_id,
+                props,
+                UpdateOptions {
+                    upsert_providers: providers,
+                    delete_providers: Vec::new(),
+                },
+            )
+            .inspect_err(|_| self.reindex(local_id))?;
         self.events.push((Lifecycle::Create, user.clone()));
         Ok(Some(user))
     }
@@ -263,6 +276,16 @@ impl ProjectState {
                 delete_providers: Vec::new(),
             },
         )
+        .inspect_err(|_| self.reindex(local_id))
+    }
+
+    /// Brings the console's digest of `local_id` up to date with the map,
+    /// for the paths that leave a record behind when an update fails.
+    fn reindex(&mut self, local_id: &str) {
+        match self.users.get(local_id) {
+            Some(record) => self.user_index.upsert(local_id, record),
+            None => self.user_index.remove(local_id),
+        }
     }
 
     /// `deleteUser`: removes the record and dispatches `delete`.
@@ -270,6 +293,7 @@ impl ProjectState {
         self.mutated();
         let local_id = str_field(user, "localId").unwrap_or_default().to_owned();
         self.users.remove(&local_id);
+        self.user_index.remove(&local_id);
         self.remove_user_from_index(user);
         self.events.push((Lifecycle::Delete, user.clone()));
     }
@@ -371,6 +395,7 @@ impl ProjectState {
         }
         self.users.insert(local_id.to_owned(), user.clone());
         let updated = self.update_user_provider_info(user, upsert_providers, &delete_providers);
+        self.user_index.upsert(local_id, &updated);
         self.users.insert(local_id.to_owned(), updated.clone());
         Ok(updated)
     }
@@ -657,6 +682,7 @@ impl ProjectState {
     pub fn delete_all_accounts(&mut self) {
         self.mutated();
         self.users.clear();
+        self.user_index.clear();
         self.local_id_for_email.clear();
         self.local_id_for_phone.clear();
         self.local_ids_for_provider_email.clear();

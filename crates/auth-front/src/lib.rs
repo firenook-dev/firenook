@@ -28,6 +28,7 @@ use firenook_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry}
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 pub mod blocking;
+pub mod console;
 pub mod error;
 pub mod legacy;
 pub mod ops;

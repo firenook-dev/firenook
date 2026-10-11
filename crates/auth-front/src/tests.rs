@@ -14,13 +14,13 @@ use tower::ServiceExt as _;
 use super::*;
 use crate::util::decode_jwt;
 
-fn test_runtime() -> AuthRuntime {
+pub(crate) fn test_runtime() -> AuthRuntime {
     let registry = TriggerRegistry::default();
     let (observer, _receiver) = TriggerObserver::channel(registry.clone());
     AuthRuntime::new("demo-auth", observer.queue(), registry, None).expect("runtime")
 }
 
-async fn call(
+pub(crate) async fn call(
     runtime: &AuthRuntime,
     method: Method,
     uri: &str,
