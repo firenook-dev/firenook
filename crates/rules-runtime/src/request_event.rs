@@ -19,6 +19,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::InstalledRules;
 use crate::request_history::RequestHistory;
+use crate::retention::DecisionRetention;
 
 #[path = "request_event_metadata.rs"]
 mod metadata;
@@ -38,11 +39,16 @@ static NEXT_EVENT: AtomicU64 = AtomicU64::new(1);
 pub(crate) struct RequestRecorder {
     history: RequestHistory,
     identity: Arc<str>,
+    retention: DecisionRetention,
 }
 
 impl RequestRecorder {
     pub(crate) fn history(&self) -> RequestHistory {
         self.history.clone()
+    }
+
+    pub(crate) const fn retention(&self) -> &DecisionRetention {
+        &self.retention
     }
 
     pub(crate) fn new(history: RequestHistory) -> Self {
@@ -53,13 +59,14 @@ impl RequestRecorder {
         Self {
             history,
             identity: format!("firenook-{}-{time}", std::process::id()).into(),
+            retention: DecisionRetention::default(),
         }
     }
 
     pub(crate) fn record(
         &self,
         project: &str,
-        installed: &InstalledRules,
+        installed: &Arc<InstalledRules>,
         request: &EvaluationRequest,
         result: &EvaluationResult,
         trace: &EvaluationTrace,
@@ -74,6 +81,10 @@ impl RequestRecorder {
             "projects/{project}/releases/cloud.firestore-{}",
             installed.source_hash
         );
+        // Before the event is published, so an id a console reads from the
+        // feed is already retained (unless retention admission was contended).
+        self.retention
+            .retain(&id, project, installed, request, result);
         // All recursive serialization happens under RequestHistory's nonblocking
         // admission and capped writer. A failed serialization increments omissions.
         let _ = self.history.record(&RequestEvent {

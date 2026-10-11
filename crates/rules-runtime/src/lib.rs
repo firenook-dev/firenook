@@ -5,10 +5,17 @@
 use std::collections::BTreeMap;
 
 pub mod coverage;
+mod dry_run;
 mod query;
 mod request_event;
 pub mod request_history;
+mod retention;
+pub use dry_run::{
+    DryRunError, DryRunOperation, DryRunRequest, DryRunRules, EvaluationAccess, PreparedRequest,
+    prepare_dry_run,
+};
 pub use query::{query_candidate, query_policy};
+pub use retention::{DecisionOutcome, RetainedDecision};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -372,22 +379,7 @@ impl RulesRuntime {
             preview: Some(preview.clone()),
             project: database.project_id().to_owned(),
         };
-        let requests = writes
-            .iter()
-            .map(|write| {
-                let (operation, key) = write_operation(write, snapshot);
-                let current = snapshot.get(&key);
-                let proposed = preview.get(&key);
-                evaluation_request(
-                    operation,
-                    &key,
-                    time,
-                    current.as_deref(),
-                    proposed.as_deref(),
-                    RulesQuery::default(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let requests = dry_run::write_requests(writes, snapshot, &preview, time);
         Ok(self.evaluate_atomic_context(
             database,
             authorization,
