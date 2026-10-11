@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use crate::ast::{
-    BinaryOperator, Expr, ExprKind, Function, MatchBlock, Operation, PathPart, PatternSegment,
-    Program,
+    Allow, BinaryOperator, Expr, ExprKind, Function, MatchBlock, Operation, PathPart,
+    PatternSegment, Program,
 };
 use crate::evaluator::match_pattern;
 use crate::{Diagnostic, DiagnosticSeverity, RequestOperation, RulesService};
@@ -462,6 +462,9 @@ pub(crate) fn outline(program: &Program, source: &str) -> RulesOutline {
 
 pub(crate) fn lints(program: &Program, source: &str) -> Vec<Diagnostic> {
     let index = LineIndex::new(source);
+    let storage = program.service == RulesService::FirebaseStorage;
+    // What the rules guard, in the words of the service.
+    let noun = if storage { "file" } else { "document" };
     let mut lints = Vec::new();
     for flat in flatten(program) {
         let scope = flat.scope();
@@ -486,29 +489,18 @@ pub(crate) fn lints(program: &Program, source: &str) -> Vec<Diagnostic> {
                     target.clone(),
                     LintCode::OpenAccess,
                     format!(
-                        "Anyone, signed in or not, can {} every document under {}",
+                        "Anyone, signed in or not, can {} every {noun} under {}",
                         verbs(&allow.operations),
                         flat.path
                     ),
                 ));
             }
             if is_signed_in_check(&allow.condition) {
-                let wildcard = scope
-                    .iter()
-                    .rev()
-                    .find_map(|segment| match segment {
-                        PatternSegment::Wildcard(name) => Some(name.as_str()),
-                        _ => None,
-                    })
-                    .unwrap_or("uid");
                 lints.push(warning(
                     &index,
                     target.clone(),
                     LintCode::AuthOnly,
-                    format!(
-                        "Any signed-in user can {} every document here, not only their own. Compare request.auth.uid with the document's owner field or the {{{wildcard}}} in the path.",
-                        verbs(&allow.operations)
-                    ),
+                    auth_only_message(storage, scope, &allow.operations),
                 ));
             }
             let writes = allow
@@ -517,18 +509,29 @@ pub(crate) fn lints(program: &Program, source: &str) -> Vec<Diagnostic> {
                 .any(|operation| matches!(operation, Operation::Create | Operation::Update));
             // An open grant already says anyone may write anything, and a
             // literal `false` lets nothing through to validate.
-            if writes
-                && !open
-                && always != Some(false)
-                && !checks_written_data(&allow.condition, &flat.functions, &mut BTreeSet::new())
-            {
+            let validates =
+                checks_written_data(&allow.condition, &flat.functions, &mut BTreeSet::new());
+            if writes && !open && always != Some(false) && !validates {
                 lints.push(warning(
                     &index,
-                    target,
+                    target.clone(),
                     LintCode::UnvalidatedWrite,
-                    "Writes here are not validated: nothing checks request.resource.data."
-                        .to_owned(),
+                    if storage {
+                        "Uploads here are not validated: nothing checks request.resource (its size or contentType)."
+                    } else {
+                        "Writes here are not validated: nothing checks request.resource.data."
+                    }
+                    .to_owned(),
                 ));
+            }
+            if storage && always != Some(false) {
+                storage_lints(
+                    (program, &flat, allow),
+                    &index,
+                    target,
+                    validates,
+                    &mut lints,
+                );
             }
         }
         // Reported on the block whose own pattern introduces the wildcard,
@@ -554,6 +557,64 @@ pub(crate) fn lints(program: &Program, source: &str) -> Vec<Diagnostic> {
     lints
 }
 
+/// What `auth-only` says: who can do what, and the wildcard naming the
+/// owner to compare the caller with.
+fn auth_only_message(storage: bool, scope: &[PatternSegment], operations: &[Operation]) -> String {
+    let verbs = verbs(operations);
+    if storage {
+        // A Storage block's last segment names the file; the owner is a
+        // folder above it.
+        let wildcard = last_wildcard(&scope[..scope.len().saturating_sub(1)])
+            .or_else(|| last_wildcard(scope))
+            .unwrap_or("uid");
+        format!(
+            "Any signed-in user can {verbs} every file here, not only their own. Compare request.auth.uid with the {{{wildcard}}} in the path."
+        )
+    } else {
+        let wildcard = last_wildcard(scope).unwrap_or("uid");
+        format!(
+            "Any signed-in user can {verbs} every document here, not only their own. Compare request.auth.uid with the document's owner field or the {{{wildcard}}} in the path."
+        )
+    }
+}
+
+/// The lints only Storage rules can earn, for one allow statement whose
+/// condition can grant something.
+fn storage_lints(
+    (program, flat, allow): (&Program, &Flat<'_>, &Allow),
+    index: &LineIndex<'_>,
+    target: Range<usize>,
+    validates: bool,
+    lints: &mut Vec<Diagnostic>,
+) {
+    // Every upload, over an existing object too, is judged as `create`;
+    // `update` is a metadata patch that cannot change the size, so only a
+    // grant of `create` can leave uploads unbounded. A grant that checks
+    // nothing at all is `unvalidated-write` already.
+    if validates
+        && allow.operations.contains(&Operation::Create)
+        && !reads_upload_size(&allow.condition, &flat.functions, &mut BTreeSet::new())
+    {
+        lints.push(warning(
+            index,
+            target,
+            LintCode::UnboundedUpload,
+            "Uploads here have no size limit. Add request.resource.size < 10 * 1024 * 1024 (or your own limit)."
+                .to_owned(),
+        ));
+    }
+    // Mirrors the evaluator, which refuses every list below version 2.
+    if program.rules_version < 2 && allow.operations.contains(&Operation::List) {
+        lints.push(warning(
+            index,
+            allow.statement.clone(),
+            LintCode::ListV1,
+            "List requests are refused below rules_version = '2', so listAll() and list() fail here. Add rules_version = '2'; at the top."
+                .to_owned(),
+        ));
+    }
+}
+
 fn warning(
     index: &LineIndex<'_>,
     span: Range<usize>,
@@ -571,6 +632,14 @@ fn warning(
         to: range.to,
         code: Some(code),
     }
+}
+
+/// The name of the last single-segment wildcard among `segments`.
+fn last_wildcard(segments: &[PatternSegment]) -> Option<&str> {
+    segments.iter().rev().find_map(|segment| match segment {
+        PatternSegment::Wildcard(name) => Some(name.as_str()),
+        _ => None,
+    })
 }
 
 /// The whole condition is `request.auth != null` or
@@ -671,11 +740,116 @@ fn checks_written_data<'p>(
     }
 }
 
+/// Whether evaluating `expression` can read the upload's size:
+/// `request.resource.size`, however indexed, here or in a user function it
+/// calls (each followed once).
+fn reads_upload_size<'p>(
+    expression: &Expr,
+    functions: &BTreeMap<&'p str, &'p Function>,
+    followed: &mut BTreeSet<&'p str>,
+) -> bool {
+    let is_request_resource = |expression: &Expr| match &expression.kind {
+        ExprKind::Field { base, name } => name == "resource" && is_variable(base, "request"),
+        ExprKind::Index { base, index } => {
+            is_variable(base, "request")
+                && matches!(&index.kind, ExprKind::String(key) if key == "resource")
+        }
+        _ => false,
+    };
+    let mut reads = |expression: &Expr| reads_upload_size(expression, functions, followed);
+    match &expression.kind {
+        ExprKind::Field { base, name } => {
+            (name == "size" && is_request_resource(base)) || reads(base)
+        }
+        ExprKind::Index { base, index } => {
+            (is_request_resource(base)
+                && matches!(&index.kind, ExprKind::String(key) if key == "size"))
+                || reads(base)
+                || reads(index)
+        }
+        ExprKind::Call { callee, arguments } => {
+            if let ExprKind::Variable(name) = &callee.kind
+                && let Some((&key, function)) = functions.get_key_value(name.as_str())
+                && followed.insert(key)
+                && (function
+                    .lets
+                    .iter()
+                    .any(|(_, value)| reads_upload_size(value, functions, followed))
+                    || reads_upload_size(&function.result, functions, followed))
+            {
+                return true;
+            }
+            reads_upload_size(callee, functions, followed)
+                || arguments
+                    .iter()
+                    .any(|argument| reads_upload_size(argument, functions, followed))
+        }
+        ExprKind::List(values) => values.iter().any(reads),
+        ExprKind::Map(entries) => entries.iter().any(|(_, value)| reads(value)),
+        ExprKind::Path(parts) => parts.iter().any(|part| match part {
+            PathPart::Literal(_) => false,
+            PathPart::Interpolation(value) => reads(value),
+        }),
+        ExprKind::Slice { base, start, end } => {
+            reads(base)
+                || start.as_deref().is_some_and(&mut reads)
+                || end.as_deref().is_some_and(&mut reads)
+        }
+        ExprKind::Unary { operand, .. } => reads(operand),
+        ExprKind::Binary { left, right, .. } => reads(left) || reads(right),
+        ExprKind::Is { value, .. } => reads(value),
+        ExprKind::Null
+        | ExprKind::Bool(_)
+        | ExprKind::Integer(_)
+        | ExprKind::Float(_)
+        | ExprKind::String(_)
+        | ExprKind::Variable(_) => false,
+    }
+}
+
 pub(crate) fn governing<S: AsRef<str>>(
     program: &Program,
     source: &str,
     database_id: &str,
     patterns: &[S],
+) -> GoverningMap {
+    govern(program, source, patterns, |pattern, block| {
+        let segments = pattern.split('/').collect::<Vec<_>>();
+        representative_path(database_id, &segments, block)
+    })
+}
+
+/// Which match blocks govern the files directly in each folder pattern of
+/// a Storage bucket (`users/*/uploads/2026/`, `''` for the bucket root):
+/// [`governing`] with the representative path a request for one of those
+/// files carries.
+pub(crate) fn governing_objects<S: AsRef<str>>(
+    program: &Program,
+    source: &str,
+    bucket: &str,
+    patterns: &[S],
+) -> GoverningMap {
+    govern(program, source, patterns, |pattern, block| {
+        // A folder pattern ends in `/`; its segments are the folders, the
+        // root having none. The rules see a path without empty segments, as
+        // the runtime builds it.
+        let folders = pattern
+            .strip_suffix('/')
+            .unwrap_or(pattern)
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>();
+        object_representative_path(bucket, &folders, block)
+    })
+}
+
+/// Matches every block against the representative path `path_of` builds
+/// per pattern, and reports the blocks no pattern reaches.
+fn govern<S: AsRef<str>>(
+    program: &Program,
+    source: &str,
+    patterns: &[S],
+    path_of: impl Fn(&str, &Flat<'_>) -> String,
 ) -> GoverningMap {
     let index = LineIndex::new(source);
     let flat = flatten(program);
@@ -683,10 +857,9 @@ pub(crate) fn governing<S: AsRef<str>>(
     let mut collections = Vec::with_capacity(patterns.len());
     for pattern in patterns {
         let pattern = pattern.as_ref();
-        let segments = pattern.split('/').collect::<Vec<_>>();
         let mut governed_by = Vec::new();
         for (position, block) in flat.iter().enumerate() {
-            let path = representative_path(database_id, &segments, block);
+            let path = path_of(pattern, block);
             if match_pattern(&block.pattern, &path).is_none() {
                 continue;
             }
@@ -745,21 +918,64 @@ fn representative_path(database_id: &str, collection: &[&str], block: &Flat<'_>)
             path.push_str(collection.get(position).copied().unwrap_or(PLACEHOLDER_ID));
             continue;
         }
-        let literal = block.below_root.and_then(|root| {
-            let at = root + position;
-            // Past a recursive wildcard, pattern positions no longer line up
-            // with path positions.
-            let aligned = !block.pattern[..at.min(block.pattern.len())]
-                .iter()
-                .any(|segment| matches!(segment, PatternSegment::RecursiveWildcard(_)));
-            match block.pattern.get(at) {
-                Some(PatternSegment::Literal(id)) if aligned => Some(id.as_str()),
-                _ => None,
-            }
-        });
-        path.push_str(literal.unwrap_or(PLACEHOLDER_ID));
+        path.push_str(literal_at(block, position).unwrap_or(PLACEHOLDER_ID));
     }
     path
+}
+
+/// A file path standing for every file directly in a folder of `bucket`
+/// (`folders` as the pattern names them, `*` for any folder at a level), as
+/// a request for one of them would carry it. A `*` folder and the file name
+/// are the block's own literal when it names one at that position
+/// (`match /public/logo.png`), so a block written for one file still counts
+/// as governing the folder it lies in.
+fn object_representative_path(bucket: &str, folders: &[&str], block: &Flat<'_>) -> String {
+    let mut path = format!("/b/{bucket}/o");
+    for (position, folder) in folders.iter().enumerate() {
+        path.push('/');
+        if *folder == "*" {
+            path.push_str(literal_at(block, position).unwrap_or(PLACEHOLDER_ID));
+        } else {
+            path.push_str(folder);
+        }
+    }
+    path.push('/');
+    path.push_str(literal_at(block, folders.len()).unwrap_or(PLACEHOLDER_ID));
+    path
+}
+
+/// The block's literal segment `position` levels below the root, when its
+/// pattern names one there. Past a recursive wildcard, pattern positions no
+/// longer line up with path positions, so there is none.
+fn literal_at<'a>(block: &'a Flat<'_>, position: usize) -> Option<&'a str> {
+    block.below_root.and_then(|root| {
+        let at = root + position;
+        let aligned = !block.pattern[..at.min(block.pattern.len())]
+            .iter()
+            .any(|segment| matches!(segment, PatternSegment::RecursiveWildcard(_)));
+        match block.pattern.get(at) {
+            Some(PatternSegment::Literal(id)) if aligned => Some(id.as_str()),
+            _ => None,
+        }
+    })
+}
+
+impl crate::Ruleset {
+    /// Which match blocks govern the files directly in each folder pattern
+    /// of a Storage `bucket` (`users/*/`, as a folder index writes them,
+    /// `''` for the bucket root), and which blocks govern none of them.
+    /// Each pattern is probed where its files are, at its real depth: a
+    /// pattern for files four levels down is not governed by a block that
+    /// matches one level only. Matching is the evaluator's own, so the
+    /// answer agrees with what a request would hit.
+    #[must_use]
+    pub fn governing_objects<S: AsRef<str>>(
+        &self,
+        bucket: &str,
+        folder_patterns: &[S],
+    ) -> GoverningMap {
+        governing_objects(&self.program, &self.source, bucket, folder_patterns)
+    }
 }
 
 /// What a block's allow statements can grant: every operation of an allow
@@ -992,6 +1208,183 @@ mod tests {
         let mut program = crate::parser::parse(&plain).expect("parses");
         program.rules_version = 1;
         assert_eq!(codes(&lints(&program, &plain)), []);
+    }
+
+    /// Wraps match blocks in the Storage root, with a declared version or
+    /// none (which Storage allows: version 1).
+    fn storage_rules(version: Option<u8>, body: &str) -> String {
+        format!(
+            "{}service firebase.storage {{\n  match /b/{{bucket}}/o {{\n{body}\n  }}\n}}\n",
+            version.map_or_else(String::new, |version| format!(
+                "rules_version = '{version}';\n"
+            ))
+        )
+    }
+
+    #[test]
+    fn storage_lints_speak_of_files() {
+        let lints = compile(&storage_rules(
+            Some(2),
+            "    match /users/{uid}/{allPaths=**} {\n      allow read, write: if true;\n    }",
+        ))
+        .lints();
+        assert_eq!(codes(&lints), [LintCode::OpenAccess], "{lints:?}");
+        assert_eq!(
+            lints[0].message,
+            "Anyone, signed in or not, can read and write every file under /users/{uid}/{allPaths=**}"
+        );
+
+        let lints = compile(&storage_rules(
+            Some(2),
+            "    match /notes/{uid}/{fileName} {\n      allow read: if request.auth != null;\n      allow write: if request.auth.uid == uid;\n    }",
+        ))
+        .lints();
+        assert_eq!(
+            codes(&lints),
+            [LintCode::AuthOnly, LintCode::UnvalidatedWrite],
+            "{lints:?}"
+        );
+        assert_eq!(
+            lints[0].message,
+            "Any signed-in user can read every file here, not only their own. Compare request.auth.uid with the {uid} in the path."
+        );
+        assert_eq!(
+            lints[1].message,
+            "Uploads here are not validated: nothing checks request.resource (its size or contentType)."
+        );
+    }
+
+    #[test]
+    fn unbounded_upload_fires_for_create_only() {
+        let source = storage_rules(
+            Some(2),
+            "    match /images/{uid}/{file} {\n      allow write: if request.auth.uid == uid && request.resource.contentType.matches('image/.*');\n      allow update: if request.resource.contentType == resource.contentType;\n    }",
+        );
+        let lints = compile(&source).lints();
+        assert_eq!(codes(&lints), [LintCode::UnboundedUpload], "{lints:?}");
+        assert_eq!(
+            lints[0].message,
+            "Uploads here have no size limit. Add request.resource.size < 10 * 1024 * 1024 (or your own limit)."
+        );
+        assert!(
+            utf16_slice(&source, lints[0].from, lints[0].to).starts_with("request.auth.uid == uid"),
+            "placed on the condition"
+        );
+
+        // A size check, written directly, indexed or in a function, bounds it.
+        for grant in [
+            "allow create: if request.resource.size < 5 * 1024 * 1024 && request.resource.contentType == 'image/png';",
+            "allow create: if request['resource']['size'] < 1000;",
+            "allow create: if small() && request.resource.contentType == 'text/plain';",
+        ] {
+            let lints = compile(&storage_rules(
+                Some(2),
+                &format!(
+                    "    function small() {{ return request.resource.size < 1000; }}\n    match /docs/{{file}} {{\n      {grant}\n    }}"
+                ),
+            ))
+            .lints();
+            assert_eq!(codes(&lints), [], "{grant}: {lints:?}");
+        }
+    }
+
+    #[test]
+    fn list_v1_fires_below_version_2_only() {
+        let source = storage_rules(
+            None,
+            "    match /users/{uid}/{file} {\n      allow read: if request.auth.uid == uid;\n      allow get: if request.auth.uid == uid;\n      allow list: if false;\n    }",
+        );
+        let lints = compile(&source).lints();
+        assert_eq!(codes(&lints), [LintCode::ListV1], "{lints:?}");
+        assert_eq!(
+            lints[0].message,
+            "List requests are refused below rules_version = '2', so listAll() and list() fail here. Add rules_version = '2'; at the top."
+        );
+        assert_eq!(
+            utf16_slice(&source, lints[0].from, lints[0].to),
+            "allow read: if request.auth.uid == uid;"
+        );
+        let lints = compile(&storage_rules(
+            Some(2),
+            "    match /users/{uid}/{file} {\n      allow read: if request.auth.uid == uid;\n    }",
+        ))
+        .lints();
+        assert_eq!(codes(&lints), [], "{lints:?}");
+    }
+
+    #[test]
+    fn governing_objects_name_blocks_files_and_folders_nothing_reaches() {
+        let ruleset = compile(&storage_rules(
+            Some(2),
+            "    match /users/{uid}/{allPaths=**} {\n      allow read, write: if request.auth.uid == uid;\n    }\n    match /public/logo.png {\n      allow read;\n    }\n    match /tmp/{f} {\n      allow read: if false;\n    }",
+        ));
+        let map =
+            ruleset.governing_objects("demo.appspot.com", &["users/*/", "public/", "misc/", ""]);
+        let by_pattern = map
+            .collections
+            .iter()
+            .map(|folder| (folder.pattern.as_str(), folder))
+            .collect::<BTreeMap<_, _>>();
+        let users = by_pattern["users/*/"];
+        assert_eq!(users.governed_by.len(), 1);
+        assert_eq!(users.governed_by[0].path, "/users/{uid}/{allPaths=**}");
+        assert_eq!(users.governed_by[0].line, 4);
+        assert_eq!(
+            users.governed_by[0].operations,
+            [Get, List, Create, Update, Delete]
+        );
+        // A block written for one file governs the folder it lies in.
+        let public = by_pattern["public/"];
+        assert_eq!(public.governed_by[0].path, "/public/logo.png");
+        assert_eq!(public.governed_by[0].operations, [Get, List]);
+        assert!(by_pattern["misc/"].uncovered());
+        assert!(by_pattern[""].uncovered());
+        let unused = map
+            .unused_matches
+            .iter()
+            .map(|block| block.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(unused, ["/tmp/{f}"]);
+    }
+
+    #[test]
+    fn governing_objects_under_a_recursive_wildcard_cover_every_folder() {
+        let ruleset = compile(&storage_rules(
+            Some(2),
+            "    match /{allPaths=**} {\n      allow read: if request.auth != null;\n    }",
+        ));
+        let map = ruleset.governing_objects("b", &["", "a/", "a/b/c/d/e/f/", "a//"]);
+        assert!(map.collections.iter().all(|folder| {
+            folder
+                .governed_by
+                .iter()
+                .any(|block| block.path == "/{allPaths=**}")
+        }));
+        let nothing: [&str; 0] = [];
+        assert_eq!(ruleset.governing_objects("b", &nothing).unused_matches, []);
+    }
+
+    #[test]
+    fn governing_objects_probe_real_depths() {
+        // Files only four levels down are not governed by a block that
+        // matches one level below the user's folder.
+        let ruleset = compile(&storage_rules(
+            Some(2),
+            "    match /users/{uid}/{file} {\n      allow read: if request.auth.uid == uid;\n    }",
+        ));
+        let map = ruleset.governing_objects("b", &["users/*/uploads/2026/", "users/*/"]);
+        assert!(map.collections[0].uncovered(), "{map:?}");
+        assert_eq!(map.collections[1].governed_by.len(), 1);
+        // A literal folder in the block governs the star level it names.
+        let ruleset = compile(&storage_rules(
+            Some(2),
+            "    match /users/admin/{file} {\n      allow read: if true;\n    }",
+        ));
+        let map = ruleset.governing_objects("b", &["users/*/"]);
+        assert_eq!(
+            map.collections[0].governed_by[0].path,
+            "/users/admin/{file}"
+        );
     }
 
     #[test]
