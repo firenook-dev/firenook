@@ -16,7 +16,7 @@ import {
   TooltipProvider,
   useSidebar,
 } from '@cloudflare/kumo'
-import { CommandIcon, GaugeIcon, SquareHalfIcon } from '@phosphor-icons/react'
+import { CommandIcon, GaugeIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type { CSSProperties, ReactNode } from 'react'
@@ -32,7 +32,7 @@ import { ThemePicker } from './theme-picker'
 
 const AREAS: readonly ServiceArea[] = ['data', 'compute', 'messaging', 'observe']
 
-/** The section panel's width, px; the panel toggle above it shares the edge. */
+/** The section panel's width, px. */
 export const PANEL_WIDTH = 264
 
 /**
@@ -200,30 +200,11 @@ function NavToggle() {
 function TopBar() {
   const status = useQuery(statusQuery)
   const setPaletteOpen = useConsoleUi((state) => state.setPaletteOpen)
-  const panel = useLayout((state) => state.panel)
-  const panelOpen = useLayout((state) => state.panelOpen)
-  const togglePanel = useLayout((state) => state.togglePanel)
+  // The console's own bar. The section panel's toggle is the section's
+  // (`PanelToggle`), placed in the panel and in the section's toolbar.
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base pr-4 pl-2">
-      {panel.present && (
-        <Tooltip
-          content={`${panelOpen ? 'Hide' : 'Show'} the ${panel.label.toLowerCase()} panel (t)`}
-          render={
-            <Button
-              variant="ghost"
-              size="sm"
-              shape="square"
-              icon={<SquareHalfIcon />}
-              aria-label={`${panelOpen ? 'Hide' : 'Show'} the ${panel.label.toLowerCase()} panel`}
-              aria-pressed={panelOpen}
-              onClick={togglePanel}
-              className={panelOpen ? 'text-kumo-default' : 'text-kumo-subtle'}
-              data-testid="panel-toggle"
-            />
-          }
-        />
-      )}
-      <div className={`flex min-w-0 items-center gap-2 ${panel.present ? '' : 'pl-2'}`}>
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-kumo-line bg-kumo-base px-4">
+      <div className="flex min-w-0 items-center gap-2">
         <Text variant="secondary" size="sm">
           Project
         </Text>

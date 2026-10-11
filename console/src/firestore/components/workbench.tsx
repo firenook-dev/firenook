@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
 import { LiveDot } from '@/components/kit'
 import { Page } from '@/components/shell/page'
+import { PanelToggle } from '@/components/shell/section-panel'
 import { useCreateDialog } from '../create'
 import { useExportDialog } from '../export'
 import { useLive, useLiveChanges } from '../live'
@@ -188,6 +189,7 @@ function WorkbenchData({
         className="flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3"
         data-testid="toolbar"
       >
+        <PanelToggle where="toolbar" />
         <PathBar />
         <Divider />
         {/* The state, and nothing to click. The grid is kept current by

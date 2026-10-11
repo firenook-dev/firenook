@@ -18,7 +18,7 @@ import {
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
-import { SectionPanel } from '@/components/shell/section-panel'
+import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
 import { databaseItems, databasesQuery } from '../databases'
 import {
   type SchemaNode,
@@ -52,23 +52,32 @@ export function SchemaPanel() {
 
   return (
     <SectionPanel label="Schema">
-      <div className="grid shrink-0 gap-1.5 border-b border-kumo-line p-2">
-        <div data-testid="database-select">
-          {/* `xs`, so it is set like the filter directly under it: Kumo's
-              `sm` Select is 14 px while its `sm` Input is 12. */}
-          <Select
-            size="xs"
-            value={workbench.database}
-            onValueChange={(value) => workbench.setDatabase(String(value))}
-            // Opening the picker asks again, so a database a client created
-            // since the panel mounted is in the list.
-            onOpenChange={(open) => {
-              if (open) void databases.refetch()
-            }}
-            items={databaseItems(databases.data, workbench.database, DEFAULT_DATABASE)}
-            aria-label="Database"
-            className="w-full font-mono"
-          />
+      {/* The inset is the toolbar's, so the panel's toggle at the head of
+          the first row is where the toolbar shows it once the panel is
+          hidden. */}
+      <div className="grid shrink-0 gap-1.5 border-b border-kumo-line px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <PanelToggle where="panel" />
+          <div className="min-w-0 flex-1" data-testid="database-select">
+            {/* `xs`, so its text is set like the filter directly under it:
+              Kumo's `sm` Select is 14 px while its `sm` Input is 12. And
+              the filter's height and corners, which `xs` leaves at 17.5 px
+              against the filter's 22.75 — two boxes stacked, one a size
+              smaller. */}
+            <Select
+              size="xs"
+              value={workbench.database}
+              onValueChange={(value) => workbench.setDatabase(String(value))}
+              // Opening the picker asks again, so a database a client created
+              // since the panel mounted is in the list.
+              onOpenChange={(open) => {
+                if (open) void databases.refetch()
+              }}
+              items={databaseItems(databases.data, workbench.database, DEFAULT_DATABASE)}
+              aria-label="Database"
+              className="h-6.5 w-full rounded-md font-mono"
+            />
+          </div>
         </div>
         <InputGroup size="sm">
           <InputGroup.Addon>

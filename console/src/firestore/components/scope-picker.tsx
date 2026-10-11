@@ -56,9 +56,11 @@ export function ScopePicker() {
             data-testid="scope-picker"
           >
             <span className="flex min-w-0 items-center gap-1">
+              {/* The id in the data's face, without the chip it wears in
+                  the menu: a box inside the button's frame was two frames. */}
               {workbench.group ? (
                 <span className="flex min-w-0 items-center gap-1">
-                  All <Id>{collectionId}</Id>
+                  All <span className="truncate font-mono text-[0.92em]">{collectionId}</span>
                 </span>
               ) : (
                 'This collection'

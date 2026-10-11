@@ -648,6 +648,17 @@ test('the scope picker names both scopes, and reads what it says', async ({ page
   await page.getByTestId('scope-all').click()
   await expect(page).toHaveURL(/group=true/)
   await expect(page.getByTestId('scope-picker')).toContainText('All orders')
+  // Framed now, for a mode that is on, and framed in the frame's colour.
+  // The menu hands focus back to its trigger, and Kumo rings a focused
+  // button near-black for the mouse as for the keyboard, so the mode just
+  // chosen wore a dark outline until something else was clicked.
+  const picker = page.getByTestId('scope-picker')
+  const frame = () =>
+    picker.evaluate((el) => el.ownerDocument.defaultView!.getComputedStyle(el).boxShadow)
+  await expect(picker).toBeFocused()
+  const focusedFrame = await frame()
+  await picker.blur()
+  expect(focusedFrame).toBe(await frame())
   // Every order in the database, named by path because an id no longer
   // identifies a row.
   await expect(page.getByRole('table').locator('thead')).toContainText('path')
@@ -733,14 +744,34 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await page.keyboard.press('Escape')
   await expect(page.getByRole('menu')).toHaveCount(0)
 
-  // Collapsing a node hides its children; the panel hides with t and comes
-  // back from the bar above it.
+  // Collapsing a node hides its children; the panel hides with t, or with
+  // its own toggle at the head of its first row, and comes back from the
+  // same spot at the head of the toolbar. It lived in the console's top
+  // bar, which is for the console as a whole, not one section's column.
   await orders.getByTestId('schema-node-toggle').click()
   await expect(items).toHaveCount(0)
+  await expect(page.locator('header').getByTestId('panel-toggle')).toHaveCount(0)
+  const toggle = page.getByTestId('panel-toggle')
+  const open = await toggle.boundingBox()
+  await expect(panel.getByTestId('panel-toggle')).toBeVisible()
   await page.keyboard.press('t')
   await expect(panel).toBeHidden()
-  await page.getByTestId('panel-toggle').click()
+  await expect(page.getByTestId('toolbar').getByTestId('panel-toggle')).toBeVisible()
+  const shut = await toggle.boundingBox()
+  expect(Math.abs((shut?.x ?? 0) - (open?.x ?? 99))).toBeLessThan(1)
+  expect(Math.abs((shut?.y ?? 0) - (open?.y ?? 99))).toBeLessThan(1)
+  await toggle.click()
   await expect(panel).toBeVisible()
+  await toggle.click()
+  await expect(panel).toBeHidden()
+  await page.keyboard.press('t')
+  await expect(panel).toBeVisible()
+
+  // The database and the filter under it are one size of box. The picker
+  // was Kumo's `xs`, 17.5 px against the filter's 22.75.
+  const database = await panel.getByRole('combobox', { name: 'Database' }).boundingBox()
+  const filterBox = await panel.getByTestId('schema-filter').locator('xpath=..').boundingBox()
+  expect(database?.height).toBe(filterBox?.height)
 
   // The tree follows the data: a new subcollection appears with its count
   // and goes when its last document goes.
@@ -3077,6 +3108,17 @@ async function seed(
  * A cell, scrolled to. Columns are virtualized like rows, so one that is
  * off screen is not in the page until the grid has been scrolled to it.
  */
+/** Whether this is what the pointer would land on at its own centre. */
+const onTop = (item: Locator) =>
+  item.evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    const hit = el.ownerDocument.elementFromPoint(
+      box.left + box.width / 2,
+      box.top + box.height / 2,
+    )
+    return hit !== null && el.contains(hit)
+  })
+
 async function reach(page: import('@playwright/test').Page, path: string, field: string) {
   const cell = page.locator(`tr[data-path="${path}"] td[data-field="${field}"]`)
   const grid = page.getByTestId('grid-scroll')
@@ -3368,15 +3410,6 @@ test('a map edited in the grid has the inspector JSON view, and all of the map',
   // A menu opened from the editor is drawn over it. The editor sat on
   // `z-50`, above popups that carry no z-index of their own, so its type
   // menus opened underneath it and could not be clicked.
-  const onTop = (item: Locator) =>
-    item.evaluate((el) => {
-      const box = el.getBoundingClientRect()
-      const hit = el.ownerDocument.elementFromPoint(
-        box.left + box.width / 2,
-        box.top + box.height / 2,
-      )
-      return hit !== null && el.contains(hit)
-    })
   for (const trigger of ['payload type: map', 'backend type: string']) {
     const button = editor.getByLabel(trigger)
     // A row's strip is drawn while its line is pointed at.

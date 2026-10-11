@@ -45,9 +45,15 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - The section panel is a second column beside the content (`PANEL_WIDTH`,
   264 px). A section fills it by rendering `<SectionPanel label="…">` (a
   portal into the shell's slot, so the section's providers reach it). The
-  shell shows the slot only while a section fills it; the button at the
-  left of the top bar and `t` hide and show it (`useLayout.panelOpen`,
-  remembered). Sections without a panel get the full width.
+  shell shows the slot only while a section fills it; `t` and the
+  section's own `<PanelToggle where="panel" | "toolbar">` hide and show it
+  (`useLayout.panelOpen`, remembered). The section places the toggle at the
+  head of the panel's first row and at the head of its toolbar(s) — the
+  toolbar copy renders only while the panel is hidden — and the panel's head
+  is inset like the toolbar (`px-3`), so the two are **one spot** (measured
+  to 0.4 px): pressed to hide, pressed again where it was to show. It sat in
+  the shell's top bar, which is the console's as a whole (project, engine,
+  theme, search). Sections without a panel get the full width.
 - The content column has no padding of its own. Document-like pages wrap
   themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
   it edge to edge with their own toolbar and borders.
@@ -417,6 +423,16 @@ on a white row) — a hover that changed nothing.
   opaque `kumo-tint` that disappears on anything at or below it. Menu items
   and palette results (`data-highlighted`) take the fill too; Kumo's
   `kumo-overlay` highlight is four levels below a white menu.
+- **A framed button keeps its frame's colour under a mouse focus.** Kumo
+  rings any focused button in `kumo-focus/50` (near black), the mouse's
+  included, and a menu hands focus back to its trigger — so a mode picked
+  from a menu (the scope picker's "All", View as) wore a dark outline until
+  the next click. One unlayered rule,
+  `[data-kumo-component='Button'].ring-kumo-line:focus:not(:focus-visible)`,
+  puts `--tw-ring-color` back to `kumo-line`; the keyboard keeps Kumo's
+  2 px `focus-visible` ring. `secondary` for a mode that is on (Explain,
+  View as, the scope) stays the rule; inside that frame, no second box —
+  the scope trigger's id is plain mono, the chip is the menu's.
 - **An icon says what happens, and one icon means one thing.** The
   open-row button is `SidebarSimpleIcon mirrored` — a window with a pane on
   its right, the panel it opens — and `weight="fill"` while its row is the

@@ -24,6 +24,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { ApiError } from '@/api/client'
+import { PanelToggle } from '@/components/shell/section-panel'
 import {
   type RulesDiagnostic,
   RulesCompileError,
@@ -95,6 +96,7 @@ export function RulesEditorPanel() {
       aria-label="Security rules"
     >
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line bg-kumo-base pr-2 pl-3">
+        <PanelToggle where="toolbar" />
         <Button
           variant="ghost"
           size="sm"

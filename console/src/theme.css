@@ -171,6 +171,19 @@
 }
 
 /*
+ * Kumo rings a focused button in `kumo-focus` at half strength — near
+ * black — on any focus, the mouse's included. A framed button (its frame
+ * is `ring-kumo-line`) keeps that dark outline after every click, and a
+ * menu hands focus back to its trigger when it closes, so a mode chosen
+ * from a menu was left looking selected-and-focused until something else
+ * was clicked. The frame keeps its own colour unless the focus came from
+ * the keyboard, which still gets Kumo's `focus-visible` ring.
+ */
+[data-kumo-component='Button'].ring-kumo-line:focus:not(:focus-visible) {
+  --tw-ring-color: var(--color-kumo-line);
+}
+
+/*
  * A highlighted menu item or palette result is a hover, so it takes the
  * hover fill. Kumo draws it in `kumo-overlay`, which in light mode is 251
  * on a 255 menu: a four-level step that reads as no highlight at all
