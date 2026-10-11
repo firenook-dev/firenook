@@ -766,6 +766,7 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "sha2",
+ "tempfile",
  "time",
  "tokio",
  "tokio-util",

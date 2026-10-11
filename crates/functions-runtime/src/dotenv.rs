@@ -248,9 +248,42 @@ pub fn load_user_envs(
     project_alias: Option<&str>,
     is_emulator: bool,
 ) -> Result<(BTreeMap<String, String>, Vec<String>), DotenvError> {
+    load_user_envs_with_sources(config_dir, project_id, project_alias, is_emulator)
+        .map(|loaded| (loaded.envs, loaded.files))
+}
+
+/// The dotenv chain of one codebase with where each value came from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LoadedEnv {
+    /// Every key with its winning value.
+    pub envs: BTreeMap<String, String>,
+    /// The files read, in precedence order (later ones win).
+    pub files: Vec<String>,
+    /// Key → the last file in precedence order that set it.
+    pub sources: BTreeMap<String, String>,
+    /// File → SHA-256 of its bytes as read, to tell a later change from a
+    /// touch with the same content.
+    pub hashes: BTreeMap<String, [u8; 32]>,
+}
+
+/// SHA-256 of a file's bytes.
+#[must_use]
+pub fn content_hash(bytes: &[u8]) -> [u8; 32] {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes).into()
+}
+
+/// [`load_user_envs`] that also records each key's file and each file's
+/// content hash.
+pub fn load_user_envs_with_sources(
+    config_dir: &Path,
+    project_id: &str,
+    project_alias: Option<&str>,
+    is_emulator: bool,
+) -> Result<LoadedEnv, DotenvError> {
     let files = find_env_files(config_dir, project_id, project_alias, is_emulator);
     if files.is_empty() {
-        return Ok((BTreeMap::new(), files));
+        return Ok(LoadedEnv::default());
     }
     if let Some(alias) = project_alias
         && files.contains(&format!(".env.{project_id}"))
@@ -260,9 +293,14 @@ pub fn load_user_envs(
             "Can't have both dotenv files with projectId (env.{project_id}) and projectAlias (.env.{alias}) as extensions."
         )));
     }
-    let mut envs = BTreeMap::new();
+    let mut loaded = LoadedEnv::default();
     for file in &files {
-        let data = std::fs::read_to_string(config_dir.join(file)).map_err(|error| {
+        let bytes = std::fs::read(config_dir.join(file)).map_err(|error| {
+            DotenvError(format!(
+                "Failed to load environment variables from {file}. {error}"
+            ))
+        })?;
+        let data = String::from_utf8(bytes.clone()).map_err(|error| {
             DotenvError(format!(
                 "Failed to load environment variables from {file}. {error}"
             ))
@@ -273,9 +311,14 @@ pub fn load_user_envs(
                 error.0
             ))
         })?;
-        envs.extend(parsed);
+        loaded.hashes.insert(file.clone(), content_hash(&bytes));
+        for key in parsed.keys() {
+            loaded.sources.insert(key.clone(), file.clone());
+        }
+        loaded.envs.extend(parsed);
     }
-    Ok((envs, files))
+    loaded.files = files;
+    Ok(loaded)
 }
 
 /// Reads a `.secret.local` file; every key is exposed to the codebase's
@@ -332,6 +375,25 @@ mod tests {
         );
         assert!(validate_key("PORT").is_err());
         assert!(validate_key("SYNTHETIC_OK").is_ok());
+    }
+
+    #[test]
+    fn sources_name_the_last_file_that_set_each_key() {
+        let temporary = tempfile::tempdir().expect("a directory");
+        let directory = temporary.path();
+        std::fs::write(directory.join(".env"), "A=1\nB=1\n").expect("written");
+        std::fs::write(directory.join(".env.demo"), "B=2\nC=2\n").expect("written");
+        std::fs::write(directory.join(".env.local"), "C=3\n").expect("written");
+        let loaded = load_user_envs_with_sources(directory, "demo", None, true).expect("loaded");
+        assert_eq!(loaded.files, [".env", ".env.demo", ".env.local"]);
+        assert_eq!(loaded.envs["B"], "2");
+        assert_eq!(loaded.sources["A"], ".env");
+        assert_eq!(loaded.sources["B"], ".env.demo");
+        assert_eq!(loaded.sources["C"], ".env.local");
+        assert_eq!(loaded.hashes[".env"], content_hash(b"A=1\nB=1\n"));
+        let (envs, files) = load_user_envs(directory, "demo", None, false).expect("loaded");
+        assert_eq!(files, [".env", ".env.demo"]);
+        assert_eq!(envs["C"], "2");
     }
 
     #[test]

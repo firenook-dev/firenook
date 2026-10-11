@@ -386,6 +386,54 @@ impl Resolver<'_> {
     }
 }
 
+/// Endpoint options a manifest may declare that the emulator does not apply.
+const DECLARED_OPTIONS: [&str; 10] = [
+    "availableMemoryMb",
+    "minInstances",
+    "maxInstances",
+    "concurrency",
+    "cpu",
+    "serviceAccount",
+    "serviceAccountEmail",
+    "vpc",
+    "ingressSettings",
+    "omit",
+];
+
+/// A param the manifest declares (`defineString`, `defineInt`,
+/// `defineSecret` …), as written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclaredParam {
+    pub name: String,
+    /// `string`, `int`, `boolean`, `list`, `secret` …
+    pub param_type: String,
+    pub default: Option<Value>,
+    pub label: Option<String>,
+    pub description: Option<String>,
+}
+
+/// An endpoint the manifest declares that the emulator dropped at load.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotLoaded {
+    /// `<region>-<name>`.
+    pub id: String,
+    pub event_type: String,
+    pub reason: String,
+}
+
+/// Everything one manifest converts to.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Conversion {
+    pub definitions: Vec<Definition>,
+    /// Endpoints dropped because the emulator cannot deliver their events.
+    pub not_loaded: Vec<NotLoaded>,
+    /// The manifest's top-level `params`.
+    pub params: Vec<DeclaredParam>,
+    /// Per definition id, the options it declares that the emulator does
+    /// not apply (as written, unresolved).
+    pub declared: BTreeMap<String, Map<String, Value>>,
+}
+
 /// Converts a `v1alpha1` manifest into emulated definitions for one codebase.
 ///
 /// `values` are the user dotenv values (parameters resolve from them) and
@@ -399,6 +447,55 @@ pub fn definitions_from_manifest(
     codebase: &str,
     values: &BTreeMap<String, String>,
 ) -> Result<Vec<Definition>, ManifestError> {
+    convert_manifest(manifest, project, default_bucket, codebase, values)
+        .map(|conversion| conversion.definitions)
+}
+
+/// The manifest's declared params.
+fn declared_params(manifest: &serde_norway::Value) -> Vec<DeclaredParam> {
+    let Some(params) = manifest
+        .get("params")
+        .and_then(|params| serde_json::to_value(params).ok())
+    else {
+        return Vec::new();
+    };
+    params
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry.get("name")?.as_str()?.to_owned();
+                    let text =
+                        |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_owned);
+                    Some(DeclaredParam {
+                        name,
+                        param_type: text("type").unwrap_or_else(|| "string".to_owned()),
+                        default: entry
+                            .get("default")
+                            .filter(|value| !value.is_null())
+                            .cloned(),
+                        label: text("label"),
+                        description: text("description"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// [`definitions_from_manifest`] with what the console shows beside the
+/// definitions: the endpoints dropped at load, the declared params and the
+/// options the emulator does not apply. The definitions are identical.
+pub fn convert_manifest(
+    manifest: &serde_norway::Value,
+    project: &str,
+    default_bucket: &str,
+    codebase: &str,
+    values: &BTreeMap<String, String>,
+) -> Result<Conversion, ManifestError> {
+    let mut not_loaded = Vec::new();
+    let mut declared: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
     let spec_version = manifest
         .get("specVersion")
         .and_then(serde_norway::Value::as_str);
@@ -572,8 +669,31 @@ pub fn definitions_from_manifest(
             else {
                 // Unsupported v2 event service: dropped like the official
                 // emulator (it never becomes a definition).
+                let event_type = endpoint
+                    .get("eventTrigger")
+                    .and_then(|event| event.get("eventType"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                not_loaded.push(NotLoaded {
+                    id: format!("{region}-{id}"),
+                    reason: format!("{event_type} is not emulated"),
+                    event_type,
+                });
                 continue;
             };
+            let options: Map<String, Value> = DECLARED_OPTIONS
+                .iter()
+                .filter_map(|key| {
+                    endpoint
+                        .get(*key)
+                        .filter(|value| !value.is_null())
+                        .map(|value| ((*key).to_owned(), value.clone()))
+                })
+                .collect();
+            if !options.is_empty() {
+                declared.insert(format!("{region}-{id}"), options);
+            }
             if trigger
                 && let Some(labels) = definition.get_mut("labels").and_then(Value::as_object_mut)
             {
@@ -626,7 +746,12 @@ pub fn definitions_from_manifest(
             );
         }
     }
-    Ok(definitions)
+    Ok(Conversion {
+        definitions,
+        not_loaded,
+        params: declared_params(manifest),
+        declared,
+    })
 }
 
 fn resolve_map(
@@ -955,6 +1080,71 @@ mod tests {
 
     fn yaml(value: &Value) -> serde_norway::Value {
         serde_norway::from_str(&value.to_string()).unwrap()
+    }
+
+    #[test]
+    fn conversion_lists_dropped_endpoints_params_and_unapplied_options() {
+        let manifest = yaml(&json!({
+            "specVersion": "v1alpha1",
+            "params": [
+                {"name": "GREETING", "type": "string", "default": "hi", "description": "What to say"},
+                {"name": "API_KEY", "type": "secret"},
+                {"name": "COUNT", "type": "int", "default": 3}
+            ],
+            "endpoints": {
+                "api": {"entryPoint": "api", "platform": "gcfv2", "region": ["europe-west1"],
+                    "httpsTrigger": {}, "availableMemoryMb": 512, "minInstances": 1, "cpu": "gcf_gen1"},
+                "onConfig": {"entryPoint": "onConfig", "platform": "gcfv2",
+                    "eventTrigger": {"eventType": "google.firebase.remoteconfig.remoteConfig.v1.updated", "eventFilters": {}}}
+            }
+        }));
+        let conversion = convert_manifest(
+            &manifest,
+            "demo-p",
+            "demo-p.appspot.com",
+            "default",
+            &BTreeMap::new(),
+        )
+        .expect("converted");
+        let ids: Vec<String> = conversion.definitions.iter().map(Definition::id).collect();
+        assert_eq!(ids, ["europe-west1-api"]);
+        assert_eq!(
+            conversion.not_loaded,
+            [NotLoaded {
+                id: "us-central1-onConfig".to_owned(),
+                event_type: "google.firebase.remoteconfig.remoteConfig.v1.updated".to_owned(),
+                reason: "google.firebase.remoteconfig.remoteConfig.v1.updated is not emulated"
+                    .to_owned(),
+            }]
+        );
+        let names: Vec<&str> = conversion
+            .params
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect();
+        assert_eq!(names, ["GREETING", "API_KEY", "COUNT"]);
+        assert_eq!(conversion.params[0].default, Some(json!("hi")));
+        assert_eq!(
+            conversion.params[0].description.as_deref(),
+            Some("What to say")
+        );
+        assert_eq!(conversion.params[1].param_type, "secret");
+        assert_eq!(conversion.params[2].default, Some(json!(3)));
+        let options = &conversion.declared["europe-west1-api"];
+        assert_eq!(options["availableMemoryMb"], json!(512));
+        assert_eq!(options["minInstances"], json!(1));
+        assert_eq!(options["cpu"], json!("gcf_gen1"));
+        assert_eq!(
+            definitions_from_manifest(
+                &manifest,
+                "demo-p",
+                "demo-p.appspot.com",
+                "default",
+                &BTreeMap::new()
+            )
+            .expect("converted"),
+            conversion.definitions
+        );
     }
 
     #[test]
