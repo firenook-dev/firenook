@@ -1,7 +1,7 @@
 //! The console router as the suite assembles it, every section present:
 //! what the request guard lets through and what it refuses.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
@@ -12,6 +12,7 @@ use firenook_query_engine::DatabaseEdition;
 use firenook_rules_runtime::RulesRuntime;
 use firenook_rules_runtime::request_history::RequestHistory;
 use firenook_suite_front::ServiceInfo;
+use futures_util::StreamExt as _;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt as _;
 
@@ -71,6 +72,108 @@ pub(crate) fn full_services(store: &Store, hosts: AllowedHosts) -> ConsoleServic
 
 fn router() -> Router {
     console_router(full_services(&Store::default(), AllowedHosts::loopback()))
+}
+
+/// Every route path registered on `router`, read from its debug form: axum
+/// has no route listing, and its `Debug` prints each path it registered.
+/// The test that uses this asserts it found the routes it knows exist, so a
+/// change in that form fails loudly instead of passing empty.
+fn route_paths(router: &Router) -> BTreeSet<String> {
+    let debug = format!("{router:?}");
+    let mut paths = BTreeSet::new();
+    let mut rest = debug.as_str();
+    while let Some(start) = rest.find("RouteId(") {
+        rest = &rest[start..];
+        let Some(open) = rest.find(": \"") else {
+            break;
+        };
+        let after = &rest[open + 3..];
+        let Some(close) = after.find('"') else {
+            break;
+        };
+        paths.insert(after[..close].to_owned());
+        rest = &after[close..];
+    }
+    paths
+}
+
+/// A concrete path for a route pattern: every `{parameter}` filled in.
+fn concrete(pattern: &str) -> String {
+    pattern
+        .split('/')
+        .map(|segment| {
+            if segment.starts_with("{*") {
+                "x/y".to_owned()
+            } else if segment.contains('{') {
+                let mut filled = String::new();
+                let mut inside = false;
+                for character in segment.chars() {
+                    match character {
+                        '{' => {
+                            inside = true;
+                            filled.push('x');
+                        }
+                        '}' => inside = false,
+                        _ if inside => {}
+                        _ => filled.push(character),
+                    }
+                }
+                filled
+            } else {
+                segment.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The two streams that predate the live channel, until the console moves
+/// onto its topics and they are removed (empty after that).
+const LEGACY_STREAMS: [&str; 2] = ["/api/v1/firestore/changes", "/api/v1/firestore/rules/live"];
+
+#[tokio::test]
+async fn only_live_streams() {
+    let router = router();
+    let paths = route_paths(&router);
+    for known in ["/api/v1/status", "/api/v1/live", "/api/v1/firestore/rules"] {
+        assert!(
+            paths.contains(known),
+            "the route walk missed {known}: {paths:?}"
+        );
+    }
+    assert!(paths.len() > 20, "{paths:?}");
+    let mut streams = BTreeSet::new();
+    for pattern in &paths {
+        let uri = concrete(pattern);
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            router.clone().oneshot(request(
+                Method::GET,
+                &uri,
+                &[("accept", "text/event-stream")],
+                "",
+            )),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{uri} answered within 5 s"))
+        .expect("response");
+        let streaming = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream"));
+        if streaming {
+            streams.insert(pattern.clone());
+        }
+    }
+    let allowed = std::iter::once("/api/v1/live")
+        .chain(LEGACY_STREAMS)
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        streams, allowed,
+        "only the live channel streams; a page's live updates are topics on it"
+    );
 }
 
 async fn send(router: &Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {
@@ -375,6 +478,118 @@ async fn the_requests_socket_opens_only_from_the_consoles_own_origin() {
     assert!(missing.starts_with("HTTP/1.1 403"), "{missing}");
     let own = handshake(router(), path, |address| Some(format!("http://{address}"))).await;
     assert!(own.starts_with("HTTP/1.1 101"), "{own}");
+}
+
+#[tokio::test]
+async fn the_live_stream_opens_only_from_the_consoles_own_origin() {
+    let router = router();
+    let refused = [
+        &[("origin", "http://evil.example")][..],
+        &[("sec-fetch-site", "cross-site")],
+        &[
+            ("host", "127.0.0.1:4000"),
+            ("origin", "http://localhost:4000"),
+        ],
+    ];
+    for headers in refused {
+        let response = router
+            .clone()
+            .oneshot(request(Method::GET, "/api/v1/live", headers, ""))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{headers:?}");
+    }
+    let allowed = [
+        &[
+            ("host", "127.0.0.1:4000"),
+            ("origin", "http://127.0.0.1:4000"),
+        ][..],
+        // A same-origin EventSource names no Origin at all.
+        &[
+            ("host", "127.0.0.1:4000"),
+            ("sec-fetch-site", "same-origin"),
+        ],
+        // A development proxy rewrote the Host; the browser attests the rest.
+        &[
+            ("host", "127.0.0.1:4000"),
+            ("origin", "http://localhost:5173"),
+            ("sec-fetch-site", "same-origin"),
+        ],
+    ];
+    for headers in allowed {
+        let response = router
+            .clone()
+            .oneshot(request(Method::GET, "/api/v1/live", headers, ""))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK, "{headers:?}");
+    }
+}
+
+#[tokio::test]
+async fn firestore_changes_and_rules_ride_the_live_channel() {
+    let store = Store::default();
+    let router = console_router(full_services(&store, AllowedHosts::loopback()));
+    let response = router
+        .clone()
+        .oneshot(request(Method::GET, "/api/v1/live", &[], ""))
+        .await
+        .expect("response");
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/event-stream"
+    );
+    let mut body = response.into_body().into_data_stream();
+    let mut seen = String::new();
+    let mut read_until = async |pattern: &str, seen: &mut String| {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !seen.contains(pattern) {
+                let chunk = body.next().await.expect("a chunk").expect("bytes");
+                seen.push_str(&String::from_utf8_lossy(&chunk));
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{pattern:?} never arrived: {seen}"));
+    };
+    read_until("event: hello", &mut seen).await;
+    read_until("\n\n", &mut seen).await;
+    let hello: serde_json::Value = serde_json::from_str(
+        seen.lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("hello data"),
+    )
+    .expect("json");
+    let connection = hello["connection"].as_str().expect("connection");
+    let (status, answer) = send(
+        &router,
+        request(
+            Method::POST,
+            &format!("/api/v1/live/{connection}/subscriptions"),
+            &[("content-type", "application/json")],
+            &serde_json::json!({ "add": [
+                { "id": "t1.s1", "topic": "firestore.changes", "params": { "scope": "users" } },
+                { "id": "t1.s2", "topic": "firestore.rules", "params": {} },
+            ] })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["accepted"], serde_json::json!(["t1.s1", "t1.s2"]));
+    read_until(r#""sub":"t1.s2","name":"file""#, &mut seen).await;
+    read_until(r#""sub":"t1.s1","name":"tick""#, &mut seen).await;
+    store
+        .commit(&[firenook_core_store::Write::Create {
+            key: firenook_core_store::DocumentKey::new(
+                firenook_core_store::DatabaseName::new(PROJECT, "(default)").expect("database"),
+                "users/u1",
+            )
+            .expect("key"),
+            fields: firenook_core_store::Fields::new(),
+        }])
+        .expect("commit");
+    read_until(r#""path":"users/u1","kind":"created""#, &mut seen).await;
+    assert!(seen.contains(r#""sub":"t1.s1","name":"change""#), "{seen}");
 }
 
 #[test]

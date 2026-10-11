@@ -49,7 +49,7 @@ async fn logging_real_tcp_nonreader_is_disconnected_without_blocking_producers()
         reclaimed.is_ok(),
         "kernel-backed nonreader retained a log subscription beyond send deadline"
     );
-    assert_eq!(runtime.state.live.receiver_count(), 0);
+    assert_eq!(runtime.state.history.followers(), 0);
 }
 
 #[test]
@@ -75,9 +75,9 @@ fn log_limits_cover_serialized_escaping_and_all_retained_records() {
         );
     }
     runtime.record(&"L".repeat(65), None, "synthetic hidden label");
-    let history = lock(&runtime.state.history);
+    let history = runtime.state.history.snapshot();
     assert_eq!(history.len(), LOG_REPLAY_CAPACITY);
-    for encoded in history.iter() {
+    for encoded in history.iter().map(|entry| &entry.json) {
         assert!(encoded.len() <= logging::MAXIMUM_RECORD_BYTES);
         let record: LogRecord = serde_json::from_str(encoded).unwrap();
         assert_eq!(record.level, "WARN");
@@ -154,7 +154,7 @@ async fn logging_caps_clients_replays_after_reconnect_and_obeys_owner_shutdown()
     })
     .await
     .unwrap();
-    assert_eq!(runtime.state.live.receiver_count(), 0);
+    assert_eq!(runtime.state.history.followers(), 0);
     let error = tokio_tungstenite::connect_async(format!("ws://{address}/"))
         .await
         .unwrap_err();
@@ -179,8 +179,8 @@ fn oversized_log_record_is_replaced_with_an_explicit_payload_free_warning() {
         Some("functions"),
         "sensitive-synthetic".repeat(maximum),
     );
-    let history = lock(&logging.state.history);
-    let encoded = history.front().unwrap();
+    let history = logging.state.history.snapshot();
+    let encoded = &history.first().unwrap().json;
     assert!(
         encoded.len() <= maximum,
         "record bytes must be bounded, not merely record count"
@@ -207,11 +207,11 @@ async fn idle_logging_disconnect_releases_its_live_subscription() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(logging.state.live.receiver_count(), 1);
+    assert_eq!(logging.state.history.followers(), 1);
     socket.close(None).await.unwrap();
     drop(socket);
     let released = tokio::time::timeout(Duration::from_secs(2), async {
-        while logging.state.live.receiver_count() != 0 {
+        while logging.state.history.followers() != 0 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })

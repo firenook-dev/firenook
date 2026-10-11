@@ -14,12 +14,16 @@ mod databases;
 mod explain;
 mod firestore;
 mod guard;
+mod instance;
+mod live;
 mod rules;
 mod rules_eval;
 mod schema;
 mod sse;
 mod time;
 
+use std::collections::BTreeMap;
+use std::hash::{Hash as _, Hasher as _};
 use std::sync::Arc;
 
 use axum::Json;
@@ -40,11 +44,16 @@ pub use explain::{
     QueryExplainer,
 };
 pub use firestore::{
-    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
+    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, ChangedCollection, DocumentChange,
+    FirestoreConsole,
 };
 pub use guard::{
     ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
     KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
+};
+pub use live::{
+    LiveEnd, LiveHello, LiveLimits, LiveProbe, LiveRefusal, LiveReset, LiveSubscribe,
+    LiveSubscriptionsRequest, LiveSubscriptionsResponse, ResetReason,
 };
 pub use rules::{
     CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
@@ -193,14 +202,42 @@ impl ConsoleServices {
 /// streams and sockets only from its own origin. A service's own application
 /// mounted here (Firestore REST, Identity Toolkit) keeps that service's
 /// semantics and gets the `Host` rule only.
+///
+/// The live channel (`/api/v1/live`) is the only route that streams: every
+/// page's live updates are topics on it (`live/`).
 pub fn console_router(services: ConsoleServices) -> Router {
     let mut natives = guard::NativeMounts::default();
+    let mut topics: Vec<Arc<dyn live::LiveTopic>> = Vec::new();
+    let mut absent = BTreeMap::new();
+    match &services.firestore {
+        Some(firestore) => {
+            topics.push(Arc::new(firestore.changes.topic()));
+            topics.push(Arc::new(firestore.rules.topic()));
+        }
+        None => {
+            absent.insert("firestore", "Firestore");
+        }
+    }
+    if services.auth.is_none() {
+        absent.insert("auth", "Authentication");
+    }
+    let hub = live::LiveHub::new(
+        topics,
+        absent,
+        live::HelloFacts {
+            instance: instance::Instance::new(),
+            console_build: console_build(),
+            engine_revision: services.release.revision().map(str::to_owned),
+        },
+        services.shutdown.clone(),
+    );
     let mut api = Router::new()
         .route("/status", get(status))
         .with_state(ConsoleState {
             directory: services.directory,
             release: services.release,
-        });
+        })
+        .merge(hub.router());
     if let Some(firestore) = services.firestore {
         api = api.nest(
             "/firestore",
@@ -225,6 +262,20 @@ pub fn console_router(services: ConsoleServices) -> Router {
         .route("/api/{*rest}", any(unknown_api))
         .fallback(asset)
         .layer(axum::middleware::from_fn_with_state(policy, guard::guard))
+}
+
+/// A hash of the console application this engine serves (its `index.html`,
+/// which names every hashed asset), so a page can tell an engine that was
+/// updated from one that restarted.
+fn console_build() -> String {
+    Assets::get("index.html").map_or_else(
+        || "unbuilt".to_owned(),
+        |index| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            index.data.hash(&mut hasher);
+            format!("{:016x}", hasher.finish())
+        },
+    )
 }
 
 async fn status(State(state): State<ConsoleState>) -> Json<ConsoleStatus> {
@@ -374,12 +425,17 @@ mod tests {
         RulesChanged::export_all(&config).expect("TypeScript bindings written");
         RulesFileStatus::export_all(&config).expect("TypeScript bindings written");
         ApiErrorBody::export_all(&config).expect("TypeScript bindings written");
+        live::export_bindings(&config);
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(
             written.contains("services: Array<ServiceStatus>"),
             "{written}"
         );
+        // Live types live in their own directory and import root types
+        // with a relative path.
+        let refusal = std::fs::read_to_string(format!("{out}/live/LiveRefusal.ts")).expect("read");
+        assert!(refusal.contains("from \"../ApiErrorDetail\""), "{refusal}");
     }
 
     #[tokio::test]

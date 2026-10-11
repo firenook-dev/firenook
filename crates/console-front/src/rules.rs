@@ -16,7 +16,8 @@
 //! The text can change under the console too: the rules file is watched,
 //! another tab saves, a test reloads the project's rules. So the editor also
 //! answers what governed a database over time (`/rules/history`), streams
-//! every change (`/rules/live`), says why the file on disk is not what is in
+//! every change (the live channel's `firestore.rules` topic), says why the
+//! file on disk is not what is in
 //! force when it did not compile, and checks a draft without installing it
 //! (`/rules/check`): compiler errors, lints, an outline, and which match
 //! blocks govern each collection the data holds.
@@ -46,6 +47,7 @@ use ts_rs::TS;
 
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
+use crate::live::{LiveTopic, TopicEvent, TopicStream, topic_params};
 use crate::schema::{SchemaIndex, SchemaNode};
 use crate::sse::{Shutdown, json_event, sse_response};
 
@@ -369,6 +371,13 @@ impl RulesEditor {
     pub fn with_schema(mut self, schema: &SchemaIndex) -> Self {
         self.schema = Some(schema.clone());
         self
+    }
+
+    /// The live channel's `firestore.rules` topic over this editor.
+    pub(crate) fn topic(&self) -> RulesTopic {
+        RulesTopic {
+            editor: self.clone(),
+        }
     }
 
     /// The editor's routes. Live streams end when `shutdown` fires, so a
@@ -739,49 +748,178 @@ async fn rules_live(
     // Subscribe before reading what is in force, so no change can fall
     // between the two; a change already read is then not repeated.
     let receiver = editor.rules.subscribe();
-    let mut seen = editor
+    let seen = editor
         .rules
         .current_version(&database)
         .map(|version| version.hash);
-    let rules = editor.rules.clone();
     let first = stream::once(async { json_event("hello", &serde_json::json!({})) });
+    let mut news = RulesNews::new(editor.rules.clone(), database, database_id, seen);
     let rest = BroadcastStream::new(receiver).flat_map(move |item| {
-        let mut events = Vec::new();
-        let (recheck, file) = match &item {
+        stream::iter(news.after(&item).into_iter().map(|told| match told {
+            Told::Rules(changed) => json_event("rules", &changed),
+            Told::File(status) => json_event("file", &status),
+        }))
+    });
+    Ok(sse_response(first.chain(rest), shutdown))
+}
+
+/// What a rules subscriber is told.
+enum Told {
+    Rules(RulesChanged),
+    File(RulesFileStatus),
+}
+
+/// Turns the rules runtime's events into what one database's subscriber
+/// is told: `rules` when the ruleset in force changed from any origin (a
+/// hash it has not seen), `file` after every check of the database's file.
+struct RulesNews {
+    rules: RulesRuntime,
+    database: DatabaseName,
+    database_id: String,
+    /// The hash in force the subscriber was last told of.
+    seen: Option<String>,
+}
+
+impl RulesNews {
+    const fn new(
+        rules: RulesRuntime,
+        database: DatabaseName,
+        database_id: String,
+        seen: Option<String>,
+    ) -> Self {
+        Self {
+            rules,
+            database,
+            database_id,
+            seen,
+        }
+    }
+
+    fn after(&mut self, item: &Result<RulesEvent, BroadcastStreamRecvError>) -> Vec<Told> {
+        let (recheck, file) = match item {
             Ok(RulesEvent::Installed { .. }) => (true, false),
-            Ok(RulesEvent::FileChecked { database: checked }) => (false, *checked == database),
+            Ok(RulesEvent::FileChecked { database: checked }) => (false, *checked == self.database),
             // A lagging stream may have missed either kind; re-read both.
             Err(BroadcastStreamRecvError::Lagged(_)) => (true, true),
         };
-        if recheck
-            && let Some(current) = rules.current_version(&database)
-            && seen.as_deref() != Some(current.hash.as_str())
-        {
-            seen = Some(current.hash.clone());
-            events.push(json_event(
-                "rules",
-                &RulesChanged {
-                    database: database_id.clone(),
-                    hash: current.hash,
-                    origin: origin(current.origin),
-                },
-            ));
+        let mut told = Vec::new();
+        if recheck && let Some(changed) = self.changed() {
+            told.push(Told::Rules(changed));
         }
         if file {
-            events.push(json_event(
-                "file",
-                &RulesFileStatus {
-                    database: database_id.clone(),
-                    problems: rules
-                        .file_problems(&database)
-                        .map(|problems| diagnostics(&problems))
-                        .unwrap_or_default(),
-                },
-            ));
+            told.push(Told::File(self.file()));
         }
-        stream::iter(events)
-    });
-    Ok(sse_response(first.chain(rest), shutdown))
+        told
+    }
+
+    /// The ruleset in force, when the subscriber has not been told of it.
+    fn changed(&mut self) -> Option<RulesChanged> {
+        let current = self.rules.current_version(&self.database)?;
+        if self.seen.as_deref() == Some(current.hash.as_str()) {
+            return None;
+        }
+        self.seen = Some(current.hash.clone());
+        Some(RulesChanged {
+            database: self.database_id.clone(),
+            hash: current.hash,
+            origin: origin(current.origin),
+        })
+    }
+
+    fn file(&self) -> RulesFileStatus {
+        RulesFileStatus {
+            database: self.database_id.clone(),
+            problems: self
+                .rules
+                .file_problems(&self.database)
+                .map(|problems| diagnostics(&problems))
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The cursor: the hash in force, empty while no ruleset is.
+    fn cursor(&self) -> String {
+        self.seen.clone().unwrap_or_default()
+    }
+
+    fn event(&self, told: Told) -> TopicEvent {
+        match told {
+            Told::Rules(changed) => TopicEvent::json("rules", Some(self.cursor()), &changed),
+            Told::File(status) => TopicEvent::json("file", Some(self.cursor()), &status),
+        }
+    }
+}
+
+/// `firestore.rules` parameters.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct RulesTopicParams {
+    /// Database id; `(default)` when absent.
+    database: Option<String>,
+}
+
+/// The live channel's `firestore.rules` topic: `rules` → [`RulesChanged`]
+/// when what governs the database changes, `file` → [`RulesFileStatus`]
+/// after every check of its file. The cursor is the hash in force: a
+/// subscriber that comes back with another hash is told `rules` at once.
+/// The file's status is sent on every open, resume or not, because a file
+/// that broke while the subscriber was away installs nothing and so moves
+/// no hash.
+pub(crate) struct RulesTopic {
+    editor: RulesEditor,
+}
+
+impl LiveTopic for RulesTopic {
+    fn name(&self) -> &'static str {
+        "firestore.rules"
+    }
+
+    fn open(
+        &self,
+        params: &serde_json::Value,
+        after: Option<&str>,
+    ) -> Result<TopicStream, ApiError> {
+        let params: RulesTopicParams = topic_params(params)?;
+        let database_id = params.database.unwrap_or_else(|| "(default)".to_owned());
+        let database = self.editor.database(&database_id)?;
+        // Subscribe before reading what is in force, so no change falls
+        // between the two.
+        let receiver = self.editor.rules.subscribe();
+        let mut news = RulesNews::new(
+            self.editor.rules.clone(),
+            database,
+            database_id,
+            after.map(str::to_owned),
+        );
+        let mut first = Vec::new();
+        match after {
+            // A returning subscriber holding another hash is told at once.
+            Some(_) => {
+                if let Some(changed) = news.changed() {
+                    first.push(news.event(Told::Rules(changed)));
+                }
+            }
+            // A new one has just read the rules: it needs only the cursor.
+            None => {
+                news.seen = self
+                    .editor
+                    .rules
+                    .current_version(&news.database)
+                    .map(|version| version.hash);
+            }
+        }
+        let file = news.file();
+        first.push(news.event(Told::File(file)));
+        let rest = BroadcastStream::new(receiver).flat_map(move |item| {
+            let told = news.after(&item);
+            stream::iter(
+                told.into_iter()
+                    .map(|told| news.event(told))
+                    .collect::<Vec<_>>(),
+            )
+        });
+        Ok(stream::iter(first).chain(rest).boxed())
+    }
 }
 
 #[cfg(test)]
@@ -1239,6 +1377,123 @@ mod tests {
         })
         .await
         .unwrap_or_else(|_| panic!("{pattern:?} never arrived: {seen}"));
+    }
+
+    /// What the `firestore.rules` topic says next: name, cursor, data.
+    async fn told(stream: &mut TopicStream) -> (&'static str, String, serde_json::Value) {
+        match tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("told something")
+            .expect("the topic goes on")
+        {
+            TopicEvent::Event { name, cursor, data } => (
+                name,
+                cursor
+                    .expect("every rules event carries the hash in force")
+                    .to_string(),
+                serde_json::from_str(&data).expect("json"),
+            ),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_new_subscriber_is_told_the_files_status_with_the_hash_in_force() {
+        let (_runtime, editor) = editor(None);
+        let mut stream = editor
+            .topic()
+            .open(&serde_json::json!({}), None)
+            .expect("opened");
+        let (name, cursor, data) = told(&mut stream).await;
+        assert_eq!(name, "file");
+        assert_eq!(cursor, firenook_rules_runtime::source_hash(&allow(false)));
+        assert_eq!(
+            data,
+            serde_json::json!({ "database": "(default)", "problems": [] })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_returning_subscriber_with_another_hash_is_told_the_rules_changed_at_once() {
+        let (runtime, editor) = editor(None);
+        let old = firenook_rules_runtime::source_hash(&allow(false));
+        runtime
+            .install_database(&database(), &allow(true))
+            .expect("install");
+        let mut stream = editor
+            .topic()
+            .open(&serde_json::json!({ "database": "(default)" }), Some(&old))
+            .expect("opened");
+        let new = firenook_rules_runtime::source_hash(&allow(true));
+        let (name, cursor, data) = told(&mut stream).await;
+        assert_eq!(name, "rules");
+        assert_eq!(cursor, new);
+        assert_eq!(data["hash"], new);
+        assert_eq!(data["database"], "(default)");
+        let (name, cursor, _) = told(&mut stream).await;
+        assert_eq!((name, cursor.as_str()), ("file", new.as_str()));
+    }
+
+    #[tokio::test]
+    async fn a_file_that_broke_while_nobody_listened_is_told_on_resume() {
+        let (runtime, editor) = editor(None);
+        let hash = firenook_rules_runtime::source_hash(&allow(false));
+        // The file stops compiling while the channel is down: nothing is
+        // installed, so the hash a subscriber holds does not move.
+        runtime.set_file_problems(&database(), Some(LoadError::unreadable("gone")));
+        let mut stream = editor
+            .topic()
+            .open(&serde_json::json!({}), Some(&hash))
+            .expect("opened");
+        let (name, cursor, data) = told(&mut stream).await;
+        assert_eq!(name, "file", "no rules event: the hash did not move");
+        assert_eq!(cursor, hash);
+        assert!(
+            data["problems"][0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("gone")),
+            "{data}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_topic_tells_of_every_change_to_its_database_only() {
+        let (runtime, editor) = editor(None);
+        let mut stream = editor
+            .topic()
+            .open(&serde_json::json!({}), None)
+            .expect("opened");
+        assert_eq!(told(&mut stream).await.0, "file");
+        let (status, _) = request(editor.clone(), put(&allow(true), false)).await;
+        assert_eq!(status, StatusCode::OK);
+        let (name, cursor, data) = told(&mut stream).await;
+        assert_eq!(name, "rules");
+        assert_eq!(cursor, firenook_rules_runtime::source_hash(&allow(true)));
+        assert_eq!(data["origin"], "console");
+        let other = DatabaseName::new(PROJECT, "other").expect("database");
+        runtime
+            .install_database(&other, &allow(false))
+            .expect("other");
+        runtime.set_file_problems(&database(), Some(LoadError::unreadable("broken")));
+        let (name, _, data) = told(&mut stream).await;
+        assert_eq!(name, "file", "another database's install says nothing here");
+        assert!(data["problems"].to_string().contains("broken"));
+    }
+
+    #[test]
+    fn the_topic_refuses_a_bad_database_or_parameter() {
+        let (_runtime, editor) = editor(None);
+        for params in [
+            serde_json::json!({ "database": "has/a/slash" }),
+            serde_json::json!({ "databse": "(default)" }),
+        ] {
+            let error = editor.topic().open(&params, None).err().expect("refused");
+            assert_eq!(
+                error.detail().code,
+                crate::ErrorCode::InvalidArgument,
+                "{params}"
+            );
+        }
     }
 
     #[tokio::test]
