@@ -524,9 +524,14 @@ export function Grid() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-kumo-base">
+      {/* The grid selects rows and cells, not text: a drag across it
+          painted every id and value it crossed in the browser's selection
+          blue. A value is copied with ⌘C on the cell the cursor is on, an
+          id with its own copy button, and text is chosen inside the
+          editor a double-click opens, which is portalled out of here. */}
       <div
         ref={scrollRef}
-        className="group/grid min-h-0 flex-1 overflow-auto"
+        className="group/grid min-h-0 flex-1 overflow-auto select-none"
         data-testid="grid-scroll"
         data-scrolled={scrolledX ? '' : undefined}
         onScroll={(event) => {

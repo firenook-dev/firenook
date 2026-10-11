@@ -1196,6 +1196,14 @@ retype that changes shape swaps line ↔ panel and moves focus.
   the check cell cancels a *shift* mouse-down, because shift on a press is
   also the browser's "extend the text selection" and painted every cell
   between the two rows (the journey asserts the selection stays empty).
+- **The grid's text cannot be selected** (`select-none` on `grid-scroll`):
+  it picks rows and cells, and a drag across it painted every id and value
+  it crossed. A value is copied with ⌘C on the cursor cell, an id with its
+  own copy button, and text is chosen in the cell editor, which is
+  portalled to `body` and so outside the rule. The shift guard stays for a
+  selection begun outside the grid. The editor opens with its value
+  selected, and a drag that starts on selected text *moves* it — the
+  journey places a caret before it drags.
 
 ### Size and age beside the document path
 

@@ -3345,6 +3345,55 @@ test('a sort that leaves documents out says how many', async ({ page }) => {
   await expect(page.getByTestId('query-leaves-out')).toHaveCount(0)
 })
 
+test('a drag across the grid selects no text, and the editor still does', async ({ page }) => {
+  await seed(page.request, 'dragged', {
+    d1: { title: text('First title'), note: text('one') },
+    d2: { title: text('Second title'), note: text('two') },
+    d3: { title: text('Third title'), note: text('three') },
+    d4: { title: text('Fourth title'), note: text('four') },
+  })
+  await page.goto(`${origin()}/console/firestore?path=dragged`)
+  const rows = page.getByTestId('grid-row')
+  await expect(rows).toHaveCount(4)
+  const selected = () =>
+    page.locator('body').evaluate((body) => body.ownerDocument.getSelection()?.toString() ?? '')
+  // From an id, down three rows and across the values: the grid picks
+  // rows and cells, and a drag used to paint everything it crossed.
+  const from = (await rows.nth(0).locator('td[data-field="__name__"]').boundingBox())!
+  const to = (await rows.nth(3).locator('td[data-field="note"]').boundingBox())!
+  await page.mouse.move(from.x + 8, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(to.x + to.width - 8, to.y + to.height / 2, { steps: 12 })
+  await page.mouse.up()
+  expect(await selected()).toBe('')
+
+  // Text is chosen where it is edited: the editor a double-click opens.
+  await rows.nth(1).locator('td[data-field="title"]').dblclick()
+  const value = page.getByTestId('cell-editor').getByRole('textbox', { name: 'title value' })
+  await expect(value).toBeFocused()
+  // It opens with the value selected, and a drag that starts on selected
+  // text moves the text; a caret first, as a person places one.
+  await value.press('End')
+  const box = (await value.boundingBox())!
+  await page.mouse.move(box.x + 4, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width - 4, box.y + box.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect
+    .poll(() =>
+      value.evaluate((input) => {
+        const field = input as unknown as {
+          value: string
+          selectionStart: number
+          selectionEnd: number
+        }
+        return field.value.slice(field.selectionStart, field.selectionEnd)
+      }),
+    )
+    .toBe('Second title')
+  await page.keyboard.press('Escape')
+})
+
 test('shift-click ticks a run of rows, and ticking one does not open it', async ({ page }) => {
   const docs: Record<string, Record<string, unknown>> = {}
   for (let at = 0; at < 8; at++) docs[`t${at}`] = { name: text(`T ${at}`) }

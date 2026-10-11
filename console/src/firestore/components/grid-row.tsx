@@ -134,10 +134,10 @@ export const GridRow = memo(function GridRow({
         style={{ left: 0 }}
         data-check=""
         // Shift on a press is also the browser's own "extend the text
-        // selection", so a range of ticks painted every id and value
-        // between the two rows. Only here: selecting text in a cell with
-        // shift still works everywhere else, and the click that ticks the
-        // box still arrives.
+        // selection". The grid's text cannot be selected, but a selection
+        // begun outside it — a name in the inspector — would still run
+        // from there to the box across everything between. The click that
+        // ticks the box still arrives.
         onMouseDown={(event) => {
           if (event.shiftKey) event.preventDefault()
         }}
