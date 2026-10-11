@@ -46,7 +46,7 @@ import {
   encodeValue,
   relativeTime,
 } from '../value'
-import { CodeBlock, firestoreOrigin } from './code-popover'
+import { CodeBlock, firestoreOrigin } from './code-block'
 import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
 import { useWorkbench } from './workbench-context'

@@ -18,7 +18,6 @@ import { useQueryLine } from '../query-line-store'
 import { countQueryOptions } from '../queries'
 import { findNode, schemaQuery } from '../schema'
 import { formatNumber } from '../value'
-import { CodePopover } from './code-popover'
 import { useWorkbench } from './workbench-context'
 
 export function QueryLine() {
@@ -205,7 +204,6 @@ export function QueryLine() {
               }
             />
           )}
-          <CodePopover />
         </div>
       </div>
       {workbench.queryError && (

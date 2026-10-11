@@ -8,7 +8,6 @@ import {
   parseQuery,
   presenceFields,
   printQuery,
-  queryAsCode,
   toStructuredQuery,
 } from './query'
 
@@ -120,23 +119,6 @@ describe('the workbench query text', () => {
       ROOT,
     )
     expect(structured.orderBy?.[0]?.field.fieldPath).toBe('address.`zip-code`')
-  })
-
-  it('writes the query as code for every target', () => {
-    const query = parseQuery('where("status", "==", "paid").orderBy("createdAt", "desc").limit(5)')
-    const scope = { project: 'demo', database: '(default)', origin: 'http://127.0.0.1:8080' }
-    expect(queryAsCode('web', 'users/u1/orders', false, query, scope)).toContain(
-      'collection(db, "users/u1/orders")',
-    )
-    expect(queryAsCode('admin', 'orders', true, query, scope)).toContain(
-      'db.collectionGroup("orders")',
-    )
-    expect(queryAsCode('flutter', 'orders', false, query, scope)).toContain(
-      ".where('status', isEqualTo: 'paid')",
-    )
-    const rest = queryAsCode('rest', 'users/u1/orders', false, query, scope)
-    expect(rest).toContain('documents/users/u1:runQuery')
-    expect(rest).toContain('"limit":5')
   })
 })
 

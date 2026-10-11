@@ -310,7 +310,7 @@ who the reads run as (`View as` — it applies to every read the section
 makes, the schema tree and the inspector included, so it is never a
 property of the query), and what acts on the whole section (`Rules`,
 `New`). **Row two is this one query**: the filter or the SDK chain, `Run`,
-`Explain`, what came back, and `Code`. A control that belongs to both rows
+`Explain`, and what came back. A control that belongs to both rows
 belongs in row one.
 
 **The query field is the path field's twin**, a row below: one box (`h-8
@@ -919,6 +919,17 @@ reference a path, and a whole-valued double an integer. Running the
 snippet wrote a different document than the one it was copied from, which
 is the one thing the feature exists not to do. Only `rest` was right,
 because it is built from `restFields`.
+
+**The query line's Code was taken out** for failing the same test. The
+line already *is* the SDK chain, so the Web tab printed back what had just
+been typed, and the only data in it — a path and the literals of a
+`where` — is what the person typed a moment before. With no filter, the
+common case, it was `collection()` plus `limit(100)`: the grid's page
+size, which nobody asked for, so the snippet fetched a hundred documents
+of a collection the grid pages through whole. Its import line was a fixed
+list (`collectionGroup`, `doc`, `orderBy`, `where`, `GeoPoint` whether used
+or not), and no journey had ever opened it. `CodeBlock` now lives in
+`code-block.tsx`, for the inspector's document alone.
 
 Rules that fall out:
 

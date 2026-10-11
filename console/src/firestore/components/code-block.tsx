@@ -1,39 +1,17 @@
-// Copy the current query, or a document, as the code that reproduces it.
+// A document as the code that writes it back, typed — the inspector's Code.
+//
+// The query line had one too, and it was taken out: the line is already
+// the SDK chain, so the Web tab printed back what had just been typed,
+// and with no filter it was `collection()` plus the grid's `limit(100)`,
+// a page size nobody asked for that fetched a hundred documents of a
+// collection the grid pages through whole. A document is different: its
+// types are the one thing only the console knows.
 
-import { Button, Popover, Tabs } from '@cloudflare/kumo'
-import { CheckIcon, CodeIcon, CopyIcon } from '@phosphor-icons/react'
+import { Button, Tabs } from '@cloudflare/kumo'
+import { CheckIcon, CopyIcon } from '@phosphor-icons/react'
 import { PanelTitle } from '@/components/kit'
-import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { statusQuery } from '@/api/queries'
-import { CODE_TARGETS, type CodeTarget, queryAsCode } from '../query'
-import { useWorkbench } from './workbench-context'
-
-export function CodePopover() {
-  const workbench = useWorkbench()
-  const status = useQuery(statusQuery)
-  const [target, setTarget] = useState<CodeTarget>('web')
-  if (!workbench.collectionPath) return null
-  const code = queryAsCode(target, workbench.collectionPath, workbench.group, workbench.query, {
-    project: workbench.project,
-    database: workbench.database,
-    origin: firestoreOrigin(status.data?.services),
-  })
-  return (
-    <Popover>
-      <Popover.Trigger
-        render={
-          <Button variant="ghost" size="sm" icon={<CodeIcon />} aria-label="Copy the query as code">
-            Code
-          </Button>
-        }
-      />
-      <Popover.Content className="w-[560px] max-w-[calc(100vw-2rem)]">
-        <CodeBlock code={code} target={target} setTarget={setTarget} title="This query as code" />
-      </Popover.Content>
-    </Popover>
-  )
-}
+import { CODE_TARGETS, type CodeTarget } from '../query'
 
 /** Where an app sends REST calls: the Firestore port the engine advertises. */
 export function firestoreOrigin(
