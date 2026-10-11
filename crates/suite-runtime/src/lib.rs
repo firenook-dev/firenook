@@ -19,7 +19,7 @@ use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
     CONSOLE_PATH, ChangeFeed, ConsoleServices, DatabaseCatalog, FirestoreConsole, QueryExplainer,
-    RulesEditor, SchemaIndex, console_router,
+    RulesEditor, RulesEvaluator, SchemaIndex, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -465,6 +465,7 @@ struct ConsoleFirestoreParts {
     databases: DatabaseCatalog,
     explain: QueryExplainer,
     rules: RulesEditor,
+    rules_evaluator: RulesEvaluator,
     /// The runtime every Firestore front evaluates against, which the rules
     /// file watcher installs into once `run` has the shutdown signal.
     rules_runtime: RulesRuntime,
@@ -612,6 +613,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     databases: parts.databases,
                     explain: parts.explain,
                     rules: parts.rules,
+                    rules_evaluator: parts.rules_evaluator,
                     requests: requests.clone(),
                     shutdown: shutdown.subscribe(),
                 }),
@@ -1078,6 +1080,9 @@ fn prepare_firestore(
         )
         // A checked draft is mapped against the tree the console shows.
         .with_schema(&schema),
+        // Dry runs and explanations read the same runtime and store, and
+        // never record or commit anything.
+        rules_evaluator: RulesEvaluator::new(&rules_for_console, store, &config.project_id),
         rules_runtime: rules_for_console,
     };
     Ok(Some(FirestoreParts {

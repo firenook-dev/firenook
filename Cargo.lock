@@ -675,6 +675,7 @@ name = "firenook-console-front"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "firenook-core-store",
  "firenook-query-engine",
  "firenook-rest-front",

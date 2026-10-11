@@ -1303,6 +1303,20 @@ pub fn structured_query(
     decode_query(structured, parent).map_err(|error| error.message)
 }
 
+/// Decodes a REST `fields` object the way a document write decodes one, for
+/// a caller outside this crate — the console's rules dry runs, whose writes
+/// must carry exactly the values a client's write would.
+pub fn document_fields(fields: &Map<String, JsonValue>) -> Result<Fields, String> {
+    fields
+        .iter()
+        .map(|(name, value)| {
+            decode_value(value)
+                .map(|value| (name.clone(), value))
+                .map_err(|error| format!("{name}: {}", error.message))
+        })
+        .collect()
+}
+
 fn decode_query(
     structured: &Map<String, JsonValue>,
     parent: Option<&str>,
