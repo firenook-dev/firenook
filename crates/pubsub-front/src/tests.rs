@@ -17,7 +17,7 @@ use tower::ServiceExt as _;
 
 use super::*;
 use crate::functions::PUBSUB_EVENT_TYPE;
-use crate::scheduler::{Cadence, CronSpec};
+use crate::scheduler::{Cadence, CronSpec, Zone};
 
 const FUNCTIONS_ORACLE: &str = include_str!(
     "../../../conformance/fixtures/firebase-suite-v1/functions-callable-http-and-error-contract/fixture.json"
@@ -307,58 +307,207 @@ async fn unsupported_reloaded_schedule_keeps_its_topic_without_automatic_ticks()
 
 #[test]
 fn supported_schedule_expressions_have_deterministic_cadence() {
-    let definition = |expression: &str, time_zone: Option<&str>| ScheduleDefinition {
-        project: "demo".to_owned(),
-        topic: "firebase-schedule-test".to_owned(),
-        expression: expression.to_owned(),
-        time_zone: time_zone.map(str::to_owned),
+    let parse = |expression: &str, time_zone: Option<&str>| {
+        Cadence::parse_expression(expression, time_zone)
     };
+    assert_eq!(
+        parse("every 5 minutes", None),
+        Ok(Cadence::Interval(std::time::Duration::from_mins(5)))
+    );
+    assert_eq!(
+        parse("every 30 mins", Some("Mars/Olympus_Mons")),
+        Ok(Cadence::Interval(std::time::Duration::from_mins(30))),
+        "an interval does not depend on its zone"
+    );
+    assert_eq!(
+        parse("every day 00:00", Some("UTC")),
+        Ok(Cadence::Weekly {
+            weekdays: 0x7f,
+            time: time::Time::MIDNIGHT,
+            zone: Zone::Utc
+        })
+    );
     assert!(matches!(
-        Cadence::parse(&definition("every 5 minutes", None)).expect("interval"),
-        Cadence::Interval(duration) if duration == std::time::Duration::from_secs(300)
+        parse("every day 03:00", Some("Etc/UTC")),
+        Ok(Cadence::Weekly { time, zone: Zone::Utc, .. }) if time.hour() == 3 && time.minute() == 0
     ));
-    assert!(matches!(
-        Cadence::parse(&definition("every day 00:00", Some("UTC"))).expect("midnight"),
-        Cadence::DailyUtc(time) if time == time::Time::MIDNIGHT
-    ));
-    assert!(matches!(
-        Cadence::parse(&definition("every day 03:00", Some("UTC"))).expect("03:00"),
-        Cadence::DailyUtc(time) if time.hour() == 3 && time.minute() == 0
-    ));
-    assert!(Cadence::parse(&definition("every day 03:00", Some("Asia/Kuala_Lumpur"))).is_err());
+    assert_eq!(
+        parse("every day 03:00", Some("Mars/Olympus_Mons")),
+        Err(ScheduleError(
+            "time zone Mars/Olympus_Mons is not in this engine's time-zone database".to_owned()
+        ))
+    );
+    assert!(parse("every day 24:00", None).is_err());
+    assert!(parse("every 0 minutes", None).is_err());
 }
 
 #[test]
-fn cron_expressions_evaluate_in_utc() {
+fn cron_expressions_evaluate_in_their_zone() {
+    let at = |text: &str| OffsetDateTime::parse(text, &Rfc3339).unwrap();
+    let next = |spec: CronSpec, zone: Zone, now: &str| {
+        spec.next_after(at(now), zone)
+            .unwrap()
+            .format(&Rfc3339)
+            .unwrap()
+    };
     let spec = CronSpec::parse("0 3 * * *").unwrap();
-    let now = OffsetDateTime::parse("2026-01-01T02:59:30Z", &Rfc3339).unwrap();
-    let next = spec.next_after(now).unwrap();
-    assert_eq!(next.format(&Rfc3339).unwrap(), "2026-01-01T03:00:00Z");
-    let later = OffsetDateTime::parse("2026-01-01T03:00:00Z", &Rfc3339).unwrap();
     assert_eq!(
-        spec.next_after(later).unwrap().format(&Rfc3339).unwrap(),
+        next(spec, Zone::Utc, "2026-01-01T02:59:30Z"),
+        "2026-01-01T03:00:00Z"
+    );
+    assert_eq!(
+        next(spec, Zone::Utc, "2026-01-01T03:00:00Z"),
         "2026-01-02T03:00:00Z"
     );
     let weekly = CronSpec::parse("*/15 9-17 * * 1-5").unwrap();
-    let saturday = OffsetDateTime::parse("2026-01-03T10:00:00Z", &Rfc3339).unwrap();
     assert_eq!(
-        weekly
-            .next_after(saturday)
-            .unwrap()
-            .format(&Rfc3339)
-            .unwrap(),
+        next(weekly, Zone::Utc, "2026-01-03T10:00:00Z"),
         "2026-01-05T09:00:00Z"
+    );
+    // Names, and 7 for Sunday.
+    let named = CronSpec::parse("0 9 * JAN mon-FRI").unwrap();
+    assert_eq!(
+        next(named, Zone::Utc, "2026-01-03T10:00:00Z"),
+        "2026-01-05T09:00:00Z"
+    );
+    let sunday = CronSpec::parse("0 0 * * 7").unwrap();
+    assert_eq!(
+        next(sunday, Zone::Utc, "2026-01-01T00:00:00Z"),
+        "2026-01-04T00:00:00Z"
+    );
+    // Both day fields restricted: either matches, as cron has it (the 13th,
+    // or a Friday).
+    let either = CronSpec::parse("0 0 13 * 5").unwrap();
+    assert_eq!(
+        next(either, Zone::Utc, "2026-04-11T00:00:00Z"),
+        "2026-04-13T00:00:00Z",
+        "Monday the 13th"
+    );
+    assert_eq!(
+        next(either, Zone::Utc, "2026-04-13T00:00:00Z"),
+        "2026-04-17T00:00:00Z",
+        "Friday the 17th"
     );
     assert!(CronSpec::parse("every 5 minutes").is_none());
     assert!(CronSpec::parse("61 * * * *").is_none());
-    let cadence = Cadence::parse(&ScheduleDefinition {
-        project: "p".to_owned(),
-        topic: "t".to_owned(),
-        expression: "0 3 * * *".to_owned(),
-        time_zone: Some("Europe/Berlin".to_owned()),
-    })
-    .unwrap();
-    assert!(matches!(cadence, Cadence::Cron(_)));
+    assert!(CronSpec::parse("0 0 * * 8").is_none());
+    // A zone with one offset: Etc/GMT-1 is an hour east of UTC.
+    let monday = CronSpec::parse("0 9 * * 1").unwrap();
+    let east = Zone::resolve(Some("Etc/GMT-1")).unwrap();
+    assert_eq!(
+        next(monday, east, "2026-01-01T00:00:00Z"),
+        "2026-01-05T08:00:00Z"
+    );
+    assert!(matches!(
+        Cadence::parse_expression("0 9 * * 1", Some("Etc/GMT-1")),
+        Ok(Cadence::Cron { zone, .. }) if zone == east
+    ));
+}
+
+#[test]
+fn cron_and_daily_run_in_their_zone() {
+    let at = |text: &str| OffsetDateTime::parse(text, &Rfc3339).unwrap();
+    let ticks = |expression: &str, zone: Option<&str>, from: &str, count: usize| {
+        let cadence = Cadence::parse_expression(expression, zone).expect(expression);
+        let mut now = at(from);
+        let mut out = Vec::new();
+        for _ in 0..count {
+            now = cadence.next_after(now).expect("a next tick");
+            out.push(now.format(&Rfc3339).unwrap());
+        }
+        out
+    };
+    // Etc/GMT+5 is five hours west: a daily 02:30 there is 07:30Z.
+    assert_eq!(
+        ticks(
+            "every day 02:30",
+            Some("Etc/GMT+5"),
+            "2026-03-08T00:00:00Z",
+            2
+        ),
+        ["2026-03-08T07:30:00Z", "2026-03-09T07:30:00Z"]
+    );
+    // App Engine forms.
+    assert_eq!(
+        ticks("every monday 09:00", None, "2026-01-01T00:00:00Z", 2),
+        ["2026-01-05T09:00:00Z", "2026-01-12T09:00:00Z"]
+    );
+    assert_eq!(
+        ticks("every mon,wed,fri 09:00", None, "2026-01-05T09:00:00Z", 3),
+        [
+            "2026-01-07T09:00:00Z",
+            "2026-01-09T09:00:00Z",
+            "2026-01-12T09:00:00Z"
+        ]
+    );
+    assert_eq!(
+        ticks(
+            "every 2 hours from 10:00 to 14:00",
+            None,
+            "2026-01-01T11:00:00Z",
+            4
+        ),
+        [
+            "2026-01-01T12:00:00Z",
+            "2026-01-01T14:00:00Z",
+            "2026-01-02T10:00:00Z",
+            "2026-01-02T12:00:00Z"
+        ]
+    );
+    // A window past midnight.
+    assert_eq!(
+        ticks(
+            "every 3 hours from 22:00 to 04:00",
+            None,
+            "2026-01-01T21:00:00Z",
+            4
+        ),
+        [
+            "2026-01-01T22:00:00Z",
+            "2026-01-02T01:00:00Z",
+            "2026-01-02T04:00:00Z",
+            "2026-01-02T22:00:00Z"
+        ]
+    );
+    assert_eq!(
+        ticks(
+            "every 15 mins synchronized",
+            None,
+            "2026-01-01T10:07:00Z",
+            2
+        ),
+        ["2026-01-01T10:15:00Z", "2026-01-01T10:30:00Z"]
+    );
+    // An ordinal form is not automatic, with the reason.
+    assert_eq!(
+        Cadence::parse_expression("1st monday of month 09:00", None),
+        Err(ScheduleError(
+            "unsupported Firebase schedule expression: 1st monday of month 09:00".to_owned()
+        ))
+    );
+    // The scheduler's view states the zone it evaluates in.
+    let view = |zone: Option<&str>| {
+        let mut book = crate::scheduler::ScheduleBook::default();
+        book.reconcile(vec![ScheduleDefinition {
+            function_id: "us-central1-tick".to_owned(),
+            function_name: "tick".to_owned(),
+            region: "us-central1".to_owned(),
+            project: "p".to_owned(),
+            topic: "firebase-schedule-tick".to_owned(),
+            expression: "every day 02:30".to_owned(),
+            time_zone: zone.map(str::to_owned),
+        }]);
+        book.view("us-central1-tick").expect("view")
+    };
+    assert_eq!(view(None).evaluated_in, "UTC");
+    assert_eq!(view(Some("Etc/GMT+5")).evaluated_in, "Etc/GMT+5");
+    assert!(view(Some("Etc/GMT+5")).automatic);
+    let unknown = view(Some("Mars/Olympus_Mons"));
+    assert!(!unknown.automatic);
+    assert_eq!(
+        unknown.problem.as_deref(),
+        Some("time zone Mars/Olympus_Mons is not in this engine's time-zone database")
+    );
 }
 
 #[test]
@@ -1390,6 +1539,293 @@ mod backlog {
         let window = broker.history_window(ORDERS).expect("window");
         assert_eq!(window.bytes, 1 + 4 + 5 + 2 * 8);
         broker.check_invariants();
+    }
+}
+
+/// The scheduler, keyed by function id: pause, run now, runs kept, the
+/// phase across reloads and two regions sharing one topic.
+mod schedules {
+    use firenook_functions_bridge::{
+        DispatchRequest, FunctionsInventory, TriggerObserver, TriggerRegistry,
+    };
+    use time::OffsetDateTime;
+
+    use super::{PROJECT, inventory};
+    use crate::{PubsubRuntime, RunScheduleError, RunTrigger, ScheduleControl, router};
+
+    const TICK: &str = "us-central1-scheduledTick";
+    const EUROPE: &str = "europe-west1-scheduledTick";
+
+    fn topic() -> String {
+        format!("projects/{PROJECT}/topics/firebase-schedule-scheduledTick")
+    }
+
+    fn published(runtime: &PubsubRuntime) -> u32 {
+        runtime
+            .broker()
+            .history_window(&topic())
+            .expect("schedule topic")
+            .messages
+    }
+
+    fn start(
+        inventory: &FunctionsInventory,
+    ) -> (
+        PubsubRuntime,
+        tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
+        TriggerRegistry,
+    ) {
+        let background = TriggerRegistry::default();
+        let (observer, deliveries) = TriggerObserver::channel(background.clone());
+        let runtime = router(PROJECT, inventory, observer.queue(), background.clone());
+        (runtime, deliveries, background)
+    }
+
+    /// The fixture's inventory with `scheduledTick` also in europe-west1.
+    fn two_regions() -> FunctionsInventory {
+        let mut inventory = inventory();
+        let mut copy = inventory
+            .functions()
+            .find(|function| function.name == "scheduledTick")
+            .expect("scheduledTick")
+            .clone();
+        copy.id = EUROPE.to_owned();
+        copy.region = "europe-west1".to_owned();
+        inventory.backends[0].function_triggers.push(copy);
+        inventory
+    }
+
+    #[tokio::test]
+    async fn schedules_pause_run_now_and_report_next() {
+        let (runtime, mut deliveries, background) = start(&inventory());
+        let view = runtime.schedule_view(TICK).expect("scheduledTick");
+        assert_eq!(view.function_name, "scheduledTick");
+        assert_eq!(view.region, "us-central1");
+        assert_eq!(view.topic, topic());
+        assert_eq!(view.expression, "every 5 minutes");
+        assert_eq!(view.evaluated_in, "UTC");
+        assert!(view.automatic);
+        assert_eq!(
+            view.next_run_at, None,
+            "no clock before the scheduler starts"
+        );
+
+        let before = OffsetDateTime::now_utc();
+        let due = runtime.schedule_due(TICK).expect("automatic");
+        assert!(due >= before + time::Duration::minutes(5));
+        assert_eq!(runtime.schedule_view(TICK).unwrap().next_run_at, Some(due));
+        let detail = runtime.schedule_detail(TICK).expect("detail");
+        assert_eq!(detail.upcoming.len(), 5);
+        assert_eq!(
+            detail.upcoming[1] - detail.upcoming[0],
+            time::Duration::minutes(5)
+        );
+
+        // Paused: the clock's tick publishes nothing and moves on.
+        ScheduleControl::set_paused(&runtime, TICK, true).expect("pause");
+        let revision = runtime.schedule_changes(0).revision;
+        runtime.clock_tick(TICK, due);
+        assert_eq!(published(&runtime), 0);
+        let view = runtime.schedule_view(TICK).unwrap();
+        assert!(view.paused);
+        assert_eq!(view.runs, 0);
+        assert_eq!(view.next_run_at, Some(due + time::Duration::minutes(5)));
+        assert_eq!(
+            runtime.schedule_changes(revision).changed.len(),
+            1,
+            "the moved tick is a change"
+        );
+
+        // Run now works while paused and records a console run.
+        let outcome = ScheduleControl::run(&runtime, TICK).expect("run");
+        assert_eq!(published(&runtime), 1);
+        let dispatch = deliveries.recv().await.expect("dispatch");
+        assert!(dispatch.path.ends_with("/us-central1-scheduledTick-0"));
+        let view = ScheduleControl::schedule(&runtime, TICK).unwrap();
+        assert_eq!(view.runs, 1);
+        let last = view.last_run.expect("last run");
+        assert_eq!(last.trigger, RunTrigger::Console);
+        assert_eq!(
+            last.message_id.as_deref(),
+            Some(outcome.message_id.as_str())
+        );
+
+        // Background triggers paused: Run now is refused and a clock tick
+        // is recorded as skipped.
+        background.set_background_enabled(false);
+        assert_eq!(
+            ScheduleControl::run(&runtime, TICK),
+            Err(RunScheduleError::BackgroundPaused)
+        );
+        assert_eq!(
+            runtime.run_schedule(TICK),
+            Err(RunScheduleError::BackgroundPaused)
+        );
+        ScheduleControl::set_paused(&runtime, TICK, false).expect("resume");
+        let due = runtime.schedule_due(TICK).expect("due");
+        runtime.clock_tick(TICK, due);
+        let view = runtime.schedule_view(TICK).unwrap();
+        assert_eq!(view.runs, 2);
+        let skipped = view.last_run.expect("skipped run");
+        assert_eq!(skipped.trigger, RunTrigger::Clock);
+        assert_eq!(skipped.message_id, None);
+        assert_eq!(
+            skipped.skipped.as_deref(),
+            Some("Background triggers are paused, so the tick was not published.")
+        );
+        assert_eq!(published(&runtime), 1);
+        background.set_background_enabled(true);
+
+        // A clock tick publishes and records a clock run.
+        let due = runtime.schedule_due(TICK).expect("due");
+        runtime.clock_tick(TICK, due);
+        assert_eq!(published(&runtime), 2);
+        let view = runtime.schedule_view(TICK).unwrap();
+        assert_eq!(view.last_run.unwrap().trigger, RunTrigger::Clock);
+        // A stale tick (the clock moved on) does nothing.
+        runtime.clock_tick(TICK, due);
+        assert_eq!(published(&runtime), 2);
+
+        // 25 runs: the first, the nineteen latest, and 5 in between.
+        for _ in 0..22 {
+            runtime.run_schedule(TICK).expect("run");
+        }
+        let detail = runtime.schedule_detail(TICK).unwrap();
+        assert_eq!(detail.view.runs, 25);
+        assert_eq!(detail.first_run.unwrap().trigger, RunTrigger::Console);
+        assert_eq!(detail.last_runs.len(), 19);
+        assert_eq!(detail.omitted_runs, 5);
+        assert!(
+            detail.last_runs[0].at >= detail.last_runs[18].at,
+            "newest first"
+        );
+        assert_eq!(
+            detail.last_runs[0].message_id.as_deref(),
+            Some("24"),
+            "the newest run published the 24th message (one run was skipped)"
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_schedule_keeps_its_phase_across_a_reload() {
+        let current = inventory();
+        let (mut runtime, _deliveries, _background) = start(&current);
+        let mut scheduler = runtime.start_scheduler().expect("scheduler");
+        let due = runtime.schedule_due(TICK).expect("due");
+        ScheduleControl::set_paused(&runtime, TICK, true).expect("pause");
+        runtime.run_schedule(TICK).expect("run");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        runtime
+            .refresh_inventory(PROJECT, &current, &mut scheduler)
+            .await
+            .expect("reload");
+        let view = runtime.schedule_view(TICK).unwrap();
+        assert_eq!(view.next_run_at, Some(due), "the phase is kept");
+        assert!(view.paused, "the pause is kept");
+        assert_eq!(view.runs, 1, "the runs are kept");
+
+        // A changed expression starts its clock afresh; pause and runs stay.
+        let mut edited = current.clone();
+        for function in &mut edited.backends[0].function_triggers {
+            if let Some(schedule) = &mut function.schedule {
+                schedule.schedule = "every 7 minutes".to_owned();
+            }
+        }
+        let before = OffsetDateTime::now_utc();
+        runtime
+            .refresh_inventory(PROJECT, &edited, &mut scheduler)
+            .await
+            .expect("reload");
+        let due = runtime.schedule_due(TICK).expect("due");
+        assert!(due >= before + time::Duration::minutes(7));
+        let view = runtime.schedule_view(TICK).unwrap();
+        assert_eq!(view.expression, "every 7 minutes");
+        assert!(view.paused);
+        assert_eq!(view.runs, 1);
+
+        // A schedule that left is gone, and a live view learns of it.
+        let revision = runtime.schedule_changes(0).revision;
+        let empty = FunctionsInventory {
+            generation: 0,
+            backends: Vec::new(),
+        };
+        runtime
+            .refresh_inventory(PROJECT, &empty, &mut scheduler)
+            .await
+            .expect("reload");
+        assert!(runtime.schedule_view(TICK).is_none());
+        let changes = runtime.schedule_changes(revision);
+        assert!(changes.removed);
+        assert!(changes.revision > revision);
+        scheduler.shutdown().await;
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_clock_writes_its_next_tick_before_it_sleeps() {
+        let (runtime, _deliveries, _background) = start(&inventory());
+        let mut watch = runtime.schedule_watch();
+        let scheduler = runtime.start_scheduler().expect("scheduler");
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while runtime.schedule_view(TICK).unwrap().next_run_at.is_none() {
+                watch.changed().await.expect("watch");
+            }
+        })
+        .await
+        .expect("the clock set its next tick");
+        scheduler.shutdown().await;
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn schedules_are_keyed_by_function_id() {
+        let (runtime, mut deliveries, _background) = start(&two_regions());
+        let us = runtime.schedule_view(TICK).expect("us-central1");
+        let europe = runtime.schedule_view(EUROPE).expect("europe-west1");
+        assert_eq!(us.topic, europe.topic);
+        assert_eq!(us.shares_topic_with, [EUROPE]);
+        assert_eq!(europe.shares_topic_with, [TICK]);
+        assert_eq!(europe.region, "europe-west1");
+        assert_eq!(runtime.schedules_view().len(), 2);
+
+        // Run now through either id publishes once to the shared topic,
+        // which reaches both functions.
+        let control: std::sync::Arc<dyn ScheduleControl> = std::sync::Arc::new(runtime.clone());
+        control.run(EUROPE).expect("run");
+        assert_eq!(published(&runtime), 1);
+        let mut paths = [
+            deliveries.recv().await.expect("first").path,
+            deliveries.recv().await.expect("second").path,
+        ];
+        paths.sort();
+        assert!(paths[0].ends_with("/europe-west1-scheduledTick-0"));
+        assert!(paths[1].ends_with("/us-central1-scheduledTick-0"));
+        assert_eq!(control.schedule(EUROPE).unwrap().runs, 1);
+        assert_eq!(control.schedule(TICK).unwrap().runs, 0);
+
+        // Pausing one leaves the other's clock running.
+        control.set_paused(TICK, true).expect("pause");
+        assert!(!control.schedule(EUROPE).unwrap().paused);
+        let due = runtime.schedule_due(EUROPE).expect("due");
+        runtime.clock_tick(EUROPE, due);
+        assert_eq!(published(&runtime), 2);
+        let due = runtime.schedule_due(TICK).expect("due");
+        runtime.clock_tick(TICK, due);
+        assert_eq!(published(&runtime), 2);
+
+        // Unknown ids.
+        assert!(control.schedule("us-central1-nope").is_none());
+        assert_eq!(
+            control.set_paused("us-central1-nope", true),
+            Err(RunScheduleError::NotScheduled)
+        );
+        assert_eq!(
+            control.run("us-central1-nope"),
+            Err(RunScheduleError::NotScheduled)
+        );
+        runtime.shutdown().await;
     }
 }
 

@@ -74,19 +74,30 @@ impl Target {
         FunctionTarget {
             function_id: function.id.clone(),
             name: function.name.clone(),
-            region: if function.region.is_empty() {
-                function.regions.first().cloned().unwrap_or_default()
-            } else {
-                function.region.clone()
-            },
+            region: region_of(function),
             kind: self.kind(),
         }
+    }
+}
+
+/// A function's region (the first of a first-generation Extension's regions).
+fn region_of(function: &FunctionDefinition) -> String {
+    if function.region.is_empty() {
+        function.regions.first().cloned().unwrap_or_default()
+    } else {
+        function.region.clone()
     }
 }
 
 /// One discovered schedule and its synthetic Pub/Sub topic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleDefinition {
+    /// The scheduled function's region-qualified id, the scheduler's key.
+    pub function_id: String,
+    /// The exported function name.
+    pub function_name: String,
+    /// The function's region.
+    pub region: String,
     /// Firebase project.
     pub project: String,
     /// Synthetic `firebase-schedule-*` topic.
@@ -113,6 +124,9 @@ pub fn discover(
                 .or_default()
                 .push(Target::Schedule(function.clone(), inventory.generation));
             schedules.push(ScheduleDefinition {
+                function_id: function.id.clone(),
+                function_name: function.name.clone(),
+                region: region_of(function),
                 project: project.to_owned(),
                 topic,
                 expression: schedule.schedule.clone(),

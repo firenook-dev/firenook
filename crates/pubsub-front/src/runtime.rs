@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
+use time::OffsetDateTime;
 
 use crate::broker::{Broker, FanoutSkip, FanoutTarget, Published, PushJob};
 use crate::error::PubsubError;
@@ -21,7 +22,12 @@ use crate::google::pubsub::v1::publisher_server::PublisherServer;
 use crate::google::pubsub::v1::schema_service_server::SchemaServiceServer;
 use crate::google::pubsub::v1::subscriber_server::SubscriberServer;
 use crate::google::pubsub::v1::{PubsubMessage, Subscription};
-use crate::scheduler::{ScheduleError, SchedulerRuntime};
+use crate::schedule_control::{
+    RunOutcome, RunScheduleError, RunTrigger, ScheduleRun, ScheduleView,
+};
+use crate::scheduler::{
+    ScheduleBook, ScheduleChanges, ScheduleDetail, ScheduleError, SchedulerRuntime,
+};
 
 /// The lease and push timer resolution.
 const TICK: Duration = Duration::from_millis(50);
@@ -44,7 +50,10 @@ struct Inner {
     queue: DispatchQueue,
     background: TriggerRegistry,
     targets: Mutex<BTreeMap<String, Vec<Target>>>,
-    schedules: Mutex<Vec<ScheduleDefinition>>,
+    /// Every schedule's state, keyed by function id.
+    schedules: Mutex<ScheduleBook>,
+    /// Bumped whenever a schedule's state changes.
+    schedule_revision: tokio::sync::watch::Sender<u64>,
     http: reqwest::Client,
     ticker: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Set by [`PubsubRuntime::shutdown`]: the timer never starts again.
@@ -347,6 +356,8 @@ impl PubsubRuntime {
         background: TriggerRegistry,
     ) -> Self {
         let (targets, schedules) = discover(project, inventory);
+        let mut book = ScheduleBook::default();
+        let problems = book.reconcile(schedules);
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(30))
@@ -359,7 +370,8 @@ impl PubsubRuntime {
                 queue,
                 background,
                 targets: Mutex::new(BTreeMap::new()),
-                schedules: Mutex::new(schedules),
+                schedules: Mutex::new(book),
+                schedule_revision: tokio::sync::watch::channel(0).0,
                 http,
                 ticker: Mutex::new(None),
                 stopped: AtomicBool::new(false),
@@ -371,6 +383,7 @@ impl PubsubRuntime {
             }),
         };
         runtime.install_targets(targets);
+        Self::report_schedule_problems(problems);
         runtime.start_ticker();
         runtime
     }
@@ -390,7 +403,11 @@ impl PubsubRuntime {
     /// Discovered schedule inventory.
     #[must_use]
     pub fn schedules(&self) -> Vec<ScheduleDefinition> {
-        lock(&self.inner.schedules).clone()
+        lock(&self.inner.schedules)
+            .entries
+            .values()
+            .map(|entry| entry.definition.clone())
+            .collect()
     }
 
     /// The HTTP/JSON application for the Pub/Sub port.
@@ -422,12 +439,14 @@ impl PubsubRuntime {
     /// available to deterministic test harnesses.
     pub fn start_scheduler(&self) -> Result<SchedulerRuntime, ScheduleError> {
         self.start_ticker();
-        let schedules = self.schedules();
-        Ok(SchedulerRuntime::start(self, &schedules))
+        let automatic = lock(&self.inner.schedules).automatic();
+        Ok(SchedulerRuntime::start(self, automatic))
     }
 
     /// Reconciles function targets after completed source registration.
-    /// Explicit topics, subscriptions, message ids and queued deliveries survive.
+    /// Explicit topics, subscriptions, message ids and queued deliveries
+    /// survive; so does every schedule's state, and an unchanged schedule
+    /// keeps its next tick.
     pub async fn refresh_inventory(
         &mut self,
         project: &str,
@@ -437,9 +456,23 @@ impl PubsubRuntime {
         let (targets, discovered) = discover(project, inventory);
         scheduler.stop().await;
         self.install_targets(targets);
-        *lock(&self.inner.schedules) = discovered;
+        let problems = lock(&self.inner.schedules).reconcile(discovered);
+        self.schedules_changed();
+        Self::report_schedule_problems(problems);
         *scheduler = self.start_scheduler()?;
         Ok(())
+    }
+
+    /// Says why schedules cannot run on a clock, once per new problem.
+    fn report_schedule_problems(problems: Vec<(String, String)>) {
+        for (function_id, problem) in problems {
+            // The official emulator never runs schedules on a clock; an
+            // expression Firenook cannot evaluate keeps Run now and the
+            // manual trigger route and loses only the automatic ticks.
+            eprintln!(
+                "firenook pubsub: schedule of {function_id} not run automatically ({problem}); run it from the console or through the Functions trigger route"
+            );
+        }
     }
 
     /// Whether `subscription` belongs to the functions consumer: it does
@@ -904,20 +937,160 @@ impl PubsubRuntime {
         }
     }
 
-    pub(crate) fn publish_scheduled(&self, schedule: &ScheduleDefinition) {
-        if !self.inner.background.background_enabled() {
-            return;
-        }
+    // ---------------------------------------------------------- schedules
+
+    /// Announces the book's revision on the schedule watch when it moved.
+    fn schedules_changed(&self) {
+        let revision = lock(&self.inner.schedules).revision;
+        self.inner.schedule_revision.send_if_modified(|announced| {
+            let moved = *announced != revision;
+            *announced = revision;
+            moved
+        });
+    }
+
+    /// Publishes one tick to the schedule's topic, as the clock does, and
+    /// hands it to the topic's functions.
+    fn publish_tick(&self, schedule: &ScheduleDefinition) -> Result<String, PubsubError> {
         let topic = topic_resource(&schedule.project, &schedule.topic);
-        if let Ok((_, published)) = self.inner.broker.publish(
+        let (ids, published) = self.inner.broker.publish(
             &topic,
             vec![PubsubMessage {
                 data: b"{}".to_vec(),
                 ..PubsubMessage::default()
             }],
-        ) {
-            self.deliver_to_functions(&published);
+        )?;
+        self.deliver_to_functions(&published);
+        Ok(ids.into_iter().next().unwrap_or_default())
+    }
+
+    /// The next tick of an automatic schedule (written for the views before
+    /// the clock sleeps); `None` once it left the inventory.
+    pub(crate) fn schedule_due(&self, function_id: &str) -> Option<OffsetDateTime> {
+        let due = lock(&self.inner.schedules).due(function_id, OffsetDateTime::now_utc());
+        self.schedules_changed();
+        due
+    }
+
+    /// The clock reached `due`: the tick is published unless the schedule
+    /// is paused (then only its next tick moves on) and recorded as a
+    /// `clock` run, or as a skipped one while background triggers are
+    /// paused or the broker refuses it.
+    pub(crate) fn clock_tick(&self, function_id: &str, due: OffsetDateTime) {
+        let now = OffsetDateTime::now_utc();
+        let definition = lock(&self.inner.schedules).advance(function_id, due, now);
+        if let Some(definition) = definition {
+            let run = if self.inner.background.background_enabled() {
+                match self.publish_tick(&definition) {
+                    Ok(message_id) => ScheduleRun {
+                        at: now,
+                        trigger: RunTrigger::Clock,
+                        message_id: Some(message_id),
+                        skipped: None,
+                    },
+                    Err(error) => ScheduleRun {
+                        at: now,
+                        trigger: RunTrigger::Clock,
+                        message_id: None,
+                        skipped: Some(RunScheduleError::Publish(error.message).to_string()),
+                    },
+                }
+            } else {
+                ScheduleRun {
+                    at: now,
+                    trigger: RunTrigger::Clock,
+                    message_id: None,
+                    skipped: Some(RunScheduleError::BackgroundPaused.to_string()),
+                }
+            };
+            lock(&self.inner.schedules).record(function_id, run);
         }
+        self.schedules_changed();
+    }
+
+    /// Publishes one tick of the function's schedule now, the same publish
+    /// the clock makes (it works while the schedule is paused), and records
+    /// a `console` run.
+    pub fn run_schedule(&self, function_id: &str) -> Result<RunOutcome, RunScheduleError> {
+        let definition = lock(&self.inner.schedules)
+            .entries
+            .get(function_id)
+            .map(|entry| entry.definition.clone())
+            .ok_or(RunScheduleError::NotScheduled)?;
+        if !self.inner.background.background_enabled() {
+            return Err(RunScheduleError::BackgroundPaused);
+        }
+        let message_id = self
+            .publish_tick(&definition)
+            .map_err(|error| RunScheduleError::Publish(error.message))?;
+        lock(&self.inner.schedules).record(
+            function_id,
+            ScheduleRun {
+                at: OffsetDateTime::now_utc(),
+                trigger: RunTrigger::Console,
+                message_id: Some(message_id.clone()),
+                skipped: None,
+            },
+        );
+        self.schedules_changed();
+        Ok(RunOutcome { message_id })
+    }
+
+    /// Pauses or resumes one function's schedule clock.
+    pub fn set_schedule_paused(
+        &self,
+        function_id: &str,
+        paused: bool,
+    ) -> Result<(), RunScheduleError> {
+        let found = lock(&self.inner.schedules).set_paused(function_id, paused);
+        self.schedules_changed();
+        if found {
+            Ok(())
+        } else {
+            Err(RunScheduleError::NotScheduled)
+        }
+    }
+
+    /// Every schedule, by function id.
+    #[must_use]
+    pub fn schedules_view(&self) -> Vec<ScheduleView> {
+        let book = lock(&self.inner.schedules);
+        book.entries.keys().filter_map(|id| book.view(id)).collect()
+    }
+
+    /// One function's schedule.
+    #[must_use]
+    pub fn schedule_view(&self, function_id: &str) -> Option<ScheduleView> {
+        lock(&self.inner.schedules).view(function_id)
+    }
+
+    /// One schedule with its upcoming ticks and its kept runs.
+    #[must_use]
+    pub fn schedule_detail(&self, function_id: &str) -> Option<ScheduleDetail> {
+        lock(&self.inner.schedules).detail(function_id)
+    }
+
+    /// Every schedule with its upcoming ticks and its kept runs, by function id.
+    #[must_use]
+    pub fn schedule_details(&self) -> Vec<ScheduleDetail> {
+        let book = lock(&self.inner.schedules);
+        book.entries
+            .keys()
+            .filter_map(|id| book.detail(id))
+            .collect()
+    }
+
+    /// The schedules stamped after `revision` (a live view's cursor).
+    #[must_use]
+    pub fn schedule_changes(&self, revision: u64) -> ScheduleChanges {
+        lock(&self.inner.schedules).changes_since(revision)
+    }
+
+    /// A receiver of the scheduler's revision, bumped whenever a schedule's
+    /// state changes (its next tick, a run, a pause, the inventory).
+    #[must_use]
+    pub fn schedule_watch(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.inner.schedule_revision.subscribe()
     }
 }
 

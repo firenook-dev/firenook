@@ -1,13 +1,30 @@
 //! Wall-clock `onSchedule` delivery: every discovered schedule publishes an
-//! empty tick to its synthetic `firebase-schedule-*` topic on its cadence
-//! (`every N minutes|hours`, `every day HH:MM` in UTC, five-field cron in UTC).
+//! empty tick to its synthetic `firebase-schedule-*` topic on its cadence.
+//!
+//! Cadences: `every N minutes|mins|hours`, the same within a daily window
+//! (`every 2 hours from 10:00 to 14:00`, `every 15 mins synchronized`),
+//! `every day HH:MM`, `every monday 09:00`, `every mon,wed,fri 09:00`, and
+//! five-field cron. Clock times and cron fields are civil times in the
+//! schedule's declared zone (UTC when none is declared).
+//!
+//! The scheduler is keyed by function id: [`ScheduleBook`] keeps each
+//! schedule's cadence, pause flag, next tick and runs, and survives codebase
+//! reloads, so an unchanged schedule keeps its next tick (its phase) across
+//! one.
 
+use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
-use time::{OffsetDateTime, Time};
+use time::{Date, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 
-use crate::functions::ScheduleDefinition;
+use crate::functions::{ScheduleDefinition, topic_resource};
 use crate::runtime::PubsubRuntime;
+use crate::schedule_control::{ScheduleRun, ScheduleView};
+
+/// Runs kept besides the first: the newest nineteen.
+const LATEST_RUNS: usize = 19;
+/// Upcoming ticks a schedule's detail lists.
+const UPCOMING: usize = 5;
 
 /// A schedule Firenook cannot run on a clock.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,32 +45,24 @@ pub struct SchedulerRuntime {
 }
 
 impl SchedulerRuntime {
-    pub(crate) fn start(runtime: &PubsubRuntime, schedules: &[ScheduleDefinition]) -> Self {
+    /// One clock task per automatic schedule of `function_ids`.
+    pub(crate) fn start(runtime: &PubsubRuntime, function_ids: Vec<String>) -> Self {
         let (shutdown, _) = tokio::sync::watch::channel(false);
-        let mut tasks = Vec::with_capacity(schedules.len());
-        for schedule in schedules {
-            let cadence = match Cadence::parse(schedule) {
-                Ok(cadence) => cadence,
-                Err(error) => {
-                    // The official emulator never runs schedules on a clock;
-                    // an expression Firenook cannot evaluate keeps the manual
-                    // trigger route and loses only the automatic ticks.
-                    eprintln!(
-                        "firenook pubsub: schedule for {} not run automatically ({error}); fire it through the Functions trigger route",
-                        schedule.topic
-                    );
-                    continue;
-                }
-            };
+        let mut tasks = Vec::with_capacity(function_ids.len());
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return Self { shutdown, tasks };
+        };
+        for function_id in function_ids {
             let runtime = runtime.clone();
-            let schedule = schedule.clone();
             let mut stopped = shutdown.subscribe();
-            tasks.push(tokio::spawn(async move {
-                loop {
-                    let delay = cadence.delay_from(OffsetDateTime::now_utc());
+            tasks.push(handle.spawn(async move {
+                // `None`: the schedule left the inventory or cannot run on a clock.
+                while let Some(due) = runtime.schedule_due(&function_id) {
+                    let delay = Duration::try_from(due - OffsetDateTime::now_utc())
+                        .unwrap_or(Duration::ZERO);
                     tokio::select! {
                         () = tokio::time::sleep(delay) => {
-                            runtime.publish_scheduled(&schedule);
+                            runtime.clock_tick(&function_id, due);
                         }
                         changed = stopped.changed() => {
                             if changed.is_err() || *stopped.borrow() {
@@ -80,23 +89,122 @@ impl SchedulerRuntime {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Cadence {
-    Interval(Duration),
-    DailyUtc(Time),
-    Cron(CronSpec),
+// ------------------------------------------------------------------ zones
+
+/// The zone a schedule's clock times and cron fields are civil times in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Zone {
+    Utc,
+    /// A zone with one offset all year (`Etc/GMT-5` is five hours east).
+    Fixed(UtcOffset),
 }
 
-/// A five-field cron expression evaluated in UTC (minute, hour, day of
-/// month, month, day of week; `*`, lists, ranges and `/step`).
-#[derive(Debug, Clone, Copy)]
+impl Zone {
+    /// The zone a schedule declares: UTC when it declares none.
+    pub(crate) fn resolve(name: Option<&str>) -> Result<Self, String> {
+        let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) else {
+            return Ok(Self::Utc);
+        };
+        let bare = name.strip_prefix("Etc/").unwrap_or(name);
+        if matches!(
+            bare,
+            "UTC" | "UCT" | "GMT" | "GMT0" | "GMT+0" | "GMT-0" | "Greenwich" | "Universal" | "Zulu"
+        ) {
+            return Ok(Self::Utc);
+        }
+        // `Etc/GMT+5` is five hours west of Greenwich: the POSIX sign.
+        if name.starts_with("Etc/GMT")
+            && let Some(hours) = bare
+                .strip_prefix("GMT")
+                .and_then(|hours| hours.parse::<i8>().ok())
+            && (-14..=12).contains(&hours)
+            && let Ok(offset) = UtcOffset::from_hms(-hours, 0, 0)
+        {
+            return Ok(Self::Fixed(offset));
+        }
+        Err(format!(
+            "time zone {name} is not in this engine's time-zone database"
+        ))
+    }
+
+    fn offset(self) -> UtcOffset {
+        match self {
+            Self::Utc => UtcOffset::UTC,
+            Self::Fixed(offset) => offset,
+        }
+    }
+
+    /// The civil time in this zone at `instant`.
+    fn civil(self, instant: OffsetDateTime) -> PrimitiveDateTime {
+        let local = instant.to_offset(self.offset());
+        PrimitiveDateTime::new(local.date(), local.time())
+    }
+
+    /// The instant a civil time in this zone names. A time a transition
+    /// skips resolves forward by the gap and a repeated one to its earlier
+    /// instant; a zone with one offset has neither.
+    fn instant(self, civil: PrimitiveDateTime) -> OffsetDateTime {
+        civil.assume_offset(self.offset()).to_offset(UtcOffset::UTC)
+    }
+}
+
+// ---------------------------------------------------------------- cadence
+
+/// How a schedule's clock ticks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cadence {
+    /// `every N minutes|hours`: from when the clock starts, independent of
+    /// zones.
+    Interval(Duration),
+    /// At one civil time on the weekdays set (bit `n` = `n` days after
+    /// Sunday): `every day 03:00`, `every monday 09:00`.
+    Weekly {
+        weekdays: u8,
+        time: Time,
+        zone: Zone,
+    },
+    /// Every `every` from `from` up to `to` each day (past midnight when
+    /// `to` is earlier): `every 2 hours from 10:00 to 14:00`.
+    Window {
+        every: time::Duration,
+        from: Time,
+        to: Time,
+        zone: Zone,
+    },
+    Cron {
+        spec: CronSpec,
+        zone: Zone,
+    },
+}
+
+/// A five-field cron expression (minute, hour, day of month, month, day of
+/// week; `*`, lists, ranges, `/step`, month and weekday names, `7` for
+/// Sunday). When both day fields are restricted a day matching either runs,
+/// as cron has it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CronSpec {
     minutes: u64,
     hours: u32,
     days: u32,
     months: u16,
     weekdays: u8,
+    any_day: bool,
+    any_weekday: bool,
 }
+
+const MONTHS: [&str; 12] = [
+    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+];
+const WEEKDAYS: [&str; 7] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const WEEKDAY_NAMES: [&str; 7] = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+];
 
 impl CronSpec {
     pub(crate) fn parse(expression: &str) -> Option<Self> {
@@ -104,29 +212,51 @@ impl CronSpec {
         if fields.len() != 5 {
             return None;
         }
+        let weekdays = Self::field(fields[4], 0, 7, &WEEKDAYS)?;
+        // `7` is Sunday too.
+        let weekdays = (weekdays & 0x7f) | u64::from(weekdays & (1 << 7) != 0);
         Some(Self {
-            minutes: Self::field(fields[0], 0, 59)?,
-            hours: u32::try_from(Self::field(fields[1], 0, 23)?).ok()?,
-            days: u32::try_from(Self::field(fields[2], 1, 31)?).ok()?,
-            months: u16::try_from(Self::field(fields[3], 1, 12)?).ok()?,
-            weekdays: u8::try_from(Self::field(fields[4], 0, 6)? & 0x7f).ok()?,
+            minutes: Self::field(fields[0], 0, 59, &[])?,
+            hours: u32::try_from(Self::field(fields[1], 0, 23, &[])?).ok()?,
+            days: u32::try_from(Self::field(fields[2], 1, 31, &[])?).ok()?,
+            months: u16::try_from(Self::field(fields[3], 1, 12, &MONTHS)?).ok()?,
+            weekdays: u8::try_from(weekdays).ok()?,
+            any_day: fields[2] == "*" || fields[2] == "?",
+            any_weekday: fields[4] == "*" || fields[4] == "?",
         })
     }
 
+    /// One value of a field: a number, or a name (`names[0]` is the field's
+    /// minimum when it has names: `sun` is 0, `jan` 1).
+    fn value(text: &str, minimum: u64, names: &[&str]) -> Option<u64> {
+        if let Ok(value) = text.parse::<u64>() {
+            return Some(value);
+        }
+        let lower = text.to_ascii_lowercase();
+        names
+            .iter()
+            .position(|name| *name == lower)
+            .and_then(|position| u64::try_from(position).ok())
+            .map(|position| position + minimum)
+    }
+
     /// Bit set of the allowed values of one field.
-    fn field(text: &str, minimum: u64, maximum: u64) -> Option<u64> {
+    fn field(text: &str, minimum: u64, maximum: u64, names: &[&str]) -> Option<u64> {
         let mut bits = 0_u64;
         for part in text.split(',') {
             let (range, step) = match part.split_once('/') {
                 Some((range, step)) => (range, step.parse::<u64>().ok().filter(|step| *step > 0)?),
                 None => (part, 1),
             };
-            let (start, end) = if range == "*" {
+            let (start, end) = if range == "*" || range == "?" {
                 (minimum, maximum)
             } else if let Some((start, end)) = range.split_once('-') {
-                (start.parse::<u64>().ok()?, end.parse::<u64>().ok()?)
+                (
+                    Self::value(start, minimum, names)?,
+                    Self::value(end, minimum, names)?,
+                )
             } else {
-                let value = range.parse::<u64>().ok()?;
+                let value = Self::value(range, minimum, names)?;
                 (value, if step == 1 { value } else { maximum })
             };
             if start < minimum || end > maximum || start > end {
@@ -141,23 +271,35 @@ impl CronSpec {
         Some(bits)
     }
 
-    fn matches(self, moment: OffsetDateTime) -> bool {
-        let weekday = moment.weekday().number_days_from_sunday();
-        self.minutes & (1 << u64::from(moment.minute())) != 0
-            && self.hours & (1 << u32::from(moment.hour())) != 0
-            && self.days & (1 << u32::from(moment.day())) != 0
-            && self.months & (1 << u16::from(u8::from(moment.month()))) != 0
-            && self.weekdays & (1 << weekday) != 0
+    fn matches(self, civil: PrimitiveDateTime) -> bool {
+        let weekday = civil.weekday().number_days_from_sunday();
+        let day = self.days & (1 << u32::from(civil.day())) != 0;
+        let weekday = self.weekdays & (1 << weekday) != 0;
+        let day_matches = match (self.any_day, self.any_weekday) {
+            (true, true) => true,
+            (false, true) => day,
+            (true, false) => weekday,
+            (false, false) => day || weekday,
+        };
+        self.minutes & (1 << u64::from(civil.minute())) != 0
+            && self.hours & (1 << u32::from(civil.hour())) != 0
+            && self.months & (1 << u16::from(u8::from(civil.month()))) != 0
+            && day_matches
     }
 
-    /// The next matching minute strictly after `now`, within a year.
-    pub(crate) fn next_after(self, now: OffsetDateTime) -> Option<OffsetDateTime> {
+    /// The next matching minute strictly after `now` in `zone`, within a
+    /// year.
+    pub(crate) fn next_after(self, now: OffsetDateTime, zone: Zone) -> Option<OffsetDateTime> {
+        let start = zone.civil(now);
         let mut candidate =
-            now.replace_second(0).ok()?.replace_nanosecond(0).ok()? + time::Duration::minutes(1);
-        let limit = now + time::Duration::days(366);
+            start.replace_second(0).ok()?.replace_nanosecond(0).ok()? + time::Duration::minutes(1);
+        let limit = start + time::Duration::days(366);
         while candidate <= limit {
             if self.matches(candidate) {
-                return Some(candidate);
+                let instant = zone.instant(candidate);
+                if instant > now {
+                    return Some(instant);
+                }
             }
             candidate += time::Duration::minutes(1);
         }
@@ -165,85 +307,454 @@ impl CronSpec {
     }
 }
 
+/// `HH:MM`, 24-hour.
+fn clock(text: &str) -> Result<Time, ScheduleError> {
+    let invalid = || ScheduleError(format!("invalid schedule time of day: {text}"));
+    let (hour, minute) = text.split_once(':').ok_or_else(invalid)?;
+    let hour = hour.parse::<u8>().map_err(|_| invalid())?;
+    let minute = minute.parse::<u8>().map_err(|_| invalid())?;
+    if minute > 59 || hour > 23 || text.len() > 5 {
+        return Err(invalid());
+    }
+    Time::from_hms(hour, minute, 0).map_err(|_| invalid())
+}
+
+/// `N minutes|mins|hours` as a duration.
+fn period(count: &str, unit: &str) -> Option<Duration> {
+    let count = count.parse::<u64>().ok().filter(|count| *count > 0)?;
+    let seconds = match unit {
+        "minute" | "minutes" | "min" | "mins" => count.checked_mul(60)?,
+        "hour" | "hours" => count.checked_mul(3_600)?,
+        _ => return None,
+    };
+    Some(Duration::from_secs(seconds))
+}
+
+/// A comma-separated weekday list (`mon,wed,fri`, `monday`) as a bit set.
+fn weekday_set(text: &str) -> Option<u8> {
+    let mut bits = 0_u8;
+    for part in text.split(',') {
+        let lower = part.to_ascii_lowercase();
+        let day = WEEKDAYS
+            .iter()
+            .position(|name| *name == lower)
+            .or_else(|| WEEKDAY_NAMES.iter().position(|name| *name == lower))?;
+        bits |= 1 << day;
+    }
+    Some(bits)
+}
+
 impl Cadence {
     pub(crate) fn parse(schedule: &ScheduleDefinition) -> Result<Self, ScheduleError> {
-        let words = schedule
-            .expression
-            .split_ascii_whitespace()
-            .collect::<Vec<_>>();
-        if let ["every", count, unit] = words.as_slice()
-            && let Ok(count) = count.parse::<u64>()
-            && count > 0
-        {
-            let seconds = match *unit {
-                "minute" | "minutes" => count.saturating_mul(60),
-                "hour" | "hours" => count.saturating_mul(3_600),
-                _ => 0,
-            };
-            if seconds > 0 {
-                return Ok(Self::Interval(Duration::from_secs(seconds)));
+        Self::parse_expression(&schedule.expression, schedule.time_zone.as_deref())
+    }
+
+    pub(crate) fn parse_expression(
+        expression: &str,
+        time_zone: Option<&str>,
+    ) -> Result<Self, ScheduleError> {
+        let words = expression.split_ascii_whitespace().collect::<Vec<_>>();
+        let zone = || Zone::resolve(time_zone).map_err(ScheduleError);
+        match words.as_slice() {
+            ["every", count, unit] if period(count, unit).is_some() => {
+                return Ok(Self::Interval(period(count, unit).unwrap_or_default()));
             }
+            ["every", count, unit, "from", from, "to", to] => {
+                if let Some(every) = period(count, unit) {
+                    return Ok(Self::Window {
+                        every: time::Duration::try_from(every).unwrap_or(time::Duration::HOUR),
+                        from: clock(from)?,
+                        to: clock(to)?,
+                        zone: zone()?,
+                    });
+                }
+            }
+            ["every", count, unit, "synchronized"] => {
+                if let Some(every) = period(count, unit) {
+                    return Ok(Self::Window {
+                        every: time::Duration::try_from(every).unwrap_or(time::Duration::HOUR),
+                        from: Time::MIDNIGHT,
+                        to: Time::from_hms(23, 59, 0).unwrap_or(Time::MIDNIGHT),
+                        zone: zone()?,
+                    });
+                }
+            }
+            ["every", "day", time] => {
+                return Ok(Self::Weekly {
+                    weekdays: 0x7f,
+                    time: clock(time)?,
+                    zone: zone()?,
+                });
+            }
+            ["every", days, time] if weekday_set(days).is_some() => {
+                return Ok(Self::Weekly {
+                    weekdays: weekday_set(days).unwrap_or_default(),
+                    time: clock(time)?,
+                    zone: zone()?,
+                });
+            }
+            _ => {}
         }
-        if let ["every", "day", clock] = words.as_slice() {
-            if schedule
-                .time_zone
-                .as_deref()
-                .is_some_and(|zone| zone != "UTC" && zone != "Etc/UTC")
-            {
-                return Err(ScheduleError(format!(
-                    "unsupported non-UTC schedule zone: {}",
-                    schedule.time_zone.as_deref().unwrap_or_default()
-                )));
-            }
-            let (hour, minute) = clock
-                .split_once(':')
-                .ok_or_else(|| ScheduleError("invalid daily schedule clock".to_owned()))?;
-            let hour = hour
-                .parse::<u8>()
-                .map_err(|_| ScheduleError("invalid daily schedule hour".to_owned()))?;
-            let minute = minute
-                .parse::<u8>()
-                .map_err(|_| ScheduleError("invalid daily schedule minute".to_owned()))?;
-            return Time::from_hms(hour, minute, 0)
-                .map(Self::DailyUtc)
-                .map_err(|error| ScheduleError(error.to_string()));
-        }
-        if let Some(cron) = CronSpec::parse(&schedule.expression) {
-            if schedule
-                .time_zone
-                .as_deref()
-                .is_some_and(|zone| zone != "UTC" && zone != "Etc/UTC")
-            {
-                eprintln!(
-                    "firenook pubsub: cron schedule {} declares time zone {}; Firenook evaluates it in UTC",
-                    schedule.expression,
-                    schedule.time_zone.as_deref().unwrap_or_default()
-                );
-            }
-            return Ok(Self::Cron(cron));
+        if let Some(spec) = CronSpec::parse(expression) {
+            return Ok(Self::Cron {
+                spec,
+                zone: zone()?,
+            });
         }
         Err(ScheduleError(format!(
-            "unsupported Firebase schedule expression: {}",
-            schedule.expression
+            "unsupported Firebase schedule expression: {expression}"
         )))
     }
 
-    pub(crate) fn delay_from(self, now: OffsetDateTime) -> Duration {
+    /// The tick after `now`; `None` when the cadence never ticks again
+    /// within a year (a cron for the 31st of February).
+    pub(crate) fn next_after(self, now: OffsetDateTime) -> Option<OffsetDateTime> {
         match self {
-            Self::Interval(duration) => duration,
-            Self::Cron(cron) => cron
-                .next_after(now)
-                .and_then(|next| Duration::try_from(next - now).ok())
-                .unwrap_or(Duration::from_hours(8784)),
-            Self::DailyUtc(time) => {
-                let today = now.replace_time(time);
-                let next = if today > now {
-                    today
-                } else {
-                    today + time::Duration::days(1)
-                };
-                Duration::try_from(next - now).unwrap_or(Duration::from_secs(1))
+            Self::Interval(duration) => Some(now + duration),
+            Self::Cron { spec, zone } => spec.next_after(now, zone),
+            Self::Weekly {
+                weekdays,
+                time,
+                zone,
+            } => {
+                let mut date = zone.civil(now).date();
+                for _ in 0..8 {
+                    if weekdays & (1 << date.weekday().number_days_from_sunday()) != 0 {
+                        let instant = zone.instant(PrimitiveDateTime::new(date, time));
+                        if instant > now {
+                            return Some(instant);
+                        }
+                    }
+                    date = date.next_day()?;
+                }
+                None
             }
+            Self::Window {
+                every,
+                from,
+                to,
+                zone,
+            } => {
+                // A window that runs past midnight may have started yesterday.
+                let mut date = zone.civil(now).date().previous_day()?;
+                for _ in 0..3 {
+                    if let Some(next) = window_next(date, every, from, to, zone, now) {
+                        return Some(next);
+                    }
+                    date = date.next_day()?;
+                }
+                None
+            }
+        }
+    }
+}
+
+/// The first tick after `now` of the window that starts on `date`.
+fn window_next(
+    date: Date,
+    every: time::Duration,
+    from: Time,
+    to: Time,
+    zone: Zone,
+    now: OffsetDateTime,
+) -> Option<OffsetDateTime> {
+    let start = PrimitiveDateTime::new(date, from);
+    let end = if to >= from {
+        PrimitiveDateTime::new(date, to)
+    } else {
+        PrimitiveDateTime::new(date.next_day()?, to)
+    };
+    let mut candidate = start;
+    while candidate <= end {
+        let instant = zone.instant(candidate);
+        if instant > now {
+            return Some(instant);
+        }
+        candidate += every;
+    }
+    None
+}
+
+// ------------------------------------------------------------------- book
+
+/// One schedule's state, kept across codebase reloads by function id.
+#[derive(Debug)]
+pub(crate) struct ScheduleEntry {
+    pub(crate) definition: ScheduleDefinition,
+    pub(crate) cadence: Result<Cadence, String>,
+    pub(crate) paused: bool,
+    /// When the clock next ticks; written by the clock before it sleeps.
+    pub(crate) next_at: Option<OffsetDateTime>,
+    pub(crate) runs: u64,
+    pub(crate) first_run: Option<ScheduleRun>,
+    /// The newest runs after the first, oldest first.
+    pub(crate) latest: VecDeque<ScheduleRun>,
+    pub(crate) omitted: u64,
+    /// The book revision at which this schedule last changed.
+    pub(crate) stamp: u64,
+}
+
+impl ScheduleEntry {
+    fn new(definition: ScheduleDefinition) -> Self {
+        let cadence = Cadence::parse(&definition).map_err(|error| error.0);
+        Self {
+            definition,
+            cadence,
+            paused: false,
+            next_at: None,
+            runs: 0,
+            first_run: None,
+            latest: VecDeque::new(),
+            omitted: 0,
+            stamp: 0,
+        }
+    }
+
+    fn record(&mut self, run: ScheduleRun) {
+        self.runs += 1;
+        if self.first_run.is_none() {
+            self.first_run = Some(run);
+            return;
+        }
+        self.latest.push_back(run);
+        if self.latest.len() > LATEST_RUNS {
+            self.latest.pop_front();
+            self.omitted += 1;
+        }
+    }
+
+    fn last_run(&self) -> Option<&ScheduleRun> {
+        self.latest.back().or(self.first_run.as_ref())
+    }
+}
+
+/// One schedule as the Schedules page shows it: the view plus its upcoming
+/// ticks and its kept runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleDetail {
+    pub view: ScheduleView,
+    /// The next five ticks (a paused schedule publishes nothing at them);
+    /// empty when the schedule is not automatic.
+    pub upcoming: Vec<OffsetDateTime>,
+    /// The first run since start, kept for good.
+    pub first_run: Option<ScheduleRun>,
+    /// The nineteen latest runs after the first, newest first.
+    pub last_runs: Vec<ScheduleRun>,
+    /// Runs between the first and the kept latest.
+    pub omitted_runs: u64,
+}
+
+/// The schedules that changed since a revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleChanges {
+    /// The book's revision now.
+    pub revision: u64,
+    /// Schedules stamped after the revision asked about.
+    pub changed: Vec<ScheduleView>,
+    /// A schedule left the inventory since then, so a view must refetch.
+    pub removed: bool,
+}
+
+/// Every schedule's state, keyed by function id.
+#[derive(Debug, Default)]
+pub(crate) struct ScheduleBook {
+    pub(crate) entries: BTreeMap<String, ScheduleEntry>,
+    pub(crate) revision: u64,
+    removed_at: u64,
+}
+
+impl ScheduleBook {
+    fn bump(&mut self) -> u64 {
+        self.revision += 1;
+        self.revision
+    }
+
+    /// Takes a new inventory's schedules. An unchanged schedule keeps
+    /// everything, its next tick included; a changed one keeps its pause
+    /// flag and runs and starts its clock afresh; a schedule that left is
+    /// forgotten. Returns the schedules whose problem is new.
+    pub(crate) fn reconcile(
+        &mut self,
+        definitions: Vec<ScheduleDefinition>,
+    ) -> Vec<(String, String)> {
+        let revision = self.bump();
+        let mut problems = Vec::new();
+        let mut kept = BTreeMap::new();
+        for definition in definitions {
+            let id = definition.function_id.clone();
+            let entry = match self.entries.remove(&id) {
+                Some(entry) if entry.definition == definition => entry,
+                Some(mut entry) => {
+                    let fresh = ScheduleEntry::new(definition);
+                    if let Err(problem) = &fresh.cadence
+                        && entry.cadence.as_ref().err() != Some(problem)
+                    {
+                        problems.push((id.clone(), problem.clone()));
+                    }
+                    entry.definition = fresh.definition;
+                    entry.cadence = fresh.cadence;
+                    entry.next_at = None;
+                    entry.stamp = revision;
+                    entry
+                }
+                None => {
+                    let mut entry = ScheduleEntry::new(definition);
+                    if let Err(problem) = &entry.cadence {
+                        problems.push((id.clone(), problem.clone()));
+                    }
+                    entry.stamp = revision;
+                    entry
+                }
+            };
+            kept.insert(id, entry);
+        }
+        if !self.entries.is_empty() {
+            self.removed_at = revision;
+        }
+        self.entries = kept;
+        problems
+    }
+
+    /// The next tick of an automatic schedule, computed and stored when the
+    /// clock has none yet.
+    pub(crate) fn due(&mut self, function_id: &str, now: OffsetDateTime) -> Option<OffsetDateTime> {
+        let entry = self.entries.get_mut(function_id)?;
+        let cadence = *entry.cadence.as_ref().ok()?;
+        if let Some(next) = entry.next_at {
+            return Some(next);
+        }
+        let next = cadence.next_after(now)?;
+        entry.next_at = Some(next);
+        let revision = self.bump();
+        if let Some(entry) = self.entries.get_mut(function_id) {
+            entry.stamp = revision;
+        }
+        Some(next)
+    }
+
+    /// The clock reached `due`: moves the next tick on (past `now` when the
+    /// process slept through ticks) and says whether to publish (`None`:
+    /// paused, gone, or not this tick).
+    pub(crate) fn advance(
+        &mut self,
+        function_id: &str,
+        due: OffsetDateTime,
+        now: OffsetDateTime,
+    ) -> Option<ScheduleDefinition> {
+        let revision = self.bump();
+        let entry = self.entries.get_mut(function_id)?;
+        if entry.next_at != Some(due) {
+            return None;
+        }
+        let cadence = *entry.cadence.as_ref().ok()?;
+        let next = cadence
+            .next_after(due)
+            .filter(|next| *next > now)
+            .or_else(|| cadence.next_after(now));
+        entry.next_at = next;
+        entry.stamp = revision;
+        (!entry.paused).then(|| entry.definition.clone())
+    }
+
+    pub(crate) fn record(&mut self, function_id: &str, run: ScheduleRun) {
+        let revision = self.bump();
+        if let Some(entry) = self.entries.get_mut(function_id) {
+            entry.record(run);
+            entry.stamp = revision;
+        }
+    }
+
+    pub(crate) fn set_paused(&mut self, function_id: &str, paused: bool) -> bool {
+        let revision = self.bump();
+        let Some(entry) = self.entries.get_mut(function_id) else {
+            return false;
+        };
+        if entry.paused != paused {
+            entry.paused = paused;
+            entry.stamp = revision;
+        }
+        true
+    }
+
+    /// The ids of the schedules a clock runs.
+    pub(crate) fn automatic(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.cadence.is_ok())
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    pub(crate) fn view(&self, function_id: &str) -> Option<ScheduleView> {
+        let entry = self.entries.get(function_id)?;
+        let definition = &entry.definition;
+        let topic = topic_resource(&definition.project, &definition.topic);
+        let shares_topic_with = self
+            .entries
+            .iter()
+            .filter(|(id, other)| {
+                id.as_str() != function_id
+                    && other.definition.project == definition.project
+                    && other.definition.topic == definition.topic
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        Some(ScheduleView {
+            function_id: function_id.to_owned(),
+            function_name: definition.function_name.clone(),
+            region: definition.region.clone(),
+            topic,
+            shares_topic_with,
+            expression: definition.expression.clone(),
+            time_zone: definition.time_zone.clone(),
+            evaluated_in: definition
+                .time_zone
+                .clone()
+                .filter(|zone| !zone.trim().is_empty())
+                .unwrap_or_else(|| "UTC".to_owned()),
+            automatic: entry.cadence.is_ok(),
+            problem: entry.cadence.as_ref().err().cloned(),
+            paused: entry.paused,
+            next_run_at: entry.next_at.filter(|_| entry.cadence.is_ok()),
+            runs: entry.runs,
+            last_run: entry.last_run().cloned(),
+        })
+    }
+
+    pub(crate) fn detail(&self, function_id: &str) -> Option<ScheduleDetail> {
+        let view = self.view(function_id)?;
+        let entry = self.entries.get(function_id)?;
+        let mut upcoming = Vec::with_capacity(UPCOMING);
+        if let (Ok(&cadence), Some(next)) = (entry.cadence.as_ref(), entry.next_at) {
+            let mut at = next;
+            upcoming.push(at);
+            while upcoming.len() < UPCOMING {
+                let Some(following) = cadence.next_after(at) else {
+                    break;
+                };
+                at = following;
+                upcoming.push(at);
+            }
+        }
+        Some(ScheduleDetail {
+            view,
+            upcoming,
+            first_run: entry.first_run.clone(),
+            last_runs: entry.latest.iter().rev().cloned().collect(),
+            omitted_runs: entry.omitted,
+        })
+    }
+
+    pub(crate) fn changes_since(&self, revision: u64) -> ScheduleChanges {
+        ScheduleChanges {
+            revision: self.revision,
+            changed: self
+                .entries
+                .iter()
+                .filter(|(_, entry)| entry.stamp > revision)
+                .filter_map(|(id, _)| self.view(id))
+                .collect(),
+            removed: self.removed_at > revision,
         }
     }
 }

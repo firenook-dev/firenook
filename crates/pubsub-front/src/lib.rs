@@ -31,7 +31,7 @@ pub use runtime::{
 pub use schedule_control::{
     RunOutcome, RunScheduleError, RunTrigger, ScheduleControl, ScheduleRun, ScheduleView,
 };
-pub use scheduler::{ScheduleError, SchedulerRuntime};
+pub use scheduler::{ScheduleChanges, ScheduleDetail, ScheduleError, SchedulerRuntime};
 
 use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
 
