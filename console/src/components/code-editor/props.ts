@@ -34,6 +34,11 @@ export interface CodeEditorProps {
    */
   tidyPaste?: ((text: string) => string | undefined) | undefined
   readOnly?: boolean | undefined
+  /**
+   * Take the keyboard on arrival. For an editor that was opened to type
+   * in, like the grid's own, where the alternative is a click to start.
+   */
+  autoFocus?: boolean | undefined
   ariaLabel?: string | undefined
   /** Put on the element that holds the text, which is what a test types into. */
   testId?: string | undefined

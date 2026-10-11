@@ -33,15 +33,25 @@ export type FsValue =
   | { type: 'null' }
   | { type: 'vector'; values: number[] }
 
-/** Whether only part of this value was loaded. */
+/**
+ * Whether only part of this value was loaded, here or anywhere inside it.
+ *
+ * Inside as well, because a grid page cuts at every level: a map whose own
+ * entries all arrived can still hold a map sent as its count alone — the
+ * engine sends one level below the field — or a string cut to its first
+ * 64 bytes. Asked only of the top, a `payload` holding a `usage` map
+ * opened in the grid's editor with `usage` empty, and Save wrote it back
+ * that way; Copy copied it that way too.
+ */
 export function isPartial(value: FsValue): boolean {
   switch (value.type) {
     case 'string':
     case 'bytes':
       return value.elided !== undefined
     case 'map':
+      return value.count !== undefined || Object.values(value.fields).some(isPartial)
     case 'array':
-      return value.count !== undefined
+      return value.count !== undefined || value.items.some(isPartial)
     default:
       return false
   }

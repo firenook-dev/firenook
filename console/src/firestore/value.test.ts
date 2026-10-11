@@ -5,7 +5,9 @@ import {
   displayValue,
   editorText,
   encodeValue,
+  type FsValue,
   fromJson,
+  isPartial,
   isRestShape,
   parseEditorText,
   relativeTime,
@@ -148,5 +150,25 @@ describe('telling a typed export from plain JSON', () => {
 
   it('needs every field to be typed, not just the first', () => {
     expect(isRestShape({ a: { stringValue: 'x' }, b: 'plain' })).toBe(false)
+  })
+})
+
+describe('a value only partly loaded', () => {
+  it('counts a cut anywhere inside it, not only at the top', () => {
+    // The grid's page sends one level below a field: a map nested in a map
+    // arrives as its count alone, with no entries, inside a parent whose
+    // own entries all arrived.
+    const nested: FsValue = {
+      type: 'map',
+      fields: {
+        backend: { type: 'string', value: 'codex' },
+        usage: { type: 'map', fields: {}, count: 2 },
+      },
+    }
+    expect(isPartial(nested)).toBe(true)
+    expect(
+      isPartial({ type: 'array', items: [{ type: 'string', value: 'abc', elided: 900 }] }),
+    ).toBe(true)
+    expect(isPartial({ type: 'map', fields: { usage: { type: 'map', fields: {} } } })).toBe(false)
   })
 })

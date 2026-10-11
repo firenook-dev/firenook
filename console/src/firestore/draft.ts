@@ -185,15 +185,35 @@ function parseRaw(node: DraftNode): Parsed {
 
 type Rebuilt = { ok: true; children: DraftNode[] } | { ok: false; error: string }
 
-/** The rows a container's raw JSON stands for, or why it stands for none. */
+/**
+ * The rows a container's raw JSON stands for, or why it stands for none.
+ *
+ * Read exactly as the document's JSON tab reads a document, so the two
+ * views of JSON in this console agree about what the same text means. It
+ * used to read the text plainly: an ISO date typed here stayed a string,
+ * and `3.0` saved as the integer 3, where the JSON tab would have made
+ * them a timestamp and a double. And the message for text that does not
+ * parse is the parser's own, with its line and column, as the tab's is.
+ */
 function rawChildren(node: DraftNode): Rebuilt {
-  const parsed = parseEditorText(node.type, node.text)
-  if (!parsed.ok) return parsed
-  if (parsed.value.type === 'map')
-    return { ok: true, children: mapEntries(parsed.value.fields, node.children) }
-  if (parsed.value.type === 'array')
-    return { ok: true, children: itemNodes(parsed.value.items, node.children) }
-  return { ok: false, error: `A ${node.type} needs JSON of the same shape` }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(node.text)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Not valid JSON' }
+  }
+  const value = readContainer(parsed, node.text)
+  if (node.type === 'map' && value?.type === 'map')
+    return { ok: true, children: mapEntries(value.fields, node.children) }
+  if (node.type === 'array' && value?.type === 'array')
+    return { ok: true, children: itemNodes(value.items, node.children) }
+  return {
+    ok: false,
+    error:
+      node.type === 'map'
+        ? 'A map is written as a JSON object'
+        : 'An array is written as a JSON array',
+  }
 }
 
 /**
@@ -266,7 +286,9 @@ function collect(
     const container = node.type === 'map' || node.type === 'array'
     if (container && !node.raw) collect(node.children, node.type === 'map', found)
     else {
-      const parsed = parseEditorText(node.type, node.text)
+      // A container in JSON is read the way it will be saved, so what is
+      // said here is what Save would say.
+      const parsed = container ? parseNode(node) : parseEditorText(node.type, node.text)
       if (!parsed.ok) problem.value = parsed.error
     }
     if (problem.name !== undefined || problem.value !== undefined) found.set(node.id, problem)
@@ -430,11 +452,28 @@ export function nodesToJson(nodes: readonly DraftNode[]): Record<string, unknown
  */
 export function nodesFromJson(text: string, current: readonly DraftNode[]): DraftNode[] {
   const parsed: unknown = JSON.parse(text)
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-    throw new Error('The document must be a JSON object')
-  const value = fromJson(parsed, INFER)
-  if (value.type !== 'map') throw new Error('The document must be a JSON object')
-  return mapEntries(readDoubles(value, text).fields, current)
+  const value = Array.isArray(parsed) ? undefined : readContainer(parsed, text)
+  if (value?.type !== 'map') throw new Error('The document must be a JSON object')
+  return mapEntries(value.fields, current)
+}
+
+/**
+ * Parsed JSON as a map or an array, with everything inside it read as far
+ * as the text allows — the shapes, the ISO dates, the numbers written with
+ * a point — or `undefined` when it is neither.
+ *
+ * The outermost value is never inferred, because it is already known: it
+ * is the document, or the map or array being edited. Read through
+ * `fromJson` whole, a map holding exactly a `latitude` and a `longitude`
+ * came back a geopoint, and was refused as not being a map at all.
+ */
+function readContainer(parsed: unknown, text: string): FsValue | undefined {
+  if (Array.isArray(parsed))
+    return readDoubles({ type: 'array', items: parsed.map((item) => fromJson(item, INFER)) }, text)
+  if (!parsed || typeof parsed !== 'object') return undefined
+  const fields: Record<string, FsValue> = {}
+  for (const [key, item] of Object.entries(parsed)) fields[key] = fromJson(item, INFER)
+  return readDoubles({ type: 'map', fields }, text)
 }
 
 /**
@@ -445,7 +484,7 @@ export function nodesFromJson(text: string, current: readonly DraftNode[]): Draf
  * whole-reading double from the JSON view — `3.0` went in and
  * `integerValue` came out.
  */
-function readDoubles(value: FsMap, text: string): FsMap {
+function readDoubles(value: FsValue, text: string): FsValue {
   const spans = valueSpans(text)
   const fix = (item: FsValue, path: readonly string[]): FsValue => {
     if (item.type === 'number') {
@@ -467,10 +506,8 @@ function readDoubles(value: FsMap, text: string): FsMap {
       }
     return item
   }
-  return fix(value, []) as FsMap
+  return fix(value, [])
 }
-
-type FsMap = Extract<FsValue, { type: 'map' }>
 
 /** Named entries, keeping whichever rows the JSON still describes. */
 function mapEntries(fields: Record<string, FsValue>, current: readonly DraftNode[]): DraftNode[] {

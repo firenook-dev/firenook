@@ -24,20 +24,30 @@
 // constraint. A value that is a structure — a map, an array, a vector, a
 // string with newlines — opens as a panel from the same corner, with the
 // field tree the inspector uses inside it. Same rows, same type menu, same
-// add-an-entry and edit-as-JSON, because it is the same component: there
-// is one way to edit a Firestore value in this console, and the grid is
-// now one more place it appears.
+// add-an-entry, because it is the same component: there is one way to edit
+// a Firestore value in this console, and the grid is now one more place it
+// appears. A map or an array also has the inspector's Fields and JSON
+// switch, and its JSON is the inspector's editor.
 //
 // Enter saves, Escape gives up, and clicking anywhere else saves — the
 // spreadsheet's rules, which is what a grid is read as. Only the field is
 // written, with a mask, so nothing else in the document can be lost to a
 // value someone else changed while this one was open.
 
-import { Button, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
-import { BracketsCurlyIcon, PlusIcon } from '@phosphor-icons/react'
+import { Button, Tabs, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
+import { PlusIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
+import { CodeEditor } from '@/components/code-editor'
 import type { InferredColumn } from '../columns'
 import {
   type DraftNode,
@@ -49,6 +59,8 @@ import {
   sameValue,
   toggleRaw,
 } from '../draft'
+import { typeMarks } from '../json-marks'
+import { tidyJson } from '../json-text'
 import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { type FsDocument, type FsValue, encodeValue, isPartial } from '../value'
@@ -56,7 +68,7 @@ import { type FieldEditing, FieldEditingProvider } from './field-context'
 import { COLUMNS, FieldRows } from './field-row'
 import { StripButton } from './strip-button'
 import { TypeMenu } from './type-menu'
-import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './value-editors'
+import { ValueControls, ValueEditor, valueIsRegion } from './value-editors'
 import { useWorkbench } from './workbench-context'
 
 /**
@@ -296,7 +308,27 @@ function Editing({
     setFocus(node.type === 'map' ? `${child.id}:name` : child.id)
   }
 
-  const live = node.children.filter((child) => child.removed !== true).length
+  // JSON that does not read as one yet has no rows to go back to. The
+  // text is the only copy of that work, so the switch waits for it.
+  const broken = raw && problem?.value !== undefined
+  // What the rows would hold, counted from the text while it is the one
+  // being typed, so the switch says what it would switch to.
+  const live = (raw ? toggleRaw(node) : node).children.filter(
+    (child) => child.removed !== true,
+  ).length
+  const rowsName = node.type === 'map' ? 'Fields' : 'Items'
+  // While the JSON is open the rows are the ones it was opened from, so
+  // the marks read those: they say which values carry a type the text
+  // cannot, as the inspector's own JSON tab does.
+  const annotate = useCallback(
+    (text: string) => typeMarks(text, node.children, node.type === 'array'),
+    [node.children, node.type],
+  )
+  const format = () => {
+    const tidied = tidyJson(node.text)
+    if (tidied === undefined) setError('This is not JSON yet, so there is nothing to lay out')
+    else change({ ...node, text: tidied })
+  }
   const shown = error ?? problem?.value ?? problem?.name
 
   return (
@@ -317,6 +349,16 @@ function Editing({
             onPointerDownCapture={() => {
               inside.current = true
             }}
+            // ⌘↵ on the way down, before anything inside has it. The JSON
+            // editor reads it as "insert a blank line", and would have
+            // typed one into the text that was being saved.
+            onKeyDownCapture={(event) => {
+              if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
+              if (root.current?.contains(event.target as Node) !== true) return
+              event.preventDefault()
+              event.stopPropagation()
+              finish()
+            }}
             onKeyDown={(event) => {
               // Keys pressed in the editor's own menus arrive here too, by
               // way of React; those menus answer Escape and Enter themselves.
@@ -325,9 +367,6 @@ function Editing({
               if (event.key === 'Escape' && !event.defaultPrevented) {
                 event.preventDefault()
                 cancel()
-              } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault()
-                finish()
               } else if (
                 event.key === 'Enter' &&
                 (event.target as HTMLElement).getAttribute('role') === 'switch'
@@ -374,10 +413,35 @@ function Editing({
                   <span className="min-w-0 truncate font-mono text-[12px] font-medium text-kumo-default">
                     {field}
                   </span>
-                  {container && !raw && (
-                    <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
-                      {node.type === 'map' ? `{${live}}` : `[${live}]`}
-                    </span>
+                  {/* The inspector's switch, worded the same, where an
+                      unlabelled `{}` toggle was: the JSON was there and
+                      read as one more icon, so it went unfound. */}
+                  {container && (
+                    <Tabs
+                      size="sm"
+                      variant="segmented"
+                      className="shrink-0"
+                      value={raw ? 'json' : 'rows'}
+                      onValueChange={(next) => {
+                        if ((next === 'json') !== raw && !broken) change(toggleRaw(node))
+                      }}
+                      tabs={[
+                        {
+                          value: 'rows',
+                          label: (
+                            <Tooltip
+                              content={`Fix the JSON to go back to ${rowsName.toLowerCase()}`}
+                              disabled={!broken}
+                              render={<span />}
+                            >
+                              {rowsName} · {live}
+                            </Tooltip>
+                          ),
+                          className: broken ? 'cursor-not-allowed opacity-50' : '',
+                        },
+                        { value: 'json', label: 'JSON' },
+                      ]}
+                    />
                   )}
                   <span className="ml-auto flex shrink-0 items-center gap-0.5">
                     {container && !raw && (
@@ -392,17 +456,18 @@ function Editing({
                         }
                       />
                     )}
-                    {container && (
+                    {raw && (
                       <Tooltip
-                        content={raw ? 'Back to rows' : 'Edit as JSON'}
+                        content="Lay the JSON out again, two spaces"
                         render={
-                          <StripButton
-                            label={`Edit ${field} as JSON`}
-                            icon={<BracketsCurlyIcon size={14} />}
-                            on={raw}
-                            disabled={raw && problem?.value !== undefined}
-                            onClick={() => change(toggleRaw(node))}
-                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={format}
+                            data-testid="cell-format-json"
+                          >
+                            Format JSON
+                          </Button>
                         }
                       />
                     )}
@@ -414,50 +479,56 @@ function Editing({
                     />
                   </span>
                 </div>
-                <div className="min-h-0 flex-1 overflow-auto">
-                  {container && !raw ? (
-                    <div className={`py-2 pr-3 pl-5 ${COLUMNS}`}>
-                      <FieldRows
-                        nodes={node.children}
-                        named={node.type === 'map'}
-                        onChange={(children) => change({ ...node, children })}
-                      />
-                      {live === 0 && (
-                        <button
-                          type="button"
-                          onClick={addEntry}
-                          className="col-span-2 h-8 rounded-md text-left text-[12px] text-kumo-subtle hover:text-kumo-default"
-                        >
-                          {node.type === 'map'
-                            ? 'No entries yet. Add one'
-                            : 'No items yet. Add one'}
-                        </button>
-                      )}
-                    </div>
-                  ) : raw ? (
-                    <div className="p-2">
-                      <textarea
+                {raw ? (
+                  // The editor scrolls itself, so its box only flexes: it
+                  // grows with the JSON until the window has no more room,
+                  // and keeps a few lines to type into when there is none.
+                  <div className="flex min-h-[148px] flex-1 flex-col p-2">
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md ring ring-kumo-line focus-within:ring-kumo-focus">
+                      <CodeEditor
                         value={node.text}
-                        onChange={(event) => change({ ...node, text: event.target.value })}
-                        rows={Math.min(16, Math.max(4, node.text.split('\n').length))}
-                        spellCheck={false}
-                        className={valueAreaClass(problem?.value !== undefined)}
-                        aria-label={`${field} value`}
-                        // oxlint-disable-next-line jsx-a11y/no-autofocus -- the editor was opened to type in this
+                        onChange={(text) => change({ ...node, text })}
+                        annotate={annotate}
+                        tidyPaste={tidyJson}
                         autoFocus
+                        ariaLabel={`${field} JSON`}
+                        testId="cell-json"
                       />
                     </div>
-                  ) : (
-                    <div className="p-2">
-                      <ValueEditor
-                        node={node}
-                        onChange={change}
-                        label={field}
-                        invalid={problem?.value !== undefined}
-                      />
-                    </div>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    {container ? (
+                      <div className={`py-2 pr-3 pl-5 ${COLUMNS}`}>
+                        <FieldRows
+                          nodes={node.children}
+                          named={node.type === 'map'}
+                          onChange={(children) => change({ ...node, children })}
+                        />
+                        {live === 0 && (
+                          <button
+                            type="button"
+                            onClick={addEntry}
+                            className="col-span-2 h-8 rounded-md text-left text-[12px] text-kumo-subtle hover:text-kumo-default"
+                          >
+                            {node.type === 'map'
+                              ? 'No entries yet. Add one'
+                              : 'No items yet. Add one'}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-2">
+                        <ValueEditor
+                          node={node}
+                          onChange={change}
+                          label={field}
+                          invalid={problem?.value !== undefined}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex shrink-0 items-center gap-2 border-t border-kumo-line py-1.5 pr-1.5 pl-3">
                   <span
                     className={`min-w-0 flex-1 truncate text-[12px] ${

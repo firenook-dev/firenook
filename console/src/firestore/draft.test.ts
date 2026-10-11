@@ -325,6 +325,54 @@ describe('one field as JSON', () => {
     expect(toggleRaw(typed)).toBe(typed)
     expect(problemsOf([typed]).get(typed.id)?.value).toBeDefined()
   })
+
+  it('reads typed JSON as the JSON tab reads a document', () => {
+    // It read the text plainly: a date typed here saved as a string and
+    // `3.0` as the integer 3, where the document's own JSON tab gives a
+    // timestamp and a double for the same characters.
+    const typed = {
+      ...toggleRaw(nested()),
+      text: '{"at": "2026-09-20T09:00:00Z", "rate": 3.0, "count": 3}',
+    }
+    const tab = nodesFromJson(typed.text, [])
+    expect(parseNodeValue(typed)).toEqual(parseNodeValue({ ...typed, raw: false, children: tab }))
+    expect(parseNodeValue(typed)).toEqual({
+      type: 'map',
+      fields: {
+        at: stamp('2026-09-20T09:00:00.000Z'),
+        rate: whole(3, false),
+        count: whole(3, true),
+      },
+    })
+    // An array's items too, by position.
+    const list = toggleRaw(nodeFrom('xs', { type: 'array', items: [] }))
+    expect(parseNodeValue({ ...list, text: '[1.0, "2026-09-20T09:00:00Z"]' })).toEqual({
+      type: 'array',
+      items: [whole(1, false), stamp('2026-09-20T09:00:00.000Z')],
+    })
+  })
+
+  it('keeps the map it is editing a map, whatever its keys', () => {
+    // A map holding exactly a latitude and a longitude is the shape a
+    // geopoint is written in. Inside it is read as one; the map itself
+    // is the thing being edited, and was refused as not being a map.
+    const open = toggleRaw(nodeFrom('spot', { type: 'map', fields: {} }))
+    expect(parseNodeValue({ ...open, text: '{"latitude": 3, "longitude": 101}' })).toEqual({
+      type: 'map',
+      fields: { latitude: whole(3, true), longitude: whole(101, true) },
+    })
+    expect(nodesFromJson('{"latitude": 3, "longitude": 101}', []).map((n) => n.name)).toEqual([
+      'latitude',
+      'longitude',
+    ])
+  })
+
+  it('says what is wrong with broken JSON where it is', () => {
+    const typed = { ...toggleRaw(nested()), text: '{"dasd" 1}' }
+    expect(problemsOf([typed]).get(typed.id)?.value).toMatch(/position|line|column/i)
+    const shape = { ...toggleRaw(nested()), text: '[1]' }
+    expect(problemsOf([shape]).get(shape.id)?.value).toBe('A map is written as a JSON object')
+  })
 })
 
 function parseNodeValue(node: DraftNode): FsValue {

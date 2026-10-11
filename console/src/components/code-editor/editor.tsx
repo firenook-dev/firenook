@@ -271,6 +271,7 @@ export default function CodeEditor({
   annotate,
   tidyPaste,
   readOnly = false,
+  autoFocus = false,
   ariaLabel,
   testId,
 }: CodeEditorProps) {
@@ -281,9 +282,9 @@ export default function CodeEditor({
   // any of it never means tearing the editor down — and the editor is
   // built once, which is what keeps the cursor, the selection, the undo
   // history and every fold across a re-render.
-  const latest = useRef({ value, readOnly, onChange, annotate, tidyPaste })
+  const latest = useRef({ value, readOnly, autoFocus, onChange, annotate, tidyPaste })
   useEffect(() => {
-    latest.current = { value, readOnly, onChange, annotate, tidyPaste }
+    latest.current = { value, readOnly, autoFocus, onChange, annotate, tidyPaste }
   })
 
   useEffect(() => {
@@ -329,6 +330,7 @@ export default function CodeEditor({
       }),
     })
     view.current = editor
+    if (latest.current.autoFocus) editor.focus()
     return () => {
       editor.destroy()
       view.current = null

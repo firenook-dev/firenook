@@ -90,9 +90,9 @@ const SAYS: Record<Kind, { is: string; because: (literal: string) => string; pla
  * A double is in here only when it reads like an integer: `1.5` is a
  * double to JSON as well, and needs no help.
  */
-export function carriedTypes(nodes: readonly DraftNode[]): Map<string, Kind> {
+export function carriedTypes(nodes: readonly DraftNode[], named = true): Map<string, Kind> {
   const found = new Map<string, Kind>()
-  walk(nodes, true, [], found)
+  walk(nodes, named, [], found)
   return found
 }
 
@@ -202,8 +202,13 @@ function compare(
  * teaching the editor to read one of these back out of the text also
  * stops it being marked, with nothing here to keep in step.
  */
-export function typeMarks(text: string, nodes: readonly DraftNode[]): CodeMark[] {
-  const carried = carriedTypes(nodes)
+export function typeMarks(
+  text: string,
+  nodes: readonly DraftNode[],
+  /** The text is an array's, numbered, rather than a document's or a map's, keyed. */
+  items = false,
+): CodeMark[] {
+  const carried = carriedTypes(nodes, !items)
   if (carried.size === 0) return []
   const inferred = inferredTypes(text)
   const marks: CodeMark[] = []
@@ -226,7 +231,7 @@ export function typeMarks(text: string, nodes: readonly DraftNode[]): CodeMark[]
       message:
         `${says.is} — ${says.because(text.slice(span.from, to))}, ` +
         `so editing this value here saves it as ${says.plain}. ` +
-        'The Fields tab keeps the type.',
+        `The ${items ? 'Items' : 'Fields'} tab keeps the type.`,
     })
   }
   return marks

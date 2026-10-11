@@ -99,8 +99,12 @@ Three rules when touching it: the fields the paging cursor orders by go in
 `keep`, or paging lands in the wrong place; `entryCount` is the only way to
 count a container, because the entries that arrived are not all of them;
 and `isPartial` blocks inline editing, because saving a previewed string
-would write the fragment over the value. The inspector is unaffected: it has
-always fetched the document itself (2 ms for a 100 KB one).
+would write the fragment over the value. `isPartial` is **deep**: the cut
+happens at every level (a container below depth 1 arrives as its count
+alone, a nested string as 64 bytes), and asking only the top let the cell
+editor open `payload` with its nested `usage` empty and save it so; the
+grid's Copy had the same hole. The inspector is unaffected: it has always
+fetched the document itself (2 ms for a 100 KB one).
 
 **The engine does not know its own version.** Every crate here carries the
 `0.0.1` workspace placeholder, because the product ships as an npm package
@@ -491,7 +495,14 @@ a value. Parsing the text directly loses every type JSON cannot write down
 *looked* at as JSON would have saved as a different map. Routing through
 `rawChildren` lets `agrees` keep whichever node the JSON still describes,
 which is the same round trip the document-level JSON tab makes. `mapEntries`
-and `itemNodes` are that one rule, shared by both.
+and `itemNodes` are that one rule, shared by both. The text is read by the
+same rules too (`readContainer`: everything inside inferred with `INFER`,
+doubles read from the literal, the outermost value never inferred, so a map
+holding exactly `latitude`/`longitude` stays a map), and a parse failure is
+the parser's own message with its position. It used to read the text
+plainly, so a date typed into a field's JSON stayed a string and `3.0` saved
+as an integer where the JSON tab would have made them a timestamp and a
+double.
 
 `draft.ts` is pure and unit-tested: `nodesFrom` builds the tree,
 `parseNode` reads it back, `problemsOf` says what is wrong *by node*, and
@@ -1192,8 +1203,18 @@ retype that changes shape swaps line ↔ panel and moves focus.
   writes nothing.
 - A missing field, or a `null`, opens as its column's type (`string` when
   the column is all null) and creates the field when typed into.
-- A previewed value (`isPartial`) is fetched whole first through
+- A previewed value (`isPartial`, deep) is fetched whole first through
   `documentQuery` — saving the fragment is the bug this guards.
+- A map or array panel has the inspector's **Fields · N | JSON** switch
+  (Kumo `Tabs`, segmented sm, in the header; `Items · N` for an array),
+  not an icon toggle — the `{}` was there and went unfound. The JSON is the
+  inspector's `CodeEditor` (lazy chunk, `autoFocus`, `typeMarks` against the
+  rows it was opened from, `tidyPaste`) with **Format JSON** where the `+`
+  sits in rows. The switch is `toggleRaw`, so Fields waits (dimmed, with a
+  tooltip) while the JSON does not parse. ⌘↵ is taken in
+  `onKeyDownCapture`, before CodeMirror reads it as "insert a blank line".
+  Nested containers inside the rows keep their small `{}` toggle, as in the
+  inspector.
 - `useSelection.editing` marks an edit in progress so the workbench's and
   grid's shortcuts stand aside wherever focus is; the grid clears it on
   unmount. The number box takes `formOutside` so its word is not drawn

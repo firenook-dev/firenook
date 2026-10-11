@@ -3299,6 +3299,103 @@ test('every value edits where it is, as the inspector edits it', async ({ page }
   await expect.poll(async () => (await stored('inplace/k2')).title).toEqual(text('Clicked away'))
 })
 
+test('a map edited in the grid has the inspector JSON view, and all of the map', async ({
+  page,
+}) => {
+  const long = 'x'.repeat(120)
+  await seed(page.request, 'inlinejson', {
+    j1: {
+      payload: {
+        mapValue: {
+          fields: {
+            backend: text('codex'),
+            ratio: { doubleValue: 269 },
+            owner: { referenceValue: `${resource()}/users/u1` },
+            note: text(long),
+            usage: {
+              mapValue: {
+                fields: { input: { integerValue: '12' }, output: { integerValue: '40' } },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto(`${origin()}/console/firestore?path=inlinejson`)
+  const editor = page.getByTestId('cell-editor')
+  const stored = async () => {
+    const response = await page.request.get(`${documents()}/inlinejson/j1`, { headers: owner })
+    const fields = ((await response.json()) as { fields: Record<string, unknown> }).fields
+    return (fields.payload as { mapValue: { fields: Record<string, Record<string, unknown>> } })
+      .mapValue.fields
+  }
+
+  await (await reach(page, 'inlinejson/j1', 'payload')).dblclick()
+  // The inspector's switch, named as it is there, where an unlabelled
+  // `{}` toggle was — the JSON was there and went unfound.
+  const rows = editor.getByRole('tab', { name: /^Fields/ })
+  const json = editor.getByRole('tab', { name: 'JSON' })
+  await expect(rows).toHaveText('Fields · 5')
+  await expect(rows).toHaveAttribute('aria-selected', 'true')
+  await expect(editor.getByLabel('Edit payload as JSON')).toHaveCount(0)
+  // All of it. The grid's page sends one level below a field, so `usage`
+  // arrived as a count with no entries and `note` as its first 64 bytes;
+  // the editor opened from that, and Save wrote it back that way.
+  await expect(editor.getByRole('textbox', { name: 'note value' })).toHaveValue(long)
+
+  // The inspector's editor — lines, folding, the type marks — rather than
+  // a text box, with the caret already in it.
+  await json.click()
+  const code = editor.getByTestId('cell-json')
+  await expect(code).toBeFocused()
+  await expect(editor.locator('.cm-lineNumbers')).toBeVisible()
+  await expect(editor.locator('.cm-lint-marker-info')).toHaveCount(2)
+  expect(JSON.parse(await code.innerText())).toEqual({
+    backend: 'codex',
+    note: long,
+    owner: 'users/u1',
+    ratio: 269,
+    usage: { input: 12, output: 40 },
+  })
+
+  // JSON that does not read as JSON keeps its text: the rows wait for it,
+  // and ⌘↵ refuses to save without typing the blank line CodeMirror reads
+  // it as.
+  await code.press('ControlOrMeta+End')
+  await page.keyboard.type(' x')
+  const lines = (await code.innerText()).split('\n').length
+  await rows.click()
+  await expect(json).toHaveAttribute('aria-selected', 'true')
+  await code.press('ControlOrMeta+Enter')
+  await expect(editor).toContainText(/position|line|column/i)
+  expect((await code.innerText()).split('\n')).toHaveLength(lines)
+
+  // Typed JSON is read as the JSON tab reads a document: the date is a
+  // timestamp and `3.0` a double, and Format keeps the point.
+  await code.fill(
+    `{"backend": "claude", "note": "${long}", "owner": "users/u1", "ratio": 269, ` +
+      '"usage": {"input": 12, "output": 40}, "at": "2026-09-20T09:00:00Z", "rate": 3.0}',
+  )
+  await expect(rows).toHaveText('Fields · 7')
+  await editor.getByTestId('cell-format-json').click()
+  await expect(code).toContainText('"rate": 3.0')
+  await code.press('ControlOrMeta+Enter')
+  await expect(editor).toHaveCount(0)
+  await expect.poll(async () => (await stored()).backend).toEqual(text('claude'))
+  const saved = await stored()
+  expect(saved.rate).toEqual({ doubleValue: 3 })
+  expect(Object.keys(saved.at ?? {})).toEqual(['timestampValue'])
+  // What JSON cannot write down stayed what it was, and nothing was cut.
+  expect(saved.ratio).toEqual({ doubleValue: 269 })
+  expect(Object.keys(saved.owner ?? {})).toEqual(['referenceValue'])
+  expect(saved.note).toEqual(text(long))
+  expect(saved.usage).toEqual({
+    mapValue: { fields: { input: { integerValue: '12' }, output: { integerValue: '40' } } },
+  })
+})
+
 test('the keyboard walks the cells, edits the one it is on, and copies it', async ({ page }) => {
   const docs: Record<string, Record<string, unknown>> = {}
   for (let at = 0; at < 5; at++)

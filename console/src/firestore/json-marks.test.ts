@@ -258,6 +258,28 @@ describe('nodesFromJson, reading types out of the text', () => {
   })
 })
 
+describe('typeMarks on an array', () => {
+  it('finds the values by position and names the Items tab', () => {
+    const nodes = nodesFrom(
+      {
+        xs: {
+          type: 'array',
+          items: [
+            { type: 'string', value: 'a' },
+            { type: 'bytes', base64: 'd29ybGQ=' },
+          ],
+        },
+      },
+      true,
+    )
+    const items = nodes[0]?.children ?? []
+    const text = '[\n  "a",\n  "d29ybGQ="\n]'
+    const marks = typeMarks(text, items, true)
+    expect(marks.map((mark) => text.slice(mark.from, mark.to))).toEqual(['"d29ybGQ="'])
+    expect(marks[0]?.message).toContain('The Items tab keeps the type.')
+  })
+})
+
 describe('typeMarks marks only what editing would cost', () => {
   // Confirmed on the wire by editing each of these in the JSON tab and
   // saving. A timestamp, a geopoint, a vector and a double written
