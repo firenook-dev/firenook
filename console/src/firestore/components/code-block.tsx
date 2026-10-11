@@ -8,9 +8,7 @@
 // types are the one thing only the console knows.
 
 import { Button, Tabs } from '@cloudflare/kumo'
-import { CheckIcon, CopyIcon } from '@phosphor-icons/react'
-import { PanelTitle } from '@/components/kit'
-import { useState } from 'react'
+import { CopyGlyph, PanelTitle, useCopied } from '@/components/kit'
 import { CODE_TARGETS, type CodeTarget } from '../query'
 
 /** Where an app sends REST calls: the Firestore port the engine advertises. */
@@ -32,7 +30,7 @@ export function CodeBlock({
   setTarget: (target: CodeTarget) => void
   title: string
 }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopied()
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
@@ -40,12 +38,9 @@ export function CodeBlock({
         <Button
           variant="secondary"
           size="sm"
-          icon={copied ? <CheckIcon /> : <CopyIcon />}
-          onClick={() => {
-            void navigator.clipboard.writeText(code)
-            setCopied(true)
-            window.setTimeout(() => setCopied(false), 1500)
-          }}
+          icon={<CopyGlyph copied={copied} />}
+          onClick={() => void copy(code)}
+          data-testid="copy-code"
         >
           {copied ? 'Copied' : 'Copy'}
         </Button>

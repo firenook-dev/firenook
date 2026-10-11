@@ -67,3 +67,21 @@ body {
     --row-flash: var(--color-kumo-tint);
   }
 }
+
+/* Kumo's InlineCopyText — the project id, a document's id and path, a
+   service's address — swaps its copy mark for a tick on the spot. The tick
+   rises in, the way Kumo's ClipboardText and the console's own copy
+   buttons (`CopyGlyph`) move it, so every copy in the console answers
+   alike. Keyed on the state Kumo exposes: the button is named "Copied"
+   while the tick shows. */
+@keyframes copied-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-kumo-component='InlineCopyText'][aria-label='Copied'] > svg {
+    animation: copied-in 200ms ease-out;
+  }
+}

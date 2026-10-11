@@ -5,9 +5,9 @@
 // shows the slot only while a section fills it, and hides it on `t`.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { SquareHalfIcon } from '@phosphor-icons/react'
 import { type ReactNode, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { PanelIcon } from '@/components/kit'
 import { useLayout } from '@/lib/layout'
 
 export function SectionPanel({ label, children }: { label: string; children: ReactNode }) {
@@ -56,7 +56,7 @@ export function PanelToggle({ where }: { where: 'panel' | 'toolbar' }) {
           variant="ghost"
           size="sm"
           shape="square"
-          icon={<SquareHalfIcon />}
+          icon={<PanelIcon open={open} size={16} />}
           aria-label={`${open ? 'Hide' : 'Show'} ${name}`}
           aria-pressed={open}
           onClick={toggle}

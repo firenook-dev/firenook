@@ -307,10 +307,23 @@ test('the inspector saves typed edits and the change flashes back through the li
   })
   expect(response.ok()).toBeTruthy()
   await expect(row).toContainText('11', { timeout: 5_000 })
-  // The channel says whether what you are looking at is current. It is
-  // the only thing left in that corner: the window it used to open is
-  // gone, and a count you cannot look into is trivia.
-  await expect(page.getByTestId('live-state')).toContainText('Live')
+  // The channel speaks only once it has dropped. While it is up the grid
+  // being current is the normal case, and a green "Live" in the toolbar
+  // said so beside the engine's own green dot in the bar above.
+  await expect(page.getByTestId('live-state')).toHaveCount(0)
+})
+
+test('a dropped live channel says the grid may be out of date', async ({ page }) => {
+  await page.route('**/firestore/changes**', (route) => route.abort())
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  const state = page.getByTestId('live-state')
+  await expect(state).toContainText('Reconnecting')
+  await state.hover()
+  await expect(page.locator('.kumo-tooltip-popup')).toContainText('so the grid may be out of date')
+  // Back, and it says nothing again.
+  await page.unroute('**/firestore/changes**')
+  await expect(state).toHaveCount(0, { timeout: 10_000 })
 })
 
 test('documents are added and deleted from the workbench', async ({ page }) => {
@@ -777,6 +790,13 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await expect(page.locator('header').getByTestId('panel-toggle')).toHaveCount(0)
   const toggle = page.getByTestId('panel-toggle')
   const open = await toggle.boundingBox()
+  // The nav's own glyph — the window and bar Kumo's sidebar trigger draws
+  // — with the bar where the nav's sits in the same state. It was
+  // Phosphor's half-filled square: two marks for one idea.
+  const navGlyph = await panelGlyph(page.getByTestId('nav-toggle'))
+  expect(navGlyph).toHaveLength(2)
+  expect(navGlyph[1]?.[1]).toBe('1px')
+  expect(await panelGlyph(toggle)).toEqual(navGlyph)
   // Its key is a key, as the Filter button's `f` is — not "(t)" spelt out.
   await toggle.hover()
   const tip = page.locator('.kumo-tooltip-popup').filter({ hasText: 'Hide the schema panel' })
@@ -788,6 +808,10 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await page.keyboard.press('t')
   await expect(panel).toBeHidden()
   await expect(page.getByTestId('toolbar').getByTestId('panel-toggle')).toBeVisible()
+  // Shut, the bar moves over as the nav's does when it is collapsed.
+  const shutGlyph = await panelGlyph(page.getByTestId('toolbar').getByTestId('panel-toggle'))
+  expect(shutGlyph.map(([d]) => d)).toEqual(navGlyph.map(([d]) => d))
+  expect(shutGlyph[1]?.[1]).toBe('10.5px')
   const shut = await toggle.boundingBox()
   expect(Math.abs((shut?.x ?? 0) - (open?.x ?? 99))).toBeLessThan(1)
   expect(Math.abs((shut?.y ?? 0) - (open?.y ?? 99))).toBeLessThan(1)
@@ -1204,6 +1228,7 @@ test('explain names what the query reads, and the index production would need', 
   await expect(missing).toContainText('Production needs a composite index')
   await page.getByTestId('copy-index-entry').click()
   await expect(page.getByTestId('copy-index-entry')).toContainText('Copied')
+  await ticked(page.getByTestId('copy-index-entry'))
   // What it copies has to be a real index file entry for this query.
   const copied = await page.evaluate(() =>
     (navigator as Navigator & { clipboard: { readText(): Promise<string> } }).clipboard.readText(),
@@ -3219,6 +3244,32 @@ async function seed(
  * off screen is not in the page until the grid has been scrolled to it.
  */
 /** Whether this is what the pointer would land on at its own centre. */
+/** A toggle's glyph: each path's shape, and where Tailwind has moved it. */
+const panelGlyph = (button: Locator) =>
+  button.locator('svg path').evaluateAll((paths) =>
+    paths.map((path) => [
+      path.getAttribute('d'),
+      // Tailwind's translate classes set `translate`, not `transform`.
+      path.ownerDocument.defaultView!.getComputedStyle(path).translate,
+    ]),
+  )
+
+/**
+ * A copy button that has copied: the copy mark gone up out of its box and
+ * the tick risen into it, as Kumo's ClipboardText moves them.
+ */
+const ticked = async (button: Locator) => {
+  const glyph = button.locator('[data-copied]')
+  await expect(glyph).toHaveCount(1)
+  await expect
+    .poll(() =>
+      glyph
+        .locator('[data-part="tick"]')
+        .evaluate((tick) => tick.ownerDocument.defaultView!.getComputedStyle(tick).opacity),
+    )
+    .toBe('1')
+}
+
 const onTop = (item: Locator) =>
   item.evaluate((el) => {
     const box = el.getBoundingClientRect()
@@ -3853,6 +3904,7 @@ test('ticked rows turn the query line into their own bar, which reaches every do
   await page.getByTestId('copy-selection').click()
   await page.getByTestId('copy-json').click()
   await expect(page.getByText('Copied 2 documents as JSON')).toBeVisible()
+  await ticked(page.getByTestId('copy-selection'))
   const copied = JSON.parse(
     await page.evaluate(() =>
       (
@@ -3878,4 +3930,116 @@ test('ticked rows turn the query line into their own bar, which reaches every do
   // the engine read that as the document alone.
   const beneath = await page.request.get(`${documents()}/bulk/s000/notes/n1`, { headers: owner })
   expect(beneath.status()).toBe(404)
+})
+
+test('every copy answers with the same tick', async ({ page }) => {
+  const clipboard = () =>
+    page.evaluate(() =>
+      (
+        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
+      ).clipboard.readText(),
+    )
+
+  // The path's copy said nothing at all: a click on it looked like a
+  // click that missed. Now the tick rises in, and goes again.
+  await page.goto(`${origin()}/console/firestore?path=users/u_k65eq/orders`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  const copyPath = page.getByTestId('copy-path')
+  await copyPath.click()
+  await ticked(copyPath)
+  await expect.poll(clipboard).toBe('users/u_k65eq/orders')
+  await expect(copyPath.locator('[data-copied]')).toHaveCount(0)
+
+  // The document as code, in the inspector.
+  await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
+  await page.getByTestId('inspector').getByTestId('document-code').click()
+  const copyCode = page.getByTestId('copy-code')
+  await copyCode.click()
+  await expect(copyCode).toContainText('Copied')
+  await ticked(copyCode)
+  await expect.poll(clipboard).toContain('u_k65eq')
+  await page.keyboard.press('Escape')
+
+  // Kumo's inline copy — the project id, an id, a path — swaps in its
+  // tick on the spot; the tick rises in here too.
+  const projectId = page
+    .locator('[data-kumo-component="InlineCopyText"]')
+    .filter({ hasText: project() })
+  await projectId.click()
+  await expect(projectId).toHaveAttribute('aria-label', 'Copied')
+  expect(
+    await projectId
+      .locator('svg')
+      .evaluate((svg) => svg.ownerDocument.defaultView!.getComputedStyle(svg).animationName),
+  ).toBe('copied-in')
+})
+
+test('the root landing keeps its recents to one row, in the cards’ columns', async ({ page }) => {
+  // Twelve, the most kept, with document paths far longer than a column.
+  const recents = [
+    ['users/u_k65eq/orders/5e500781-3d39-4534-8253-e727857315b6', 'document'],
+    ['users/*/orders', 'collection'],
+    ['users/u_k65eq/orders', 'collection'],
+    ['users/u_9f3k2/orders/a1ec0843-493e-4b79-9d6b-d630009d8d54', 'document'],
+    ['products', 'collection'],
+    ['events', 'collection'],
+    ['teams/t_real', 'document'],
+    ['users', 'collection'],
+    ['teams', 'collection'],
+    ['users/u_aa/orders/91606ec0-2710-419e-8595-b134d5395a2c', 'document'],
+    ['users/u_bb/orders', 'collection'],
+    ['products/p1', 'document'],
+  ].map(([path, kind], index) => ({ path, kind, at: 1000 - index }))
+  await page.goto(`${origin()}/console/firestore`)
+  await page.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+    key: `firenook.console.recents.${project()}.(default)`,
+    value: JSON.stringify(recents),
+  })
+  for (const width of [1024, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 800 })
+    await page.reload()
+    await expect(page.getByTestId('root-collection').first()).toBeVisible()
+    const layout = await page.getByTestId('recents').evaluate((recentsBox) => {
+      const view = recentsBox.ownerDocument.defaultView!
+      const boxes = [...recentsBox.querySelectorAll('[data-testid="recent"]')]
+        .map((chip) => chip.getBoundingClientRect())
+        .filter((box) => box.width > 0)
+      const cards = recentsBox.ownerDocument
+        .querySelector('[data-testid="root-collection"]')!
+        .closest('ul')!
+      return {
+        shown: boxes.map((box) => ({ x: box.x, y: box.y })),
+        columns: view.getComputedStyle(cards).gridTemplateColumns.split(' ').length,
+        cells: [...cards.children].map((cell) => cell.getBoundingClientRect().x),
+      }
+    })
+    // One row, as many as the cards have columns, each over its column.
+    expect(layout.shown.length).toBe(Math.min(layout.columns, 6))
+    expect(new Set(layout.shown.map((box) => box.y)).size).toBe(1)
+    layout.shown.forEach((box, index) =>
+      expect(Math.abs(box.x - (layout.cells[index] ?? NaN))).toBeLessThan(1),
+    )
+  }
+
+  // A long path is cut from the front: where a column has room for the
+  // id, the id shows whole, and the path before it still reads left to
+  // right up to it.
+  await page.setViewportSize({ width: 1440, height: 800 })
+  await page.reload()
+  const chip = page.getByTestId('recent').first()
+  const label = chip.locator('span[dir="rtl"]')
+  const leaf = chip.locator('[data-part="leaf"]')
+  expect(await label.evaluate((span) => span.scrollWidth > span.clientWidth)).toBe(true)
+  const labelBox = (await label.boundingBox())!
+  const leafBox = (await leaf.boundingBox())!
+  expect(leafBox.x).toBeGreaterThanOrEqual(labelBox.x)
+  expect(edge(leafBox)).toBeLessThanOrEqual(edge(labelBox) + 0.5)
+  const parentBox = (await leaf.locator('xpath=preceding-sibling::span').boundingBox())!
+  expect(Math.abs(edge(parentBox) - leafBox.x)).toBeLessThan(1)
+  await chip.hover()
+  await expect(page.locator('.kumo-tooltip-popup')).toHaveText(
+    'users/u_k65eq/orders/5e500781-3d39-4534-8253-e727857315b6',
+  )
+  await page.getByTestId('recent').filter({ hasText: 'users/*/orders' }).click()
+  await expect(page).toHaveURL(/path=users%2F\*%2Forders|path=users\/\*\/orders/)
 })

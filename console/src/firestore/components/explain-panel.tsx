@@ -7,9 +7,9 @@
 // panel exists to prevent.
 
 import { Badge, Button, Text } from '@cloudflare/kumo'
-import { CheckCircleIcon, CopyIcon, LightningIcon, WarningIcon, XIcon } from '@phosphor-icons/react'
+import { CheckCircleIcon, LightningIcon, WarningIcon, XIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { CopyGlyph, useCopied } from '@/components/kit'
 import {
   type Explanation,
   STRATEGY_DETAIL,
@@ -159,7 +159,7 @@ function Fact({
 }
 
 function IndexCard({ index }: { index: NonNullable<Explanation['index']> }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopied()
   const kind = index.composite ? 'composite index' : 'collection-group index'
   return (
     <div
@@ -202,12 +202,8 @@ function IndexCard({ index }: { index: NonNullable<Explanation['index']> }) {
               <Button
                 variant="secondary"
                 size="sm"
-                icon={copied ? <CheckCircleIcon /> : <CopyIcon />}
-                onClick={() => {
-                  void navigator.clipboard.writeText(index.configEntry)
-                  setCopied(true)
-                  window.setTimeout(() => setCopied(false), 1500)
-                }}
+                icon={<CopyGlyph copied={copied} />}
+                onClick={() => void copy(index.configEntry)}
                 title="Copy the firestore.indexes.json entry"
                 data-testid="copy-index-entry"
               >

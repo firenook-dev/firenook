@@ -4,7 +4,7 @@
 // beside it when a document is open. Everything on screen is live from the
 // engine's change feed.
 
-import { Button, Text } from '@cloudflare/kumo'
+import { Button, Text, Tooltip } from '@cloudflare/kumo'
 import { ShieldCheckIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
@@ -192,18 +192,28 @@ function WorkbenchData({
         <PanelToggle where="toolbar" />
         <PathBar />
         <Divider />
-        {/* The state, and nothing to click. The grid is kept current by
-            this channel, so a channel that has dropped is a grid that
-            looks fresh and is not — which is the one thing a dev tool
-            must not do quietly. The count beside it went with the window
-            it used to open: a number you cannot look into is trivia, and
-            it was counting writes since the tab opened while the panel
-            counted what the engine still held, under one word. */}
-        <span className="flex h-7 items-center px-1.5" data-testid="live-state">
-          <LiveDot
-            state={live === 'live' ? 'live' : live === 'offline' ? 'offline' : 'reconnecting'}
+        {/* The channel, said only when it has dropped. The grid is kept
+            current by it, so a dropped channel is a grid that looks fresh
+            and is not — the one thing a dev tool must not do quietly. While
+            it is up there is nothing to say: a green "Live" in every
+            toolbar was the normal case announced, beside the engine's own
+            green dot in the bar above, and a word that is always there is
+            a word nobody reads on the day it changes. The count beside it
+            went earlier, with the window it used to open. */}
+        {(live === 'reconnecting' || live === 'offline') && (
+          <Tooltip
+            content={
+              live === 'offline'
+                ? 'Changes are not arriving, so the grid may be out of date. Reload to reconnect.'
+                : 'Changes stopped arriving, so the grid may be out of date. Reconnecting.'
+            }
+            render={
+              <span className="flex h-7 items-center px-1.5" data-testid="live-state">
+                <LiveDot state={live} />
+              </span>
+            }
           />
-        </span>
+        )}
         {/* Not a property of the query below: the identity applies to every
             read the workbench makes, the schema tree and inspector included. */}
         <ViewAsPicker />

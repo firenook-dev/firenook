@@ -1,12 +1,8 @@
 import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
-import {
-  ArrowSquareOutIcon,
-  GaugeIcon,
-  SidebarSimpleIcon,
-  SquareHalfIcon,
-} from '@phosphor-icons/react'
+import { ArrowSquareOutIcon, GaugeIcon } from '@phosphor-icons/react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
+import { PanelIcon } from '@/components/kit'
 import {
   type PaletteGroup,
   type PaletteItem,
@@ -69,7 +65,7 @@ export function CommandPalette() {
         title: navOpen ? 'Collapse the sidebar' : 'Expand the sidebar',
         description: navOpen ? 'Icons only; hover to peek · [' : 'Icons and labels · [',
         keywords: 'navigation layout sidebar collapse expand',
-        icon: <SidebarSimpleIcon size={16} />,
+        icon: <PanelIcon open={navOpen} size={16} />,
         run: toggleNav,
       },
     ]
@@ -79,7 +75,7 @@ export function CommandPalette() {
         title: `${panelOpen ? 'Hide' : 'Show'} the ${panel.label.toLowerCase()} panel`,
         description: 'The column beside the content · t',
         keywords: 'layout tree schema rail sidebar',
-        icon: <SquareHalfIcon size={16} />,
+        icon: <PanelIcon open={panelOpen} size={16} />,
         run: togglePanel,
       })
     // Every theme is offered, the one in force included, so the list says

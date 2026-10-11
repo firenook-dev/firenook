@@ -10,9 +10,10 @@
 // end of the path without being dragged about by the path's length.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { CopyIcon, FolderPlusIcon } from '@phosphor-icons/react'
+import { FolderPlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
+import { CopyGlyph, useCopied } from '@/components/kit'
 import { useCreateDialog, validateId } from '../create'
 import { EMPTY_QUERY } from '../query'
 import { collectionsQuery, countQueryOptions } from '../queries'
@@ -26,6 +27,7 @@ export function PathBar() {
   const openCreate = useCreateDialog((state) => state.open)
   const [editing, setEditing] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const { copied, copy } = useCopied()
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -230,23 +232,23 @@ export function PathBar() {
         {/* Inside the field and against its right edge: the end of the path
             wherever the path ends, and a target that never moves. */}
         <Tooltip
-          content="Copy the path"
+          content={copied ? 'Copied' : 'Copy the path'}
           render={
             <Button
               variant="ghost"
               size="sm"
               shape="square"
-              icon={<CopyIcon />}
+              icon={<CopyGlyph copied={copied} />}
               aria-label="Copy the path"
               className="h-7 w-7 shrink-0"
-              onClick={() =>
-                void navigator.clipboard.writeText(
-                  editing ?? workbench.selectedDocument ?? workbench.path,
-                )
-              }
+              onClick={() => void copy(editing ?? workbench.selectedDocument ?? workbench.path)}
+              data-testid="copy-path"
             />
           }
         />
+        <span className="sr-only" aria-live="polite">
+          {copied ? 'Path copied' : ''}
+        </span>
         {editing !== null &&
           suggestions.data &&
           (matching(suggestions.data, editing).length > 0 || creatable) && (

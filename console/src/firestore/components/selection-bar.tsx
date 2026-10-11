@@ -10,14 +10,9 @@
 // aimed at the next row still lands on it.
 
 import { Button, DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
-import {
-  CaretDownIcon,
-  CopyIcon,
-  DownloadSimpleIcon,
-  TrashIcon,
-  XIcon,
-} from '@phosphor-icons/react'
+import { CaretDownIcon, DownloadSimpleIcon, TrashIcon, XIcon } from '@phosphor-icons/react'
 import { useInfiniteQuery, useMutation } from '@tanstack/react-query'
+import { CopyGlyph, useCopied } from '@/components/kit'
 import { type ExportFormat, renderExport, useExportDialog } from '../export'
 import { isEmptyQuery } from '../query'
 import { pageQueryOptions } from '../queries'
@@ -30,6 +25,8 @@ import { useWorkbench } from './workbench-context'
 export function SelectionBar({ onDelete }: { onDelete: (target: DeleteTarget) => void }) {
   const workbench = useWorkbench()
   const toasts = useKumoToastManager()
+  // The Copy button's own tick; the toast says how many and in what form.
+  const tick = useCopied()
   const checked = useSelection((state) => state.checked)
   const everything = useSelection((state) => state.everything)
   const clear = useSelection((state) => state.clear)
@@ -67,10 +64,12 @@ export function SelectionBar({ onDelete }: { onDelete: (target: DeleteTarget) =>
       await navigator.clipboard.writeText(parts.join(''))
       return { copied, format }
     },
-    onSuccess: ({ copied, format }) =>
+    onSuccess: ({ copied, format }) => {
+      tick.flash()
       toasts.add({
         title: `Copied ${formatNumber(copied)} ${copied === 1 ? 'document' : 'documents'} as ${format === 'csv' ? 'CSV' : 'JSON'}`,
-      }),
+      })
+    },
     onError: (failure) =>
       toasts.add({ title: 'Not copied', description: failure.message, variant: 'error' }),
   })
@@ -122,7 +121,7 @@ export function SelectionBar({ onDelete }: { onDelete: (target: DeleteTarget) =>
             <Button
               variant="ghost"
               size="sm"
-              icon={<CopyIcon />}
+              icon={<CopyGlyph copied={tick.copied} />}
               loading={copy.isPending}
               data-testid="copy-selection"
             >

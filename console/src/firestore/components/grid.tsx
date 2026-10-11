@@ -803,6 +803,24 @@ function describe(workbench: ReturnType<typeof useWorkbench>): string {
       : 'admin'
 }
 
+/**
+ * The recents shown on the root landing, one class per place: one row, as
+ * many as the collection cards below have columns, and in their columns.
+ * Twelve wrapped, at their full lengths, were seven rows above the
+ * collections they were meant to be a shortcut past. The breakpoints are
+ * where the cards' `repeat(auto-fill, minmax(240px, 1fr))` gains a column
+ * with `gap-2` (7 px at the 14 px root): n × 240 + (n − 1) × 7. ⌘K still
+ * offers all twelve.
+ */
+const RECENT_SHOWN = [
+  '',
+  'hidden @min-[487px]:block',
+  'hidden @min-[734px]:block',
+  'hidden @min-[981px]:block',
+  'hidden @min-[1228px]:block',
+  'hidden @min-[1475px]:block',
+]
+
 function RootLanding() {
   const workbench = useWorkbench()
   const openCreate = useCreateDialog((state) => state.open)
@@ -822,27 +840,49 @@ function RootLanding() {
         to search.
       </Text>
       {recents.length > 0 && (
-        <div className="grid gap-1.5" data-testid="recents">
+        <div className="@container grid gap-1.5" data-testid="recents">
           <span className="flex items-center gap-1.5 text-[12px] text-kumo-subtle">
             <ClockCounterClockwiseIcon size={14} /> Recent
           </span>
-          <ul className="flex flex-wrap gap-1.5">
-            {recents.map((recent) => (
-              <li key={recent.path}>
-                <button
-                  type="button"
-                  onClick={() => workbench.setPath(recent.path)}
-                  className="flex h-7 items-center gap-1.5 rounded-md bg-kumo-base px-2 font-mono text-[12px] ring ring-kumo-hairline hover:ink"
-                >
-                  {recent.kind === 'document' ? (
-                    <FileIcon size={12} className="text-kumo-subtle" />
-                  ) : (
-                    <DatabaseIcon size={12} className="text-kumo-subtle" />
-                  )}
-                  {recent.path}
-                </button>
-              </li>
-            ))}
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
+            {recents.slice(0, RECENT_SHOWN.length).map((recent, index) => {
+              const cut = recent.path.lastIndexOf('/') + 1
+              const parent = recent.path.slice(0, cut)
+              return (
+                <li key={recent.path} className={RECENT_SHOWN[index]}>
+                  <Tooltip
+                    content={recent.path}
+                    disabled={!parent}
+                    render={
+                      <button
+                        type="button"
+                        onClick={() => workbench.setPath(recent.path)}
+                        className="flex h-7 w-full items-center gap-1.5 rounded-md bg-kumo-base px-2 font-mono text-[12px] ring ring-kumo-hairline hover:ink"
+                        data-testid="recent"
+                      >
+                        {recent.kind === 'document' ? (
+                          <FileIcon size={12} className="shrink-0 text-kumo-subtle" />
+                        ) : (
+                          <DatabaseIcon size={12} className="shrink-0 text-kumo-subtle" />
+                        )}
+                        {/* Cut from the front, so the end shows: the id is
+                            what tells two documents of one collection
+                            apart, and every path here starts the same
+                            way. Right to left for the cut alone; the
+                            isolate keeps the path itself reading left to
+                            right, slashes where they belong. */}
+                        <span dir="rtl" className="min-w-0 truncate text-left">
+                          <bdi>
+                            <span className="text-kumo-subtle">{parent}</span>
+                            <span data-part="leaf">{recent.path.slice(cut)}</span>
+                          </bdi>
+                        </span>
+                      </button>
+                    }
+                  />
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

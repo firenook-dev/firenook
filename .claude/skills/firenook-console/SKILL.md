@@ -54,6 +54,13 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   to 0.4 px): pressed to hide, pressed again where it was to show. It sat in
   the shell's top bar, which is the console's as a whole (project, engine,
   theme, search). Sections without a panel get the full width.
+  The toggle draws **the nav's own glyph** (`PanelIcon` in `components/kit`,
+  Kumo's `Sidebar.PanelIcon` geometry with the state passed in — Kumo's
+  reads the nav's context), bar where the nav's sits in the same state; the
+  palette's two Layout rows use it too. It was Phosphor's `SquareHalf`:
+  two marks for one idea. The schema journey compares the paths and the
+  bar's `translate` with the nav toggle's (Tailwind 4's translate classes
+  set `translate`, not `transform`).
 - The content column has no padding of its own. Document-like pages wrap
   themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
   it edge to edge with their own toolbar and borders.
@@ -1358,13 +1365,19 @@ behind a confirmation that names the trigger behaviour. And it belongs
 **per document, in the inspector**, not as one global list: the question
 is almost always "what happened to *this*?".
 
-**What is left in its place:** `LiveDot` is a state chip, not a button.
-Keep it. The grid is kept current by that channel, so a channel that has
-dropped is a grid that looks fresh and is not — the one thing a dev tool
-must not do quietly. The count beside it went with the panel it used to
-open: a number nobody can look into is trivia, and it was counting writes
-since the tab opened while the panel counted what the engine still held,
-both under the word "change".
+**What is left in its place:** `LiveDot` is a state chip, not a button,
+and it shows **only when the channel has dropped** (amber "Reconnecting",
+red "Offline", with a tooltip saying the grid may be out of date). The grid
+is kept current by that channel, so a dropped channel is a grid that looks
+fresh and is not — the one thing a dev tool must not do quietly. While it
+is up there is nothing to say: a green "Live" in every toolbar was the
+normal case announced beside the engine's own green dot in the bar above,
+and a word that is always there is not read on the day it changes. A
+journey aborts `/firestore/changes` with `page.route` to see it, then
+unroutes and sees it go. The count beside it went with the panel it used
+to open: a number nobody can look into is trivia, and it was counting
+writes since the tab opened while the panel counted what the engine still
+held, both under the word "change".
 
 ## Firestore workbench (built, `src/firestore/`)
 
@@ -1551,10 +1564,30 @@ both under the word "change".
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
   path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
-  project+database), every pattern of the schema tree (a nested one opens
+  project+database, twelve kept), every pattern of the schema tree (a nested one opens
   as its group) and its actions; the panel toggle (`t`) and the nav modes
   are the shell's "Layout" group. `matchesQuery` is word-wise: every word
   of the query must appear in the title, breadcrumbs or keywords.
+- The root landing shows **one row of recents, in the collection cards'
+  columns**: the same `repeat(auto-fill, minmax(240px, 1fr))` grid, and
+  `RECENT_SHOWN` hides each place past the column count with container
+  queries (`@container`, `hidden @min-[734px]:block`, breakpoints
+  n × 240 + (n − 1) × 7). Twelve at full length wrapped into seven rows
+  above the collections they were a shortcut past; ⌘K still has all
+  twelve. A chip cuts its path **from the front** (`dir="rtl"` on the
+  truncating span, `<bdi>` around the path so it still reads left to
+  right), parent muted and the last segment plain: the id is what tells
+  two documents of one collection apart. A nested path's chip has a
+  tooltip with the whole path.
+- **Every copy answers with the same tick.** Icon and labelled copy
+  buttons use `CopyGlyph` + `useCopied` (`components/kit/copy-glyph.tsx`):
+  Kumo's ClipboardText motion, the copy mark rising out of its box as the
+  tick rises in, back after 1.5 s, and only once the clipboard has the
+  text. Kumo's `InlineCopyText` (project id, ids, the inspector's path)
+  swaps its tick in on the spot; `styles.css` makes it rise in, keyed on
+  `[data-kumo-component='InlineCopyText'][aria-label='Copied'] > svg`.
+  The path's copy gave no answer at all before. A new copy button takes
+  the glyph; the `ticked` helper in the journeys checks it.
 - Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
   a `Tooltip` given a `Button` as its **child** nests two `<button>`s and
   React says so in the console — pass it as `render={<Button … />}`, which
