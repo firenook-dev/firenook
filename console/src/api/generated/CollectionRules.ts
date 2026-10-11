@@ -6,7 +6,10 @@ import type { GoverningMatch } from "./GoverningMatch";
  */
 export type CollectionRules = { 
 /**
- * Schema pattern, such as `users/*/orders`.
+ * Schema pattern: collection ids with `*` standing for each document
+ * id between them, as the schema tree writes them (the orders of every
+ * user, for example). Spelt out because the pattern itself would close
+ * the generated TypeScript doc comment.
  */
 pattern: string, 
 /**

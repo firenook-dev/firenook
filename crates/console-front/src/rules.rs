@@ -242,7 +242,10 @@ pub struct RulesMap {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionRules {
-    /// Schema pattern, such as `users/*/orders`.
+    /// Schema pattern: collection ids with `*` standing for each document
+    /// id between them, as the schema tree writes them (the orders of every
+    /// user, for example). Spelt out because the pattern itself would close
+    /// the generated TypeScript doc comment.
     pub pattern: String,
     /// Match blocks matching its documents, in source order. A block naming
     /// one document (`/config/global`) is included.
