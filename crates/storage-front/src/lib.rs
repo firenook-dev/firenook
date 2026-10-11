@@ -36,17 +36,21 @@ use tokio::io::{AsyncWriteExt as _, BufReader};
 mod changes;
 mod console;
 mod download;
+mod folder_index;
 mod listing;
 mod log;
 mod metadata;
 mod rules;
 mod staging;
+mod tasks;
 pub use changes::{
     Actor, ChangeContext, ChangeEvent, EventDelivery, ObjectChangeKind, ObjectChangeRecord,
 };
 use changes::{ChangeFeed, via_console};
-pub use console::StorageConsoleApi;
+pub use console::{StorageConsoleApi, StorageSummaryCounts};
 use download::file_response;
+use folder_index::{FolderIndex, IndexControl};
+pub use folder_index::{FolderIndexError, FolderStats};
 #[cfg(test)]
 use listing::ObjectListPage;
 use listing::list_objects;
@@ -59,6 +63,7 @@ pub use rules::{
 use rules::{NativeRules, Operation, Verdict};
 pub use staging::InFlight;
 use staging::{StagedFile, StagingGauge, staging_path};
+use tasks::ConsoleTasks;
 #[cfg(test)]
 mod changes_tests;
 #[cfg(test)]
@@ -173,6 +178,8 @@ impl StorageRuntime {
             background,
             staging: Arc::new(StagingGauge::default()),
             log: LogHandle::default(),
+            tasks: Arc::new(ConsoleTasks::default()),
+            index: Arc::new(IndexControl::default()),
         };
         let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
@@ -288,9 +295,17 @@ impl StorageRuntime {
         export_directory(&self.state, root).await
     }
 
-    /// Stops the write-behind flusher (waiting for an in-flight flush) and
-    /// makes every acknowledged mutation durable.
+    /// Stops the console's tasks (the folder index walk, and every long task
+    /// a console started) and waits for each to end. Idempotent; the suite
+    /// calls it after its jobs stop and before trigger delivery stops.
+    pub async fn stop_console_tasks(&self) {
+        self.state.tasks.stop().await;
+    }
+
+    /// Stops the console's tasks and the write-behind flusher (waiting for
+    /// an in-flight flush) and makes every acknowledged mutation durable.
     pub async fn shutdown(mut self) -> Result<(), StorageError> {
+        self.stop_console_tasks().await;
         if let Some((stop, task)) = self.flusher.take() {
             let _ = stop.send(true);
             // The task exits at its next select; an in-flight blocking flush
@@ -353,6 +368,10 @@ struct StorageState {
     /// Bytes staged by uploads in progress, per bucket.
     staging: Arc<StagingGauge>,
     log: LogHandle,
+    /// The console's long tasks, stopped and awaited before the final flush.
+    tasks: Arc<ConsoleTasks>,
+    /// The folder index walk's wake-up and failures.
+    index: Arc<IndexControl>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -369,6 +388,9 @@ struct StorageData {
     revision: u64,
     #[serde(skip)]
     feed: Arc<ChangeFeed>,
+    /// Counts and sizes under every folder; `None` until a console asks.
+    #[serde(skip)]
+    folders: Option<FolderIndex>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -480,23 +502,7 @@ async fn readiness() -> Json<JsonValue> {
 // Inventory for the local UI: configured buckets and buckets with native objects.
 // This does not implement the cloud bucket-management/lifecycle API.
 async fn list_buckets(State(state): State<StorageState>) -> Json<JsonValue> {
-    let mut names = BTreeSet::new();
-    if let Some(NativeRulesConfig {
-        source: RulesSource::PerBucket(buckets),
-        ..
-    }) = &state.config.rules
-    {
-        names.extend(buckets.iter().map(|rules| rules.bucket.clone()));
-    }
-    names.extend(
-        lock(&state.inner)
-            .objects
-            .values()
-            .map(|object| object.bucket.clone()),
-    );
-    if names.is_empty() {
-        names.insert(format!("{}.appspot.com", state.config.project));
-    }
+    let names = known_buckets(&state, &lock(&state.inner));
     let items: Vec<_> = names
         .into_iter()
         .map(|name| {
@@ -510,6 +516,24 @@ async fn list_buckets(State(state): State<StorageState>) -> Json<JsonValue> {
         })
         .collect();
     Json(json!({"kind":"storage#buckets", "items":items}))
+}
+
+/// Configured buckets and every bucket holding objects, by name; the
+/// project's default bucket when there is none.
+fn known_buckets(state: &StorageState, data: &StorageData) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    if let Some(NativeRulesConfig {
+        source: RulesSource::PerBucket(buckets),
+        ..
+    }) = &state.config.rules
+    {
+        names.extend(buckets.iter().map(|rules| rules.bucket.clone()));
+    }
+    names.extend(listing::bucket_names(&data.objects).map(str::to_owned));
+    if names.is_empty() {
+        names.insert(format!("{}.appspot.com", state.config.project));
+    }
+    names
 }
 
 async fn not_found() -> StorageApiError {

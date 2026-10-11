@@ -120,6 +120,32 @@ impl<'a> Iterator for LevelWalk<'a> {
     }
 }
 
+/// Every bucket holding objects, in name order, one seek per bucket rather
+/// than a step per object.
+pub(crate) fn bucket_names(objects: &BTreeMap<String, StoredObject>) -> impl Iterator<Item = &str> {
+    let mut range = objects.range::<str, _>(..);
+    std::iter::from_fn(move || {
+        let (key, _) = range.next()?;
+        let bucket = &key[..key.find('\0')?];
+        let mut seek = String::with_capacity(bucket.len() + 1 + LAST_SCALAR.len_utf8());
+        seek.push_str(bucket);
+        seek.push('\0');
+        seek.push(LAST_SCALAR);
+        // Names that themselves start with the highest scalar are stepped
+        // over one by one; the next key of another bucket ends the skip.
+        range = objects.range::<str, _>((Bound::Excluded(seek.as_str()), Bound::Unbounded));
+        let scope = &seek[..=bucket.len()];
+        let mut ahead = range.clone();
+        while let Some((next, _)) = ahead.next() {
+            if !next.starts_with(scope) {
+                break;
+            }
+            range = ahead.clone();
+        }
+        Some(bucket)
+    })
+}
+
 /// One page of the protocol's list routes.
 pub(crate) struct ObjectListPage<'a> {
     pub(crate) items: Vec<&'a StoredObject>,
@@ -410,6 +436,27 @@ mod tests {
         // step per object below it.
         let entries = LevelWalk::new(&data.objects, BUCKET, "users/", Some("/"), None).count();
         assert_eq!(entries, 2_001);
+    }
+
+    #[test]
+    fn buckets_are_listed_once_each_by_seeking() {
+        let mut data = StorageData::default();
+        for (bucket, name) in [
+            ("a", "x"),
+            ("a", "y/z"),
+            ("a", "\u{10FFFF}"),
+            ("a", "\u{10FFFF}more"),
+            ("a.b", "x"),
+            ("b", "1"),
+            ("b", "2"),
+        ] {
+            insert(&mut data, bucket, name);
+        }
+        assert_eq!(
+            bucket_names(&data.objects).collect::<Vec<_>>(),
+            ["a", "a.b", "b"]
+        );
+        assert_eq!(bucket_names(&StorageData::default().objects).count(), 0);
     }
 
     #[test]

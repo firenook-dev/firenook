@@ -18,6 +18,7 @@ use axum::http::HeaderMap;
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 
+use crate::folder_index::{FolderIndex, Shape};
 use crate::rules::auth_from_authorization;
 use crate::{StorageData, StoredObject, UploadSession, object_key};
 
@@ -317,6 +318,10 @@ impl ActivityRing {
     }
 }
 
+fn unix_millis(at: OffsetDateTime) -> i64 {
+    i64::try_from(at.unix_timestamp_nanos() / 1_000_000).unwrap_or(i64::MAX)
+}
+
 /// Created, replaced (a new generation), tokens or metadata.
 fn classify(before: Option<&StoredObject>, after: &StoredObject) -> ObjectChangeKind {
     match before {
@@ -380,7 +385,8 @@ fn changed_keys(before: &StoredObject, after: &StoredObject) -> Vec<String> {
 
 impl StorageData {
     /// The one way to create or replace an object (new bytes, metadata,
-    /// tokens). Returns the object it replaced.
+    /// tokens), which keeps the folder index exact. Returns the object it
+    /// replaced.
     pub(crate) fn put(&mut self, object: StoredObject, cx: &ChangeContext) -> Option<StoredObject> {
         let key = object_key(&object.bucket, &object.name);
         self.revision += 1;
@@ -390,9 +396,19 @@ impl StorageData {
             (ObjectChangeKind::Metadata, Some(before)) => changed_keys(before, &object),
             _ => Vec::new(),
         };
+        let at = OffsetDateTime::now_utc();
+        if let Some(index) = &mut self.folders {
+            index.observe(
+                &key,
+                (&object.bucket, &object.name),
+                before.map(Shape::of),
+                Some(Shape::of(&object)),
+                (self.revision, unix_millis(at)),
+            );
+        }
         let record = ObjectChangeRecord {
             revision: self.revision,
-            at: OffsetDateTime::now_utc(),
+            at,
             bucket: object.bucket.clone(),
             name: object.name.clone(),
             kind,
@@ -416,9 +432,19 @@ impl StorageData {
     pub(crate) fn remove(&mut self, key: &str, cx: &ChangeContext) -> Option<StoredObject> {
         let before = self.objects.remove(key)?;
         self.revision += 1;
+        let at = OffsetDateTime::now_utc();
+        if let Some(index) = &mut self.folders {
+            index.observe(
+                key,
+                (&before.bucket, &before.name),
+                Some(Shape::of(&before)),
+                None,
+                (self.revision, unix_millis(at)),
+            );
+        }
         let record = ObjectChangeRecord {
             revision: self.revision,
-            at: OffsetDateTime::now_utc(),
+            at,
             bucket: before.bucket.clone(),
             name: before.name.clone(),
             kind: ObjectChangeKind::Deleted,
@@ -459,6 +485,8 @@ impl StorageData {
         self.uploads.clear();
         self.next_id = 0;
         self.revision += 1;
+        // Nothing left to count: the index is complete at once.
+        self.folders = Some(FolderIndex::built());
         self.feed.announce(ChangeEvent::Reset);
     }
 

@@ -3,11 +3,25 @@
 //! No HTTP types are invented here; the console crate maps these answers to
 //! its API.
 
+use std::time::Duration;
+
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 
+use crate::folder_index::{self, FolderIndexError, FolderStats};
 use crate::staging::{self, InFlight};
-use crate::{ChangeEvent, ObjectChangeRecord, StorageState, lock};
+use crate::{ChangeEvent, ObjectChangeRecord, StorageState, known_buckets, lock};
+
+/// The figures the Overview shows for Storage.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StorageSummaryCounts {
+    /// Buckets the console knows: configured, and every one holding objects.
+    pub buckets: usize,
+    /// Files in every bucket; `None` while the folder index is being built.
+    pub objects: Option<u64>,
+    /// Their bytes; `None` while the folder index is being built.
+    pub bytes: Option<u64>,
+}
 
 /// What the console's routes, topics, search, summary and clear call. A
 /// cheap clone of the runtime's state.
@@ -48,6 +62,54 @@ impl StorageConsoleApi {
         name: &str,
     ) -> (Vec<ObjectChangeRecord>, Option<OffsetDateTime>) {
         self.state.feed.activity(bucket, name)
+    }
+
+    /// Buckets at once, and objects and bytes once the folder index is built.
+    /// The first call starts the index walk; none waits for it.
+    #[must_use]
+    pub fn summary(&self) -> StorageSummaryCounts {
+        folder_index::ensure_built(&self.state);
+        let data = lock(&self.state.inner);
+        let buckets = known_buckets(&self.state, &data).len();
+        match &data.folders {
+            Some(index) if index.is_built() => {
+                let (objects, bytes) =
+                    index
+                        .roots()
+                        .fold((0_u64, 0_u64), |(objects, bytes), (_, root)| {
+                            (objects + root.objects, bytes.saturating_add(root.bytes))
+                        });
+                StorageSummaryCounts {
+                    buckets,
+                    objects: Some(objects),
+                    bytes: Some(bytes),
+                }
+            }
+            _ => StorageSummaryCounts {
+                buckets,
+                objects: None,
+                bytes: None,
+            },
+        }
+    }
+
+    /// Whether the folder index is built, starting its walk if no console
+    /// has yet and waiting up to `wait` for it (zero: never waits). An error
+    /// once the walk has failed for good.
+    pub async fn folder_index_ready(&self, wait: Duration) -> Result<bool, FolderIndexError> {
+        folder_index::ready(&self.state, wait).await
+    }
+
+    /// One folder's figures (`prefix` empty for the bucket root, else ending
+    /// in `/`); `None` while the index is being built or when nothing is
+    /// there.
+    #[must_use]
+    pub fn folder(&self, bucket: &str, prefix: &str) -> Option<FolderStats> {
+        let data = lock(&self.state.inner);
+        data.folders
+            .as_ref()
+            .filter(|index| index.is_built())
+            .and_then(|index| index.stats(bucket, prefix))
     }
 
     /// Bytes staged by uploads still in progress in `bucket`: single
