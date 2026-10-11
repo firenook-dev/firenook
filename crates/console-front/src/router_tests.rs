@@ -12,7 +12,6 @@ use firenook_query_engine::DatabaseEdition;
 use firenook_rules_runtime::RulesRuntime;
 use firenook_rules_runtime::request_history::RequestHistory;
 use firenook_suite_front::ServiceInfo;
-use futures_util::StreamExt as _;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt as _;
 
@@ -50,11 +49,39 @@ fn auth_application() -> Router {
     Router::new().fallback(|| async { "auth" })
 }
 
-/// Every section present, answering for `hosts`.
+/// A stand-in for a service's own application that answers every path,
+/// and says which service it is.
+fn native_application(name: &'static str) -> Router {
+    Router::new().fallback(move || async move { name })
+}
+
+/// Every section present, the late ones already handed over, answering for
+/// `hosts`.
 pub(crate) fn full_services(store: &Store, hosts: AllowedHosts) -> ConsoleServices {
+    let compute = ComputeParts::new();
+    compute.late.set(ComputeConsole {
+        functions: native_application("functions"),
+        eventarc: native_application("eventarc"),
+    });
+    let pubsub = Late::pending("Pub/Sub");
+    pubsub.set(PubsubConsole {
+        native: native_application("pubsub"),
+    });
+    let tasks = Late::pending("Cloud Tasks");
+    tasks.set(TasksConsole {
+        native: native_application("tasks"),
+    });
     ConsoleServices {
         firestore: Some(firestore_console(store)),
-        auth: Some(auth_application()),
+        auth: Some(AuthConsole {
+            native: auth_application(),
+        }),
+        storage: Some(StorageConsole {
+            native: native_application("storage"),
+        }),
+        compute: Some(compute),
+        pubsub: Some(pubsub),
+        tasks: Some(tasks),
         allowed_hosts: hosts,
         ..ConsoleServices::new(
             SuiteDirectory::new(
@@ -363,6 +390,53 @@ async fn native_mounts_keep_their_own_semantics_but_not_a_foreign_host() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    // Every section's `/native` mount is one too, and each reaches its own
+    // service, sandboxed.
+    for service in ["storage", "functions", "eventarc", "pubsub", "tasks"] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                Method::POST,
+                &format!("/api/v1/{service}/native/anything"),
+                &[("content-type", "text/plain")],
+                "x",
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK, "{service}");
+        assert_eq!(
+            response.headers()[header::CONTENT_SECURITY_POLICY],
+            "sandbox",
+            "{service}"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(body, service.as_bytes());
+        let (status, _) = send(
+            &router,
+            request(
+                Method::GET,
+                &format!("/api/v1/{service}/native/anything"),
+                &[("host", "evil.example")],
+                "",
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{service}");
+    }
+    // A section's own routes beside the mount keep the console's rules.
+    let (status, _) = send(
+        &router,
+        request(
+            Method::POST,
+            "/api/v1/storage/elsewhere",
+            &[("content-type", "text/plain")],
+            "x",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
 }
 
 #[tokio::test]

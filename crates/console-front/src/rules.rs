@@ -47,6 +47,7 @@ use ts_rs::TS;
 
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
+use crate::live::badges::{BadgeHandle, BadgeTone};
 use crate::live::{LiveTopic, TopicEvent, TopicStream, topic_params};
 use crate::schema::{SchemaIndex, SchemaNode};
 use crate::sse::{Shutdown, json_event, sse_response};
@@ -378,6 +379,57 @@ impl RulesEditor {
         RulesTopic {
             editor: self.clone(),
         }
+    }
+
+    /// How many configured databases' rules files the watcher last found
+    /// broken: those `firebase.json` names a file for whose latest check
+    /// failed.
+    fn broken_files(&self) -> u64 {
+        let broken = self
+            .files
+            .keys()
+            .filter_map(|database_id| self.database(database_id).ok())
+            .filter(|database| self.rules.file_problems(database).is_some())
+            .count();
+        u64::try_from(broken).unwrap_or(u64::MAX)
+    }
+
+    /// Keeps the `firestore.rules` badge (`badge`) at the number of
+    /// configured databases whose rules file does not compile: set now, and
+    /// again after every file check, until the suite stops.
+    pub(crate) fn spawn_badge(&self, badge: BadgeHandle, shutdown: Shutdown) {
+        fn publish(editor: &RulesEditor, badge: &BadgeHandle) {
+            let broken = editor.broken_files();
+            let tone = if broken == 0 {
+                BadgeTone::Neutral
+            } else {
+                BadgeTone::Danger
+            };
+            badge.set(broken, tone);
+        }
+        // Subscribe first, so a check that lands while the count is read is
+        // still seen.
+        let mut events = self.rules.subscribe();
+        publish(self, &badge);
+        let editor = self.clone();
+        tokio::spawn(async move {
+            let stopped = shutdown.stopped();
+            tokio::pin!(stopped);
+            loop {
+                tokio::select! {
+                    biased;
+                    () = &mut stopped => break,
+                    event = events.recv() => match event {
+                        Ok(RulesEvent::FileChecked { .. })
+                        | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            publish(&editor, &badge);
+                        }
+                        Ok(RulesEvent::Installed { .. }) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    },
+                }
+            }
+        });
     }
 
     /// The editor's routes. Live streams end when `shutdown` fires, so a
@@ -1543,5 +1595,58 @@ mod tests {
         })
         .await
         .expect("the stream ended after shutdown");
+    }
+
+    #[tokio::test]
+    async fn the_rules_badge_counts_configured_databases_whose_file_does_not_compile() {
+        let runtime = RulesRuntime::default();
+        let orders = DatabaseName::new(PROJECT, "orders").expect("database");
+        let editor = RulesEditor::new(
+            &runtime,
+            PROJECT,
+            BTreeMap::from([
+                ("(default)".to_owned(), PathBuf::from("firestore.rules")),
+                ("orders".to_owned(), PathBuf::from("orders.rules")),
+            ]),
+        );
+        let board = crate::live::badges::BadgeBoard::default();
+        let mut changes = board.subscribe();
+        let (stop, shutdown) = watch::channel(false);
+        editor.spawn_badge(
+            board.handle(
+                "firestore.rules",
+                crate::live::badges::BadgeKind::Gauge,
+                crate::live::badges::BadgeNoun::new(
+                    "rules file does not compile",
+                    "rules files do not compile",
+                ),
+            ),
+            Shutdown::new(shutdown),
+        );
+        let badge = |board: &crate::live::badges::BadgeBoard| {
+            let set = board.snapshot();
+            (set.badges[0].count, set.badges[0].tone)
+        };
+        assert_eq!(badge(&board), (0, BadgeTone::Neutral));
+        let mut wait_for = async |expected: (u64, BadgeTone)| {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while badge(&board) != expected {
+                    changes.changed().await.expect("board open");
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("the badge never read {expected:?}: {:?}", badge(&board)));
+        };
+        runtime.set_file_problems(&database(), Some(LoadError::unreadable("broken")));
+        wait_for((1, BadgeTone::Danger)).await;
+        runtime.set_file_problems(&orders, Some(LoadError::unreadable("broken")));
+        wait_for((2, BadgeTone::Danger)).await;
+        // A database the configuration names no file for is not counted.
+        let other = DatabaseName::new(PROJECT, "other").expect("database");
+        runtime.set_file_problems(&other, Some(LoadError::unreadable("broken")));
+        runtime.set_file_problems(&database(), None);
+        runtime.set_file_problems(&orders, None);
+        wait_for((0, BadgeTone::Neutral)).await;
+        stop.send(true).expect("stopped");
     }
 }

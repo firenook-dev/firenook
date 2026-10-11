@@ -144,7 +144,10 @@ impl Default for AllowedHosts {
     }
 }
 
-/// Paths inside the console mount that reach a service's own application.
+/// Paths inside the console mount that reach a service's own application:
+/// every `/api/v1/<section>/native/...` (where sections mount their
+/// service's application), and the older addresses recorded with
+/// [`NativeMounts::add`] (Firestore REST, Identity Toolkit).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct NativeMounts {
     prefixes: Vec<String>,
@@ -158,11 +161,21 @@ impl NativeMounts {
     }
 
     fn contains(&self, path: &str) -> bool {
-        self.prefixes.iter().any(|prefix| {
-            path.strip_prefix(prefix.as_str())
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
-        })
+        is_section_native(path)
+            || self.prefixes.iter().any(|prefix| {
+                path.strip_prefix(prefix.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            })
     }
+}
+
+/// `/api/v1/<section>/native` and everything under it.
+fn is_section_native(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/api/v1/") else {
+        return false;
+    };
+    let mut segments = rest.splitn(3, '/');
+    segments.next().is_some_and(|section| !section.is_empty()) && segments.next() == Some("native")
 }
 
 /// What the guard checks requests against.

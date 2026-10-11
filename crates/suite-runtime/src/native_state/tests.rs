@@ -61,6 +61,7 @@ impl Case {
                 tasks: 11,
             },
             minimum_functions: 1,
+            launch: None,
         };
         Self { root, config }
     }

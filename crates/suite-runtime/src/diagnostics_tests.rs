@@ -179,5 +179,6 @@ pub(super) fn test_config() -> SuiteConfig {
             tasks: 11,
         },
         minimum_functions: 0,
+        launch: None,
     }
 }
