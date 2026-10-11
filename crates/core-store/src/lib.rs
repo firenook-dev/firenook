@@ -890,7 +890,8 @@ impl BulkCommit<'_> {
             BulkCommitBackend::Memory => self.store.commit(writes),
             BulkCommitBackend::Disk(bulk) => {
                 let (result, changes) = bulk.commit(writes).map_err(commit_error)?;
-                self.store.notify_commit_observers(result, changes);
+                self.store
+                    .notify_commit_observers(result, changes, CommitOrigin::Client);
                 Ok(result)
             }
         }
@@ -992,6 +993,24 @@ impl Store {
 
     /// Atomically validates and applies a sequence of writes.
     pub fn commit(&self, writes: &[Write]) -> Result<CommitResult, CommitError> {
+        self.commit_from(writes, CommitOrigin::Client)
+    }
+
+    /// Commits housekeeping such as a console reset: validated, applied,
+    /// durable and replayed to listeners exactly like
+    /// [`commit`](Self::commit), but reported to commit observers with
+    /// [`CommitOrigin::Maintenance`], so trigger-like observers (Functions)
+    /// can leave it alone while change feeds and listeners still see every
+    /// deletion.
+    pub fn commit_maintenance(&self, writes: &[Write]) -> Result<CommitResult, CommitError> {
+        self.commit_from(writes, CommitOrigin::Maintenance)
+    }
+
+    fn commit_from(
+        &self,
+        writes: &[Write],
+        origin: CommitOrigin,
+    ) -> Result<CommitResult, CommitError> {
         let (result, changes) = match &self.backend {
             StoreBackend::Memory(inner) => {
                 let mut state = lock(inner);
@@ -1004,14 +1023,16 @@ impl Store {
             StoreBackend::Disk(store) => store.commit_observed(writes).map_err(commit_error),
         }?;
 
-        self.notify_commit_observers(result, changes);
+        self.notify_commit_observers(result, changes, origin);
         Ok(result)
     }
 
     /// Starts a bulk load for pre-serving imports.
     ///
     /// Batches are validated, installed and reported to observers exactly like
-    /// [`commit`](Self::commit). On the disk backend nothing is durable until
+    /// [`commit`](Self::commit), as [`CommitOrigin::Client`] commits: an
+    /// import is data arriving, not housekeeping. On the disk backend nothing
+    /// is durable until
     /// [`BulkCommit::finish`] returns, and the store's commit lock is held for
     /// the whole session; see [`DiskBulkCommit`]. The in-memory backend simply
     /// commits each batch.
@@ -1028,11 +1049,20 @@ impl Store {
         })
     }
 
-    fn notify_commit_observers(&self, result: CommitResult, changes: Vec<Change>) {
+    fn notify_commit_observers(
+        &self,
+        result: CommitResult,
+        changes: Vec<Change>,
+        origin: CommitOrigin,
+    ) {
         if changes.is_empty() {
             return;
         }
-        let observation = CommitObservation { result, changes };
+        let observation = CommitObservation {
+            result,
+            changes,
+            origin,
+        };
         for observer in lock(&self.commit_observers).clone() {
             observer.committed(&observation);
         }
@@ -1529,6 +1559,22 @@ impl Snapshot {
         }
     }
 
+    /// Whether `database` holds at least one visible document in this
+    /// snapshot. No document body is read: on the memory backend one ordered
+    /// lookup from the database's lowest key (keys order by database first),
+    /// O(log n); on disk one seek plus this snapshot's overlay, so a pending
+    /// deletion can empty a database and a restored document can fill one.
+    #[must_use]
+    pub fn has_documents(&self, database: &DatabaseName) -> bool {
+        match &self.documents {
+            SnapshotDocuments::Memory { documents, .. } => documents
+                .range(DocumentKey::unchecked(database.clone(), "")..)
+                .next()
+                .is_some_and(|(key, _)| key.database() == database),
+            SnapshotDocuments::Disk(documents) => documents.has_documents(database),
+        }
+    }
+
     /// The databases of one project that hold at least one document in this
     /// snapshot, in name order. A database is not a stored object: it exists
     /// exactly while it has documents, so an emptied database disappears.
@@ -1765,6 +1811,21 @@ pub struct CommitResult {
     pub commit_time: Timestamp,
 }
 
+/// Why a commit happened, for observers that react differently to
+/// housekeeping.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CommitOrigin {
+    /// A client's write, an import or anything else that is data arriving:
+    /// every observer reacts to it.
+    #[default]
+    Client,
+    /// Housekeeping committed through [`Store::commit_maintenance`], such as
+    /// a console reset. Trigger-like observers (Functions) ignore it; change
+    /// feeds, indexes and listeners treat it like any commit, because their
+    /// readers must still see the deletions.
+    Maintenance,
+}
+
 /// One successfully installed atomic commit delivered to process-local observers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitObservation {
@@ -1772,6 +1833,9 @@ pub struct CommitObservation {
     pub result: CommitResult,
     /// Effective document transitions in write order.
     pub changes: Vec<Change>,
+    /// Why the commit happened. Every new trigger-like observer must leave
+    /// [`CommitOrigin::Maintenance`] commits alone.
+    pub origin: CommitOrigin,
 }
 
 /// Receives successful document transitions after they become visible.
@@ -3047,6 +3111,161 @@ mod tests {
             );
             assert_eq!(store.revision().get(), 2);
             assert_eq!(store.snapshot().documents(&database("(default)")).len(), 2);
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn maintenance_commits_reach_observers_with_their_origin_on_both_backends() {
+        let directory = temporary_directory("maintenance");
+        let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        for store in [Store::default(), disk] {
+            let observer = Arc::new(RecordingObserver::default());
+            store.add_commit_observer(observer.clone());
+            let db = database("(default)");
+            let seeded = store
+                .commit(&[create(&db, "carts/one"), create(&db, "carts/two")])
+                .expect("client commit");
+            let mut bulk = store.begin_bulk_commit().expect("bulk load");
+            let imported = bulk
+                .commit(&[create(&db, "carts/three")])
+                .expect("bulk batch");
+            bulk.finish().expect("finish");
+
+            let delete = |path: &str| Write::Delete {
+                key: key(&db, path),
+                precondition: Precondition::None,
+            };
+            let cleared = store
+                .commit_maintenance(&[delete("carts/one"), delete("carts/two")])
+                .expect("maintenance commit");
+            // A maintenance commit that changes nothing is not reported, and
+            // a failed one is not applied, exactly like a client commit.
+            store
+                .commit_maintenance(&[delete("carts/absent")])
+                .expect("no-op maintenance commit");
+            assert!(
+                store
+                    .commit_maintenance(&[Write::Delete {
+                        key: key(&db, "carts/three"),
+                        precondition: Precondition::Exists(false),
+                    }])
+                    .is_err()
+            );
+
+            let observations = lock(&observer.observations);
+            assert_eq!(
+                observations
+                    .iter()
+                    .map(|observation| (observation.result, observation.origin))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (seeded, CommitOrigin::Client),
+                    (imported, CommitOrigin::Client),
+                    (cleared, CommitOrigin::Maintenance),
+                ]
+            );
+            let maintenance = &observations[2];
+            assert_eq!(
+                maintenance
+                    .changes
+                    .iter()
+                    .map(|change| (change.key.path(), change.after.is_none()))
+                    .collect::<Vec<_>>(),
+                vec![("carts/one", true), ("carts/two", true)]
+            );
+            assert!(
+                maintenance
+                    .changes
+                    .iter()
+                    .all(|change| change.before.is_some() && change.revision == cleared.revision)
+            );
+            drop(observations);
+
+            // Listeners replay maintenance deletions like any other change,
+            // and the documents are gone from every later snapshot.
+            let replayed = store.changes_since(imported.revision).expect("replay");
+            assert_eq!(
+                replayed
+                    .iter()
+                    .map(|change| change.key.path())
+                    .collect::<Vec<_>>(),
+                ["carts/one", "carts/two"]
+            );
+            assert_eq!(
+                store
+                    .snapshot()
+                    .documents(&db)
+                    .into_iter()
+                    .map(|(key, _)| key.path().to_owned())
+                    .collect::<Vec<_>>(),
+                ["carts/three"]
+            );
+            assert!(
+                store
+                    .changes_since(cleared.revision)
+                    .expect("replay")
+                    .is_empty(),
+                "the no-op and the refused maintenance commits changed nothing"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn has_documents_answers_from_visible_documents_and_the_overlay_on_both_backends() {
+        let directory = temporary_directory("has-documents");
+        let disk = Store::open_disk(&directory, DiskOptions::default()).expect("disk store");
+        for store in [Store::default(), disk] {
+            let default = database("(default)");
+            let zeta = database("zeta");
+            // Neighbours in key order: `zet` sorts just before `zeta`, and
+            // the shorter project id just before `firenook-test`, so a lookup
+            // that ignored the database would find the next one's documents.
+            let zet = database("zet");
+            let shorter_project = DatabaseName::new("firenook-tes", "zeta").expect("database");
+            let empty = store.snapshot();
+            for database in [&default, &zeta, &zet, &shorter_project] {
+                assert!(!empty.has_documents(database), "{database}");
+            }
+
+            let seeded = store
+                .commit(&[create(&default, "items/one"), create(&zeta, "a/b/c/d")])
+                .expect("seed");
+            let snapshot = store.snapshot();
+            assert!(snapshot.has_documents(&default));
+            assert!(snapshot.has_documents(&zeta));
+            assert!(!snapshot.has_documents(&zet));
+            assert!(!snapshot.has_documents(&shorter_project));
+
+            let emptied = store
+                .commit(&[Write::Delete {
+                    key: key(&zeta, "a/b/c/d"),
+                    precondition: Precondition::None,
+                }])
+                .expect("empty zeta");
+            assert!(!store.snapshot().has_documents(&zeta));
+            assert!(store.snapshot().has_documents(&default));
+            assert!(
+                snapshot.has_documents(&zeta),
+                "an older snapshot keeps its own view"
+            );
+
+            // Historical views merge the reverse overlay: the deleted
+            // document fills `zeta` again, and before the seed the overlay
+            // hides `(default)`'s document, which disk still stores.
+            let at_seed = store.snapshot_at(seeded.revision).expect("seeded revision");
+            assert!(at_seed.has_documents(&zeta));
+            assert!(at_seed.has_documents(&default));
+            let at_empty = store
+                .snapshot_at(emptied.revision)
+                .expect("emptied revision");
+            assert!(!at_empty.has_documents(&zeta));
+            let initial = store
+                .snapshot_at(Revision::from_u64(0))
+                .expect("initial revision");
+            assert!(!initial.has_documents(&default));
+            assert!(!initial.has_documents(&zeta));
         }
         let _ = std::fs::remove_dir_all(&directory);
     }
