@@ -9,6 +9,7 @@ mod ast;
 mod coverage_layout;
 mod coverage_observer;
 mod evaluator;
+mod explain;
 mod lexer;
 mod model;
 mod parser;
@@ -16,7 +17,12 @@ mod trace;
 
 pub use coverage_layout::{CoverageNode, SourcePosition};
 pub use coverage_observer::{
-    CoverageObserver, ExpressionKey, ExpressionValue, MapDifference, MapKeyStatus,
+    CoverageObserver, ExpressionKey, ExpressionValue, MapDifference, MapKeyStatus, QueryComparison,
+    QueryProof,
+};
+pub use explain::{
+    EvaluationExplanation, ExplainedAllow, ExplanationStep, MAXIMUM_EXPLANATION_STEPS,
+    MAXIMUM_VALUE_CHARS, RulesExplainer, SourceIndex, SourceSpan,
 };
 
 pub use trace::{
