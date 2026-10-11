@@ -56,6 +56,8 @@ const CORS_ALLOWED_METHODS: HeaderValue =
     HeaderValue::from_static("DELETE,GET,HEAD,PATCH,POST,PUT");
 const JSON_CONTENT_TYPE: HeaderValue = HeaderValue::from_static("application/json");
 
+mod preview;
+use preview::Preview;
 mod coverage;
 mod listing;
 mod read_json;
@@ -924,12 +926,14 @@ async fn run_query_at_root(
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, RestError> {
     let project = path.project.clone();
+    let preview = Preview::from_headers(&headers)?;
     run_query(
         &state,
         &database_name(path)?,
         None,
         &body,
         &request_authorization(&headers, &project)?,
+        preview.as_ref(),
     )
     .await
 }
@@ -946,7 +950,16 @@ async fn run_query_at_parent(
         .map_err(|error| RestError::invalid(error.to_string()))?;
     if let Some(parent) = path.document.strip_suffix(":runQuery") {
         validate_parent(parent)?;
-        return run_query(&state, &database, Some(parent), &body, &authorization).await;
+        let preview = Preview::from_headers(headers)?;
+        return run_query(
+            &state,
+            &database,
+            Some(parent),
+            &body,
+            &authorization,
+            preview.as_ref(),
+        )
+        .await;
     }
     if let Some(parent) = path.document.strip_suffix(":runAggregationQuery") {
         validate_parent(parent)?;
@@ -980,12 +993,14 @@ async fn run_query(
     parent: Option<&str>,
     body: &JsonValue,
     authorization: &Authorization,
+    preview: Option<&Preview>,
 ) -> Result<Json<JsonValue>, RestError> {
     let state = state.clone();
     let database = database.clone();
     let parent = parent.map(str::to_owned);
     let body = body.clone();
     let authorization = authorization.clone();
+    let preview = preview.cloned();
     let service = state.service.clone();
     service
         .run_read(move || {
@@ -995,6 +1010,7 @@ async fn run_query(
                 parent.as_deref(),
                 &body,
                 &authorization,
+                preview.as_ref(),
             ))
         })
         .await
@@ -1034,6 +1050,7 @@ fn run_query_blocking(
     parent: Option<&str>,
     body: &JsonValue,
     authorization: &Authorization,
+    preview: Option<&Preview>,
 ) -> Result<Json<JsonValue>, RestError> {
     let structured = body
         .get("structuredQuery")
@@ -1055,7 +1072,10 @@ fn run_query_blocking(
             Ok(json!({
                 "document": {
                     "name": document.key().to_string(),
-                    "fields": encode_fields(document.fields())?,
+                    "fields": match preview {
+                        Some(preview) => preview.encode_fields(document.fields(), encode_value)?,
+                        None => encode_fields(document.fields())?,
+                    },
                     "createTime": format_timestamp(document.document().create_time())?,
                     "updateTime": format_timestamp(document.document().update_time())?,
                 },
@@ -1273,6 +1293,16 @@ fn decode_aggregation_field(value: &JsonValue) -> Result<QueryFieldPath, RestErr
     decode_query_field(field)
 }
 
+/// Decodes a `structuredQuery` body the way `runQuery` does, for a caller
+/// outside this crate — the console's explain endpoint, which must reason
+/// about exactly the query the REST front would run.
+pub fn structured_query(
+    structured: &Map<String, JsonValue>,
+    parent: Option<&str>,
+) -> Result<StructuredQuery, String> {
+    decode_query(structured, parent).map_err(|error| error.message)
+}
+
 fn decode_query(
     structured: &Map<String, JsonValue>,
     parent: Option<&str>,
@@ -1317,26 +1347,25 @@ fn decode_query(
     }
     if let Some(orders) = structured.get("orderBy").and_then(JsonValue::as_array) {
         for order in orders {
-            let order = order
-                .as_object()
-                .ok_or_else(|| RestError::invalid("orderBy entry must be an object"))?;
-            let field = order
-                .get("field")
-                .and_then(JsonValue::as_object)
-                .and_then(|field| field.get("fieldPath"))
-                .and_then(JsonValue::as_str)
-                .ok_or_else(|| RestError::invalid("orderBy fieldPath is required"))?;
-            let direction = match order
-                .get("direction")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("ASCENDING")
-            {
-                "ASCENDING" => Direction::Ascending,
-                "DESCENDING" => Direction::Descending,
-                _ => return Err(RestError::invalid("invalid orderBy direction")),
-            };
-            query = query.order_by(decode_query_field(field)?, direction);
+            let (field, direction) = decode_order(order)?;
+            query = query.order_by(field, direction);
         }
+    }
+    if let Some(cursor) = structured.get("startAt") {
+        let (values, before) = decode_cursor(cursor, "startAt")?;
+        query = if before {
+            query.start_at(values)
+        } else {
+            query.start_after(values)
+        };
+    }
+    if let Some(cursor) = structured.get("endAt") {
+        let (values, before) = decode_cursor(cursor, "endAt")?;
+        query = if before {
+            query.end_before(values)
+        } else {
+            query.end_at(values)
+        };
     }
     if let Some(offset) = structured.get("offset").and_then(JsonValue::as_u64) {
         query = query.offset(
@@ -1379,6 +1408,53 @@ fn decode_query(
         query = decode_nearest(query, nearest)?;
     }
     Ok(query)
+}
+
+fn decode_order(order: &JsonValue) -> Result<(QueryFieldPath, Direction), RestError> {
+    let order = order
+        .as_object()
+        .ok_or_else(|| RestError::invalid("orderBy entry must be an object"))?;
+    let field = order
+        .get("field")
+        .and_then(JsonValue::as_object)
+        .and_then(|field| field.get("fieldPath"))
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| RestError::invalid("orderBy fieldPath is required"))?;
+    let direction = match order
+        .get("direction")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("ASCENDING")
+    {
+        "ASCENDING" => Direction::Ascending,
+        "DESCENDING" => Direction::Descending,
+        _ => return Err(RestError::invalid("invalid orderBy direction")),
+    };
+    Ok((decode_query_field(field)?, direction))
+}
+
+/// A REST `Cursor`: the sort-key values in order and whether the position is
+/// before them (`startAt`/`endBefore`) or after (`startAfter`/`endAt`).
+fn decode_cursor(value: &JsonValue, name: &str) -> Result<(Vec<Value>, bool), RestError> {
+    let cursor = value
+        .as_object()
+        .ok_or_else(|| RestError::invalid(format!("{name} must be an object")))?;
+    let values = cursor
+        .get("values")
+        .map(|values| {
+            values
+                .as_array()
+                .ok_or_else(|| RestError::invalid(format!("{name} values must be an array")))
+        })
+        .transpose()?
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(decode_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    let before = cursor
+        .get("before")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
+    Ok((values, before))
 }
 
 fn decode_nearest(query: StructuredQuery, value: &JsonValue) -> Result<StructuredQuery, RestError> {
@@ -2033,12 +2109,38 @@ fn now_timestamp() -> Timestamp {
     .expect("system time is a valid timestamp")
 }
 
+/// A timestamp in protobuf JSON's canonical form, which is what Firestore
+/// returns: always `Z`, and a fraction of exactly zero, three, six or nine
+/// digits.
+///
+/// `time`'s RFC 3339 writes as many digits as the value needs and trims the
+/// rest, so the same instant came back as `…51.23986Z` from the endpoints
+/// that encode by hand and `…51.239860Z` from the one that serializes the
+/// protobuf message. A client comparing an `updateTime` it listed with one
+/// it read saw two different strings for one document.
 fn format_timestamp(value: Timestamp) -> Result<String, RestError> {
-    OffsetDateTime::from_unix_timestamp(value.seconds())
-        .and_then(|timestamp| timestamp.replace_nanosecond(value.nanos()))
-        .map_err(|error| RestError::internal(format!("invalid stored timestamp: {error}")))?
-        .format(&Rfc3339)
-        .map_err(|error| RestError::internal(format!("timestamp formatting failed: {error}")))
+    let moment = OffsetDateTime::from_unix_timestamp(value.seconds())
+        .map_err(|error| RestError::internal(format!("invalid stored timestamp: {error}")))?;
+    let seconds = format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        moment.year(),
+        u8::from(moment.month()),
+        moment.day(),
+        moment.hour(),
+        moment.minute(),
+        moment.second(),
+    );
+    let nanos = value.nanos();
+    let fraction = if nanos == 0 {
+        String::new()
+    } else if nanos.is_multiple_of(1_000_000) {
+        format!(".{:03}", nanos / 1_000_000)
+    } else if nanos.is_multiple_of(1_000) {
+        format!(".{:06}", nanos / 1_000)
+    } else {
+        format!(".{nanos:09}")
+    };
+    Ok(format!("{seconds}{fraction}Z"))
 }
 
 fn number_field(fields: &Map<String, JsonValue>, name: &str) -> Result<f64, RestError> {
@@ -2814,6 +2916,74 @@ mod tests {
         assert!(response[0].get("done").is_none());
     }
 
+    /// Google writes a UTC timestamp as `Z` from every endpoint. This
+    /// server hand-encodes most responses and gets that for free, but a
+    /// listing is serialized from the protobuf message, which writes
+    /// `+00:00` — so the same document read two ways used to come back with
+    /// the same instant spelled two ways.
+    #[tokio::test]
+    async fn every_endpoint_spells_a_utc_timestamp_the_same_way() {
+        const PROJECT: &str = "demo-timestamp-shape";
+        let store = Store::default();
+        let database = DatabaseName::new(PROJECT, "(default)").expect("database");
+        store
+            .commit(&[firenook_core_store::Write::Create {
+                key: firenook_core_store::DocumentKey::new(database, "things/one")
+                    .expect("document key"),
+                fields: firenook_core_store::Fields::from([(
+                    "when".to_owned(),
+                    Value::Timestamp(
+                        firenook_core_store::Timestamp::new(1_772_600_767, 0).expect("timestamp"),
+                    ),
+                )]),
+            }])
+            .expect("commit");
+
+        let read = |path: String| {
+            let store = store.clone();
+            async move {
+                let response = router(store)
+                    .oneshot(
+                        Request::builder()
+                            .method(Method::GET)
+                            .uri(path)
+                            .body(Body::empty())
+                            .expect("request"),
+                    )
+                    .await
+                    .expect("response");
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("body");
+                serde_json::from_slice::<JsonValue>(&body).expect("JSON")
+            }
+        };
+
+        let root = format!("/v1/projects/{PROJECT}/databases/(default)/documents");
+        let fetched = read(format!("{root}/things/one")).await;
+        let listed = read(format!("{root}/things")).await;
+        let listed = &listed["documents"][0];
+
+        for (endpoint, document) in [("get", &fetched), ("list", listed)] {
+            for field in ["createTime", "updateTime"] {
+                let value = document[field].as_str().expect(field);
+                assert!(
+                    value.ends_with('Z'),
+                    "{endpoint} returned {field} as {value}"
+                );
+            }
+            assert_eq!(
+                document["fields"]["when"]["timestampValue"], "2026-03-04T05:06:07Z",
+                "{endpoint} returned a document timestamp in the wrong shape"
+            );
+        }
+        assert_eq!(
+            fetched["updateTime"], listed["updateTime"],
+            "the same document read two ways must carry the same updateTime"
+        );
+    }
+
     async fn post_json(store: Store, path: &str, body: JsonValue) -> (StatusCode, JsonValue) {
         let request = Request::builder()
             .method(Method::POST)
@@ -2938,6 +3108,71 @@ mod tests {
                 "structuredQuery": {
                     "from": [{"collectionId": "items"}],
                     "select": {"fields": [{"nope": "label"}]}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn run_query_applies_start_and_end_cursors_like_the_grpc_codec() {
+        let database = DatabaseName::new("demo-cursor", "(default)").expect("database");
+        let base = "/v1/projects/demo-cursor/databases/(default)/documents";
+        let name = |index: usize| {
+            format!("projects/demo-cursor/databases/(default)/documents/items/item-{index:03}")
+        };
+        let ids = |response: &JsonValue| -> Vec<String> {
+            response
+                .as_array()
+                .expect("array")
+                .iter()
+                .filter_map(|row| row["document"]["name"].as_str())
+                .map(|full| full.rsplit('/').next().expect("id").to_owned())
+                .collect()
+        };
+
+        // `before: false` on startAt is the SDK's startAfter: the next page.
+        let (status, response) = post_json(
+            seeded_store(&database, 6),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "orderBy": [{"field": {"fieldPath": "__name__"}}],
+                    "startAt": {"values": [{"referenceValue": name(1)}], "before": false},
+                    "limit": 2
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(ids(&response), ["item-002", "item-003"]);
+
+        // `before: true` includes the cursor document itself.
+        let (status, response) = post_json(
+            seeded_store(&database, 6),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "orderBy": [{"field": {"fieldPath": "__name__"}, "direction": "DESCENDING"}],
+                    "startAt": {"values": [{"referenceValue": name(4)}], "before": true},
+                    "endAt": {"values": [{"referenceValue": name(2)}], "before": true},
+                }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(ids(&response), ["item-004", "item-003"]);
+
+        let (status, _) = post_json(
+            seeded_store(&database, 1),
+            &format!("{base}:runQuery"),
+            json!({
+                "structuredQuery": {
+                    "from": [{"collectionId": "items"}],
+                    "startAt": {"values": "nope"}
                 }
             }),
         )

@@ -1,0 +1,113 @@
+/*
+ * The component library's stylesheet for the design tool: Kumo's styles under
+ * the Firenook theme, plus a broad utility vocabulary so a design built with
+ * the library can lay itself out with the same classes the console uses.
+ * The console's own build purges to what it uses; this one deliberately
+ * keeps a generous, enumerated set (listed in the conventions header).
+ */
+@source "../../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@source "../../../src/components/kit";
+@source "../../../.design-sync/previews";
+@import '@cloudflare/kumo/styles/tailwind';
+@import 'tailwindcss' source(none);
+@import '../../../src/theme.css';
+
+/* Arbitrary values the console uses; anything else must come from the scale */
+@source inline("text-[{0.9em,10px,11px,12px,13px}]");
+@source inline("{w,h,min-h,max-h,min-w,max-w}-[{120,160,200,240,280,320,360,400,420,480,520,560,640,720,800,960}px]");
+@source inline("{min-h-0!,h-full!,w-full!}");
+
+/* Layout */
+@source inline("{sm:,md:,lg:,}{flex,inline-flex,grid,block,inline-block,inline,hidden,contents}");
+@source inline("{sm:,md:,lg:,}flex-{row,col,row-reverse,col-reverse,wrap,nowrap,1,auto,none}");
+@source inline("{grow,grow-0,shrink,shrink-0,basis-0,basis-full}");
+@source inline("items-{start,center,end,baseline,stretch}");
+@source inline("justify-{start,center,end,between,around,evenly,stretch}");
+@source inline("{justify-items,justify-self,self,place-items}-{start,center,end,stretch,auto}");
+@source inline("{sm:,md:,lg:,}grid-cols-{1,2,3,4,5,6,7,8,9,10,11,12,none}");
+@source inline("{col,row}-span-{1,2,3,4,5,6,7,8,9,10,11,12,full}");
+@source inline("grid-flow-{row,col,dense}");
+@source inline("{gap,gap-x,gap-y}-{0,0.5,1,1.5,2,2.5,3,3.5,4,5,6,8,10,12,16}");
+@source inline("{space-x,space-y}-{0,1,2,3,4,6,8}");
+@source inline("{divide-x,divide-y}");
+
+/* Spacing */
+@source inline("{p,px,py,pt,pr,pb,pl,ps,pe}-{0,0.5,1,1.5,2,2.5,3,3.5,4,5,6,7,8,10,12,16,20,24}");
+@source inline("{m,mx,my,mt,mr,mb,ml,ms,me}-{0,0.5,1,1.5,2,3,4,5,6,8,10,12,16,auto}");
+@source inline("-{mt,mr,mb,ml,mx,my}-{1,2,3,4}");
+
+/* Sizing */
+@source inline("{w,h}-{0,px,0.5,1,1.5,2,2.5,3,3.5,4,5,6,7,8,9,10,11,12,14,16,20,24,28,32,36,40,44,48,52,56,60,64,72,80,96,full,screen,auto,fit,min,max,1/2,1/3,2/3,1/4,3/4,1/5,2/5,3/5,4/5}");
+@source inline("size-{2,2.5,3,3.5,4,5,6,7,8,9,10,11,12,14,16,20,24,full}");
+@source inline("{min-w,min-h}-{0,full,fit,px}");
+@source inline("max-w-{0,none,xs,sm,md,lg,xl,2xl,3xl,4xl,5xl,6xl,7xl,full,prose,screen-sm,screen-md,screen-lg,screen-xl}");
+@source inline("max-h-{0,none,full,screen,48,64,80,96}");
+@source inline("{h,min-h,max-h}-{dvh,svh,lvh}");
+@source inline("{w,h}-lh");
+
+/* Typography */
+@source inline("text-{xs,sm,base,lg,xl,2xl,3xl,4xl}");
+@source inline("font-{normal,medium,semibold,sans,mono}");
+@source inline("leading-{none,tight,snug,normal,relaxed,loose,3,4,5,6,7,8}");
+@source inline("text-{left,center,right,start,end}");
+@source inline("{italic,not-italic,underline,no-underline,line-through,truncate,tabular-nums,text-ellipsis,text-clip}");
+@source inline("whitespace-{normal,nowrap,pre,pre-line,pre-wrap}");
+@source inline("break-{words,all,normal}");
+@source inline("{wrap-break-word,text-pretty,text-balance,text-wrap,text-nowrap}");
+@source inline("align-{baseline,top,middle,bottom}");
+@source inline("list-{none,disc,decimal,inside,outside}");
+
+/* Colour: Kumo's semantic tokens only */
+@source inline("{hover:,focus:,focus-visible:,active:,data-[state=open]:,}bg-kumo-{canvas,base,elevated,recessed,tint,contrast,overlay,control,interact,fill,fill-hover,brand,brand-hover,line,hairline,focus,info,info-tint,success,success-tint,warning,warning-tint,danger,danger-tint,banner-info,banner-warning,badge-red,badge-green,badge-orange,badge-purple,badge-teal,badge-blue,badge-neutral,badge-inverted}");
+@source inline("bg-kumo-{brand,success,warning,danger,info,tint,fill,contrast}/{5,10,20,30,40,50,60,70,80,90}");
+@source inline("{hover:,focus:,group-hover:,}text-kumo-{default,inverse,strong,subtle,inactive,placeholder,brand,link,info,success,danger,warning,badge-orange-subtle,badge-teal-subtle,badge-neutral-subtle,badge-inverted}");
+@source inline("{text,bg}-{white,black,transparent,current,inherit}");
+@source inline("{hover:,focus:,focus-visible:,}{ring,border,divide,outline}-kumo-{line,hairline,focus,brand,fill,interact,info,success,warning,danger,shadow-edge,arrow-edge}");
+@source inline("ring-kumo-{line,focus,brand,danger}/{20,25,30,50}");
+@source inline("{fill,stroke}-{current,none}");
+@source inline("{decoration,accent,caret}-kumo-{brand,link,default}");
+
+/* Borders, rings, radius, shadow */
+@source inline("{border,border-0,border-2,border-t,border-r,border-b,border-l,border-x,border-y,border-t-0,border-b-0,border-l-0,border-r-0,border-transparent,border-dashed,border-dotted,border-solid}");
+@source inline("{ring,ring-0,ring-1,ring-2,ring-4,ring-inset,ring-transparent,outline-none,outline-hidden,outline-0,outline-2,outline-offset-2}");
+@source inline("{focus-visible:,focus:,}{ring,ring-2,ring-inset,outline-none,outline-hidden}");
+@source inline("{rounded,rounded-none,rounded-xs,rounded-sm,rounded-md,rounded-lg,rounded-xl,rounded-2xl,rounded-3xl,rounded-full}");
+@source inline("rounded-{t,r,b,l,tl,tr,bl,br}-{none,sm,md,lg,xl,full}");
+@source inline("rounded-[inherit]");
+@source inline("shadow-{none,2xs,xs,sm,md,lg,xl,2xl,inner}");
+@source inline("shadow-kumo-{shadow-drop,shadow-edge}");
+
+/* Position, layering, overflow */
+@source inline("{static,relative,absolute,fixed,sticky}");
+@source inline("{inset,inset-x,inset-y,top,right,bottom,left,start,end}-{0,px,0.5,1,2,3,4,6,8,auto,full,1/2}");
+@source inline("-{top,right,bottom,left,inset}-{px,1,2,4}");
+@source inline("z-{0,10,20,30,40,50,auto}");
+@source inline("overflow-{auto,hidden,visible,scroll,clip}");
+@source inline("overflow-{x,y}-{auto,hidden,visible,scroll,clip}");
+@source inline("{isolate,isolation-auto,contents}");
+
+/* Effects, interaction, misc */
+@source inline("opacity-{0,5,10,20,25,30,40,50,60,70,75,80,90,95,100}");
+@source inline("{hover:,disabled:,group-hover:,}opacity-{50,60,70,80,100}");
+@source inline("cursor-{pointer,default,not-allowed,text,move,grab,grabbing,col-resize,row-resize,wait,help}");
+@source inline("{select-none,select-text,select-all,pointer-events-none,pointer-events-auto,sr-only,not-sr-only,appearance-none,resize,resize-none,resize-y,scroll-smooth,touch-none,will-change-transform}");
+@source inline("{visible,invisible,collapse}");
+@source inline("{group,peer}");
+@source inline("{group-hover:,group-focus-within:,peer-checked:,}{visible,invisible,flex,block,hidden,underline}");
+@source inline("{aria-selected:,aria-expanded:,aria-disabled:,data-[state=open]:,data-[state=active]:,data-[selected]:,}{font-medium,bg-kumo-tint,bg-kumo-base,text-kumo-default,text-kumo-strong,ring-2,opacity-50}");
+@source inline("{transition,transition-none,transition-opacity,transition-transform,transition-shadow,duration-75,duration-100,duration-150,duration-200,duration-300,ease-in,ease-out,ease-in-out}");
+@source inline("{motion-reduce:,}{transition-none,animate-none}");
+@source inline("animate-{none,spin,ping,pulse,bounce}");
+@source inline("{scale,scale-x,scale-y}-{0,50,75,90,95,100,105,110}");
+@source inline("{rotate,-rotate}-{0,45,90,180}");
+@source inline("translate-{x,y}-{0,1/2,full,px,1,2,4}");
+@source inline("-translate-{x,y}-{1/2,full,px,1,2,4}");
+@source inline("{blur,blur-sm,blur-md,backdrop-blur,backdrop-blur-sm,grayscale,brightness-90,brightness-110}");
+@source inline("{object-cover,object-contain,object-center,aspect-square,aspect-video,aspect-auto}");
+@source inline("{columns-2,columns-3,columns-4}");
+@source inline("{dark:,}{block,hidden}");
+@source inline("{first:,last:,odd:,even:,only:,}{border-t-0,border-b-0,rounded-t-lg,rounded-b-lg,bg-kumo-elevated,bg-kumo-base,pt-0,pb-0,mt-0,mb-0}");
+@source inline("[&>svg]:size-{3,4,5,6}");
+@source inline("[&_th]:{text-left,px-3,py-2}");
+@source inline("[contain:paint]");
+@source inline("supports-[backdrop-filter]:bg-kumo-base/80");

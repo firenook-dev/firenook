@@ -480,7 +480,7 @@ resume tokens issued before it; no emulator behaviour changed.
   (every version carries the deprecation notice; a notice-only
   `0.1.0-next.10` with no engine is their `latest`/`next`).
 
-## Read path and listener maintenance (`0.2.0-next.2`, unreleased)
+## Read path and listener maintenance (`0.2.0-next.2`)
 
 A fix round on the `0.2.0-next.1` engine, recorded in
 `support/read-path-audit.md`: the official Emulator UI's Firestore browser
@@ -534,14 +534,191 @@ served until every section has landed.
   the Console API's first route with Rust-generated TypeScript types; unit,
   end-to-end (real engine) and bundle-budget checks in CI; the console is
   built before every engine build.
-- [ ] Console API contract and live channel (one multiplexed socket, deltas
-  per scope, bounded like the Requests feed).
-- [ ] Firestore workbench: path bar, grid with inferred columns, query
-  builder, inspector, bulk actions, view-as-user over the rules engine.
+- [x] Same-origin data services under the console: the Firestore REST front,
+  the Requests feed and the Auth application mount under `/console/api/v1`,
+  so the console works wherever its page loads from (a proxy, an HTTPS
+  alias) and never needs the service ports from the browser.
+- [x] Live channel: a server-sent event stream fed by the store's commit
+  observers carries every commit's document paths; the console invalidates
+  by scope and flashes the rows on screen. Nothing polls.
+- [x] Firestore workbench: path bar as a command line with completion and
+  index counts, grid with inferred typed columns (mixed types flagged),
+  cursor-paged and virtualized, the SDK query chain as text with the live
+  count, view-as-user over the rules engine with the Requests drawer and the
+  deciding rule lines, inspector with typed editors and JSON, add and delete
+  (recursive), copy as code (Web, Admin, Flutter, REST). Found and fixed on
+  the way: the REST front ignored `startAt`/`endAt` cursors.
+- [x] Creating and shaping: one `New` menu that follows the context (document,
+  root collection, subcollection under the open document, duplicate, JSON
+  import), typed fields from the first document, the inspector grows
+  subcollections in place, the path bar offers to create what does not
+  exist, column headers sort, filter and hide, scalar cells edit in place,
+  reference cells peek at their target beside the grid, every row shows
+  its subcollections and jumps into them, and ⌘K carries the page's
+  collections, recent paths and actions.
+- [x] The shape of the data: the engine keeps a schema index per database
+  (collection patterns such as `users/*/orders/*/items` with document and
+  parent counts, one key-only walk on first use, exact from then on through
+  the commit observer) and serves it at `/console/api/v1/firestore/schema`.
+  The console draws it as a tree: a root opens as a grid, a nested pattern
+  opens as the collection group it names, the row for the current shape is
+  marked and the foot says how many parents carry it. The grid names each
+  row's subcollections in their own column, the path bar shows a pattern's
+  `*`, the root landing describes each collection's shape, and ⌘K finds
+  any pattern by name.
+- [x] The shell's layout: the navigation is expanded or collapsed to icons
+  (flipped at its foot or with `[`, kept per browser), a collapsed one
+  slides its labels out on hover, and every section can fill a panel
+  column beside its content. Firestore fills it with the database, a filter and the schema
+  tree, open only along the current path, so a database with dozens of
+  roots and hundreds of thousands of documents reads at a glance; the
+  workbench runs edge to edge under its own toolbar, and `t` hides the
+  panel.
+- [x] Every database of the project: `/console/api/v1/firestore/databases`
+  lists `(default)`, every database `firebase.json` declares and every one
+  a client has written to (the store seeks once per database), and the
+  panel's picker offers them, asking again each time it opens. Picking one
+  switches the tree, the path bar and the grid to that database alone.
+- [x] A pass over the Firestore section against a database of its own making:
+  a long field name no longer widens its column without end and a short one
+  under a long type badge keeps its header, arrays preview their items the
+  way maps preview their keys, the inspector keeps a long field's type and
+  remove controls inside the panel, a query that does not parse says so
+  instead of claiming to load for ever and leaves its text editable, the
+  document actions sit below the subcollections they act with, the grid's
+  footer and the query line scroll rather than stack when the column is
+  narrow, the inspector floats over the grid below `xl` instead of
+  squeezing it to a sliver, and the console follows the operating system's
+  colour scheme (Kumo's dark tokens were complete; nothing set `data-mode`).
+- [x] A theme the person picks: light, dark, or match the operating system,
+  remembered per browser and offered both in the header and in ⌘K. `system`
+  keeps following the OS live, so a machine that darkens at sunset takes the
+  console with it, while an explicit choice outlives the OS changing. Three
+  buttons rather than a menu, because Kumo's `DropdownMenu` is not in the
+  first route's chunk and pulling it in cost 10 KB of the bundle budget.
+- [x] One request for a whole screen of subcollections.
+  `POST /console/api/v1/firestore/subcollections` answers a list of parents
+  at once — which collections each document has and how many documents are
+  in each — from the schema index, which now keeps the concrete collections
+  (`users/u_9f3k2/orders`) beside the patterns it already kept. The grid's
+  column asked `ListCollectionIds` per rendered row and a count per chip, so
+  a screen cost dozens of requests and scrolling a large collection cost
+  thousands; the console now collects every path a tick asks for into one
+  request, while keeping its cache and live invalidation per document. The
+  index agrees with the store's own listing, descendant-only collections
+  included: `teams/t1` has `channels` even when no channel document exists.
+  Measured on 82,000 documents, a 32-row screen takes 2 ms in one request
+  against 9 ms in the 96 it replaces.
+- [x] The engine reports the version it actually ships as. Every crate here
+  carries the `0.0.1` workspace placeholder, because the npm package's
+  version is set by the packaging checkout while the binary is built from
+  the pinned engine commit — so the binary cannot know it at compile time
+  and the console's badge read `engine 0.0.1`. The CLI now passes
+  `FIRENOOK_RELEASE_VERSION` and `FIRENOOK_ENGINE_REVISION` at launch,
+  `firenook --version` and the console's status document report them, and a
+  binary started any other way says "unreleased build" rather than naming a
+  number that means nothing.
+- [x] The grid reads previews instead of whole documents. A collection whose
+  documents carry large maps made the page query ship 30 MB of JSON to paint
+  one screen — 302 KB a document, of which a cell shows one truncated line,
+  and the inspector refetched the document anyway. `runQuery` now opts in
+  with `x-firenook-preview`, and the REST front cuts strings and containers
+  to what a preview can draw while reporting their real sizes, so a cell
+  still shows the true entry count and never passes a fragment off as the
+  whole value. The fields the cursor orders by are kept whole, a cut value
+  is not editable in place, and a request without the header is unchanged
+  byte for byte.
+- [x] A console reader that goes away no longer wedges the schema index.
+  The walk was owned by whichever request asked for it first, so a browser
+  navigating, a socket closing or a client timing out dropped it mid-flight
+  and left the database marked as building for ever: the schema tree and the
+  grid's subcollections then hung for the life of the process while queries
+  and the status document kept answering normally. The walk now runs on its
+  own task and every reader waits on the notification, with an attempt
+  budget so a store that cannot be walked fails instead of looping.
+- [x] One connection could hold the suite's stop open for ever. The engine
+  printed that it was stopping and then never exited, so the ports stayed
+  taken and nothing could restart on them. A listener's graceful drain stops
+  accepting and then waits for the connections it already has: it closes the
+  ones sitting idle between requests, but a connection that has begun a
+  request and not finished sending it is not idle, so the wait never ended.
+  Every stream the console and the UI hold open already ends itself on the
+  stop signal, which is why the change feed was not the cause. Each HTTP
+  listener now gives the drain three seconds and then closes whatever is
+  still connected, the way the Firestore port already closed its WebChannel
+  and gRPC responses. A stop with nothing left to wait for is unchanged.
+- [x] Explain: what a query reads here, and what it would need in
+  production. The local engine answers every query it is given, so a query
+  that works all through development can still fail after a deploy for want
+  of a composite index. The plan comes from the code that runs the query,
+  not from a description of it — one function decides the strategy and
+  `execute_iter` and `plan` both call it — and names where the candidates
+  come from: documents read by name, an equality field index, a collection
+  scan or a collection-group scan. Beside it is the index requirement,
+  derived by asking a catalog that declares nothing what the query would
+  need, and the project's own `firestore.indexes.json` then says whether it
+  is already declared. The entry to paste is printed from the requirement
+  and a test declares that printed entry to prove it satisfies the query. A
+  declared index is a trailing `__name__` away from looking missing, which
+  is how the Firebase CLI writes some of its entries, so that field is now
+  matched as the implicit one it is.
+- [x] Export from the page: the query you are looking at, as JSON, NDJSON or
+  CSV. It reads whole documents rather than the previews a cell draws from,
+  pages the whole result with the grid's own cursors, and says before it
+  writes anything what the file will contain and whose view it is — an
+  export made while viewing as a user holds what that user can read. Plain
+  JSON is keyed by document id, which is the shape this console imports, so
+  an export loads straight back in; references, bytes, geopoints and vectors
+  have no plain-JSON form that survives that, so "keep Firestore types
+  exactly" writes the REST wire shape and the import now recognises it
+  instead of storing the wrappers as maps.
+- [x] One instant, one spelling. Writing that round trip found the engine
+  answering with a timestamp in two shapes: every REST response it encodes
+  by hand carried `Z` and as many fractional digits as the value needed,
+  while a listing, which is serialized from the protobuf message, carried
+  `+00:00` and six. A client comparing an `updateTime` it listed against one
+  it read saw one document with two different times. Protobuf JSON's
+  canonical form — always `Z`, a fraction of exactly zero, three, six or
+  nine digits — is now what every endpoint writes, and the normalisation the
+  WebChannel and Functions paths each carried a copy of lives in one place.
+- [x] A rules editor. The emulator exists so rules can be got right before
+  they reach production, and the loop that takes — edit the file, restart,
+  try again — is the slowest part of writing them. The rules are now the
+  text on screen: `GET`/`PUT /console/api/v1/firestore/rules` read what is
+  in force and replace it, a change compiles and takes effect on the next
+  request, and the Requests feed then shows the line that decided it.
+  Applying and saving are separate, so trying something out never rewrites
+  the file behind you; a ruleset that does not compile changes nothing, says
+  which line and column, and never reaches the file. A database whose rules
+  `firebase.json` does not configure can still be edited and says it was not
+  saved rather than implying it was.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants.
 - [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and
   Requests sections.
 - [ ] Parity checklist against the Google UI, then remove the archive and
   `setup`.
+- [ ] A write log, and perhaps an undo with it. Built and then taken out
+  again, which is the useful part of the entry: the engine can keep a
+  bounded window of commits with the document as it was and as it became,
+  and the console can list them, show the leaves that moved under their
+  dotted path, and put one back. Nothing else in the field ships this —
+  the Firebase console versions Rules and Remote Config but not documents,
+  Supabase needs an audit extension you install yourself, and the usual
+  answer elsewhere is point-in-time restore, which rolls the whole
+  database rather than one write. That is an argument for it, since the
+  objections are production's and not an emulator's: storage cost and
+  undoing a write something downstream already read.
+
+  Two findings decided against shipping it now. The undo writes through
+  the store, so **it fires triggers** — undoing a write a Function made
+  runs that Function again, which can re-apply it or loop, and the button
+  promises a restoration it cannot keep. And the value is lopsided: the
+  log answers "what did my app just do?", which nothing else answers,
+  while the undo is the half carrying the hazard and the least worth in a
+  database you can re-seed. If it returns: log first, undo behind a
+  confirmation that says triggers will fire, and the per-document history
+  in the inspector rather than one global list — the question is almost
+  always "what happened to *this*?". The removal is one commit, so the
+  implementation is readable in the history rather than lost.
 

@@ -1,0 +1,13 @@
+{
+  "name": "@firenook/kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Firenook console's component library: Kumo under the Firenook theme plus the console's own pieces. Built for the design tool; the console imports the same sources directly.",
+  "type": "module",
+  "main": "dist/design-system/kit/src/index.js",
+  "module": "dist/design-system/kit/src/index.js",
+  "types": "dist/design-system/kit/src/index.d.ts",
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  }
+}

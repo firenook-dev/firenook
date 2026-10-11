@@ -8,17 +8,37 @@
 //! `/console` on the Emulator UI port; every asset and API call is
 //! same-origin, so the console works whatever scheme the UI was opened with.
 
+mod databases;
+mod explain;
+mod firestore;
+mod rules;
+mod schema;
+
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{any, get};
-use firenook_suite_front::SuiteDirectory;
+use firenook_suite_front::{EngineRelease, SuiteDirectory};
 use rust_embed::{Embed, EmbeddedFile};
 use serde::Serialize;
 use serde_json::json;
 use ts_rs::TS;
+
+pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
+pub use explain::{
+    ExplainCandidates, ExplainIndex, ExplainIndexField, ExplainOrder, ExplainStrategy, Explanation,
+    QueryExplainer,
+};
+pub use firestore::{
+    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
+};
+pub use rules::{RulesDiagnostic, RulesDocument, RulesEditor, RulesError, RulesInstalled};
+pub use schema::{
+    ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
+    SubcollectionsSnapshot,
+};
 
 /// Built console assets. `build.rs` guarantees the folder exists, so a
 /// checkout without a console build still compiles and the router answers
@@ -49,8 +69,14 @@ pub struct ConsoleStatus {
 pub struct EngineInfo {
     /// Product name.
     pub name: String,
-    /// Version of the engine crate that built this binary.
-    pub crate_version: String,
+    /// The release this engine ships as, as the distribution that launched
+    /// it declares. Absent for a binary run straight from a build, which has
+    /// no release version to report: the crate versions in this workspace
+    /// are a placeholder, so reporting one would invent an answer.
+    pub version: Option<String>,
+    /// The engine source commit this binary was built from, when the
+    /// distribution recorded one.
+    pub revision: Option<String>,
 }
 
 /// One running service as the console shows it.
@@ -71,14 +97,15 @@ pub struct ServiceStatus {
 }
 
 impl ConsoleStatus {
-    /// The status the console shows for `directory`.
+    /// The status the console shows for `directory`, running as `release`.
     #[must_use]
-    pub fn from_directory(directory: &SuiteDirectory) -> Self {
+    pub fn new(directory: &SuiteDirectory, release: &EngineRelease) -> Self {
         Self {
             project_id: directory.project().to_owned(),
             engine: EngineInfo {
                 name: "Firenook".to_owned(),
-                crate_version: env!("CARGO_PKG_VERSION").to_owned(),
+                version: release.version().map(str::to_owned),
+                revision: release.revision().map(str::to_owned),
             },
             services: directory
                 .services()
@@ -97,20 +124,61 @@ impl ConsoleStatus {
 #[derive(Clone)]
 struct ConsoleState {
     directory: SuiteDirectory,
+    release: EngineRelease,
+}
+
+/// What the suite hands the console.
+pub struct ConsoleServices {
+    /// The running suite's directory.
+    pub directory: SuiteDirectory,
+    /// The release this engine ships as, read once at startup.
+    pub release: EngineRelease,
+    /// Firestore, when the suite runs it.
+    pub firestore: Option<FirestoreConsole>,
+    /// The Auth emulator's HTTP application, when the suite runs it, so the
+    /// console reaches Identity Toolkit same-origin under `/api/v1/auth`.
+    pub auth: Option<Router>,
+}
+
+impl ConsoleServices {
+    /// A console with the directory alone (no data services), reporting the
+    /// release the environment declares.
+    #[must_use]
+    pub fn new(directory: SuiteDirectory) -> Self {
+        Self {
+            directory,
+            release: EngineRelease::from_environment(),
+            firestore: None,
+            auth: None,
+        }
+    }
 }
 
 /// The console router: the Console API under `/api/v1` and the embedded
 /// application for every other path. Mount it under [`CONSOLE_PATH`].
-pub fn console_router(directory: SuiteDirectory) -> Router {
+pub fn console_router(services: ConsoleServices) -> Router {
+    let mut api = Router::new()
+        .route("/status", get(status))
+        .with_state(ConsoleState {
+            directory: services.directory,
+            release: services.release,
+        });
+    if let Some(firestore) = services.firestore {
+        api = api.nest("/firestore", firestore::firestore_router(firestore));
+    }
+    if let Some(auth) = services.auth {
+        // The Auth application is one fallback handler, so it mounts as a
+        // service: every path under the prefix reaches it, prefix stripped.
+        api = api.nest_service("/auth", auth);
+    }
     Router::new()
-        .route("/api/v1/status", get(status))
+        .nest("/api/v1", api)
         .route("/api/{*rest}", any(unknown_api))
         .fallback(asset)
-        .with_state(ConsoleState { directory })
 }
 
 async fn status(State(state): State<ConsoleState>) -> Json<ConsoleStatus> {
-    Json(ConsoleStatus::from_directory(&state.directory))
+    Json(ConsoleStatus::new(&state.directory, &state.release))
 }
 
 async fn unknown_api(uri: Uri) -> Response {
@@ -194,8 +262,31 @@ mod tests {
         .expect("valid directory")
     }
 
+    const REVISION: &str = "63d554c15f2699cf623c7fac19a4d1393c77f322";
+
+    /// A console that reports the release a distribution declared. The test
+    /// never reads the process environment: a release is data the launcher
+    /// supplies, so the test supplies it too.
+    fn services(release: EngineRelease) -> ConsoleServices {
+        ConsoleServices {
+            release,
+            ..ConsoleServices::new(directory())
+        }
+    }
+
     async fn call(uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-        let response = console_router(directory())
+        call_as(
+            uri,
+            EngineRelease::declared(Some("0.2.0-next.2"), Some(REVISION)),
+        )
+        .await
+    }
+
+    async fn call_as(
+        uri: &str,
+        release: EngineRelease,
+    ) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+        let response = console_router(services(release))
             .oneshot(Request::get(uri).body(Body::empty()).expect("request"))
             .await
             .expect("response");
@@ -216,6 +307,15 @@ mod tests {
         );
         let config = ts_rs::Config::new().with_out_dir(out);
         ConsoleStatus::export_all(&config).expect("TypeScript bindings written");
+        ChangeBatch::export_all(&config).expect("TypeScript bindings written");
+        ChangeHello::export_all(&config).expect("TypeScript bindings written");
+        SchemaSnapshot::export_all(&config).expect("TypeScript bindings written");
+        SubcollectionsSnapshot::export_all(&config).expect("TypeScript bindings written");
+        DatabaseList::export_all(&config).expect("TypeScript bindings written");
+        Explanation::export_all(&config).expect("TypeScript bindings written");
+        RulesDocument::export_all(&config).expect("TypeScript bindings written");
+        RulesInstalled::export_all(&config).expect("TypeScript bindings written");
+        RulesDiagnostic::export_all(&config).expect("TypeScript bindings written");
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(
@@ -232,7 +332,8 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&body).expect("json");
         assert_eq!(value["projectId"], "demo-console");
         assert_eq!(value["engine"]["name"], "Firenook");
-        assert_eq!(value["engine"]["crateVersion"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["engine"]["version"], "0.2.0-next.2");
+        assert_eq!(value["engine"]["revision"], REVISION);
         let names: Vec<&str> = value["services"]
             .as_array()
             .expect("services")
@@ -244,6 +345,22 @@ mod tests {
         assert_eq!(value["services"][0]["listening"], true);
         assert_eq!(value["services"][2]["listening"], false);
         assert_eq!(value["services"][2]["pid"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn an_engine_nobody_released_reports_no_version_rather_than_the_placeholder() {
+        let (status, _, body) = call_as("/api/v1/status", EngineRelease::default()).await;
+        assert_eq!(status, StatusCode::OK);
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(value["engine"]["version"], serde_json::Value::Null);
+        assert_eq!(value["engine"]["revision"], serde_json::Value::Null);
+        // Narrowed to the engine object: `127.0.0.1` contains the
+        // placeholder as a substring, so the whole body cannot be scanned.
+        let engine = value["engine"].to_string();
+        assert!(
+            !engine.contains(env!("CARGO_PKG_VERSION")),
+            "the workspace placeholder must never reach the console: {engine}"
+        );
     }
 
     #[tokio::test]

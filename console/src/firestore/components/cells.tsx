@@ -1,0 +1,168 @@
+// How each Firestore type reads in a grid cell: exact, copyable, and typed
+// at a glance. Colour carries meaning only (a reference is a link, a
+// boolean is a state), never decoration.
+//
+// Every cell names its own size in pixels — 12 for the value, 11 for the
+// detail beside it — and every value is set in the data face. A cell is a
+// block, not a phrase inside one, so there is no surrounding size for an
+// `em` to measure against: one did, and the same class rendered 14.4 px in
+// the toolbar, 12.6 px here and 10.8 px where 12 was meant.
+
+import { InlineCopyText } from '@cloudflare/kumo'
+import { ArrowSquareInIcon } from '@phosphor-icons/react'
+import {
+  type FsValue,
+  compactIso,
+  displayValue,
+  entryCount,
+  formatNumber,
+  relativeTime,
+} from '../value'
+
+export function IdCell({ id, missing }: { id: string; missing?: boolean | undefined }) {
+  // A whole path (a group's row) keeps its own id in view and lets the
+  // parent part give way; a bare id simply truncates.
+  const slash = id.lastIndexOf('/')
+  const parent = slash === -1 ? '' : id.slice(0, slash + 1)
+  const own = slash === -1 ? id : id.slice(slash + 1)
+  return (
+    <span
+      className={`flex min-w-0 items-center ${missing ? 'italic text-kumo-subtle' : ''}`}
+      title={id}
+    >
+      {parent && (
+        <span className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle">{parent}</span>
+      )}
+      {/* Kumo locks its monospace variants to 13 px, which is a size above
+          the rest of the row, so the face is asked for here and the size is
+          taken from the body scale. */}
+      <InlineCopyText value={id} variant="body" size="xs" className="shrink-0 font-mono" title={id}>
+        {own}
+      </InlineCopyText>
+    </span>
+  )
+}
+
+export function ValueCell({
+  value,
+  onOpenReference,
+}: {
+  value: FsValue | undefined
+  onOpenReference: (path: string) => void
+}) {
+  // Not set is not empty. A document without the field drew nothing at all,
+  // which is also what a row that has not loaded yet looks like and close
+  // to what `""` looks like, so ten rows of an older shape read as ten
+  // empty rows. A short rule says "nothing here" in a way no value can:
+  // `null` and `""` are words, and every value is text.
+  if (!value)
+    return (
+      <span
+        className="block h-px w-3 bg-kumo-line"
+        role="img"
+        aria-label="not set"
+        title="This document has no such field"
+        data-testid="not-set"
+      />
+    )
+  switch (value.type) {
+    case 'string':
+      return (
+        <span
+          className="block truncate font-mono text-[12px]"
+          // A previewed read sends the first bytes only; the tooltip says so
+          // rather than passing the fragment off as the whole value.
+          title={
+            value.elided === undefined
+              ? value.value
+              : `${value.value}…\n\n${formatNumber(value.elided)} more bytes — open the row to read it all`
+          }
+        >
+          {value.value === '' && value.elided === undefined ? (
+            <span className="text-kumo-inactive">""</span>
+          ) : (
+            value.value
+          )}
+          {value.elided !== undefined && <span className="text-kumo-inactive">…</span>}
+        </span>
+      )
+    case 'number':
+      return (
+        <span
+          className="block truncate font-mono text-[12px] tabular-nums"
+          title={String(value.value)}
+        >
+          {formatNumber(value.value)}
+        </span>
+      )
+    case 'boolean':
+      return (
+        <span
+          className={`font-mono text-[12px] ${value.value ? 'text-kumo-success' : 'text-kumo-subtle'}`}
+        >
+          {value.value ? 'true' : 'false'}
+        </span>
+      )
+    case 'timestamp':
+      return (
+        <span className="flex items-baseline gap-1.5 text-[12px]" title={value.value}>
+          {/* The relative time is the answer and reads as English; the exact
+              stamp beside it is the detail, in the data face a step down. */}
+          <span className="whitespace-nowrap">{relativeTime(value.value)}</span>
+          <span className="truncate font-mono text-[11px] text-kumo-subtle">
+            {compactIso(value.value)}
+          </span>
+        </span>
+      )
+    case 'reference':
+      return (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenReference(value.path)
+          }}
+          className="group flex max-w-full items-center gap-1 font-mono text-[12px] text-kumo-link hover:underline"
+          title={value.path}
+        >
+          <span className="truncate">{value.path}</span>
+          <ArrowSquareInIcon size={12} className="shrink-0 opacity-0 group-hover:opacity-100" />
+        </button>
+      )
+    case 'geopoint':
+      return (
+        <span className="font-mono text-[12px] tabular-nums">
+          {value.latitude}, {value.longitude}
+        </span>
+      )
+    case 'map':
+    case 'array': {
+      // A map previews its keys and an array its items, because that is what
+      // tells one row from the next; the count sits in the chip beside them.
+      // Only the first few are rendered: the cell truncates anyway, and a
+      // thousand-item array must not cost a thousand conversions a row.
+      // The engine's count, not the entries that arrived: a previewed read
+      // sends the first few and says how many there really are.
+      const count = entryCount(value)
+      const preview = (limit: number) =>
+        (value.type === 'map'
+          ? Object.keys(value.fields).slice(0, limit)
+          : value.items.slice(0, limit).map(displayValue)
+        ).join(', ') + (count > limit ? ', …' : '')
+      return (
+        <span className="flex min-w-0 items-center gap-1.5" title={preview(24)}>
+          <span className="shrink-0 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle tabular-nums">
+            {value.type === 'map' ? `{${count}}` : `[${count}]`}
+          </span>
+          <span className="truncate font-mono text-[12px] text-kumo-subtle">{preview(8)}</span>
+        </span>
+      )
+    }
+    case 'bytes':
+      return <span className="font-mono text-[12px] text-kumo-subtle">{displayValue(value)}</span>
+    case 'vector':
+      return <span className="font-mono text-[12px] text-kumo-subtle">{displayValue(value)}</span>
+    case 'null':
+      return <span className="font-mono text-[12px] text-kumo-inactive">null</span>
+  }
+}

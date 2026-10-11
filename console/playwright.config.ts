@@ -13,6 +13,10 @@ export default defineConfig({
   use: {
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // The console copies things people paste elsewhere — an index entry, a
+    // query as code — so a journey has to be able to read back what it put
+    // on the clipboard.
+    permissions: ['clipboard-read', 'clipboard-write'],
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 })

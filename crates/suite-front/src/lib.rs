@@ -7,10 +7,12 @@
 #![forbid(unsafe_code)]
 
 mod logging;
+mod release;
 mod requests;
 pub use logging::LoggingRuntime;
 #[cfg(test)]
 mod logging_tests;
+pub use release::{ENGINE_REVISION_VARIABLE, EngineRelease, RELEASE_VERSION_VARIABLE};
 pub use requests::requests_router;
 
 use std::collections::{BTreeMap, BTreeSet};

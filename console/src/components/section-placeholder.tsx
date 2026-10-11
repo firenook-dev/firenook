@@ -1,6 +1,7 @@
 import { Badge, Empty, Text } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
 import { statusQuery } from '@/api/queries'
+import { Page } from '@/components/shell/page'
 import type { ConsoleSection } from '@/lib/services'
 
 // Every section keeps this honest shape until its real screen lands: what the
@@ -9,7 +10,7 @@ export function SectionPlaceholder({ section }: { section: ConsoleSection }) {
   const status = useQuery(statusQuery)
   const running = status.data?.services.some((service) => section.services.includes(service.name))
   return (
-    <div className="grid gap-6">
+    <Page className="grid gap-6">
       <div className="grid gap-1.5">
         <div className="flex items-center gap-2">
           <Text variant="heading" size="lg" as="h1">
@@ -33,6 +34,6 @@ export function SectionPlaceholder({ section }: { section: ConsoleSection }) {
         title="This section is not built yet"
         description="The engine serves this service today; its console screen is on the way. Until then, the Google Emulator UI on this port covers it."
       />
-    </div>
+    </Page>
   )
 }

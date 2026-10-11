@@ -9,10 +9,18 @@ repository.workspace = true
 
 [dependencies]
 axum.workspace = true
+firenook-core-store = { path = "../core-store" }
+firenook-query-engine = { path = "../query-engine" }
+firenook-rest-front = { path = "../rest-front" }
+firenook-rules-runtime = { path = "../rules-runtime" }
 firenook-suite-front = { path = "../suite-front" }
+futures-util.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
 ts-rs.workspace = true
 
 [dev-dependencies]

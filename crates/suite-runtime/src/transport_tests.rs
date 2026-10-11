@@ -3,8 +3,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::server::TcpIncoming;
 
-fn idle_stream_routes() -> tonic::service::Routes {
-    tonic::service::Routes::from(axum::Router::new().route(
+fn idle_application() -> axum::Router {
+    axum::Router::new().route(
         "/idle",
         axum::routing::get(|| async {
             let stream = futures_util::stream::once(async {
@@ -13,7 +13,11 @@ fn idle_stream_routes() -> tonic::service::Routes {
             .chain(futures_util::stream::pending());
             axum::body::Body::from_stream(stream)
         }),
-    ))
+    )
+}
+
+fn idle_stream_routes() -> tonic::service::Routes {
+    tonic::service::Routes::from(idle_application())
 }
 
 // Reproduce the pre-fix transport independently: graceful shutdown cannot
@@ -178,4 +182,105 @@ async fn suite_firestore_transport_keeps_http1_http2_and_graceful_shutdown() {
         .unwrap()
         .unwrap();
     assert!(failures.recv().await.is_none());
+}
+
+// A connection that has begun a request and not finished sending it. It is
+// not idle, so `axum`'s graceful shutdown waits for it; these three tests
+// pin down that it waits, that the suite's listener stops waiting, and that
+// the wait is only ever spent on a straggler.
+async fn half_sent_request(address: std::net::SocketAddr) -> TcpStream {
+    use tokio::io::AsyncWriteExt as _;
+    let mut client = TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(b"GET /idle HTTP/1.1\r\nHost: localhost\r\n")
+        .await
+        .unwrap();
+    client.flush().await.unwrap();
+    // Give the server time to read what arrived and park for the rest.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    client
+}
+
+// Baseline reproducer: plain `axum::serve` never finishes draining.
+#[tokio::test]
+async fn raw_axum_shutdown_waits_for_a_half_sent_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown, mut receive_shutdown) = tokio::sync::watch::channel(false);
+    let mut task = tokio::spawn(async move {
+        axum::serve(crate::no_delay(listener), idle_application())
+            .with_graceful_shutdown(async move {
+                let _ = receive_shutdown.wait_for(|stopping| *stopping).await;
+            })
+            .await
+            .unwrap();
+    });
+    let client = half_sent_request(address).await;
+    shutdown.send(true).unwrap();
+    assert!(
+        tokio::time::timeout(super::DRAIN_GRACE * 2, &mut task)
+            .await
+            .is_err(),
+        "plain axum keeps waiting on a connection that is mid-request"
+    );
+    drop(client);
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn suite_shutdown_closes_a_connection_left_mid_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown, receive_shutdown) = tokio::sync::watch::channel(false);
+    let (failed, mut failures) = tokio::sync::mpsc::unbounded_channel();
+    let task = super::spawn_axum("ui", listener, idle_application(), receive_shutdown, failed);
+    let client = half_sent_request(address).await;
+    shutdown.send(true).unwrap();
+    tokio::time::timeout(super::DRAIN_GRACE * 2, task)
+        .await
+        .expect("the listener gives up on the straggler")
+        .unwrap();
+    // The client is deliberately still held when the server finishes.
+    drop(client);
+    assert!(failures.try_recv().is_err(), "closing is not a failure");
+}
+
+#[tokio::test]
+async fn suite_shutdown_still_lets_a_response_in_flight_finish() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let application = axum::Router::new().route(
+        "/slow",
+        axum::routing::get(|| async {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            "finished"
+        }),
+    );
+    let (shutdown, receive_shutdown) = tokio::sync::watch::channel(false);
+    let (failed, _failures) = tokio::sync::mpsc::unbounded_channel();
+    let task = super::spawn_axum("ui", listener, application, receive_shutdown, failed);
+    let pending = tokio::spawn(async move {
+        reqwest::get(format!("http://{address}/slow"))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let started = std::time::Instant::now();
+    shutdown.send(true).unwrap();
+    // The deadline closes stragglers; it does not cut a live response short.
+    assert_eq!(pending.await.unwrap(), "finished");
+    tokio::time::timeout(super::DRAIN_GRACE, task)
+        .await
+        .expect("the drain ends as soon as the response does")
+        .unwrap();
+    assert!(
+        started.elapsed() < super::DRAIN_GRACE,
+        "a drain with nothing left to wait for must not spend the grace budget"
+    );
 }

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { ENGINE_REVISION, RELEASE_VERSION } from './engine'
 
 const origin = () => {
   const value = process.env.FIRENOOK_CONSOLE_ORIGIN
@@ -15,7 +16,56 @@ test('the overview lists the running services from the engine', async ({ page })
   await expect(table.getByText('Firestore', { exact: true })).toBeVisible()
   await expect(table.getByText('Authentication', { exact: true })).toBeVisible()
   await expect(table.getByText('Emulator hub', { exact: true })).toBeVisible()
-  await expect(page.getByText(/engine \d+\.\d+\.\d+/)).toBeVisible()
+  // The release the launcher declared, not the placeholder crate version:
+  // the engine is built from a pinned commit and cannot know what it ships
+  // as, so a wrong number here means the handoff is broken.
+  const badge = page.getByTestId('engine-badge')
+  await expect(badge).toHaveText(`engine ${RELEASE_VERSION}`)
+  await expect(badge).toHaveAttribute(
+    'title',
+    `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`,
+  )
+  await expect(page.getByText(`on Firenook ${RELEASE_VERSION}`)).toBeVisible()
+})
+
+test('the theme is light, dark or the system\u2019s, and it is remembered', async ({ browser }) => {
+  // A browser whose OS says dark, so "match the system" has something to
+  // follow and an explicit choice has something to override.
+  const context = await browser.newContext({ colorScheme: 'dark' })
+  const page = await context.newPage()
+  const mode = () => page.locator('html').getAttribute('data-mode')
+
+  await page.goto(`${origin()}/console`)
+  await expect(page.getByTestId('theme-picker')).toHaveAttribute('data-choice', 'system')
+  expect(await mode()).toBe('dark')
+
+  // An explicit light choice beats the dark OS.
+  await page.getByTestId('theme-light').click()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await expect(page.getByTestId('theme-picker')).toHaveAttribute('data-choice', 'light')
+
+  // And survives a reload rather than snapping back to the OS.
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await expect(page.getByTestId('theme-picker')).toHaveAttribute('data-choice', 'light')
+
+  // Back to the system, and the dark OS takes over again.
+  await page.getByTestId('theme-system').click()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'dark')
+
+  // The system changing is followed live, with no reload.
+  await page.emulateMedia({ colorScheme: 'light' })
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'dark')
+
+  // The palette offers the same three and says which is in force.
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('combobox').fill('theme')
+  await expect(page.getByRole('option', { name: /Dark theme/ })).toBeVisible()
+  await page.getByRole('option', { name: /Light theme/ }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
+  await context.close()
 })
 
 test('client routes deep-link through the engine and navigate in place', async ({ page }) => {
@@ -24,15 +74,51 @@ test('client routes deep-link through the engine and navigate in place', async (
   await expect(page.getByText('running', { exact: true })).toBeVisible()
   await page.getByRole('link', { name: 'Firestore' }).click()
   await expect(page).toHaveURL(/\/console\/firestore$/)
-  await expect(page.getByRole('heading', { name: 'Firestore', level: 1 })).toBeVisible()
+  // The workbench fills the content column; its heading is for readers.
+  await expect(page.getByRole('heading', { name: 'Firestore', level: 1 })).toBeAttached()
+  await expect(page.getByTestId('path-bar')).toBeVisible()
   await page.goto(`${origin()}/console/tasks`)
   await expect(page.getByText('not running', { exact: true })).toBeVisible()
 })
 
+test('the navigation collapses to icons that peek on hover, and remembers it', async ({ page }) => {
+  await page.goto(`${origin()}/console/auth`)
+  const nav = page.locator('aside[data-sidebar="sidebar"]')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+  await expect(page.getByTestId('nav-toggle')).toHaveAttribute('aria-expanded', 'true')
+
+  // Collapsed: icons only, and the choice survives a reload.
+  await page.getByTestId('nav-toggle').click()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // Collapsed, the labels slide out over the page while the pointer is on
+  // the rail, and go back when it leaves.
+  await nav.locator('[data-sidebar="peek-zone"]').hover()
+  await expect(nav).toHaveAttribute('data-state', 'peeking')
+  await expect(nav.getByRole('link', { name: 'Functions' })).toBeVisible()
+  await page.getByRole('heading', { name: 'Authentication', level: 1 }).hover()
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+
+  // `[` flips it; ⌘K offers the same.
+  await page.keyboard.press('[')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+  await page.keyboard.press('[')
+  await expect(nav).toHaveAttribute('data-state', 'collapsed')
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('palette-input').fill('expand sidebar')
+  await page.keyboard.press('Enter')
+  await expect(nav).toHaveAttribute('data-state', 'expanded')
+})
+
 test('the command palette opens from the keyboard and jumps to a section', async ({ page }) => {
   await page.goto(`${origin()}/console`)
+  // The shortcut is a window listener the shell installs after mount.
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
   await page.keyboard.press('ControlOrMeta+k')
-  const input = page.getByPlaceholder('Jump to a section…')
+  const input = page.getByTestId('palette-input')
   await expect(input).toBeVisible()
   await input.fill('tasks')
   await page.keyboard.press('Enter')
