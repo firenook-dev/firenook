@@ -22,9 +22,11 @@ use crate::log::{LogEvent, LogSink};
 use crate::manifest::Signature;
 use crate::monitor::cause::{self, CauseInput};
 use crate::monitor::{
-    FunctionKind, InvocationEnd, InvocationOrigin, InvocationOutcome, InvocationStart,
-    InvocationSummary, InvocationTarget, InvocationToken, Monitor,
+    DeliveryPlan, EventReceived, EventarcFilterMismatch, EventarcOrigin, FunctionKind,
+    InvocationEnd, InvocationOrigin, InvocationOutcome, InvocationStart, InvocationSummary,
+    InvocationTarget, InvocationToken, Monitor, RecordedEvent,
 };
+use crate::registry::EventarcSubscription;
 use crate::{RuntimeState, WORKER_READY_TIMEOUT};
 
 type Shared = Arc<RuntimeState>;
@@ -1131,9 +1133,44 @@ async fn eventarc_publish(state: Shared, channel: String, body: Bytes) -> Respon
     let Some(events) = parsed.get("events").and_then(Value::as_array) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    match publish_events(state, &channel, events, EventarcOrigin::App, None).await {
+        Ok(_) => StatusCode::OK.into_response(),
+        Err(PublishError::MissingType) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+/// Why a batch of Eventarc events was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PublishError {
+    /// An event has no `type`; the events before it were published (the
+    /// official route's answer is `400`).
+    MissingType,
+}
+
+/// Publishes events on a channel (`google` for the native channel): each
+/// one is recorded with every subscription of its type on the channel and
+/// whether that subscription's filters let it through, and delivered to the
+/// ones they do. An event that cannot be converted is recorded with its
+/// error and delivered to none. Returns the recorded events, in order.
+pub(crate) async fn publish_events(
+    state: Shared,
+    channel: &str,
+    events: &[Value],
+    origin: EventarcOrigin,
+    replay_of: Option<String>,
+) -> Result<Vec<RecordedEvent>, PublishError> {
+    let mut recorded = Vec::with_capacity(events.len());
     for event in events {
         let Some(event_type) = event.get("type").and_then(Value::as_str) else {
-            return StatusCode::BAD_REQUEST.into_response();
+            state.monitor.event_received(EventReceived {
+                channel: channel.to_owned(),
+                raw: event.clone(),
+                converted: Err("CloudEvent 'type' is required.".to_owned()),
+                origin,
+                replay_of: replay_of.clone(),
+                deliveries: Vec::new(),
+            });
+            return Err(PublishError::MissingType);
         };
         // The official emulator's unlabeled INFO line reaches only its debug
         // log, never the terminal.
@@ -1145,43 +1182,62 @@ async fn eventarc_publish(state: Shared, channel: String, body: Bytes) -> Respon
                 serde_json::to_string_pretty(event).unwrap_or_default()
             ),
         ));
-        let payload = if channel == "google" {
-            event.clone()
+        let converted = if channel == "google" {
+            Ok(event.clone())
         } else {
-            match cloud_event_from_proto(event) {
-                Ok(payload) => payload,
-                Err(error) => {
-                    state.log.record(LogEvent::new("ERROR", "eventarc", error));
-                    continue;
-                }
+            cloud_event_from_proto(event)
+        };
+        let payload = match &converted {
+            Ok(payload) => payload.clone(),
+            Err(error) => {
+                state.log.record(
+                    LogEvent::new("ERROR", "eventarc", error.clone())
+                        .with_kind("eventarc.failed")
+                        .with_detail(json!({ "error": error })),
+                );
+                recorded.push(state.monitor.event_received(EventReceived {
+                    channel: channel.to_owned(),
+                    raw: event.clone(),
+                    converted,
+                    origin,
+                    replay_of: replay_of.clone(),
+                    deliveries: Vec::new(),
+                }));
+                continue;
             }
         };
-        let subscriptions = state
-            .registry
-            .read()
-            .await
-            .eventarc_subscriptions(event_type, &channel);
-        for subscription in subscriptions {
-            if !subscription.filters.iter().all(|(name, expected)| {
-                let attribute = event.get(name).or_else(|| {
-                    event
-                        .get("attributes")
-                        .and_then(|attributes| attributes.get(name))
-                });
-                let actual = match attribute {
-                    Some(Value::Object(map)) => map
-                        .get("ceTimestamp")
-                        .or_else(|| map.get("ceString"))
-                        .and_then(Value::as_str),
-                    Some(value) => value.as_str(),
-                    None => None,
-                };
-                actual == Some(expected.as_str())
-            }) {
+        let plans: Vec<(EventarcSubscription, DeliveryPlan)> = {
+            let registry = state.registry.read().await;
+            registry
+                .eventarc_subscriptions(event_type, channel)
+                .into_iter()
+                .map(|subscription| {
+                    let plan = DeliveryPlan {
+                        trigger_key: subscription.trigger_key.clone(),
+                        function_id: registry
+                            .get(&subscription.trigger_key)
+                            .map(|record| record.definition.id()),
+                        mismatches: filter_mismatches(event, &subscription.filters),
+                    };
+                    (subscription, plan)
+                })
+                .collect()
+        };
+        let event_record = state.monitor.event_received(EventReceived {
+            channel: channel.to_owned(),
+            raw: event.clone(),
+            converted,
+            origin,
+            replay_of: replay_of.clone(),
+            deliveries: plans.iter().map(|(_, plan)| plan.clone()).collect(),
+        });
+        for (slot, (subscription, plan)) in plans.into_iter().enumerate() {
+            if !plan.mismatches.is_empty() {
                 continue;
             }
             let state = Arc::clone(&state);
             let payload = payload.clone();
+            let event_seq = event_record.seq;
             tokio::spawn(async move {
                 let request = Request::builder()
                     .method(Method::POST)
@@ -1197,17 +1253,65 @@ async fn eventarc_publish(state: Shared, channel: String, body: Bytes) -> Respon
                         &subscription.trigger_key,
                         request,
                         "/".to_owned(),
-                        DispatchContext::default(),
+                        DispatchContext {
+                            delivery: Some((event_seq, slot)),
+                            ..DispatchContext::default()
+                        },
                     )
                     .await;
-                    if response.status().as_u16() >= 400 {
-                        state.log.record(LogEvent::new("ERROR", "eventarc", format!("Failed to trigger Functions emulator for {}: Received non-200 status code: {}", subscription.trigger_key, response.status().as_u16())));
+                    let status = response.status().as_u16();
+                    if status >= 400 {
+                        state.log.record(
+                            LogEvent::new(
+                                "ERROR",
+                                "eventarc",
+                                format!(
+                                    "Failed to trigger Functions emulator for {}: Received non-200 status code: {status}",
+                                    subscription.trigger_key
+                                ),
+                            )
+                            .with_kind("eventarc.failed")
+                            .with_detail(json!({ "status": status })),
+                        );
                     }
                 }
             });
         }
+        recorded.push(event_record);
     }
-    StatusCode::OK.into_response()
+    Ok(recorded)
+}
+
+/// The filters of a subscription an event does not satisfy. An attribute is
+/// read from the event's top level first, then from a channel event's
+/// `attributes` (its `ceString` or `ceTimestamp`).
+fn filter_mismatches(
+    event: &Value,
+    filters: &BTreeMap<String, String>,
+) -> Vec<EventarcFilterMismatch> {
+    filters
+        .iter()
+        .filter_map(|(name, expected)| {
+            let attribute = event.get(name).or_else(|| {
+                event
+                    .get("attributes")
+                    .and_then(|attributes| attributes.get(name))
+            });
+            let actual = match attribute {
+                Some(Value::Object(map)) => map
+                    .get("ceTimestamp")
+                    .or_else(|| map.get("ceString"))
+                    .and_then(Value::as_str),
+                Some(value) => value.as_str(),
+                None => None,
+            };
+            (actual != Some(expected.as_str())).then(|| EventarcFilterMismatch {
+                attribute: name.clone(),
+                expected: expected.clone(),
+                actual: actual.map(str::to_owned),
+            })
+        })
+        .collect()
 }
 
 /// `cloudEventFromProtoToJson`.
@@ -1270,4 +1374,42 @@ fn cloud_event_from_proto(event: &Value) -> Result<Value, String> {
         }
     }
     Ok(Value::Object(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mismatches_name_the_attribute_the_expected_and_the_actual_value() {
+        let filters = BTreeMap::from([
+            ("tier".to_owned(), "vip".to_owned()),
+            ("subject".to_owned(), "ada".to_owned()),
+            ("region".to_owned(), "eu".to_owned()),
+        ]);
+        let channel_event = json!({
+            "type": "test.greeted",
+            "attributes": {"tier": {"ceString": "gold"}, "subject": {"ceString": "ada"}}
+        });
+        assert_eq!(
+            filter_mismatches(&channel_event, &filters),
+            [
+                EventarcFilterMismatch {
+                    attribute: "region".to_owned(),
+                    expected: "eu".to_owned(),
+                    actual: None,
+                },
+                EventarcFilterMismatch {
+                    attribute: "tier".to_owned(),
+                    expected: "vip".to_owned(),
+                    actual: Some("gold".to_owned()),
+                },
+            ]
+        );
+        let native = json!({"type": "a", "tier": "vip", "subject": "ada", "region": "eu"});
+        assert_eq!(filter_mismatches(&native, &filters), []);
+        let timestamped = json!({"attributes": {"time": {"ceTimestamp": "2026-10-12T00:00:00Z"}}});
+        let at = BTreeMap::from([("time".to_owned(), "2026-10-12T00:00:00Z".to_owned())]);
+        assert_eq!(filter_mismatches(&timestamped, &at), []);
+    }
 }
