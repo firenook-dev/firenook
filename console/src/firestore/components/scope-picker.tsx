@@ -116,9 +116,29 @@ export function ScopePicker() {
               }
               count={patterns.length > 0 ? everywhere : undefined}
             >
-              {places > 1
-                ? `Every collection called ${collectionId}, whatever its parent — ${formatNumber(places)} of them. A collection group.`
-                : `The only ${collectionId} in the database, so the same documents. A collection group.`}
+              {/* Which patterns, when there are several: the schema panel's
+                  footer said "the group also covers …" beside a tree that
+                  was not where the choice is made. */}
+              {places > 1 ? (
+                <>
+                  Every collection called {collectionId}, whatever its parent —{' '}
+                  {formatNumber(places)} of them
+                  {patterns.length > 1 && (
+                    <>
+                      , at{' '}
+                      {patterns.map((node, index) => (
+                        <span key={node.pattern}>
+                          {index > 0 && (index === patterns.length - 1 ? ' and ' : ', ')}
+                          <span className="font-mono text-[11px]">{node.pattern}</span>
+                        </span>
+                      ))}
+                    </>
+                  )}
+                  . A collection group.
+                </>
+              ) : (
+                `The only ${collectionId} in the database, so the same documents. A collection group.`
+              )}
             </Option>
           </DropdownMenu.Item>
         </DropdownMenu.Group>

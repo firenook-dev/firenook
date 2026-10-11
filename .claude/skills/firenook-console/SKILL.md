@@ -1433,7 +1433,13 @@ both under the word "change".
   side is `src/firestore/schema.ts` (`schemaQuery`, `patternOf`, `findNode`,
   `childrenOf`, `filterSchema`, `isExpanded`, the `useSchemaTree` store) and
   `components/schema-panel.tsx`, which fills the shell's section panel with
-  the database picker, a filter and the tree. The picker is fed by
+  the database picker, a filter and the tree — and **no footer**. One said
+  the current pattern, its count and parents, and "the group also covers
+  …": the lit row, that row's count and tooltip, and (for the last) the
+  scope picker's "All" description, which names every pattern the group
+  reads when there are several. It was a third band at the window's foot
+  beside the grid footer and the Requests bar, and its pattern count
+  disagreed with the filter line's whenever the grid showed one collection. The picker is fed by
   `GET /console/api/v1/firestore/databases` (`DatabaseCatalog` in
   `crates/console-front/src/databases.rs`: `(default)` always, every id
   `firebase.json` declares and every database holding a document, from

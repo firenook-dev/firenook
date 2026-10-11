@@ -11,7 +11,6 @@ import {
   isPattern,
   patternOf,
   patternsById,
-  siblingsById,
   useSchemaTree,
 } from './schema'
 
@@ -87,7 +86,7 @@ describe('the tree', () => {
     expect(childrenOf(schema, 'events')).toEqual([])
   })
 
-  it('flattens depth-first with depth and parent, and finds same-named patterns', () => {
+  it('flattens depth-first with depth and parent', () => {
     expect(flattenSchema(schema).map((entry) => `${entry.depth}:${entry.node.pattern}`)).toEqual([
       '0:shops',
       '1:shops/*/orders',
@@ -97,8 +96,6 @@ describe('the tree', () => {
       '1:users/*/sessions',
     ])
     expect(flattenSchema(schema)[4]?.parent).toBe(orders)
-    expect(siblingsById(schema, orders)).toEqual([shopOrders])
-    expect(siblingsById(schema, items)).toEqual([])
   })
 
   it('describes a shape in one line', () => {

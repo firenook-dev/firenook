@@ -670,6 +670,19 @@ test('the scope picker names both scopes, and reads what it says', async ({ page
   await page.keyboard.press('g')
   await expect(page).not.toHaveURL(/group=true/)
   await expect(page.getByTestId('scope-picker')).toContainText('This collection')
+
+  // With orders under a team as well, "All orders" reads two patterns, and
+  // the menu names them where the choice is made. The schema panel's footer
+  // said "the group also covers …" beside the tree instead.
+  await put(page.request, 'teams/t_scope/orders/o1', { total: { integerValue: '1' } })
+  await page.reload()
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  await page.getByTestId('scope-picker').click()
+  const named = page.getByTestId('scope-all')
+  await expect(named).toContainText('teams/*/orders')
+  await drop(page.request, 'teams/t_scope/orders/o1')
+  await expect(named).toContainText('users/*/orders')
+  await page.keyboard.press('Escape')
 })
 
 test('the schema tree shows the shape and opens a nested pattern as its group', async ({
@@ -713,7 +726,10 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await expect(orders).toBeVisible()
   await expect(items).toHaveCount(0)
   await expect(panel.locator('[data-pattern="products/*/reviews"]')).toHaveCount(0)
-  await expect(panel.getByTestId('schema-summary')).toContainText('users')
+  // No footer under the tree. Everything it said is the lit row, that
+  // row's count and tooltip, or the scope picker's menu, and it was a third
+  // band stacked at the foot of the window.
+  await expect(panel.getByTestId('schema-summary')).toHaveCount(0)
 
   // The filter narrows the tree to matching ids and the way to them.
   await panel.getByTestId('schema-filter').fill('item')
@@ -733,10 +749,18 @@ test('the schema tree shows the shape and opens a nested pattern as its group', 
   await expect(page.getByTestId('scope-picker')).toContainText('All orders')
   await expect(page.getByTestId('grid-row').first()).toContainText(/users\/[^/]+\/orders\//)
   await expect(items).toBeVisible()
-  await expect(panel.getByTestId('schema-summary')).toContainText(
-    `${ordersNode?.documents} documents`,
+  // The pattern's size is its row's: the count on it, the parents in its tooltip.
+  await expect(orders.getByTestId('schema-node-open').first()).toContainText(
+    (ordersNode?.documents ?? 0).toLocaleString('en-US'),
   )
-  await expect(panel.getByTestId('schema-summary')).toContainText(`in ${ordersNode?.parents} of`)
+  // Away first: the click that opened it left the pointer on it, and a
+  // tooltip a click closed waits for the pointer to come back.
+  await page.mouse.move(700, 600)
+  await orders.getByTestId('schema-node-open').first().hover()
+  await expect(
+    page.locator('.kumo-tooltip-popup').filter({ hasText: 'users/*/orders ·' }),
+  ).toContainText(`in ${(ordersNode?.parents ?? 0).toLocaleString('en-US')} parents`)
+  await page.mouse.move(700, 600)
   // Nothing can be created at a pattern.
   await page.getByTestId('new-menu').click()
   await expect(page.getByTestId('new-root-collection')).toBeVisible()
@@ -987,7 +1011,6 @@ test('a database a client writes to joins the picker and opens on its own', asyn
   await expect(picker).toContainText('analytics')
   await expect(panel.locator('[data-pattern="events"]')).toBeVisible()
   await expect(panel.locator('[data-pattern="users"]')).toHaveCount(0)
-  await expect(panel.getByTestId('schema-summary')).toContainText('1 root collection · 1 document')
   await panel.locator('[data-pattern="events"]').getByTestId('schema-node-open').click()
   await expect(page).toHaveURL(/db=analytics.*path=events|path=events.*db=analytics/)
   await expect(page.getByTestId('grid-row').first()).toContainText('e_first')

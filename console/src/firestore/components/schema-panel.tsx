@@ -22,13 +22,10 @@ import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
 import { databaseItems, databasesQuery } from '../databases'
 import {
   type SchemaNode,
-  type SchemaSnapshot,
   filterSchema,
-  findNode,
   isExpanded,
   patternOf,
   schemaQuery,
-  siblingsById,
   useSchemaTree,
 } from '../schema'
 import { formatNumber } from '../value'
@@ -46,7 +43,6 @@ export function SchemaPanel() {
   const current = patternOf(workbench.collectionPath)
   useEffect(() => reveal(current), [reveal, current])
   const kept = filterSchema(schema.data, filter)
-  const node = findNode(schema.data, current)
   const roots = (schema.data?.collections ?? []).filter((root) => !kept || kept.has(root.pattern))
   const databases = useQuery(databasesQuery)
 
@@ -168,7 +164,14 @@ export function SchemaPanel() {
           </ul>
         )}
       </div>
-      <Summary schema={schema.data} node={node} />
+      {/* No footer. It said the current pattern, its document count and
+          its parents, and the other patterns sharing its id: the first is
+          the lit row and the path bar, the next two are that row's own
+          count and tooltip, and the last is in the scope picker's menu,
+          where "All" is chosen. It stacked a third band at the foot of the
+          window beside the grid's footer and the Requests bar, and its
+          count, a pattern's, disagreed with the filter line's whenever the
+          grid showed one collection of it. */}
     </SectionPanel>
   )
 }
@@ -304,61 +307,3 @@ function TreeNode({
 }
 
 /** What the open shape holds, or the database as a whole at the root. */
-function Summary({
-  schema,
-  node,
-}: {
-  schema: SchemaSnapshot | undefined
-  node: SchemaNode | undefined
-}) {
-  if (!schema) return null
-  if (!node) {
-    const roots = schema.collections.length
-    return (
-      <footer
-        className="shrink-0 border-t border-kumo-line px-3 py-1.5"
-        data-testid="schema-summary"
-      >
-        <span className="text-[12px] text-kumo-subtle tabular-nums">
-          {formatNumber(roots)} root {roots === 1 ? 'collection' : 'collections'} ·{' '}
-          {formatNumber(schema.documents)} {schema.documents === 1 ? 'document' : 'documents'}
-        </span>
-      </footer>
-    )
-  }
-  const pattern = node.pattern
-  const parentPattern = pattern.includes('/*/') ? pattern.slice(0, pattern.lastIndexOf('/*/')) : ''
-  const parent = parentPattern ? findNode(schema, parentPattern) : undefined
-  const siblings = siblingsById(schema, node)
-  return (
-    <footer
-      className="grid shrink-0 gap-0.5 border-t border-kumo-line px-3 py-1.5"
-      data-testid="schema-summary"
-    >
-      <span className="truncate font-mono text-[11px] text-kumo-subtle" title={pattern}>
-        {pattern}
-      </span>
-      <span className="text-[12px] text-kumo-default tabular-nums">
-        {formatNumber(node.documents)} {node.documents === 1 ? 'document' : 'documents'}
-        {node.parents !== null && parent && (
-          <span className="text-kumo-subtle">
-            {' '}
-            in {formatNumber(node.parents)} of {formatNumber(parent.documents)}{' '}
-            <span className="font-mono text-[11px]">{parent.id}</span>
-          </span>
-        )}
-      </span>
-      {siblings.length > 0 && (
-        <span className="text-[12px] text-kumo-subtle">
-          The group also covers{' '}
-          {siblings.map((sibling, index) => (
-            <span key={sibling.pattern}>
-              {index > 0 && ', '}
-              <span className="font-mono text-[11px]">{sibling.pattern}</span>
-            </span>
-          ))}
-        </span>
-      )}
-    </footer>
-  )
-}

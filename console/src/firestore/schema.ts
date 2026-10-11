@@ -80,13 +80,6 @@ export function flattenSchema(
   return out
 }
 
-/** The other patterns that share a collection id with `node`, if any. */
-export function siblingsById(schema: SchemaSnapshot | undefined, node: SchemaNode): SchemaNode[] {
-  return flattenSchema(schema)
-    .map((entry) => entry.node)
-    .filter((candidate) => candidate.id === node.id && candidate.pattern !== node.pattern)
-}
-
 /**
  * Every pattern that carries a collection id, which is exactly the set a
  * collection-group query reads. One entry means the id is unique in the
