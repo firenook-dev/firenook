@@ -3,15 +3,19 @@
 //! publishes, dead-letter forwards included, reach the Functions host through
 //! the delivery queue), the lease/push timer and the `onSchedule` scheduler.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
 
-use crate::broker::{Broker, Published, PushJob};
-use crate::functions::{ScheduleDefinition, Target, build_dispatch, discover, topic_resource};
+use crate::broker::{Broker, FanoutSkip, FanoutTarget, Published, PushJob};
+use crate::error::PubsubError;
+use crate::functions::{
+    FunctionTarget, ScheduleDefinition, Target, build_dispatch, build_dispatch_with, discover,
+    event_id, topic_resource,
+};
 use crate::google::iam::v1::iam_policy_server::IamPolicyServer;
 use crate::google::pubsub::v1::publisher_server::PublisherServer;
 use crate::google::pubsub::v1::schema_service_server::SchemaServiceServer;
@@ -21,6 +25,18 @@ use crate::scheduler::{ScheduleError, SchedulerRuntime};
 
 /// The lease and push timer resolution.
 const TICK: Duration = Duration::from_millis(50);
+/// How long a push response body is read for its snippet, at most.
+const SNIPPET_WAIT: Duration = Duration::from_millis(500);
+/// The bytes of a push response body kept for its snippet.
+const SNIPPET_BYTES: usize = 1_024;
+/// A growing push streak reaches the sink at most this often.
+const STREAK_EMIT: Duration = Duration::from_secs(10);
+/// A streak with no attempt for this long is forgotten.
+const STREAK_IDLE: Duration = Duration::from_secs(60);
+/// Refused requests kept.
+const REJECTED_CAPACITY: usize = 200;
+/// Messages the console publishes per broker batch.
+const CONSOLE_BATCH: usize = 1_000;
 
 struct Inner {
     project: String,
@@ -34,6 +50,256 @@ struct Inner {
     /// Set by [`PubsubRuntime::shutdown`]: the timer never starts again.
     stopped: AtomicBool,
     managed: Mutex<ManagedSubscriptions>,
+    push_sink: Mutex<Option<PushSink>>,
+    streaks: Mutex<PushStreaks>,
+    rejected: Mutex<RejectedRing>,
+    /// Numbers console redeliveries, so each gets a fresh event id.
+    redeliveries: AtomicU64,
+}
+
+/// One streak of push attempts: consecutive attempts of one message with
+/// the same outcome (status or error). The push sink receives it when it
+/// starts, then at most every 10 s while it grows, and once more with its
+/// final count when another outcome ends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushStreakRecord {
+    /// Stable for the streak; a new outcome starts a new one.
+    pub streak: String,
+    pub subscription: String,
+    pub message_id: u64,
+    pub first_attempt: u32,
+    pub last_attempt: u32,
+    pub count: u32,
+    pub first_at: SystemTime,
+    pub last_at: SystemTime,
+    /// The endpoint's HTTP status, when it answered.
+    pub status: Option<u16>,
+    /// Why no answer came (refused, timed out), when none did.
+    pub error: Option<String>,
+    /// How long the latest attempt took.
+    pub latency: Duration,
+    /// The first 1 KiB of the latest response body.
+    pub response: Option<String>,
+}
+
+/// Receives push streaks inline, from the push loop; it must not block.
+pub type PushSink = Arc<dyn Fn(PushStreakRecord) + Send + Sync>;
+
+/// What one push attempt got. Success is any 2xx, as the push loop decides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PushOutcome {
+    pub(crate) status: Option<u16>,
+    pub(crate) error: Option<String>,
+    pub(crate) latency: Duration,
+}
+
+impl PushOutcome {
+    fn delivered(&self) -> bool {
+        self.status
+            .is_some_and(|status| (200..300).contains(&status))
+    }
+}
+
+#[derive(Debug)]
+struct Streak {
+    record: PushStreakRecord,
+    emitted_at: Instant,
+    emitted_count: u32,
+    seen_at: Instant,
+}
+
+/// The current streak of each message being pushed.
+#[derive(Debug, Default)]
+pub(crate) struct PushStreaks {
+    current: HashMap<(String, u64), Streak>,
+    next: u64,
+}
+
+impl PushStreaks {
+    /// Records one attempt and returns what the sink receives for it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn record(
+        &mut self,
+        subscription: &str,
+        message_id: u64,
+        attempt: u32,
+        outcome: &PushOutcome,
+        response: Option<String>,
+        now: Instant,
+        at: SystemTime,
+    ) -> Vec<PushStreakRecord> {
+        let key = (subscription.to_owned(), message_id);
+        let mut records = Vec::new();
+        let same = self.current.get(&key).is_some_and(|streak| {
+            streak.record.status == outcome.status && streak.record.error == outcome.error
+        });
+        if same {
+            if let Some(streak) = self.current.get_mut(&key) {
+                let record = &mut streak.record;
+                record.last_attempt = attempt;
+                record.count += 1;
+                record.last_at = at;
+                record.latency = outcome.latency;
+                record.response = response;
+                streak.seen_at = now;
+                if now.saturating_duration_since(streak.emitted_at) >= STREAK_EMIT {
+                    streak.emitted_at = now;
+                    streak.emitted_count = record.count;
+                    records.push(record.clone());
+                }
+            }
+        } else {
+            if let Some(ended) = self.current.remove(&key)
+                && ended.record.count > ended.emitted_count
+            {
+                records.push(ended.record);
+            }
+            self.next += 1;
+            let record = PushStreakRecord {
+                streak: self.next.to_string(),
+                subscription: subscription.to_owned(),
+                message_id,
+                first_attempt: attempt,
+                last_attempt: attempt,
+                count: 1,
+                first_at: at,
+                last_at: at,
+                status: outcome.status,
+                error: outcome.error.clone(),
+                latency: outcome.latency,
+                response,
+            };
+            records.push(record.clone());
+            self.current.insert(
+                key.clone(),
+                Streak {
+                    record,
+                    emitted_at: now,
+                    emitted_count: 1,
+                    seen_at: now,
+                },
+            );
+        }
+        // A delivered push ends the message's pushes.
+        if outcome.delivered() {
+            self.current.remove(&key);
+        }
+        records
+    }
+
+    /// The current streak of a message, if it has one.
+    #[cfg(test)]
+    pub(crate) fn current(&self, subscription: &str, message_id: u64) -> Option<PushStreakRecord> {
+        self.current
+            .get(&(subscription.to_owned(), message_id))
+            .map(|streak| streak.record.clone())
+    }
+
+    /// Forgets streaks whose message is no longer being pushed.
+    fn prune(&mut self, now: Instant) {
+        self.current
+            .retain(|_, streak| now.saturating_duration_since(streak.seen_at) < STREAK_IDLE);
+    }
+}
+
+/// A request the wire refused, coalesced by operation, resource and error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejection {
+    pub first_at: SystemTime,
+    pub last_at: SystemTime,
+    pub count: u32,
+    /// `publish`, `pull`, `streaming-pull` or `create-subscription`.
+    pub operation: &'static str,
+    /// The full name the app used.
+    pub resource: String,
+    /// The engine's answer, verbatim.
+    pub error: String,
+    /// Its code name (`NOT_FOUND`).
+    pub code: &'static str,
+    /// The nearest existing id in the same project, when one is close.
+    pub suggestion: Option<String>,
+    /// A project where this id exists, when the app used another.
+    pub elsewhere: Option<String>,
+}
+
+/// Every refusal kept, oldest first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedList {
+    pub entries: Vec<Rejection>,
+    /// Refusals evicted from the ring since start.
+    pub dropped: u64,
+    /// Bumped by every new or repeated refusal.
+    pub revision: u64,
+}
+
+#[derive(Debug, Default)]
+struct RejectedRing {
+    entries: VecDeque<Rejection>,
+    dropped: u64,
+    revision: u64,
+}
+
+/// A message as the console publishes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutgoingMessage {
+    pub data: Vec<u8>,
+    pub attributes: BTreeMap<String, String>,
+    pub ordering_key: String,
+}
+
+/// What a console publish did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PublishOutcome {
+    pub ids: Vec<String>,
+    /// Subscriptions of the topic (the functions consumer's left out).
+    pub subscriptions: u32,
+    /// Functions listening on the topic.
+    pub functions: u32,
+    /// Function targets skipped because background triggers are paused
+    /// (the events were dropped, not queued).
+    pub functions_skipped: u32,
+}
+
+/// What a publish handed to the topic's functions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FanoutSummary {
+    pub functions: u32,
+    pub skipped: u32,
+}
+
+/// Why a console redelivery or dispatch preview could not be made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RedeliverError {
+    /// The topic's history ring no longer keeps the message.
+    MessageNotKept,
+    /// The function does not listen on the topic.
+    NotATarget,
+    /// Background triggers are paused, so nothing is dispatched.
+    BackgroundPaused,
+    /// The Functions delivery queue has stopped.
+    Stopped,
+}
+
+impl std::fmt::Display for RedeliverError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MessageNotKept => "The engine no longer keeps this message.",
+            Self::NotATarget => "That function does not listen on this topic.",
+            Self::BackgroundPaused => {
+                "Background triggers are paused, so the message was not dispatched."
+            }
+            Self::Stopped => "The Functions delivery queue has stopped.",
+        })
+    }
+}
+
+impl std::error::Error for RedeliverError {}
+
+/// The request a function receives for a message, rebuilt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchPreview {
+    pub content_type: String,
+    pub body: Vec<u8>,
 }
 
 /// The functions consumer's `emulator-sub-<topic>` subscriptions: the ones
@@ -98,6 +364,10 @@ impl PubsubRuntime {
                 ticker: Mutex::new(None),
                 stopped: AtomicBool::new(false),
                 managed: Mutex::new(ManagedSubscriptions::default()),
+                push_sink: Mutex::new(None),
+                streaks: Mutex::new(PushStreaks::default()),
+                rejected: Mutex::new(RejectedRing::default()),
+                redeliveries: AtomicU64::new(0),
             }),
         };
         runtime.install_targets(targets);
@@ -224,9 +494,14 @@ impl PubsubRuntime {
         *slot = Some(handle.spawn(async move {
             // The push requests belong to the timer: stopping it aborts them.
             let mut pushes = tokio::task::JoinSet::new();
+            let mut pruned = Instant::now();
             loop {
                 tokio::time::sleep(TICK).await;
                 while pushes.try_join_next().is_some() {}
+                if pruned.elapsed() >= Duration::from_secs(1) {
+                    pruned = Instant::now();
+                    lock(&runtime.inner.streaks).prune(pruned);
+                }
                 for job in runtime.inner.broker.tick() {
                     let runtime = runtime.clone();
                     pushes.spawn(async move { runtime.push(job).await });
@@ -275,38 +550,357 @@ impl PubsubRuntime {
         for (name, value) in &job.headers {
             request = request.header(name, value);
         }
-        let delivered = match request.body(job.body.clone()).send().await {
-            Ok(response) => response.status().is_success(),
-            Err(_) => false,
+        let started = Instant::now();
+        let at = SystemTime::now();
+        let (outcome, response) = match request.body(job.body.clone()).send().await {
+            Ok(response) => (
+                PushOutcome {
+                    status: Some(response.status().as_u16()),
+                    error: None,
+                    latency: started.elapsed(),
+                },
+                Some(response),
+            ),
+            Err(error) => (
+                PushOutcome {
+                    status: None,
+                    error: Some(describe_push_error(&error)),
+                    latency: started.elapsed(),
+                },
+                None,
+            ),
         };
-        self.inner.broker.push_finished(&job, delivered);
+        // The outcome decides at once; the snippet is read afterwards, so
+        // acknowledgement and retry timing are what they always were.
+        self.inner.broker.push_finished(&job, outcome.delivered());
+        let sink = lock(&self.inner.push_sink).clone();
+        let Some(sink) = sink else {
+            return;
+        };
+        let snippet = match response {
+            Some(response) => read_snippet(response).await,
+            None => None,
+        };
+        let records = lock(&self.inner.streaks).record(
+            &job.subscription,
+            job.message_id,
+            job.attempt,
+            &outcome,
+            snippet,
+            Instant::now(),
+            at,
+        );
+        if !records.is_empty() {
+            for record in records {
+                sink(record);
+            }
+            self.inner.broker.console_changed();
+        }
+    }
+
+    /// Hands every push streak to `sink` from now on (the console's ring);
+    /// called inline by the push loop, never awaited. Without a sink no
+    /// streak is kept.
+    pub fn set_push_sink(&self, sink: PushSink) {
+        *lock(&self.inner.push_sink) = Some(sink);
     }
 
     /// Hands a publish to the functions listening on its topic; the official
-    /// `emulator-sub-<topic>` subscription is drained as their consumer would.
+    /// `emulator-sub-<topic>` subscription is drained as their consumer
+    /// would. The fanout (each target's event id, or that background
+    /// triggers were paused) is recorded on the messages' history entries.
     pub fn deliver_to_functions(&self, published: &Published) {
+        self.fan_out(published);
+    }
+
+    /// [`PubsubRuntime::deliver_to_functions`], saying what it handed over.
+    fn fan_out(&self, published: &Published) -> FanoutSummary {
         let targets = lock(&self.inner.targets)
             .get(&published.topic)
             .cloned()
             .unwrap_or_default();
         if targets.is_empty() {
-            return;
+            return FanoutSummary::default();
         }
         if let Some((project, short)) = crate::functions::parse_topic_resource(&published.topic) {
             self.inner.broker.drain(&format!(
                 "projects/{project}/subscriptions/emulator-sub-{short}"
             ));
         }
-        if !self.inner.background.background_enabled() {
-            return;
-        }
-        for message in &published.messages {
-            for target in &targets {
-                let _ = self
-                    .inner
-                    .queue
-                    .enqueue(build_dispatch(&published.topic, target, message));
+        let functions = u32::try_from(targets.len()).unwrap_or(u32::MAX);
+        let mut fanouts = Vec::with_capacity(published.messages.len());
+        let skipped = if self.inner.background.background_enabled() {
+            for message in &published.messages {
+                let mut fanout = Vec::with_capacity(targets.len());
+                for target in &targets {
+                    let dispatch = build_dispatch(&published.topic, target, message);
+                    fanout.push(FanoutTarget {
+                        function_id: target.function().id.clone(),
+                        event_id: dispatch.event_id.clone(),
+                        redelivery: false,
+                    });
+                    let _ = self.inner.queue.enqueue(dispatch);
+                }
+                fanouts.push((message.id, fanout));
             }
+            None
+        } else {
+            // Background triggers are paused: the events are dropped, not
+            // queued; the fanout says so.
+            for message in &published.messages {
+                let fanout = targets
+                    .iter()
+                    .map(|target| FanoutTarget {
+                        function_id: target.function().id.clone(),
+                        event_id: event_id(
+                            &published.topic,
+                            target,
+                            &message.message.message_id,
+                            0,
+                        ),
+                        redelivery: false,
+                    })
+                    .collect();
+                fanouts.push((message.id, fanout));
+            }
+            Some(FanoutSkip::BackgroundOff)
+        };
+        self.inner
+            .broker
+            .record_fanout(&published.topic, SystemTime::now(), skipped, fanouts);
+        FanoutSummary {
+            functions,
+            skipped: if skipped.is_some() { functions } else { 0 },
+        }
+    }
+
+    /// The console's one publish path: the gRPC publish path, in broker
+    /// batches of 1,000, each handed to the topic's functions. A refusal is
+    /// the broker's own answer and is not recorded as an app's refusal.
+    pub fn publish_from_console(
+        &self,
+        topic: &str,
+        messages: Vec<OutgoingMessage>,
+    ) -> Result<PublishOutcome, PubsubError> {
+        let mut outcome = PublishOutcome::default();
+        let mut pending = messages.into_iter().peekable();
+        if pending.peek().is_none() {
+            return Err(PubsubError::invalid_argument("No messages to publish"));
+        }
+        while pending.peek().is_some() {
+            let batch: Vec<crate::google::pubsub::v1::PubsubMessage> = pending
+                .by_ref()
+                .take(CONSOLE_BATCH)
+                .map(|message| crate::google::pubsub::v1::PubsubMessage {
+                    data: message.data,
+                    attributes: message.attributes,
+                    ordering_key: message.ordering_key,
+                    ..crate::google::pubsub::v1::PubsubMessage::default()
+                })
+                .collect();
+            let (ids, published) = self.inner.broker.publish(topic, batch)?;
+            let fanout = self.fan_out(&published);
+            outcome.ids.extend(ids);
+            outcome.functions = fanout.functions;
+            outcome.functions_skipped = fanout.skipped;
+        }
+        outcome.subscriptions = u32::try_from(
+            self.inner
+                .broker
+                .topic_subscriptions(topic)
+                .iter()
+                .filter(|name| self.managed(name) != Managed::Functions)
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        Ok(outcome)
+    }
+
+    /// The functions listening on `topic` (the targets
+    /// [`PubsubRuntime::deliver_to_functions`] uses).
+    #[must_use]
+    pub fn function_targets(&self, topic: &str) -> Vec<FunctionTarget> {
+        lock(&self.inner.targets)
+            .get(topic)
+            .map(|targets| targets.iter().map(Target::describe).collect())
+            .unwrap_or_default()
+    }
+
+    /// Every topic with function targets, and its targets.
+    #[must_use]
+    pub fn all_function_targets(&self) -> BTreeMap<String, Vec<FunctionTarget>> {
+        lock(&self.inner.targets)
+            .iter()
+            .map(|(topic, targets)| {
+                (
+                    topic.clone(),
+                    targets.iter().map(Target::describe).collect(),
+                )
+            })
+            .collect()
+    }
+
+    fn target(&self, topic: &str, function_id: &str) -> Option<Target> {
+        lock(&self.inner.targets)
+            .get(topic)?
+            .iter()
+            .find(|target| target.function().id == function_id)
+            .cloned()
+    }
+
+    /// Dispatches message `message_id` of `topic` to one function again, with
+    /// a fresh event id (the delivery runtime suppresses a repeated one),
+    /// without publishing it to every subscription and function; the
+    /// redelivery is appended to the message's fanout. Returns its event id.
+    pub fn redeliver(
+        &self,
+        topic: &str,
+        message_id: u64,
+        function_id: &str,
+    ) -> Result<String, RedeliverError> {
+        let message = self
+            .inner
+            .broker
+            .history_message(topic, message_id)
+            .ok_or(RedeliverError::MessageNotKept)?;
+        let target = self
+            .target(topic, function_id)
+            .ok_or(RedeliverError::NotATarget)?;
+        if !self.inner.background.background_enabled() {
+            return Err(RedeliverError::BackgroundPaused);
+        }
+        let redelivery = self.inner.redeliveries.fetch_add(1, Ordering::Relaxed) + 1;
+        let dispatch = build_dispatch_with(topic, &target, &message, redelivery);
+        let event = dispatch.event_id.clone();
+        self.inner
+            .queue
+            .enqueue(dispatch)
+            .map_err(|_| RedeliverError::Stopped)?;
+        self.inner.broker.add_fanout_target(
+            topic,
+            message_id,
+            FanoutTarget {
+                function_id: function_id.to_owned(),
+                event_id: event.clone(),
+                redelivery: true,
+            },
+        );
+        Ok(event)
+    }
+
+    /// The request `function_id` receives for message `message_id` of
+    /// `topic`, rebuilt now (its time is the current time).
+    pub fn dispatch_preview(
+        &self,
+        topic: &str,
+        message_id: u64,
+        function_id: &str,
+    ) -> Result<DispatchPreview, RedeliverError> {
+        let message = self
+            .inner
+            .broker
+            .history_message(topic, message_id)
+            .ok_or(RedeliverError::MessageNotKept)?;
+        let target = self
+            .target(topic, function_id)
+            .ok_or(RedeliverError::NotATarget)?;
+        let dispatch = build_dispatch(topic, &target, &message);
+        Ok(DispatchPreview {
+            content_type: dispatch
+                .headers
+                .get("content-type")
+                .cloned()
+                .unwrap_or_default(),
+            body: dispatch.body,
+        })
+    }
+
+    /// Records a wire request's refusal (a missing resource, a schema's
+    /// refusal) and hands the result back unchanged.
+    pub(crate) fn refusal<T>(
+        &self,
+        operation: &'static str,
+        resource: &str,
+        result: Result<T, PubsubError>,
+    ) -> Result<T, PubsubError> {
+        if let Err(error) = &result
+            && (error.code == tonic::Code::NotFound || error.message == "Could not parse message")
+        {
+            self.record_refusal(operation, resource, error);
+        }
+        result
+    }
+
+    fn record_refusal(&self, operation: &'static str, resource: &str, error: &PubsubError) {
+        let now = SystemTime::now();
+        {
+            let mut ring = lock(&self.inner.rejected);
+            ring.revision += 1;
+            let existing = ring.entries.iter().position(|entry| {
+                entry.operation == operation
+                    && entry.resource == resource
+                    && entry.error == error.message
+            });
+            let entry = match existing.and_then(|position| ring.entries.remove(position)) {
+                Some(mut entry) => {
+                    entry.count = entry.count.saturating_add(1);
+                    entry.last_at = now;
+                    entry
+                }
+                None => Rejection {
+                    first_at: now,
+                    last_at: now,
+                    count: 1,
+                    operation,
+                    resource: resource.to_owned(),
+                    error: error.message.clone(),
+                    code: error.status_name(),
+                    suggestion: None,
+                    elsewhere: None,
+                },
+            };
+            ring.entries.push_back(entry);
+            if ring.entries.len() > REJECTED_CAPACITY {
+                ring.entries.pop_front();
+                ring.dropped += 1;
+            }
+        }
+        self.inner.broker.console_changed();
+    }
+
+    /// The refused wire requests kept, oldest first, each with the nearest
+    /// existing id in its project and a project where its id exists.
+    #[must_use]
+    pub fn rejected(&self) -> RejectedList {
+        let (mut entries, dropped, revision) = {
+            let ring = lock(&self.inner.rejected);
+            (
+                ring.entries.iter().cloned().collect::<Vec<_>>(),
+                ring.dropped,
+                ring.revision,
+            )
+        };
+        let topics = self.inner.broker.resource_ids("topics");
+        let subscriptions = self.inner.broker.resource_ids("subscriptions");
+        for entry in &mut entries {
+            let (collection, existing) = if entry.resource.contains("/subscriptions/") {
+                ("subscriptions", &subscriptions)
+            } else {
+                ("topics", &topics)
+            };
+            let Ok(parsed) = crate::names::parse(collection, &entry.resource) else {
+                continue;
+            };
+            entry.suggestion = nearest_id(&parsed.project, &parsed.id, existing);
+            entry.elsewhere = existing
+                .iter()
+                .find(|(project, id)| *id == parsed.id && *project != parsed.project)
+                .map(|(project, _)| project.clone());
+        }
+        RejectedList {
+            entries,
+            dropped,
+            revision,
         }
     }
 
@@ -325,4 +919,95 @@ impl PubsubRuntime {
             self.deliver_to_functions(&published);
         }
     }
+}
+
+/// The nearest existing id in `project` to `id`: case-insensitive optimal
+/// string alignment distance up to 2 (the closest, then the first by name);
+/// none when `id` itself exists.
+fn nearest_id(project: &str, id: &str, existing: &[(String, String)]) -> Option<String> {
+    let wanted = id.to_lowercase();
+    let mut best: Option<(usize, &str)> = None;
+    for (candidate_project, candidate) in existing {
+        if candidate_project != project {
+            continue;
+        }
+        if candidate == id {
+            return None;
+        }
+        let distance = osa_distance(&wanted, &candidate.to_lowercase());
+        if distance <= 2 && best.is_none_or(|(found, _)| distance < found) {
+            best = Some((distance, candidate));
+        }
+    }
+    best.map(|(_, candidate)| candidate.to_owned())
+}
+
+/// Damerau-Levenshtein distance in its optimal string alignment form.
+fn osa_distance(left: &str, right: &str) -> usize {
+    let left: Vec<char> = left.chars().collect();
+    let right: Vec<char> = right.chars().collect();
+    let width = right.len() + 1;
+    let mut table = vec![0_usize; (left.len() + 1) * width];
+    for (row, cell) in table.iter_mut().step_by(width).enumerate() {
+        *cell = row;
+    }
+    for (column, cell) in table.iter_mut().take(width).enumerate() {
+        *cell = column;
+    }
+    for row in 1..=left.len() {
+        for column in 1..=right.len() {
+            let cost = usize::from(left[row - 1] != right[column - 1]);
+            let mut value = (table[(row - 1) * width + column] + 1)
+                .min(table[row * width + column - 1] + 1)
+                .min(table[(row - 1) * width + column - 1] + cost);
+            if row > 1
+                && column > 1
+                && left[row - 1] == right[column - 2]
+                && left[row - 2] == right[column - 1]
+            {
+                value = value.min(table[(row - 2) * width + column - 2] + 1);
+            }
+            table[row * width + column] = value;
+        }
+    }
+    table[left.len() * width + right.len()]
+}
+
+/// A push error the way the push feed shows it.
+fn describe_push_error(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        return "timed out".to_owned();
+    }
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            return match io.kind() {
+                std::io::ErrorKind::ConnectionRefused => "connect ECONNREFUSED".to_owned(),
+                std::io::ErrorKind::ConnectionReset => "ECONNRESET".to_owned(),
+                std::io::ErrorKind::TimedOut => "timed out".to_owned(),
+                _ => io.to_string(),
+            };
+        }
+        source = current.source();
+    }
+    error.to_string()
+}
+
+/// The first 1 KiB of a response body, read for at most 500 ms.
+async fn read_snippet(mut response: reqwest::Response) -> Option<String> {
+    let mut body = Vec::new();
+    let read = async {
+        while body.len() < SNIPPET_BYTES {
+            match response.chunk().await {
+                Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+                Ok(None) | Err(_) => break,
+            }
+        }
+    };
+    let _ = tokio::time::timeout(SNIPPET_WAIT, read).await;
+    if body.is_empty() {
+        return None;
+    }
+    body.truncate(SNIPPET_BYTES);
+    Some(String::from_utf8_lossy(&body).into_owned())
 }

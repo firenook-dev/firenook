@@ -1303,6 +1303,28 @@ mod backlog {
         let ack = started.elapsed();
         assert!(pull < Duration::from_millis(1), "pull 10 took {pull:?}");
         assert!(ack < Duration::from_millis(5), "ack 1,000 took {ack:?}");
+
+        // The first message page of a 100,000-message retention topic.
+        let broker = Broker::new();
+        let retained = "projects/p/topics/retained";
+        create_topic(&broker, retained, Some(3_600));
+        publish(&broker, retained, 100_000);
+        let started = Instant::now();
+        let page = broker
+            .history_page(
+                retained,
+                &crate::broker::inspect::MessageQuery::default(),
+                None,
+                None,
+                100,
+            )
+            .expect("page");
+        let first_page = started.elapsed();
+        assert_eq!(page.rows.len(), 100);
+        assert!(
+            first_page < Duration::from_millis(50),
+            "the first page took {first_page:?}"
+        );
     }
 
     #[test]
@@ -1368,5 +1390,1249 @@ mod backlog {
         let window = broker.history_window(ORDERS).expect("window");
         assert_eq!(window.bytes, 1 + 4 + 5 + 2 * 8);
         broker.check_invariants();
+    }
+}
+
+/// What the console reads and does: push streaks, consumers, the console
+/// delta, console actions, history and backlog pages, refusals, function
+/// fanout and redelivery.
+mod console {
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant, SystemTime};
+
+    use axum::body::Body;
+    use axum::http::{Request as HttpRequest, StatusCode};
+    use firenook_functions_bridge::{DispatchRequest, TriggerObserver, TriggerRegistry};
+    use serde_json::{Value as JsonValue, json};
+    use tower::ServiceExt as _;
+
+    use super::{PROJECT, inventory, publish_request};
+    use crate::broker::inspect::{
+        BacklogState, Comparison, ConsoleCursor, DeltaScope, MessageClause, MessageFlag,
+        MessageQuery, MessageTerm, PayloadEncoding, payload_preview,
+    };
+    use crate::broker::{
+        Broker, ConsumerCounts, ConsumerKind, FanoutSkip, HistoryLimits, MessageMark, ResourceKind,
+        visits,
+    };
+    use crate::filter::Filter;
+    use crate::google::pubsub::v1::publisher_server::Publisher as _;
+    use crate::google::pubsub::v1::{
+        DeadLetterPolicy, PublishRequest, PubsubMessage, PushConfig, Subscription, Topic,
+    };
+    use crate::runtime::{PushOutcome, PushStreaks};
+    use crate::{OutgoingMessage, PubsubRuntime, PushStreakRecord, RedeliverError, router};
+
+    const ORDERS: &str = "projects/p/topics/orders";
+    const DEAD: &str = "projects/p/topics/orders-dead";
+
+    fn topic(broker: &Broker, name: &str, retention: Option<i64>) {
+        broker
+            .create_topic(Topic {
+                name: name.to_owned(),
+                message_retention_duration: retention
+                    .map(|seconds| pbjson_types::Duration { seconds, nanos: 0 }),
+                ..Topic::default()
+            })
+            .expect("topic");
+    }
+
+    fn subscription(
+        broker: &Broker,
+        id: &str,
+        topic: &str,
+        configure: impl FnOnce(&mut Subscription),
+    ) -> String {
+        let name = format!("projects/p/subscriptions/{id}");
+        let mut subscription = Subscription {
+            name: name.clone(),
+            topic: topic.to_owned(),
+            ..Subscription::default()
+        };
+        configure(&mut subscription);
+        broker
+            .create_subscription(subscription)
+            .expect("subscription");
+        name
+    }
+
+    fn message(data: &str) -> PubsubMessage {
+        PubsubMessage {
+            data: data.as_bytes().to_vec(),
+            ..PubsubMessage::default()
+        }
+    }
+
+    fn publish(broker: &Broker, topic: &str, messages: Vec<PubsubMessage>) -> Vec<u64> {
+        broker
+            .publish(topic, messages)
+            .expect("publish")
+            .0
+            .iter()
+            .map(|id| id.parse().expect("id"))
+            .collect()
+    }
+
+    fn publish_many(broker: &Broker, topic: &str, count: usize) -> Vec<u64> {
+        let mut ids = Vec::with_capacity(count);
+        let mut remaining = count;
+        while remaining > 0 {
+            let batch = remaining.min(1_000);
+            ids.extend(publish(
+                broker,
+                topic,
+                (0..batch)
+                    .map(|index| message(&format!("m{index}")))
+                    .collect(),
+            ));
+            remaining -= batch;
+        }
+        ids
+    }
+
+    fn ack_ids(broker: &Broker, subscription: &str, max: i32) -> Vec<String> {
+        broker
+            .pull(subscription, max)
+            .expect("pull")
+            .into_iter()
+            .map(|received| received.ack_id)
+            .collect()
+    }
+
+    fn query(terms: Vec<MessageTerm>) -> MessageQuery {
+        MessageQuery {
+            clauses: terms
+                .into_iter()
+                .map(|term| MessageClause {
+                    any: vec![term],
+                    negated: false,
+                })
+                .collect(),
+            expr: None,
+        }
+    }
+
+    fn page_ids(page: &crate::broker::inspect::HistoryPage) -> Vec<u64> {
+        page.rows.iter().map(|row| row.message.id).collect()
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn push_attempts_are_counted_apart_and_coalesced() {
+        // Three failed pushes, then the subscription is switched to pull with
+        // a dead-letter policy: deliveries count from one, as if never pushed.
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        topic(&broker, DEAD, None);
+        let pushed = subscription(&broker, "pushed", ORDERS, |subscription| {
+            subscription.push_config = Some(PushConfig {
+                push_endpoint: "http://127.0.0.1:9/push".to_owned(),
+                ..PushConfig::default()
+            });
+        });
+        let id = publish(&broker, ORDERS, vec![message("m")])[0];
+        let mut attempts = Vec::new();
+        for round in 0..3_u64 {
+            let jobs = broker.tick_at(Instant::now() + Duration::from_secs(2 * round));
+            assert_eq!(jobs.len(), 1);
+            attempts.push(jobs[0].attempt);
+            broker.push_finished(&jobs[0], false);
+        }
+        assert_eq!(attempts, vec![1, 2, 3]);
+        broker
+            .modify_push_config(&pushed, Some(PushConfig::default()))
+            .expect("switch to pull");
+        broker
+            .update_subscription(
+                Some(Subscription {
+                    name: pushed.clone(),
+                    dead_letter_policy: Some(DeadLetterPolicy {
+                        dead_letter_topic: DEAD.to_owned(),
+                        max_delivery_attempts: 5,
+                    }),
+                    ..Subscription::default()
+                }),
+                &["dead_letter_policy".to_owned()],
+            )
+            .expect("dead letter policy");
+        for attempt in 1..=5 {
+            let received = broker.pull(&pushed, 10).expect("pull");
+            assert_eq!(received.len(), 1);
+            assert_eq!(received[0].delivery_attempt, attempt);
+            assert_eq!(
+                broker
+                    .subscription_counts(&pushed)
+                    .expect("counts")
+                    .dead_lettered_total,
+                0
+            );
+            broker
+                .modify_ack_deadline(&pushed, &[received[0].ack_id.clone()], 0)
+                .expect("nack");
+        }
+        assert_eq!(
+            broker
+                .subscription_counts(&pushed)
+                .expect("counts")
+                .dead_lettered_total,
+            1
+        );
+        let view = broker.message_view(ORDERS, id).expect("view");
+        assert_eq!(view.subscriptions[0].mark, MessageMark::DeadLettered);
+
+        // 312 failures of one message, a second apart: one streak, at most
+        // six records a minute; a 200 then ends it and starts another.
+        let mut streaks = PushStreaks::default();
+        let started = Instant::now();
+        let failure = PushOutcome {
+            status: Some(500),
+            error: None,
+            latency: Duration::from_millis(18),
+        };
+        let mut emitted: Vec<(u64, PushStreakRecord)> = Vec::new();
+        for attempt in 1..=312_u32 {
+            let second = u64::from(attempt - 1);
+            let records = streaks.record(
+                "sub",
+                7,
+                attempt,
+                &failure,
+                Some("{\"error\":\"db locked\"}".to_owned()),
+                started + Duration::from_secs(second),
+                SystemTime::now(),
+            );
+            emitted.extend(records.into_iter().map(|record| (second, record)));
+        }
+        let current = streaks.current("sub", 7).expect("one streak");
+        assert_eq!(
+            (current.count, current.first_attempt, current.last_attempt),
+            (312, 1, 312)
+        );
+        assert!(
+            emitted
+                .iter()
+                .all(|(_, record)| record.streak == current.streak)
+        );
+        for window in 0..=252_u64 {
+            let in_window = emitted
+                .iter()
+                .filter(|(second, _)| (window..window + 60).contains(second))
+                .count();
+            assert!(
+                in_window <= 6,
+                "{in_window} records in the minute from {window} s"
+            );
+        }
+        let success = PushOutcome {
+            status: Some(200),
+            error: None,
+            latency: Duration::from_millis(21),
+        };
+        let records = streaks.record(
+            "sub",
+            7,
+            313,
+            &success,
+            None,
+            started + Duration::from_secs(312),
+            SystemTime::now(),
+        );
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            (records[0].streak.as_str(), records[0].count),
+            (current.streak.as_str(), 312)
+        );
+        assert_eq!(
+            (
+                records[1].status,
+                records[1].count,
+                records[1].first_attempt
+            ),
+            (Some(200), 1, 313)
+        );
+        assert_ne!(records[1].streak, current.streak);
+        assert_eq!(streaks.current("sub", 7), None);
+    }
+
+    #[tokio::test]
+    async fn a_push_endpoint_reaches_the_sink_with_its_outcomes() {
+        // An endpoint that fails twice, then accepts.
+        let calls = Arc::new(Mutex::new(0_u32));
+        let counted = Arc::clone(&calls);
+        let endpoint = axum::Router::new().route(
+            "/push",
+            axum::routing::post(move || {
+                let counted = Arc::clone(&counted);
+                async move {
+                    let mut calls = counted.lock().expect("calls");
+                    *calls += 1;
+                    if *calls <= 2 {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "{\"error\":\"db locked\"}",
+                        )
+                    } else {
+                        (StatusCode::OK, "")
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, endpoint).await;
+        });
+        let background = TriggerRegistry::default();
+        let (observer, _deliveries) = TriggerObserver::channel(background.clone());
+        let runtime = router(PROJECT, &inventory(), observer.queue(), background);
+        let records: Arc<Mutex<Vec<PushStreakRecord>>> = Arc::default();
+        let sink_records = Arc::clone(&records);
+        runtime.set_push_sink(Arc::new(move |record| {
+            sink_records.lock().expect("records").push(record);
+        }));
+        let broker = runtime.broker();
+        topic(broker, ORDERS, None);
+        let pushed = subscription(broker, "pushed", ORDERS, |subscription| {
+            subscription.push_config = Some(PushConfig {
+                push_endpoint: format!("http://{address}/push"),
+                ..PushConfig::default()
+            });
+        });
+        let id = publish(broker, ORDERS, vec![message("m")])[0];
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while broker
+            .subscription_counts(&pushed)
+            .expect("counts")
+            .acked_total
+            == 0
+        {
+            assert!(Instant::now() < deadline, "the push never succeeded");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let records = records.lock().expect("records").clone();
+        let failures: Vec<&PushStreakRecord> = records
+            .iter()
+            .filter(|record| record.status == Some(500))
+            .collect();
+        let latest_failure = failures.last().expect("the failing streak");
+        assert_eq!(latest_failure.message_id, id);
+        assert_eq!(latest_failure.count, 2);
+        assert_eq!(
+            latest_failure.response.as_deref(),
+            Some("{\"error\":\"db locked\"}")
+        );
+        let delivered = records
+            .iter()
+            .find(|record| record.status == Some(200))
+            .expect("the delivered streak");
+        assert_eq!(delivered.first_attempt, 3);
+        assert_ne!(delivered.streak, latest_failure.streak);
+        runtime.shutdown().await;
+        server.abort();
+    }
+
+    #[test]
+    fn consumers_count_streaming_and_waiting_pulls() {
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        let worker = subscription(&broker, "worker", ORDERS, |_| {});
+        let mut changed = broker.watch();
+        changed.borrow_and_update();
+        let mut console = broker.console_watch();
+        console.borrow_and_update();
+        let first = broker.consumer_guard(&worker, ConsumerKind::Streaming);
+        let second = broker.consumer_guard(&worker, ConsumerKind::Streaming);
+        let waiting = broker.consumer_guard(&worker, ConsumerKind::Waiting);
+        assert_eq!(
+            broker.consumers(&worker),
+            ConsumerCounts {
+                streaming: 2,
+                waiting: 1
+            }
+        );
+        drop(first);
+        drop(waiting);
+        assert_eq!(
+            broker.consumers(&worker),
+            ConsumerCounts {
+                streaming: 1,
+                waiting: 0
+            }
+        );
+        drop(second);
+        assert_eq!(broker.consumers(&worker), ConsumerCounts::default());
+        let before = SystemTime::now();
+        assert_eq!(broker.pull(&worker, 1).expect("pull").len(), 0);
+        let view = broker.subscription_view(&worker).expect("view");
+        assert!(
+            view.summary
+                .counters
+                .last_pull_at
+                .is_some_and(|at| at >= before)
+        );
+        assert!(
+            !changed.has_changed().expect("watch"),
+            "a consumer woke subscribers"
+        );
+        assert!(console.has_changed().expect("watch"));
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn console_delta_reports_only_what_changed() {
+        let broker = Broker::new();
+        let other = "projects/p/topics/payments";
+        topic(&broker, ORDERS, None);
+        topic(&broker, other, None);
+        let worker = subscription(&broker, "worker", ORDERS, |_| {});
+        subscription(&broker, "ledger", other, |_| {});
+        let index = broker.topics_index("p");
+        assert_eq!(index.topics.len(), 2);
+        let scope = DeltaScope {
+            project: "p".to_owned(),
+            counters: true,
+            throughput: vec![ORDERS.to_owned()],
+            topic: Some(ORDERS.to_owned()),
+            subscription: Some(worker.clone()),
+            deliveries: false,
+            max_changed: 200,
+        };
+        let _reader = broker.backlog_reader(&worker).expect("reader");
+        let mut counters = ConsoleCursor::at(index.revision);
+        let first = broker.console_delta(&mut counters, &scope);
+        assert!(first.is_empty(), "{first:?}");
+
+        let ids = publish(
+            &broker,
+            ORDERS,
+            vec![message("a"), message("b"), message("c")],
+        );
+        publish(&broker, other, vec![message("x"), message("y")]);
+        let delta = broker.console_delta(&mut counters, &scope);
+        let topics: Vec<&str> = delta
+            .topics
+            .iter()
+            .map(|topic| topic.name.as_str())
+            .collect();
+        assert_eq!(topics, vec![ORDERS, other]);
+        let orders = &delta.topics[0];
+        assert_eq!(orders.published, 3);
+        assert_eq!(orders.latest_id, Some(ids[2]));
+        assert_eq!(
+            orders
+                .most_behind
+                .as_ref()
+                .map(|most| (most.subscription.as_str(), most.backlog)),
+            Some((worker.as_str(), 3))
+        );
+        let published = delta.published.expect("new ids of the scoped topic");
+        assert_eq!(published.ids, vec![ids[2], ids[1], ids[0]]);
+        assert_eq!(published.added, 3);
+        assert!(!published.overflow);
+        assert_eq!(delta.throughput.len(), 1);
+        let (_, window) = &delta.throughput[0];
+        assert_eq!(
+            window.buckets.iter().map(|(_, count)| count).sum::<u32>(),
+            3
+        );
+        assert!(window.buckets.len() <= 2, "sparse: {:?}", window.buckets);
+        assert_eq!(delta.backlog.len(), 3, "three new rows");
+        assert_eq!(delta.resources.len(), 0);
+
+        // A pull moves one row: its old and new keys, and the counters.
+        assert_eq!(broker.pull(&worker, 1).expect("pull").len(), 1);
+        let delta = broker.console_delta(&mut counters, &scope);
+        assert_eq!(delta.backlog.len(), 2);
+        assert!(delta.backlog.iter().all(|key| key.id == ids[0]));
+        assert_eq!(delta.subscriptions.len(), 1);
+        assert_eq!(delta.subscriptions[0].counts.outstanding, 1);
+        assert!(delta.published.is_none());
+
+        // A schema is a resource change and nothing else.
+        broker
+            .create_schema(
+                "projects/p",
+                "order-schema",
+                Some(crate::google::pubsub::v1::Schema {
+                    r#type: crate::google::pubsub::v1::schema::Type::Avro as i32,
+                    definition: r#"{"type":"record","name":"Order","fields":[{"name":"id","type":"string"}]}"#.to_owned(),
+                    ..Default::default()
+                }),
+            )
+            .expect("schema");
+        let delta = broker.console_delta(&mut counters, &scope);
+        assert_eq!(delta.resources, vec![ResourceKind::Schemas]);
+        assert!(delta.topics.is_empty() && delta.subscriptions.is_empty());
+
+        // Past the cap the delta says so instead of listing.
+        let tight = DeltaScope {
+            max_changed: 1,
+            ..scope.clone()
+        };
+        publish(&broker, ORDERS, vec![message("d")]);
+        publish(&broker, other, vec![message("z")]);
+        let delta = broker.console_delta(&mut counters, &tight);
+        assert!(delta.overflow);
+        assert_eq!(delta.topics.len(), 0);
+        let delta = broker.console_delta(&mut counters, &scope);
+        assert!(delta.topics.is_empty() && !delta.overflow);
+    }
+
+    #[test]
+    fn force_ack_and_release_follow_the_engine_rules() {
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        topic(&broker, DEAD, None);
+        let worker = subscription(&broker, "worker", ORDERS, |subscription| {
+            subscription.dead_letter_policy = Some(DeadLetterPolicy {
+                dead_letter_topic: DEAD.to_owned(),
+                max_delivery_attempts: 5,
+            });
+        });
+        let id = publish(&broker, ORDERS, vec![message("m")])[0];
+        assert_eq!(
+            broker.release(&worker, id).expect_err("not leased").code,
+            tonic::Code::FailedPrecondition
+        );
+        for attempt in 1..=5 {
+            let received = broker.pull(&worker, 1).expect("pull");
+            assert_eq!(received[0].delivery_attempt, attempt);
+            broker.release(&worker, id).expect("release");
+        }
+        assert_eq!(
+            broker
+                .subscription_counts(&worker)
+                .expect("counts")
+                .dead_lettered_total,
+            1
+        );
+        assert_eq!(
+            broker.force_ack(&worker, id).expect_err("gone").code,
+            tonic::Code::NotFound
+        );
+
+        // A console ack makes the app's own ack stale.
+        let once = subscription(&broker, "once", ORDERS, |subscription| {
+            subscription.enable_exactly_once_delivery = true;
+        });
+        let id = publish(&broker, ORDERS, vec![message("n")])[0];
+        let held = ack_ids(&broker, &once, 1);
+        broker.force_ack(&once, id).expect("console ack");
+        let stale = broker.acknowledge(&once, &held).expect_err("stale");
+        assert_eq!(
+            (stale.code, stale.message.as_str()),
+            (tonic::Code::InvalidArgument, "")
+        );
+        let counts = broker.subscription_counts(&once).expect("counts");
+        assert_eq!((counts.outstanding, counts.acked_total), (0, 1));
+        broker.check_invariants();
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn history_pages_are_stable_and_filtered_outside_the_lock() {
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        let ids = publish_many(&broker, ORDERS, 250);
+        let all = MessageQuery::default();
+        let first = broker
+            .history_page(ORDERS, &all, None, None, 100)
+            .expect("page");
+        assert_eq!(
+            page_ids(&first),
+            ids[150..].iter().rev().copied().collect::<Vec<_>>()
+        );
+        assert_eq!((first.total, first.exact), (250, true));
+        // New publishes do not shift the pages that follow.
+        publish_many(&broker, ORDERS, 10);
+        let second = broker
+            .history_page(ORDERS, &all, first.next_cursor, None, 100)
+            .expect("page");
+        assert_eq!(
+            page_ids(&second),
+            ids[50..150].iter().rev().copied().collect::<Vec<_>>()
+        );
+        let third = broker
+            .history_page(ORDERS, &all, second.next_cursor, None, 100)
+            .expect("page");
+        assert_eq!(
+            page_ids(&third),
+            ids[..50].iter().rev().copied().collect::<Vec<_>>()
+        );
+        assert_eq!(third.next_cursor, None);
+        let above = broker
+            .history_page(ORDERS, &all, None, second.prev_cursor, 100)
+            .expect("page");
+        assert_eq!(
+            page_ids(&above),
+            ids[150..250].iter().rev().copied().collect::<Vec<_>>()
+        );
+
+        // Terms that read no data, words, and the filter expression.
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        let attributes = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect()
+        };
+        let keyed = publish(
+            &broker,
+            ORDERS,
+            vec![
+                PubsubMessage {
+                    data: b"{\"order\":\"Big Coffee\"}".to_vec(),
+                    ordering_key: "cust-7".to_owned(),
+                    attributes: attributes(&[("region", "eu")]),
+                    ..PubsubMessage::default()
+                },
+                PubsubMessage {
+                    data: b"plain tea".to_vec(),
+                    attributes: attributes(&[
+                        ("region", "us"),
+                        ("CloudPubSubDeadLetterSourceSubscription", "w"),
+                    ]),
+                    ..PubsubMessage::default()
+                },
+                PubsubMessage {
+                    data: vec![0xff, 0xfe, 0x00],
+                    ordering_key: "cust-8".to_owned(),
+                    ..PubsubMessage::default()
+                },
+            ],
+        );
+        let find = |query: &MessageQuery| -> Vec<u64> {
+            page_ids(
+                &broker
+                    .history_page(ORDERS, query, None, None, 100)
+                    .expect("page"),
+            )
+        };
+        assert_eq!(
+            find(&query(vec![MessageTerm::Id(Comparison::Gt, keyed[0])])),
+            vec![keyed[2], keyed[1]]
+        );
+        assert_eq!(
+            find(&query(vec![MessageTerm::Key {
+                value: "cust-".to_owned(),
+                prefix: true
+            }])),
+            vec![keyed[2], keyed[0]]
+        );
+        assert_eq!(
+            find(&query(vec![MessageTerm::Attribute {
+                key: "region".to_owned(),
+                comparison: Comparison::Eq,
+                value: "eu".to_owned(),
+                prefix: false
+            }])),
+            vec![keyed[0]]
+        );
+        assert_eq!(
+            find(&query(vec![MessageTerm::Flag(MessageFlag::DeadLettered)])),
+            vec![keyed[1]]
+        );
+        assert_eq!(
+            find(&query(vec![MessageTerm::Flag(MessageFlag::Binary)])),
+            vec![keyed[2]]
+        );
+        assert_eq!(
+            find(&query(vec![MessageTerm::Flag(MessageFlag::Json)])),
+            vec![keyed[0]]
+        );
+        assert_eq!(
+            find(&query(vec![MessageTerm::Word("coffee".to_owned())])),
+            vec![keyed[0]]
+        );
+        let negated = MessageQuery {
+            clauses: vec![MessageClause {
+                any: vec![MessageTerm::Flag(MessageFlag::Key)],
+                negated: true,
+            }],
+            expr: None,
+        };
+        assert_eq!(find(&negated), vec![keyed[1]]);
+        let expression = MessageQuery {
+            clauses: Vec::new(),
+            expr: Some(
+                Filter::parse(r#"attributes.region = "us" OR attributes.region = "eu""#)
+                    .expect("filter"),
+            ),
+        };
+        assert_eq!(find(&expression), vec![keyed[1], keyed[0]]);
+
+        // A word search examines 20,000 messages per request and continues
+        // where it stopped; its count is a floor until then.
+        let broker = Broker::new();
+        topic(&broker, ORDERS, Some(3_600));
+        publish_many(&broker, ORDERS, 30_000);
+        let nothing = query(vec![MessageTerm::Word("absent".to_owned())]);
+        let _ = visits::take();
+        let partial = broker
+            .history_page(ORDERS, &nothing, None, None, 100)
+            .expect("page");
+        assert_eq!(partial.rows.len(), 0);
+        assert!(!partial.exact);
+        assert_eq!(partial.scanned, Some(20_000));
+        let seen = visits::take();
+        assert_eq!(seen.scanned, 20_000);
+        assert_eq!(
+            seen.locks, 2,
+            "the lock is taken for the pointer copy and the rows only"
+        );
+        let rest = broker
+            .history_page(ORDERS, &nothing, partial.next_cursor, None, 100)
+            .expect("page");
+        assert!(rest.exact);
+        assert_eq!((rest.total, rest.next_cursor), (0, None));
+        assert_eq!(visits::take().scanned, 10_000);
+        // New publishes extend the remembered search instead of rescanning.
+        publish_many(&broker, ORDERS, 5);
+        let refreshed = broker
+            .history_page(ORDERS, &nothing, None, None, 100)
+            .expect("page");
+        assert!(refreshed.exact);
+        assert_eq!(visits::take().scanned, 5);
+
+        // The byte budget: data checks stop after 64 MiB.
+        let broker = Broker::new();
+        topic(&broker, ORDERS, Some(3_600));
+        for _ in 0..70 {
+            publish(
+                &broker,
+                ORDERS,
+                vec![PubsubMessage {
+                    data: vec![b'x'; 1 << 20],
+                    ..PubsubMessage::default()
+                }],
+            );
+        }
+        let json = query(vec![MessageTerm::Flag(MessageFlag::Json)]);
+        let page = broker
+            .history_page(ORDERS, &json, None, None, 100)
+            .expect("page");
+        assert!(!page.exact);
+        assert_eq!(page.scanned, Some(64));
+    }
+
+    #[test]
+    fn previews_show_json_text_or_base64() {
+        let json = payload_preview(b"{ \"a\" : [1, 2] }");
+        assert_eq!(
+            (json.encoding, json.text.as_str(), json.truncated),
+            (PayloadEncoding::Json, "{\"a\":[1,2]}", false)
+        );
+        let text = payload_preview("é".repeat(300).as_bytes());
+        assert_eq!(text.encoding, PayloadEncoding::Text);
+        assert_eq!(text.text.chars().count(), 256);
+        assert!(text.truncated);
+        let binary = payload_preview(&[0xff; 200]);
+        assert_eq!(binary.encoding, PayloadEncoding::Binary);
+        assert!(binary.truncated);
+        assert_eq!(binary.text.len(), 256);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn backlog_pages_follow_the_delivery_order() {
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        let worker = subscription(&broker, "worker", ORDERS, |_| {});
+        let ids = publish_many(&broker, ORDERS, 5);
+        let held = ack_ids(&broker, &worker, 2);
+        // The first is nacked: it queues behind the later ones.
+        broker
+            .modify_ack_deadline(&worker, &held[..1], 0)
+            .expect("nack");
+        let page = broker
+            .backlog_page(&worker, None, None, None, 100)
+            .expect("page");
+        let order: Vec<(u64, BacklogState, Option<u64>)> = page
+            .rows
+            .iter()
+            .map(|row| (row.message.id, row.state, row.place))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                (ids[1], BacklogState::Outstanding, None),
+                (ids[2], BacklogState::Available, Some(1)),
+                (ids[3], BacklogState::Available, Some(2)),
+                (ids[4], BacklogState::Available, Some(3)),
+                (ids[0], BacklogState::Available, Some(4)),
+            ]
+        );
+        assert_eq!(page.total, 5);
+        assert!(page.rows[0].lease_expires_at.is_some());
+        assert_eq!(page.rows[4].attempts, 1);
+        // The next pull takes them in exactly that order.
+        let next: Vec<u64> = broker
+            .pull(&worker, 4)
+            .expect("pull")
+            .iter()
+            .map(|received| {
+                received
+                    .message
+                    .as_ref()
+                    .expect("message")
+                    .message_id
+                    .parse()
+                    .expect("id")
+            })
+            .collect();
+        assert_eq!(next, vec![ids[2], ids[3], ids[4], ids[0]]);
+
+        // Pages by cursor, forward and back, never repeat or skip a row.
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        let worker = subscription(&broker, "worker", ORDERS, |_| {});
+        publish_many(&broker, ORDERS, 9);
+        let _ = ack_ids(&broker, &worker, 3);
+        let full: Vec<u64> = broker
+            .backlog_page(&worker, None, None, None, 100)
+            .expect("page")
+            .rows
+            .iter()
+            .map(|row| row.message.id)
+            .collect();
+        let mut walked = Vec::new();
+        let mut places = Vec::new();
+        let mut cursor = None;
+        let mut pages = Vec::new();
+        loop {
+            let page = broker
+                .backlog_page(&worker, None, cursor, None, 2)
+                .expect("page");
+            walked.extend(page.rows.iter().map(|row| row.message.id));
+            places.extend(page.rows.iter().filter_map(|row| row.place));
+            pages.push(page.rows.first().map(|row| row.message.id));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        assert_eq!(walked, full);
+        assert_eq!(places, (1..=6).collect::<Vec<u64>>());
+        let last = broker
+            .backlog_page(&worker, None, cursor, None, 2)
+            .expect("page");
+        let back = broker
+            .backlog_page(&worker, None, None, last.prev_cursor, 2)
+            .expect("page");
+        let back_ids: Vec<u64> = back.rows.iter().map(|row| row.message.id).collect();
+        // The last page is the ninth row; the page before it is the two rows above.
+        assert_eq!(back_ids, full[6..8].to_vec());
+        assert_eq!(
+            back.rows
+                .iter()
+                .filter_map(|row| row.place)
+                .collect::<Vec<_>>(),
+            vec![4, 5]
+        );
+        let available = broker
+            .backlog_page(&worker, Some(BacklogState::Available), None, None, 100)
+            .expect("page");
+        assert_eq!(available.total, 6);
+        assert!(
+            available
+                .rows
+                .iter()
+                .all(|row| row.state == BacklogState::Available)
+        );
+
+        // An ordering key held by an outstanding message blocks the rest of
+        // its key, as the next pull decides; a batch read follows moves.
+        let broker = Broker::new();
+        topic(&broker, ORDERS, None);
+        let ordered = subscription(&broker, "ordered", ORDERS, |subscription| {
+            subscription.enable_message_ordering = true;
+        });
+        let keyed = publish(
+            &broker,
+            ORDERS,
+            vec![
+                PubsubMessage {
+                    data: b"1".to_vec(),
+                    ordering_key: "k".to_owned(),
+                    ..PubsubMessage::default()
+                },
+                PubsubMessage {
+                    data: b"2".to_vec(),
+                    ordering_key: "k".to_owned(),
+                    ..PubsubMessage::default()
+                },
+            ],
+        );
+        let before = broker
+            .backlog_page(&ordered, None, None, None, 100)
+            .expect("page");
+        let first_key = before.rows[0].key;
+        let held = ack_ids(&broker, &ordered, 1);
+        assert_eq!(held.len(), 1);
+        let page = broker
+            .backlog_page(&ordered, None, None, None, 100)
+            .expect("page");
+        let waiting = page
+            .rows
+            .iter()
+            .find(|row| row.message.id == keyed[1])
+            .expect("the second message");
+        assert_eq!(waiting.blocked_by, Some(keyed[0]));
+        let moved = page.rows[0].key;
+        let rows = broker.backlog_rows(&ordered, &[first_key, moved]);
+        assert!(rows[0].is_none(), "the old position is gone");
+        assert_eq!(rows[1].as_ref().map(|row| row.message.id), Some(keyed[0]));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn a_pull_never_wakes_itself() {
+        use crate::google::pubsub::v1::subscriber_client::SubscriberClient;
+        use crate::google::pubsub::v1::{PullRequest, StreamingPullRequest};
+
+        let background = TriggerRegistry::default();
+        let (observer, _deliveries) = TriggerObserver::channel(background.clone());
+        let runtime = router(PROJECT, &inventory(), observer.queue(), background);
+        let broker = runtime.broker().clone();
+        let orders = format!("projects/{PROJECT}/topics/orders");
+        topic(&broker, &orders, None);
+        let streaming = format!("projects/{PROJECT}/subscriptions/streaming");
+        let polling = format!("projects/{PROJECT}/subscriptions/polling");
+        for name in [&streaming, &polling] {
+            broker
+                .create_subscription(Subscription {
+                    name: name.clone(),
+                    topic: orders.clone(),
+                    ..Subscription::default()
+                })
+                .expect("subscription");
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(
+            tonic::transport::Server::builder()
+                .accept_http1(true)
+                .add_routes(runtime.routes())
+                .serve_with_incoming(tonic::transport::server::TcpIncoming::from(listener)),
+        );
+        // A console view following the counters the whole time.
+        let reader_broker = broker.clone();
+        let reader = tokio::spawn(async move {
+            let mut watch = reader_broker.console_watch();
+            let mut cursor = ConsoleCursor::default();
+            let scope = DeltaScope {
+                project: PROJECT.to_owned(),
+                counters: true,
+                max_changed: 200,
+                ..DeltaScope::default()
+            };
+            while watch.changed().await.is_ok() {
+                let _ = reader_broker.console_delta(&mut cursor, &scope);
+            }
+        });
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .expect("endpoint")
+            .connect()
+            .await
+            .expect("channel");
+        let mut stream_client = SubscriberClient::new(channel.clone());
+        let (requests, receiver) = tokio::sync::mpsc::channel(4);
+        requests
+            .send(StreamingPullRequest {
+                subscription: streaming.clone(),
+                stream_ack_deadline_seconds: 10,
+                ..StreamingPullRequest::default()
+            })
+            .await
+            .expect("first request");
+        let _ = visits::take();
+        let mut stream = stream_client
+            .streaming_pull(tokio_stream::wrappers::ReceiverStream::new(receiver))
+            .await
+            .expect("stream")
+            .into_inner();
+        let mut poll_client = SubscriberClient::new(channel);
+        let poll_subscription = polling.clone();
+        let poll = tokio::spawn(async move {
+            let mut request = tonic::Request::new(PullRequest {
+                subscription: poll_subscription,
+                max_messages: 10,
+                ..PullRequest::default()
+            });
+            request.set_timeout(Duration::from_secs(20));
+            poll_client.pull(request).await
+        });
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let pulls = visits::take().pulls;
+        assert!(pulls <= 4, "{pulls} pulls in 2 s on an empty subscription");
+        assert_eq!(
+            broker.consumers(&streaming),
+            ConsumerCounts {
+                streaming: 1,
+                waiting: 0
+            }
+        );
+        assert_eq!(broker.consumers(&polling).waiting, 1);
+        // A publish still wakes both at once.
+        broker
+            .publish(&orders, vec![message("wake")])
+            .expect("publish");
+        let streamed = tokio::time::timeout(Duration::from_secs(5), stream.message())
+            .await
+            .expect("the stream woke")
+            .expect("stream")
+            .expect("a response");
+        assert_eq!(streamed.received_messages.len(), 1);
+        let pulled = tokio::time::timeout(Duration::from_secs(5), poll)
+            .await
+            .expect("the long poll woke")
+            .expect("task")
+            .expect("pull");
+        assert_eq!(pulled.into_inner().received_messages.len(), 1);
+        drop(requests);
+        reader.abort();
+        server.abort();
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn refused_requests_are_kept_and_coalesced() {
+        let background = TriggerRegistry::default();
+        let (observer, _deliveries) = TriggerObserver::channel(background.clone());
+        let runtime = router(PROJECT, &inventory(), observer.queue(), background);
+        let broker = runtime.broker();
+        topic(broker, &format!("projects/{PROJECT}/topics/orders"), None);
+        topic(broker, "projects/demo-elsewhere/topics/payments", None);
+        let missing = format!("projects/{PROJECT}/topics/order");
+        let status = runtime
+            .publish(tonic::Request::new(PublishRequest {
+                topic: missing.clone(),
+                messages: vec![message("m")],
+            }))
+            .await
+            .expect_err("no such topic");
+        assert_eq!(status.code(), tonic::Code::NotFound);
+        let response = runtime
+            .application()
+            .oneshot(publish_request(
+                "order",
+                &json!({ "messages": [{ "data": "e30=" }] }),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = runtime
+            .application()
+            .oneshot(publish_request(
+                "payments",
+                &json!({ "messages": [{ "data": "e30=" }] }),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        // The console's own publish is not an app's refusal.
+        assert!(
+            runtime
+                .publish_from_console(
+                    &missing,
+                    vec![OutgoingMessage {
+                        data: b"m".to_vec(),
+                        ..OutgoingMessage::default()
+                    }]
+                )
+                .is_err()
+        );
+        let pull = HttpRequest::post(format!("/v1/projects/{PROJECT}/subscriptions/workers:pull"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"maxMessages":1,"returnImmediately":true}"#))
+            .expect("pull request");
+        let response = runtime.application().oneshot(pull).await.expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let rejected = runtime.rejected();
+        assert_eq!(rejected.entries.len(), 3);
+        let order = &rejected.entries[0];
+        assert_eq!(
+            (
+                order.operation,
+                order.resource.as_str(),
+                order.count,
+                order.code
+            ),
+            ("publish", missing.as_str(), 2, "NOT_FOUND")
+        );
+        assert_eq!(order.error, "Topic not found");
+        assert_eq!(order.suggestion.as_deref(), Some("orders"));
+        let payments = &rejected.entries[1];
+        assert_eq!(payments.elsewhere.as_deref(), Some("demo-elsewhere"));
+        assert_eq!(payments.suggestion, None);
+        assert_eq!(rejected.entries[2].operation, "pull");
+
+        for index in 0..201 {
+            let _ = runtime
+                .publish(tonic::Request::new(PublishRequest {
+                    topic: format!("projects/{PROJECT}/topics/missing-{index}"),
+                    messages: vec![message("m")],
+                }))
+                .await;
+        }
+        let rejected = runtime.rejected();
+        assert_eq!(rejected.entries.len(), 200);
+        assert_eq!(rejected.dropped, 4);
+        runtime.shutdown().await;
+    }
+
+    fn deliveries_runtime() -> (
+        PubsubRuntime,
+        tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
+        TriggerRegistry,
+    ) {
+        let background = TriggerRegistry::default();
+        let (observer, deliveries) = TriggerObserver::channel(background.clone());
+        let runtime = router(PROJECT, &inventory(), observer.queue(), background.clone());
+        (runtime, deliveries, background)
+    }
+
+    fn without_times(body: &[u8]) -> JsonValue {
+        let mut value: JsonValue = serde_json::from_slice(body).expect("JSON body");
+        value["time"] = JsonValue::Null;
+        value["data"]["message"]["publishTime"] = JsonValue::Null;
+        value["data"]["message"]["publish_time"] = JsonValue::Null;
+        value
+    }
+
+    #[tokio::test]
+    async fn redeliver_reaches_one_function_with_a_fresh_event_id() {
+        let (runtime, mut deliveries, _background) = deliveries_runtime();
+        let topic = format!("projects/{PROJECT}/topics/phase4-topic");
+        let outcome = runtime
+            .publish_from_console(
+                &topic,
+                vec![OutgoingMessage {
+                    data: b"{\"n\":1}".to_vec(),
+                    ..OutgoingMessage::default()
+                }],
+            )
+            .expect("publish");
+        assert_eq!(
+            (
+                outcome.functions,
+                outcome.functions_skipped,
+                outcome.subscriptions
+            ),
+            (1, 0, 0)
+        );
+        let id: u64 = outcome.ids[0].parse().expect("id");
+        let original = deliveries.recv().await.expect("dispatch");
+        let function = "us-central1-topicEcho";
+        let first = runtime.redeliver(&topic, id, function).expect("redeliver");
+        let second = runtime.redeliver(&topic, id, function).expect("redeliver");
+        assert_ne!(first, second);
+        assert_ne!(first, original.event_id);
+        for event in [&first, &second] {
+            let dispatch = deliveries.recv().await.expect("redelivery");
+            assert_eq!(&dispatch.event_id, event);
+            assert!(dispatch.path.ends_with("/us-central1-topicEcho-0"));
+        }
+        assert!(
+            deliveries.try_recv().is_err(),
+            "only that function, only twice"
+        );
+        let fanout = runtime
+            .broker()
+            .message_view(&topic, id)
+            .expect("view")
+            .fanout
+            .expect("fanout");
+        let targets: Vec<(&str, bool)> = fanout
+            .targets
+            .iter()
+            .map(|target| (target.event_id.as_str(), target.redelivery))
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                (original.event_id.as_str(), false),
+                (first.as_str(), true),
+                (second.as_str(), true)
+            ]
+        );
+        let preview = runtime
+            .dispatch_preview(&topic, id, function)
+            .expect("preview");
+        assert_eq!(preview.content_type, original.headers["content-type"]);
+        assert_eq!(without_times(&preview.body), without_times(&original.body));
+        assert_eq!(
+            runtime.redeliver(&topic, id, "us-central1-other"),
+            Err(RedeliverError::NotATarget)
+        );
+        assert_eq!(
+            runtime.redeliver(&topic, id + 100, function),
+            Err(RedeliverError::MessageNotKept)
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_paused_background_switch_records_skipped_targets() {
+        let (runtime, mut deliveries, background) = deliveries_runtime();
+        background.set_background_enabled(false);
+        let topic = format!("projects/{PROJECT}/topics/phase4-topic");
+        let response = runtime
+            .application()
+            .oneshot(publish_request(
+                "phase4-topic",
+                &json!({ "messages": [{ "data": "e30=" }] }),
+            ))
+            .await
+            .expect("publish");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            deliveries.try_recv().is_err(),
+            "nothing reaches the delivery queue"
+        );
+        let page = runtime
+            .broker()
+            .history_page(&topic, &MessageQuery::default(), None, None, 10)
+            .expect("page");
+        let fanout = page.rows[0].fanout.clone().expect("fanout");
+        assert_eq!(fanout.skipped, Some(FanoutSkip::BackgroundOff));
+        assert_eq!(fanout.targets.len(), 1);
+        assert_eq!(fanout.targets[0].function_id, "us-central1-topicEcho");
+        assert_eq!(
+            runtime.redeliver(&topic, page.rows[0].message.id, "us-central1-topicEcho"),
+            Err(RedeliverError::BackgroundPaused)
+        );
+        let outcome = runtime
+            .publish_from_console(
+                &topic,
+                vec![OutgoingMessage {
+                    data: b"{}".to_vec(),
+                    ..OutgoingMessage::default()
+                }],
+            )
+            .expect("publish");
+        assert_eq!((outcome.functions, outcome.functions_skipped), (1, 1));
+        runtime.shutdown().await;
+    }
+
+    #[test]
+    fn history_limits_are_the_documented_ones() {
+        let limits = HistoryLimits::default();
+        assert_eq!(
+            (
+                limits.messages,
+                limits.bytes,
+                limits.retention_messages,
+                limits.retention_bytes,
+                limits.total_bytes
+            ),
+            (5_000, 16 << 20, 100_000, 256 << 20, 512 << 20)
+        );
     }
 }

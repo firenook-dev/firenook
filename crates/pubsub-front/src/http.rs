@@ -363,8 +363,12 @@ async fn dispatch(
                 .map(|()| empty()),
             ("topics", Some(_), Some("publish"), None, &Method::POST) => {
                 parse::<PublishRequest>(body).and_then(|request| {
-                    let (message_ids, published) =
-                        broker.publish(&name("topics").unwrap_or_default(), request.messages)?;
+                    let topic = name("topics").unwrap_or_default();
+                    let (message_ids, published) = runtime.refusal(
+                        "publish",
+                        &topic,
+                        broker.publish(&topic, request.messages),
+                    )?;
                     runtime.deliver_to_functions(&published);
                     Ok(json(&PublishResponse { message_ids }))
                 })
@@ -448,8 +452,7 @@ async fn dispatch(
             ("subscriptions", Some(_), None, None, &Method::PUT) => parse::<Subscription>(body)
                 .and_then(|mut subscription| {
                     subscription.name = name("subscriptions").unwrap_or_default();
-                    broker
-                        .create_subscription(subscription)
+                    crate::grpc::create_subscription(runtime, subscription)
                         .map(|subscription| json(&subscription))
                 }),
             ("subscriptions", Some(_), None, None, &Method::GET) => broker
@@ -473,15 +476,18 @@ async fn dispatch(
                     Ok(request) => {
                         #[allow(deprecated)]
                         let immediately = request.return_immediately;
-                        crate::grpc::pull_with_wait(
+                        let subscription = name("subscriptions").unwrap_or_default();
+                        let pulled = crate::grpc::pull_with_wait(
                             runtime,
-                            &name("subscriptions").unwrap_or_default(),
+                            &subscription,
                             request.max_messages,
                             immediately,
                             timeout,
                         )
-                        .await
-                        .map(|response| json(&response))
+                        .await;
+                        runtime
+                            .refusal("pull", &subscription, pulled)
+                            .map(|response| json(&response))
                     }
                     Err(error) => Err(error),
                 }

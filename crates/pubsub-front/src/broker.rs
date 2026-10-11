@@ -90,12 +90,53 @@ pub enum Outcome {
     Drained,
 }
 
+/// Why a publish reached none of its topic's functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FanoutSkip {
+    /// Background triggers were paused: the events were dropped, not queued.
+    BackgroundOff,
+}
+
+/// One function a message was handed to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FanoutTarget {
+    /// The region-qualified Functions id.
+    pub function_id: String,
+    /// The `CloudEvent` id (or the legacy `context.eventId`) of the dispatch.
+    pub event_id: String,
+    /// A console redelivery, not the publish's own.
+    pub redelivery: bool,
+}
+
+/// What the Pub/Sub runtime did with a message for the functions on its
+/// topic: recorded at publish (and on each redelivery) on the history entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fanout {
+    pub at: SystemTime,
+    pub targets: Vec<FanoutTarget>,
+    pub skipped: Option<FanoutSkip>,
+    /// The topic's fanout sequence when this was recorded or last changed.
+    pub sequence: u64,
+}
+
+impl Fanout {
+    fn bytes(&self) -> u64 {
+        let targets: usize = self
+            .targets
+            .iter()
+            .map(|target| target.function_id.len() + target.event_id.len() + 8)
+            .sum();
+        u64::try_from(targets + 32).unwrap_or(u64::MAX)
+    }
+}
+
 /// One message in a topic's history ring, with the outcomes of the
-/// subscriptions that let go of it (keyed by their slot).
+/// subscriptions that let go of it (keyed by their slot) and its fanout.
 #[derive(Debug)]
 pub struct HistoryEntry {
     pub message: Arc<StoredMessage>,
     outcomes: Mutex<Vec<(u32, Outcome)>>,
+    fanout: Mutex<Option<Fanout>>,
 }
 
 impl HistoryEntry {
@@ -103,6 +144,7 @@ impl HistoryEntry {
         Self {
             message,
             outcomes: Mutex::new(Vec::new()),
+            fanout: Mutex::new(None),
         }
     }
 
@@ -112,10 +154,19 @@ impl HistoryEntry {
         lock(&self.outcomes).clone()
     }
 
+    /// The fanout recorded for the message, if it reached the functions step.
+    #[must_use]
+    pub fn fanout(&self) -> Option<Fanout> {
+        lock(&self.fanout).clone()
+    }
+
     /// What the entry costs in its ring's byte count.
     fn bytes(&self) -> u64 {
         let outcomes = u64::try_from(lock(&self.outcomes).len()).unwrap_or(u64::MAX);
-        u64::from(self.message.size).saturating_add(outcomes.saturating_mul(OUTCOME_BYTES))
+        let fanout = lock(&self.fanout).as_ref().map_or(0, Fanout::bytes);
+        u64::from(self.message.size)
+            .saturating_add(outcomes.saturating_mul(OUTCOME_BYTES))
+            .saturating_add(fanout)
     }
 }
 
@@ -232,8 +283,12 @@ enum MessageState {
 struct Tracked {
     message: Arc<StoredMessage>,
     state: MessageState,
-    /// Deliveries so far.
+    /// Deliveries so far: what `take` reports as `deliveryAttempt` and
+    /// dead-lettering counts.
     attempts: u32,
+    /// Push attempts so far, counted apart: neither a pull nor
+    /// dead-lettering reads them.
+    push_attempts: u32,
     /// Delivery order: the message id at first, a fresh number after a nack
     /// or an expired lease (a redelivery queues behind later messages).
     sequence: u64,
@@ -249,6 +304,17 @@ impl Tracked {
 struct TopicEntry {
     topic: Topic,
     generation: u64,
+    created_at: SystemTime,
+    /// The console revision at which the topic's figures last changed.
+    stamp: u64,
+    published_total: u64,
+    last_published_at: Option<SystemTime>,
+    throughput: Throughput,
+    latest_id: Option<u64>,
+    /// Fanouts recorded on the topic's messages (the deliveries topic's cursor).
+    fanouts: u64,
+    /// The newest fanout records, `(sequence, message id)`.
+    recent_fanouts: VecDeque<(u64, u64)>,
     /// The newest published messages, oldest first (ids ascend).
     history: VecDeque<Arc<HistoryEntry>>,
     history_bytes: u64,
@@ -289,10 +355,10 @@ struct Index {
     unacked: BTreeSet<u64>,
     /// Available messages in delivery order, `(sequence, id)`.
     available: BTreeSet<(u64, u64)>,
-    /// Leased messages by lease expiry.
-    leases: BTreeSet<(Instant, u64)>,
-    /// Pushing messages by next attempt.
-    push_due: BTreeSet<(Instant, u64)>,
+    /// Leased messages by lease expiry (microseconds from the epoch).
+    leases: BTreeSet<(u64, u64)>,
+    /// Pushing messages by next attempt (microseconds from the epoch).
+    push_due: BTreeSet<(u64, u64)>,
     /// Acknowledged ids still kept.
     acked: BTreeSet<u64>,
     /// Ack id to message id, for leased messages.
@@ -310,7 +376,7 @@ impl Index {
             }
             MessageState::Leased { ack, deadline } => {
                 self.counts.leased += 1;
-                self.leases.insert((*deadline, id));
+                self.leases.insert((micros(*deadline), id));
                 self.acks.insert(*ack, id);
                 let key = &tracked.message.message.ordering_key;
                 if !key.is_empty() {
@@ -319,7 +385,7 @@ impl Index {
             }
             MessageState::Pushing { next_attempt } => {
                 self.counts.pushing += 1;
-                self.push_due.insert((*next_attempt, id));
+                self.push_due.insert((micros(*next_attempt), id));
             }
             MessageState::Acked => {
                 self.counts.acked += 1;
@@ -343,7 +409,7 @@ impl Index {
             }
             MessageState::Leased { ack, deadline } => {
                 self.counts.leased -= 1;
-                self.leases.remove(&(*deadline, id));
+                self.leases.remove(&(micros(*deadline), id));
                 self.acks.remove(ack);
                 let key = &tracked.message.message.ordering_key;
                 if !key.is_empty()
@@ -357,7 +423,7 @@ impl Index {
             }
             MessageState::Pushing { next_attempt } => {
                 self.counts.pushing -= 1;
-                self.push_due.remove(&(*next_attempt, id));
+                self.push_due.remove(&(micros(*next_attempt), id));
             }
             MessageState::Acked => {
                 self.counts.acked -= 1;
@@ -391,6 +457,16 @@ struct SubscriptionEntry {
     created_at: SystemTime,
     /// A small id naming the subscription in history outcomes.
     slot: u32,
+    /// The console revision at which the subscription's figures last changed.
+    stamp: u64,
+    /// Set by every change of a tracked message; the next stamp clears it.
+    dirty: bool,
+    last_pull: Option<SystemTime>,
+    /// Console views following this subscription's backlog rows.
+    readers: u32,
+    /// While it has readers: the old and new position of every moved row.
+    changes: VecDeque<(u64, BacklogKey)>,
+    change_sequence: u64,
 }
 
 /// Whether a change moved a message out of or into the backlog.
@@ -411,28 +487,55 @@ impl SubscriptionEntry {
     fn insert(&mut self, tracked: Tracked) {
         let id = tracked.message.id;
         self.index.add(id, &tracked);
+        let key = BacklogKey::of(id, &tracked);
         if let Some(previous) = self.messages.insert(id, tracked) {
             self.index.remove(id, &previous);
+            self.record_change(BacklogKey::of(id, &previous));
         }
+        self.record_change(key);
+        self.dirty = true;
     }
 
     fn remove(&mut self, id: u64) -> Option<Tracked> {
         let tracked = self.messages.remove(&id)?;
         self.index.remove(id, &tracked);
+        self.record_change(BacklogKey::of(id, &tracked));
+        self.dirty = true;
         Some(tracked)
     }
 
-    /// The one place a tracked message changes: counts and indexes follow.
+    /// The one place a tracked message changes: counts, indexes and the
+    /// console's moved-rows ring follow.
     fn update(&mut self, id: u64, change: impl FnOnce(&mut Tracked)) -> Option<Moved> {
         let tracked = self.messages.get_mut(&id)?;
         let was_unacked = tracked.unacked();
+        let before = BacklogKey::of(id, tracked);
         self.index.remove(id, tracked);
         change(tracked);
         self.index.add(id, tracked);
+        let after = BacklogKey::of(id, tracked);
+        let is_unacked = tracked.unacked();
+        self.record_change(before);
+        if after != before {
+            self.record_change(after);
+        }
+        self.dirty = true;
         Some(Moved {
             was_unacked,
-            is_unacked: tracked.unacked(),
+            is_unacked,
         })
+    }
+
+    /// Remembers a row a console view must patch, while one follows.
+    fn record_change(&mut self, key: BacklogKey) {
+        if self.readers == 0 {
+            return;
+        }
+        self.change_sequence += 1;
+        self.changes.push_back((self.change_sequence, key));
+        if self.changes.len() > CHANGE_RING {
+            self.changes.pop_front();
+        }
     }
 
     fn counts(&self) -> SubscriptionCounts {
@@ -467,6 +570,9 @@ struct SnapshotEntry {
     topic_generation: u64,
     unacked: BTreeSet<u64>,
     created: Instant,
+    created_at: SystemTime,
+    /// The subscription it was taken from.
+    source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -532,6 +638,42 @@ struct State {
     /// drains it.
     outbox: VecDeque<Published>,
     outbox_open: bool,
+    /// The console revision: bumped by every change a console view shows.
+    revision: u64,
+    /// The revision the console watch last announced.
+    announced: u64,
+    /// The revision at which each kind of resource last changed.
+    resources: ResourceStamps,
+}
+
+/// The kinds of resource the console lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceKind {
+    Topics,
+    Subscriptions,
+    Snapshots,
+    Schemas,
+}
+
+impl ResourceKind {
+    /// `topics`, `subscriptions`, `snapshots` or `schemas`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Topics => "topics",
+            Self::Subscriptions => "subscriptions",
+            Self::Snapshots => "snapshots",
+            Self::Schemas => "schemas",
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ResourceStamps {
+    topics: u64,
+    subscriptions: u64,
+    snapshots: u64,
+    schemas: u64,
 }
 
 /// Dead-letter forwards the outbox holds at most between two ticks.
@@ -542,6 +684,8 @@ const OUTBOX_CAPACITY: usize = 100_000;
 pub struct PushJob {
     pub subscription: String,
     pub message_id: u64,
+    /// The message's push attempt this is, from 1.
+    pub attempt: u32,
     pub endpoint: String,
     pub headers: BTreeMap<String, String>,
     pub body: String,
@@ -556,8 +700,15 @@ pub struct Published {
 
 struct Inner {
     state: Mutex<State>,
-    /// Bumped on every change a waiter could care about.
+    /// Bumped on every change a waiter could care about: deliverability.
     changed: watch::Sender<u64>,
+    /// Bumped on every change only the console needs (counter stamps,
+    /// resources, consumers, pulls); never wakes a subscriber.
+    console: watch::Sender<u64>,
+    /// Streaming pulls and waiting long polls, by subscription.
+    consumers: Mutex<HashMap<String, ConsumerCounts>>,
+    /// The newest filtered history searches.
+    searches: Mutex<inspect::SearchCache>,
     /// Pushes currently in flight, by subscription.
     in_flight: Mutex<HashMap<String, BTreeSet<u64>>>,
 }
@@ -620,6 +771,202 @@ pub fn rfc3339_millis(time: SystemTime) -> String {
     )
 }
 
+/// The instant console positions are measured from.
+fn epoch() -> Instant {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// Microseconds from [`epoch`] to `at` (zero for earlier instants).
+fn micros(at: Instant) -> u64 {
+    u64::try_from(at.saturating_duration_since(epoch()).as_micros()).unwrap_or(u64::MAX)
+}
+
+/// An instant on the wall clock.
+#[must_use]
+pub fn wall_clock(at: Instant) -> SystemTime {
+    let now = Instant::now();
+    let system = SystemTime::now();
+    if at >= now {
+        system + (at - now)
+    } else {
+        system.checked_sub(now - at).unwrap_or(UNIX_EPOCH)
+    }
+}
+
+/// Counts per second over the last minute, ending at `ends_at` (the last
+/// whole second counted); the console ages it on its own clock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecondWindow {
+    pub ends_at: SystemTime,
+    /// `(seconds before ends_at, count)` for the non-zero seconds, newest first.
+    pub buckets: Vec<(u8, u32)>,
+}
+
+/// A topic's publishes per second: sixty slots and the second the newest
+/// one counts.
+#[derive(Debug, Clone)]
+struct Throughput {
+    slots: [u32; 60],
+    second: u64,
+}
+
+impl Default for Throughput {
+    fn default() -> Self {
+        Self {
+            slots: [0; 60],
+            second: 0,
+        }
+    }
+}
+
+impl Throughput {
+    fn slot(second: u64) -> usize {
+        usize::try_from(second % 60).unwrap_or(0)
+    }
+
+    fn record(&mut self, at: SystemTime, count: usize) {
+        let second = at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        if second > self.second {
+            for step in 1..=(second - self.second).min(60) {
+                self.slots[Self::slot(self.second + step)] = 0;
+            }
+            self.second = second;
+        } else if second + 60 <= self.second {
+            return;
+        }
+        let slot = Self::slot(second);
+        self.slots[slot] =
+            self.slots[slot].saturating_add(u32::try_from(count).unwrap_or(u32::MAX));
+    }
+
+    fn window(&self) -> SecondWindow {
+        let buckets = (0..60_u8)
+            .filter_map(|age| {
+                let second = self.second.checked_sub(u64::from(age))?;
+                let count = self.slots[Self::slot(second)];
+                (count > 0).then_some((age, count))
+            })
+            .collect();
+        SecondWindow {
+            ends_at: UNIX_EPOCH + Duration::from_secs(self.second),
+            buckets,
+        }
+    }
+}
+
+/// A backlog row's place in delivery order: outstanding and pushing
+/// messages first by when they are due (phase 0), then available ones in
+/// the order the next pull takes them (phase 1), then retained
+/// acknowledged ones by id (phase 2). A message that moves gets a new key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BacklogKey {
+    pub phase: u8,
+    pub order: u64,
+    pub id: u64,
+}
+
+impl BacklogKey {
+    fn of(id: u64, tracked: &Tracked) -> Self {
+        match tracked.state {
+            MessageState::Leased { deadline, .. } => Self {
+                phase: 0,
+                order: micros(deadline),
+                id,
+            },
+            MessageState::Pushing { next_attempt } => Self {
+                phase: 0,
+                order: micros(next_attempt),
+                id,
+            },
+            MessageState::Available => Self {
+                phase: 1,
+                order: tracked.sequence,
+                id,
+            },
+            MessageState::Acked => Self {
+                phase: 2,
+                order: id,
+                id,
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for BacklogKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}.{}.{}", self.phase, self.order, self.id)
+    }
+}
+
+impl std::str::FromStr for BacklogKey {
+    type Err = ();
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let mut parts = text.split('.');
+        let phase = parts.next().and_then(|part| part.parse().ok()).ok_or(())?;
+        let order = parts.next().and_then(|part| part.parse().ok()).ok_or(())?;
+        let id = parts.next().and_then(|part| part.parse().ok()).ok_or(())?;
+        if parts.next().is_some() || phase > 2 {
+            return Err(());
+        }
+        Ok(Self { phase, order, id })
+    }
+}
+
+/// Moved rows a subscription with console readers remembers.
+const CHANGE_RING: usize = 1_000;
+/// Fanout records a topic remembers for the deliveries view.
+const RECENT_FANOUTS: usize = 1_000;
+
+/// Who is consuming a subscription right now.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ConsumerCounts {
+    /// Streaming pulls open on it.
+    pub streaming: u32,
+    /// Long-poll pulls waiting for a message.
+    pub waiting: u32,
+}
+
+/// What a [`ConsumerGuard`] counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsumerKind {
+    Streaming,
+    Waiting,
+}
+
+/// Counts one consumer of a subscription while it lives.
+pub struct ConsumerGuard {
+    broker: Broker,
+    subscription: String,
+    kind: ConsumerKind,
+}
+
+impl Drop for ConsumerGuard {
+    fn drop(&mut self) {
+        self.broker
+            .count_consumer(&self.subscription, self.kind, false);
+    }
+}
+
+/// Keeps a subscription's moved backlog rows remembered for a console view.
+pub struct BacklogReader {
+    broker: Broker,
+    subscription: String,
+}
+
+impl Drop for BacklogReader {
+    fn drop(&mut self) {
+        let mut state = lock(&self.broker.inner.state);
+        if let Some(entry) = state.subscriptions.get_mut(&self.subscription) {
+            entry.readers = entry.readers.saturating_sub(1);
+            if entry.readers == 0 {
+                entry.changes.clear();
+            }
+        }
+    }
+}
+
 /// Visit counters that prove the cost model in tests.
 #[cfg(test)]
 pub(crate) mod visits {
@@ -643,6 +990,12 @@ pub(crate) mod visits {
         pub(crate) released: u64,
         /// Retained acknowledgements pruned by age or cap.
         pub(crate) pruned: u64,
+        /// History entries a filtered search examined.
+        pub(crate) scanned: u64,
+        /// Broker lock acquisitions of a history page.
+        pub(crate) locks: u64,
+        /// Calls of `Broker::pull`.
+        pub(crate) pulls: u64,
     }
 
     thread_local! {
@@ -668,6 +1021,10 @@ macro_rules! visit {
     };
 }
 
+/// Read models for the console: plain structs built under one short lock.
+#[path = "inspect.rs"]
+pub mod inspect;
+
 impl Broker {
     #[must_use]
     pub fn new() -> Self {
@@ -676,8 +1033,13 @@ impl Broker {
 
     pub(crate) fn with_limits(limits: HistoryLimits) -> Self {
         let (changed, _) = watch::channel(0);
+        let (console, _) = watch::channel(0);
+        let _ = epoch();
         Self {
             inner: Arc::new(Inner {
+                console,
+                consumers: Mutex::new(HashMap::new()),
+                searches: Mutex::new(inspect::SearchCache::default()),
                 state: Mutex::new(State {
                     topics: BTreeMap::new(),
                     subscriptions: BTreeMap::new(),
@@ -695,6 +1057,9 @@ impl Broker {
                     next_slow_tick: Instant::now() + SLOW_TICK,
                     outbox: VecDeque::new(),
                     outbox_open: false,
+                    revision: 0,
+                    announced: 0,
+                    resources: ResourceStamps::default(),
                 }),
                 changed,
                 in_flight: Mutex::new(HashMap::new()),
@@ -710,6 +1075,34 @@ impl Broker {
 
     fn notify(&self) {
         self.inner.changed.send_modify(|version| *version += 1);
+    }
+
+    /// A receiver that wakes when anything a console view shows changed:
+    /// counters, resources, consumers, pushes, fanouts. It never wakes a
+    /// subscriber, so a pull that records itself cannot wake itself.
+    #[must_use]
+    pub fn console_watch(&self) -> watch::Receiver<u64> {
+        self.inner.console.subscribe()
+    }
+
+    /// Tells the console watch that something outside the broker's state
+    /// changed (the runtime's refusals and push records).
+    pub fn console_changed(&self) {
+        self.inner.console.send_modify(|version| *version += 1);
+    }
+
+    /// Releases the state; announces a new console revision on the console
+    /// watch, and wakes subscribers when deliverability changed.
+    fn finish(&self, mut state: MutexGuard<'_, State>, wake: bool) {
+        let announce = state.revision != state.announced;
+        state.announced = state.revision;
+        drop(state);
+        if announce {
+            self.console_changed();
+        }
+        if wake {
+            self.notify();
+        }
     }
 
     // ------------------------------------------------------------ topics
@@ -751,6 +1144,14 @@ impl Broker {
             TopicEntry {
                 topic: topic.clone(),
                 generation,
+                created_at: SystemTime::now(),
+                stamp: 0,
+                published_total: 0,
+                last_published_at: None,
+                throughput: Throughput::default(),
+                latest_id: None,
+                fanouts: 0,
+                recent_fanouts: VecDeque::new(),
                 history: VecDeque::new(),
                 history_bytes: 0,
                 history_dropped: 0,
@@ -760,6 +1161,8 @@ impl Broker {
             },
         );
         state.generations.insert(generation, Generation::default());
+        state.touch(ResourceKind::Topics);
+        self.finish(state, false);
         Ok(topic)
     }
 
@@ -863,7 +1266,10 @@ impl Broker {
         // A topic that lost its retention keeps only what a topic without
         // one keeps.
         entry.trim(history_bytes, &limits);
-        Ok(entry.topic.clone())
+        let topic = entry.topic.clone();
+        state.touch(ResourceKind::Topics);
+        self.finish(state, false);
+        Ok(topic)
     }
 
     pub fn delete_topic(&self, name: &str) -> Result<(), PubsubError> {
@@ -880,6 +1286,9 @@ impl Broker {
             }
         }
         state.forget_generation_if_unused(entry.generation);
+        state.touch(ResourceKind::Topics);
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, false);
         Ok(())
     }
 
@@ -1010,8 +1419,7 @@ impl Broker {
             stored.push(record);
         }
         state.deliver(topic, &stored);
-        drop(state);
-        self.notify();
+        self.finish(state, true);
         Ok((
             ids,
             Published {
@@ -1068,8 +1476,8 @@ impl Broker {
                 }
             });
         }
-        drop(state);
-        self.notify();
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
         Ok(subscription)
     }
 
@@ -1198,8 +1606,8 @@ impl Broker {
                 }
             }
         });
-        drop(state);
-        self.notify();
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
         Ok(validated)
     }
 
@@ -1209,9 +1617,10 @@ impl Broker {
         if !state.remove_subscription(name) {
             return Err(PubsubError::not_found("Subscription does not exist"));
         }
-        drop(state);
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
         lock(&self.inner.in_flight).remove(name);
-        self.notify();
+        lock(&self.inner.consumers).remove(name);
         Ok(())
     }
 
@@ -1233,8 +1642,8 @@ impl Broker {
             ctx.entry.subscription.push_config = Some(config);
             ctx.switch_delivery(was_push, now);
         });
-        drop(state);
-        self.notify();
+        state.touch(ResourceKind::Subscriptions);
+        self.finish(state, true);
         Ok(())
     }
 
@@ -1243,6 +1652,7 @@ impl Broker {
     /// Takes up to `max_messages` deliverable messages, or `None` when the
     /// subscription has nothing to deliver right now.
     pub fn pull(&self, name: &str, max_messages: i32) -> Result<Vec<ReceivedMessage>, PubsubError> {
+        visit!(pulls);
         names::parse("subscriptions", name)?;
         let mut state = lock(&self.inner.state);
         let next_ack = state.next_ack;
@@ -1257,14 +1667,16 @@ impl Broker {
         }
         let now = Instant::now();
         let (received, used) = state
-            .with_subscription(name, |ctx| ctx.take(max_messages, next_ack, now))
+            .with_subscription(name, |ctx| {
+                // Only the console hears of the pull itself.
+                ctx.entry.last_pull = Some(SystemTime::now());
+                ctx.entry.dirty = true;
+                ctx.take(max_messages, next_ack, now)
+            })
             .unwrap_or_default();
         state.next_ack += used;
-        if received.is_empty() {
-            return Ok(received);
-        }
-        drop(state);
-        self.notify();
+        let delivered = !received.is_empty();
+        self.finish(state, delivered);
         Ok(received)
     }
 
@@ -1310,8 +1722,7 @@ impl Broker {
         if refused {
             return Err(PubsubError::invalid_argument(""));
         }
-        drop(state);
-        self.notify();
+        self.finish(state, true);
         Ok(())
     }
 
@@ -1343,8 +1754,7 @@ impl Broker {
                 }
             }
         });
-        drop(state);
-        self.notify();
+        self.finish(state, true);
         Ok(())
     }
 
@@ -1359,7 +1769,7 @@ impl Broker {
     /// acknowledgements.
     pub(crate) fn tick_at(&self, now: Instant) -> Vec<PushJob> {
         let mut state = lock(&self.inner.state);
-        let due_until = (now, u64::MAX);
+        let due_until = (micros(now), u64::MAX);
         let due: Vec<String> = state
             .subscriptions
             .iter()
@@ -1419,19 +1829,20 @@ impl Broker {
                         if flying.contains(&id) {
                             continue;
                         }
+                        ctx.hand_out_push(id, now + PUSH_IN_FLIGHT);
                         let Some(tracked) = ctx.entry.messages.get(&id) else {
                             continue;
                         };
                         jobs.push(PushJob {
                             subscription: name.clone(),
                             message_id: id,
+                            attempt: tracked.push_attempts,
                             endpoint: endpoint.clone(),
                             // Push config attributes are stored, not sent as headers.
                             headers: BTreeMap::new(),
                             body: push_envelope(name, &tracked.message),
                         });
                         flying.insert(id);
-                        ctx.set_next_push(id, now + PUSH_IN_FLIGHT);
                     }
                     if flying.is_empty() {
                         flights.remove(name);
@@ -1443,10 +1854,7 @@ impl Broker {
             state.next_slow_tick = now + SLOW_TICK;
             state.prune(now);
         }
-        drop(state);
-        if changed {
-            self.notify();
-        }
+        self.finish(state, changed);
         jobs
     }
 
@@ -1478,8 +1886,7 @@ impl Broker {
                 ctx.set_next_push(job.message_id, now + PUSH_RETRY);
             }
         });
-        drop(state);
-        self.notify();
+        self.finish(state, true);
     }
 
     // ------------------------------------------------------------ seek and snapshots
@@ -1522,8 +1929,7 @@ impl Broker {
                 }
             }
         });
-        drop(state);
-        self.notify();
+        self.finish(state, true);
         Ok(())
     }
 
@@ -1576,8 +1982,7 @@ impl Broker {
                 }
             }
         });
-        drop(state);
-        self.notify();
+        self.finish(state, true);
         Ok(())
     }
 
@@ -1613,11 +2018,15 @@ impl Broker {
                 topic_generation: generation,
                 unacked,
                 created: Instant::now(),
+                created_at: now,
+                source: subscription.to_owned(),
             },
         );
         if let Some(generation) = state.generations.get_mut(&generation) {
             generation.snapshots += 1;
         }
+        state.touch(ResourceKind::Snapshots);
+        self.finish(state, false);
         Ok(snapshot)
     }
 
@@ -1667,6 +2076,8 @@ impl Broker {
             return Err(PubsubError::not_found("Snapshot does not exist"));
         };
         state.snapshot_removed(snapshot.topic_generation);
+        state.touch(ResourceKind::Snapshots);
+        self.finish(state, false);
         Ok(())
     }
 
@@ -1695,6 +2106,8 @@ impl Broker {
                 revisions: vec![revision],
             },
         );
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
         Ok(output)
     }
 
@@ -1808,7 +2221,10 @@ impl Broker {
             .get_mut(base)
             .ok_or_else(|| PubsubError::not_found("Schema not found"))?;
         entry.revisions.push(revision.clone());
-        Ok(revision_view(&entry.name, &revision, SchemaView::Full))
+        let output = revision_view(&entry.name, &revision, SchemaView::Full);
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
+        Ok(output)
     }
 
     pub fn rollback_schema(&self, name: &str, revision_id: &str) -> Result<Schema, PubsubError> {
@@ -1832,7 +2248,10 @@ impl Broker {
             .get_mut(base)
             .ok_or_else(|| PubsubError::not_found("Schema not found"))?;
         entry.revisions.push(revision.clone());
-        Ok(revision_view(&entry.name, &revision, SchemaView::Full))
+        let output = revision_view(&entry.name, &revision, SchemaView::Full);
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
+        Ok(output)
     }
 
     pub fn delete_schema_revision(&self, name: &str) -> Result<Schema, PubsubError> {
@@ -1857,7 +2276,10 @@ impl Broker {
             ));
         }
         let removed = entry.revisions.remove(index);
-        Ok(revision_view(&entry.name, &removed, SchemaView::Full))
+        let output = revision_view(&entry.name, &removed, SchemaView::Full);
+        state.touch(ResourceKind::Schemas);
+        self.finish(state, false);
+        Ok(output)
     }
 
     pub fn delete_schema(&self, name: &str) -> Result<(), PubsubError> {
@@ -1877,6 +2299,9 @@ impl Broker {
                 }
             }
         }
+        state.touch(ResourceKind::Schemas);
+        state.touch(ResourceKind::Topics);
+        self.finish(state, false);
         Ok(())
     }
 
@@ -1932,6 +2357,7 @@ impl Broker {
                 ctx.remove(id, Outcome::Drained);
             }
         });
+        self.finish(state, false);
     }
 
     /// Keeps dead-letter forwards for [`Broker::take_outbox`] while `open`
@@ -1972,12 +2398,21 @@ impl State {
             topics,
             generations,
             history_bytes,
+            revision,
             ..
         } = self;
         let Some(entry) = topics.get_mut(topic) else {
             return;
         };
         entry.append(messages, history_bytes, &limits);
+        if let Some(last) = messages.last() {
+            entry.published_total += u64::try_from(messages.len()).unwrap_or(u64::MAX);
+            entry.last_published_at = Some(last.published_at);
+            entry.latest_id = Some(last.id);
+            entry.throughput.record(last.published_at, messages.len());
+            *revision += 1;
+            entry.stamp = *revision;
+        }
         let members: Vec<String> = generations
             .get(&entry.generation)
             .map(|generation| generation.members.iter().cloned().collect())
@@ -2088,6 +2523,12 @@ impl State {
                 dead_lettered_total: 0,
                 created_at: SystemTime::now(),
                 slot,
+                stamp: 0,
+                dirty: false,
+                last_pull: None,
+                readers: 0,
+                changes: VecDeque::new(),
+                change_sequence: 0,
             },
         );
         self.slots.insert(slot, name.clone());
@@ -2149,6 +2590,26 @@ impl State {
         self.forget_generation_if_unused(generation);
     }
 
+    /// A resource of `kind` was created, changed or deleted.
+    fn touch(&mut self, kind: ResourceKind) {
+        self.revision += 1;
+        let stamp = match kind {
+            ResourceKind::Topics => &mut self.resources.topics,
+            ResourceKind::Subscriptions => &mut self.resources.subscriptions,
+            ResourceKind::Snapshots => &mut self.resources.snapshots,
+            ResourceKind::Schemas => &mut self.resources.schemas,
+        };
+        *stamp = self.revision;
+    }
+
+    /// A subscription's console figures changed outside its messages.
+    fn stamp_subscription(&mut self, name: &str) {
+        if let Some(entry) = self.subscriptions.get_mut(name) {
+            self.revision += 1;
+            entry.stamp = self.revision;
+        }
+    }
+
     fn forget_generation_if_unused(&mut self, generation: u64) {
         let unused = self
             .generations
@@ -2177,6 +2638,7 @@ impl State {
                 subscriptions,
                 generations,
                 snapshots,
+                revision,
                 ..
             } = self;
             let entry = subscriptions.get_mut(name)?;
@@ -2190,6 +2652,11 @@ impl State {
                 effects: Effects::default(),
             };
             let result = work(&mut ctx);
+            if ctx.entry.dirty {
+                *revision += 1;
+                ctx.entry.stamp = *revision;
+                ctx.entry.dirty = false;
+            }
             let effects = ctx.effects;
             let topic = (!effects.outcomes.is_empty() && !ctx.entry.topic_deleted)
                 .then(|| ctx.entry.subscription.topic.clone());
@@ -2706,6 +3173,13 @@ impl TopicEntry {
         }
     }
 
+    fn remember_fanout(&mut self, id: u64) {
+        self.recent_fanouts.push_back((self.fanouts, id));
+        if self.recent_fanouts.len() > RECENT_FANOUTS {
+            self.recent_fanouts.pop_front();
+        }
+    }
+
     fn remember_keys(&mut self, message: &PubsubMessage) {
         let key = &message.ordering_key;
         if !key.is_empty() && self.ordering_keys.back() != Some(key) {
@@ -2823,6 +3297,214 @@ impl SubscriptionEntry {
     }
 }
 
+// ---------------------------------------------------------------- console controls
+
+impl Broker {
+    /// Counts a streaming pull or a waiting long poll on `subscription` until
+    /// the guard drops; only the console watch hears of it.
+    #[must_use]
+    pub fn consumer_guard(&self, subscription: &str, kind: ConsumerKind) -> ConsumerGuard {
+        self.count_consumer(subscription, kind, true);
+        ConsumerGuard {
+            broker: self.clone(),
+            subscription: subscription.to_owned(),
+            kind,
+        }
+    }
+
+    fn count_consumer(&self, subscription: &str, kind: ConsumerKind, add: bool) {
+        {
+            let mut consumers = lock(&self.inner.consumers);
+            let counts = consumers.entry(subscription.to_owned()).or_default();
+            let count = match kind {
+                ConsumerKind::Streaming => &mut counts.streaming,
+                ConsumerKind::Waiting => &mut counts.waiting,
+            };
+            *count = if add {
+                count.saturating_add(1)
+            } else {
+                count.saturating_sub(1)
+            };
+            if *counts == ConsumerCounts::default() {
+                consumers.remove(subscription);
+            }
+        }
+        let mut state = lock(&self.inner.state);
+        state.stamp_subscription(subscription);
+        self.finish(state, false);
+    }
+
+    /// Streaming pulls and waiting long polls on `subscription` now.
+    #[must_use]
+    pub fn consumers(&self, subscription: &str) -> ConsumerCounts {
+        lock(&self.inner.consumers)
+            .get(subscription)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Remembers `subscription`'s moved backlog rows for a console view
+    /// until the reader drops; `None` when it does not exist.
+    #[must_use]
+    pub fn backlog_reader(&self, subscription: &str) -> Option<BacklogReader> {
+        let mut state = lock(&self.inner.state);
+        let entry = state.subscriptions.get_mut(subscription)?;
+        entry.readers += 1;
+        Some(BacklogReader {
+            broker: self.clone(),
+            subscription: subscription.to_owned(),
+        })
+    }
+
+    /// Acknowledges message `id` on `subscription` from the console, whatever
+    /// state it is in: an app's later ack of it is stale, as after any ack.
+    pub fn force_ack(&self, subscription: &str, id: u64) -> Result<(), PubsubError> {
+        names::parse("subscriptions", subscription)?;
+        let mut state = lock(&self.inner.state);
+        let unacked = state
+            .subscriptions
+            .get(subscription)
+            .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?
+            .messages
+            .get(&id)
+            .map(Tracked::unacked)
+            .ok_or_else(|| {
+                PubsubError::not_found(format!(
+                    "Message {id} is not in this subscription's backlog."
+                ))
+            })?;
+        if !unacked {
+            return Err(PubsubError::failed_precondition(format!(
+                "Message {id} is already acknowledged on this subscription."
+            )));
+        }
+        state.with_subscription(subscription, |ctx| ctx.acknowledge(id));
+        self.finish(state, true);
+        Ok(())
+    }
+
+    /// Ends the lease on message `id` now, as its expiry would: it is
+    /// redelivered behind later messages, or dead-lettered at its last attempt.
+    pub fn release(&self, subscription: &str, id: u64) -> Result<(), PubsubError> {
+        names::parse("subscriptions", subscription)?;
+        let mut state = lock(&self.inner.state);
+        let leased = state
+            .subscriptions
+            .get(subscription)
+            .ok_or_else(|| PubsubError::not_found("Subscription does not exist"))?
+            .messages
+            .get(&id)
+            .map(|tracked| matches!(tracked.state, MessageState::Leased { .. }))
+            .ok_or_else(|| {
+                PubsubError::not_found(format!(
+                    "Message {id} is not in this subscription's backlog."
+                ))
+            })?;
+        if !leased {
+            return Err(PubsubError::failed_precondition(format!(
+                "Message {id} is not leased on this subscription."
+            )));
+        }
+        let now = Instant::now();
+        state.with_subscription(subscription, |ctx| ctx.modify_deadline(id, 0, now));
+        self.finish(state, true);
+        Ok(())
+    }
+
+    /// Records, on each message's history entry (while the ring keeps it),
+    /// what the runtime did for the functions of `topic`.
+    pub fn record_fanout(
+        &self,
+        topic: &str,
+        at: SystemTime,
+        skipped: Option<FanoutSkip>,
+        messages: Vec<(u64, Vec<FanoutTarget>)>,
+    ) {
+        let mut state = lock(&self.inner.state);
+        let State {
+            topics,
+            history_bytes,
+            revision,
+            ..
+        } = &mut *state;
+        let Some(entry) = topics.get_mut(topic) else {
+            return;
+        };
+        let mut recorded = false;
+        for (id, targets) in messages {
+            let Ok(position) = entry
+                .history
+                .binary_search_by_key(&id, |history| history.message.id)
+            else {
+                continue;
+            };
+            entry.fanouts += 1;
+            let fanout = Fanout {
+                at,
+                targets,
+                skipped,
+                sequence: entry.fanouts,
+            };
+            let added = fanout.bytes();
+            let mut slot = lock(&entry.history[position].fanout);
+            let removed = slot.as_ref().map_or(0, Fanout::bytes);
+            *slot = Some(fanout);
+            drop(slot);
+            entry.history_bytes = entry.history_bytes.saturating_sub(removed) + added;
+            *history_bytes = history_bytes.saturating_sub(removed) + added;
+            entry.remember_fanout(id);
+            recorded = true;
+        }
+        if recorded {
+            *revision += 1;
+            entry.stamp = *revision;
+        }
+        self.finish(state, false);
+    }
+
+    /// Appends a target (a console redelivery) to message `id`'s fanout;
+    /// false when the ring no longer keeps the message.
+    pub fn add_fanout_target(&self, topic: &str, id: u64, target: FanoutTarget) -> bool {
+        let mut state = lock(&self.inner.state);
+        let State {
+            topics,
+            history_bytes,
+            revision,
+            ..
+        } = &mut *state;
+        let Some(entry) = topics.get_mut(topic) else {
+            return false;
+        };
+        let Ok(position) = entry
+            .history
+            .binary_search_by_key(&id, |history| history.message.id)
+        else {
+            return false;
+        };
+        entry.fanouts += 1;
+        let sequence = entry.fanouts;
+        let mut slot = lock(&entry.history[position].fanout);
+        let removed = slot.as_ref().map_or(0, Fanout::bytes);
+        let fanout = slot.get_or_insert_with(|| Fanout {
+            at: SystemTime::now(),
+            targets: Vec::new(),
+            skipped: None,
+            sequence,
+        });
+        fanout.targets.push(target);
+        fanout.sequence = sequence;
+        let added = fanout.bytes();
+        drop(slot);
+        entry.history_bytes = entry.history_bytes.saturating_sub(removed) + added;
+        *history_bytes = history_bytes.saturating_sub(removed) + added;
+        entry.remember_fanout(id);
+        *revision += 1;
+        entry.stamp = *revision;
+        self.finish(state, false);
+        true
+    }
+}
+
 // ---------------------------------------------------------------- transitions
 
 /// What one subscription's transitions caused elsewhere, applied by
@@ -2878,6 +3560,7 @@ impl Ctx<'_> {
             message,
             state,
             attempts: 0,
+            push_attempts: 0,
         });
         self.hold(id);
     }
@@ -3032,6 +3715,17 @@ impl Ctx<'_> {
         if !moved.was_unacked && moved.is_unacked {
             self.hold(id);
         }
+    }
+
+    /// A push handed to the push loop: one more push attempt, not due again
+    /// until it finishes.
+    fn hand_out_push(&mut self, id: u64, hold: Instant) {
+        self.entry.update(id, |tracked| {
+            if let MessageState::Pushing { .. } = tracked.state {
+                tracked.push_attempts += 1;
+                tracked.state = MessageState::Pushing { next_attempt: hold };
+            }
+        });
     }
 
     fn set_next_push(&mut self, id: u64, at: Instant) {
