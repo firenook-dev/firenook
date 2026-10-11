@@ -427,8 +427,11 @@ export function Grid() {
     },
   ])
 
-  // Fetch the next page as the last rows come into view.
+  // Fetch the next page as the last rows come into view, and — once the
+  // window has let its oldest pages go (it holds at most 20) — the page
+  // before as the first rows do.
   const items = virtualizer.getVirtualItems()
+  const firstVisible = items[0]?.index ?? 0
   const lastVisible = items.at(-1)?.index ?? -1
   useEffect(() => {
     if (
@@ -439,6 +442,37 @@ export function Grid() {
     )
       void page.fetchNextPage()
   }, [lastVisible, documents.length, page])
+  useEffect(() => {
+    if (
+      firstVisible <= 20 &&
+      page.hasPreviousPage &&
+      !page.isFetchingPreviousPage &&
+      documents.length > 0
+    )
+      void page.fetchPreviousPage()
+  }, [firstVisible, documents.length, page])
+
+  // Rows that came or went above the ones on screen leave those rows where
+  // they are: a page dropped from the front of the window, a page read back
+  // in, a document created or deleted above. At the very top nothing is
+  // held, so what arrives there is seen.
+  const anchor = useRef<readonly FsDocument[]>(documents)
+  useLayoutEffect(() => {
+    const before = anchor.current
+    anchor.current = documents
+    const element = scrollRef.current
+    const previousFirst = before[0]?.path
+    const first = documents[0]?.path
+    if (!element || element.scrollTop === 0 || !previousFirst || !first || previousFirst === first)
+      return
+    const added = documents.findIndex((document) => document.path === previousFirst)
+    if (added > 0) {
+      element.scrollTop += added * ROW_HEIGHT
+      return
+    }
+    const removed = before.findIndex((document) => document.path === first)
+    if (removed > 0) element.scrollTop = Math.max(0, element.scrollTop - removed * ROW_HEIGHT)
+  }, [documents])
 
   // The cell being edited, found in the page each render: a live change can
   // replace the document under it, and a delete can take it away.

@@ -44,8 +44,7 @@ pub use explain::{
     QueryExplainer,
 };
 pub use firestore::{
-    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, ChangedCollection, DocumentChange,
-    FirestoreConsole,
+    ChangeBatch, ChangeFeed, ChangeKind, ChangedCollection, DocumentChange, FirestoreConsole,
 };
 pub use guard::{
     ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
@@ -239,10 +238,7 @@ pub fn console_router(services: ConsoleServices) -> Router {
         })
         .merge(hub.router());
     if let Some(firestore) = services.firestore {
-        api = api.nest(
-            "/firestore",
-            firestore::firestore_router(firestore, services.shutdown),
-        );
+        api = api.nest("/firestore", firestore::firestore_router(firestore));
         for prefix in firestore::REST_PREFIXES {
             natives.add(&format!("/api/v1/firestore{prefix}"));
         }
@@ -412,7 +408,6 @@ mod tests {
         let config = ts_rs::Config::new().with_out_dir(out);
         ConsoleStatus::export_all(&config).expect("TypeScript bindings written");
         ChangeBatch::export_all(&config).expect("TypeScript bindings written");
-        ChangeHello::export_all(&config).expect("TypeScript bindings written");
         SchemaSnapshot::export_all(&config).expect("TypeScript bindings written");
         SubcollectionsSnapshot::export_all(&config).expect("TypeScript bindings written");
         DatabaseList::export_all(&config).expect("TypeScript bindings written");

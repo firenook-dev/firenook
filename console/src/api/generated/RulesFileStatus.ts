@@ -2,7 +2,8 @@
 import type { RulesDiagnostic } from "./RulesDiagnostic";
 
 /**
- * The rules file watcher finished a pass (`event: file` on `/rules/live`).
+ * The rules file watcher finished a pass (`file` on the `firestore.rules`
+ * topic).
  */
 export type RulesFileStatus = { database: string, 
 /**

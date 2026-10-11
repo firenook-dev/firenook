@@ -1364,16 +1364,22 @@ behind a confirmation that names the trigger behaviour. And it belongs
 **per document, in the inspector**, not as one global list: the question
 is almost always "what happened to *this*?".
 
-**What is left in its place:** `LiveDot` is a state chip, not a button,
-and it shows **only when the channel has dropped** (amber "Reconnecting",
-red "Offline", with a tooltip saying the grid may be out of date). The grid
-is kept current by that channel, so a dropped channel is a grid that looks
+**What is left in its place:** the console has **one live connection per
+browser** (`src/lib/live`), so a dropped channel is said **once, by the
+engine badge in the top bar** (amber "reconnecting", red "engine stopped"
+the moment the engine says it is stopping, amber "too many console tabs"),
+with a tooltip saying what is on screen may be out of date. The grid is
+kept current by that channel, so a dropped channel is a grid that looks
 fresh and is not — the one thing a dev tool must not do quietly. While it
 is up there is nothing to say: a green "Live" in every toolbar was the
-normal case announced beside the engine's own green dot in the bar above,
-and a word that is always there is not read on the day it changes. A
-journey aborts `/firestore/changes` with `page.route` to see it, then
-unroutes and sees it go. The count beside it went with the panel it used
+normal case announced beside the engine's own green dot. The toolbar keeps
+a `LiveDot` chip only for this page's own subscription, when the engine
+ended or refused it. A journey drops the channel with `dropLive`
+(`e2e/support/live.ts`: the product's own release path — the tab hidden
+until it lets the connection go, the live routes refused, the tab shown
+again), sees the badge say so, writes a document meanwhile, and after
+`restoreLive` sees the row catch up without a reload: `firestore.changes`
+replays what was missed. The count beside it went with the panel it used
 to open: a number nobody can look into is trivia, and it was counting
 writes since the tab opened while the panel counted what the engine still
 held, both under the word "change".
@@ -1483,13 +1489,16 @@ document read with `withSecurityRulesDisabled`, `assertSucceeds` /
 **History and the file.** `GET /rules/history` (startup, console, file,
 reload); the dialog diffs any version — and the file on disk when it
 differs — against the editor (`diff.ts`), "Put in the editor" makes it the
-draft. `GET /rules/live` (SSE) tells the page when what governs the
-database changed, so a file saved in an editor shows up without a reload;
+draft. The live channel's `firestore.rules` topic tells the page when what
+governs the database changed (`rules`, cursor = the hash in force) and the
+file's status on every subscription (`file`), so a file saved in an editor
+shows up without a reload and a file that broke while the tab was away is
+said when it comes back;
 the engine watches each configured rules file (1 s debounce, a broken file
 keeps the rules in force and reports `fileProblems`). No polling anywhere.
 
 **Engine contract**: `crates/console-front/src/rules.rs` (read, apply,
-check, history, live) and `rules_eval.rs` (evaluate, decision detail,
+check, history, the `firestore.rules` topic) and `rules_eval.rs` (evaluate, decision detail,
 impact); generated types in `src/api/generated/`. A Rust doc comment that
 contains `*/` — a pattern like `users/*/orders` — closes the generated
 TypeScript comment and breaks the console build; spell it out.
@@ -1509,11 +1518,17 @@ indenting: paste instead (`pasteRules`).
   official Requests websocket at `/console/api/v1/firestore/requests`,
   which the rules page reads as its decisions. Never reach the service
   ports from the browser.
-- Live: `GET /console/api/v1/firestore/changes?database=` is an SSE stream
-  from the store's commit observer (`ChangeFeed` in
-  `crates/console-front/src/firestore.rs`); `src/firestore/live.ts`
-  invalidates TanStack Query scopes and flashes rows. Payloads are paths
-  only, never documents.
+- Live: the `firestore.changes` topic on the console's one live channel
+  (`useLiveTopic`, `src/lib/live`), fed by the store's commit observer
+  (`ChangeFeed` in `crates/console-front/src/firestore.rs`, a ring of
+  path-only batches, so a dropped connection or a hidden tab gets the
+  commits it missed replayed). `src/firestore/live.ts` patches updated rows
+  of loaded pages in place through `documents:batchGet` read as the page's
+  identity, refetches the window (at most 20 pages, `maxPages`) for creates,
+  deletes and truncated commits, invalidates the other scopes and flashes
+  rows. Payloads are paths only, never documents. No route of its own
+  streams: `only_live_streams` (console-front) fails if one does, and the
+  `EventSource` global is a lint error outside `src/lib/live`.
 - Identity: `Authorization: Bearer owner` bypasses rules; "view as" mints
   an unsigned `alg: none` emulator token for an Auth user
   (`src/firestore/view-as.ts`), so rules run exactly as for the app.

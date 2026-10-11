@@ -1,4 +1,5 @@
 import { type Locator, expect, test } from '@playwright/test'
+import { dropLive, restoreLive } from './support/live'
 
 // The Firestore workbench against a real engine seeded by scripts/seed-firestore.mjs.
 const origin = () => {
@@ -317,17 +318,51 @@ test('the inspector saves typed edits and the change flashes back through the li
   await expect(page.getByTestId('live-state')).toHaveCount(0)
 })
 
-test('a dropped live channel says the grid may be out of date', async ({ page }) => {
-  await page.route('**/firestore/changes**', (route) => route.abort())
-  await page.goto(`${origin()}/console/firestore?path=users`)
-  await expect(page.getByTestId('grid-row').first()).toBeVisible()
-  const state = page.getByTestId('live-state')
-  await expect(state).toContainText('Reconnecting')
-  await state.hover()
-  await expect(page.locator('.kumo-tooltip-popup')).toContainText('so the grid may be out of date')
-  // Back, and it says nothing again.
-  await page.unroute('**/firestore/changes**')
-  await expect(state).toHaveCount(0, { timeout: 10_000 })
+test('a dropped live channel says so once, in the engine badge, and replays what it missed', async ({
+  page,
+}) => {
+  await page.goto(`${origin()}/console/firestore?path=teams`)
+  const row = page.getByTestId('grid-row').filter({ hasText: 't_real' })
+  await expect(row).toBeVisible()
+  const badge = page.getByTestId('engine-badge')
+  await expect(badge).toHaveText(/^engine /)
+
+  await dropLive(page)
+  await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+  await badge.hover()
+  await expect(page.locator('.kumo-tooltip-popup')).toContainText(
+    'so what is on screen may be out of date',
+  )
+  // The whole console shares the one connection, so the drop is said
+  // there and nowhere else: the toolbar keeps quiet.
+  await expect(page.getByTestId('live-state')).toHaveCount(0)
+  // Gone long enough, it says the engine stopped.
+  await expect(badge).toHaveText('engine stopped', { timeout: 5_000 })
+
+  // A write while the channel is down: nobody hears it now, and the
+  // channel replays it when it is back, so the grid catches up without a
+  // reload.
+  const seats = String(40 + Math.floor(Math.random() * 50))
+  const response = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: {
+      writes: [
+        {
+          update: {
+            name: `${resource()}/teams/t_real`,
+            fields: { seats: { integerValue: seats } },
+          },
+          updateMask: { fieldPaths: ['seats'] },
+        },
+      ],
+    },
+  })
+  expect(response.ok()).toBeTruthy()
+  await expect(row).not.toContainText(seats)
+
+  await restoreLive(page)
+  await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(row).toContainText(seats, { timeout: 5_000 })
 })
 
 test('documents are added and deleted from the workbench', async ({ page }) => {

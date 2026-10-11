@@ -2,20 +2,22 @@
 // schema panel in the shell's panel slot, a toolbar with the path and the
 // actions, the query line when summoned, then the grid with the inspector
 // beside it when a document is open. Everything on screen is live from the
-// engine's change feed.
+// engine's change feed, a topic on the console's one live channel.
 
 import { Text, Tooltip } from '@cloudflare/kumo'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { statusQuery } from '@/api/queries'
 import { LiveDot } from '@/components/kit'
 import { Page } from '@/components/shell/page'
 import { PanelToggle } from '@/components/shell/section-panel'
+import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
 import { isTyping, useShortcuts } from '@/lib/shortcuts'
 import { useCreateDialog } from '../create'
 import { useExportDialog } from '../export'
-import { useLive, useLiveChanges } from '../live'
+import { useLiveChanges } from '../live'
 import { useFirestorePalette } from '../palette'
+import { documentQuery } from '../queries'
 import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
@@ -58,9 +60,9 @@ export function FirestoreWorkbench() {
 function WorkbenchBody() {
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
-  useLiveChanges(queryClient, workbench.database)
+  const live = useLiveChanges(queryClient, workbench.scope)
   useFirestorePalette()
-  const live = useLive((state) => state.status)
+  useRestartRecovery()
   const checked = useSelection((state) => state.checked)
   const everything = useSelection((state) => state.everything)
   const { total } = useMatchCount()
@@ -165,6 +167,39 @@ function WorkbenchBody() {
   )
 }
 
+/**
+ * What an engine restart does to the workbench beyond reloading its queries
+ * (the channel does that): the ticked rows go, since the documents they
+ * named may not exist in the new run, and the inspector closes when its
+ * document no longer does. An edit in progress is kept.
+ */
+function useRestartRecovery() {
+  const workbench = useWorkbench()
+  const queryClient = useQueryClient()
+  const latest = useRef(workbench)
+  useEffect(() => {
+    latest.current = workbench
+  })
+  useEffect(
+    () =>
+      liveChannel.onEngineRestart(() => {
+        useSelection.getState().clear()
+        const { scope, selectedDocument, selectDocument } = latest.current
+        if (!selectedDocument) return
+        void queryClient
+          .fetchQuery(documentQuery(scope, selectedDocument))
+          .then((document) => {
+            if (!document && latest.current.selectedDocument === selectedDocument)
+              selectDocument(undefined)
+          })
+          .catch(() => {
+            // Unreadable now is still a document: the inspector says why.
+          })
+      }),
+    [queryClient],
+  )
+}
+
 /** The rule that separates one group of toolbar controls from the next. */
 function Divider() {
   return <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
@@ -177,7 +212,7 @@ function WorkbenchData({
   explain,
   setExplain,
 }: {
-  live: string
+  live: SubscriptionStatus
   onDelete: (target: DeleteTarget) => void
   explain: boolean
   setExplain: (explain: boolean) => void
@@ -193,24 +228,20 @@ function WorkbenchData({
         <PanelToggle where="toolbar" />
         <PathBar />
         <Divider />
-        {/* The channel, said only when it has dropped. The grid is kept
-            current by it, so a dropped channel is a grid that looks fresh
-            and is not — the one thing a dev tool must not do quietly. While
-            it is up there is nothing to say: a green "Live" in every
-            toolbar was the normal case announced, beside the engine's own
-            green dot in the bar above, and a word that is always there is
-            a word nobody reads on the day it changes. The count beside it
-            went earlier, with the window it used to open. */}
-        {(live === 'reconnecting' || live === 'offline') && (
+        {/* This page's own subscription, said only when the engine ended
+            or refused it. A dropped channel is the whole console's, so the
+            engine badge in the bar above says it, once, for every page; a
+            green "Live" here would only announce the normal case. */}
+        {(live === 'ended' || live === 'refused') && (
           <Tooltip
             content={
-              live === 'offline'
-                ? 'Changes are not arriving, so the grid may be out of date. Reload to reconnect.'
-                : 'Changes stopped arriving, so the grid may be out of date. Reconnecting.'
+              live === 'ended'
+                ? 'Live updates stopped, so the grid may be out of date. The console retries by itself.'
+                : 'The engine refused live updates for this database, so the grid may be out of date.'
             }
             render={
               <span className="flex h-7 items-center px-1.5" data-testid="live-state">
-                <LiveDot state={live} />
+                <LiveDot state={live === 'ended' ? 'reconnecting' : 'offline'} />
               </span>
             }
           />

@@ -20,9 +20,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use axum::Router;
-use axum::extract::{Query, State};
-use axum::response::IntoResponse;
-use axum::response::sse::Event;
 use firenook_core_store::{
     Change, CommitObservation, CommitObserver, DocumentKey, Store, Timestamp,
 };
@@ -30,9 +27,6 @@ use firenook_suite_front::replay::random_epoch;
 use firenook_suite_front::{Cursor, Entry, ReplayRing, RingBudget, RingLimits};
 use futures_util::stream::{self, StreamExt as _};
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use ts_rs::TS;
 
 use crate::api_error::ApiError;
@@ -43,12 +37,7 @@ use crate::live::{LiveTopic, ResetReason, TopicEvent, TopicStream, topic_params}
 use crate::rules::RulesEditor;
 use crate::rules_eval::RulesEvaluator;
 use crate::schema::SchemaIndex;
-use crate::sse::{Shutdown, json_event, sse_response};
 use crate::time::rfc3339;
-
-/// Commits retained for a slow console before it is told to resync (the
-/// legacy `/changes` stream).
-const FEED_CAPACITY: usize = 512;
 
 /// What the change ring keeps: 20,000 batches or 4 MiB of paths, and never
 /// fewer than 2,000 batches when the process's rings share out memory.
@@ -148,22 +137,9 @@ pub enum ChangeKind {
     Deleted,
 }
 
-/// The first event on a change stream: where the store is now, so the
-/// console knows which revision its data corresponds to.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ChangeHello {
-    /// Current store revision.
-    #[ts(type = "number")]
-    pub revision: u64,
-}
-
-/// Records store commits for the `firestore.changes` topic, and fans them
-/// out to every open legacy change stream.
+/// Records store commits for the `firestore.changes` topic.
 #[derive(Clone)]
 pub struct ChangeFeed {
-    sender: broadcast::Sender<Arc<ChangeBatch>>,
-    store: Store,
     /// Path-only batches, recorded from the first subscription on.
     recorded: ReplayRing<ChangeMeta>,
     recording: Arc<AtomicBool>,
@@ -227,23 +203,11 @@ fn no_json() -> Arc<str> {
     EMPTY.get_or_init(|| Arc::from("")).clone()
 }
 
-/// What the change stream handler needs: the feed and the suite's stop
-/// signal, which ends every open stream so a console tab never holds the UI
-/// listener's graceful shutdown open.
-#[derive(Clone)]
-struct ChangeStreams {
-    feed: ChangeFeed,
-    shutdown: Shutdown,
-}
-
 impl ChangeFeed {
     /// Creates the feed and registers it with `store`.
     #[must_use]
     pub fn attach(store: &Store) -> Self {
-        let (sender, _) = broadcast::channel(FEED_CAPACITY);
         let feed = Self {
-            sender,
-            store: store.clone(),
             recorded: ReplayRing::new(
                 "firestore.changes",
                 CHANGE_RING,
@@ -300,50 +264,19 @@ impl ChangeFeed {
             weight,
         );
     }
-
-    fn router(self, shutdown: Shutdown) -> Router {
-        Router::new()
-            .route("/changes", axum::routing::get(changes))
-            .with_state(ChangeStreams {
-                feed: self,
-                shutdown,
-            })
-    }
 }
 
 impl CommitObserver for ChangeFeed {
     fn committed(&self, observation: &CommitObservation) {
+        // Nothing at all until a console first subscribes: a headless run
+        // pays one relaxed load per commit.
         if self.recording.load(Ordering::Relaxed) {
             self.record(observation);
         }
-        if self.sender.receiver_count() == 0 {
-            return;
-        }
-        let batch = ChangeBatch {
-            revision: observation.result.revision.get(),
-            commit_time: rfc3339(observation.result.commit_time),
-            changes: observation
-                .changes
-                .iter()
-                .map(|change| DocumentChange {
-                    database: change.key.database().database_id().to_owned(),
-                    path: change.key.path().to_owned(),
-                    kind: match (&change.before, &change.after) {
-                        (None, Some(_)) => ChangeKind::Created,
-                        (Some(_), None) => ChangeKind::Deleted,
-                        _ => ChangeKind::Updated,
-                    },
-                })
-                .collect(),
-            truncated: None,
-            collections: None,
-        };
-        // A send only fails when no stream is open; nothing to retain then.
-        let _ = self.sender.send(Arc::new(batch));
     }
 }
 
-/// Which changes one stream wants.
+/// Which changes one subscriber wants.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct ChangeScope {
     /// Database id; every database when absent.
@@ -355,10 +288,6 @@ pub(crate) struct ChangeScope {
 }
 
 impl ChangeScope {
-    fn matches(&self, change: &DocumentChange) -> bool {
-        self.matches_document(&change.database, &change.path)
-    }
-
     fn wants_database(&self, database: &str) -> bool {
         self.database
             .as_deref()
@@ -605,62 +534,18 @@ fn merged_kind(first: ChangeKind, last: ChangeKind) -> ChangeKind {
     }
 }
 
-/// `GET /changes?database=(default)&scope=users`: a server-sent event stream.
-/// `hello` carries the current revision, `change` one commit, and `reset`
-/// tells a console that fell behind to reload what it shows. The stream
-/// ends when the suite stops, so shutdown never waits on a console tab.
-async fn changes(
-    State(streams): State<ChangeStreams>,
-    Query(scope): Query<ChangeScope>,
-) -> impl IntoResponse {
-    let receiver = streams.feed.sender.subscribe();
-    let hello = ChangeHello {
-        revision: streams.feed.store.revision().get(),
-    };
-    let first = stream::once(async move { json_event("hello", &hello) });
-    let rest = BroadcastStream::new(receiver).filter_map(move |item| {
-        let event = match item {
-            Ok(batch) => {
-                let changes = batch
-                    .changes
-                    .iter()
-                    .filter(|change| scope.matches(change))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if changes.is_empty() {
-                    None
-                } else {
-                    Some(json_event(
-                        "change",
-                        &ChangeBatch {
-                            revision: batch.revision,
-                            commit_time: batch.commit_time.clone(),
-                            changes,
-                            truncated: None,
-                            collections: None,
-                        },
-                    ))
-                }
-            }
-            Err(BroadcastStreamRecvError::Lagged(_)) => Some(Event::default().event("reset")),
-        };
-        async move { event }
-    });
-    sse_response(first.chain(rest), streams.shutdown)
-}
-
-/// The console's Firestore routes: the change feed, the schema index, the
-/// database list, the Requests feed and the REST front, mounted together
-/// under `/api/v1/firestore`.
-pub(crate) fn firestore_router(console: FirestoreConsole, shutdown: Shutdown) -> Router {
+/// The console's Firestore routes: the schema index, the database list, the
+/// query explainer, the rules, the Requests feed and the REST front, mounted
+/// together under `/api/v1/firestore`. The change feed is not a route: it is
+/// the live channel's `firestore.changes` topic.
+pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
     let mut router = console
-        .changes
-        .router(shutdown.clone())
-        .merge(console.schema.router())
+        .schema
+        .router()
         .merge(console.databases.router())
         .merge(console.explain.router())
         .merge(console.rules_evaluator.router())
-        .merge(console.rules.router(shutdown));
+        .merge(console.rules.router());
     if let Some(requests) = console.requests {
         router = router.merge(requests);
     }
@@ -671,14 +556,10 @@ pub(crate) fn firestore_router(console: FirestoreConsole, shutdown: Shutdown) ->
 mod tests {
     use std::time::Duration;
 
-    use axum::body::Body;
-    use axum::http::Request;
     use std::sync::atomic::AtomicI64;
 
     use firenook_core_store::{DatabaseName, Fields, Precondition, Value as StoreValue, Write};
     use serde_json::{Value, json};
-    use tokio::sync::watch;
-    use tower::ServiceExt as _;
 
     use super::*;
 
@@ -1130,66 +1011,21 @@ mod tests {
         );
     }
 
-    fn change(database: &str, path: &str) -> DocumentChange {
-        DocumentChange {
-            database: database.to_owned(),
-            path: path.to_owned(),
-            kind: ChangeKind::Updated,
-        }
-    }
-
     #[test]
     fn scope_matches_the_path_itself_and_everything_under_it() {
         let scope = ChangeScope {
             database: Some("(default)".to_owned()),
             scope: "users".to_owned(),
         };
-        assert!(scope.matches(&change("(default)", "users/u1")));
-        assert!(scope.matches(&change("(default)", "users/u1/orders/o1")));
-        assert!(!scope.matches(&change("(default)", "users-archive/u1")));
-        assert!(!scope.matches(&change("analytics", "users/u1")));
+        assert!(scope.matches_document("(default)", "users/u1"));
+        assert!(scope.matches_document("(default)", "users/u1/orders/o1"));
+        assert!(!scope.matches_document("(default)", "users-archive/u1"));
+        assert!(!scope.matches_document("analytics", "users/u1"));
     }
 
     #[test]
     fn an_empty_scope_matches_every_change() {
         let scope = ChangeScope::default();
-        assert!(scope.matches(&change("(default)", "anything/at/all/here")));
-    }
-
-    #[tokio::test]
-    async fn a_change_stream_ends_when_the_suite_stops() {
-        let store = Store::default();
-        let (stop, shutdown) = watch::channel(false);
-        let router = ChangeFeed::attach(&store).router(Shutdown::new(shutdown));
-        let response = router
-            .oneshot(
-                Request::get("/changes?database=(default)")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
-        // The greeting arrives while the suite runs; the body then only
-        // ends because the suite stopped, not because a tab closed.
-        let mut body = response.into_body().into_data_stream();
-        let greeting = tokio::time::timeout(Duration::from_secs(5), body.next())
-            .await
-            .expect("the greeting arrives")
-            .expect("a chunk")
-            .expect("bytes");
-        stop.send(true).expect("a subscriber is listening");
-        let remainder = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut collected = Vec::new();
-            while let Some(chunk) = body.next().await {
-                collected.extend_from_slice(&chunk.expect("bytes"));
-            }
-            collected
-        })
-        .await
-        .expect("the stream ended after shutdown");
-        let body = [greeting.to_vec(), remainder].concat();
-        let text = String::from_utf8(body).expect("utf-8");
-        assert!(text.contains("event: hello"), "{text}");
+        assert!(scope.matches_document("(default)", "anything/at/all/here"));
     }
 }

@@ -5,7 +5,10 @@
 // labels out over the page while the pointer is on it. The control at its
 // foot and `[` flip it; `t` hides and shows the panel. The shell also holds
 // the console's one keydown listener (`lib/shortcuts.ts`): its own keys,
-// ⌘K, `[`, `t` and `?`, and every page's, go through the same registry.
+// ⌘K, `[`, `t` and `?`, and every page's, go through the same registry;
+// and its one live subscription (`lib/live/shell.ts`), whose channel the
+// engine badge speaks for: the whole console shares one connection, so a
+// drop is said once, there, not again on every page.
 
 import {
   Badge,
@@ -23,11 +26,12 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type { CSSProperties, ReactNode } from 'react'
 import { Suspense, lazy, useState } from 'react'
-import type { EngineInfo } from '@/api/generated/EngineInfo'
 import { statusQuery } from '@/api/queries'
 import { engineBuild, engineVersion } from '@/lib/engine'
 import { Kbd } from '@/components/kit'
 import { useLayout } from '@/lib/layout'
+import { useLiveStatus } from '@/lib/live/channel'
+import { useShellLive } from '@/lib/live/shell'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
 import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
@@ -73,6 +77,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // The console's one keydown listener; every page's keys go through it.
   useShortcutListener()
+  // The engine's status and badges, live, for every page.
+  useShellLive()
   useShortcuts({ id: SHELL_SCOPE, label: 'Everywhere' }, [
     { key: 'Mod+k', label: 'Search the console', run: togglePalette, allowInInputs: true },
     { key: '[', label: 'Collapse or expand the sidebar', run: toggleNav },
@@ -282,7 +288,7 @@ function TopBar() {
         )}
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <EngineBadge state={status.status} engine={status.data?.engine} />
+        <EngineBadge />
         <ThemePicker />
         <Button
           variant="ghost"
@@ -302,33 +308,76 @@ function TopBar() {
   )
 }
 
-function EngineBadge({
-  state,
-  engine,
-}: {
-  state: 'pending' | 'error' | 'success'
-  engine?: EngineInfo | undefined
-}) {
-  if (state === 'error') {
+/**
+ * The engine, as the live channel knows it: its version while live; amber
+ * while reconnecting, red the moment it says it is stopping (or 30 s after
+ * it vanished without a word), amber when it already serves as many console
+ * connections as it takes. An engine of another build than this page's asks
+ * for a reload instead: the page's code no longer matches it.
+ */
+function EngineBadge() {
+  const status = useQuery(statusQuery)
+  const live = useLiveStatus((state) => state.status)
+  const updated = useLiveStatus((state) => state.engineUpdated)
+  if (updated) {
     return (
-      <Badge variant="error" appearance="dot">
-        engine unreachable
-      </Badge>
+      <Tooltip
+        content="The engine was updated. Reload to get its console."
+        render={
+          <button
+            type="button"
+            className="cursor-pointer rounded-md"
+            onClick={() => window.location.reload()}
+            data-testid="engine-badge"
+          >
+            <Badge variant="neutral" appearance="dot">
+              engine updated · reload
+            </Badge>
+          </button>
+        }
+      />
     )
   }
-  if (state === 'pending') {
-    return (
-      <Badge variant="neutral" appearance="dot">
-        connecting
-      </Badge>
+  const said = (variant: 'warning' | 'error' | 'neutral', label: string, why: string) => (
+    <Tooltip
+      content={why}
+      render={
+        <span data-testid="engine-badge" data-state={live}>
+          <Badge variant={variant} appearance="dot">
+            {label}
+          </Badge>
+        </span>
+      }
+    />
+  )
+  if (live === 'reconnecting')
+    return said(
+      'warning',
+      'reconnecting',
+      'Live updates are reconnecting, so what is on screen may be out of date.',
     )
-  }
+  if (live === 'offline')
+    return said(
+      'error',
+      'engine stopped',
+      'The engine stopped. The console reconnects by itself when it is back.',
+    )
+  if (live === 'too-many')
+    return said(
+      'warning',
+      'too many console tabs',
+      'This engine already serves 64 console connections. Close a console tab.',
+    )
+  if (status.isError && live === 'connecting')
+    return said('error', 'engine unreachable', 'The console could not reach the engine.')
+  if (!status.data || live === 'connecting')
+    return said('neutral', 'connecting', 'Connecting to the engine…')
   // The engine source commit is the detail, not the headline: it only
   // matters when a version has to be traced back to a build.
   return (
-    <span title={engineBuild(engine)} data-testid="engine-badge">
+    <span title={engineBuild(status.data.engine)} data-testid="engine-badge" data-state={live}>
       <Badge variant="success" appearance="dot">
-        engine {engineVersion(engine)}
+        engine {engineVersion(status.data.engine)}
       </Badge>
     </span>
   )
