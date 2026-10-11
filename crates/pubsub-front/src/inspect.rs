@@ -1512,7 +1512,9 @@ impl Broker {
         {
             let latest = topic.latest_id.unwrap_or(0);
             match cursor.topic {
-                Some((published, last)) if topic.published_total > published => {
+                // Message ids only grow, so a topic deleted and created again
+                // (or cleared) since the cursor still shows its new messages.
+                Some((published, last)) if latest > last => {
                     let start = topic
                         .history
                         .partition_point(|entry| entry.message.id <= last);
@@ -1524,7 +1526,11 @@ impl Broker {
                         .collect();
                     delta.published = Some(PublishedIds {
                         latest_id: latest,
-                        added: topic.published_total - published,
+                        added: if topic.published_total >= published {
+                            topic.published_total - published
+                        } else {
+                            topic.published_total
+                        },
                         overflow: new.len() > 100,
                         ids: new.into_iter().take(100).collect(),
                     });
@@ -1533,10 +1539,12 @@ impl Broker {
             }
             cursor.topic = Some((topic.published_total, latest));
             if scope.deliveries {
-                if let Some(seen) = cursor.fanouts
-                    && topic.fanouts > seen
-                {
-                    delta.deliveries = Some(fanouts_since(topic, seen));
+                if let Some(seen) = cursor.fanouts {
+                    // A topic created again counts its fanouts from zero.
+                    let seen = if topic.fanouts < seen { 0 } else { seen };
+                    if topic.fanouts > seen {
+                        delta.deliveries = Some(fanouts_since(topic, seen));
+                    }
                 }
                 cursor.fanouts = Some(topic.fanouts);
             }
@@ -1547,6 +1555,11 @@ impl Broker {
             .and_then(|subscription| state.subscriptions.get(subscription))
         {
             if let Some(seen) = cursor.backlog
+                && entry.change_sequence < seen
+            {
+                // The subscription was created again since the cursor.
+                delta.backlog_reset = true;
+            } else if let Some(seen) = cursor.backlog
                 && entry.change_sequence > seen
             {
                 let oldest = entry

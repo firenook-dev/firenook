@@ -25,8 +25,9 @@ pub use error::PubsubError;
 pub use functions::ScheduleDefinition;
 pub use functions::{FunctionTarget, TargetKind};
 pub use runtime::{
-    DispatchPreview, FanoutSummary, Managed, OutgoingMessage, PublishOutcome, PubsubRuntime,
-    PushSink, PushStreakRecord, RedeliverError, RejectedList, Rejection,
+    DispatchPreview, FanoutSummary, LOG_PUSH, LOG_SCHEDULE, LogSink, Managed, OutgoingMessage,
+    PublishOutcome, PubsubLogLine, PubsubResetCount, PubsubRuntime, PushSink, PushStreakRecord,
+    RedeliverError, RejectedList, Rejection,
 };
 pub use schedule_control::{
     RunOutcome, RunScheduleError, RunTrigger, ScheduleControl, ScheduleRun, ScheduleView,

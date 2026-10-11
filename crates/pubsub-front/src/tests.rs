@@ -1550,8 +1550,18 @@ mod schedules {
     };
     use time::OffsetDateTime;
 
-    use super::{PROJECT, inventory};
-    use crate::{PubsubRuntime, RunScheduleError, RunTrigger, ScheduleControl, router};
+    use std::sync::{Arc, Mutex};
+
+    use axum::http::StatusCode;
+    use serde_json::json;
+    use tower::ServiceExt as _;
+
+    use super::{PROJECT, inventory, publish_request};
+    use crate::google::pubsub::v1::{PubsubMessage, Subscription, Topic};
+    use crate::{
+        LOG_SCHEDULE, Managed, PubsubLogLine, PubsubRuntime, RunScheduleError, RunTrigger,
+        ScheduleControl, router,
+    };
 
     const TICK: &str = "us-central1-scheduledTick";
     const EUROPE: &str = "europe-west1-scheduledTick";
@@ -1779,6 +1789,261 @@ mod schedules {
         runtime.shutdown().await;
     }
 
+    /// A user topic with a subscription, messages, a snapshot, a schema and
+    /// a refused publish, beside the functions' own topics.
+    async fn populate(runtime: &PubsubRuntime) {
+        let broker = runtime.broker();
+        let orders = format!("projects/{PROJECT}/topics/orders");
+        let worker = format!("projects/{PROJECT}/subscriptions/orders-worker");
+        let function_topic = format!("projects/{PROJECT}/topics/phase4-topic");
+        broker
+            .create_topic(Topic {
+                name: orders.clone(),
+                ..Topic::default()
+            })
+            .expect("topic");
+        broker
+            .create_subscription(Subscription {
+                name: worker.clone(),
+                topic: orders.clone(),
+                ..Subscription::default()
+            })
+            .expect("subscription");
+        let message = || PubsubMessage {
+            data: b"m".to_vec(),
+            ..PubsubMessage::default()
+        };
+        broker
+            .publish(&orders, vec![message(), message(), message()])
+            .expect("publish");
+        broker
+            .publish(&function_topic, vec![message()])
+            .expect("publish");
+        broker
+            .create_snapshot(
+                &format!("projects/{PROJECT}/snapshots/before"),
+                &worker,
+                std::collections::BTreeMap::new(),
+            )
+            .expect("snapshot");
+        broker
+            .create_schema(
+                &format!("projects/{PROJECT}"),
+                "order-schema",
+                Some(crate::google::pubsub::v1::Schema {
+                    r#type: crate::google::pubsub::v1::schema::Type::Avro as i32,
+                    definition: r#"{"type":"record","name":"Order","fields":[{"name":"id","type":"string"}]}"#.to_owned(),
+                    ..Default::default()
+                }),
+            )
+            .expect("schema");
+        let response = runtime
+            .application()
+            .oneshot(publish_request(
+                "missing",
+                &json!({ "messages": [{ "data": "e30=" }] }),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn clear_leaves_a_clean_broker_with_function_topics() {
+        let (runtime, _deliveries, _background) = start(&inventory());
+        populate(&runtime).await;
+        let broker = runtime.broker();
+        let function_topic = format!("projects/{PROJECT}/topics/phase4-topic");
+        let function_subscription =
+            format!("projects/{PROJECT}/subscriptions/emulator-sub-phase4-topic");
+        let message = || PubsubMessage {
+            data: b"m".to_vec(),
+            ..PubsubMessage::default()
+        };
+        let last = runtime.run_schedule(TICK).expect("run").message_id;
+        runtime.set_schedule_paused(TICK, true).expect("pause");
+
+        let removed = runtime.reset();
+        assert_eq!(removed.broker.topics, 3);
+        assert_eq!(removed.broker.subscriptions, 3);
+        assert_eq!(removed.broker.snapshots, 1);
+        assert_eq!(removed.broker.schemas, 1);
+        assert_eq!(removed.broker.messages, 5);
+        assert_eq!(
+            removed.broker.backlog, 4,
+            "orders-worker's three, and the one published past the runtime's fanout"
+        );
+        assert_eq!(removed.rejections, 1);
+        assert_eq!(removed.schedule_runs, 1);
+
+        // Only the functions' own topics and subscriptions, empty.
+        let mut topics: Vec<String> = broker
+            .resource_ids("topics")
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
+        topics.sort();
+        assert_eq!(topics, ["firebase-schedule-scheduledTick", "phase4-topic"]);
+        let mut subscriptions: Vec<String> = broker
+            .resource_ids("subscriptions")
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
+        subscriptions.sort();
+        assert_eq!(
+            subscriptions,
+            [
+                "emulator-sub-firebase-schedule-scheduledTick",
+                "emulator-sub-phase4-topic"
+            ]
+        );
+        assert_eq!(runtime.managed(&function_subscription), Managed::Functions);
+        assert_eq!(broker.history_window(&function_topic).unwrap().messages, 0);
+        assert!(
+            broker
+                .get_snapshot(&format!("projects/{PROJECT}/snapshots/before"))
+                .is_err()
+        );
+        assert!(
+            broker
+                .get_schema(
+                    &format!("projects/{PROJECT}/schemas/order-schema"),
+                    crate::google::pubsub::v1::SchemaView::Basic,
+                )
+                .is_err()
+        );
+        assert_eq!(runtime.rejected().entries.len(), 0);
+        let view = runtime.schedule_view(TICK).expect("schedule");
+        assert_eq!(view.runs, 0);
+        assert!(view.last_run.is_none());
+        assert!(view.paused, "pause flags are kept");
+        broker.check_invariants();
+
+        // Message ids keep counting.
+        let (ids, _) = broker
+            .publish(&function_topic, vec![message()])
+            .expect("publish");
+        assert!(ids[0].parse::<u64>().unwrap() > last.parse::<u64>().unwrap());
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn console_views_follow_a_cleared_topic() {
+        use crate::broker::inspect::{ConsoleCursor, DeltaScope};
+        let (runtime, _deliveries, _background) = start(&inventory());
+        let broker = runtime.broker();
+        let orders = format!("projects/{PROJECT}/topics/orders");
+        let worker = format!("projects/{PROJECT}/subscriptions/orders-worker");
+        let make = || {
+            broker
+                .create_topic(Topic {
+                    name: orders.clone(),
+                    ..Topic::default()
+                })
+                .expect("topic");
+            broker
+                .create_subscription(Subscription {
+                    name: worker.clone(),
+                    topic: orders.clone(),
+                    ..Subscription::default()
+                })
+                .expect("subscription");
+        };
+        let message = || PubsubMessage {
+            data: b"m".to_vec(),
+            ..PubsubMessage::default()
+        };
+        make();
+        let reader = broker.backlog_reader(&worker).expect("reader");
+        let scope = DeltaScope {
+            project: PROJECT.to_owned(),
+            counters: false,
+            throughput: Vec::new(),
+            topic: Some(orders.clone()),
+            subscription: Some(worker.clone()),
+            deliveries: true,
+            max_changed: 200,
+        };
+        let mut cursor = ConsoleCursor::default();
+        broker
+            .publish(&orders, vec![message(), message(), message()])
+            .expect("publish");
+        let _ = broker.console_delta(&mut cursor, &scope);
+        broker.publish(&orders, vec![message()]).expect("publish");
+        let delta = broker.console_delta(&mut cursor, &scope);
+        assert_eq!(delta.published.expect("published").added, 1);
+
+        // The clear removes both; the view's topic and subscription come
+        // back with fewer messages than its cursor counted.
+        let _ = runtime.reset();
+        make();
+        let (ids, _) = broker.publish(&orders, vec![message()]).expect("publish");
+        let delta = broker.console_delta(&mut cursor, &scope);
+        let published = delta.published.expect("the new message is reported");
+        assert_eq!(published.added, 1);
+        assert_eq!(published.ids, [ids[0].parse::<u64>().unwrap()]);
+        assert!(delta.backlog_reset, "the subscription is a new one");
+        // The open view still records the new subscription's moved rows.
+        let _ = broker.pull(&worker, 1).expect("pull");
+        let delta = broker.console_delta(&mut cursor, &scope);
+        assert_eq!(delta.backlog.len(), 2, "old and new key of the leased row");
+        drop(reader);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn schedule_problems_reach_the_log_sink_with_refs() {
+        let broken = |expression: &str| {
+            let mut inventory = inventory();
+            for function in &mut inventory.backends[0].function_triggers {
+                if let Some(schedule) = &mut function.schedule {
+                    schedule.schedule = expression.to_owned();
+                }
+            }
+            inventory
+        };
+        let current = broken("not a schedule");
+        let (mut runtime, _deliveries, _background) = start(&current);
+        let lines: Arc<Mutex<Vec<PubsubLogLine>>> = Arc::default();
+        let sink_lines = Arc::clone(&lines);
+        runtime.set_log_sink(Arc::new(move |line| {
+            sink_lines.lock().expect("lines").push(line);
+        }));
+        let expected = PubsubLogLine {
+            level: "WARN",
+            kind: LOG_SCHEDULE,
+            text: format!(
+                "schedule of {TICK} not run automatically (unsupported Firebase schedule expression: not a schedule); run it from the console or through the Functions trigger route"
+            ),
+            topic: Some(topic()),
+            subscription: None,
+            function_id: Some(TICK.to_owned()),
+        };
+        assert_eq!(*lines.lock().unwrap(), [expected], "found before the sink");
+
+        // The same problem after a reload is not logged again; a new one is.
+        let mut scheduler = runtime.start_scheduler().expect("scheduler");
+        runtime
+            .refresh_inventory(PROJECT, &current, &mut scheduler)
+            .await
+            .expect("reload");
+        assert_eq!(lines.lock().unwrap().len(), 1);
+        runtime
+            .refresh_inventory(PROJECT, &broken("every day 25:00"), &mut scheduler)
+            .await
+            .expect("reload");
+        let lines = lines.lock().unwrap().clone();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines[1].text,
+            format!(
+                "schedule of {TICK} not run automatically (invalid schedule time of day: 25:00); run it from the console or through the Functions trigger route"
+            )
+        );
+        scheduler.shutdown().await;
+        runtime.shutdown().await;
+    }
+
     #[tokio::test]
     async fn schedules_are_keyed_by_function_id() {
         let (runtime, mut deliveries, _background) = start(&two_regions());
@@ -1858,7 +2123,10 @@ mod console {
         DeadLetterPolicy, PublishRequest, PubsubMessage, PushConfig, Subscription, Topic,
     };
     use crate::runtime::{PushOutcome, PushStreaks};
-    use crate::{OutgoingMessage, PubsubRuntime, PushStreakRecord, RedeliverError, router};
+    use crate::{
+        LOG_PUSH, OutgoingMessage, PubsubLogLine, PubsubRuntime, PushStreakRecord, RedeliverError,
+        router,
+    };
 
     const ORDERS: &str = "projects/p/topics/orders";
     const DEAD: &str = "projects/p/topics/orders-dead";
@@ -2129,6 +2397,11 @@ mod console {
         runtime.set_push_sink(Arc::new(move |record| {
             sink_records.lock().expect("records").push(record);
         }));
+        let lines: Arc<Mutex<Vec<PubsubLogLine>>> = Arc::default();
+        let sink_lines = Arc::clone(&lines);
+        runtime.set_log_sink(Arc::new(move |line| {
+            sink_lines.lock().expect("lines").push(line);
+        }));
         let broker = runtime.broker();
         topic(broker, ORDERS, None);
         let pushed = subscription(broker, "pushed", ORDERS, |subscription| {
@@ -2166,6 +2439,19 @@ mod console {
             .expect("the delivered streak");
         assert_eq!(delivered.first_attempt, 3);
         assert_ne!(delivered.streak, latest_failure.streak);
+        // The failing streak logged once, with its subscription and topic.
+        let lines = lines.lock().expect("lines").clone();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines[0].kind, LOG_PUSH);
+        assert_eq!(lines[0].level, "WARN");
+        assert_eq!(lines[0].subscription.as_deref(), Some(pushed.as_str()));
+        assert_eq!(lines[0].topic.as_deref(), Some(ORDERS));
+        assert_eq!(
+            lines[0].text,
+            format!(
+                "push of message {id} to http://{address}/push answered 500; the emulator retries every second until the endpoint answers 2xx"
+            )
+        );
         runtime.shutdown().await;
         server.abort();
     }

@@ -644,6 +644,10 @@ struct State {
     announced: u64,
     /// The revision at which each kind of resource last changed.
     resources: ResourceStamps,
+    /// Console views following each subscription's backlog rows, by name, so
+    /// a subscription deleted and created again (or cleared) under an open
+    /// view keeps recording its moved rows.
+    readers: HashMap<String, u32>,
 }
 
 /// The kinds of resource the console lists.
@@ -679,10 +683,26 @@ struct ResourceStamps {
 /// Dead-letter forwards the outbox holds at most between two ticks.
 const OUTBOX_CAPACITY: usize = 100_000;
 
+/// What [`Broker::reset`] removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResetCount {
+    pub topics: u32,
+    pub subscriptions: u32,
+    pub snapshots: u32,
+    pub schemas: u32,
+    /// Messages the topics' history rings held.
+    pub messages: u64,
+    /// Messages the subscriptions tracked, unacknowledged or retained (one
+    /// message counts once per subscription).
+    pub backlog: u64,
+}
+
 /// A push the loop must attempt.
 #[derive(Debug, Clone)]
 pub struct PushJob {
     pub subscription: String,
+    /// The subscription's topic (`_deleted-topic_` once it was deleted).
+    pub topic: String,
     pub message_id: u64,
     /// The message's push attempt this is, from 1.
     pub attempt: u32,
@@ -958,6 +978,12 @@ pub struct BacklogReader {
 impl Drop for BacklogReader {
     fn drop(&mut self) {
         let mut state = lock(&self.broker.inner.state);
+        if let Some(count) = state.readers.get_mut(&self.subscription) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                state.readers.remove(&self.subscription);
+            }
+        }
         if let Some(entry) = state.subscriptions.get_mut(&self.subscription) {
             entry.readers = entry.readers.saturating_sub(1);
             if entry.readers == 0 {
@@ -1060,6 +1086,7 @@ impl Broker {
                     revision: 0,
                     announced: 0,
                     resources: ResourceStamps::default(),
+                    readers: HashMap::new(),
                 }),
                 changed,
                 in_flight: Mutex::new(HashMap::new()),
@@ -1823,6 +1850,7 @@ impl Broker {
                         .range(..=due_until)
                         .map(|(_, id)| *id)
                         .collect();
+                    let topic = ctx.entry.subscription.topic.clone();
                     let flying = flights.entry(name.clone()).or_default();
                     for id in pushes {
                         visit!(tick);
@@ -1835,6 +1863,7 @@ impl Broker {
                         };
                         jobs.push(PushJob {
                             subscription: name.clone(),
+                            topic: topic.clone(),
                             message_id: id,
                             attempt: tracked.push_attempts,
                             endpoint: endpoint.clone(),
@@ -2380,6 +2409,52 @@ impl Broker {
         state.outbox.drain(..).collect()
     }
 
+    /// Removes every topic, subscription, snapshot and schema with their
+    /// messages, history rings and holders (the console's clear). Message
+    /// ids, acknowledgement ids and schema revision ids keep counting, so no
+    /// id is reused within a run; subscribers waiting on a removed
+    /// subscription wake and find it gone.
+    #[must_use = "the count is what the clear reports"]
+    pub fn reset(&self) -> ResetCount {
+        let mut state = lock(&self.inner.state);
+        let count = ResetCount {
+            topics: u32::try_from(state.topics.len()).unwrap_or(u32::MAX),
+            subscriptions: u32::try_from(state.subscriptions.len()).unwrap_or(u32::MAX),
+            snapshots: u32::try_from(state.snapshots.len()).unwrap_or(u32::MAX),
+            schemas: u32::try_from(state.schemas.len()).unwrap_or(u32::MAX),
+            messages: state
+                .topics
+                .values()
+                .map(|topic| u64::try_from(topic.history.len()).unwrap_or(u64::MAX))
+                .sum(),
+            backlog: state
+                .subscriptions
+                .values()
+                .map(|entry| u64::try_from(entry.messages.len()).unwrap_or(u64::MAX))
+                .sum(),
+        };
+        state.topics.clear();
+        state.subscriptions.clear();
+        state.snapshots.clear();
+        state.schemas.clear();
+        state.generations.clear();
+        state.slots.clear();
+        state.history_bytes = 0;
+        state.outbox.clear();
+        for kind in [
+            ResourceKind::Topics,
+            ResourceKind::Subscriptions,
+            ResourceKind::Snapshots,
+            ResourceKind::Schemas,
+        ] {
+            state.touch(kind);
+        }
+        self.finish(state, true);
+        *lock(&self.inner.searches) = inspect::SearchCache::default();
+        lock(&self.inner.in_flight).clear();
+        count
+    }
+
     /// Creates the topic when it does not exist yet (function targets).
     pub fn ensure_topic(&self, name: &str) {
         let _ = self.create_topic(Topic {
@@ -2526,7 +2601,7 @@ impl State {
                 stamp: 0,
                 dirty: false,
                 last_pull: None,
-                readers: 0,
+                readers: self.readers.get(&name).copied().unwrap_or(0),
                 changes: VecDeque::new(),
                 change_sequence: 0,
             },
@@ -3350,6 +3425,7 @@ impl Broker {
         let mut state = lock(&self.inner.state);
         let entry = state.subscriptions.get_mut(subscription)?;
         entry.readers += 1;
+        *state.readers.entry(subscription.to_owned()).or_default() += 1;
         Some(BacklogReader {
             broker: self.clone(),
             subscription: subscription.to_owned(),

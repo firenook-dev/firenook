@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
 use time::OffsetDateTime;
 
-use crate::broker::{Broker, FanoutSkip, FanoutTarget, Published, PushJob};
+use crate::broker::{Broker, FanoutSkip, FanoutTarget, Published, PushJob, ResetCount};
 use crate::error::PubsubError;
 use crate::functions::{
     FunctionTarget, ScheduleDefinition, Target, build_dispatch, build_dispatch_with, discover,
@@ -60,6 +60,7 @@ struct Inner {
     stopped: AtomicBool,
     managed: Mutex<ManagedSubscriptions>,
     push_sink: Mutex<Option<PushSink>>,
+    log_sink: Mutex<Option<LogSink>>,
     streaks: Mutex<PushStreaks>,
     rejected: Mutex<RejectedRing>,
     /// Numbers console redeliveries, so each gets a fresh event id.
@@ -93,6 +94,45 @@ pub struct PushStreakRecord {
 
 /// Receives push streaks inline, from the push loop; it must not block.
 pub type PushSink = Arc<dyn Fn(PushStreakRecord) + Send + Sync>;
+
+/// A line the runtime logs, with the resources it is about, so a log view
+/// can link back to them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PubsubLogLine {
+    /// `INFO`, `WARN` or `ERROR`.
+    pub level: &'static str,
+    /// `pubsub.schedule` or `pubsub.push`.
+    pub kind: &'static str,
+    /// The line without a label.
+    pub text: String,
+    /// The topic's full name.
+    pub topic: Option<String>,
+    /// The subscription's full name.
+    pub subscription: Option<String>,
+    /// The scheduled function's id, on a schedule's line.
+    pub function_id: Option<String>,
+}
+
+/// The kind of a schedule's line.
+pub const LOG_SCHEDULE: &str = "pubsub.schedule";
+/// The kind of a push subscription's line.
+pub const LOG_PUSH: &str = "pubsub.push";
+
+/// Receives the runtime's log lines inline; it must not block.
+pub type LogSink = Arc<dyn Fn(PubsubLogLine) + Send + Sync>;
+
+/// What [`PubsubRuntime::reset`] removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PubsubResetCount {
+    /// Topics, subscriptions, snapshots and schemas, and the messages the
+    /// broker held. The functions' own topics and subscriptions come back at
+    /// once, empty.
+    pub broker: ResetCount,
+    /// Refused requests forgotten.
+    pub rejections: u32,
+    /// Schedule runs forgotten (pause flags stay).
+    pub schedule_runs: u64,
+}
 
 /// What one push attempt got. Success is any 2xx, as the push loop decides.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -377,13 +417,14 @@ impl PubsubRuntime {
                 stopped: AtomicBool::new(false),
                 managed: Mutex::new(ManagedSubscriptions::default()),
                 push_sink: Mutex::new(None),
+                log_sink: Mutex::new(None),
                 streaks: Mutex::new(PushStreaks::default()),
                 rejected: Mutex::new(RejectedRing::default()),
                 redeliveries: AtomicU64::new(0),
             }),
         };
         runtime.install_targets(targets);
-        Self::report_schedule_problems(problems);
+        runtime.report_schedule_problems(problems);
         runtime.start_ticker();
         runtime
     }
@@ -458,20 +499,101 @@ impl PubsubRuntime {
         self.install_targets(targets);
         let problems = lock(&self.inner.schedules).reconcile(discovered);
         self.schedules_changed();
-        Self::report_schedule_problems(problems);
+        self.report_schedule_problems(problems);
         *scheduler = self.start_scheduler()?;
         Ok(())
     }
 
     /// Says why schedules cannot run on a clock, once per new problem.
-    fn report_schedule_problems(problems: Vec<(String, String)>) {
+    fn report_schedule_problems(&self, problems: Vec<(String, String)>) {
         for (function_id, problem) in problems {
-            // The official emulator never runs schedules on a clock; an
-            // expression Firenook cannot evaluate keeps Run now and the
-            // manual trigger route and loses only the automatic ticks.
-            eprintln!(
-                "firenook pubsub: schedule of {function_id} not run automatically ({problem}); run it from the console or through the Functions trigger route"
-            );
+            self.log(self.schedule_problem_line(function_id, &problem));
+        }
+    }
+
+    fn schedule_problem_line(&self, function_id: String, problem: &str) -> PubsubLogLine {
+        let topic = lock(&self.inner.schedules)
+            .entries
+            .get(&function_id)
+            .map(|entry| topic_resource(&entry.definition.project, &entry.definition.topic));
+        // The official emulator never runs schedules on a clock; an
+        // expression Firenook cannot evaluate keeps Run now and the manual
+        // trigger route and loses only the automatic ticks.
+        PubsubLogLine {
+            level: "WARN",
+            kind: LOG_SCHEDULE,
+            text: format!(
+                "schedule of {function_id} not run automatically ({problem}); run it from the console or through the Functions trigger route"
+            ),
+            topic,
+            subscription: None,
+            function_id: Some(function_id),
+        }
+    }
+
+    /// Hands every log line to `sink` from now on (the console's logs),
+    /// starting with the schedules that cannot run on a clock, which were
+    /// found before any sink could be set. Called inline, never awaited.
+    pub fn set_log_sink(&self, sink: LogSink) {
+        let problems = lock(&self.inner.schedules).problems();
+        for (function_id, problem) in problems {
+            sink(self.schedule_problem_line(function_id, &problem));
+        }
+        *lock(&self.inner.log_sink) = Some(sink);
+    }
+
+    /// Logs a line: to the sink when one is set; without one, a schedule's
+    /// line goes to stderr (as it always did) and a push line nowhere.
+    fn log(&self, line: PubsubLogLine) {
+        let sink = lock(&self.inner.log_sink).clone();
+        match sink {
+            Some(sink) => sink(line),
+            None if line.kind == LOG_SCHEDULE => eprintln!("firenook pubsub: {}", line.text),
+            None => {}
+        }
+    }
+
+    fn logging(&self) -> bool {
+        lock(&self.inner.log_sink).is_some()
+    }
+
+    /// Removes every topic, subscription, snapshot and schema, the history
+    /// rings, the refused requests, the push streaks and every schedule's
+    /// runs (the console's clear; pause flags and the clocks' next ticks
+    /// stay), then re-creates the functions' topics and their
+    /// `emulator-sub-*` subscriptions at once. Message ids keep counting.
+    #[must_use = "the count is what the clear reports"]
+    pub fn reset(&self) -> PubsubResetCount {
+        let broker = self.inner.broker.reset();
+        let rejections = {
+            let mut ring = lock(&self.inner.rejected);
+            let removed = u32::try_from(ring.entries.len()).unwrap_or(u32::MAX);
+            ring.entries.clear();
+            ring.dropped = 0;
+            ring.revision += 1;
+            removed
+        };
+        lock(&self.inner.streaks).current.clear();
+        let schedule_runs = {
+            let mut book = lock(&self.inner.schedules);
+            let runs = book.entries.values().map(|entry| entry.runs).sum();
+            book.forget_runs();
+            runs
+        };
+        self.schedules_changed();
+        let targets = lock(&self.inner.targets).clone();
+        self.install_targets(targets);
+        {
+            // The orphaned subscriptions are gone with the rest.
+            let mut guard = lock(&self.inner.managed);
+            let managed = &mut *guard;
+            managed.installed.clone_from(&managed.current);
+        }
+        self.inner.broker.console_changed();
+        PubsubResetCount {
+            broker,
+            rejections,
+            schedule_runs,
         }
     }
 
@@ -607,9 +729,9 @@ impl PubsubRuntime {
         // acknowledgement and retry timing are what they always were.
         self.inner.broker.push_finished(&job, outcome.delivered());
         let sink = lock(&self.inner.push_sink).clone();
-        let Some(sink) = sink else {
+        if sink.is_none() && !self.logging() {
             return;
-        };
+        }
         let snippet = match response {
             Some(response) => read_snippet(response).await,
             None => None,
@@ -623,7 +745,14 @@ impl PubsubRuntime {
             Instant::now(),
             at,
         );
-        if !records.is_empty() {
+        // A failure that starts a streak is logged once; the streak grows
+        // silently while the emulator keeps retrying.
+        if !outcome.delivered() && records.iter().any(|record| record.count == 1) {
+            self.log(push_failure_line(&job, &outcome));
+        }
+        if let Some(sink) = sink
+            && !records.is_empty()
+        {
             for record in records {
                 sink(record);
             }
@@ -988,12 +1117,23 @@ impl PubsubRuntime {
                         message_id: Some(message_id),
                         skipped: None,
                     },
-                    Err(error) => ScheduleRun {
-                        at: now,
-                        trigger: RunTrigger::Clock,
-                        message_id: None,
-                        skipped: Some(RunScheduleError::Publish(error.message).to_string()),
-                    },
+                    Err(error) => {
+                        let skipped = RunScheduleError::Publish(error.message).to_string();
+                        self.log(PubsubLogLine {
+                            level: "WARN",
+                            kind: LOG_SCHEDULE,
+                            text: format!("scheduled tick of {function_id}: {skipped}"),
+                            topic: Some(topic_resource(&definition.project, &definition.topic)),
+                            subscription: None,
+                            function_id: Some(function_id.to_owned()),
+                        });
+                        ScheduleRun {
+                            at: now,
+                            trigger: RunTrigger::Clock,
+                            message_id: None,
+                            skipped: Some(skipped),
+                        }
+                    }
                 }
             } else {
                 ScheduleRun {
@@ -1144,6 +1284,26 @@ fn osa_distance(left: &str, right: &str) -> usize {
         }
     }
     table[left.len() * width + right.len()]
+}
+
+/// The line a push failure that starts a streak logs.
+fn push_failure_line(job: &PushJob, outcome: &PushOutcome) -> PubsubLogLine {
+    let failure = match (outcome.status, &outcome.error) {
+        (Some(status), _) => format!("answered {status}"),
+        (None, Some(error)) => format!("failed: {error}"),
+        (None, None) => "failed".to_owned(),
+    };
+    PubsubLogLine {
+        level: "WARN",
+        kind: LOG_PUSH,
+        text: format!(
+            "push of message {} to {} {failure}; the emulator retries every second until the endpoint answers 2xx",
+            job.message_id, job.endpoint
+        ),
+        topic: (job.topic != crate::broker::DELETED_TOPIC).then(|| job.topic.clone()),
+        subscription: Some(job.subscription.clone()),
+        function_id: None,
+    }
 }
 
 /// A push error the way the push feed shows it.

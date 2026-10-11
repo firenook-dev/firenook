@@ -523,6 +523,13 @@ impl ScheduleEntry {
         }
     }
 
+    fn forget_runs(&mut self) {
+        self.runs = 0;
+        self.first_run = None;
+        self.latest.clear();
+        self.omitted = 0;
+    }
+
     fn last_run(&self) -> Option<&ScheduleRun> {
         self.latest.back().or(self.first_run.as_ref())
     }
@@ -674,6 +681,30 @@ impl ScheduleBook {
             entry.stamp = revision;
         }
         true
+    }
+
+    /// Forgets every run (the console's clear); pause flags and the clocks'
+    /// next ticks stay.
+    pub(crate) fn forget_runs(&mut self) {
+        let revision = self.bump();
+        for entry in self.entries.values_mut() {
+            entry.forget_runs();
+            entry.stamp = revision;
+        }
+    }
+
+    /// Every schedule that cannot run on a clock, with the reason.
+    pub(crate) fn problems(&self) -> Vec<(String, String)> {
+        self.entries
+            .iter()
+            .filter_map(|(id, entry)| {
+                entry
+                    .cadence
+                    .as_ref()
+                    .err()
+                    .map(|problem| (id.clone(), problem.clone()))
+            })
+            .collect()
     }
 
     /// The ids of the schedules a clock runs.
