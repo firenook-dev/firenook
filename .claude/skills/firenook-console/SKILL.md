@@ -1308,8 +1308,7 @@ it belongs to, for a fact you glance at twice a session.
 any field of the document. The two can disagree by years: a journey seeds
 `createdAt: 2020-01-01` and the header says *just now* while the row
 beneath says *7 y ago*. It names itself in a Kumo tooltip ("Last changed
-…", `compactIso`), not a native `title`. `requests-drawer.tsx` still uses
-a native `title` on its times — the same gap, not yet closed.
+…", `compactIso`), not a native `title`.
 
 **The size** is `src/firestore/size.ts`, Firestore's own rule: strings
 and field names are UTF-8 bytes + 1, numbers and timestamps 8 whatever
@@ -1379,13 +1378,137 @@ to open: a number nobody can look into is trivia, and it was counting
 writes since the tab opened while the panel counted what the engine still
 held, both under the word "change".
 
+## Security rules (built, `src/firestore/rules-page/`)
+
+Rules are **a page of their own**, `/firestore/rules` (route file
+`routes/firestore_.rules.tsx`, the trailing underscore keeps it out of the
+data route's layout; `useSearch({ from: '/firestore_/rules' })` takes the
+route id, `useNavigate({ from: '/firestore/rules' })` the path). The nav
+shows Firestore as Kumo's `Sidebar.Collapsible` over its `pages` (Data,
+Rules) — `ConsoleSection.pages` in `src/lib/services.ts`; the active page
+carries `data-active`. They were a mode of the data view (a Rules button
+among View as and New swapping the grid for a textarea, the schema tree
+left beside it meaning nothing) and the Requests drawer sat at the data
+page's foot; both are gone, and so is the Observe ▸ Requests placeholder.
+
+**Layout.** Toolbar: the shared `DatabasePicker` (rules are per database),
+the file name, a "Draft · not applied" or "Applied · not saved" badge,
+Coverage, History, Revert / Apply (⌘↵) / Save (⌘S, disabled when draft,
+in force and file agree). Banners under it, each only when true: no rules
+loaded (everything allowed), the file on disk does not compile, the rules
+changed under your draft (Discard / Keep editing), what applying would
+turn around ("Show them" filters the decisions to the flips), saved tests
+that fail against the draft. The editor fills the left; a 440 px side
+panel has Decisions · Playground · Tests · Collections (counts as badges).
+
+**The editor** is the shared CodeMirror `CodeEditor` with
+`language="rules"` (`components/code-editor/rules/`: a `StreamLanguage`
+with brace folding and context completion — `request.auth.token.`, the
+built-ins and methods, `resource.data.` fields **sampled from the data**
+through `rulesCompletion.fields(pattern)` → `fieldsQuery` in
+`schema-fields.ts`, custom claims from the Auth users). New props: `marks`
+(the engine's diagnostics), `lineMarks`, `inlineValues` (debugger-style
+values after expressions), `gutterNotes` (coverage), `reveal`. ⌘↵ is
+claimed by the rules language (`Prec.highest` keymap) — CodeMirror's own
+`Mod-Enter` inserts a blank line, which went into the rules with every
+keyboard Apply.
+
+**One overlay at a time.** A panel draws into the editor through
+`useOverlay` (`overlay.ts`): lines and values, plus the `source` they refer
+to; the page applies it only while the editor holds that exact text. A
+reveal comes from a click or an overlay's arrival — each carries `at`, the
+latest wins (no setState in an effect).
+
+**Checking as you type.** `POST /rules/check` (debounced 300 ms) returns
+compile errors or the engine's lint warnings (`code`: `open-access`,
+`auth-only`, `unvalidated-write`; positions are UTF-16 `from`/`to`), the
+outline, and the map against the schema index. The Problems strip under
+the editor lists them; Collections shows the warnings and the map
+(governing match blocks with the operations their allows grant, uncovered
+collections, match blocks that reach no data). "Add starter rules"
+(`starter.ts`) writes a match block from sampled fields: ownership from a
+`users/{userId}` ancestor, `users` itself, or an owner field; a
+`valid<Name>(data)` with `hasOnly`, `hasAll` for fields every sample
+carries, and type checks; inserted before the documents block closes.
+
+**Decisions** (`decisions.ts`, `decisions-panel.tsx`, `decision-detail.tsx`)
+read the official Requests websocket, unchanged — its JSON is pinned by
+conformance fixtures. **History arrives as one JSON array, live events
+one by one**; the old drawer parsed only objects and silently dropped the
+replay. Typed rules values (`intValue`, `pathValue`, `undefined` …) become
+`FsValue` through `fromRulesValue`. A decision opens onto who asked
+(claims, provider), the lines that ran (deduplicated with ×n), the
+document before/after with changed keys, and **Why**: `GET
+/rules/decisions/{requestId}` re-runs the retained context against the
+ruleset that decided it and returns the explanation. "See why" on a denied
+grid read links with `path`, `uid`, `denied` and **`pick`**: pick opens the
+newest matching denial **once** and is cleared — the first version
+re-picked every time the list came back, so "All decisions" bounced (and
+the React Compiler memoizes the filtered list, so a sabotage that drops
+`decision` from the effect's dependencies does not reproduce it). An empty
+list says the Admin SDK and the console as admin skip rules; a database
+with no rules file says nothing is checked.
+
+**Inline values** (`explain.ts`, `inlineSteps`): the engine reports every
+expression evaluated; written after each, a line is unreadable. Keep each
+whole operand and each comparison — drop a span when a longer evaluated
+span starts at the same place and the text after it continues the chain
+(`.`, `[`, `(`) — and the last value of a span evaluated twice. The
+explanation view drops the condition's own value (it is the verdict above
+it) and lists steps inside called functions separately, plus the
+`get()`/`exists()` count and `queryReason` (which filter a list needs).
+
+**Coverage** is the official report, read from the console origin at
+`/console/api/v1/firestore/emulator/v1/projects/{p}:ruleCoverage` and
+refetched when the decisions feed grows (no timer). Offsets are Unicode
+scalars with an **inclusive** end (`scalarToUtf16`); the `report` key is
+**absent** when the rules have nothing to count (`if true` alone) — that
+crashed the page once. Drawn only over the text it describes.
+
+**Playground** (`playground.tsx`, `requests.ts`): a form becomes the
+request a real client sends — a token minted like View as, data typed by
+`fromJson(INFER)` + `encodeFields`, a list query through `parseQuery` +
+`toStructuredQuery` — and `POST /rules/evaluate` runs it against the
+**editor's text** (a dry run: nothing committed or recorded), again on
+every edit. "Try in the playground" loads a decision's replayable
+`request` (recorded auth, before-document, time).
+
+**Tests** (`tests-store.ts`): saved cases per project+database in
+localStorage, run against the editor's text after each edit (an error
+counts as a deny, as in Firestore); export as a
+`@firebase/rules-unit-testing` file (`tests-export.ts`: seeds the
+document read with `withSecurityRulesDisabled`, `assertSucceeds` /
+`assertFails`) or as JSON.
+
+**History and the file.** `GET /rules/history` (startup, console, file,
+reload); the dialog diffs any version — and the file on disk when it
+differs — against the editor (`diff.ts`), "Put in the editor" makes it the
+draft. `GET /rules/live` (SSE) tells the page when what governs the
+database changed, so a file saved in an editor shows up without a reload;
+the engine watches each configured rules file (1 s debounce, a broken file
+keeps the rules in force and reports `fileProblems`). No polling anywhere.
+
+**Engine contract**: `crates/console-front/src/rules.rs` (read, apply,
+check, history, live) and `rules_eval.rs` (evaluate, decision detail,
+impact); generated types in `src/api/generated/`. A Rust doc comment that
+contains `*/` — a pattern like `users/*/orders` — closes the generated
+TypeScript comment and breaks the console build; spell it out.
+
+**Test hooks**: Kumo's `Badge` and `Select` do not pass `data-testid`
+through — wrap the badge, find the select by role and name. Journeys live
+in `e2e/rules.spec.ts`; each one that changes rules restores the rules in
+force and the file on disk in `finally`, because the data journeys read
+through them. Typing into CodeMirror meets its bracket closing and
+indenting: paste instead (`pasteRules`).
+
 ## Firestore workbench (built, `src/firestore/`)
 
 - Data path: the browser talks Firestore REST to the console's own origin
   (`/console/api/v1/firestore/v1/...`, a second `rest-front` router on the
   same service), Identity Toolkit at `/console/api/v1/auth/...` and the
-  Requests websocket at `/console/api/v1/firestore/requests`. Never reach
-  the service ports from the browser.
+  official Requests websocket at `/console/api/v1/firestore/requests`,
+  which the rules page reads as its decisions. Never reach the service
+  ports from the browser.
 - Live: `GET /console/api/v1/firestore/changes?database=` is an SSE stream
   from the store's commit observer (`ChangeFeed` in
   `crates/console-front/src/firestore.rs`); `src/firestore/live.ts`
@@ -1547,19 +1670,8 @@ held, both under the word "change".
   console reads a 404 as "diagnostics are off" rather than "nothing
   happened". The console asks only while the popover is open, because the
   live channel invalidates `['fs', db, 'changelog']` on every commit.
-- Rules (`?view=rules`, the toolbar's Rules button, ⌘K): `RulesEditor` in
-  `crates/console-front/src/rules.rs` reads `RulesRuntime::rules_for(...)`
-  and replaces a database's ruleset with `install_database`, which is the
-  level `firebase.json` declares rules at and the level that takes
-  precedence. **Compile before writing**: a ruleset that does not compile
-  must change nothing and must never reach the file, and `LoadError`'s
-  diagnostics carry the line and column the editor places. Applying and
-  saving are separate — a change is in force the moment it compiles and
-  reaches the repository only when asked. `?view` switches the content
-  column rather than adding a route, and `setPath` clears it, because
-  choosing a collection is asking for its data. The editor is a textarea
-  over a numbered gutter in one scroller: a code editor would cost several
-  times its worth of the first-route budget.
+- Rules are a page of their own — see "Security rules" below. `?view=rules`
+  and `/requests` redirect there.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for

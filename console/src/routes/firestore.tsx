@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
 import { FirestoreWorkbench } from '@/firestore/components/workbench'
 
@@ -12,7 +12,8 @@ const searchSchema = z.object({
   as: z.string().optional(),
   doc: z.string().optional(),
   tab: z.enum(['fields', 'json']).optional(),
-  // The content column: the data grid, or this database's security rules.
+  // The rules were a mode of this page once (`?view=rules`); they are a
+  // page of their own now, and the old address still leads there.
   view: z.enum(['rules']).optional(),
 })
 
@@ -20,5 +21,9 @@ export type FirestoreSearch = z.infer<typeof searchSchema>
 
 export const Route = createFileRoute('/firestore')({
   validateSearch: searchSchema,
+  beforeLoad: ({ search }) => {
+    if (search.view === 'rules')
+      throw redirect({ to: '/firestore/rules', search: { db: search.db }, replace: true })
+  },
   component: FirestoreWorkbench,
 })

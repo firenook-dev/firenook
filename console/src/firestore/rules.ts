@@ -86,7 +86,9 @@ export function lineCount(source: string): number {
 }
 
 /** `3:17 expected '{'` — a diagnostic as one line a person can scan. */
-export function describeDiagnostic(diagnostic: RulesDiagnostic): string {
+export function describeDiagnostic(
+  diagnostic: Pick<RulesDiagnostic, 'line' | 'column' | 'message'>,
+): string {
   return `${diagnostic.line}:${diagnostic.column} ${diagnostic.message}`
 }
 
@@ -95,7 +97,10 @@ export function describeDiagnostic(diagnostic: RulesDiagnostic): string {
  * can put the caret on it. Out-of-range positions clamp to the end rather
  * than throwing: a diagnostic is a hint, not a contract.
  */
-export function offsetOf(source: string, diagnostic: RulesDiagnostic): number {
+export function offsetOf(
+  source: string,
+  diagnostic: Pick<RulesDiagnostic, 'line' | 'column'>,
+): number {
   const lines = source.split('\n')
   let offset = 0
   for (let index = 0; index < diagnostic.line - 1 && index < lines.length; index += 1) {

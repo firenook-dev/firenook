@@ -4,8 +4,7 @@
 // beside it when a document is open. Everything on screen is live from the
 // engine's change feed.
 
-import { Button, Text, Tooltip } from '@cloudflare/kumo'
-import { ShieldCheckIcon } from '@phosphor-icons/react'
+import { Text, Tooltip } from '@cloudflare/kumo'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { statusQuery } from '@/api/queries'
@@ -28,8 +27,6 @@ import { Inspector } from './inspector'
 import { NewMenu } from './new-menu'
 import { PathBar } from './path-bar'
 import { QueryLine, useMatchCount } from './query-line'
-import { RequestsDrawer } from './requests-drawer'
-import { RulesEditorPanel } from './rules-editor'
 import { SchemaPanel } from './schema-panel'
 import { SelectionBar } from './selection-bar'
 import { ViewAsPicker } from './view-as-picker'
@@ -71,7 +68,6 @@ function WorkbenchBody() {
   const explain = useQueryLine((state) => state.explain)
   const setExplain = useQueryLine((state) => state.setExplain)
   const openCreate = useCreateDialog((state) => state.open)
-  const [requestsOpen, setRequestsOpen] = useState(false)
   const exportOpen = useExportDialog((state) => state.open)
   const setExportOpen = useExportDialog((state) => state.setOpen)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
@@ -146,18 +142,8 @@ function WorkbenchBody() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">
       <h1 className="sr-only">Firestore</h1>
       <SchemaPanel />
-      {workbench.view === 'rules' ? (
-        <RulesEditorPanel />
-      ) : (
-        <WorkbenchData
-          live={live}
-          onDelete={setDeleting}
-          explain={explain}
-          setExplain={setExplain}
-        />
-      )}
+      <WorkbenchData live={live} onDelete={setDeleting} explain={explain} setExplain={setExplain} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
-      <RequestsDrawer open={requestsOpen} setOpen={setRequestsOpen} />
       <CreateDialog />
       <DeleteDialog target={deleting} onOpenChange={(open) => !open && setDeleting(null)} />
     </div>
@@ -215,21 +201,11 @@ function WorkbenchData({
           />
         )}
         {/* Not a property of the query below: the identity applies to every
-            read the workbench makes, the schema tree and inspector included. */}
+            read the workbench makes, the schema tree and inspector included.
+            The security rules it reads through have a page of their own in
+            the sidebar; the Rules button that stood here swapped the grid
+            for an editor, a mode of this page for what is a different job. */}
         <ViewAsPicker />
-        {/* A view, not an action on the grid: it belongs with what you are
-            reading as, and the rule is the divider — only the control that
-            writes stands on the other side of it. */}
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<ShieldCheckIcon />}
-          onClick={() => workbench.navigate({ view: 'rules' })}
-          aria-label="Security rules"
-          data-testid="open-rules"
-        >
-          <span className="hidden xl:inline">Rules</span>
-        </Button>
         <Divider />
         <NewMenu />
       </div>

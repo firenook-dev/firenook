@@ -162,18 +162,60 @@ function Navigation() {
           <Sidebar.Group key={area}>
             <Sidebar.GroupLabel>{AREA_LABELS[area]}</Sidebar.GroupLabel>
             <Sidebar.Menu>
-              {SECTIONS.filter((section) => section.area === area).map((section) => (
-                <Sidebar.MenuButton
-                  key={section.to}
-                  icon={section.icon}
-                  tooltip={section.label}
-                  href={`/console${section.to}`}
-                  active={isActive(section.to)}
-                  onClick={go(section.to)}
-                >
-                  {section.label}
-                </Sidebar.MenuButton>
-              ))}
+              {SECTIONS.filter((section) => section.area === area).map((section) =>
+                section.pages ? (
+                  // A section of several pages is a heading over them, as
+                  // Kumo files a group: open by default, so its pages are
+                  // in sight without a click, and the page you are on is
+                  // the one lit — the heading itself is not a place.
+                  <Sidebar.MenuItem key={section.to}>
+                    <Sidebar.Collapsible defaultOpen>
+                      <Sidebar.CollapsibleTrigger
+                        render={
+                          <Sidebar.MenuButton
+                            icon={section.icon}
+                            tooltip={section.label}
+                            data-testid={`nav-${section.label.toLowerCase()}`}
+                          >
+                            {section.label}
+                            <Sidebar.MenuChevron />
+                          </Sidebar.MenuButton>
+                        }
+                      />
+                      <Sidebar.CollapsibleContent>
+                        <Sidebar.MenuSub>
+                          {section.pages.map((page) => (
+                            <Sidebar.MenuSubButton
+                              key={page.to}
+                              href={`/console${page.to}`}
+                              active={
+                                page.exact
+                                  ? pathname === page.to || pathname === `${page.to}/`
+                                  : isActive(page.to)
+                              }
+                              onClick={go(page.to)}
+                              data-testid={`nav-page-${page.label.toLowerCase()}`}
+                            >
+                              {page.label}
+                            </Sidebar.MenuSubButton>
+                          ))}
+                        </Sidebar.MenuSub>
+                      </Sidebar.CollapsibleContent>
+                    </Sidebar.Collapsible>
+                  </Sidebar.MenuItem>
+                ) : (
+                  <Sidebar.MenuButton
+                    key={section.to}
+                    icon={section.icon}
+                    tooltip={section.label}
+                    href={`/console${section.to}`}
+                    active={isActive(section.to)}
+                    onClick={go(section.to)}
+                  >
+                    {section.label}
+                  </Sidebar.MenuButton>
+                ),
+              )}
             </Sidebar.Menu>
           </Sidebar.Group>
         ))}

@@ -8,7 +8,7 @@
 // without walking through a user first. The foot says what the open shape
 // holds.
 
-import { InputGroup, Select, Text, Tooltip } from '@cloudflare/kumo'
+import { InputGroup, Text, Tooltip } from '@cloudflare/kumo'
 import {
   CaretRightIcon,
   DatabaseIcon,
@@ -19,7 +19,6 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
-import { databaseItems, databasesQuery } from '../databases'
 import {
   type SchemaNode,
   filterSchema,
@@ -29,7 +28,8 @@ import {
   useSchemaTree,
 } from '../schema'
 import { formatNumber } from '../value'
-import { DEFAULT_DATABASE, useWorkbench } from './workbench-context'
+import { DatabasePicker } from './database-picker'
+import { useWorkbench } from './workbench-context'
 
 export function SchemaPanel() {
   const workbench = useWorkbench()
@@ -44,7 +44,6 @@ export function SchemaPanel() {
   useEffect(() => reveal(current), [reveal, current])
   const kept = filterSchema(schema.data, filter)
   const roots = (schema.data?.collections ?? []).filter((root) => !kept || kept.has(root.pattern))
-  const databases = useQuery(databasesQuery)
 
   return (
     <SectionPanel label="Schema">
@@ -54,39 +53,11 @@ export function SchemaPanel() {
       <div className="grid shrink-0 gap-1.5 border-b border-kumo-line px-3 py-2">
         <div className="flex items-center gap-1.5">
           <PanelToggle where="panel" />
-          <div className="min-w-0 flex-1" data-testid="database-select">
-            {/* `xs`, so its text is set like the filter directly under it:
-              Kumo's `sm` Select is 14 px while its `sm` Input is 12. And
-              the filter's height and corners, which `xs` leaves at 17.5 px
-              against the filter's 22.75 — two boxes stacked, one a size
-              smaller.
-              The box says what it holds, the way the top bar says
-              "Project": an id such as `(default)` alone does not. Inside
-              the box, because Kumo's `label` is a form label stacked over
-              it — a second row, with the panel toggle left between the
-              two. And `min-w-0`, because Kumo wraps the box in a grid
-              whose column grows to its text: a long id pushed the box
-              past the panel's edge and its caret out of sight. */}
-            <Select
-              size="xs"
-              value={workbench.database}
-              onValueChange={(value) => workbench.setDatabase(String(value))}
-              // Opening the picker asks again, so a database a client created
-              // since the panel mounted is in the list.
-              onOpenChange={(open) => {
-                if (open) void databases.refetch()
-              }}
-              items={databaseItems(databases.data, workbench.database, DEFAULT_DATABASE)}
-              renderValue={(value) => (
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="shrink-0 text-kumo-subtle">Database</span>
-                  <span className="truncate font-mono">{String(value)}</span>
-                </span>
-              )}
-              aria-label="Database"
-              className="h-6.5 w-full min-w-0 rounded-md"
-            />
-          </div>
+          <DatabasePicker
+            value={workbench.database}
+            onChange={workbench.setDatabase}
+            className="flex-1"
+          />
         </div>
         <InputGroup size="sm">
           <InputGroup.Addon>

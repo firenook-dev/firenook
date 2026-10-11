@@ -4,7 +4,6 @@ import {
   DatabaseIcon,
   HardDrivesIcon,
   LightningIcon,
-  ListMagnifyingGlassIcon,
   PuzzlePieceIcon,
   QueueIcon,
   ScrollIcon,
@@ -25,6 +24,18 @@ export interface ConsoleSection {
   icon: Icon
   /** What the finished section does, in one sentence. */
   summary: string
+  /**
+   * The section's own pages, when it has more than one: shown under it in
+   * the sidebar. The first is where the section's own entry leads.
+   */
+  pages?: readonly SectionPage[]
+}
+
+export interface SectionPage {
+  to: string
+  label: string
+  /** Matches this page and nothing else under the section. */
+  exact?: boolean
 }
 
 export const SECTIONS: readonly ConsoleSection[] = [
@@ -35,7 +46,14 @@ export const SECTIONS: readonly ConsoleSection[] = [
     area: 'data',
     icon: DatabaseIcon,
     summary:
-      'Path bar, document grid with inferred columns, a query builder that runs the same engine query the app runs, and view-as-user over the rules engine.',
+      'Path bar, document grid with inferred columns, a query builder that runs the same engine query the app runs, and view-as-user over the rules engine. Security rules have their own page: an editor that knows the language, every decision with the line and values behind it, a playground and saved tests.',
+    // Rules are their own page, not a mode of the data view: a different
+    // job — writing who may do what, not reading what there is — with a
+    // URL of its own, the way Firebase's own console files them.
+    pages: [
+      { to: '/firestore', label: 'Data', exact: true },
+      { to: '/firestore/rules', label: 'Rules' },
+    ],
   },
   {
     to: '/auth',
@@ -106,15 +124,6 @@ export const SECTIONS: readonly ConsoleSection[] = [
     area: 'observe',
     icon: ScrollIcon,
     summary: 'One stream for every service with level and service filters and search.',
-  },
-  {
-    to: '/requests',
-    label: 'Requests',
-    services: ['firestore.websocket'],
-    area: 'observe',
-    icon: ListMagnifyingGlassIcon,
-    summary:
-      'Every rules evaluation with its allow or deny detail, coverage inline, scoped to the path you are looking at.',
   },
 ]
 

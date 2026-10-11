@@ -9,7 +9,13 @@
 import { Suspense, lazy } from 'react'
 import type { CodeEditorProps } from './props'
 
-export type { CodeEditorProps, CodeMark } from './props'
+export type {
+  CodeEditorProps,
+  CodeGutterNote,
+  CodeInlineValue,
+  CodeLineMark,
+  CodeMark,
+} from './props'
 
 const Editor = lazy(() => import('./editor'))
 

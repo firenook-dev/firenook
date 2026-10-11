@@ -19,6 +19,7 @@ import {
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo } from 'react'
 import {
   type PaletteGroup,
@@ -37,6 +38,7 @@ import { flattenSchema, schemaQuery } from './schema'
 
 export function useFirestorePalette() {
   const workbench = useWorkbench()
+  const navigate = useNavigate()
   const paletteOpen = useConsoleUi((state) => state.paletteOpen)
   const register = usePaletteProviders((state) => state.register)
   const unregister = usePaletteProviders((state) => state.unregister)
@@ -114,10 +116,14 @@ export function useFirestorePalette() {
     actions.push({
       id: 'fs:rules',
       title: 'Security rules',
-      description: `Edit the rules this database is served with`,
-      keywords: 'permissions allow deny security firestore.rules',
+      description: `Edit the rules this database is served with, and see what they decided`,
+      keywords: 'permissions allow deny security firestore.rules decisions requests playground',
       icon: <ShieldCheckIcon size={16} />,
-      run: () => workbench.navigate({ view: 'rules' }),
+      run: () =>
+        void navigate({
+          to: '/firestore/rules',
+          search: { db: workbench.database === '(default)' ? undefined : workbench.database },
+        }),
     })
     if (workbench.collectionPath)
       actions.push(
@@ -225,6 +231,7 @@ export function useFirestorePalette() {
     openQuery,
     setExplain,
     openExport,
+    navigate,
   ])
 
   useEffect(() => {

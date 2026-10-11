@@ -72,7 +72,8 @@ test('client routes deep-link through the engine and navigate in place', async (
   await page.goto(`${origin()}/console/auth`)
   await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()
   await expect(page.getByText('running', { exact: true })).toBeVisible()
-  await page.getByRole('link', { name: 'Firestore' }).click()
+  // Firestore is a heading over its two pages; Data is where its grid is.
+  await page.getByTestId('nav-page-data').click()
   await expect(page).toHaveURL(/\/console\/firestore$/)
   // The workbench fills the content column; its heading is for readers.
   await expect(page.getByRole('heading', { name: 'Firestore', level: 1 })).toBeAttached()

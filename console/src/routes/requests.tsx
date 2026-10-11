@@ -1,10 +1,10 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { SectionPlaceholder } from '@/components/section-placeholder'
-import { SECTIONS } from '@/lib/services'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
-const section = SECTIONS.find((candidate) => candidate.to === '/requests')
-if (!section) throw new Error('The requests section is missing from the registry')
-
+// Rules decisions — what the Requests section was going to be — live on the
+// Firestore rules page now, beside the rules they point at. The address
+// stays a way there rather than a dead end.
 export const Route = createFileRoute('/requests')({
-  component: () => <SectionPlaceholder section={section} />,
+  beforeLoad: () => {
+    throw redirect({ to: '/firestore/rules', replace: true })
+  },
 })

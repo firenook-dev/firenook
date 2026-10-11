@@ -24,11 +24,24 @@ import {
   indentOnInput,
   syntaxHighlighting,
 } from '@codemirror/language'
-import { type Diagnostic, lintGutter, linter } from '@codemirror/lint'
+import { type Diagnostic, lintGutter, linter, setDiagnostics } from '@codemirror/lint'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import {
+  Compartment,
+  EditorState,
+  type Extension,
+  Prec,
+  RangeSet,
+  StateEffect,
+  StateField,
+} from '@codemirror/state'
+import {
+  Decoration,
+  type DecorationSet,
   EditorView,
+  GutterMarker,
+  WidgetType,
+  gutter,
   highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
@@ -36,7 +49,8 @@ import {
 } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { useEffect, useRef } from 'react'
-import type { CodeEditorProps } from './props'
+import type { CodeEditorProps, CodeGutterNote, CodeInlineValue, CodeLineMark } from './props'
+import { rulesLanguage } from './rules'
 
 /**
  * The ink, from the syntax palette in `theme.css` — see the note there
@@ -65,6 +79,45 @@ const INK = HighlightStyle.define([
   { tag: tags.squareBracket, color: 'var(--color-firenook-code-punctuation)' },
   { tag: tags.brace, color: 'var(--color-firenook-code-punctuation)' },
   { tag: tags.invalid, color: 'var(--text-color-kumo-danger)' },
+  // Rules. The words of the language take the key's hue, as JSON's keys
+  // do — the structure — and the wildcards in a path the literal's, since
+  // they are the values a path binds. Operators and punctuation recede.
+  // Names keep the text colour: a condition is mostly names, and colour on
+  // every one of them would mean nothing.
+  {
+    tag: [
+      tags.keyword,
+      tags.controlKeyword,
+      tags.definitionKeyword,
+      tags.operatorKeyword,
+      tags.special(tags.keyword),
+    ],
+    color: 'var(--color-firenook-code-key)',
+    fontWeight: '500',
+  },
+  {
+    tag: [tags.lineComment, tags.blockComment],
+    color: 'var(--text-color-kumo-inactive)',
+    fontStyle: 'italic',
+  },
+  {
+    tag: [tags.special(tags.variableName), tags.typeName, tags.escape],
+    color: 'var(--color-firenook-code-literal)',
+  },
+  { tag: tags.standard(tags.variableName), fontWeight: '500' },
+  {
+    tag: [
+      tags.logicOperator,
+      tags.compareOperator,
+      tags.arithmeticOperator,
+      tags.operator,
+      tags.definitionOperator,
+      tags.derefOperator,
+      tags.paren,
+      tags.punctuation,
+    ],
+    color: 'var(--color-firenook-code-punctuation)',
+  },
 ])
 
 /**
@@ -218,6 +271,178 @@ const SKIN = EditorView.theme({
     borderColor: 'var(--color-kumo-danger)',
     borderRadius: '50%',
   },
+  // A rule line lit for a request: the line that granted it in the
+  // success tint, the ones that refused it in the danger tint. Laid
+  // under the active line's tint rather than over it, so the caret's
+  // line still reads as the caret's.
+  '.cm-line-allow': { backgroundColor: 'var(--color-kumo-success-tint)' },
+  '.cm-line-deny': { backgroundColor: 'var(--color-kumo-danger-tint)' },
+  '.cm-line-error': { backgroundColor: 'var(--color-kumo-warning-tint)' },
+  '.cm-line-focus': { backgroundColor: 'var(--color-kumo-info-tint)' },
+  // What an expression evaluated to, after it, as a debugger writes it:
+  // smaller, on a ground of its own, so it never reads as source.
+  '.cm-inline-value': {
+    marginLeft: '3px',
+    padding: '0 4px',
+    borderRadius: '3px',
+    backgroundColor: 'var(--color-kumo-tint)',
+    color: 'var(--text-color-kumo-subtle)',
+    fontSize: '10.5px',
+    whiteSpace: 'pre',
+  },
+  '.cm-inline-value-true': { color: 'var(--text-color-kumo-success)' },
+  '.cm-inline-value-false': { color: 'var(--text-color-kumo-danger)' },
+  '.cm-inline-value-error': {
+    color: 'var(--text-color-kumo-danger)',
+    backgroundColor: 'var(--color-kumo-danger-tint)',
+  },
+  // How often a rule ran: a count in its own column, quiet when it ran,
+  // marked when an allow never has.
+  '.cm-notes-gutter .cm-gutterElement': {
+    padding: '0 6px 0 4px',
+    fontSize: '10.5px',
+    fontVariantNumeric: 'tabular-nums',
+    textAlign: 'right',
+    minWidth: '30px',
+  },
+  '.cm-note-hit': { color: 'var(--text-color-kumo-subtle)' },
+  '.cm-note-miss': { color: 'var(--text-color-kumo-warning)', fontWeight: '500' },
+})
+
+/** Lines lit from outside: the rule lines that decided a request. */
+const setLineMarks = StateEffect.define<readonly CodeLineMark[]>()
+const lineMarks = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    let next = value.map(transaction.changes)
+    for (const effect of transaction.effects) {
+      if (!effect.is(setLineMarks)) continue
+      const doc = transaction.state.doc
+      const seen = new Set<number>()
+      next = Decoration.set(
+        effect.value
+          .filter((mark) => mark.line >= 1 && mark.line <= doc.lines && !seen.has(mark.line))
+          .map((mark) => {
+            seen.add(mark.line)
+            return Decoration.line({ class: `cm-line-${mark.tone}` }).range(
+              doc.line(mark.line).from,
+            )
+          }),
+        true,
+      )
+    }
+    return next
+  },
+  provide: (field) => EditorView.decorations.from(field),
+})
+
+class ValueWidget extends WidgetType {
+  readonly text: string
+  readonly tone: string
+  constructor(text: string, tone: string) {
+    super()
+    this.text = text
+    this.tone = tone
+  }
+  override eq(other: ValueWidget) {
+    return other.text === this.text && other.tone === this.tone
+  }
+  toDOM() {
+    const span = document.createElement('span')
+    span.className = `cm-inline-value ${this.tone}`
+    span.textContent = this.text
+    span.setAttribute('data-inline-value', '')
+    return span
+  }
+  override ignoreEvent() {
+    return true
+  }
+}
+
+function valueTone(value: CodeInlineValue): string {
+  if (value.error) return 'cm-inline-value-error'
+  if (value.value === 'true') return 'cm-inline-value-true'
+  if (value.value === 'false') return 'cm-inline-value-false'
+  return ''
+}
+
+/** Values written after the expressions that produced them. */
+const setInlineValues = StateEffect.define<readonly CodeInlineValue[]>()
+const inlineValues = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    let next = value.map(transaction.changes)
+    for (const effect of transaction.effects) {
+      if (!effect.is(setInlineValues)) continue
+      const length = transaction.state.doc.length
+      next = Decoration.set(
+        effect.value
+          .filter((item) => item.to >= 0 && item.to <= length)
+          .map((item) =>
+            Decoration.widget({
+              widget: new ValueWidget(item.value, valueTone(item)),
+              side: 1,
+            }).range(item.to),
+          ),
+        true,
+      )
+    }
+    return next
+  },
+  provide: (field) => EditorView.decorations.from(field),
+})
+
+class NoteMarker extends GutterMarker {
+  readonly text: string
+  readonly tone: string
+  readonly title: string | undefined
+  constructor(text: string, tone: string, title: string | undefined) {
+    super()
+    this.text = text
+    this.tone = tone
+    this.title = title
+  }
+  override eq(other: NoteMarker) {
+    return other.text === this.text && other.tone === this.tone && other.title === this.title
+  }
+  override toDOM() {
+    const span = document.createElement('span')
+    span.className = `cm-note-${this.tone}`
+    span.textContent = this.text
+    if (this.title) span.title = this.title
+    return span
+  }
+}
+
+const setGutterNotes = StateEffect.define<readonly CodeGutterNote[]>()
+const gutterNotes = StateField.define<RangeSet<GutterMarker>>({
+  create: () => RangeSet.empty,
+  update(value, transaction) {
+    let next = value.map(transaction.changes)
+    for (const effect of transaction.effects) {
+      if (!effect.is(setGutterNotes)) continue
+      const doc = transaction.state.doc
+      const seen = new Set<number>()
+      next = RangeSet.of(
+        effect.value
+          .filter((note) => note.line >= 1 && note.line <= doc.lines && !seen.has(note.line))
+          .map((note) => {
+            seen.add(note.line)
+            return new NoteMarker(note.text, note.tone, note.title).range(doc.line(note.line).from)
+          }),
+        true,
+      )
+    }
+    return next
+  },
+})
+
+const notesGutter = gutter({
+  class: 'cm-notes-gutter',
+  markers: (view) => view.state.field(gutterNotes),
+  // Its own class: the spacer only holds the column's width open, and a
+  // test (or a stylesheet) looking for the counts must not find it.
+  initialSpacer: () => new NoteMarker('999×', 'spacer', undefined),
 })
 
 /**
@@ -227,6 +452,34 @@ const SKIN = EditorView.theme({
  */
 const EXTRA = new Compartment()
 const EDITABLE = new Compartment()
+/** The language, chosen once per editor but kept swappable like the rest. */
+const LANGUAGE = new Compartment()
+/** The notes gutter takes a column only while there are notes for it. */
+const NOTES = new Compartment()
+
+/**
+ * JSON gets the parser's own linter; rules get nothing from the editor —
+ * their marks come from the engine's compiler through `marks`.
+ */
+function languageFor(
+  language: CodeEditorProps['language'],
+  completion: () => CodeEditorProps['rulesCompletion'],
+): Extension {
+  if (language === 'rules')
+    return [
+      // The callbacks are read through on each completion rather than
+      // captured, so a new schema sample never rebuilds the language.
+      rulesLanguage({
+        fields: (pattern) => completion()?.fields?.(pattern) ?? [],
+        claims: () => completion()?.claims?.() ?? [],
+      }),
+      // ⌘↵ is the rules page's Apply. CodeMirror's own binding for it
+      // inserts a blank line, which went into the rules with every Apply
+      // from the keyboard; claimed here, the key reaches the page alone.
+      Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => true }])),
+    ]
+  return [json(), linter(jsonParseLinter(), { delay: 150 })]
+}
 
 /**
  * A document pasted over the top of this one arrives tidied.
@@ -268,7 +521,14 @@ function extraLinter(find: CodeEditorProps['annotate']): Extension {
 export default function CodeEditor({
   value,
   onChange,
+  language = 'json',
+  rulesCompletion,
   annotate,
+  marks,
+  lineMarks: lit,
+  inlineValues: values,
+  gutterNotes: notes,
+  reveal,
   tidyPaste,
   readOnly = false,
   autoFocus = false,
@@ -282,9 +542,27 @@ export default function CodeEditor({
   // any of it never means tearing the editor down — and the editor is
   // built once, which is what keeps the cursor, the selection, the undo
   // history and every fold across a re-render.
-  const latest = useRef({ value, readOnly, autoFocus, onChange, annotate, tidyPaste })
+  const latest = useRef({
+    value,
+    language,
+    rulesCompletion,
+    readOnly,
+    autoFocus,
+    onChange,
+    annotate,
+    tidyPaste,
+  })
   useEffect(() => {
-    latest.current = { value, readOnly, autoFocus, onChange, annotate, tidyPaste }
+    latest.current = {
+      value,
+      language,
+      rulesCompletion,
+      readOnly,
+      autoFocus,
+      onChange,
+      annotate,
+      tidyPaste,
+    }
   })
 
   useEffect(() => {
@@ -316,11 +594,14 @@ export default function CodeEditor({
             ...foldKeymap,
             indentWithTab,
           ]),
-          json(),
+          LANGUAGE.of(languageFor(latest.current.language, () => latest.current.rulesCompletion)),
           tidyOnPaste(() => latest.current.tidyPaste),
-          linter(jsonParseLinter(), { delay: 150 }),
           syntaxHighlighting(INK),
           SKIN,
+          lineMarks,
+          inlineValues,
+          gutterNotes,
+          NOTES.of([]),
           EXTRA.of(extraLinter(latest.current.annotate)),
           EDITABLE.of(EditorState.readOnly.of(latest.current.readOnly)),
           EditorView.updateListener.of((update) => {
@@ -353,6 +634,58 @@ export default function CodeEditor({
   useEffect(() => {
     view.current?.dispatch({ effects: EXTRA.reconfigure(extraLinter(annotate)) })
   }, [annotate])
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: LANGUAGE.reconfigure(languageFor(language, () => latest.current.rulesCompletion)),
+    })
+  }, [language])
+
+  // The engine's marks are for a text that may since have moved on by a
+  // keystroke; they are clamped rather than dropped, and the next check
+  // replaces them.
+  useEffect(() => {
+    const editor = view.current
+    if (!editor || marks === undefined) return
+    const length = editor.state.doc.length
+    editor.dispatch(
+      setDiagnostics(
+        editor.state,
+        marks.map((mark) => {
+          const from = Math.min(Math.max(0, mark.from), length)
+          return { ...mark, from, to: Math.min(Math.max(from, mark.to), length) }
+        }),
+      ),
+    )
+  }, [marks])
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: setLineMarks.of(lit ?? []) })
+  }, [lit])
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: setInlineValues.of(values ?? []) })
+  }, [values])
+
+  useEffect(() => {
+    const editor = view.current
+    if (!editor) return
+    const list = notes ?? []
+    editor.dispatch({
+      effects: [NOTES.reconfigure(list.length > 0 ? notesGutter : []), setGutterNotes.of(list)],
+    })
+  }, [notes])
+
+  useEffect(() => {
+    const editor = view.current
+    if (!editor || !reveal) return
+    const doc = editor.state.doc
+    const line = doc.line(Math.min(Math.max(1, reveal.line), doc.lines))
+    editor.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+    })
+  }, [reveal])
 
   useEffect(() => {
     view.current?.dispatch({

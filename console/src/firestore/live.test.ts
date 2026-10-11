@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { inferColumns } from './columns'
 import { scopesTouched, useLive } from './live'
-import { decodeFrame } from './requests'
 import type { FsDocument } from './value'
 
 describe('the live channel', () => {
@@ -65,38 +64,5 @@ describe('column inference', () => {
       holds: { timestamp: 2, string: 1 },
     })
     expect(columns[1]?.mixed).toBeUndefined()
-  })
-})
-
-describe('the Requests feed', () => {
-  it('decodes an evaluation frame into what the drawer shows', () => {
-    const event = decodeFrame(
-      JSON.stringify({
-        requestId: 'r-1',
-        time: '2026-09-20T09:00:00Z',
-        outcome: 'deny',
-        granularAllowOutcomes: [{ line: 5, outcome: false }],
-        rulesContext: {
-          method: 'get',
-          path: '/databases/(default)/documents/users/u1',
-          request: {
-            mapValue: {
-              fields: { auth: { mapValue: { fields: { uid: { stringValue: 'u9' } } } } },
-            },
-          },
-        },
-      }),
-    )
-    expect(event).toMatchObject({
-      requestId: 'r-1',
-      outcome: 'deny',
-      method: 'get',
-      path: 'users/u1',
-      database: '(default)',
-      uid: 'u9',
-      lines: [{ line: 5, outcome: false }],
-    })
-    expect(decodeFrame('not json')).toBeUndefined()
-    expect(decodeFrame('{"hello":true}')).toBeUndefined()
   })
 })

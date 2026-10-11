@@ -22,8 +22,10 @@ import {
   LockKeyIcon,
   PlusIcon,
   WarningIcon,
+  ShieldCheckIcon,
 } from '@phosphor-icons/react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   useCallback,
@@ -68,7 +70,7 @@ import {
 } from './grid-row'
 import { FoldedHeader, HeaderMenu, IdHeaderMenu } from './header-menu'
 import { subcollectionsWidth } from './subcollections-cell'
-import { useWorkbench } from './workbench-context'
+import { DEFAULT_DATABASE, useWorkbench } from './workbench-context'
 
 /**
  * A row's height, px, and the virtualizer's estimate of it — which have to
@@ -765,6 +767,7 @@ function QueryUnparsed() {
 
 function QueryFailure({ error }: { error: Error }) {
   const workbench = useWorkbench()
+  const navigate = useNavigate()
   const denied = error instanceof FirestoreError && error.denied
   return (
     <div className="min-h-0 flex-1 overflow-auto">
@@ -777,16 +780,36 @@ function QueryFailure({ error }: { error: Error }) {
           )
         }
         title={denied ? 'Denied by security rules' : 'The query failed'}
-        description={
-          denied
-            ? `${error.message} Viewing as ${describe(workbench)}; open the Requests drawer for the rule that decided it.`
-            : error.message
-        }
+        description={denied ? `${error.message} Viewing as ${describe(workbench)}.` : error.message}
         contents={
           denied ? (
-            <Button variant="secondary" onClick={() => workbench.setViewAs({ kind: 'owner' })}>
-              View as admin
-            </Button>
+            <span className="flex flex-wrap justify-center gap-2">
+              {/* The decision behind the denial, on the rules page: the
+                  lines that refused it and the values they saw. It used to
+                  say "open the Requests drawer", a list to search by hand. */}
+              <Button
+                variant="primary"
+                icon={<ShieldCheckIcon />}
+                onClick={() =>
+                  void navigate({
+                    to: '/firestore/rules',
+                    search: {
+                      db: workbench.database === DEFAULT_DATABASE ? undefined : workbench.database,
+                      path: workbench.collectionPath || undefined,
+                      uid: workbench.viewAs.kind === 'user' ? workbench.viewAs.uid : undefined,
+                      denied: true,
+                      pick: true,
+                    },
+                  })
+                }
+                data-testid="see-why"
+              >
+                See why
+              </Button>
+              <Button variant="secondary" onClick={() => workbench.setViewAs({ kind: 'owner' })}>
+                View as admin
+              </Button>
+            </span>
           ) : undefined
         }
       />
