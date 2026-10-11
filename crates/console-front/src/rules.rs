@@ -12,30 +12,85 @@
 //! what the console applied and what the repository holds do not drift; a
 //! database with no file configured can still be edited, and says it was
 //! not saved rather than implying it was.
+//!
+//! The text can change under the console too: the rules file is watched,
+//! another tab saves, a test reloads the project's rules. So the editor also
+//! answers what governed a database over time (`/rules/history`), streams
+//! every change (`/rules/live`), says why the file on disk is not what is in
+//! force when it did not compile, and checks a draft without installing it
+//! (`/rules/check`): compiler errors, lints, an outline, and which match
+//! blocks govern each collection the data holds.
+//!
+//! Every position in a response is a UTF-16 offset into the exact source
+//! that response is about, because the editor is a browser text component
+//! and that is how it counts.
 
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use firenook_core_store::DatabaseName;
-use firenook_rules_runtime::RulesRuntime;
+use firenook_rules_engine::{
+    Diagnostic, DiagnosticSeverity, GoverningMap, LintCode, RequestOperation,
+};
+use firenook_rules_runtime::{InstalledVersion, LoadError, RulesEvent, RulesRuntime};
+use futures_util::Stream;
+use futures_util::stream::{self, StreamExt as _};
 use serde::{Deserialize, Serialize};
+use time::format_description::well_known::Rfc3339;
+use tokio::sync::watch;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use ts_rs::TS;
+
+use crate::schema::{SchemaIndex, SchemaNode};
 
 /// The largest ruleset the console will accept, matching the engine's own
 /// compiler limit closely enough to refuse early with a clear message.
 const MAX_SOURCE_BYTES: usize = 256 * 1024;
 
-/// One compiler complaint, placed in the text.
+/// How often an idle live stream says it is still there.
+const KEEPALIVE: Duration = Duration::from_secs(15);
+
+/// How serious a diagnostic is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum RulesSeverity {
+    /// The rules do not compile.
+    Error,
+    /// The rules compile but a lint objects.
+    Warning,
+}
+
+/// The lint behind a warning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+pub enum RulesLintCode {
+    /// An unconditional allow on a match that reaches arbitrary collections.
+    #[serde(rename = "open-access")]
+    OpenAccess,
+    /// A condition that only asks whether the caller is signed in.
+    #[serde(rename = "auth-only")]
+    AuthOnly,
+    /// A create or update allowed without looking at the written data.
+    #[serde(rename = "unvalidated-write")]
+    UnvalidatedWrite,
+    /// A recursive wildcard below `rules_version = '2'`.
+    #[serde(rename = "collection-group-v1")]
+    CollectionGroupV1,
+}
+
+/// One compiler complaint or lint warning, placed in the text.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RulesDiagnostic {
-    /// `error` or `warning`.
-    pub severity: String,
+    pub severity: RulesSeverity,
     pub message: String,
     /// One-based line.
     #[ts(type = "number")]
@@ -43,6 +98,16 @@ pub struct RulesDiagnostic {
     /// One-based column.
     #[ts(type = "number")]
     pub column: usize,
+    /// Zero-based UTF-16 offset of the start, into the source this
+    /// diagnostic is about.
+    #[ts(type = "number")]
+    pub from: usize,
+    /// Exclusive UTF-16 end; equal to `from` when only a position is known,
+    /// as for compiler errors.
+    #[ts(type = "number")]
+    pub to: usize,
+    /// The lint that raised a warning; `null` for a compiler error.
+    pub code: Option<RulesLintCode>,
 }
 
 /// The rules a database is being served with.
@@ -58,6 +123,17 @@ pub struct RulesDocument {
     /// The file this database's rules are configured in, when
     /// `firebase.json` names one. Saving writes here.
     pub path: Option<String>,
+    /// Stable hash of `source`, the one versions and live events carry;
+    /// empty when no ruleset is in force.
+    pub hash: String,
+    /// The configured file's current text, when `path` is set and readable.
+    /// It differs from `source` while the file holds a change that did not
+    /// compile, or one applied in the console without saving.
+    pub file_source: Option<String>,
+    /// Why the file on disk is not what is in force: the watcher's last pass
+    /// found it did not compile, or could not read it. Empty otherwise.
+    /// Positions refer to `fileSource`.
+    pub file_problems: Vec<RulesDiagnostic>,
 }
 
 /// What a change did.
@@ -71,6 +147,181 @@ pub struct RulesInstalled {
     pub path: Option<String>,
 }
 
+/// A draft, compiled and read but not installed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesCheck {
+    /// Compiler errors (then `outline` and `map` are null), or the lints'
+    /// warnings for a draft that compiles.
+    pub diagnostics: Vec<RulesDiagnostic>,
+    pub outline: Option<RulesOutline>,
+    /// Which match blocks govern each collection of the database's data,
+    /// the console's schema tree. Null when the draft does not compile or
+    /// the schema could not be read.
+    pub map: Option<RulesMap>,
+}
+
+/// The match blocks of a draft, depth first in source order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesOutline {
+    /// Declared `rules_version`.
+    pub rules_version: u8,
+    pub matches: Vec<OutlineMatch>,
+}
+
+/// One match block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct OutlineMatch {
+    /// The full pattern below the documents root, such as
+    /// `/users/{uid}/orders/{orderId}` or `/{document=**}`.
+    pub path: String,
+    /// Line of the `match …` header.
+    #[ts(type = "number")]
+    pub line: usize,
+    /// UTF-16 offset of the `match …` header's start.
+    #[ts(type = "number")]
+    pub from: usize,
+    /// Exclusive UTF-16 end of the header (the end of its path).
+    #[ts(type = "number")]
+    pub to: usize,
+    /// Nesting below `match /databases/{database}/documents`: its direct
+    /// children are 0.
+    #[ts(type = "number")]
+    pub depth: usize,
+    pub allows: Vec<OutlineAllow>,
+}
+
+/// One allow statement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct OutlineAllow {
+    /// Line of the statement.
+    #[ts(type = "number")]
+    pub line: usize,
+    /// UTF-16 offset of the whole `allow …;` statement's start.
+    #[ts(type = "number")]
+    pub from: usize,
+    /// Exclusive UTF-16 end of the statement, its semicolon included.
+    #[ts(type = "number")]
+    pub to: usize,
+    /// `read` and `write` expanded, in the order get, list, create, update,
+    /// delete.
+    pub operations: Vec<RulesOperation>,
+    /// The condition's source text; `true` for `allow read;`.
+    pub condition: String,
+    /// Set when the condition is the literal `true` or `false`.
+    pub always: Option<bool>,
+}
+
+/// One concrete operation an allow statement can grant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum RulesOperation {
+    Get,
+    List,
+    Create,
+    Update,
+    Delete,
+}
+
+/// Which match blocks govern which collections.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesMap {
+    /// Every collection pattern of the schema tree, depth first.
+    pub collections: Vec<CollectionRules>,
+    /// Match blocks no collection in the data reaches, nor any block nested
+    /// in them — often a typo in the path. Empty while the database holds no
+    /// data.
+    pub unused_matches: Vec<UnusedMatch>,
+}
+
+/// What governs one collection pattern.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionRules {
+    /// Schema pattern, such as `users/*/orders`.
+    pub pattern: String,
+    /// Match blocks matching its documents, in source order. A block naming
+    /// one document (`/config/global`) is included.
+    pub governed_by: Vec<GoverningMatch>,
+    /// No match block matches its documents, so every client request for
+    /// them is denied.
+    pub uncovered: bool,
+}
+
+/// A match block governing a collection, with what its allows can grant.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GoverningMatch {
+    /// Line of the block's header.
+    #[ts(type = "number")]
+    pub line: usize,
+    /// The block's outline path.
+    pub path: String,
+    /// Operations its allow statements grant under some condition; an
+    /// `if false` grants nothing and is left out.
+    pub operations: Vec<RulesOperation>,
+}
+
+/// A match block nothing in the data reaches.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UnusedMatch {
+    /// Line of the block's header.
+    #[ts(type = "number")]
+    pub line: usize,
+    /// The block's outline path.
+    pub path: String,
+}
+
+/// Where a ruleset came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum RulesOrigin {
+    /// The configuration the suite started with.
+    Startup,
+    /// The console (`PUT /rules`).
+    Console,
+    /// The rules file watcher, after the file changed on disk.
+    File,
+    /// The emulator's project-wide hot-reload route (rules unit testing).
+    Reload,
+}
+
+/// One ruleset that governed a database.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesVersion {
+    pub hash: String,
+    pub source: String,
+    pub origin: RulesOrigin,
+    /// When it was installed, RFC 3339.
+    pub installed_at: String,
+}
+
+/// What governs a database changed (`event: rules` on `/rules/live`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesChanged {
+    pub database: String,
+    /// Hash of the ruleset now in force.
+    pub hash: String,
+    /// Where it came from.
+    pub origin: RulesOrigin,
+}
+
+/// The rules file watcher finished a pass (`event: file` on `/rules/live`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesFileStatus {
+    pub database: String,
+    /// Why the file is not in force; empty when the pass succeeded.
+    pub problems: Vec<RulesDiagnostic>,
+}
+
 /// Reads and replaces the rules of each database the console can reach.
 #[derive(Clone)]
 pub struct RulesEditor {
@@ -78,6 +329,10 @@ pub struct RulesEditor {
     project: Arc<str>,
     /// The file each database declares its rules in, from `firebase.json`.
     files: Arc<BTreeMap<String, PathBuf>>,
+    /// The console's schema index, which a check maps the rules against.
+    schema: Option<SchemaIndex>,
+    /// Flips to `true` when the suite stops; live streams end then.
+    shutdown: Option<watch::Receiver<bool>>,
 }
 
 impl RulesEditor {
@@ -89,12 +344,32 @@ impl RulesEditor {
             rules: rules.clone(),
             project: Arc::from(project),
             files: Arc::new(files),
+            schema: None,
+            shutdown: None,
         }
+    }
+
+    /// Maps checked drafts against `schema`, the tree the console shows.
+    #[must_use]
+    pub fn with_schema(mut self, schema: &SchemaIndex) -> Self {
+        self.schema = Some(schema.clone());
+        self
+    }
+
+    /// Ends live streams when `shutdown` flips, so a console tab never holds
+    /// the listener's graceful shutdown open.
+    #[must_use]
+    pub(crate) fn with_shutdown(mut self, shutdown: watch::Receiver<bool>) -> Self {
+        self.shutdown = Some(shutdown);
+        self
     }
 
     pub(crate) fn router(self) -> axum::Router {
         axum::Router::new()
             .route("/rules", axum::routing::get(read_rules).put(write_rules))
+            .route("/rules/check", axum::routing::post(check_rules))
+            .route("/rules/history", axum::routing::get(rules_history))
+            .route("/rules/live", axum::routing::get(rules_live))
             .with_state(self)
     }
 
@@ -103,17 +378,34 @@ impl RulesEditor {
             .map_err(|error| RulesError::invalid(error.to_string()))
     }
 
-    fn read(&self, database_id: &str) -> Result<RulesDocument, RulesError> {
+    async fn read(&self, database_id: &str) -> Result<RulesDocument, RulesError> {
         let database = self.database(database_id)?;
-        let installed = self.rules.rules_for(&database);
+        // One read gives source and hash from the same install.
+        let current = self.rules.current_version(&database);
+        let file_source = match self.files.get(database_id).cloned() {
+            Some(path) => tokio::task::spawn_blocking(move || std::fs::read_to_string(path).ok())
+                .await
+                .ok()
+                .flatten(),
+            None => None,
+        };
         Ok(RulesDocument {
             database: database_id.to_owned(),
-            source: installed
+            enforced: current.is_some(),
+            hash: current
                 .as_ref()
-                .map(|rules| rules.source().to_owned())
+                .map(|version| version.hash.clone())
                 .unwrap_or_default(),
-            enforced: installed.is_some(),
+            source: current
+                .map(|version| version.source.to_string())
+                .unwrap_or_default(),
             path: self.path(database_id),
+            file_source,
+            file_problems: self
+                .rules
+                .file_problems(&database)
+                .map(|problems| diagnostics(&problems))
+                .unwrap_or_default(),
         })
     }
 
@@ -135,7 +427,11 @@ impl RulesEditor {
         // not reach the file, and a failed compilation leaves the previous
         // one serving requests untouched.
         self.rules
-            .install_database(&database, &request.source)
+            .install_database_from(
+                &database,
+                &request.source,
+                firenook_rules_runtime::RulesOrigin::Console,
+            )
             .map_err(|error| RulesError::Diagnostics(diagnostics(&error)))?;
         let Some(path) = self.files.get(database_id) else {
             return Ok(RulesInstalled {
@@ -151,6 +447,8 @@ impl RulesEditor {
                 path: Some(path.display().to_string()),
             });
         }
+        // The file watcher sees this write, finds the text already in force
+        // and installs nothing, so a save records one version, not two.
         std::fs::write(path, &request.source).map_err(|error| {
             RulesError::NotSaved(format!(
                 "the rules are in force but {} could not be written: {error}",
@@ -163,19 +461,179 @@ impl RulesEditor {
             path: Some(path.display().to_string()),
         })
     }
+
+    async fn check(&self, request: CheckRules) -> Result<RulesCheck, RulesError> {
+        let database_id = request.database.unwrap_or_else(|| "(default)".to_owned());
+        self.database(&database_id)?;
+        if request.source.len() > MAX_SOURCE_BYTES {
+            return Err(RulesError::invalid(format!(
+                "a ruleset is at most {MAX_SOURCE_BYTES} bytes"
+            )));
+        }
+        // Compiling and reading a large ruleset is CPU work; keep it off
+        // the request workers.
+        let source = request.source;
+        let compiled = tokio::task::spawn_blocking(move || {
+            firenook_rules_engine::compile(&source).map(|ruleset| {
+                let lints = ruleset.lints();
+                let outline = ruleset.outline();
+                (ruleset, lints, outline)
+            })
+        })
+        .await
+        .map_err(|_| RulesError::invalid("the rules task did not finish"))?;
+        let (ruleset, lints, outline) = match compiled {
+            Ok(compiled) => compiled,
+            Err(errors) => {
+                return Ok(RulesCheck {
+                    diagnostics: errors.iter().map(diagnostic).collect(),
+                    outline: None,
+                    map: None,
+                });
+            }
+        };
+        let map = match &self.schema {
+            // A schema that cannot be read leaves the map out rather than
+            // failing a check whose compiler answer is still good.
+            Some(schema) => schema.snapshot(&database_id).await.ok().map(|snapshot| {
+                let mut patterns = Vec::new();
+                for node in &snapshot.collections {
+                    collect_patterns(node, &mut patterns);
+                }
+                rules_map(&ruleset.governing(&database_id, &patterns))
+            }),
+            None => None,
+        };
+        Ok(RulesCheck {
+            diagnostics: lints.iter().map(diagnostic).collect(),
+            outline: Some(outline_view(&outline)),
+            map,
+        })
+    }
 }
 
-fn diagnostics(error: &firenook_rules_runtime::LoadError) -> Vec<RulesDiagnostic> {
-    error
-        .diagnostics
-        .iter()
-        .map(|diagnostic| RulesDiagnostic {
-            severity: format!("{:?}", diagnostic.severity).to_lowercase(),
-            message: diagnostic.message.clone(),
-            line: diagnostic.line,
-            column: diagnostic.column,
-        })
-        .collect()
+/// THE way to turn a failed compilation into what the console shows.
+pub(crate) fn diagnostics(error: &LoadError) -> Vec<RulesDiagnostic> {
+    error.diagnostics.iter().map(diagnostic).collect()
+}
+
+fn diagnostic(diagnostic: &Diagnostic) -> RulesDiagnostic {
+    RulesDiagnostic {
+        severity: match diagnostic.severity {
+            DiagnosticSeverity::Error => RulesSeverity::Error,
+            DiagnosticSeverity::Warning => RulesSeverity::Warning,
+        },
+        message: diagnostic.message.clone(),
+        line: diagnostic.line,
+        column: diagnostic.column,
+        from: diagnostic.from,
+        to: diagnostic.to,
+        code: diagnostic.code.map(|code| match code {
+            LintCode::OpenAccess => RulesLintCode::OpenAccess,
+            LintCode::AuthOnly => RulesLintCode::AuthOnly,
+            LintCode::UnvalidatedWrite => RulesLintCode::UnvalidatedWrite,
+            LintCode::CollectionGroupV1 => RulesLintCode::CollectionGroupV1,
+        }),
+    }
+}
+
+const fn operation(operation: RequestOperation) -> RulesOperation {
+    match operation {
+        RequestOperation::Get => RulesOperation::Get,
+        RequestOperation::List => RulesOperation::List,
+        RequestOperation::Create => RulesOperation::Create,
+        RequestOperation::Update => RulesOperation::Update,
+        RequestOperation::Delete => RulesOperation::Delete,
+    }
+}
+
+fn operations(operations: &[RequestOperation]) -> Vec<RulesOperation> {
+    operations.iter().copied().map(operation).collect()
+}
+
+fn outline_view(outline: &firenook_rules_engine::RulesOutline) -> RulesOutline {
+    RulesOutline {
+        rules_version: outline.rules_version,
+        matches: outline
+            .matches
+            .iter()
+            .map(|block| OutlineMatch {
+                path: block.path.clone(),
+                line: block.header.line,
+                from: block.header.from,
+                to: block.header.to,
+                depth: block.depth,
+                allows: block
+                    .allows
+                    .iter()
+                    .map(|allow| OutlineAllow {
+                        line: allow.statement.line,
+                        from: allow.statement.from,
+                        to: allow.statement.to,
+                        operations: operations(&allow.operations),
+                        condition: allow.condition.clone(),
+                        always: allow.always,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+fn rules_map(map: &GoverningMap) -> RulesMap {
+    RulesMap {
+        collections: map
+            .collections
+            .iter()
+            .map(|collection| CollectionRules {
+                pattern: collection.pattern.clone(),
+                uncovered: collection.uncovered(),
+                governed_by: collection
+                    .governed_by
+                    .iter()
+                    .map(|block| GoverningMatch {
+                        line: block.line,
+                        path: block.path.clone(),
+                        operations: operations(&block.operations),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        unused_matches: map
+            .unused_matches
+            .iter()
+            .map(|block| UnusedMatch {
+                line: block.line,
+                path: block.path.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// The schema tree's patterns, depth first, as the console draws them.
+fn collect_patterns(node: &SchemaNode, patterns: &mut Vec<String>) {
+    patterns.push(node.pattern.clone());
+    for child in &node.children {
+        collect_patterns(child, patterns);
+    }
+}
+
+fn version(version: InstalledVersion) -> RulesVersion {
+    RulesVersion {
+        hash: version.hash,
+        source: version.source.to_string(),
+        origin: origin(version.origin),
+        installed_at: version.installed_at.format(&Rfc3339).unwrap_or_default(),
+    }
+}
+
+const fn origin(origin: firenook_rules_runtime::RulesOrigin) -> RulesOrigin {
+    match origin {
+        firenook_rules_runtime::RulesOrigin::Startup => RulesOrigin::Startup,
+        firenook_rules_runtime::RulesOrigin::Console => RulesOrigin::Console,
+        firenook_rules_runtime::RulesOrigin::File => RulesOrigin::File,
+        firenook_rules_runtime::RulesOrigin::Reload => RulesOrigin::Reload,
+    }
 }
 
 /// Why a change was refused.
@@ -233,13 +691,20 @@ pub(crate) struct WriteRules {
     save: bool,
 }
 
-/// `GET /rules?database=(default)`: the rules in force.
+#[derive(Debug, Deserialize)]
+pub(crate) struct CheckRules {
+    database: Option<String>,
+    source: String,
+}
+
+/// `GET /rules?database=(default)`: the rules in force, and the file.
 async fn read_rules(
     State(editor): State<RulesEditor>,
     Query(request): Query<ReadRules>,
 ) -> Result<Json<RulesDocument>, RulesError> {
     editor
         .read(request.database.as_deref().unwrap_or("(default)"))
+        .await
         .map(Json)
 }
 
@@ -255,10 +720,112 @@ async fn write_rules(
         .map(Json)
 }
 
+/// `POST /rules/check`: compile and read a draft, installing nothing. Rules
+/// that do not compile are an answer here, not a failure: their errors come
+/// back as diagnostics with a 200.
+async fn check_rules(
+    State(editor): State<RulesEditor>,
+    Json(request): Json<CheckRules>,
+) -> Result<Json<RulesCheck>, RulesError> {
+    editor.check(request).await.map(Json)
+}
+
+/// `GET /rules/history?database=(default)`: what governed the database,
+/// newest first.
+async fn rules_history(
+    State(editor): State<RulesEditor>,
+    Query(request): Query<ReadRules>,
+) -> Result<Json<Vec<RulesVersion>>, RulesError> {
+    let database = editor.database(request.database.as_deref().unwrap_or("(default)"))?;
+    Ok(Json(
+        editor
+            .rules
+            .rules_history(&database)
+            .into_iter()
+            .map(version)
+            .collect(),
+    ))
+}
+
+/// `GET /rules/live?database=(default)`: a server-sent event stream. `hello`
+/// once; `rules` whenever what governs the database changes, from any
+/// origin; `file` after every rules file check for it. Ends when the suite
+/// stops, like `/changes`.
+async fn rules_live(
+    State(editor): State<RulesEditor>,
+    Query(request): Query<ReadRules>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, RulesError> {
+    let database_id = request.database.unwrap_or_else(|| "(default)".to_owned());
+    let database = editor.database(&database_id)?;
+    // Subscribe before reading what is in force, so no change can fall
+    // between the two; a change already read is then not repeated.
+    let receiver = editor.rules.subscribe();
+    let mut seen = editor
+        .rules
+        .current_version(&database)
+        .map(|version| version.hash);
+    let rules = editor.rules.clone();
+    let first = stream::once(async { Ok(json_event("hello", &serde_json::json!({}))) });
+    let rest = BroadcastStream::new(receiver).flat_map(move |item| {
+        let mut events = Vec::new();
+        let (recheck, file) = match &item {
+            Ok(RulesEvent::Installed { .. }) => (true, false),
+            Ok(RulesEvent::FileChecked { database: checked }) => (false, *checked == database),
+            // A lagging stream may have missed either kind; re-read both.
+            Err(BroadcastStreamRecvError::Lagged(_)) => (true, true),
+        };
+        if recheck
+            && let Some(current) = rules.current_version(&database)
+            && seen.as_deref() != Some(current.hash.as_str())
+        {
+            seen = Some(current.hash.clone());
+            events.push(json_event(
+                "rules",
+                &RulesChanged {
+                    database: database_id.clone(),
+                    hash: current.hash,
+                    origin: origin(current.origin),
+                },
+            ));
+        }
+        if file {
+            events.push(json_event(
+                "file",
+                &RulesFileStatus {
+                    database: database_id.clone(),
+                    problems: rules
+                        .file_problems(&database)
+                        .map(|problems| diagnostics(&problems))
+                        .unwrap_or_default(),
+                },
+            ));
+        }
+        stream::iter(events.into_iter().map(Ok))
+    });
+    let shutdown = editor.shutdown.clone();
+    let stopped = async move {
+        let Some(mut shutdown) = shutdown else {
+            return std::future::pending().await;
+        };
+        // A dropped sender means the suite is gone too.
+        while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
+    };
+    Ok(Sse::new(first.chain(rest).take_until(stopped))
+        .keep_alive(KeepAlive::new().interval(KEEPALIVE).text("keepalive")))
+}
+
+fn json_event(name: &str, data: &impl Serialize) -> Event {
+    Event::default()
+        .event(name)
+        .json_data(data)
+        .unwrap_or_else(|_| Event::default().event(name))
+}
+
 #[cfg(test)]
 mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
+    use firenook_core_store::{DocumentKey, Fields, Store, Write};
     use tower::ServiceExt as _;
 
     use super::*;
@@ -332,16 +899,29 @@ mod tests {
             .expect("request")
     }
 
+    fn check(body: &serde_json::Value) -> Request<Body> {
+        Request::post("/rules/check")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request")
+    }
+
+    fn get(uri: &str) -> Request<Body> {
+        Request::get(uri).body(Body::empty()).expect("request")
+    }
+
+    /// The text between two UTF-16 offsets, as the browser editor slices it.
+    fn utf16_slice(source: &str, from: &serde_json::Value, to: &serde_json::Value) -> String {
+        let units = source.encode_utf16().collect::<Vec<_>>();
+        let from = usize::try_from(from.as_u64().expect("from")).expect("fits");
+        let to = usize::try_from(to.as_u64().expect("to")).expect("fits");
+        String::from_utf16(&units[from..to]).expect("whole characters")
+    }
+
     #[tokio::test]
     async fn the_rules_in_force_are_what_is_read_back() {
         let (_runtime, editor) = editor(None);
-        let (status, body) = request(
-            editor,
-            Request::get("/rules?database=(default)")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await;
+        let (status, body) = request(editor, get("/rules?database=(default)")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["enforced"], true);
         assert!(
@@ -351,6 +931,39 @@ mod tests {
             "{body}"
         );
         assert!(body["path"].is_null(), "no file is configured: {body}");
+        assert_eq!(
+            body["hash"],
+            firenook_rules_runtime::source_hash(&allow(false))
+        );
+        assert!(body["fileSource"].is_null(), "{body}");
+        assert_eq!(body["fileProblems"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn reading_shows_the_file_and_why_it_is_not_in_force() {
+        let broken = "rules_version = '2';\n// é\nservice cloud.firestore { match";
+        let file = TempRules::new(broken);
+        let (runtime, editor) = editor(Some(&file.0));
+        let error = firenook_rules_engine::compile(broken).expect_err("broken");
+        runtime.set_file_problems(&database(), Some(LoadError { diagnostics: error }));
+        let (status, body) = request(editor, get("/rules")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["fileSource"], broken);
+        assert!(
+            body["source"]
+                .as_str()
+                .is_some_and(|source| source.contains("if false")),
+            "the rules in force are unchanged: {body}"
+        );
+        let problem = &body["fileProblems"][0];
+        assert_eq!(problem["severity"], "error");
+        assert!(problem["code"].is_null(), "{body}");
+        assert_eq!(problem["line"], 3);
+        // The é before it is two bytes but one UTF-16 unit, and positions
+        // refer to `fileSource`.
+        let expected = firenook_rules_engine::compile(broken).expect_err("broken")[0].byte_offset;
+        assert_eq!(problem["from"], expected - 1);
+        assert_eq!(problem["from"], problem["to"]);
     }
 
     #[tokio::test]
@@ -391,6 +1004,7 @@ mod tests {
             first["message"].as_str().is_some_and(|m| !m.is_empty()),
             "{body}"
         );
+        assert!(first["from"].is_u64(), "{body}");
         assert!(
             runtime
                 .rules_for(&database())
@@ -416,12 +1030,9 @@ mod tests {
             "the file holds what was applied"
         );
         // Reading names the file, so the console can say where it saves.
-        let (_, read) = request(
-            editor,
-            Request::get("/rules").body(Body::empty()).expect("request"),
-        )
-        .await;
+        let (_, read) = request(editor, get("/rules")).await;
         assert_eq!(read["path"], file.0.display().to_string());
+        assert_eq!(read["fileSource"], allow(true));
     }
 
     #[tokio::test]
@@ -465,21 +1076,22 @@ mod tests {
     #[tokio::test]
     async fn an_invalid_database_is_refused() {
         let (_runtime, editor) = editor(None);
-        let (status, _) = request(
-            editor,
-            Request::get("/rules?database=has/a/slash")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
+        for request_to in [
+            get("/rules?database=has/a/slash"),
+            get("/rules/history?database=has/a/slash"),
+            get("/rules/live?database=has/a/slash"),
+            check(&serde_json::json!({ "database": "has/a/slash", "source": allow(true) })),
+        ] {
+            let (status, _) = request(editor.clone(), request_to).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+        }
     }
 
     #[tokio::test]
     async fn a_ruleset_beyond_the_limit_is_refused_before_it_is_compiled() {
         let (_runtime, editor) = editor(None);
         let huge = "/".repeat(MAX_SOURCE_BYTES + 1);
-        let (status, body) = request(editor, put(&huge, false)).await;
+        let (status, body) = request(editor.clone(), put(&huge, false)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(
             body["error"]["message"]
@@ -487,5 +1099,224 @@ mod tests {
                 .is_some_and(|message| message.contains("at most")),
             "{body}"
         );
+        let (status, _) = request(editor, check(&serde_json::json!({ "source": huge }))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_check_of_broken_rules_answers_with_diagnostics_and_installs_nothing() {
+        let (runtime, editor) = editor(None);
+        let broken = "rules_version = '2';\n// 🔥\nservice cloud.firestore { match }";
+        let (status, body) = request(editor, check(&serde_json::json!({ "source": broken }))).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["outline"].is_null(), "{body}");
+        assert!(body["map"].is_null(), "{body}");
+        let error = &body["diagnostics"][0];
+        assert_eq!(error["severity"], "error");
+        assert!(error["code"].is_null());
+        // The 🔥 is four bytes but two UTF-16 units.
+        let byte = broken.find('}').expect("the brace the error points at");
+        assert_eq!(error["from"], byte - 2);
+        assert_eq!(error["to"], error["from"]);
+        assert!(
+            runtime
+                .rules_for(&database())
+                .expect("rules")
+                .source()
+                .contains("if false"),
+            "a check installs nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_check_returns_lints_an_outline_and_the_map_of_the_data() {
+        let store = Store::default();
+        let key = |path: &str| DocumentKey::new(database(), path).expect("key");
+        store
+            .commit(&[
+                Write::Create {
+                    key: key("users/u1"),
+                    fields: Fields::new(),
+                },
+                Write::Create {
+                    key: key("users/u1/orders/o1"),
+                    fields: Fields::new(),
+                },
+                Write::Create {
+                    key: key("products/p1"),
+                    fields: Fields::new(),
+                },
+            ])
+            .expect("seed");
+        let schema = SchemaIndex::attach(&store, PROJECT);
+        let (runtime, editor) = editor(None);
+        let editor = editor.with_schema(&schema);
+        let source = "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    // Règles\n    match /users/{uid} {\n      allow read: if request.auth != null;\n      match /orders/{orderId} {\n        allow write: if request.auth.uid == uid;\n      }\n    }\n    match /usres/{uid} {\n      allow get: if false;\n    }\n  }\n}\n";
+        let (status, body) = request(editor, check(&serde_json::json!({ "source": source }))).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let codes = body["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .iter()
+            .map(|lint| lint["code"].as_str().expect("a lint code"))
+            .collect::<Vec<_>>();
+        assert_eq!(codes, ["auth-only", "unvalidated-write"], "{body}");
+        let auth_only = &body["diagnostics"][0];
+        assert_eq!(auth_only["severity"], "warning");
+        assert_eq!(
+            utf16_slice(source, &auth_only["from"], &auth_only["to"]),
+            "request.auth != null"
+        );
+
+        let outline = &body["outline"];
+        assert_eq!(outline["rulesVersion"], 2);
+        let users = &outline["matches"][0];
+        assert_eq!(users["path"], "/users/{uid}");
+        assert_eq!(users["depth"], 0);
+        assert_eq!(
+            utf16_slice(source, &users["from"], &users["to"]),
+            "match /users/{uid}"
+        );
+        assert_eq!(
+            users["allows"][0]["operations"],
+            serde_json::json!(["get", "list"])
+        );
+        assert_eq!(users["allows"][0]["condition"], "request.auth != null");
+        assert!(users["allows"][0]["always"].is_null());
+        let orders = &outline["matches"][1];
+        assert_eq!(orders["path"], "/users/{uid}/orders/{orderId}");
+        assert_eq!(orders["depth"], 1);
+        assert_eq!(
+            orders["allows"][0]["operations"],
+            serde_json::json!(["create", "update", "delete"])
+        );
+        assert_eq!(outline["matches"][2]["allows"][0]["always"], false);
+
+        let map = &body["map"];
+        let collections = map["collections"].as_array().expect("collections");
+        let patterns = collections
+            .iter()
+            .map(|collection| collection["pattern"].as_str().expect("pattern"))
+            .collect::<Vec<_>>();
+        assert_eq!(patterns, ["products", "users", "users/*/orders"]);
+        assert_eq!(collections[0]["uncovered"], true);
+        assert_eq!(collections[0]["governedBy"], serde_json::json!([]));
+        assert_eq!(collections[1]["uncovered"], false);
+        assert_eq!(
+            collections[1]["governedBy"],
+            serde_json::json!([{ "line": 5, "path": "/users/{uid}", "operations": ["get", "list"] }])
+        );
+        assert_eq!(
+            collections[2]["governedBy"][0]["path"],
+            "/users/{uid}/orders/{orderId}"
+        );
+        assert_eq!(
+            map["unusedMatches"],
+            serde_json::json!([{ "line": 11, "path": "/usres/{uid}" }])
+        );
+        assert!(
+            runtime
+                .rules_for(&database())
+                .expect("rules")
+                .source()
+                .contains("if false"),
+            "a check installs nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn history_lists_what_governed_the_database_newest_first() {
+        let (_runtime, editor) = editor(None);
+        let (status, _) = request(editor.clone(), put(&allow(true), false)).await;
+        assert_eq!(status, StatusCode::OK);
+        // The same text again governs nothing new.
+        let (status, _) = request(editor.clone(), put(&allow(true), false)).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, body) = request(editor, get("/rules/history?database=(default)")).await;
+        assert_eq!(status, StatusCode::OK);
+        let versions = body.as_array().expect("versions");
+        let origins = versions
+            .iter()
+            .map(|version| version["origin"].as_str().expect("origin"))
+            .collect::<Vec<_>>();
+        assert_eq!(origins, ["console", "startup"], "{body}");
+        assert_eq!(
+            versions[0]["hash"],
+            firenook_rules_runtime::source_hash(&allow(true))
+        );
+        assert_eq!(versions[0]["source"], allow(true));
+        assert!(
+            versions[0]["installedAt"]
+                .as_str()
+                .is_some_and(|at| time::OffsetDateTime::parse(at, &Rfc3339).is_ok()),
+            "{body}"
+        );
+    }
+
+    /// Reads the stream until `pattern` appears or five seconds pass.
+    async fn read_until(
+        body: &mut (impl Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin),
+        seen: &mut String,
+        pattern: &str,
+    ) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !seen.contains(pattern) {
+                let chunk = body.next().await.expect("a chunk").expect("bytes");
+                seen.push_str(&String::from_utf8_lossy(&chunk));
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{pattern:?} never arrived: {seen}"));
+    }
+
+    #[tokio::test]
+    async fn the_live_stream_tells_of_every_change_and_ends_with_the_suite() {
+        let (runtime, editor) = editor(None);
+        let (stop, shutdown) = watch::channel(false);
+        let editor = editor.with_shutdown(shutdown);
+        let response = editor
+            .clone()
+            .router()
+            .oneshot(get("/rules/live?database=(default)"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut body = response.into_body().into_data_stream();
+        let mut seen = String::new();
+        read_until(&mut body, &mut seen, "event: hello").await;
+        assert!(seen.contains("data: {}"), "{seen}");
+
+        let (status, _) = request(editor, put(&allow(true), false)).await;
+        assert_eq!(status, StatusCode::OK);
+        read_until(&mut body, &mut seen, "event: rules").await;
+        let hash = firenook_rules_runtime::source_hash(&allow(true));
+        read_until(&mut body, &mut seen, &hash).await;
+        assert!(seen.contains(r#""origin":"console""#), "{seen}");
+
+        // Another database's install says nothing here; a reload that now
+        // governs this one does.
+        let other = DatabaseName::new(PROJECT, "other").expect("database");
+        runtime
+            .install_database(&other, &allow(false))
+            .expect("other");
+        runtime
+            .install_project(PROJECT, &allow(false).replace("false", "1 == 1"))
+            .expect("reload");
+        read_until(&mut body, &mut seen, r#""origin":"reload""#).await;
+        assert_eq!(seen.matches("event: rules").count(), 2, "{seen}");
+
+        runtime.set_file_problems(&database(), Some(LoadError::unreadable("gone")));
+        read_until(&mut body, &mut seen, "event: file").await;
+        read_until(&mut body, &mut seen, "gone").await;
+
+        stop.send(true).expect("a stream is listening");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(chunk) = body.next().await {
+                chunk.expect("bytes");
+            }
+        })
+        .await
+        .expect("the stream ended after shutdown");
     }
 }

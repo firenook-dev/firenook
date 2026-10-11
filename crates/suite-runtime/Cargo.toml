@@ -27,6 +27,7 @@ firenook-rules-runtime = { path = "../rules-runtime" }
 firenook-storage-front = { path = "../storage-front" }
 firenook-suite-front = { path = "../suite-front" }
 firenook-webchannel-front = { path = "../webchannel-front" }
+notify = "8"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

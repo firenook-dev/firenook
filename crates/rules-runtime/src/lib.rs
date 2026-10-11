@@ -8,10 +8,12 @@ pub mod coverage;
 mod query;
 mod request_event;
 pub mod request_history;
+mod versions;
 pub use query::{query_candidate, query_policy};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+pub use versions::{InstalledVersion, MAXIMUM_VERSIONS, RulesEvent, RulesOrigin, source_hash};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -24,7 +26,6 @@ use firenook_rules_engine::{
     Timestamp, Value, compile,
 };
 use serde_json::Value as JsonValue;
-use sha2::{Digest as _, Sha256};
 
 pub use firenook_rules_engine::{
     AtomicEvaluationResult, EvaluationResult, Query as RulesQuery, RequestOperation,
@@ -58,6 +59,8 @@ pub struct RulesRuntime {
     write_guard: Arc<Mutex<()>>,
     recorder: Option<request_event::RequestRecorder>,
     coverage: Option<Arc<coverage::CoverageStore>>,
+    /// Install and rules-file notifications for the console's live view.
+    events: versions::Events,
 }
 
 #[derive(Default)]
@@ -65,6 +68,8 @@ struct RuntimeState {
     default: Option<Arc<InstalledRules>>,
     projects: BTreeMap<String, Arc<InstalledRules>>,
     databases: BTreeMap<DatabaseName, Arc<InstalledRules>>,
+    /// What governed each database over time, and its rules file's problems.
+    versions: versions::Versions,
 }
 
 struct InstalledRules {
@@ -76,7 +81,7 @@ impl InstalledRules {
     fn compile(source: &str) -> Result<Arc<Self>, LoadError> {
         Ok(Arc::new(Self {
             rules: Arc::new(compile(source).map_err(LoadError::new)?),
-            source_hash: URL_SAFE_NO_PAD.encode(Sha256::digest(source.as_bytes())),
+            source_hash: source_hash(source),
         }))
     }
 }
@@ -106,7 +111,13 @@ impl RulesRuntime {
     /// ruleset of their own or a later project-wide hot reload.
     pub fn install_default(&self, source: &str) -> Result<(), LoadError> {
         let rules = InstalledRules::compile(source)?;
-        write_lock(&self.state).default = Some(rules);
+        let version = versions::version(&rules, RulesOrigin::Startup);
+        {
+            let mut state = write_lock(&self.state);
+            state.default = Some(rules);
+            state.record_default(&version);
+        }
+        self.events.installed(RulesOrigin::Startup);
         Ok(())
     }
 
@@ -116,22 +127,44 @@ impl RulesRuntime {
     /// ruleset untouched.
     pub fn install_project(&self, project: &str, source: &str) -> Result<(), LoadError> {
         let rules = InstalledRules::compile(source)?;
-        let mut state = write_lock(&self.state);
-        state
-            .databases
-            .retain(|database, _| database.project_id() != project);
-        state.projects.insert(project.to_owned(), rules);
+        let version = versions::version(&rules, RulesOrigin::Reload);
+        {
+            let mut state = write_lock(&self.state);
+            state
+                .databases
+                .retain(|database, _| database.project_id() != project);
+            state.projects.insert(project.to_owned(), rules);
+            state.record_project(project, &version);
+        }
+        self.events.installed(RulesOrigin::Reload);
         Ok(())
     }
 
     /// Compiles then atomically replaces the ruleset of one database, which
     /// takes precedence over the project-wide and default rulesets. A failed
-    /// compilation leaves the previous ruleset untouched.
+    /// compilation leaves the previous ruleset untouched. Recorded as the
+    /// startup configuration; [`install_database_from`](Self::install_database_from)
+    /// names another origin.
     pub fn install_database(&self, database: &DatabaseName, source: &str) -> Result<(), LoadError> {
+        self.install_database_from(database, source, RulesOrigin::Startup)
+    }
+
+    /// [`install_database`](Self::install_database), recording where the
+    /// ruleset came from in the database's version history.
+    pub fn install_database_from(
+        &self,
+        database: &DatabaseName,
+        source: &str,
+        origin: RulesOrigin,
+    ) -> Result<(), LoadError> {
         let rules = InstalledRules::compile(source)?;
-        write_lock(&self.state)
-            .databases
-            .insert(database.clone(), rules);
+        let version = versions::version(&rules, origin);
+        {
+            let mut state = write_lock(&self.state);
+            state.databases.insert(database.clone(), rules);
+            state.record_database(database, &version);
+        }
+        self.events.installed(origin);
         Ok(())
     }
 

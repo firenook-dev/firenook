@@ -34,7 +34,12 @@ pub use explain::{
 pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, DocumentChange, FirestoreConsole,
 };
-pub use rules::{RulesDiagnostic, RulesDocument, RulesEditor, RulesError, RulesInstalled};
+pub use rules::{
+    CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
+    RulesDiagnostic, RulesDocument, RulesEditor, RulesError, RulesFileStatus, RulesInstalled,
+    RulesLintCode, RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity,
+    RulesVersion, UnusedMatch,
+};
 pub use schema::{
     ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
     SubcollectionsSnapshot,
@@ -316,6 +321,10 @@ mod tests {
         RulesDocument::export_all(&config).expect("TypeScript bindings written");
         RulesInstalled::export_all(&config).expect("TypeScript bindings written");
         RulesDiagnostic::export_all(&config).expect("TypeScript bindings written");
+        RulesCheck::export_all(&config).expect("TypeScript bindings written");
+        RulesVersion::export_all(&config).expect("TypeScript bindings written");
+        RulesChanged::export_all(&config).expect("TypeScript bindings written");
+        RulesFileStatus::export_all(&config).expect("TypeScript bindings written");
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(

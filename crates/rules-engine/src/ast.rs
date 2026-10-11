@@ -71,6 +71,8 @@ impl Program {
 
 #[derive(Clone, Debug)]
 pub(crate) struct MatchBlock {
+    /// Half-open UTF-8 span of the `match /path` header, for the outline.
+    pub(crate) header: std::ops::Range<usize>,
     pub(crate) pattern: Vec<PatternSegment>,
     pub(crate) functions: BTreeMap<String, Function>,
     pub(crate) allows: Vec<Allow>,
@@ -174,6 +176,12 @@ pub(crate) struct Function {
 #[derive(Clone, Debug)]
 pub(crate) struct Allow {
     pub(crate) location: crate::AllowLocation,
+    /// Half-open UTF-8 span of the whole statement, `allow` through `;`.
+    pub(crate) statement: std::ops::Range<usize>,
+    /// Half-open UTF-8 span of the condition as written, closing
+    /// parentheses included (an expression's own span stops short of a
+    /// closing grouping token). Empty for an `allow read;` with no condition.
+    pub(crate) condition_span: std::ops::Range<usize>,
     pub(crate) operations: Vec<Operation>,
     pub(crate) condition: Expr,
 }

@@ -1039,7 +1039,10 @@ fn storage_document_value(resource: Resource) -> Value {
     Value::Map(map)
 }
 
-fn match_pattern(pattern: &[PatternSegment], path: &str) -> Option<BTreeMap<String, Value>> {
+pub(crate) fn match_pattern(
+    pattern: &[PatternSegment],
+    path: &str,
+) -> Option<BTreeMap<String, Value>> {
     let path = path.trim_matches('/');
     let segments = if path.is_empty() {
         Vec::new()
