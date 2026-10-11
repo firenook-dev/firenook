@@ -34,9 +34,13 @@ use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
 mod download;
+mod listing;
 mod metadata;
 mod rules;
 use download::file_response;
+#[cfg(test)]
+use listing::ObjectListPage;
+use listing::list_objects;
 pub use rules::{
     BucketRules, FirestoreDocuments, NativeRulesConfig, NoFirestoreDocuments, RulesFile,
     RulesSource,
@@ -44,6 +48,8 @@ pub use rules::{
 use rules::{NativeRules, Operation, Verdict};
 #[cfg(test)]
 mod encoding_tests;
+#[cfg(test)]
+mod listing_reference;
 #[cfg(test)]
 mod missing_object_tests;
 #[cfg(test)]
@@ -1177,71 +1183,6 @@ async fn gcs_list(
         response.insert("items".to_owned(), JsonValue::Array(items));
     }
     Ok(Json(JsonValue::Object(response)))
-}
-
-struct ObjectListPage<'a> {
-    items: Vec<&'a StoredObject>,
-    prefixes: Vec<String>,
-    next_page_token: Option<String>,
-}
-
-fn list_objects<'a>(
-    data: &'a StorageData,
-    bucket: &str,
-    prefix: &str,
-    delimiter: Option<&str>,
-    page_token: Option<&str>,
-    maximum: usize,
-) -> ObjectListPage<'a> {
-    let first_key = object_key(bucket, prefix);
-    let scoped = || {
-        data.objects
-            .range(first_key.clone()..)
-            .map(|(_, object)| object)
-            .take_while(|object| object.bucket == bucket && object.name.starts_with(prefix))
-    };
-    let item_prefix = |object: &StoredObject| {
-        delimiter.and_then(|delimiter| {
-            object.name[prefix.len()..].find(delimiter).map(|index| {
-                let end = prefix.len() + index + delimiter.len();
-                object.name[..end].to_owned()
-            })
-        })
-    };
-
-    let mut prefixes = BTreeSet::new();
-    let mut token_present = page_token.is_none();
-    for object in scoped() {
-        if let Some(group) = item_prefix(object) {
-            prefixes.insert(group);
-        } else if page_token == Some(object.name.as_str()) {
-            token_present = true;
-        }
-    }
-
-    let mut started = page_token.is_none() || !token_present;
-    let mut items = Vec::with_capacity(maximum.min(1_000));
-    let mut next_page_token = None;
-    for object in scoped().filter(|object| item_prefix(object).is_none()) {
-        if !started {
-            if page_token == Some(object.name.as_str()) {
-                started = true;
-            } else {
-                continue;
-            }
-        }
-        if items.len() == maximum {
-            next_page_token = Some(object.name.clone());
-            break;
-        }
-        items.push(object);
-    }
-
-    ObjectListPage {
-        items,
-        prefixes: prefixes.into_iter().collect(),
-        next_page_token,
-    }
 }
 
 async fn gcs_metadata_or_copy(
