@@ -686,7 +686,7 @@ fn v2_firestore_bundle(event: &Map<String, Value>) -> Result<Value, String> {
 
 /// Multicast keys an Auth or Storage definition subscribes to
 /// (`addAuthTrigger`, `addStorageTrigger`).
-fn multicast_keys(definition: &Definition, project: &str) -> Vec<String> {
+pub(crate) fn multicast_keys(definition: &Definition, project: &str) -> Vec<String> {
     let Some(event) = definition.event_trigger() else {
         return Vec::new();
     };

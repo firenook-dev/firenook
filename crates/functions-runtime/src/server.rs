@@ -211,7 +211,7 @@ async fn https_route(
 }
 
 /// `path.replace(new RegExp("/{project}/[^/]*/{name}/?"), "/")`, keeping the query.
-fn rewrite_path(uri: &Uri, project: &str, name: &str) -> String {
+pub(crate) fn rewrite_path(uri: &Uri, project: &str, name: &str) -> String {
     let path = uri.path();
     let mut rewritten = path.to_owned();
     if let Some(after_project) = path.strip_prefix(&format!("/{project}/"))
@@ -359,6 +359,9 @@ pub(crate) async fn dispatch(
         if answer_id && let Ok(value) = HeaderValue::from_str(&token.id) {
             response.headers_mut().insert(EXECUTION_HEADER, value);
         }
+        // In-process callers (the console's dispatch) read the invocation
+        // from the response.
+        response.extensions_mut().insert(token.clone());
         response
     };
     let attributed = |event: LogEvent| {
@@ -434,7 +437,7 @@ pub(crate) async fn dispatch(
         Err(error) => {
             let failure = format!(
                 "Failed to start functions in {}: {error}",
-                backend.directory.display()
+                backend.directory().display()
             );
             state.log.record(attributed(LogEvent::new(
                 "ERROR",

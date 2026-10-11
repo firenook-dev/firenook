@@ -78,6 +78,35 @@ impl Harness {
         prepare: impl FnOnce(&Path),
     ) -> Result<Self, String> {
         let (node, sdk) = requirements()?;
+        Self::launch(index, manifest, delivery, files, prepare, node, Some(sdk)).await
+    }
+
+    /// A runtime whose worker can never start (no Node, no SDK needed):
+    /// loads, registrations, environments and env edits work without one.
+    pub async fn start_without_worker(manifest: &str, files: &[(&str, &str)]) -> Self {
+        Self::launch(
+            "",
+            manifest,
+            LogDelivery::Attributed,
+            files,
+            |_| {},
+            PathBuf::from("/nonexistent/firenook-test-node"),
+            None,
+        )
+        .await
+        .expect("the runtime starts")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn launch(
+        index: &str,
+        manifest: &str,
+        delivery: LogDelivery,
+        files: &[(&str, &str)],
+        prepare: impl FnOnce(&Path),
+        node: PathBuf,
+        sdk: Option<PathBuf>,
+    ) -> Result<Self, String> {
         let directory = tempfile::Builder::new()
             .prefix("firenook-dispatch-")
             .tempdir()
@@ -96,7 +125,9 @@ impl Harness {
             "{\"name\":\"dispatch\",\"main\":\"index.js\"}",
         )
         .map_err(|error| error.to_string())?;
-        link(&sdk, &source.join("node_modules"))?;
+        if let Some(sdk) = &sdk {
+            link(sdk, &source.join("node_modules"))?;
+        }
         for (name, content) in files {
             let path = source.join(name);
             if let Some(parent) = path.parent() {
