@@ -237,6 +237,15 @@ so a select stacked above a filter needs `size="xs"` to match it. A journey
 reads the computed sizes back out of a row and the panel beside it, because
 this is not a thing you can see in a diff.
 
+A select's `label` is a **form label stacked over the box** (14 px medium,
+a second row). Where a box sits in a toolbar or a panel header, name it
+inside instead, through `renderValue` — muted sans name, mono value, the way
+the top bar writes "Project <id>" — and keep `aria-label`. The database
+picker reads "Database (default)". And give the trigger `min-w-0`: Kumo
+wraps every `Select` in a one-column grid whose track grows to the text, so
+a long value pushes the box past its parent and the caret out of sight. The
+database journey opens a 39-character id and checks the box keeps its width.
+
 ### Capitals: English for the person, lowercase for the data
 
 Anything written *to* the reader starts with a capital — every control label

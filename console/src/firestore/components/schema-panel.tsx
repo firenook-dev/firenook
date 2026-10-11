@@ -59,7 +59,14 @@ export function SchemaPanel() {
               Kumo's `sm` Select is 14 px while its `sm` Input is 12. And
               the filter's height and corners, which `xs` leaves at 17.5 px
               against the filter's 22.75 — two boxes stacked, one a size
-              smaller. */}
+              smaller.
+              The box says what it holds, the way the top bar says
+              "Project": an id such as `(default)` alone does not. Inside
+              the box, because Kumo's `label` is a form label stacked over
+              it — a second row, with the panel toggle left between the
+              two. And `min-w-0`, because Kumo wraps the box in a grid
+              whose column grows to its text: a long id pushed the box
+              past the panel's edge and its caret out of sight. */}
             <Select
               size="xs"
               value={workbench.database}
@@ -70,8 +77,14 @@ export function SchemaPanel() {
                 if (open) void databases.refetch()
               }}
               items={databaseItems(databases.data, workbench.database, DEFAULT_DATABASE)}
+              renderValue={(value) => (
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 text-kumo-subtle">Database</span>
+                  <span className="truncate font-mono">{String(value)}</span>
+                </span>
+              )}
               aria-label="Database"
-              className="h-6.5 w-full rounded-md font-mono"
+              className="h-6.5 w-full min-w-0 rounded-md"
             />
           </div>
         </div>

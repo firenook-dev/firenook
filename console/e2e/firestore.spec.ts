@@ -983,6 +983,15 @@ test('a database a client writes to joins the picker and opens on its own', asyn
   await expect(picker).toContainText('(default)')
   await expect(panel.locator('[data-pattern="users"]')).toBeVisible()
 
+  // The box says what it holds, beside the value and on its line: an id
+  // such as `(default)` alone did not.
+  const named = picker.getByText('Database', { exact: true })
+  await expect(named).toBeVisible()
+  const nameBox = await named.boundingBox()
+  const valueBox = await picker.getByText('(default)', { exact: true }).boundingBox()
+  expect(Math.abs((nameBox?.y ?? 0) - (valueBox?.y ?? 99))).toBeLessThan(2)
+  expect(edge(nameBox)).toBeLessThan(valueBox?.x ?? 0)
+
   // An app that opens `getFirestore(app, 'analytics')` and writes brings the
   // database into being; nothing in firebase.json declares it.
   const analytics = `projects/${project()}/databases/analytics/documents`
@@ -1020,6 +1029,22 @@ test('a database a client writes to joins the picker and opens on its own', asyn
   await page.getByRole('option', { name: '(default)' }).click()
   await expect(page).not.toHaveURL(/db=/)
   await expect(panel.locator('[data-pattern="users"]')).toBeVisible()
+
+  // A long id is cut short inside the box, which keeps its width, its
+  // name and its caret. Kumo's grid around the box grew to the text and
+  // pushed it past the panel's edge.
+  const width = (await picker.boundingBox())?.width
+  const long = 'analytics-events-production-europe-west'
+  await page.goto(`${origin()}/console/firestore?db=${long}`)
+  await expect(picker).toContainText(long)
+  const longBox = await picker.boundingBox()
+  expect(longBox?.width).toBe(width)
+  expect(edge(longBox)).toBeLessThanOrEqual(edge(await panel.boundingBox()))
+  await expect(picker.getByText('Database', { exact: true })).toBeVisible()
+  const cut = await picker
+    .getByText(long, { exact: true })
+    .evaluate((value) => value.scrollWidth > value.clientWidth)
+  expect(cut).toBe(true)
 })
 
 test('a query that does not parse says so, and stays editable', async ({ page }) => {
