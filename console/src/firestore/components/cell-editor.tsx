@@ -662,9 +662,15 @@ function Floating({
   const top = rect
     ? Math.max(MARGIN, Math.min(rect.top, window.innerHeight - height - MARGIN))
     : MARGIN
+  // No z-index, which is what puts the editor's own menus over it. The
+  // app root is `isolate`, so anything portaled to the body is drawn above
+  // the whole page in the order it arrived — the editor over the grid, and
+  // a menu opened from the editor over the editor. It sat on `z-50`, above
+  // popups that carry no z-index of their own, and its type menu opened
+  // underneath it.
   return createPortal(
     <div
-      className={`fixed z-50 ${cell?.seen === false || !rect ? 'invisible' : ''}`}
+      className={`fixed ${cell?.seen === false || !rect ? 'invisible' : ''}`}
       // Measured coordinates: the one thing a class cannot carry.
       style={{ left, top, width }}
     >

@@ -3345,6 +3345,36 @@ test('a map edited in the grid has the inspector JSON view, and all of the map',
   // the editor opened from that, and Save wrote it back that way.
   await expect(editor.getByRole('textbox', { name: 'note value' })).toHaveValue(long)
 
+  // A menu opened from the editor is drawn over it. The editor sat on
+  // `z-50`, above popups that carry no z-index of their own, so its type
+  // menus opened underneath it and could not be clicked.
+  const onTop = (item: Locator) =>
+    item.evaluate((el) => {
+      const box = el.getBoundingClientRect()
+      const hit = el.ownerDocument.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      )
+      return hit !== null && el.contains(hit)
+    })
+  for (const trigger of ['payload type: map', 'backend type: string']) {
+    const button = editor.getByLabel(trigger)
+    // A row's strip is drawn while its line is pointed at.
+    if (trigger.startsWith('backend'))
+      await button.locator('xpath=ancestor::*[@data-testid="field-row"][1]/*[1]').hover()
+    await button.click()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    for (const type of ['string', 'map', 'vector'])
+      expect(
+        await onTop(menu.getByRole('menuitemradio', { name: type })),
+        `${trigger} → ${type}`,
+      ).toBe(true)
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await expect(editor).toBeVisible()
+  }
+
   // The inspector's editor — lines, folding, the type marks — rather than
   // a text box, with the caret already in it.
   await json.click()

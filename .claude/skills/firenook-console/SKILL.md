@@ -1203,6 +1203,12 @@ retype that changes shape swaps line ↔ panel and moves focus.
   writes nothing.
 - A missing field, or a `null`, opens as its column's type (`string` when
   the column is all null) and creates the field when typed into.
+- The editor's portal carries **no z-index**. `#root` is `isolate`, so a
+  body-level portal draws above the page in arrival order: the editor over
+  the grid, and a Kumo menu opened from it over the editor. It sat on
+  `z-50`, above Kumo popups that have no z-index (Kumo's own rule: isolate
+  the app root, never z-index a portaled layer), and its type menus opened
+  underneath it.
 - A previewed value (`isPartial`, deep) is fetched whole first through
   `documentQuery` — saving the fragment is the bug this guards.
 - A map or array panel has the inspector's **Fields · N | JSON** switch
