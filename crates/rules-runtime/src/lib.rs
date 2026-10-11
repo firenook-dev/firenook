@@ -5,12 +5,14 @@
 use std::collections::BTreeMap;
 
 pub mod coverage;
+mod deny_tap;
 mod dry_run;
 mod query;
 mod request_event;
 pub mod request_history;
 mod retention;
 mod versions;
+pub use deny_tap::{DENIAL_CAPACITY, Denial, DenialOrigin};
 pub use dry_run::{
     DryRunError, DryRunOperation, DryRunRequest, DryRunRules, EvaluationAccess, PreparedRequest,
     prepare_dry_run,
@@ -60,6 +62,10 @@ pub const OWNER_BEARER_TOKEN: &str = "Bearer owner";
 ///
 /// No ruleset at any level is the emulator's explicit open-with-warning
 /// mode.
+///
+/// Clones share everything. A handle made with
+/// [`with_origin`](Self::with_origin) shares everything too, and reports the
+/// requests it refuses as entering from that origin.
 #[derive(Clone, Default)]
 pub struct RulesRuntime {
     state: Arc<RwLock<RuntimeState>>,
@@ -68,6 +74,10 @@ pub struct RulesRuntime {
     coverage: Option<Arc<coverage::CoverageStore>>,
     /// Install and rules-file notifications for the console's live view.
     events: versions::Events,
+    /// Refused requests, for the console's log.
+    tap: Arc<deny_tap::DenyTap>,
+    /// Where the requests this handle evaluates entered.
+    origin: DenialOrigin,
 }
 
 #[derive(Default)]
@@ -252,7 +262,10 @@ impl RulesRuntime {
         let mut request = request.clone();
         request.auth = authorization.auth().cloned();
         let Some(recorder) = &self.recorder else {
-            return installed.rules.evaluate(&request, access);
+            let result = installed.rules.evaluate(&request, access);
+            self.tap
+                .observe(self.origin, database, &request, &result, None);
+            return result;
         };
         let mut coverage = self.coverage.as_ref().and_then(|coverage| {
             coverage.session(
@@ -271,7 +284,7 @@ impl RulesRuntime {
             None => installed.rules.evaluate_with_trace(&request, access),
         };
         drop(coverage);
-        recorder.record(
+        let request_id = recorder.record(
             database.project_id(),
             &installed,
             &request,
@@ -281,6 +294,13 @@ impl RulesRuntime {
                 in_read_write_transaction,
                 write: None,
             },
+        );
+        self.tap.observe(
+            self.origin,
+            database,
+            &request,
+            &result,
+            request_id.as_deref(),
         );
         result
     }
@@ -353,7 +373,14 @@ impl RulesRuntime {
             })
             .collect::<Vec<_>>();
         let Some(recorder) = &self.recorder else {
-            return installed.rules.evaluate_atomic(&requests, access);
+            let result = installed.rules.evaluate_atomic(&requests, access);
+            if !result.allowed {
+                for (request, operation) in requests.iter().zip(&result.operations) {
+                    self.tap
+                        .observe(self.origin, database, request, operation, None);
+                }
+            }
+            return result;
         };
         let mut coverage = self.coverage.as_ref().and_then(|coverage| {
             coverage.session(&database.to_string(), &installed.rules, context)
@@ -373,7 +400,7 @@ impl RulesRuntime {
             .zip(&traces)
             .enumerate()
         {
-            recorder.record(
+            let request_id = recorder.record(
                 database.project_id(),
                 &installed,
                 request,
@@ -383,6 +410,13 @@ impl RulesRuntime {
                     in_read_write_transaction: context.in_read_write_transaction,
                     write: context.writes.and_then(|writes| writes.get(index)),
                 },
+            );
+            self.tap.observe(
+                self.origin,
+                database,
+                request,
+                operation,
+                request_id.as_deref(),
             );
         }
         result

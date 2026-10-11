@@ -18,7 +18,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::InstalledRules;
-use crate::request_history::RequestHistory;
+use crate::request_history::{RecordOutcome, RequestHistory};
 use crate::retention::DecisionRetention;
 
 #[path = "request_event_metadata.rs"]
@@ -63,6 +63,9 @@ impl RequestRecorder {
         }
     }
 
+    /// Records one evaluation in the Requests feed and the decision
+    /// retention, and answers the id it gave the decision when either kept
+    /// it, so a refusal reported elsewhere can name the decision to open.
     pub(crate) fn record(
         &self,
         project: &str,
@@ -71,7 +74,7 @@ impl RequestRecorder {
         result: &EvaluationResult,
         trace: &EvaluationTrace,
         metadata: Metadata<'_>,
-    ) {
+    ) -> Option<String> {
         let id = format!(
             "{}-{}",
             self.identity,
@@ -83,11 +86,12 @@ impl RequestRecorder {
         );
         // Before the event is published, so an id a console reads from the
         // feed is already retained (unless retention admission was contended).
-        self.retention
+        let retained = self
+            .retention
             .retain(&id, project, installed, request, result);
         // All recursive serialization happens under RequestHistory's nonblocking
         // admission and capped writer. A failed serialization increments omissions.
-        let _ = self.history.record(&RequestEvent {
+        let recorded = self.history.record(&RequestEvent {
             rules: installed.rules.source(),
             time: DebugTime(request.time),
             rules_release_key: &release,
@@ -101,7 +105,8 @@ impl RequestRecorder {
             },
             granular_allow_outcomes: Outcomes(trace),
             rules_context: Context { request, metadata },
-        });
+        }) == RecordOutcome::Recorded;
+        (retained || recorded).then_some(id)
     }
 }
 

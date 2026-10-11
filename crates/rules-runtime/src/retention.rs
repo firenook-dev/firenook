@@ -192,7 +192,7 @@ struct Entry {
 
 impl DecisionRetention {
     /// Keeps one decision unless the ring is contended or the entry alone
-    /// exceeds the byte budget. Never waits.
+    /// exceeds the byte budget. Never waits. Whether it was kept.
     pub(crate) fn retain(
         &self,
         request_id: &str,
@@ -200,7 +200,7 @@ impl DecisionRetention {
         installed: &Arc<InstalledRules>,
         request: &EvaluationRequest,
         result: &EvaluationResult,
-    ) {
+    ) -> bool {
         self.retain_at(
             request_id,
             project,
@@ -208,7 +208,7 @@ impl DecisionRetention {
             request,
             result,
             Instant::now(),
-        );
+        )
     }
 
     fn retain_at(
@@ -219,7 +219,7 @@ impl DecisionRetention {
         request: &EvaluationRequest,
         result: &EvaluationResult,
         now: Instant,
-    ) {
+    ) -> bool {
         // Probe first, as the history does: a contended ring costs the
         // producer nothing, not even the copy of the request.
         match self.ring.try_lock() {
@@ -253,10 +253,13 @@ impl DecisionRetention {
             bytes,
             decision: Arc::new(decision),
         });
+        true
     }
 
-    fn omit(&self) {
+    /// Counts a decision that was not kept; `false` is the caller's answer.
+    fn omit(&self) -> bool {
         self.omitted.fetch_add(1, Ordering::Relaxed);
+        false
     }
 
     pub(crate) fn find(&self, request_id: &str) -> Option<Arc<RetainedDecision>> {
