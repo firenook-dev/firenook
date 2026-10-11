@@ -51,14 +51,21 @@ test('the query field is built like the path field, and nothing cuts its outline
   page,
 }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
-  await expect(page.getByTestId('grid-row').first()).toBeVisible()
-  await page.keyboard.press('f')
+  const first = page.getByTestId('grid-row').first()
+  await expect(first).toBeVisible()
+  // Opening the line changes what is in it, not how tall it is: the
+  // grid under it stays where it was. Shut, it was 5 px shorter.
+  const top = (await first.boundingBox())?.y
+  await page.getByRole('button', { name: 'Filter' }).click()
   const field = page.getByTestId('query-field')
   const input = page.getByTestId('query-input')
   await expect(input).toBeFocused()
+  expect((await first.boundingBox())?.y).toBe(top)
   // Focused, the two fields wear the same outline and ground.
   const focused = await fieldLook(field)
   await page.keyboard.press('Escape')
+  await expect(input).toHaveCount(0)
+  expect((await first.boundingBox())?.y).toBe(top)
   await page.keyboard.press('/')
   expect(await fieldLook(page.getByTestId('path-field'))).toEqual(focused)
   expect(focused.ring).toBe(true)

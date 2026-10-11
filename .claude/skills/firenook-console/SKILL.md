@@ -322,9 +322,13 @@ keeps copy. A query that did not parse keeps a `ring-kumo-danger` outline
 at rest. The row scrolls sideways when narrow, and **a scroller clips at its
 padding edge**, so the padding is the scroller's own (`px-3 py-1.5`), not
 the line's: with it outside, the field was 28 px in a 28 px scroller and
-focus drew two brackets with no top or bottom. The journey measures the
-room every clipping ancestor leaves the field (`ringRoom`, ≥ 1 px) and
-compares its focused look with the path field's.
+focus drew two brackets with no top or bottom. **The row is `box-content
+min-h-8`**: the minimum is the field's height with the padding on top. With
+the padding counted inside it, the shut row closed around the 23 px Filter
+button and grew 5.25 px when the field opened, pushing the grid down. The
+journey measures the room every clipping ancestor leaves the field
+(`ringRoom`, ≥ 1 px), compares its focused look with the path field's, and
+holds the first row's `y` while the line opens and shuts.
 
 **The count is the figure alone** — `240 documents` — in a Kumo tooltip
 that says what it counts ("Every document this query matches, not only

@@ -86,8 +86,11 @@ export function QueryLine() {
           at its padding edge, and the field's outline is a ring painted
           outside its box. With the padding outside, the field was exactly
           as tall as the box clipping it — 28 px in 28 px — and focus showed
-          as two brackets with no top or bottom. */}
-      <div className="flex min-h-8 items-center gap-2 overflow-x-auto px-3 py-1.5">
+          as two brackets with no top or bottom. The minimum height is the
+          field's, with the padding on top of it (`box-content`): counted
+          inside it, the row shut around the 23 px Filter button and grew
+          5 px when the field opened, pushing the grid down. */}
+      <div className="box-content flex min-h-8 items-center gap-2 overflow-x-auto px-3 py-1.5">
         {open ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">
             {/* The field is built like the path field a row above: one box,
