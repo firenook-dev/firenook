@@ -48,6 +48,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { CodeEditor } from '@/components/code-editor'
+import { useEditing } from '@/lib/shortcuts'
 import type { InferredColumn } from '../columns'
 import {
   type DraftNode,
@@ -139,6 +140,13 @@ export function CellEditor({
   onDone: () => void
 }) {
   const workbench = useWorkbench()
+  // While the editor is open, single-key shortcuts — the workbench's `f`
+  // and Escape, the grid's arrows — stand aside wherever focus is in it.
+  useEffect(() => {
+    const { setEditing } = useEditing.getState()
+    setEditing(true)
+    return () => setEditing(false)
+  }, [])
   const stored = document.fields[field]
   // A grid page is a preview: a long string arrives as its first bytes and a
   // big map as its first entries. Saving what arrived would write the

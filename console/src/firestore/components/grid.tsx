@@ -27,15 +27,9 @@ import {
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Kbd } from '@/components/kit'
+import { describeKey, useShortcuts } from '@/lib/shortcuts'
 import { shapeKey, useColumnWidths, useIdFreeze } from '../column-widths'
 import { arrangeColumns, foldRare, inferColumns } from '../columns'
 import { useCreateDialog } from '../create'
@@ -328,67 +322,110 @@ export function Grid() {
   })
 
   // Keyboard: arrows move the cell cursor, Enter edits the cell it is on —
-  // or opens the document from its id — and Escape closes. An effect event,
-  // so the listener is added once rather than on every frame of a scroll.
-  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (useSelection.getState().editing) return
-    const target = event.target as HTMLElement | null
-    if (
-      target &&
-      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-    )
-      return
-    if (documents.length === 0) return
+  // or opens the document from its id — and Escape closes. The keys go
+  // through the console's registry, which keeps them from a field that has
+  // the keys and from an edit in progress, and reads the newest of these
+  // handlers on each press, so a scroll frame registers nothing.
+  const current = () => documents.find((document) => document.path === focused)
+  const moveRow = (step: 1 | -1) => {
     const index = documents.findIndex((document) => document.path === focused)
-    const current = documents[index]
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault()
-      const next = Math.min(
-        documents.length - 1,
-        Math.max(0, index === -1 ? 0 : index + (event.key === 'ArrowDown' ? 1 : -1)),
-      )
-      const document = documents[next]
-      if (!document) return
-      focus(document.path, cursorField)
-      virtualizer.scrollToIndex(next, { align: 'auto' })
-      if (workbench.selectedDocument) workbench.selectDocument(document.path)
-    } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && current) {
-      // The id is the row's own cell, left of the first field.
-      event.preventDefault()
-      const keys = gridColumns.map((column) => column.key)
-      const at = cursorField === undefined ? -1 : keys.indexOf(cursorField)
-      const next = event.key === 'ArrowRight' ? Math.min(keys.length - 1, at + 1) : at - 1
-      const field = next < 0 ? undefined : keys[next]
-      focus(current.path, field)
-      if (field !== undefined) reveal(field)
-    } else if ((event.key === 'Enter' || event.key === 'F2') && current) {
-      event.preventDefault()
-      if (cursorField !== undefined && cursorField !== FOLDED_COLUMN)
-        actions.current?.edit(current, cursorField)
-      else if (event.key === 'Enter') workbench.selectDocument(current.path)
-    } else if (event.key === ' ' && focused) {
-      event.preventDefault()
-      toggle(focused)
-    } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
-      event.preventDefault()
-      setChecked(documents.map((document) => document.path))
-    } else if (
-      (event.metaKey || event.ctrlKey) &&
-      event.key.toLowerCase() === 'c' &&
-      current &&
-      cursorField !== FOLDED_COLUMN &&
+    const next = Math.min(documents.length - 1, Math.max(0, index === -1 ? 0 : index + step))
+    const document = documents[next]
+    if (!document) return
+    focus(document.path, cursorField)
+    virtualizer.scrollToIndex(next, { align: 'auto' })
+    if (workbench.selectedDocument) workbench.selectDocument(document.path)
+  }
+  const moveField = (step: 1 | -1) => {
+    const row = current()
+    if (!row) return
+    // The id is the row's own cell, left of the first field.
+    const keys = gridColumns.map((column) => column.key)
+    const at = cursorField === undefined ? -1 : keys.indexOf(cursorField)
+    const next = step === 1 ? Math.min(keys.length - 1, at + 1) : at - 1
+    const field = next < 0 ? undefined : keys[next]
+    focus(row.path, field)
+    if (field !== undefined) reveal(field)
+  }
+  const open = (row: FsDocument | undefined, key: 'Enter' | 'F2') => {
+    if (!row) return
+    if (cursorField !== undefined && cursorField !== FOLDED_COLUMN)
+      actions.current?.edit(row, cursorField)
+    else if (key === 'Enter') workbench.selectDocument(row.path)
+  }
+  const loaded = () => documents.length > 0
+  const onRow = () => loaded() && current() !== undefined
+  useShortcuts({ id: 'firestore', label: 'Firestore' }, [
+    {
+      key: 'ArrowUp',
+      label: 'Move between rows',
+      group: 'Grid',
+      when: loaded,
+      run: () => moveRow(-1),
+    },
+    {
+      key: 'ArrowDown',
+      label: 'Move between rows',
+      group: 'Grid',
+      when: loaded,
+      run: () => moveRow(1),
+    },
+    {
+      key: 'ArrowLeft',
+      label: 'Move between fields',
+      group: 'Grid',
+      when: onRow,
+      run: () => moveField(-1),
+    },
+    {
+      key: 'ArrowRight',
+      label: 'Move between fields',
+      group: 'Grid',
+      when: onRow,
+      run: () => moveField(1),
+    },
+    {
+      key: 'Enter',
+      label: 'Edit the value, or open the document from its id',
+      group: 'Grid',
+      when: onRow,
+      run: () => open(current(), 'Enter'),
+    },
+    {
+      key: 'F2',
+      label: 'Edit the value',
+      group: 'Grid',
+      when: onRow,
+      run: () => open(current(), 'F2'),
+    },
+    {
+      key: 'Space',
+      label: 'Tick the row',
+      group: 'Grid',
+      when: () => loaded() && focused !== undefined,
+      run: () => {
+        if (focused) toggle(focused)
+      },
+    },
+    {
+      key: 'Mod+a',
+      label: 'Tick every loaded row',
+      group: 'Grid',
+      when: loaded,
+      run: () => setChecked(documents.map((document) => document.path)),
+    },
+    {
+      key: 'Mod+c',
+      label: 'Copy the value',
+      group: 'Grid',
       // Text somebody selected on purpose is what they meant to copy.
-      !window.getSelection()?.toString()
-    ) {
-      event.preventDefault()
-      void copy(current, cursorField)
-    }
-  })
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => onKeyDown(event)
-    window.addEventListener('keydown', listener)
-    return () => window.removeEventListener('keydown', listener)
-  }, [])
+      when: () => onRow() && cursorField !== FOLDED_COLUMN && !window.getSelection()?.toString(),
+      run: () => {
+        const row = current()
+        if (row) void copy(row, cursorField)
+      },
+    },
+  ])
 
   // Fetch the next page as the last rows come into view.
   const items = virtualizer.getVirtualItems()
@@ -856,11 +893,8 @@ function RootLanding() {
     <div className="grid content-start gap-4 overflow-auto px-5 py-4">
       <Text variant="secondary">
         Root collections in <span className="font-mono text-[0.9em]">{workbench.database}</span>.
-        Pick one, press{' '}
-        <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">/</kbd>{' '}
-        and type a path, or{' '}
-        <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">⌘K</kbd>{' '}
-        to search.
+        Pick one, press <Kbd className="text-inherit">/</Kbd> and type a path, or{' '}
+        <Kbd className="text-inherit">{describeKey('Mod+k')}</Kbd> to search.
       </Text>
       {recents.length > 0 && (
         <div className="@container grid gap-1.5" data-testid="recents">

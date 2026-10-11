@@ -11,6 +11,7 @@ import { statusQuery } from '@/api/queries'
 import { LiveDot } from '@/components/kit'
 import { Page } from '@/components/shell/page'
 import { PanelToggle } from '@/components/shell/section-panel'
+import { isTyping, useShortcuts } from '@/lib/shortcuts'
 import { useCreateDialog } from '../create'
 import { useExportDialog } from '../export'
 import { useLive, useLiveChanges } from '../live'
@@ -93,50 +94,64 @@ function WorkbenchBody() {
     if (workbench.selectedDocument) recordRecent(workbench.selectedDocument, 'document')
   }, [recordRecent, workbench.selectedDocument])
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      // A value being edited in the grid owns the keyboard, wherever in it
-      // focus is — a switch, a type menu — so `f` is a letter and Escape
-      // gives up the edit rather than closing the inspector beside it.
-      if (useSelection.getState().editing) return
-      const target = event.target as HTMLElement | null
-      const typing =
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      if (typing) {
-        if (event.key === 'Escape') (target as HTMLElement).blur()
-        return
-      }
-      if (event.metaKey || event.ctrlKey) return
-      if (event.key === 'f' && workbench.collectionPath) {
-        event.preventDefault()
-        openQuery(true)
-      } else if (event.key === 'Escape') {
-        if (workbench.selectedDocument) workbench.selectDocument(undefined)
+  // The page's keys, through the console's one registry: they stand aside
+  // while a field has the keys or a value is being edited in the grid
+  // (`useEditing`), so `f` is a letter there and Escape gives up the edit
+  // rather than closing the inspector beside it.
+  const inCollection = () => Boolean(workbench.collectionPath)
+  const canCreate = () => Boolean(workbench.collectionPath) && !workbench.isPattern
+  const deleteTicked = () =>
+    setDeleting(
+      everything
+        ? { kind: 'everything', count: total?.count ?? checked.size }
+        : { kind: 'paths', paths: [...checked] },
+    )
+  useShortcuts({ id: 'firestore', label: 'Firestore' }, [
+    { key: 'f', label: 'Filter the documents', when: inCollection, run: () => openQuery(true) },
+    {
+      key: 'e',
+      label: 'Explain the query',
+      when: inCollection,
+      run: () => setExplain(!useQueryLine.getState().explain),
+    },
+    {
+      // The scope is a menu so both scopes are named, but flipping it stays
+      // one keystroke. A pattern is already the group, with nowhere to go.
+      key: 'g',
+      label: 'Switch between this collection and its group',
+      when: canCreate,
+      run: () => workbench.setGroup(!workbench.group),
+    },
+    {
+      key: 'n',
+      label: 'New document',
+      when: canCreate,
+      run: () => openCreate({ kind: 'document', collection: workbench.collectionPath }),
+    },
+    {
+      key: 'Escape',
+      label: 'Close the document, then clear the selection',
+      // Escape in a field leaves the field, so the next key is a shortcut.
+      allowInInputs: true,
+      run: (event) => {
+        if (isTyping(event.target)) (event.target as HTMLElement).blur()
+        else if (workbench.selectedDocument) workbench.selectDocument(undefined)
         else if (checked.size > 0) clearSelection()
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && checked.size > 0) {
-        event.preventDefault()
-        setDeleting(
-          everything
-            ? { kind: 'everything', count: total?.count ?? checked.size }
-            : { kind: 'paths', paths: [...checked] },
-        )
-      } else if (event.key === 'e' && workbench.collectionPath) {
-        event.preventDefault()
-        setExplain(!useQueryLine.getState().explain)
-      } else if (event.key === 'g' && workbench.collectionPath && !workbench.isPattern) {
-        // The scope is a menu so both scopes are named, but flipping it stays
-        // one keystroke. A pattern is already the group, with nowhere to go.
-        event.preventDefault()
-        workbench.setGroup(!workbench.group)
-      } else if (event.key === 'n' && workbench.collectionPath && !workbench.isPattern) {
-        event.preventDefault()
-        openCreate({ kind: 'document', collection: workbench.collectionPath })
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench, checked, everything, total, clearSelection, openQuery, openCreate, setExplain])
+      },
+    },
+    {
+      key: 'Delete',
+      label: 'Delete the ticked documents',
+      when: () => checked.size > 0,
+      run: deleteTicked,
+    },
+    {
+      key: 'Backspace',
+      label: 'Delete the ticked documents',
+      when: () => checked.size > 0,
+      run: deleteTicked,
+    },
+  ])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">

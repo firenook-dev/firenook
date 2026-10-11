@@ -1,5 +1,5 @@
 import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
-import { ArrowSquareOutIcon, GaugeIcon } from '@phosphor-icons/react'
+import { ArrowSquareOutIcon, GaugeIcon, KeyboardIcon } from '@phosphor-icons/react'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { PanelIcon } from '@/components/kit'
@@ -11,6 +11,7 @@ import {
 } from '@/lib/palette'
 import { describeTheme, useTheme } from '@/lib/color-mode'
 import { useLayout } from '@/lib/layout'
+import { describeKey } from '@/lib/shortcuts'
 import { SECTIONS } from '@/lib/services'
 import { THEME_CHOICES } from './theme-picker'
 import { useConsoleUi } from '@/lib/store'
@@ -29,6 +30,7 @@ export function CommandPalette() {
   const theme = useTheme((state) => state.choice)
   const mode = useTheme((state) => state.mode)
   const setTheme = useTheme((state) => state.setChoice)
+  const setShortcutsOpen = useConsoleUi((state) => state.setShortcutsOpen)
 
   const sections = useMemo<PaletteItem[]>(() => {
     const go = (to: string) => () => void navigate({ to })
@@ -90,8 +92,16 @@ export function CommandPalette() {
         icon: <option.icon size={16} />,
         run: () => setTheme(option.choice),
       })
+    items.push({
+      id: 'layout:shortcuts',
+      title: 'Keyboard shortcuts',
+      description: `Every key this page answers to · ${describeKey('?')}`,
+      keywords: 'keys keyboard shortcuts hotkeys help',
+      icon: <KeyboardIcon size={16} />,
+      run: () => setShortcutsOpen(true),
+    })
     return items
-  }, [navOpen, toggleNav, panel, panelOpen, togglePanel, theme, mode, setTheme])
+  }, [navOpen, toggleNav, panel, panelOpen, togglePanel, theme, mode, setTheme, setShortcutsOpen])
 
   // What the page on screen contributes comes first; the sections and the
   // layout always follow.

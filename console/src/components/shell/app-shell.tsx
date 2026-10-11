@@ -3,7 +3,9 @@
 // column a section can fill through `SectionPanel`) and the content. The
 // navigation is expanded or collapsed to icons; collapsed, it slides its
 // labels out over the page while the pointer is on it. The control at its
-// foot and `[` flip it; `t` hides and shows the panel.
+// foot and `[` flip it; `t` hides and shows the panel. The shell also holds
+// the console's one keydown listener (`lib/shortcuts.ts`): its own keys,
+// ⌘K, `[`, `t` and `?`, and every page's, go through the same registry.
 
 import {
   Badge,
@@ -20,18 +22,27 @@ import { CommandIcon, GaugeIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import type { CSSProperties, ReactNode } from 'react'
-import { useEffect } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import type { EngineInfo } from '@/api/generated/EngineInfo'
 import { statusQuery } from '@/api/queries'
 import { engineBuild, engineVersion } from '@/lib/engine'
+import { Kbd } from '@/components/kit'
 import { useLayout } from '@/lib/layout'
 import { AREA_LABELS, SECTIONS, type ServiceArea } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
+import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
 import { consoleToasts } from '@/lib/toasts'
 import { CommandPalette } from './command-palette'
 import { ThemePicker } from './theme-picker'
 
 const AREAS: readonly ServiceArea[] = ['data', 'compute', 'messaging', 'observe']
+
+/** The `?` dialog, loaded the first time it is opened: no page needs it to start. */
+const ShortcutsDialog = lazy(() =>
+  import('@/components/console/shortcuts-dialog').then((module) => ({
+    default: module.ShortcutsDialog,
+  })),
+)
 
 /** The section panel's width, px. */
 export const PANEL_WIDTH = 264
@@ -53,29 +64,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   const panelOpen = useLayout((state) => state.panelOpen)
   const setSlot = useLayout((state) => state.setSlot)
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        togglePalette()
-        return
-      }
-      const target = event.target as HTMLElement | null
-      const typing =
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      if (typing || event.metaKey || event.ctrlKey || event.altKey) return
-      if (event.key === '[') {
-        event.preventDefault()
-        toggleNav()
-      } else if (event.key === 't' && panel.present) {
-        event.preventDefault()
-        togglePanel()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [togglePalette, toggleNav, togglePanel, panel.present])
+  const shortcutsOpen = useConsoleUi((state) => state.shortcutsOpen)
+  const setShortcutsOpen = useConsoleUi((state) => state.setShortcutsOpen)
+  const toggleShortcuts = useConsoleUi((state) => state.toggleShortcuts)
+  // The dialog's code arrives the first time it is asked for, and stays.
+  const [shortcutsLoaded, setShortcutsLoaded] = useState(false)
+  if (shortcutsOpen && !shortcutsLoaded) setShortcutsLoaded(true)
+
+  // The console's one keydown listener; every page's keys go through it.
+  useShortcutListener()
+  useShortcuts({ id: SHELL_SCOPE, label: 'Everywhere' }, [
+    { key: 'Mod+k', label: 'Search the console', run: togglePalette, allowInInputs: true },
+    { key: '[', label: 'Collapse or expand the sidebar', run: toggleNav },
+    {
+      key: 't',
+      label: panel.present
+        ? `Hide or show the ${panel.label.toLowerCase()} panel`
+        : 'Hide or show the panel',
+      run: togglePanel,
+      when: () => useLayout.getState().panel.present,
+    },
+    { key: '?', label: 'Keyboard shortcuts', run: toggleShortcuts },
+  ])
 
   return (
     // Toasts raised outside React (a timer, a live handler) reach the same
@@ -114,6 +124,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <CommandPalette />
+        {shortcutsLoaded && (
+          <Suspense fallback={null}>
+            <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+          </Suspense>
+        )}
       </TooltipProvider>
     </Toasty>
   )
@@ -238,9 +253,7 @@ function NavToggle() {
       content={
         <span className="flex items-center gap-1.5">
           {open ? 'Collapse the sidebar' : 'Expand the sidebar'}
-          <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
-            [
-          </kbd>
+          <Kbd>[</Kbd>
         </span>
       }
       side="right"
@@ -280,9 +293,8 @@ function TopBar() {
         >
           <span className="flex items-center gap-1.5">
             Search
-            <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">
-              ⌘K
-            </kbd>
+            {/* ⌘K on a Mac, Ctrl+K elsewhere: the key the registry listens for. */}
+            <Kbd className="text-inherit">{describeKey('Mod+k')}</Kbd>
           </span>
         </Button>
       </div>

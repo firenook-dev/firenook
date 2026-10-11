@@ -1,4 +1,5 @@
 export { CopyGlyph, useCopied } from './copy-glyph'
+export { Kbd } from './kbd'
 export { LiveDot, type LiveState } from './live-dot'
 export { Mark } from './mark'
 export { MenuCheck } from './menu-check'
