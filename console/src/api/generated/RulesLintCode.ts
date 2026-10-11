@@ -3,4 +3,4 @@
 /**
  * The lint behind a warning.
  */
-export type RulesLintCode = "open-access" | "auth-only" | "unvalidated-write" | "collection-group-v1";
+export type RulesLintCode = "open-access" | "auth-only" | "unvalidated-write" | "collection-group-v1" | "unbounded-upload" | "list-v1";

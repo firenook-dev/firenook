@@ -158,6 +158,12 @@ pub enum LintCode {
     /// A recursive wildcard under `rules_version` 1, where it does not
     /// match collection group queries.
     CollectionGroupV1,
+    /// Storage: an upload allowed with checks on what is uploaded but none
+    /// on its size.
+    UnboundedUpload,
+    /// Storage: a list allowed below `rules_version` 2, where every list
+    /// request is refused.
+    ListV1,
 }
 
 impl LintCode {
@@ -169,6 +175,8 @@ impl LintCode {
             Self::AuthOnly => "auth-only",
             Self::UnvalidatedWrite => "unvalidated-write",
             Self::CollectionGroupV1 => "collection-group-v1",
+            Self::UnboundedUpload => "unbounded-upload",
+            Self::ListV1 => "list-v1",
         }
     }
 }

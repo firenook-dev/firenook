@@ -84,6 +84,12 @@ pub enum RulesLintCode {
     /// A recursive wildcard below `rules_version = '2'`.
     #[serde(rename = "collection-group-v1")]
     CollectionGroupV1,
+    /// Storage: an upload allowed with no check on its size.
+    #[serde(rename = "unbounded-upload")]
+    UnboundedUpload,
+    /// Storage: a list allowed below `rules_version = '2'`, where lists are refused.
+    #[serde(rename = "list-v1")]
+    ListV1,
 }
 
 /// One compiler complaint or lint warning, placed in the text.
@@ -536,6 +542,8 @@ fn diagnostic(diagnostic: &Diagnostic) -> RulesDiagnostic {
             LintCode::AuthOnly => RulesLintCode::AuthOnly,
             LintCode::UnvalidatedWrite => RulesLintCode::UnvalidatedWrite,
             LintCode::CollectionGroupV1 => RulesLintCode::CollectionGroupV1,
+            LintCode::UnboundedUpload => RulesLintCode::UnboundedUpload,
+            LintCode::ListV1 => RulesLintCode::ListV1,
         }),
     }
 }
