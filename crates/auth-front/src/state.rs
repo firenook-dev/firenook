@@ -3,6 +3,7 @@
 //! proofs, and the agent/tenant configuration split.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
@@ -669,22 +670,54 @@ impl ProjectState {
     }
 
     /// `queryUsers`: every account after `start_token`, sorted by localId.
+    ///
+    /// The map is keyed by `localId`, so its order is already the sort; the
+    /// accounts are cloned once, in order, and never re-sorted.
     #[must_use]
     pub fn query_users(&self, order: QueryOrder, start_token: Option<&str>) -> Vec<UserRecord> {
-        let mut users: Vec<UserRecord> = self
-            .users
-            .values()
-            .filter(|user| {
-                start_token
-                    .is_none_or(|token| str_field(user, "localId").unwrap_or_default() > token)
-            })
-            .cloned()
-            .collect();
-        users.sort_by(|a, b| str_field(a, "localId").cmp(&str_field(b, "localId")));
-        if order == QueryOrder::Desc {
-            users.reverse();
+        let after = self.users_after(start_token);
+        match order {
+            QueryOrder::Asc => after.cloned().collect(),
+            QueryOrder::Desc => after.rev().cloned().collect(),
         }
-        users
+    }
+
+    /// One `batchGet` page: at most `max_results` accounts after
+    /// `start_token` in localId order (every account when `None`), and the
+    /// `nextPageToken` the official emulator answers with — the last
+    /// account's id whenever the page is full, even when nothing follows it.
+    /// A ranged read of the ordered map: only the page's accounts are cloned.
+    #[must_use]
+    pub fn query_users_page(
+        &self,
+        start_token: Option<&str>,
+        max_results: Option<usize>,
+    ) -> (Vec<UserRecord>, Option<String>) {
+        let after = self.users_after(start_token);
+        let Some(max_results) = max_results else {
+            return (after.cloned().collect(), None);
+        };
+        let users: Vec<UserRecord> = after.take(max_results).cloned().collect();
+        let next_page_token = if max_results > 0 && users.len() == max_results {
+            users
+                .last()
+                .and_then(|user| str_field(user, "localId"))
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        (users, next_page_token)
+    }
+
+    /// The accounts whose localId sorts after `start_token`, in order.
+    fn users_after<'a>(
+        &'a self,
+        start_token: Option<&'a str>,
+    ) -> impl DoubleEndedIterator<Item = &'a UserRecord> {
+        let lower = start_token.map_or(Bound::Unbounded, Bound::Excluded);
+        self.users
+            .range::<str, _>((lower, Bound::Unbounded))
+            .map(|(_, user)| user)
     }
 }
 

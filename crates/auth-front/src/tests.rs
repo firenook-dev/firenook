@@ -913,3 +913,189 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
     );
     let _ = std::fs::remove_dir_all(&directory);
 }
+
+// ------------------------------------------------------------------
+// `batchGet` and `queryAccounts` read the ordered account map by range
+// instead of cloning and sorting every account per call; their answers are
+// those of the clone-and-sort algorithm they replace.
+
+/// A small deterministic generator (xorshift64*), so a failing state can be
+/// reproduced from its seed.
+pub(crate) struct Lcg(u64);
+
+impl Lcg {
+    pub(crate) fn new(seed: u64) -> Self {
+        Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
+    }
+
+    pub(crate) fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    pub(crate) fn below(&mut self, bound: usize) -> usize {
+        usize::try_from(self.next() % u64::try_from(bound.max(1)).unwrap_or(1)).unwrap_or(0)
+    }
+
+    pub(crate) fn chance(&mut self, percent: usize) -> bool {
+        self.below(100) < percent
+    }
+
+    pub(crate) fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below(items.len())]
+    }
+}
+
+/// The `queryUsers` the ranged read replaced: every account cloned,
+/// filtered, sorted by its `localId` field.
+fn query_users_by_cloning(
+    project: &state::ProjectState,
+    order: state::QueryOrder,
+    start_token: Option<&str>,
+) -> Vec<UserRecord> {
+    let mut users: Vec<UserRecord> = project
+        .users
+        .values()
+        .filter(|user| {
+            start_token.is_none_or(|token| str_field(user, "localId").unwrap_or_default() > token)
+        })
+        .cloned()
+        .collect();
+    users.sort_by(|a, b| str_field(a, "localId").cmp(&str_field(b, "localId")));
+    if order == state::QueryOrder::Desc {
+        users.reverse();
+    }
+    users
+}
+
+/// The page `batchGet` cut from that list before.
+fn batch_get_by_cloning(
+    project: &state::ProjectState,
+    start_token: Option<&str>,
+    max_results: i64,
+) -> (Vec<UserRecord>, Option<String>) {
+    let mut users = query_users_by_cloning(project, state::QueryOrder::Asc, start_token);
+    let mut next_page_token = None;
+    if max_results >= 0 && i64::try_from(users.len()).unwrap_or(i64::MAX) >= max_results {
+        users.truncate(usize::try_from(max_results).unwrap_or(0));
+        if let Some(last) = users.last() {
+            next_page_token = str_field(last, "localId").map(str::to_owned);
+        }
+    }
+    (users, next_page_token)
+}
+
+/// Local ids with shared prefixes, mixed case, digits and non-ASCII
+/// characters, so the order is exercised where byte and character order
+/// could disagree.
+fn random_local_id(random: &mut Lcg) -> String {
+    const PARTS: &[&str] = &[
+        "a", "b", "A", "z", "Z", "0", "9", "_", "-", "é", "ß", "🔥", "user", "user1", "u",
+        "sample-",
+    ];
+    if random.chance(40) {
+        return crate::util::random_id(28);
+    }
+    let parts = 1 + random.below(4);
+    (0..parts).map(|_| *random.pick(PARTS)).collect()
+}
+
+#[test]
+fn ranged_batch_get_pages_equal_the_clone_and_sort_answer() {
+    let mut random = Lcg::new(17);
+    for state_index in 0..200 {
+        let mut project = state::ProjectState::default();
+        let users = random.below(40);
+        let mut ids = Vec::new();
+        for _ in 0..users {
+            let local_id = random_local_id(&mut random);
+            let mut props = UserRecord::new();
+            if random.chance(50) {
+                props.insert(
+                    "displayName".to_owned(),
+                    json!(format!("User {}", random.below(1000))),
+                );
+            }
+            if project
+                .create_user_with_local_id(&local_id, &props)
+                .expect("create")
+                .is_some()
+            {
+                ids.push(local_id);
+            }
+        }
+        if random.chance(30) && !ids.is_empty() {
+            let victim = ids.swap_remove(random.below(ids.len()));
+            let record = project.get_user_by_local_id(&victim).expect("victim");
+            project.delete_user(&record);
+        }
+        let mut tokens: Vec<Option<String>> = vec![None, Some(String::new())];
+        tokens.extend(ids.iter().take(4).cloned().map(Some));
+        tokens.push(Some(random_local_id(&mut random)));
+        let length = i64::try_from(ids.len()).unwrap_or(0);
+        for token in &tokens {
+            for max_results in [-1, 1, 2, 3, 20, 1000, length, length + 1] {
+                let expected = batch_get_by_cloning(&project, token.as_deref(), max_results);
+                let actual =
+                    project.query_users_page(token.as_deref(), usize::try_from(max_results).ok());
+                assert_eq!(
+                    actual, expected,
+                    "state {state_index}, token {token:?}, maxResults {max_results}"
+                );
+            }
+            for order in [state::QueryOrder::Asc, state::QueryOrder::Desc] {
+                assert_eq!(
+                    project.query_users(order, token.as_deref()),
+                    query_users_by_cloning(&project, order, token.as_deref()),
+                    "state {state_index}, token {token:?}, {order:?}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn batch_get_pages_through_every_account_once() {
+    let runtime = test_runtime();
+    let mut created = Vec::new();
+    for index in 0..7 {
+        let (status, body) = call(
+            &runtime,
+            Method::POST,
+            "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts",
+            &json!({ "localId": format!("user-{index}"), "email": format!("user{index}@example.test") }),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        created.push(format!("user-{index}"));
+    }
+    let mut seen = Vec::new();
+    let mut token: Option<String> = None;
+    let mut pages = 0;
+    loop {
+        let uri = match &token {
+            None => "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchGet?maxResults=3".to_owned(),
+            Some(token) => format!(
+                "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchGet?maxResults=3&nextPageToken={token}"
+            ),
+        };
+        let (status, body) = call(&runtime, Method::GET, &uri, &JsonValue::Null).await;
+        assert_eq!(status, 200, "{body}");
+        pages += 1;
+        for user in body["users"].as_array().into_iter().flatten() {
+            seen.push(user["localId"].as_str().expect("localId").to_owned());
+        }
+        match body["nextPageToken"].as_str() {
+            Some(next) => token = Some(next.to_owned()),
+            None => break,
+        }
+    }
+    // 7 accounts in pages of 3: 3, 3, 1 — the third page is not full, so it
+    // ends the listing.
+    assert_eq!(pages, 3);
+    assert_eq!(seen, created);
+}

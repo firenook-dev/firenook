@@ -415,25 +415,21 @@ pub fn batch_get(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
             .min(1000);
         let start = ctx.query_str("nextPageToken").map(str::to_owned);
         let query_tenant = ctx.query_str("tenantId").map(str::to_owned);
-        let mut users = if let Some(tenant) = query_tenant.filter(|_| !scope.is_tenant()) {
-            let project_id = scope.project_id.clone();
-            let mut tenant_scope =
-                crate::state::Scope::new_in(scope.agent(), &project_id, Some(&tenant));
-            tenant_scope
-                .project()
-                .query_users(QueryOrder::Asc, start.as_deref())
-        } else {
-            scope
-                .project()
-                .query_users(QueryOrder::Asc, start.as_deref())
-        };
-        let mut next_page_token = None;
-        if max_results >= 0 && i64::try_from(users.len()).unwrap_or(i64::MAX) >= max_results {
-            users.truncate(usize::try_from(max_results).unwrap_or(0));
-            if let Some(last) = users.last() {
-                next_page_token = str_field(last, "localId").map(str::to_owned);
-            }
-        }
+        // A negative maxResults is no limit at all (`maxResults >= 0 && …`).
+        let max_results = usize::try_from(max_results).ok();
+        let (users, next_page_token) =
+            if let Some(tenant) = query_tenant.filter(|_| !scope.is_tenant()) {
+                let project_id = scope.project_id.clone();
+                let mut tenant_scope =
+                    crate::state::Scope::new_in(scope.agent(), &project_id, Some(&tenant));
+                tenant_scope
+                    .project()
+                    .query_users_page(start.as_deref(), max_results)
+            } else {
+                scope
+                    .project()
+                    .query_users_page(start.as_deref(), max_results)
+            };
         let mut response = json!({
             "kind": "identitytoolkit#DownloadAccountResponse",
             "users": users.iter().map(user_response).collect::<Vec<_>>(),
