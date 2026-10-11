@@ -1050,6 +1050,78 @@ mod tests {
     }
 
     #[test]
+    fn the_frozen_complex_ruleset_reads_cleanly() {
+        let source = include_str!("../../../conformance/fixtures/rules-v2/complex-firestore.rules");
+        // A non-ASCII line in front moves every UTF-16 offset off its byte
+        // offset, so a byte/unit mix-up anywhere shows as a bad slice.
+        let source = format!("// Überblick 🔥\n{source}");
+        let ruleset = compile(&source);
+        let outline = ruleset.outline();
+        assert!(outline.matches.len() >= 70, "{}", outline.matches.len());
+        for block in &outline.matches {
+            assert!(
+                utf16_slice(&source, block.header.from, block.header.to).starts_with("match /"),
+                "{block:?}"
+            );
+            for allow in &block.allows {
+                let statement = utf16_slice(&source, allow.statement.from, allow.statement.to);
+                assert!(statement.starts_with("allow "), "{statement}");
+                if allow.condition_range.from < allow.condition_range.to {
+                    assert_eq!(
+                        utf16_slice(
+                            &source,
+                            allow.condition_range.from,
+                            allow.condition_range.to
+                        ),
+                        allow.condition
+                    );
+                }
+            }
+        }
+        for lint in ruleset.lints() {
+            assert!(lint.from <= lint.to && lint.code.is_some(), "{lint:?}");
+        }
+        // Every block shaped `/collection/{id}/…/collection/{id}` governs
+        // the collection pattern its own path spells.
+        let shaped = outline
+            .matches
+            .iter()
+            .filter_map(|block| {
+                let segments = block
+                    .path
+                    .trim_start_matches('/')
+                    .split('/')
+                    .collect::<Vec<_>>();
+                let alternating = segments.len() % 2 == 0
+                    && segments.iter().enumerate().all(|(index, segment)| {
+                        let wildcard = segment.starts_with('{') && !segment.contains("=**");
+                        (index % 2 == 1) == wildcard
+                    });
+                alternating.then(|| {
+                    let collections = segments.iter().step_by(2).copied().collect::<Vec<_>>();
+                    (block.path.clone(), collections.join("/*/"))
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(shaped.len() >= 20, "{}", shaped.len());
+        let patterns = shaped
+            .iter()
+            .map(|(_, pattern)| pattern.as_str())
+            .collect::<Vec<_>>();
+        let map = ruleset.governing("(default)", &patterns);
+        for ((path, pattern), collection) in shaped.iter().zip(&map.collections) {
+            assert_eq!(&collection.pattern, pattern);
+            assert!(
+                collection
+                    .governed_by
+                    .iter()
+                    .any(|block| &block.path == path),
+                "{pattern} is not governed by {path}: {collection:?}"
+            );
+        }
+    }
+
+    #[test]
     fn the_map_agrees_with_evaluation_about_the_database_segment() {
         let ruleset = compile(
             "rules_version = '2';\nservice cloud.firestore {\n  match /databases/analytics/documents/events/{id} {\n    allow read: if true;\n  }\n}\n",
