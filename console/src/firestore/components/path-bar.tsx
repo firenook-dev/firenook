@@ -92,7 +92,13 @@ export function PathBar() {
       // painting over the status group when the row runs out of room. It has
       // to lift while the completions are open, because they hang below the
       // row from inside it and a clipped popup is an invisible one.
-      className={`flex h-full min-w-0 flex-1 items-center gap-1 ${
+      //
+      // And it reaches a step past what it holds at both ends (`-mx-1 px-1`,
+      // so nothing moves): the scope picker leads the row and the path's
+      // copy button ends it, and their frames and focus rings are `ring`s,
+      // drawn outside the button. With the clip flush to them, "All
+      // aiGatewayJobs" lost the left side of its frame.
+      className={`-mx-1 flex h-full min-w-0 flex-1 items-center gap-1 px-1 ${
         editing === null ? 'overflow-hidden' : ''
       }`}
       data-testid="path-bar"

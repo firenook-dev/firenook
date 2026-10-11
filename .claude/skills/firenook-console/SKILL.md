@@ -433,6 +433,16 @@ on a white row) — a hover that changed nothing.
   2 px `focus-visible` ring. `secondary` for a mode that is on (Explain,
   View as, the scope) stays the rule; inside that frame, no second box —
   the scope trigger's id is plain mono, the chip is the menu's.
+- **A ring is drawn outside the box, so no clip may sit flush against a
+  ringed control.** The path bar clips (so its never-shrinking controls
+  cannot paint over the status group), and its first control is the framed
+  scope picker: "All aiGatewayJobs" lost the left of its frame. The clip
+  now reaches a step past its contents at both ends (`-mx-1 px-1`, nothing
+  moves). A control that must touch a clip draws its focus ring inside
+  (`focus-visible:ring-inset`), as the column resize strips do — they run
+  the header's full height at the top of the grid's scroller. The journey
+  "no frame or focus ring is cut by the box that clips it" (`cutRings`)
+  checks every outer ring at rest and every focus ring under a Tab walk.
 - **An icon says what happens, and one icon means one thing.** The
   open-row button is `SidebarSimpleIcon mirrored` — a window with a pane on
   its right, the panel it opens — and `weight="fill"` while its row is the

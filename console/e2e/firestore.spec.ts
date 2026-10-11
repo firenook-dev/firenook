@@ -1394,6 +1394,61 @@ const ringRoom = (field: Locator) =>
     return room
   })
 
+/**
+ * Every outer ring on the page — a frame or a focus ring, both a
+ * `box-shadow` spread outside the box — that an ancestor's clip cuts, or
+ * only the focused element's. A control partly scrolled out of a scroller
+ * is content, not chrome, and is passed over.
+ */
+const cutRings = (page: import('@playwright/test').Page, focusedOnly = false) =>
+  page.locator('body').evaluate((body, only) => {
+    const doc = body.ownerDocument
+    const view = doc.defaultView!
+    const cut: string[] = []
+    const candidates = only ? [doc.activeElement] : [...doc.querySelectorAll('body *')]
+    for (const el of candidates) {
+      if (!el) continue
+      const style = view.getComputedStyle(el)
+      if (style.visibility === 'hidden' || style.display === 'none') continue
+      let spread = 0
+      for (const part of style.boxShadow.split(/,(?![^(]*\))/)) {
+        if (part.includes('inset')) continue
+        const ring = /^(.*\))\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px$/.exec(
+          part.trim(),
+        )
+        if (!ring || /rgba\(0, 0, 0, 0\)|\/ 0\)$/.test(ring[1] ?? '')) continue
+        if (Number(ring[2]) === 0 && Number(ring[3]) === 0)
+          spread = Math.max(spread, Number(ring[5]))
+      }
+      const box = el.getBoundingClientRect()
+      if (spread === 0 || box.width === 0 || box.height === 0) continue
+      for (let up = el.parentElement; up; up = up.parentElement) {
+        const clip = view.getComputedStyle(up)
+        if (clip.overflowX === 'visible' && clip.overflowY === 'visible') continue
+        const bounds = up.getBoundingClientRect()
+        const left = bounds.left + Number.parseFloat(clip.borderLeftWidth)
+        const top = bounds.top + Number.parseFloat(clip.borderTopWidth)
+        // A scroller clips at its padding edge, inside its scrollbar too.
+        const right = left + up.clientWidth
+        const bottom = top + up.clientHeight
+        const room = {
+          left: box.left - left,
+          right: right - box.right,
+          top: box.top - top,
+          bottom: bottom - box.bottom,
+        }
+        if (Object.values(room).some((value) => value < -0.5)) break
+        const short = Object.entries(room).filter(([, value]) => value < spread - 0.05)
+        if (short.length > 0) {
+          const name = el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.tagName
+          cut.push(`${name}: ${short.map(([side]) => side).join(', ')}`)
+          break
+        }
+      }
+    }
+    return cut
+  }, focusedOnly)
+
 /** A download's bytes, as text. */
 async function readDownload(download: { path(): Promise<string> }): Promise<string> {
   const { readFile } = await import('node:fs/promises')
@@ -3477,6 +3532,41 @@ test('a map edited in the grid has the inspector JSON view, and all of the map',
   expect(saved.usage).toEqual({
     mapValue: { fields: { input: { integerValue: '12' }, output: { integerValue: '40' } } },
   })
+})
+
+test('no frame or focus ring is cut by the box that clips it', async ({ page }) => {
+  // A frame and a focus ring are drawn outside the box, so a control flush
+  // against a clipping edge loses that side of it. The scope picker leads a
+  // clipped row and lost the left of its frame as "All aiGatewayJobs"; the
+  // path's copy button and every column's resize handle lost an edge of
+  // their focus rings the same way.
+  await page.setViewportSize({ width: 1400, height: 900 })
+  const walk = async (steps: number) => {
+    const cut = new Set<string>()
+    for (let step = 0; step < steps; step++) {
+      await page.keyboard.press('Tab')
+      for (const ring of await cutRings(page, true)) cut.add(ring)
+    }
+    return [...cut]
+  }
+
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  expect(await cutRings(page)).toEqual([])
+  expect(await walk(90)).toEqual([])
+
+  await page.goto(`${origin()}/console/firestore?path=users&group=true`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  expect(await cutRings(page)).toEqual([])
+  await page.keyboard.press('t')
+  expect(await walk(6)).toEqual([])
+  await page.keyboard.press('t')
+
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await page.getByTestId('open-row').first().click({ force: true })
+  await expect(page.getByTestId('inspector')).toBeVisible()
+  expect(await cutRings(page)).toEqual([])
+  expect(await walk(60)).toEqual([])
 })
 
 test('the keyboard walks the cells, edits the one it is on, and copies it', async ({ page }) => {

@@ -44,7 +44,10 @@ export function ColumnResizer({
           type="button"
           aria-label={`Resize ${label}`}
           data-testid={testId}
-          className="group/edge absolute top-0 right-0 z-[3] flex h-full w-2.5 cursor-col-resize touch-none items-center justify-center outline-none select-none focus-visible:ring-2 focus-visible:ring-kumo-focus"
+          // The focus ring inside the strip: the strip is the header's full
+          // height, at the top of the grid's scroller, and a ring drawn
+          // outside it lost its top edge to the scroller's clip.
+          className="group/edge absolute top-0 right-0 z-[3] flex h-full w-2.5 cursor-col-resize touch-none items-center justify-center outline-none select-none focus-visible:ring-2 focus-visible:ring-kumo-focus focus-visible:ring-inset"
           // Not the header's menu: the press is the drag's.
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => {
