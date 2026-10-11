@@ -33,10 +33,13 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
+mod console;
 mod download;
 mod listing;
 mod metadata;
 mod rules;
+mod staging;
+pub use console::StorageConsoleApi;
 use download::file_response;
 #[cfg(test)]
 use listing::ObjectListPage;
@@ -46,6 +49,8 @@ pub use rules::{
     RulesSource,
 };
 use rules::{NativeRules, Operation, Verdict};
+pub use staging::InFlight;
+use staging::{StagedFile, StagingGauge, staging_path};
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]
@@ -58,6 +63,8 @@ mod pagination_tests;
 mod persistence_tests;
 #[cfg(test)]
 mod rules_replay_tests;
+#[cfg(test)]
+mod staging_tests;
 
 /// Storage service construction settings.
 #[derive(Debug, Clone)]
@@ -105,6 +112,16 @@ impl StorageRuntime {
             .await
             .map_err(|error| StorageError(format!("failed to create upload root: {error}")))?;
         let (metadata, data) = metadata::MetadataStore::open(&config.data_dir, config.durability)?;
+        // Nothing is uploading yet, so a staged file no session names is
+        // what a crash mid-upload left behind.
+        let (orphans, orphan_bytes) = staging::remove_orphans(&config.data_dir, &data);
+        if orphans > 0 {
+            eprintln!(
+                "firenook storage: removed {orphans} staged upload {} left by an earlier run ({})",
+                if orphans == 1 { "file" } else { "files" },
+                staging::format_bytes(orphan_bytes)
+            );
+        }
         let rules = config.rules.as_ref().map(NativeRules::start).transpose()?;
         let state = StorageState {
             started_at: now_rfc3339(),
@@ -115,6 +132,7 @@ impl StorageRuntime {
             rules,
             queue,
             background,
+            staging: Arc::new(StagingGauge::default()),
         };
         let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
@@ -161,6 +179,13 @@ impl StorageRuntime {
     /// Cloneable Axum application.
     pub fn application(&self) -> Router {
         self.application.clone()
+    }
+
+    /// The handle the console's routes, topics and search call: a cheap
+    /// clone of this runtime's state.
+    #[must_use]
+    pub fn console(&self) -> StorageConsoleApi {
+        StorageConsoleApi::new(self.state.clone())
     }
 
     /// Validates committed blob presence/size before publishing native metadata.
@@ -270,6 +295,8 @@ struct StorageState {
     rules: Option<NativeRules>,
     queue: DispatchQueue,
     background: TriggerRegistry,
+    /// Bytes staged by uploads in progress, per bucket.
+    staging: Arc<StagingGauge>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -566,7 +593,7 @@ async fn v0_upload(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| bad_request("Missing object name"))?
         .clone();
-    let upload = firebase_upload(&state, &headers, body).await?;
+    let upload = firebase_upload(&state, &bucket, &headers, body).await?;
     let object = commit_staging(
         &state,
         CommitSpec {
@@ -696,6 +723,7 @@ async fn firebase_resumable(
         session.received = session.received.saturating_add(
             append_body(
                 state,
+                bucket,
                 state.config.data_dir.join(&session.staging_file),
                 body,
             )
@@ -726,7 +754,10 @@ async fn firebase_resumable(
             authorization: session.authorization.as_deref(),
             firebase: true,
         },
-        summarize_file(state.config.data_dir.join(&session.staging_file)).await?,
+        summarize_file(StagedFile::session(
+            state.config.data_dir.join(&session.staging_file),
+        ))
+        .await?,
     )
     .await
     {
@@ -942,10 +973,7 @@ async fn gcs_multipart_upload(
         .map(String::as_str)
         .or_else(|| multipart.metadata.get("name").and_then(JsonValue::as_str))
         .ok_or_else(|| bad_request("Missing object name"))?;
-    let path = staging_path(state, "upload");
-    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
-    file.write_all(multipart.data).await.map_err(io_error)?;
-    settle_written_file(state, &mut file, &path).await?;
+    let staged = write_staged(state, bucket, multipart.data).await?;
     let object = commit_staging(
         state,
         CommitSpec {
@@ -962,7 +990,7 @@ async fn gcs_multipart_upload(
             authorization: authorization_header(headers),
             firebase: false,
         },
-        summarize_file(path).await?,
+        summarize_file(staged).await?,
     )
     .await?;
     Ok(Json(gcs_metadata(state, &object)).into_response())
@@ -1055,7 +1083,7 @@ async fn gcs_media_upload(
         .get("name")
         .filter(|value| !value.is_empty())
         .ok_or_else(|| bad_request("Missing object name"))?;
-    let uploaded = stream_to_staging(state, body).await?;
+    let uploaded = stream_to_staging(state, bucket, body).await?;
     let object = commit_staging(
         state,
         CommitSpec {
@@ -1107,6 +1135,7 @@ async fn gcs_resumable_chunk(
     }
     let appended = append_body(
         &state,
+        &bucket,
         state.config.data_dir.join(&session.staging_file),
         body,
     )
@@ -1122,12 +1151,17 @@ async fn gcs_resumable_chunk(
         let range = format!("bytes=0-{}", session.received.saturating_sub(1));
         return Ok((StatusCode::PERMANENT_REDIRECT, [(header::RANGE, range)]).into_response());
     }
-    let uploaded = summarize_file(state.config.data_dir.join(&session.staging_file)).await?;
+    let mut uploaded = summarize_file(StagedFile::session(
+        state.config.data_dir.join(&session.staging_file),
+    ))
+    .await?;
     {
         let mut data = lock(&state.inner);
         data.uploads.remove(&id);
         persist_change(&state, &data, metadata::Change::Upload(&id))?;
     }
+    // No session names the bytes now: they go unless the commit takes them.
+    uploaded.staged = uploaded.staged.orphaned();
     let object = commit_staging(
         &state,
         CommitSpec {
@@ -1285,12 +1319,16 @@ async fn gcs_alias_copy(
     let destination_bucket = destination.0;
     let destination_name = destination.1;
     let source_path = state.config.data_dir.join(&source.data_file);
-    let temporary = staging_path(&state, "copy");
-    tokio::fs::copy(source_path, &temporary)
+    let mut staged = StagedFile::new(
+        staging_path(&state.config, "copy"),
+        state.staging.bucket(&destination_bucket),
+    );
+    tokio::fs::copy(source_path, staged.path())
         .await
         .map_err(io_error)?;
+    staged.add(source.size);
     let uploaded = Uploaded {
-        path: temporary,
+        staged,
         size: source.size,
         md5_hash: source.md5_hash.clone(),
         crc32c: source.crc32c,
@@ -1463,7 +1501,8 @@ async fn delete_object(
 }
 
 struct Uploaded {
-    path: PathBuf,
+    /// The staged bytes, removed if the upload never commits.
+    staged: StagedFile,
     size: u64,
     md5_hash: String,
     crc32c: u32,
@@ -1478,6 +1517,7 @@ struct FirebaseUpload {
 
 async fn firebase_upload(
     state: &StorageState,
+    bucket: &str,
     headers: &HeaderMap,
     body: Body,
 ) -> Result<FirebaseUpload, StorageApiError> {
@@ -1487,7 +1527,7 @@ async fn firebase_upload(
         // ignores the request Content-Type (storage-rules-v1
         // request-resource-create-media content-type-defaulted).
         return Ok(FirebaseUpload {
-            uploaded: stream_to_staging(state, body).await?,
+            uploaded: stream_to_staging(state, bucket, body).await?,
             content_type: "application/octet-stream".to_owned(),
             metadata: BTreeMap::new(),
             object_metadata: JsonValue::Null,
@@ -1495,10 +1535,7 @@ async fn firebase_upload(
     };
     let bytes = collect_limited(body, 64 * 1024 * 1024).await?;
     let multipart = parse_related_multipart(&bytes, &boundary)?;
-    let path = staging_path(state, "upload");
-    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
-    file.write_all(multipart.data).await.map_err(io_error)?;
-    settle_written_file(state, &mut file, &path).await?;
+    let staged = write_staged(state, bucket, multipart.data).await?;
     let content_type = multipart
         .metadata
         .get("contentType")
@@ -1507,7 +1544,7 @@ async fn firebase_upload(
         .unwrap_or("application/octet-stream")
         .to_owned();
     Ok(FirebaseUpload {
-        uploaded: summarize_file(path).await?,
+        uploaded: summarize_file(staged).await?,
         content_type,
         metadata: string_metadata(multipart.metadata.get("metadata")),
         object_metadata: multipart.metadata,
@@ -1590,9 +1627,21 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .flatten()
 }
 
-async fn stream_to_staging(state: &StorageState, body: Body) -> Result<Uploaded, StorageApiError> {
-    let path = staging_path(state, "upload");
-    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
+/// Streams a request body to a fresh staged file of `bucket`. A body that
+/// fails midway (the client aborted) leaves nothing behind: the staged file
+/// is dropped with the error.
+async fn stream_to_staging(
+    state: &StorageState,
+    bucket: &str,
+    body: Body,
+) -> Result<Uploaded, StorageApiError> {
+    let mut staged = StagedFile::new(
+        staging_path(&state.config, "upload"),
+        state.staging.bucket(bucket),
+    );
+    let mut file = tokio::fs::File::create(staged.path())
+        .await
+        .map_err(io_error)?;
     let mut stream = body.into_data_stream();
     let mut md5 = Md5::new();
     let mut crc = 0;
@@ -1602,19 +1651,45 @@ async fn stream_to_staging(state: &StorageState, body: Body) -> Result<Uploaded,
         file.write_all(&chunk).await.map_err(io_error)?;
         md5.update(&chunk);
         crc = crc32c::crc32c_append(crc, &chunk);
-        size = size.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+        let length = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+        size = size.saturating_add(length);
+        staged.add(length);
     }
+    let path = staged.path().to_path_buf();
     settle_written_file(state, &mut file, &path).await?;
     Ok(Uploaded {
-        path,
+        staged,
         size,
         md5_hash: BASE64.encode(md5.finalize()),
         crc32c: crc,
     })
 }
 
+/// Writes bytes already in memory (a multipart body) to a fresh staged file.
+async fn write_staged(
+    state: &StorageState,
+    bucket: &str,
+    bytes: &[u8],
+) -> Result<StagedFile, StorageApiError> {
+    let mut staged = StagedFile::new(
+        staging_path(&state.config, "upload"),
+        state.staging.bucket(bucket),
+    );
+    let path = staged.path().to_path_buf();
+    let mut file = tokio::fs::File::create(&path).await.map_err(io_error)?;
+    file.write_all(bytes).await.map_err(io_error)?;
+    staged.add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+    settle_written_file(state, &mut file, &path).await?;
+    Ok(staged)
+}
+
+/// Appends one resumable chunk to the session's staged file. A chunk that
+/// fails midway is cut off again, so the file keeps the length the session
+/// reports and a retry appends at that offset; the session's bytes stay, as
+/// the upload may resume.
 async fn append_body(
     state: &StorageState,
+    bucket: &str,
     path: PathBuf,
     body: Body,
 ) -> Result<u64, StorageApiError> {
@@ -1623,19 +1698,38 @@ async fn append_body(
         .open(&path)
         .await
         .map_err(io_error)?;
+    let before = file.metadata().await.map_err(io_error)?.len();
+    let mut counted = state.staging.chunk(bucket);
     let mut stream = body.into_data_stream();
     let mut size = 0_u64;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| bad_request(format!("Invalid upload body: {error}")))?;
-        file.write_all(&chunk).await.map_err(io_error)?;
-        size = size.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+    let appended: Result<(), StorageApiError> = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk =
+                chunk.map_err(|error| bad_request(format!("Invalid upload body: {error}")))?;
+            file.write_all(&chunk).await.map_err(io_error)?;
+            let length = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+            size = size.saturating_add(length);
+            counted.add(length);
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(error) = appended {
+        // Best effort: if even the truncation fails, the session's
+        // `received` still names the offset a retry must start from.
+        let _ = file.set_len(before).await;
+        return Err(error);
     }
     settle_written_file(state, &mut file, &path).await?;
     Ok(size)
 }
 
-async fn summarize_file(path: PathBuf) -> Result<Uploaded, StorageApiError> {
-    let file = tokio::fs::File::open(&path).await.map_err(io_error)?;
+/// Hashes a staged file written elsewhere (a multipart body, a resumable
+/// session's chunks).
+async fn summarize_file(staged: StagedFile) -> Result<Uploaded, StorageApiError> {
+    let file = tokio::fs::File::open(staged.path())
+        .await
+        .map_err(io_error)?;
     let mut reader = BufReader::new(file);
     let mut md5 = Md5::new();
     let mut crc = 0;
@@ -1654,7 +1748,7 @@ async fn summarize_file(path: PathBuf) -> Result<Uploaded, StorageApiError> {
         size = size.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
     }
     Ok(Uploaded {
-        path,
+        staged,
         size,
         md5_hash: BASE64.encode(md5.finalize()),
         crc32c: crc,
@@ -1774,7 +1868,7 @@ async fn commit_staging(
             spec.authorization,
         )
     {
-        let _ = tokio::fs::remove_file(uploaded.path).await;
+        uploaded.staged.discard();
         return Err(error.upload_final());
     }
     // The official emulator dispatches finalize before defaulting the
@@ -1785,9 +1879,10 @@ async fn commit_staging(
         object.content_disposition = Some("inline".to_owned());
     }
     let final_path = state.config.data_dir.join(&data_file);
-    tokio::fs::rename(&uploaded.path, &final_path)
+    tokio::fs::rename(uploaded.staged.path(), &final_path)
         .await
         .map_err(io_error)?;
+    uploaded.staged.committed();
     // The bytes were recorded under the staging path; sync the published one.
     state.metadata.note_unsynced_file(final_path.clone());
     {
@@ -2424,20 +2519,6 @@ fn stable_id(parts: &[&str]) -> String {
         digest.update([0]);
     }
     URL_SAFE_NO_PAD.encode(digest.finalize())
-}
-
-fn staging_path(state: &StorageState, kind: &str) -> PathBuf {
-    let id = stable_id(&[
-        &state.config.project,
-        kind,
-        &std::process::id().to_string(),
-        &OffsetDateTime::now_utc().unix_timestamp_nanos().to_string(),
-    ]);
-    state
-        .config
-        .data_dir
-        .join("uploads")
-        .join(format!("{id}.part"))
 }
 
 fn validate_config(config: &StorageConfig) -> Result<(), StorageError> {
