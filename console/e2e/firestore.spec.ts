@@ -1705,13 +1705,15 @@ test('an integer and a double are told apart, and stay that way', async ({ page 
   expect(after.fields.count).toEqual({ integerValue: '4' })
 
   // Duplicating writes every field, which is where the narrowing used to
-  // happen without anyone touching the number at all. The save's toast
-  // sits over the inspector's footer for a few seconds, and a pointer
-  // resting on a toast keeps it open: the pointer waits elsewhere until it
-  // has gone, as a person's would, rather than racing its entrance.
-  await page.mouse.move(0, 0)
-  await expect(page.getByText('Document saved')).toBeHidden({ timeout: 15_000 })
-  await inspector.getByTestId('duplicate-document').click()
+  // happen without anyone touching the number at all. It is pressed at
+  // once, the way a person goes on after Save: the save's toast floats
+  // above the inspector's footer. It used to come up on the footer, under
+  // the pointer that had just pressed Save, and a resting pointer keeps a
+  // toast open, so Duplicate stayed covered until the hand moved.
+  const toasts = await page.getByRole('region', { name: 'Notifications' }).boundingBox()
+  const footer = await inspector.locator('footer').last().boundingBox()
+  expect(toasts!.y + toasts!.height).toBeLessThanOrEqual(footer!.y)
+  await inspector.getByTestId('duplicate-document').click({ timeout: 2_000 })
   await page.getByTestId('create-submit').click()
   await expect(page.getByText('Document added')).toBeVisible()
   const copy = new URL(page.url()).searchParams.get('doc') ?? ''

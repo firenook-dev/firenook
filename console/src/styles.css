@@ -85,3 +85,15 @@ body {
     animation: copied-in 200ms ease-out;
   }
 }
+
+/* Toasts float above the bottom band of the page instead of on it. Kumo's
+   viewport sits 2rem from the corner, which is on the inspector's footer
+   (Duplicate, Delete, Save) and the table's footer: a "Saved" toast came up
+   under the pointer that had just pressed Save, and a resting pointer keeps
+   a toast open, so the footer stayed covered for as long as the hand did
+   not move. 4.5rem clears the 3rem footer with the corner's own gap above
+   it. Unlayered, so it wins over the utility class without !important;
+   keyed on the region's name, which is all the viewport exposes. */
+[role='region'][aria-label='Notifications'] {
+  bottom: 4.5rem;
+}
