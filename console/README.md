@@ -35,7 +35,7 @@ npm run check --prefix console         # TypeScript
 npm run lint --prefix console          # oxlint
 npm run format:check --prefix console  # oxfmt
 npm run test --prefix console          # Vitest + Testing Library, compiled by the React compiler as the build is
-npm run budget --prefix console        # first-route gzip budget from the Vite manifest
+npm run budget --prefix console        # entry and landing-route gzip budgets from the Vite manifest
 npm run e2e:sdk --prefix console       # once: the offline Functions SDK the fixture codebase links
 npm run test:e2e --prefix console      # every Playwright project, each against real engines
 cargo test -p firenook-console-front   # Console API tests; also writes src/api/generated/*.ts

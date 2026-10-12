@@ -6,21 +6,8 @@
 import { Checkbox } from '@cloudflare/kumo'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import { serviceLabel } from '@/lib/services'
-import { SNAPSHOT_SERVICES } from '../snapshot'
 
-/** The snapshot services this engine runs, in the console's order. */
-export function snapshotServices(status: ConsoleStatus): string[] {
-  return SNAPSHOT_SERVICES.filter((name) =>
-    status.services.some((service) => service.name === name),
-  )
-}
-
-/** "Firestore, Authentication and Storage". */
-export function listedLabels(names: readonly string[]): string {
-  const labels = names.map(serviceLabel)
-  if (labels.length < 2) return labels.join('')
-  return `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`
-}
+export { listedLabels, snapshotServices } from '../snapshot'
 
 export function SnapshotTargets({
   status,

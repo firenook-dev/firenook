@@ -10,7 +10,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
 import { API_BASE, type ApiError } from '@/api/client'
+import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import { formatBytes, formatCount } from '@/lib/format'
+import { serviceLabel } from '@/lib/services'
 import { toast } from '@/lib/toasts'
 import { type SnapshotResult, downloadSnapshot, prepareSnapshot, useSnapshot } from './api'
 
@@ -41,6 +43,20 @@ export function snapshotSize(result: Pick<SnapshotResult, 'files' | 'bytes'>): s
 
 /** The services a snapshot covers on this engine, in the order the console names them. */
 export const SNAPSHOT_SERVICES = ['firestore', 'auth', 'storage'] as const
+
+/** The snapshot services this engine runs, in the console's order. */
+export function snapshotServices(status: ConsoleStatus): string[] {
+  return SNAPSHOT_SERVICES.filter((name) =>
+    status.services.some((service) => service.name === name),
+  )
+}
+
+/** "Firestore, Authentication and Storage". */
+export function listedLabels(names: readonly string[]): string {
+  const labels = names.map(serviceLabel)
+  if (labels.length < 2) return labels.join('')
+  return `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`
+}
 
 /**
  * The page's snapshot and what it can do: start one (every service this

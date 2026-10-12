@@ -46,7 +46,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
-use axum::http::{StatusCode, Uri, header};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{any, get};
 use firenook_suite_front::{EngineRelease, RingBudget, SuiteDirectory};
@@ -627,34 +627,82 @@ async fn unknown_api(uri: Uri) -> ApiError {
 
 /// Serves a built file, or the application shell for any path the client
 /// router owns. Hashed build assets are immutable; the shell never caches.
-async fn asset(uri: Uri) -> Response {
+async fn asset(uri: Uri, headers: HeaderMap) -> Response {
     let path = uri.path().trim_start_matches('/');
+    let gzip = accepts_gzip(&headers);
     if !path.is_empty()
         && !path.split('/').any(|segment| segment == "..")
         && let Some(file) = Assets::get(path)
     {
-        return serve(path, file);
+        return serve(path, file, gzip);
     }
     match Assets::get("index.html") {
-        Some(index) => serve("index.html", index),
+        Some(index) => serve("index.html", index, gzip),
         None => not_built(),
     }
 }
 
-fn serve(path: &str, file: EmbeddedFile) -> Response {
+/// Whether a request's `Accept-Encoding` takes gzip: named (or `*`) with a
+/// weight that is not zero.
+fn accepts_gzip(headers: &HeaderMap) -> bool {
+    headers
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|coding| {
+            let mut parts = coding.split(';');
+            let name = parts.next().unwrap_or_default().trim();
+            let refused = parts.any(|parameter| {
+                parameter
+                    .trim()
+                    .strip_prefix("q=")
+                    .and_then(|weight| weight.trim().parse::<f32>().ok())
+                    .is_some_and(|weight| weight <= 0.0)
+            });
+            (name.eq_ignore_ascii_case("gzip") || name == "*") && !refused
+        })
+}
+
+/// A built file, as the gzip copy the console build wrote beside it when
+/// the browser takes gzip (every script and stylesheet over 1 KB has one);
+/// `Vary` says the answer depends on the header either way.
+fn serve(path: &str, file: EmbeddedFile, gzip: bool) -> Response {
     let cache = if path.starts_with("assets/") {
         "public, max-age=31536000, immutable"
     } else {
         "no-cache"
     };
-    (
+    let content_type = file.metadata.mimetype().to_owned();
+    let compressed = Assets::get(&format!("{path}.gz"));
+    let varies = compressed.is_some();
+    if gzip && let Some(compressed) = compressed {
+        return (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, cache.to_owned()),
+                (header::CONTENT_ENCODING, "gzip".to_owned()),
+                (header::VARY, "accept-encoding".to_owned()),
+            ],
+            compressed.data,
+        )
+            .into_response();
+    }
+    let mut response = (
         [
-            (header::CONTENT_TYPE, file.metadata.mimetype().to_owned()),
+            (header::CONTENT_TYPE, content_type),
             (header::CACHE_CONTROL, cache.to_owned()),
         ],
         file.data,
     )
-        .into_response()
+        .into_response();
+    if varies {
+        response.headers_mut().insert(
+            header::VARY,
+            header::HeaderValue::from_static("accept-encoding"),
+        );
+    }
+    response
 }
 
 fn not_built() -> Response {
@@ -1142,5 +1190,63 @@ mod tests {
         );
         let (status, _, _) = call("/assets/../index.html").await;
         assert_eq!(status, StatusCode::OK, "traversal falls back to the shell");
+    }
+
+    #[tokio::test]
+    async fn a_browser_that_takes_gzip_gets_the_compressed_copy() {
+        let Some(script) = Assets::iter().find(|name| {
+            name.starts_with("assets/")
+                && name.ends_with(".js")
+                && Assets::get(&format!("{name}.gz")).is_some()
+        }) else {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "the console build writes a gzip copy beside every script over 1 KB"
+            );
+            return;
+        };
+        let raw = Assets::get(&script).expect("the script");
+        let compressed = Assets::get(&format!("{script}.gz")).expect("its gzip copy");
+        let send = |accept: Option<&'static str>| {
+            let mut request = Request::get(format!("/{script}"));
+            if let Some(accept) = accept {
+                request = request.header(header::ACCEPT_ENCODING, accept);
+            }
+            request.body(Body::empty()).expect("request")
+        };
+        for accept in ["gzip, deflate, br, zstd", "br;q=1.0, gzip;q=0.8", "*"] {
+            let response = console_router(directory_services())
+                .oneshot(send(Some(accept)))
+                .await
+                .expect("response");
+            let headers = response.headers().clone();
+            assert_eq!(headers[header::CONTENT_ENCODING], "gzip", "{accept}");
+            assert_eq!(headers[header::VARY], "accept-encoding");
+            assert!(
+                headers[header::CONTENT_TYPE]
+                    .to_str()
+                    .expect("utf8")
+                    .contains("javascript")
+            );
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            assert_eq!(body, compressed.data.as_ref(), "{accept}");
+        }
+        for accept in [None, Some("identity"), Some("gzip;q=0, br")] {
+            let response = console_router(directory_services())
+                .oneshot(send(accept))
+                .await
+                .expect("response");
+            assert!(
+                response.headers().get(header::CONTENT_ENCODING).is_none(),
+                "{accept:?}"
+            );
+            assert_eq!(response.headers()[header::VARY], "accept-encoding");
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            assert_eq!(body, raw.data.as_ref(), "{accept:?}");
+        }
     }
 }

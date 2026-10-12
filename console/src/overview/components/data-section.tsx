@@ -6,6 +6,7 @@
 // control that would start another waits, and says why.
 
 import { Button, Loader, Tooltip } from '@cloudflare/kumo'
+import { lazy, Suspense, useState } from 'react'
 import {
   ArrowCounterClockwiseIcon,
   DownloadSimpleIcon,
@@ -20,12 +21,36 @@ import { cancelJob } from '@/lib/jobs'
 import { SNAPSHOT_JOB } from '../api'
 import { holdsNothing, resettableSections } from '../model'
 import type { OverviewDialog } from '../search'
-import { type SnapshotView, snapshotSize, useSnapshotFlow } from '../snapshot'
-import { ResetDialog, type ResetTarget } from './reset-dialog'
-import { SaveSnapshotDialog } from './save-snapshot-dialog'
-import { SnapshotDialog } from './snapshot-dialog'
-import { listedLabels, snapshotServices } from './snapshot-targets'
+import {
+  type SnapshotView,
+  listedLabels,
+  snapshotServices,
+  snapshotSize,
+  useSnapshotFlow,
+} from '../snapshot'
+import type { ResetTarget } from './reset-dialog'
 import { LINK_CLASS } from './text-link'
+
+// The three dialogs load when one is first asked for: their checkboxes,
+// radios and confirmation are not part of the Overview's first paint, and
+// the landing route is the one every visit starts on. Once loaded, each
+// stays mounted and is opened and shut by `open`, as every dialog is.
+const SnapshotDialog = lazy(() =>
+  import('./snapshot-dialog').then((module) => ({ default: module.SnapshotDialog })),
+)
+const SaveSnapshotDialog = lazy(() =>
+  import('./save-snapshot-dialog').then((module) => ({ default: module.SaveSnapshotDialog })),
+)
+const ResetDialog = lazy(() =>
+  import('./reset-dialog').then((module) => ({ default: module.ResetDialog })),
+)
+
+/** Whether a dialog has been asked for on this page: from then on it stays mounted. */
+function useAsked(open: boolean): boolean {
+  const [asked, setAsked] = useState(open)
+  if (open && !asked) setAsked(true)
+  return asked || open
+}
 
 const IMPORT_COMMAND = 'firenook emulators:start --import <folder>'
 
@@ -48,6 +73,8 @@ export function DataSection({
 }) {
   const snapshot = useSnapshotFlow(project)
   const resettable = resettableSections(status)
+  const snapshotAsked = useAsked(dialog === 'snapshot')
+  const saveAsked = useAsked(dialog === 'save')
   const running = snapshot.running
   // `?dialog=reset` names no section: the one there is, or all of them.
   const resetTarget: ResetTarget | undefined =
@@ -57,6 +84,7 @@ export function DataSection({
         ? { kind: 'section', id: resettable[0].section.id }
         : { kind: 'everything' }
       : undefined)
+  const resetAsked = useAsked(resetTarget !== undefined)
 
   return (
     <section
@@ -69,42 +97,50 @@ export function DataSection({
       </h2>
       <DataCards status={status} snapshot={snapshot} onDialog={onDialog} onReset={onReset} />
 
-      <SnapshotDialog
-        open={dialog === 'snapshot'}
-        onOpenChange={(open) => {
-          if (!open) {
-            onDialog(undefined)
-            snapshot.clearRefusal()
-          }
-        }}
-        status={status}
-        running={running}
-        starting={snapshot.starting}
-        refusal={snapshot.refusal}
-        onStart={snapshot.start}
-      />
-      <SaveSnapshotDialog
-        open={dialog === 'save'}
-        onOpenChange={(open) => {
-          if (!open) onDialog(undefined)
-        }}
-        status={status}
-        running={running}
-      />
-      <ResetDialog
-        open={resetTarget !== undefined}
-        onOpenChange={(open) => {
-          if (!open) {
-            onReset(undefined)
-            if (dialog === 'reset') onDialog(undefined)
-          }
-        }}
-        target={resetTarget}
-        sections={resettable}
-        status={status}
-        snapshotting={running?.kind === SNAPSHOT_JOB}
-        onSnapshot={() => void snapshot.start()}
-      />
+      <Suspense fallback={null}>
+        {snapshotAsked && (
+          <SnapshotDialog
+            open={dialog === 'snapshot'}
+            onOpenChange={(open) => {
+              if (!open) {
+                onDialog(undefined)
+                snapshot.clearRefusal()
+              }
+            }}
+            status={status}
+            running={running}
+            starting={snapshot.starting}
+            refusal={snapshot.refusal}
+            onStart={snapshot.start}
+          />
+        )}
+        {saveAsked && (
+          <SaveSnapshotDialog
+            open={dialog === 'save'}
+            onOpenChange={(open) => {
+              if (!open) onDialog(undefined)
+            }}
+            status={status}
+            running={running}
+          />
+        )}
+        {resetAsked && (
+          <ResetDialog
+            open={resetTarget !== undefined}
+            onOpenChange={(open) => {
+              if (!open) {
+                onReset(undefined)
+                if (dialog === 'reset') onDialog(undefined)
+              }
+            }}
+            target={resetTarget}
+            sections={resettable}
+            status={status}
+            snapshotting={running?.kind === SNAPSHOT_JOB}
+            onSnapshot={() => void snapshot.start()}
+          />
+        )}
+      </Suspense>
     </section>
   )
 }
