@@ -12,6 +12,17 @@ const part = (row: HTMLElement, name: string) => row.querySelector(`[data-part="
 
 const AT = '2026-10-12T06:09:09.126Z'
 
+/** Marks every `cart` in a text, as a page's search would. */
+const mark = (text: string) =>
+  text.split(/(cart)/).map((piece, index) =>
+    piece === 'cart' ? (
+      // oxlint-disable-next-line react/no-array-index-key -- the pieces of one fixed string
+      <mark key={index}>{piece}</mark>
+    ) : (
+      piece
+    ),
+  )
+
 describe('a log line', () => {
   it('writes the time in the console-wide clock format, or the offset it is given', () => {
     render(<LogLine time={AT} level="info" message="loading cart for u_9f3k2" data-testid="row" />)
@@ -129,6 +140,22 @@ describe('a log line', () => {
     expect(screen.getByTestId('payload')).toBeInTheDocument()
     expect(row).toHaveAttribute('data-expanded', 'true')
     expect(row.className).toContain('min-h-[24px]')
+  })
+
+  it('marks the page’s search in the message, on every line of it', () => {
+    render(
+      <LogLine
+        time={AT}
+        level="info"
+        message={'loading cart\nthe cart is empty'}
+        expanded
+        highlight={mark}
+        data-testid="row"
+      />,
+    )
+    const message = part(screen.getByTestId('row'), 'message')
+    expect(message?.querySelectorAll('mark')).toHaveLength(2)
+    expect(message).toHaveTextContent('loading cart the cart is empty')
   })
 
   it('marks the cursor row the way the grid does', () => {
