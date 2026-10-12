@@ -98,6 +98,43 @@ describe('what ⌘K shows of the engine’s search', () => {
     })
   })
 
+  it('labels a hit by the section it opens in, whichever source found it', () => {
+    // Compute's search answers for Functions and for Extensions instances.
+    const running = testStatus({
+      sections: [sectionEntry('functions'), sectionEntry('extensions')],
+    })
+    const groups = engineGroups(
+      {
+        partial: false,
+        groups: [
+          {
+            section: 'functions',
+            hits: [
+              {
+                kind: 'extensions.instance',
+                key: 'greeter',
+                title: 'Greeter',
+                detail: 'Extension · ./extensions/greeter',
+              },
+              {
+                kind: 'functions.function',
+                key: 'us-central1-ext-greeter-greet',
+                title: 'ext-greeter-greet',
+                detail: null,
+              },
+            ],
+          },
+        ],
+      },
+      'greeter',
+      running,
+      go,
+    )
+    expect(groups.map((group) => group.label)).toEqual(['Extensions', 'Functions'])
+    groups[0]?.items[0]?.run()
+    expect(opened.at(-1)).toEqual({ to: '/extensions', search: { instance: 'greeter' } })
+  })
+
   it('shows nothing before the engine answered, or when it has no search', () => {
     expect(engineGroups(undefined, 'prod', status, go)).toEqual([])
     expect(engineGroups(null, 'prod', status, go)).toEqual([])

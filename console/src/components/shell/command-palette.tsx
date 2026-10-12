@@ -95,6 +95,12 @@ export function refId(ref: { kind: string; key: string }): string {
  * "Search <section> for “text”" where the section has a filter to search
  * with, even when the page offered every hit.
  */
+/** The section a kind of thing belongs to (`extensions.instance` → Extensions). */
+function ownerOf(kind: string) {
+  const dot = kind.indexOf('.')
+  return dot > 0 ? sectionById(kind.slice(0, dot)) : undefined
+}
+
 export function engineGroups(
   results: SearchResults | null | undefined,
   text: string,
@@ -115,11 +121,14 @@ export function engineGroups(
       found += 1
       if (offered.has(refId(hit))) continue
       const items = byKind.get(hit.kind) ?? []
+      // A source can answer for another section's things (compute's finds
+      // Extensions instances): each hit wears the icon of the section it opens in.
+      const owner = ownerOf(hit.kind) ?? section
       items.push({
         id: `hit:${hit.kind}:${hit.key}`,
         title: hit.title,
         ...(hit.detail ? { description: hit.detail } : {}),
-        icon: <section.icon size={16} />,
+        icon: <owner.icon size={16} />,
         run: go(link),
       })
       byKind.set(hit.kind, items)
@@ -140,8 +149,9 @@ export function engineGroups(
     if (kinds.length === 0 && searchRow) groups.push({ label: section.label, items: [searchRow] })
     kinds.forEach(([kind, items], index) => {
       const last = index === kinds.length - 1
+      const owner = ownerOf(kind) ?? section
       groups.push({
-        label: section.searchLabels?.[kind] ?? section.label,
+        label: owner.searchLabels?.[kind] ?? owner.label,
         items: last && searchRow ? [...items, searchRow] : items,
       })
     })
