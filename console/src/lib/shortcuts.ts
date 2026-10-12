@@ -172,9 +172,16 @@ export function isTyping(target: EventTarget | null): boolean {
 
 const OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
 
-/** Whether focus is inside an overlay that owns its single keys. */
+/**
+ * Whether focus is inside an overlay that owns its single keys. One that is
+ * closing (Base UI marks it `data-closed` while its exit plays) owns
+ * nothing: focus stays on it for those few frames, and a key pressed then
+ * (Space just after Escape shut a row menu) is the page's.
+ */
 function inOverlay(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(OVERLAY) !== null
+  if (!(target instanceof Element)) return false
+  const overlay = target.closest(OVERLAY)
+  return overlay !== null && !overlay.hasAttribute('data-closed')
 }
 
 /**

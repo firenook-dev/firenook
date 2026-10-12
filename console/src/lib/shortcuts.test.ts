@@ -149,6 +149,20 @@ describe('the keyboard registry', () => {
     expect(palette).toHaveBeenCalledTimes(4)
   })
 
+  it('gives the page its single keys while an overlay plays its exit, focus still on it', () => {
+    const tick = vi.fn()
+    mount({ id: 'page', label: 'Page' }, [{ key: 'Space', label: 'Tick', run: tick }])
+    const menu = document.body.appendChild(document.createElement('div'))
+    menu.setAttribute('role', 'menu')
+    const item = menu.appendChild(document.createElement('button'))
+    press(' ', {}, item)
+    expect(tick).not.toHaveBeenCalled()
+    // Escape shut it: Base UI marks it closed while it fades.
+    menu.setAttribute('data-closed', '')
+    press(' ', {}, item)
+    expect(tick).toHaveBeenCalledTimes(1)
+  })
+
   it('holds single keys back while a value is being edited, and lets modified keys through', () => {
     const single = vi.fn()
     const save = vi.fn()
