@@ -368,6 +368,10 @@ export function DataTable<Row>({
     if (top < element.scrollTop + head) element.scrollTop = Math.max(0, top - head)
     else if (bottom > element.scrollTop + element.clientHeight)
       element.scrollTop = bottom - element.clientHeight
+    else return
+    // The browser reports the scroll a frame later: rows that change
+    // before then must hold the row revealed, not the one left behind.
+    recordAnchor()
   }
   /** Scrolls a column fully into view beside the pinned ones. */
   const revealColumn = (id: string | undefined) => {

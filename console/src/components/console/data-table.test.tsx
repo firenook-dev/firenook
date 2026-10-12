@@ -313,6 +313,22 @@ describe('DataTable', () => {
     expect(screen.queryByTestId('new-above')).toBeNull()
   })
 
+  it('keeps a row the keyboard revealed in view when the rows change before the scroll is reported', () => {
+    const { rerender } = render(<Harness rows={users(1000)} />)
+    act(() => scrollTo(scroller(), 900 * 32 + 12))
+    // Home reveals the first row; the page renders again (a new array of
+    // the same rows) before the browser reports that scroll.
+    key('Home')
+    rerender(<Harness rows={[...users(1000)]} />)
+    expect(scroller().scrollTop).toBe(0)
+    act(() => scrollTo(scroller(), scroller().scrollTop))
+    expect(cursorRow()).toBe('u0000')
+    key('End')
+    const end = scroller().scrollTop
+    rerender(<Harness rows={[...users(1000)]} />)
+    expect(scroller().scrollTop).toBe(end)
+  })
+
   it('shows rows that arrive at the very top: nothing is held there', () => {
     const { rerender } = render(<Harness rows={users(100, 100)} />)
     rerender(<Harness rows={[...users(5, 95), ...users(100, 100)]} />)
