@@ -124,6 +124,10 @@ dedicated.describe('with engines of their own', () => {
       await expect(fix).toContainText('functions')
       await page.keyboard.press('Escape')
       await expect(card.getByTestId('hook-beforeCreate')).toHaveText('none')
+      // "Functions" leads to the Functions page, which is its gate here.
+      await notice.getByTestId('requires-functions-section').click()
+      await expect(page).toHaveURL(/\/console\/functions$/)
+      await expect(page.getByTestId('service-not-running')).toBeVisible()
 
       await page.goto(`${engine.origin}/console/auth?new=user`)
       const note = page.getByTestId('create-user-dialog').getByTestId('new-user-note')

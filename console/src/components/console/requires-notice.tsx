@@ -1,10 +1,13 @@
 // "This needs another section", said one way everywhere: running a schedule
 // now needs Pub/Sub, a storage trigger needs Functions. One line naming
 // what needs what, and that section's own fix from the engine's status, so
-// no page writes its own "Functions is not running…" sentence.
+// no page writes its own "Functions is not running…" sentence. The section
+// it names is a link to that section's page: while it starts, the page that
+// fills in by itself; while it is absent, its gate with the whole fix.
 
 import { Button, Popover } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { statusQuery } from '@/api/queries'
 import { PanelTitle } from '@/components/kit'
 import { type SectionId, sectionById } from '@/lib/services'
@@ -33,10 +36,19 @@ export function RequiresNotice({
   if (!section || !status.data) return null
   const entry = sectionStatus(status.data.sections, id)
   if (entry.state === 'ready') return null
+  const name = (
+    <Link
+      to={section.to as never}
+      className="font-medium text-kumo-link underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+      data-testid={`${testId}-section`}
+    >
+      {section.label}
+    </Link>
+  )
   if (entry.state === 'starting') {
     return (
       <SectionBanner tone="info" testId={testId}>
-        {feature} needs {section.label}, which is starting; it works as soon as it is up.
+        {feature} needs {name}, which is starting; it works as soon as it is up.
       </SectionBanner>
     )
   }
@@ -73,7 +85,7 @@ export function RequiresNotice({
         ) : undefined
       }
     >
-      {feature} needs {section.label}, which this engine does not run.
+      {feature} needs {name}, which this engine does not run.
     </SectionBanner>
   )
 }
