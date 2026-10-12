@@ -455,13 +455,16 @@ fn parse_storage_event(event: &str) -> Result<StorageEvent, String> {
 }
 
 fn parse_auth_event(event: &str) -> Result<AuthEvent, String> {
+    // `user.create` and `user.delete` are the official event types' own
+    // names (`providers/firebase.auth/eventTypes/user.create`), which the
+    // Authentication pages ask by.
     match event {
-        "create" | "created" => Ok(AuthEvent::Create),
-        "delete" | "deleted" => Ok(AuthEvent::Delete),
+        "create" | "created" | "user.create" => Ok(AuthEvent::Create),
+        "delete" | "deleted" | "user.delete" => Ok(AuthEvent::Delete),
         "beforeCreate" => Ok(AuthEvent::BeforeCreate),
         "beforeSignIn" => Ok(AuthEvent::BeforeSignIn),
         other => Err(format!(
-            "The event must be create, delete, beforeCreate or beforeSignIn, not \"{other}\"."
+            "The event must be create (user.create), delete (user.delete), beforeCreate or beforeSignIn, not \"{other}\"."
         )),
     }
 }
@@ -2155,6 +2158,23 @@ mod tests {
                 event: None
             })
         );
+        // Auth's pages ask by the official event types' own names.
+        for (asked, event) in [
+            ("user.create", AuthEvent::Create),
+            ("create", AuthEvent::Create),
+            ("user.delete", AuthEvent::Delete),
+            ("beforeSignIn", AuthEvent::BeforeSignIn),
+        ] {
+            assert_eq!(
+                TriggersQuery::parse("auth", "acme", Some(asked)),
+                Ok(TriggersQuery::Auth {
+                    tenant: Some("acme".to_owned()),
+                    event: Some(event)
+                }),
+                "{asked}"
+            );
+        }
+        assert!(TriggersQuery::parse("auth", "", Some("user.signIn")).is_err());
         assert!(TriggersQuery::parse("firestore", "orders/o_1", None).is_err());
         assert!(TriggersQuery::parse("pubsub", "emails", None).is_err());
         assert!(TriggersQuery::parse("tasks", "resize", None).is_err());
