@@ -222,11 +222,13 @@ function EditValue({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={param.example ?? param.default ?? undefined}
-        variant={invalid ? 'error' : 'default'}
+        // Kumo's error variant is deprecated (and warns on every render); the
+        // invalid ring is drawn the way the select beside it draws one.
+        aria-invalid={invalid || undefined}
         aria-label={name}
         spellCheck={false}
         autoComplete="off"
-        className="w-full font-mono"
+        className={cn('w-full font-mono', invalid && 'ring-kumo-danger focus:ring-kumo-danger/50')}
         data-testid="param-input"
       />
     </div>
