@@ -506,7 +506,7 @@ defaults never in the URL):
 | `tasks.queue` | `{ project?, queue }` | `stale`, `finished` | none |
 | `tasks.attempts` | `{ project?, queue?, task? }` | `attempts` | replay |
 | `logs.entries` | `{ q?, from?, to? }` | `entries` | replay |
-| `overview` | `{}` | `snapshot` | compare |
+| `overview` | `{}` | `state` | compare |
 
 **Badges** (no badge outside this table):
 
