@@ -242,6 +242,33 @@ describe('FeedList', () => {
     expect(scroller().scrollTop).toBe(15 * 28)
   })
 
+  it('holds the rows on screen still when paused at the top of a newest-first list', async () => {
+    const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
+    store.push(lines(50))
+    function Paused() {
+      const [follow, setFollow] = useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setFollow(false)}>
+            Pause
+          </button>
+          <Feed store={store} order="newest-first" follow={follow} onFollowChange={setFollow} />
+        </>
+      )
+    }
+    render(<Paused />)
+    await frame()
+    // Never scrolled: the newest row is at the top, the view at 0.
+    expect(scroller().scrollTop).toBe(0)
+    expect(shown()[0]).toBe('l49')
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    await frame()
+    act(() => store.push(lines(5, 50)))
+    await frame()
+    // The five new rows went above the view; l49 is still the top row.
+    expect(scroller().scrollTop).toBe(5 * 28)
+  })
+
   it('draws a gap as one quiet line and a marker with its action', async () => {
     const store = createFeedStore<Line>({ max: 100, key: rowKey })
     const run = vi.fn()
@@ -296,6 +323,40 @@ describe('FeedList', () => {
     await frame()
     expect(screen.getByTestId('following')).toHaveTextContent('true')
     expect(scroller().scrollTop).toBe(200 * 28)
+  })
+
+  it('stays paused when a row it places for the URL lands at the live edge', async () => {
+    const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
+    store.push(lines(100))
+    function Opening() {
+      const [open, setOpen] = useState<string | undefined>(undefined)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen('l97')}>
+            Open
+          </button>
+          <Feed
+            store={store}
+            order="newest-first"
+            startPaused
+            scrollToKey={open === undefined ? undefined : { key: open }}
+          />
+        </>
+      )
+    }
+    render(<Opening />)
+    await frame()
+    act(() => scrollTo(scroller(), 6 * 28))
+    // The reader presses (a row, as it opens): the list then places the row,
+    // near the newest, at the top of the view.
+    fireEvent.pointerDown(scroller())
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+    await frame()
+    expect(scroller().scrollTop).toBe(0)
+    act(() => {
+      scroller().dispatchEvent(new Event('scroll'))
+    })
+    expect(screen.getByTestId('following')).toHaveTextContent('false')
   })
 
   it('opens a row the URL names in the middle of the view', async () => {
