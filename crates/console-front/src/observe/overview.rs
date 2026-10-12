@@ -61,7 +61,9 @@ pub(crate) struct OverviewProblem {
     pub(crate) time: String,
     pub(crate) level: LogLevel,
     pub(crate) kind: Option<String>,
-    /// The label the terminal prints, or the service.
+    /// Where it came from, as a terminal label: the label the line was
+    /// printed under, else `functions[<id>]` for a function's line or
+    /// `extensions[<id>]` for an instance's, else the service.
     pub(crate) source: String,
     /// The message's first line, at most 200 characters.
     pub(crate) first_line: String,
@@ -150,7 +152,13 @@ fn problem(entry: LogEntry) -> OverviewProblem {
         time: entry.time,
         level: entry.level,
         kind: entry.kind,
-        source: entry.source.unwrap_or(entry.service),
+        // An attributed Functions line is printed under `functions`; the
+        // function it names is its source.
+        source: entry
+            .source
+            .or_else(|| entry.function.map(|id| format!("functions[{id}]")))
+            .or_else(|| entry.extension.map(|id| format!("extensions[{id}]")))
+            .unwrap_or(entry.service),
         first_line,
         refs: entry.refs,
     }

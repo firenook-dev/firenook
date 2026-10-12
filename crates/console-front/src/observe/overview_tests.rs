@@ -128,6 +128,33 @@ async fn the_state_lists_notices_the_newest_problems_the_hour_and_the_totals() {
     assert_eq!(failed.state(now_millis()).logs.errors, 1);
 }
 
+#[test]
+fn a_problem_names_the_function_or_instance_that_printed_it() {
+    let log = log();
+    // An attributed line: printed under `functions`, naming its function.
+    log.accept(LogInput {
+        function: Some("us-central1-fails".to_owned()),
+        execution: Some("a1b2c3-1".to_owned()),
+        service: "functions".to_owned(),
+        ..line(LogLevel::Error, "TypeError: cannot read 'id' of undefined")
+    });
+    log.accept(LogInput {
+        extension: Some("greeter".to_owned()),
+        service: "functions".to_owned(),
+        ..line(LogLevel::Error, "greeting failed")
+    });
+    let sources: Vec<String> = api(Some(&log))
+        .state(now_millis())
+        .problems
+        .into_iter()
+        .map(|problem| problem.source)
+        .collect();
+    assert_eq!(
+        sources,
+        ["extensions[greeter]", "functions[us-central1-fails]"]
+    );
+}
+
 #[tokio::test]
 async fn without_a_suite_log_the_state_still_answers() {
     let (status, state) = get(router(api(None)), "/overview").await;

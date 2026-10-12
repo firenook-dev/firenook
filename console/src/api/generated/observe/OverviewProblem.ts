@@ -11,7 +11,9 @@ export type OverviewProblem = {
  */
 cursor: string, time: string, level: LogLevel, kind: string | null, 
 /**
- * The label the terminal prints, or the service.
+ * Where it came from, as a terminal label: the label the line was
+ * printed under, else `functions[<id>]` for a function's line or
+ * `extensions[<id>]` for an instance's, else the service.
  */
 source: string, 
 /**
