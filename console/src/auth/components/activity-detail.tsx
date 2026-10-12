@@ -34,6 +34,7 @@ import { exactTime } from '@/components/console/relative-time'
 import { defaultConnectHost, hostLiteral } from '@/lib/connect'
 import { formatNumber } from '@/lib/format'
 import { toast } from '@/lib/toasts'
+import { useTriggersFor } from '@/lib/triggers'
 import {
   callerChip,
   configText,
@@ -217,7 +218,7 @@ function DetailBody({
             // Steps are the call's, in the order they happened: their place is their identity.
             // oxlint-disable-next-line react/no-array-index-key
             <li key={index} className="grid gap-0.5">
-              <StepLine step={step} />
+              <StepLine step={step} tenant={call.tenant} />
             </li>
           ))}
           {call.moreSteps > 0 && (
@@ -310,21 +311,46 @@ function WhatWentWrong({
   )
 }
 
-function StepLine({ step }: { step: AuthStep }): ReactNode {
+/**
+ * A lifecycle event the call queued, and the functions that listen to it
+ * (compute's matcher; nothing is said of them while it does not know).
+ */
+function TriggerStep({
+  step,
+  tenant,
+}: {
+  step: Extract<AuthStep, { kind: 'trigger' }>
+  tenant: string | null
+}) {
+  const answer = useTriggersFor('auth', tenant ?? '', step.event)
+  const functions = typeof answer === 'object' ? answer.functions : []
+  return (
+    <span className="flex flex-wrap items-center gap-x-1.5 text-[13px] text-kumo-default">
+      <span className="font-mono text-[12px]">{step.event}</span>
+      <span className={step.outcome.startsWith('failed') ? 'text-kumo-danger' : 'text-kumo-subtle'}>
+        {triggerOutcomeText(step.outcome)}
+      </span>
+      {step.outcome === 'queued' &&
+        functions.map((fn) => (
+          <EntityLink
+            key={`${fn.codebase}|${fn.functionId}`}
+            entity={{
+              kind: 'functions.function',
+              key: fn.functionId,
+              label: fn.functionId.replace(/^[a-z]+-[a-z]+\d+-/, ''),
+            }}
+          />
+        ))}
+    </span>
+  )
+}
+
+function StepLine({ step, tenant }: { step: AuthStep; tenant: string | null }): ReactNode {
   switch (step.kind) {
     case 'blocking':
       return <BlockingStep step={step} />
     case 'trigger':
-      return (
-        <span className="text-[13px] text-kumo-default">
-          <span className="font-mono text-[12px]">{step.event}</span>{' '}
-          <span
-            className={step.outcome.startsWith('failed') ? 'text-kumo-danger' : 'text-kumo-subtle'}
-          >
-            {triggerOutcomeText(step.outcome)}
-          </span>
-        </span>
-      )
+      return <TriggerStep step={step} tenant={tenant} />
     case 'message':
       return (
         <span className="flex flex-wrap items-center gap-x-1.5 text-[13px] text-kumo-default">
