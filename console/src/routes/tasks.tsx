@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { SectionFrame } from '@/components/console/section-gate'
 import { zFlag } from '@/lib/search-params'
 import { TasksPage } from '@/tasks/components/tasks-page'
+import { TasksStarting } from '@/tasks/components/tasks-starting'
 
 // Every view of the Cloud Tasks page is a link: the queue, its tab, the
 // open task and its inspector tab, the switches, the filter, a paused feed
@@ -51,7 +52,7 @@ export const Route = createFileRoute('/tasks')({
   validateSearch: searchSchema,
   search: { middlewares: [stripSearchParams(DEFAULTS)] },
   component: () => (
-    <SectionFrame section="tasks">
+    <SectionFrame section="tasks" skeleton={<TasksStarting />}>
       <TasksPage />
     </SectionFrame>
   ),

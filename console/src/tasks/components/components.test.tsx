@@ -22,6 +22,7 @@ import { panelNodes } from './queues-panel'
 import { meantQueue, refusedText } from './refused-banner'
 import { replacedText } from './replaced-banner'
 import type { TaskActions } from './task-actions'
+import { SLOW_DISCOVERY_MS, TasksStarting } from './tasks-starting'
 import { TaskInspector } from './task-inspector'
 
 afterEach(() => {
@@ -88,6 +89,22 @@ describe('the section states (U-18)', () => {
     expect(screen.getByTestId('service-starting')).toBeInTheDocument()
     act(() => client.setQueryData(['status'], { ...status, sections: [sectionEntry('tasks')] }))
     expect(await screen.findByText('the tasks page')).toBeInTheDocument()
+  })
+})
+
+describe('a slow start (TK-70)', () => {
+  it('says where to look once discovery has run for 30 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      await renderInConsole(() => <TasksStarting />, { status: ready() })
+      expect(screen.queryByTestId('tasks-slow-discovery')).not.toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(SLOW_DISCOVERY_MS))
+      expect(screen.getByTestId('tasks-slow-discovery')).toHaveTextContent(
+        'Functions discovery has not finished after 30 seconds',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
