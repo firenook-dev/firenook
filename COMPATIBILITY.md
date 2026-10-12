@@ -45,6 +45,17 @@ there), and a file that does not compile leaves the rules in force serving
 requests: the diagnostics are logged and the console shows them beside the
 file.
 
+Storage rules files are watched and reloaded on change the same way, whether
+or not Firestore runs: a `storage: { rules }` file governs every bucket, and
+each `storage` target's file governs its bucket. A file that does not compile
+leaves the previous rules in force, as the official watcher keeps its previous
+ruleset. (`/internal/setRules` keeps the official semantics: a body that does
+not compile leaves no ruleset until the next valid one.)
+
+Storage events are sent only when the suite runs Functions, as the official
+emulator dispatches them only then; with `--only storage` an upload, a
+metadata change or a delete queues nothing.
+
 The package supports only its enumerated native targets after their exact
 candidate checks pass. Linux musl, Windows ARM64/32-bit, network-filesystem
 durability and Windows power-loss recovery are not qualified.

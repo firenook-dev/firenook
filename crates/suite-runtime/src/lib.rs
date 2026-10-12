@@ -1711,7 +1711,29 @@ async fn start_storage(
                 .collect::<Result<Vec<_>, SuiteRuntimeError>>()?,
         ),
     };
-    StorageRuntime::start(
+    // What `firebase.json` says beyond the sources: the files a console
+    // saves to, the bucket `getStorage()` uses, whether Functions run (no
+    // Storage event is queued without them, as the official emulator sends
+    // none) and whether rules decisions are recorded.
+    let rules_files = match &config.storage_rules {
+        StorageRulesConfig::Single(path) => {
+            firenook_storage_front::RulesFiles::Single(path.clone())
+        }
+        StorageRulesConfig::OpenDefault => firenook_storage_front::RulesFiles::None,
+        StorageRulesConfig::PerBucket(buckets) => firenook_storage_front::RulesFiles::PerBucket(
+            buckets
+                .iter()
+                .map(|bucket| (bucket.bucket.clone(), bucket.rules.clone()))
+                .collect(),
+        ),
+    };
+    let options = firenook_storage_front::StorageOptions {
+        functions: config.services.functions,
+        default_bucket: Some(config.default_bucket.clone()),
+        rules_files: Some(rules_files),
+        diagnostics: config.diagnostics,
+    };
+    StorageRuntime::start_with(
         StorageConfig {
             project: config.project_id.clone(),
             origin: config.origin(config.ports.storage),
@@ -1725,6 +1747,7 @@ async fn start_storage(
                 }),
             }),
         },
+        options,
         delivery.queue(),
         triggers.clone(),
     )

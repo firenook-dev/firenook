@@ -14,9 +14,10 @@
 //! channel, success or not.
 //!
 //! Each watched file is a [`RulesTarget`]: a Firestore database's rules
-//! ([`FirestoreTarget`]) or, once Storage's rules handle exists, a bucket's.
-//! One watcher serves every target of every service, so a suite started
-//! with only Storage watches its rules file as well.
+//! ([`FirestoreTarget`]) or the Storage rules of a bucket, or of every
+//! bucket ([`StorageTarget`]). One watcher serves every target of every
+//! service, so a suite started with only Storage watches its rules file as
+//! well.
 //!
 //! The directory holding a file is watched rather than the file itself:
 //! editors commonly save by writing a new file and renaming it over the old
@@ -32,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use firenook_core_store::DatabaseName;
 use firenook_rules_runtime::{LoadError, RulesOrigin, RulesRuntime, source_hash};
-use firenook_storage_front::StorageRuntime;
+use firenook_storage_front::{RulesScope, StorageRulesHandle, StorageRuntime};
 use firenook_suite_front::LoggingRuntime;
 use notify::{EventKind, RecursiveMode, Watcher as _};
 use tokio::sync::watch;
@@ -106,14 +107,56 @@ impl RulesTarget for FirestoreTarget {
     }
 }
 
+/// The Storage rules of one scope: a bucket's own file (`firebase.json`
+/// Storage targets), or the one file that governs every bucket.
+pub(crate) struct StorageTarget {
+    pub(crate) scope: RulesScope,
+    pub(crate) path: PathBuf,
+    pub(crate) rules: StorageRulesHandle,
+}
+
+impl RulesTarget for StorageTarget {
+    fn service(&self) -> &'static str {
+        "storage"
+    }
+
+    fn label(&self) -> String {
+        match &self.scope {
+            RulesScope::AllBuckets => "rules for every bucket".to_owned(),
+            RulesScope::Bucket(bucket) => format!("rules for gs://{bucket}"),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn in_force_hash(&self) -> Option<String> {
+        self.rules
+            .current(&self.scope)
+            .map(|installed| installed.hash.clone())
+    }
+
+    fn install(&self, source: &str) -> Result<(), FileProblem> {
+        self.rules
+            .install(&self.scope, source, RulesOrigin::File)
+            .map_err(|diagnostics| LoadError { diagnostics })
+    }
+
+    fn set_file_problems(&self, problems: Option<FileProblem>) {
+        self.rules.set_file_problems(&self.scope, problems);
+    }
+}
+
 /// Every configured rules file the suite watches: each Firestore database
 /// with a rules file (its runtime is the console's Firestore runtime, the
-/// one every Firestore front evaluates against). Storage's buckets join
-/// once its rules handle can install a file's rules.
+/// one every Firestore front evaluates against), and each Storage scope
+/// `firebase.json` names a file for (none for a demo project's open
+/// default rules).
 pub(crate) fn rules_watch_targets(
     config: &SuiteConfig,
     firestore: Option<&ConsoleFirestoreParts>,
-    _storage: Option<&StorageRuntime>,
+    storage: Option<&StorageRuntime>,
 ) -> Result<Vec<Arc<dyn RulesTarget>>, SuiteRuntimeError> {
     let mut targets: Vec<Arc<dyn RulesTarget>> = Vec::new();
     if let Some(parts) = firestore {
@@ -134,6 +177,17 @@ pub(crate) fn rules_watch_targets(
                 path: path.clone(),
                 runtime: parts.rules_runtime.clone(),
             }));
+        }
+    }
+    if let Some(rules) = storage.and_then(|storage| storage.console().rules()) {
+        for scope in rules.scopes() {
+            if let Some(path) = rules.file(&scope) {
+                targets.push(Arc::new(StorageTarget {
+                    scope,
+                    path,
+                    rules: rules.clone(),
+                }));
+            }
         }
     }
     Ok(targets)
@@ -684,5 +738,238 @@ mod tests {
             lock(&lines)
         );
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    fn storage_rules(condition: &str) -> String {
+        format!(
+            "rules_version = '2';\nservice firebase.storage {{\n  match /b/{{bucket}}/o {{\n    match /{{allPaths=**}} {{\n      allow read: if {condition};\n    }}\n  }}\n}}\n"
+        )
+    }
+
+    /// What the watcher reported, by service.
+    type Lines = Arc<Mutex<Vec<(&'static str, Level, String)>>>;
+
+    /// A Storage runtime whose one rules file governs every bucket, in a
+    /// directory of its own, watched like the suite watches it.
+    struct StorageFixture {
+        directory: PathBuf,
+        file: PathBuf,
+        rules: StorageRulesHandle,
+        runtime: Option<StorageRuntime>,
+        lines: Lines,
+        watcher: Option<RulesWatcher>,
+    }
+
+    impl StorageFixture {
+        /// Started from `config` as `--only storage` starts it: no Firestore
+        /// parts, the targets from [`rules_watch_targets`].
+        async fn new(name: &str) -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "firenook-rules-watch-storage-{name}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&directory);
+            std::fs::create_dir_all(&directory).expect("directory");
+            let file = directory.join("storage.rules");
+            std::fs::write(&file, storage_rules("false")).expect("write");
+            let registry = firenook_functions_bridge::TriggerRegistry::default();
+            let (observer, _deliveries) =
+                firenook_functions_bridge::TriggerObserver::channel(registry.clone());
+            let runtime = StorageRuntime::start_with(
+                firenook_storage_front::StorageConfig {
+                    project: "demo-watch".to_owned(),
+                    origin: "http://127.0.0.1:9199".to_owned(),
+                    data_dir: directory.join("state"),
+                    rules: Some(firenook_storage_front::NativeRulesConfig {
+                        source: firenook_storage_front::RulesSource::Single(
+                            firenook_storage_front::RulesFile {
+                                name: file.display().to_string(),
+                                content: storage_rules("false"),
+                            },
+                        ),
+                        documents: Arc::new(firenook_storage_front::NoFirestoreDocuments),
+                    }),
+                    durability: firenook_storage_front::StorageDurability::PerCommit,
+                },
+                firenook_storage_front::StorageOptions {
+                    functions: false,
+                    default_bucket: None,
+                    rules_files: Some(firenook_storage_front::RulesFiles::Single(file.clone())),
+                    diagnostics: false,
+                },
+                observer.queue(),
+                registry,
+            )
+            .await
+            .expect("Storage runtime");
+            let mut config = crate::diagnostics_tests::test_config();
+            config.services = crate::ServiceSelection::parse("storage").expect("selection");
+            config.storage_rules = crate::StorageRulesConfig::Single(file.clone());
+            let targets = rules_watch_targets(&config, None, Some(&runtime)).expect("targets");
+            assert_eq!(targets.len(), 1, "the one Storage rules file is watched");
+            assert_eq!(targets[0].service(), "storage");
+            assert_eq!(targets[0].label(), "rules for every bucket");
+            let rules = runtime.console().rules().expect("native rules");
+            let lines = Arc::new(Mutex::new(Vec::new()));
+            let collected = Arc::clone(&lines);
+            let watcher = RulesWatcher::start(
+                targets,
+                Arc::new(move |service, level, line| lock(&collected).push((service, level, line))),
+            )
+            .expect("watching starts");
+            Self {
+                directory,
+                file,
+                rules,
+                runtime: Some(runtime),
+                lines,
+                watcher: Some(watcher),
+            }
+        }
+
+        fn hash(&self) -> Option<String> {
+            self.rules
+                .current(&RulesScope::AllBuckets)
+                .map(|installed| installed.hash.clone())
+        }
+
+        fn problems(&self) -> Vec<firenook_rules_engine::Diagnostic> {
+            self.rules.file_problems(&RulesScope::AllBuckets)
+        }
+
+        /// Writes `source` until `done` holds, as [`Fixture::write_until`].
+        fn write_until(&self, source: &str, mut done: impl FnMut() -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let mut next_write = Instant::now();
+            while !done() {
+                assert!(
+                    Instant::now() < deadline,
+                    "the watcher never acted on the file; lines: {:?}",
+                    lock(&self.lines)
+                );
+                if Instant::now() >= next_write {
+                    std::fs::write(&self.file, source).expect("write");
+                    next_write = Instant::now() + Duration::from_secs(4);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+
+        fn lines(&self) -> Vec<(&'static str, Level, String)> {
+            lock(&self.lines).clone()
+        }
+
+        async fn finish(mut self) {
+            if let Some(watcher) = self.watcher.take() {
+                watcher.stop();
+            }
+            if let Some(runtime) = self.runtime.take() {
+                runtime.shutdown().await.expect("shutdown");
+            }
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn only_storage_watches_its_rules_file() {
+        let fixture = StorageFixture::new("only").await;
+        let mut events = fixture.rules.subscribe();
+        let changed = storage_rules("request.auth != null");
+        fixture.write_until(&changed, || fixture.hash() == Some(source_hash(&changed)));
+        let history = fixture.rules.history(&RulesScope::AllBuckets);
+        assert_eq!(history[0].origin, RulesOrigin::File);
+        assert_eq!(history[1].origin, RulesOrigin::Startup);
+        assert_eq!(fixture.problems(), []);
+        let mut seen = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            seen.push(event);
+        }
+        assert!(
+            seen.contains(&firenook_storage_front::StorageRulesEvent::Installed {
+                scope: RulesScope::AllBuckets,
+                origin: RulesOrigin::File,
+            }),
+            "{seen:?}"
+        );
+        let expected = format!(
+            "rules for every bucket reloaded from {}",
+            fixture.file.display()
+        );
+        assert!(
+            fixture
+                .lines()
+                .iter()
+                .any(|(service, level, line)| *service == "storage"
+                    && *level == Level::Info
+                    && *line == expected),
+            "{:?}",
+            fixture.lines()
+        );
+        fixture.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_broken_storage_file_keeps_the_rules_and_a_save_lands_once() {
+        let fixture = StorageFixture::new("broken").await;
+        let before = fixture.hash();
+        fixture.write_until("rules_version = '2';\nservice firebase.storage {", || {
+            !fixture.problems().is_empty()
+        });
+        assert_eq!(fixture.hash(), before, "the previous rules keep serving");
+        assert_eq!(fixture.problems()[0].line, 2);
+        assert!(
+            fixture
+                .lines()
+                .iter()
+                .any(|(_, level, line)| *level == Level::Warn
+                    && line.contains("did not compile; the rules in force are unchanged")),
+            "{:?}",
+            fixture.lines()
+        );
+        // The console's save: installed first, then written to the file,
+        // which the watcher finds already in force.
+        let saved = storage_rules("true");
+        fixture
+            .rules
+            .install(&RulesScope::AllBuckets, &saved, RulesOrigin::Console)
+            .expect("installed");
+        fixture.write_until(&saved, || fixture.problems().is_empty());
+        let history = fixture.rules.history(&RulesScope::AllBuckets);
+        assert_eq!(history[0].origin, RulesOrigin::Console);
+        assert_eq!(
+            history
+                .iter()
+                .filter(|version| version.hash == source_hash(&saved))
+                .count(),
+            1,
+            "one version per save"
+        );
+        fixture.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unreadable_storage_file_sets_problems() {
+        let fixture = StorageFixture::new("unreadable").await;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut next = Instant::now();
+        while fixture.problems().is_empty() {
+            assert!(Instant::now() < deadline, "{:?}", fixture.lines());
+            if Instant::now() >= next {
+                // The file goes away (an editor's rename gone wrong); a
+                // repeated write-and-remove is another event if the first
+                // was missed.
+                let _ = std::fs::write(&fixture.file, storage_rules("false"));
+                let _ = std::fs::remove_file(&fixture.file);
+                next = Instant::now() + Duration::from_secs(4);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            fixture.problems()[0].message.contains("could not be read"),
+            "{:?}",
+            fixture.problems()
+        );
+        assert!(fixture.hash().is_some(), "the rules in force stay");
+        fixture.finish().await;
     }
 }
