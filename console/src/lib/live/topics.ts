@@ -16,7 +16,8 @@ import type { ChangeBatch } from '@/api/generated/ChangeBatch'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { RulesChanged } from '@/api/generated/RulesChanged'
 import type { RulesFileStatus } from '@/api/generated/RulesFileStatus'
-import type { BadgeSet, Job } from './contract'
+import type { BadgeSet } from '@/api/generated/live/BadgeSet'
+import type { Job } from './contract'
 
 export interface TopicMap {
   shell: { params: Record<string, never>; events: { status: ConsoleStatus; badges: BadgeSet } }

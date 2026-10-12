@@ -13,7 +13,8 @@ const calls = vi.hoisted(() => ({
   topics: [] as Array<{ topic: string; params: unknown; handlers: Record<string, unknown> }>,
 }))
 
-vi.mock('@/api/client', () => ({
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/client')>()),
   apiGet: calls.get,
   apiSend: calls.send,
 }))

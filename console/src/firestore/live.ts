@@ -27,7 +27,7 @@ import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { EMPTY_QUERY, type WorkbenchQuery, parseQuery } from './query'
 import { FS } from './queries'
-import { type FirestoreScope, type QueryPage, batchGetDocuments } from './rest'
+import { type FirestoreScope, type QueryPage, batchGetDocuments, keySlot } from './rest'
 import type { FsDocument, FsValue } from './value'
 
 interface LiveState {
@@ -144,12 +144,13 @@ function isUnder(path: string, collections: Set<string>): boolean {
 }
 
 /**
- * Which queries of `database` a window makes stale, other than the pages it
- * can patch: the predicate `invalidateQueries` runs.
+ * Which queries of the key slot `slot` (a database id, or
+ * `<project>|<database>` for another project's view) a window makes stale,
+ * other than the pages it can patch: the predicate `invalidateQueries` runs.
  */
-export function staleQuery(database: string, touched: Touched) {
+export function staleQuery(slot: string, touched: Touched) {
   return (key: QueryKey): boolean => {
-    if (key[0] !== FS || key[1] !== database) return false
+    if (key[0] !== FS || key[1] !== slot) return false
     const kind = key[2]
     const scope = key[3] as string
     const group = key[4] === true
@@ -271,7 +272,7 @@ async function patchUpdated(
     string,
     Array<{ key: QueryKey; paths: Set<string>; fields: readonly string[] }>
   >()
-  const queries = queryClient.getQueryCache().findAll({ queryKey: [FS, scope.database, 'page'] })
+  const queries = queryClient.getQueryCache().findAll({ queryKey: [FS, keySlot(scope), 'page'] })
   for (const query of queries) {
     const data = query.state.data as InfiniteData<QueryPage, unknown> | undefined
     const key = query.queryKey
@@ -334,7 +335,7 @@ export function applyChanges(
 ): Promise<void> {
   const touched = scopesTouched(batches)
   void queryClient.invalidateQueries({
-    predicate: (query) => staleQuery(scope.database, touched)(query.queryKey),
+    predicate: (query) => staleQuery(keySlot(scope), touched)(query.queryKey),
   })
   return patchUpdated(queryClient, scope, touched)
 }
@@ -377,7 +378,7 @@ export function useLiveChanges(
         }, 120)
       },
       onReset: () => {
-        void queryClient.invalidateQueries({ queryKey: [FS, latest.current.database] })
+        void queryClient.invalidateQueries({ queryKey: [FS, keySlot(latest.current)] })
       },
     },
   )

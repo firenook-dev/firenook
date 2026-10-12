@@ -13,6 +13,17 @@ export interface FirestoreScope {
   database: string
   /** The `Authorization` header value, or none for an anonymous client. */
   authorization?: string | undefined
+  /**
+   * The database slot of this scope's query keys when it is not the
+   * database id: `<project>|<database>` for another project the app used
+   * (`?project=`), so its cache entries never mix with the emulator's own.
+   */
+  slot?: string | undefined
+}
+
+/** The database slot of a scope's query keys (`['fs', slot, …]`). */
+export function keySlot(scope: FirestoreScope): string {
+  return scope.slot ?? scope.database
 }
 
 export interface QueryPage {

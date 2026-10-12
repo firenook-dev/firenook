@@ -9,6 +9,9 @@ interface ConsoleUiState {
   shortcutsOpen: boolean
   setShortcutsOpen: (open: boolean) => void
   toggleShortcuts: () => void
+  /** The engine badge's popover (data facts, Export now); ⌘K's "Export now…" opens it. */
+  enginePopoverOpen: boolean
+  setEnginePopoverOpen: (open: boolean) => void
 }
 
 export const useConsoleUi = create<ConsoleUiState>((set) => ({
@@ -18,4 +21,6 @@ export const useConsoleUi = create<ConsoleUiState>((set) => ({
   shortcutsOpen: false,
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   toggleShortcuts: () => set((state) => ({ shortcutsOpen: !state.shortcutsOpen })),
+  enginePopoverOpen: false,
+  setEnginePopoverOpen: (enginePopoverOpen) => set({ enginePopoverOpen }),
 }))

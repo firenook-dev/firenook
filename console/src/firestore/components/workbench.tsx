@@ -76,7 +76,7 @@ function WorkbenchBody() {
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
 
   // The selection and hidden columns belong to one collection.
-  const selectionScope = `${workbench.database}|${workbench.collectionPath}|${workbench.group}`
+  const selectionScope = `${workbench.slot}|${workbench.collectionPath}|${workbench.group}`
   useEffect(() => {
     resetSelection(selectionScope)
     resetColumns(selectionScope)

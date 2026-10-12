@@ -9,7 +9,7 @@ import { statusQuery } from '@/api/queries'
 import { queryClient } from '@/lib/query'
 import { toast } from '@/lib/toasts'
 import { setRestartHooks } from './channel'
-import type { Badge } from './contract'
+import type { Badge } from '@/api/generated/live/Badge'
 import { useLiveTopic } from './use-live-topic'
 
 /** The engine's badges by id, as the `shell` topic last sent them. */

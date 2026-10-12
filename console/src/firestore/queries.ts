@@ -8,6 +8,7 @@ import {
   countQuery,
   documentRoot,
   getDocument,
+  keySlot,
   listCollectionIds,
   listDocumentIds,
   listMissingDocuments,
@@ -24,7 +25,7 @@ export function scopeKey(scope: FirestoreScope): string {
 
 export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'collections', parent, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'collections', parent, scope.authorization ?? ''],
     queryFn: () => listCollectionIds(scope, parent),
     staleTime: 30_000,
     retry: false,
@@ -33,7 +34,7 @@ export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
 /** Document ids in one collection from a prefix, for completing a reference. */
 export const documentIdsQuery = (scope: FirestoreScope, collection: string, from: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'ids', collection, from, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'ids', collection, from, scope.authorization ?? ''],
     queryFn: () => listDocumentIds(scope, collection, from, 20),
     staleTime: 30_000,
     retry: false,
@@ -49,7 +50,7 @@ export const countQueryOptions = (
   return queryOptions({
     queryKey: [
       FS,
-      scope.database,
+      keySlot(scope),
       'count',
       collectionPath,
       group,
@@ -73,7 +74,7 @@ export const countQueryOptions = (
 
 export const documentQuery = (scope: FirestoreScope, path: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'doc', path, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'doc', path, scope.authorization ?? ''],
     queryFn: () => getDocument(scope, path),
     staleTime: 30_000,
     retry: false,
@@ -81,7 +82,7 @@ export const documentQuery = (scope: FirestoreScope, path: string) =>
 
 export const missingDocumentsQuery = (scope: FirestoreScope, collectionPath: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'missing', collectionPath, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'missing', collectionPath, scope.authorization ?? ''],
     queryFn: () => listMissingDocuments(scope, collectionPath, 300),
     staleTime: 30_000,
     retry: false,
@@ -162,7 +163,7 @@ export const pageQueryOptions = (
   return infiniteQueryOptions({
     queryKey: [
       FS,
-      scope.database,
+      keySlot(scope),
       'page',
       collectionPath,
       group,

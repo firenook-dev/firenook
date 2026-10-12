@@ -24,11 +24,11 @@ import { statusQuery } from '@/api/queries'
 import { PanelTitle } from '@/components/kit'
 import { useMemo, useState } from 'react'
 import { useCreateDialog } from '../create'
-import { type CodeTarget, documentAsCode } from '../query'
+import { CODE_TARGETS, type CodeTarget, documentAsCode } from '../query'
 import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { CODE_LABEL_AT, clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
-import { type Subcollection, subcollectionsQuery } from '../subcollections'
+import { type Subcollection, workbenchSubcollectionsQuery } from '../subcollections'
 import {
   type DraftNode,
   diffDocument,
@@ -46,10 +46,18 @@ import {
   encodeValue,
   relativeTime,
 } from '../value'
-import { CodeBlock, firestoreOrigin } from './code-block'
+import { CodeBlock } from '@/components/console/code-block'
 import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
 import { useWorkbench } from './workbench-context'
+
+/** Where an app sends REST calls: the Firestore port the engine advertises. */
+function firestoreOrigin(
+  services: ReadonlyArray<{ name: string; host: string; port: number }> | undefined,
+): string {
+  const firestore = services?.find((service) => service.name === 'firestore')
+  return firestore ? `http://${firestore.host}:${firestore.port}` : window.location.origin
+}
 
 /**
  * The panel's left edge, which is also the grip for its width. A hairline
@@ -134,7 +142,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
   const size = drafted?.key === editorKey ? drafted.reading : stored
   // Names and counts in one request, shared with the grid's column: the
   // row the inspector was opened from has usually asked already.
-  const subcollections = useQuery(subcollectionsQuery(workbench.database, path))
+  const subcollections = useQuery(workbenchSubcollectionsQuery(workbench, path))
 
   return (
     <aside
@@ -424,7 +432,7 @@ function DocumentEditor({
       return changed
     },
     onSuccess: (count) => {
-      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
+      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
       toasts.add({
         title: 'Document saved',
         description: `${document.path} · ${count} field${count === 1 ? '' : 's'}`,
@@ -513,14 +521,18 @@ function DocumentEditor({
             />
             <Popover.Content className="w-[560px] max-w-[calc(100vw-2rem)]">
               <CodeBlock
-                title="This document as code"
-                target={codeTarget}
-                setTarget={setCodeTarget}
-                code={documentAsCode(codeTarget, document.path, forCode, {
-                  project: workbench.project,
-                  database: workbench.database,
-                  origin: firestoreOrigin(status.data?.services),
-                })}
+                label="This document as code"
+                value={codeTarget}
+                onValueChange={(id) => setCodeTarget(id as CodeTarget)}
+                dialects={CODE_TARGETS.map((target) => ({
+                  id: target.id,
+                  label: target.label,
+                  code: documentAsCode(target.id, document.path, forCode, {
+                    project: workbench.project,
+                    database: workbench.database,
+                    origin: firestoreOrigin(status.data?.services),
+                  }),
+                }))}
               />
             </Popover.Content>
           </Popover>

@@ -18,7 +18,7 @@ import { useShortcuts } from '@/lib/shortcuts'
 import { useCreateDialog, validateId } from '../create'
 import { EMPTY_QUERY } from '../query'
 import { collectionsQuery, countQueryOptions } from '../queries'
-import { findNode, isPattern, schemaQuery } from '../schema'
+import { findNode, isPattern, workbenchSchemaQuery } from '../schema'
 import { formatNumber } from '../value'
 import { ScopePicker } from './scope-picker'
 import { useWorkbench } from './workbench-context'
@@ -363,7 +363,7 @@ function CollectionCount({ path }: { path: string }) {
     ...countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY),
     enabled: !pattern,
   })
-  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: pattern })
+  const schema = useQuery({ ...workbenchSchemaQuery(workbench), enabled: pattern })
   const value = pattern ? findNode(schema.data, path)?.documents : count.data?.count
   if (value === undefined) return null
   return <span className="text-[11px] text-kumo-subtle tabular-nums">{formatNumber(value)}</span>

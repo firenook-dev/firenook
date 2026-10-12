@@ -1,39 +1,45 @@
-// Engine types the live channel's foundation topics carry that the engine
-// does not generate yet: the badges of the `shell` topic (engine commit 3,
-// foundation spec §7.10) and the jobs of the `jobs` topic (engine commit 4b,
-// §7.20). Each mirrors its pinned Rust shape field for field. When those
-// commits land, `cargo test -p firenook-console-front` writes
-// `api/generated/live/{Badge,BadgeSet,BadgeKind,BadgeTone,BadgeNoun}.ts` and
-// `api/generated/{Job,JobState,JobError}.ts`; import those instead and delete
-// this file (nothing else defines these names).
+// Engine types the console reads that the engine does not generate yet,
+// each mirroring its pinned Rust shape field for field: the jobs of the
+// `jobs` topic (engine commit 4b, foundation spec §7.20), the links between
+// sections (`EntityRef`, commit 4b, §7.24) and ⌘K's engine search (commit 4,
+// §7.13). When those commits land, `cargo test -p firenook-console-front`
+// writes `api/generated/{Job,JobState,JobError,EntityRef,SearchResults,
+// SearchGroup,SearchHit}.ts`; import those instead and delete this file
+// (nothing else defines these names).
 
-/** Singular and plural of what a badge counts, each read after a number. */
-export interface BadgeNoun {
-  one: string
-  other: string
+/** Something a section shows, as another section's payload points at it. */
+export interface EntityRef {
+  /** `<section>.<thing>`, one of the pinned kinds: `firestore.document`, `auth.user`. */
+  kind: string
+  /** What that section opens it by, in the pinned key format (`<db>|<path>`). */
+  key: string
+  /** The text to show, when it is not the key. */
+  label?: string
 }
 
-/** A running total since the engine started, or an amount now. */
-export type BadgeKind = 'counter' | 'gauge'
-
-/** How loudly a badge is drawn. */
-export type BadgeTone = 'neutral' | 'attention' | 'danger'
-
-/** A number the navigation shows beside a section or one of its pages. */
-export interface Badge {
-  /** `<section>.<what>`, for example `auth.inbox`. */
-  id: string
-  count: number
-  kind: BadgeKind
-  tone: BadgeTone
-  noun: BadgeNoun
-  /** Counters of ring entries only: the cursor of the newest counted entry. */
-  cursor?: string
+/** One thing ⌘K can open. */
+export interface SearchHit {
+  /** One of the pinned `EntityRef` kinds. */
+  kind: string
+  key: string
+  /** The line ⌘K shows. */
+  title: string
+  /** The quieter line beside it. */
+  detail: string | null
 }
 
-/** Every badge, as the `shell` topic sends it. */
-export interface BadgeSet {
-  badges: Badge[]
+/** One section's hits. */
+export interface SearchGroup {
+  section: string
+  hits: SearchHit[]
+}
+
+/** What ⌘K found across the console (`GET /search?q=&limit=`). */
+export interface SearchResults {
+  /** One group per section with hits, in sidebar order. */
+  groups: SearchGroup[]
+  /** A section ran out of its time budget and is missing. */
+  partial: boolean
 }
 
 export type JobState = 'running' | 'done' | 'failed' | 'cancelled'

@@ -16,7 +16,7 @@ import {
 } from '../query'
 import { useQueryLine } from '../query-line-store'
 import { countQueryOptions } from '../queries'
-import { findNode, schemaQuery } from '../schema'
+import { findNode, workbenchSchemaQuery } from '../schema'
 import { formatNumber } from '../value'
 import { useWorkbench } from './workbench-context'
 
@@ -295,7 +295,7 @@ export function useMatchCount(): {
     ),
     enabled: Boolean(workbench.collectionPath) && !workbench.queryError && !fromSchema,
   })
-  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: fromSchema })
+  const schema = useQuery({ ...workbenchSchemaQuery(workbench), enabled: fromSchema })
   const known = fromSchema ? findNode(schema.data, workbench.collectionPath) : undefined
   const total = known
     ? { count: known.documents, elapsedMs: undefined }

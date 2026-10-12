@@ -239,7 +239,7 @@ function Editing({
       ]),
     onSuccess: () => {
       closed.current = true
-      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
+      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
       onDone()
     },
     onError: (failure) => {

@@ -47,7 +47,7 @@ import {
 } from '../queries'
 import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
-import { childrenOf, describeChildren, schemaQuery } from '../schema'
+import { childrenOf, describeChildren, workbenchSchemaQuery } from '../schema'
 import { useSelection } from '../selection'
 import { type FsDocument, formatNumber, isPartial } from '../value'
 import { CellEditor } from './cell-editor'
@@ -117,7 +117,7 @@ export function Grid() {
 
   // The schema says which subcollections these documents can have; that
   // decides whether the grid has a subcollections column and how wide.
-  const schema = useQuery(schemaQuery(workbench.database))
+  const schema = useQuery(workbenchSchemaQuery(workbench))
   const known = useMemo(
     () => childrenOf(schema.data, workbench.collectionPath),
     [schema.data, workbench.collectionPath],
@@ -135,7 +135,7 @@ export function Grid() {
   // order is held per collection, not per query, so sorting by a column —
   // which loads a different first page — leaves every column where it was.
   const inferred = useMemo(() => inferColumns(documents), [documents])
-  const scope = `${workbench.database}|${workbench.collectionPath}|${workbench.group}`
+  const scope = `${workbench.slot}|${workbench.collectionPath}|${workbench.group}`
   const [remembered, setRemembered] = useState({ scope: '', order: NO_ORDER })
   const previous = remembered.scope === scope ? remembered.order : NO_ORDER
   const arranged = useMemo(() => arrangeColumns(inferred, previous), [inferred, previous])
@@ -920,7 +920,7 @@ function RootLanding() {
   const openCreate = useCreateDialog((state) => state.open)
   const recents = useRecents((state) => state.items)
   const collections = useQuery(collectionsQuery(workbench.ownerScope, ''))
-  const schema = useQuery(schemaQuery(workbench.database))
+  const schema = useQuery(workbenchSchemaQuery(workbench))
   const shapes = new Map((schema.data?.collections ?? []).map((node) => [node.id, node]))
   const anyNested = [...shapes.values()].some((node) => node.children.length > 0)
   return (

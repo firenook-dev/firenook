@@ -34,7 +34,7 @@ import { useExportDialog } from './export'
 import { useQueryLine } from './query-line-store'
 import { collectionsQuery } from './queries'
 import { useRecents } from './recents'
-import { flattenSchema, schemaQuery } from './schema'
+import { flattenSchema, workbenchSchemaQuery } from './schema'
 
 export function useFirestorePalette() {
   const workbench = useWorkbench()
@@ -49,7 +49,7 @@ export function useFirestorePalette() {
   const recents = useRecents((state) => state.items)
   const selected = workbench.selectedDocument
   const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
-  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: paletteOpen })
+  const schema = useQuery({ ...workbenchSchemaQuery(workbench), enabled: paletteOpen })
   const under = useQuery({
     ...collectionsQuery(workbench.ownerScope, selected ?? ''),
     enabled: paletteOpen && Boolean(selected),
