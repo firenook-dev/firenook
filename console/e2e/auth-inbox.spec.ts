@@ -34,16 +34,25 @@ const rowOf = (page: Page, id: number) =>
 const navInbox = (page: Page) => page.getByTestId('nav-page-inbox')
 
 /**
- * Resolves once the page's beacon follows the Inbox feed: what is sent
- * after it is news; what came before is what the page read at load.
+ * Resolves once the beacon of the page at `path` follows the Inbox feed:
+ * what is sent after it is news; what came before is what the page read at
+ * load. Only that page's subscription counts: the page before it (the
+ * Inbox, whose beacon subscribes too) may still be answered after this
+ * starts waiting, and a message sent then would be read by the next page
+ * at load, as it should, and never toasted.
  */
-function beaconFollowing(page: Page) {
-  return page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      /\/console\/api\/v1\/live\/[^/]+\/subscriptions$/.test(new URL(response.url()).pathname) &&
-      (response.request().postData() ?? '').includes('"auth.inbox"'),
-  )
+function beaconFollowing(page: Page, path: string) {
+  return page.waitForResponse(async (response) => {
+    const request = response.request()
+    if (
+      request.method() !== 'POST' ||
+      !/\/console\/api\/v1\/live\/[^/]+\/subscriptions$/.test(new URL(response.url()).pathname) ||
+      !(request.postData() ?? '').includes('"auth.inbox"')
+    )
+      return false
+    const from = await request.headerValue('referer')
+    return from !== null && new URL(from).pathname === path
+  })
 }
 
 /** The badge count this browser last saw on the Inbox (`lib/badges.ts` SEEN_KEY). */
@@ -96,7 +105,7 @@ test('I1 a reset link toasts elsewhere, lands in the Inbox live and sets a passw
   try {
     // Seen the Inbox, so its badge counts from here.
     await seeInbox(page, engine)
-    const following = beaconFollowing(page)
+    const following = beaconFollowing(page, '/console/auth')
     await page.goto(`${engine.origin}/console/auth?user=${user.localId}`)
     await expect(page.getByTestId('user-inspector')).toContainText(user.localId)
     await following
@@ -248,7 +257,7 @@ test('I5 a link handed back to the Admin SDK is marked returned and never toaste
   const email = `admin-${stamp()}@journey.test`
   const user = await signUp(engine, { email })
   try {
-    const following = beaconFollowing(page)
+    const following = beaconFollowing(page, '/console/auth')
     await page.goto(`${engine.origin}/console/auth`)
     await expect(page.getByTestId('users-grid')).toBeVisible()
     await following
@@ -279,7 +288,7 @@ test('I5 a link handed back to the Admin SDK is marked returned and never toaste
 test('I7 what arrives while the channel is down comes back quietly', async ({ page, engine }) => {
   // Seen the Inbox: the badge counts from here.
   await seeInbox(page, engine)
-  const following = beaconFollowing(page)
+  const following = beaconFollowing(page, '/console/auth')
   await page.goto(`${engine.origin}/console/auth`)
   await expect(page.getByTestId('users-grid')).toBeVisible()
   await following
