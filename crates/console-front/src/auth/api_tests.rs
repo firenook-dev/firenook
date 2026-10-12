@@ -944,9 +944,9 @@ async fn the_status_carries_the_summary_and_the_suite_clear_removes_every_user()
     assert_eq!(
         auth["summary"]["figures"],
         json!([
-            { "label": "users", "value": 2, "unit": "count" },
-            { "label": "tenants", "value": 1, "unit": "count" },
-            { "label": "tenant users", "value": 1, "unit": "count" },
+            { "label": "Users", "value": 2, "unit": "count" },
+            { "label": "Tenants", "value": 1, "unit": "count" },
+            { "label": "Tenant users", "value": 1, "unit": "count" },
         ])
     );
     let (status, job) = post(

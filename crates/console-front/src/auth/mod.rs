@@ -246,9 +246,9 @@ impl Section for AuthSection {
         Some(SectionSummary {
             headline,
             figures: vec![
-                figure("users", counts.users),
-                figure("tenants", counts.tenants),
-                figure("tenant users", counts.tenant_users),
+                figure("Users", counts.users),
+                figure("Tenants", counts.tenants),
+                figure("Tenant users", counts.tenant_users),
             ],
         })
     }

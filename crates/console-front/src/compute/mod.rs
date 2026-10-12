@@ -374,9 +374,9 @@ impl Section for ComputeSection {
                 Some(SectionSummary {
                     headline,
                     figures: vec![
-                        figure("functions", functions),
-                        figure("codebases", user),
-                        figure("failing loads", failing),
+                        figure("Functions", functions),
+                        figure("Codebases", user),
+                        figure("Failing loads", failing),
                     ],
                 })
             }
@@ -387,7 +387,7 @@ impl Section for ComputeSection {
                     .count() as u64;
                 Some(SectionSummary {
                     headline: counted(instances, "instance", "instances"),
-                    figures: vec![figure("instances", instances)],
+                    figures: vec![figure("Instances", instances)],
                 })
             }
             "eventarc" => {
@@ -405,7 +405,7 @@ impl Section for ComputeSection {
                     .total;
                 Some(SectionSummary {
                     headline: format!("{} kept", counted(kept, "event", "events")),
-                    figures: vec![figure("events kept", kept)],
+                    figures: vec![figure("Events kept", kept)],
                 })
             }
             _ => None,

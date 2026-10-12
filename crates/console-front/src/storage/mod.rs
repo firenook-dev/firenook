@@ -317,17 +317,17 @@ impl Section for StorageSection {
             headline,
             figures: vec![
                 SummaryFigure {
-                    label: "objects".to_owned(),
+                    label: "Objects".to_owned(),
                     value: counts.objects,
                     unit: SummaryUnit::Count,
                 },
                 SummaryFigure {
-                    label: "bytes".to_owned(),
+                    label: "Stored".to_owned(),
                     value: counts.bytes,
                     unit: SummaryUnit::Bytes,
                 },
                 SummaryFigure {
-                    label: "buckets".to_owned(),
+                    label: "Buckets".to_owned(),
                     value: Some(buckets),
                     unit: SummaryUnit::Count,
                 },

@@ -145,7 +145,7 @@ test('U1 the table lists the engine’s users with its count, sort and type', as
     sections: { id: string; summary: { figures: { label: string; value: number }[] } | null }[]
   }>(engine, '/status')
   const summary = status.sections.find((section) => section.id === 'auth')?.summary
-  expect(summary?.figures.find((entry) => entry.label === 'users')?.value).toBe(total)
+  expect(summary?.figures.find((entry) => entry.label === 'Users')?.value).toBe(total)
 })
 
 test('U2 typing and facets write the filter, and one request goes per settled filter', async ({

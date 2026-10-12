@@ -712,9 +712,9 @@ async fn summaries_count_functions_codebases_failing_loads_instances_and_events(
     assert_eq!(
         figures,
         [
-            ("functions", Some(1_204)),
-            ("codebases", Some(2)),
-            ("failing loads", Some(1)),
+            ("Functions", Some(1_204)),
+            ("Codebases", Some(2)),
+            ("Failing loads", Some(1)),
         ]
     );
     assert_eq!(
