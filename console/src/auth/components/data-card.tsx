@@ -9,7 +9,7 @@
 
 import { Button, Text } from '@cloudflare/kumo'
 import { DownloadSimpleIcon, UploadSimpleIcon, UsersThreeIcon } from '@phosphor-icons/react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
 import { apiSend } from '@/api/client'
@@ -18,6 +18,9 @@ import type { Job } from '@/api/generated/Job'
 import { statusQuery } from '@/api/queries'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { formatCount, formatNumber } from '@/lib/format'
+import { mergeJob, sectionJobsKey } from '@/lib/jobs'
+import { toast } from '@/lib/toasts'
+import { jobEndToast } from '@/components/shell/jobs-watch'
 import { useTriggersFor } from '@/lib/triggers'
 import { clearActivity, clearMessages, previewBulk, startBulk } from '../api'
 import { summaryQuery } from '../queries'
@@ -51,6 +54,7 @@ export function DataCard({
   scope: TenantScope
 }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const status = useQuery(statusQuery)
   const summary = useQuery({ ...summaryQuery(project), enabled: project !== '' })
   const tenant = scope.kind === 'tenant' ? scope.tenant : undefined
@@ -107,8 +111,21 @@ export function DataCard({
       })
     },
     onSuccess: (job) => {
-      if (job) setJobId(job.id)
-      else setDanger(undefined)
+      if (!job) {
+        setDanger(undefined)
+        return
+      }
+      setJobId(job.id)
+      // This tab started the job, so its ending is news here however fast it
+      // came. JobsWatch says nothing of a job it first saw finished, and the
+      // jobs topic can beat this answer: told it is running, the shell's
+      // suite toast follows it to the end; already finished, it is said here,
+      // under the same key and in the same words.
+      const key = sectionJobsKey(job.section)
+      const known = queryClient.getQueryData<Job[]>(key)?.find((entry) => entry.id === job.id)
+      if (known === undefined)
+        queryClient.setQueryData<Job[]>(key, (list) => mergeJob(list ?? [], job))
+      else if (known.state !== 'running') toast(jobEndToast(known))
     },
   })
 
