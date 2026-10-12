@@ -4,6 +4,7 @@
 //! flag and awaits them all, so nothing still runs when the final flush
 //! makes the metadata durable.
 
+use std::future::Future;
 use std::sync::Mutex;
 
 use tokio::sync::watch;
@@ -52,6 +53,37 @@ impl ConsoleTasks {
         true
     }
 
+    /// Runs `work` on the runtime as one of the console's tasks. Refused
+    /// (false) once the service is stopping, or outside a runtime. The work
+    /// ends itself when [`Self::stopped`] resolves.
+    pub(crate) fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) -> bool {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return false;
+        };
+        let mut set = self
+            .set
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.stopping() {
+            return false;
+        }
+        while set.try_join_next().is_some() {}
+        set.spawn_on(work, &handle);
+        true
+    }
+
+    /// Resolves once the service is stopping.
+    pub(crate) fn stopped(&self) -> impl Future<Output = ()> + Send + 'static {
+        let mut receiver = self.stop.subscribe();
+        async move {
+            while !*receiver.borrow_and_update() {
+                if receiver.changed().await.is_err() {
+                    return;
+                }
+            }
+        }
+    }
+
     /// Runs `work` on the blocking pool and hands back its answer. `None`
     /// once the service is stopping (or outside a runtime).
     pub(crate) fn run_blocking<T: Send + 'static>(
@@ -64,6 +96,11 @@ impl ConsoleTasks {
             let _ = sender.send(work());
         })
         .then_some(receiver)
+    }
+
+    /// Asks every task to stop without waiting (the runtime was dropped).
+    pub(crate) fn signal_stop(&self) {
+        self.stop.send_replace(true);
     }
 
     /// Asks every task to stop and waits for each to end. Later spawns are

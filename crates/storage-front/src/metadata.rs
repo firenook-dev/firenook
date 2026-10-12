@@ -67,6 +67,64 @@ struct JournalEntry {
     next_id: u64,
 }
 
+/// One journal line for a whole batch of changes (a console bulk batch):
+/// replayed whole or, torn, not at all.
+#[derive(Serialize, Deserialize)]
+struct JournalBatch {
+    seq: u64,
+    changes: Vec<JournalChange>,
+    next_id: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct JournalChange {
+    table: JournalTable,
+    key: String,
+    /// The record's JSON, or null for a removal.
+    value: Option<serde_json::Value>,
+}
+
+/// A journal line of either shape.
+enum JournalLine {
+    One(JournalEntry),
+    Batch(JournalBatch),
+}
+
+impl JournalLine {
+    fn parse(line: &[u8]) -> Option<Self> {
+        serde_json::from_slice::<JournalEntry>(line)
+            .map(Self::One)
+            .or_else(|_| serde_json::from_slice::<JournalBatch>(line).map(Self::Batch))
+            .ok()
+    }
+
+    const fn seq(&self) -> u64 {
+        match self {
+            Self::One(entry) => entry.seq,
+            Self::Batch(batch) => batch.seq,
+        }
+    }
+
+    const fn next_id(&self) -> u64 {
+        match self {
+            Self::One(entry) => entry.next_id,
+            Self::Batch(batch) => batch.next_id,
+        }
+    }
+
+    /// Every change the line holds, as (table, key, value).
+    fn changes(&self) -> Vec<(JournalTable, &str, Option<&serde_json::Value>)> {
+        match self {
+            Self::One(entry) => vec![(entry.table, entry.key.as_str(), entry.value.as_ref())],
+            Self::Batch(batch) => batch
+                .changes
+                .iter()
+                .map(|change| (change.table, change.key.as_str(), change.value.as_ref()))
+                .collect(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum JournalTable {
@@ -183,7 +241,7 @@ impl MetadataStore {
         let mut entries = Vec::new();
         for line in reader.split(b'\n') {
             let line = line.map_err(error)?;
-            let Ok(entry) = serde_json::from_slice::<JournalEntry>(&line) else {
+            let Some(entry) = JournalLine::parse(&line) else {
                 break;
             };
             entries.push(entry);
@@ -191,7 +249,7 @@ impl MetadataStore {
         let mut applied = durable_seq;
         let pending = entries
             .into_iter()
-            .filter(|entry| entry.seq > durable_seq)
+            .filter(|entry| entry.seq() > durable_seq)
             .collect::<Vec<_>>();
         if pending.is_empty() {
             return Ok(applied);
@@ -204,48 +262,41 @@ impl MetadataStore {
             let mut objects = transaction.open_table(OBJECTS).map_err(error)?;
             let mut uploads = transaction.open_table(UPLOADS).map_err(error)?;
             for entry in &pending {
-                if entry.seq != applied.saturating_add(1) {
+                if entry.seq() != applied.saturating_add(1) {
                     return Err(StorageError(format!(
                         "Storage metadata journal sequence {} does not follow {applied}",
-                        entry.seq
+                        entry.seq()
                     )));
                 }
-                let bytes = entry
-                    .value
-                    .as_ref()
-                    .map(serde_json::to_vec)
-                    .transpose()
-                    .map_err(error)?;
-                match (entry.table, bytes) {
-                    (JournalTable::Objects, Some(bytes)) => {
-                        objects
-                            .insert(entry.key.as_str(), bytes.as_slice())
-                            .map_err(error)?;
-                        data.objects.insert(
-                            entry.key.clone(),
-                            serde_json::from_slice(&bytes).map_err(error)?,
-                        );
-                    }
-                    (JournalTable::Objects, None) => {
-                        objects.remove(entry.key.as_str()).map_err(error)?;
-                        data.objects.remove(&entry.key);
-                    }
-                    (JournalTable::Uploads, Some(bytes)) => {
-                        uploads
-                            .insert(entry.key.as_str(), bytes.as_slice())
-                            .map_err(error)?;
-                        data.uploads.insert(
-                            entry.key.clone(),
-                            serde_json::from_slice(&bytes).map_err(error)?,
-                        );
-                    }
-                    (JournalTable::Uploads, None) => {
-                        uploads.remove(entry.key.as_str()).map_err(error)?;
-                        data.uploads.remove(&entry.key);
+                for (table, key, value) in entry.changes() {
+                    let bytes = value.map(serde_json::to_vec).transpose().map_err(error)?;
+                    match (table, bytes) {
+                        (JournalTable::Objects, Some(bytes)) => {
+                            objects.insert(key, bytes.as_slice()).map_err(error)?;
+                            data.objects.insert(
+                                key.to_owned(),
+                                serde_json::from_slice(&bytes).map_err(error)?,
+                            );
+                        }
+                        (JournalTable::Objects, None) => {
+                            objects.remove(key).map_err(error)?;
+                            data.objects.remove(key);
+                        }
+                        (JournalTable::Uploads, Some(bytes)) => {
+                            uploads.insert(key, bytes.as_slice()).map_err(error)?;
+                            data.uploads.insert(
+                                key.to_owned(),
+                                serde_json::from_slice(&bytes).map_err(error)?,
+                            );
+                        }
+                        (JournalTable::Uploads, None) => {
+                            uploads.remove(key).map_err(error)?;
+                            data.uploads.remove(key);
+                        }
                     }
                 }
-                data.next_id = data.next_id.max(entry.next_id);
-                applied = entry.seq;
+                data.next_id = data.next_id.max(entry.next_id());
+                applied = entry.seq();
             }
         }
         {
@@ -427,6 +478,104 @@ impl MetadataStore {
                 records.insert(key, value.as_slice()).map_err(error)?;
             } else {
                 records.remove(key).map_err(error)?;
+            }
+        }
+        transaction
+            .open_table(HEADER)
+            .map_err(error)?
+            .insert("next_id", data.next_id)
+            .map_err(error)?;
+        transaction.commit().map_err(error)?;
+        Ok(bytes)
+    }
+
+    /// Persists several changes as one: one journal line and one metadata
+    /// transaction, so a batch is applied whole or not at all and costs one
+    /// commit instead of one per change. A single change is written exactly
+    /// as [`Self::update`] writes it.
+    pub(super) fn update_many(
+        &self,
+        data: &StorageData,
+        changes: &[Change<'_>],
+    ) -> Result<usize, StorageError> {
+        match changes {
+            [] => return Ok(0),
+            [change] => return self.update(data, *change),
+            _ => {}
+        }
+        let mut records = Vec::with_capacity(changes.len());
+        for change in changes {
+            let (table, key, value) = match change {
+                Change::Object(key) => (
+                    JournalTable::Objects,
+                    *key,
+                    data.objects
+                        .get(*key)
+                        .map(serde_json::to_vec)
+                        .transpose()
+                        .map_err(error)?,
+                ),
+                Change::Upload(key) => (
+                    JournalTable::Uploads,
+                    *key,
+                    data.uploads
+                        .get(*key)
+                        .map(serde_json::to_vec)
+                        .transpose()
+                        .map_err(error)?,
+                ),
+            };
+            records.push((table, key, value));
+        }
+        let bytes = records
+            .iter()
+            .map(|(_, _, value)| value.as_ref().map_or(0, Vec::len))
+            .sum();
+        if let Some(write_behind) = &self.write_behind {
+            let mut state = lock(write_behind);
+            let batch = JournalBatch {
+                seq: state.seq.saturating_add(1),
+                changes: records
+                    .iter()
+                    .map(|(table, key, value)| {
+                        Ok(JournalChange {
+                            table: *table,
+                            key: (*key).to_owned(),
+                            value: value
+                                .as_deref()
+                                .map(serde_json::from_slice::<serde_json::Value>)
+                                .transpose()
+                                .map_err(error)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, StorageError>>()?,
+                next_id: data.next_id,
+            };
+            let mut line = serde_json::to_vec(&batch).map_err(error)?;
+            line.push(b'\n');
+            state.journal.write_all(&line).map_err(error)?;
+            state.seq = batch.seq;
+        }
+        let mut transaction = self.database.begin_write().map_err(error)?;
+        transaction
+            .set_durability(match self.durability {
+                StorageDurability::PerCommit => Durability::Immediate,
+                StorageDurability::WriteBehind { .. } => Durability::None,
+            })
+            .map_err(error)?;
+        {
+            let mut objects = transaction.open_table(OBJECTS).map_err(error)?;
+            let mut uploads = transaction.open_table(UPLOADS).map_err(error)?;
+            for (table, key, value) in &records {
+                let records = match table {
+                    JournalTable::Objects => &mut objects,
+                    JournalTable::Uploads => &mut uploads,
+                };
+                if let Some(value) = value {
+                    records.insert(*key, value.as_slice()).map_err(error)?;
+                } else {
+                    records.remove(*key).map_err(error)?;
+                }
             }
         }
         transaction

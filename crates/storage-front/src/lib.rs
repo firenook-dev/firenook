@@ -36,8 +36,10 @@ use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
 mod archive;
+mod bulk;
 mod changes;
 mod console;
+mod console_write;
 mod decisions;
 mod download;
 mod dry_run;
@@ -50,12 +52,19 @@ mod metadata;
 mod rules;
 mod rules_manager;
 mod search;
+mod sessions;
 mod sniff;
 mod staging;
 mod tasks;
 mod thumbnails;
 mod view_cache;
+mod write;
+mod zip_stream;
 pub use archive::{ARCHIVE_ENTRIES, ArchiveEntry, ArchiveListing};
+pub use bulk::{
+    BULK_BATCH, BulkPreview, BulkProgress, BulkRequest, BulkSource, BulkVerb, ConflictPolicy,
+    Destination, MetadataPatch, QUEUE_LIMIT,
+};
 pub use changes::{
     Actor, ChangeContext, ChangeEvent, EventDelivery, ObjectChangeKind, ObjectChangeRecord,
 };
@@ -64,6 +73,10 @@ pub use console::{
     BucketInfo, Buckets, ConsoleError, ConsoleListQuery, EXISTS_NAMES, INDEX_WAIT, Identity,
     ListResult, ListTotals, ObjectView, PROFILE_OBJECTS, Profile, StorageConsoleApi,
     StorageSummaryCounts,
+};
+pub use console_write::{
+    ConsoleUpload, EventBodies, EventPayloads, METADATA_HEADER_BYTES, ResendEvent,
+    parse_metadata_header,
 };
 pub use decisions::{DecisionLog, RE_RUNNABLE_BYTES, RE_RUNNABLE_DECISIONS, StorageDecisionRecord};
 use decisions::{RulesCheck, judge};
@@ -98,6 +111,7 @@ pub use rules_manager::{
     FolderRules, Impact, ImpactFlip, StorageRulesHandle, StorageRulesMap,
 };
 pub use search::{SearchFound, SearchKind, SearchOutcome};
+pub use sessions::{SESSION_IDLE, SessionCursor, SessionPage, SessionState, SessionView};
 pub use sniff::{SniffFamily, Sniffed};
 pub use staging::InFlight;
 use staging::{StagedFile, StagingGauge, staging_path};
@@ -105,10 +119,14 @@ use tasks::ConsoleTasks;
 pub use thumbnails::{
     THUMBNAIL_SOURCE_BYTES, THUMBNAIL_SOURCE_PIXELS, THUMBNAIL_WIDTHS, Thumbnail,
 };
+pub use write::TokenOp;
+pub use zip_stream::{EXPORT_BYTES, EXPORT_OBJECTS, ExportSource, ExportTicketInfo, TICKET_LIFE};
 #[cfg(test)]
 mod changes_tests;
 #[cfg(test)]
 mod console_read_tests;
+#[cfg(test)]
+mod console_write_tests;
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]
@@ -125,6 +143,9 @@ mod rules_replay_tests;
 mod rules_tests;
 #[cfg(test)]
 mod staging_tests;
+
+/// Makes every resent event's ids unique within the process.
+static RESEND_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Storage service construction settings.
 #[derive(Debug, Clone)]
@@ -214,7 +235,11 @@ impl StorageRuntime {
         tokio::fs::create_dir_all(config.data_dir.join("uploads"))
             .await
             .map_err(|error| StorageError(format!("failed to create upload root: {error}")))?;
-        let (metadata, data) = metadata::MetadataStore::open(&config.data_dir, config.durability)?;
+        let (metadata, mut data) =
+            metadata::MetadataStore::open(&config.data_dir, config.durability)?;
+        // Sessions an older engine recorded carry no times: their idle time
+        // counts from now.
+        sessions::stamp_unknown(&mut data, now_millis());
         // Nothing is uploading yet, so a staged file no session names is
         // what a crash mid-upload left behind.
         let (orphans, orphan_bytes) = staging::remove_orphans(&config.data_dir, &data);
@@ -251,6 +276,7 @@ impl StorageRuntime {
             shapes: Arc::default(),
             views: Arc::default(),
             thumbnails: Arc::new(thumbnails::ThumbnailCache::new()),
+            exports: Arc::default(),
         };
         let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
@@ -282,6 +308,7 @@ impl StorageRuntime {
             });
             write_behind = Some((stop, task));
         }
+        sessions::spawn_sweep(&state);
         let application = routes(state.clone());
         Ok(Self {
             application,
@@ -387,6 +414,15 @@ impl StorageRuntime {
     }
 }
 
+impl Drop for StorageRuntime {
+    /// A runtime dropped without [`StorageRuntime::shutdown`] still ends
+    /// the console's tasks (the session sweep would otherwise keep the
+    /// service's state, its metadata database included, alive).
+    fn drop(&mut self) {
+        self.state.tasks.signal_stop();
+    }
+}
+
 fn config_durability(state: &StorageState) -> StorageDurability {
     state.metadata.durability()
 }
@@ -451,6 +487,8 @@ struct StorageState {
     views: Arc<view_cache::ViewCache>,
     /// Thumbnails made, by generation.
     thumbnails: Arc<thumbnails::ThumbnailCache>,
+    /// Selections waiting for their `.zip` download.
+    exports: Arc<zip_stream::ExportTickets>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -470,6 +508,9 @@ struct StorageData {
     /// Counts and sizes under every folder; `None` until a console asks.
     #[serde(skip)]
     folders: Option<FolderIndex>,
+    /// A bulk batch in progress: its changes are announced together.
+    #[serde(skip)]
+    batch: Option<changes::Batch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -528,6 +569,17 @@ struct UploadSession {
     /// later command is a bad request, as in the official emulator.
     #[serde(default)]
     cancelled: bool,
+    /// The size the client declared for the whole upload, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    total: Option<u64>,
+    /// When the session started, Unix milliseconds (0: recorded by an older
+    /// engine, read as the time the service opened).
+    #[serde(default)]
+    started_at_ms: i64,
+    /// Its last activity, Unix milliseconds; a session idle for seven days
+    /// is swept.
+    #[serde(default)]
+    updated_at_ms: i64,
 }
 
 fn routes(state: StorageState) -> Router {
@@ -779,6 +831,7 @@ async fn v0_upload(
             authorization: authorization_header(&headers),
             firebase: true,
             console: via_console(&headers),
+            keep_tokens: false,
         },
         upload.uploaded,
     )
@@ -932,6 +985,7 @@ async fn firebase_resumable(
             authorization: session.authorization.as_deref(),
             firebase: true,
             console: via_console(headers),
+            keep_tokens: false,
         },
         summarize_file(StagedFile::session(
             state.config.data_dir.join(&session.staging_file),
@@ -1076,37 +1130,28 @@ async fn v0_token_action(
             "Missing admin credentials.",
         ));
     }
-    let _guard = state.mutation.lock().await;
-    let mut object = get_object(&state, &bucket, &object_name)
+    let guard = state.mutation.lock().await;
+    let object = get_object(&state, &bucket, &object_name)
         .map_err(|_| StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found"))?;
-    if query.get("create_token").map(String::as_str) == Some("true") {
-        let token = next_token(&state, &bucket, &object_name);
-        object.download_tokens.push(token);
+    let op = if query.get("create_token").map(String::as_str) == Some("true") {
+        write::TokenOp::Create
     } else if let Some(token) = query.get("delete_token") {
-        object.download_tokens.retain(|value| value != token);
+        write::TokenOp::Revoke(token.clone())
     } else {
         return Err(bad_request("Unknown token action"));
-    }
-    object.metageneration = object.metageneration.saturating_add(1);
-    object.updated = now_rfc3339();
-    object.etag = etag(object.generation, object.metageneration);
-    let revision = {
-        let mut data = lock(&state.inner);
-        data.put(
-            object.clone(),
-            &ChangeContext::from_authorization(
-                authorization_header(&headers),
-                via_console(&headers),
-            ),
-        );
-        persist_change(
-            &state,
-            &data,
-            metadata::Change::Object(&object_key(&bucket, &object_name)),
-        )?;
-        data.revision
     };
-    state.dispatch_change(revision, StorageEvent::Metadata, &object);
+    let mut pending = write::Pending::default();
+    let object = write::token_locked(
+        &state,
+        &guard,
+        &mut pending,
+        object,
+        &op,
+        &ChangeContext::from_authorization(authorization_header(&headers), via_console(&headers)),
+    );
+    pending.commit(&state).await?;
+    drop(guard);
+    pending.dispatch(&state);
     Ok(Json(firebase_metadata(&object)))
 }
 
@@ -1172,6 +1217,7 @@ async fn gcs_multipart_upload(
             authorization: authorization_header(headers),
             firebase: false,
             console: via_console(headers),
+            keep_tokens: false,
         },
         summarize_file(staged).await?,
     )
@@ -1239,6 +1285,19 @@ async fn gcs_resumable_start(
             authorization: authorization_header(headers).map(str::to_owned),
             denied: false,
             cancelled: false,
+            total: [
+                "x-upload-content-length",
+                "x-goog-upload-header-content-length",
+            ]
+            .iter()
+            .find_map(|header| {
+                headers
+                    .get(*header)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.trim().parse().ok())
+            }),
+            started_at_ms: 0,
+            updated_at_ms: 0,
         });
         persist_change(state, &data, metadata::Change::Upload(&id))?;
         (id, staging_file)
@@ -1279,6 +1338,7 @@ async fn gcs_media_upload(
             authorization: authorization_header(headers),
             firebase: false,
             console: via_console(headers),
+            keep_tokens: false,
         },
         uploaded,
     )
@@ -1330,6 +1390,9 @@ async fn gcs_resumable_chunk(
     )
     .await?;
     session.received = session.received.saturating_add(appended);
+    if let Some(declared) = range.and_then(|value| value.total) {
+        session.total = Some(declared);
+    }
     let total = range
         .and_then(|value| value.total)
         .unwrap_or(session.received);
@@ -1362,6 +1425,7 @@ async fn gcs_resumable_chunk(
             authorization: session.authorization.as_deref(),
             firebase: false,
             console: via_console(&headers),
+            keep_tokens: false,
         },
         uploaded,
     )
@@ -1557,6 +1621,7 @@ async fn gcs_alias_copy(
             authorization: authorization_header(&headers),
             firebase: false,
             console: via_console(&headers),
+            keep_tokens: false,
         },
         uploaded,
     )
@@ -1616,19 +1681,16 @@ async fn update_metadata(
     request: &JsonValue,
     enforce_rules: bool,
 ) -> Result<StoredObject, StorageApiError> {
-    let _guard = state.mutation.lock().await;
+    let guard = state.mutation.lock().await;
     let stored = get_object(state, bucket, name);
     if enforce_rules {
         // `request.resource` is the merged object with the metageneration
         // and update time it would have; a missing object is checked with
         // both resources null and is 404 only when the rules allow.
-        let proposed = stored.as_ref().ok().map(|before| {
-            let mut proposed = before.clone();
-            apply_metadata(&mut proposed, request);
-            proposed.metageneration = proposed.metageneration.saturating_add(1);
-            proposed.updated = now_rfc3339();
-            proposed
-        });
+        let proposed = stored
+            .as_ref()
+            .ok()
+            .map(|before| write::proposed_metadata(before, request));
         authorize(
             state,
             &RulesCheck {
@@ -1642,31 +1704,25 @@ async fn update_metadata(
             },
         )?;
     }
-    let mut object = stored.map_err(|error| {
+    let object = stored.map_err(|error| {
         if enforce_rules {
             StorageApiError::plain(StatusCode::NOT_FOUND, "Not Found")
         } else {
             error
         }
     })?;
-    apply_metadata(&mut object, request);
-    object.metageneration = object.metageneration.saturating_add(1);
-    object.updated = now_rfc3339();
-    object.etag = etag(object.generation, object.metageneration);
-    let revision = {
-        let mut data = lock(&state.inner);
-        data.put(
-            object.clone(),
-            &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
-        );
-        persist_change(
-            state,
-            &data,
-            metadata::Change::Object(&object_key(bucket, name)),
-        )?;
-        data.revision
-    };
-    state.dispatch_change(revision, StorageEvent::Metadata, &object);
+    let mut pending = write::Pending::default();
+    let object = write::update_metadata_locked(
+        state,
+        &guard,
+        &mut pending,
+        object,
+        request,
+        &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
+    );
+    pending.commit(state).await?;
+    drop(guard);
+    pending.dispatch(state);
     Ok(object)
 }
 
@@ -1677,7 +1733,7 @@ async fn delete_object(
     headers: &HeaderMap,
     enforce_rules: bool,
 ) -> Result<(), StorageApiError> {
-    let _guard = state.mutation.lock().await;
+    let guard = state.mutation.lock().await;
     let stored = get_object(state, bucket, name);
     if enforce_rules {
         authorize(
@@ -1700,23 +1756,17 @@ async fn delete_object(
             error
         }
     })?;
-    let revision = {
-        let mut data = lock(&state.inner);
-        data.remove(
-            &object_key(bucket, name),
-            &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
-        );
-        persist_change(
-            state,
-            &data,
-            metadata::Change::Object(&object_key(bucket, name)),
-        )?;
-        data.revision
-    };
-    tokio::fs::remove_file(state.config.data_dir.join(&object.data_file))
-        .await
-        .map_err(io_error)?;
-    state.dispatch_change(revision, StorageEvent::Delete, &object);
+    let mut pending = write::Pending::default();
+    write::delete_locked(
+        state,
+        &guard,
+        &mut pending,
+        object,
+        &ChangeContext::from_authorization(authorization_header(headers), via_console(headers)),
+    );
+    pending.commit(state).await?;
+    drop(guard);
+    pending.dispatch(state);
     Ok(())
 }
 
@@ -2019,6 +2069,9 @@ struct CommitSpec<'a> {
     firebase: bool,
     /// The request came from the console (`x-firenook-console`).
     console: bool,
+    /// A replacement keeps the replaced object's download tokens instead of
+    /// minting one (the console's edit in place, Admin only).
+    keep_tokens: bool,
 }
 
 async fn commit_staging(
@@ -2026,56 +2079,8 @@ async fn commit_staging(
     spec: CommitSpec<'_>,
     uploaded: Uploaded,
 ) -> Result<StoredObject, StorageApiError> {
-    let _guard = state.mutation.lock().await;
-    let before = lock(&state.inner)
-        .objects
-        .get(&object_key(spec.bucket, spec.name))
-        .cloned();
-    let now = now_rfc3339();
-    let (generation, token) = {
-        let mut data = lock(&state.inner);
-        data.next_id = data.next_id.saturating_add(1);
-        let generation = generation(&mut data);
-        let token = spec.firebase.then(|| {
-            uuid_shaped(&Sha256::digest(
-                stable_id(&[
-                    &state.config.project,
-                    spec.bucket,
-                    spec.name,
-                    "download",
-                    &data.next_id.to_string(),
-                ])
-                .as_bytes(),
-            ))
-        });
-        (generation, token)
-    };
-    let data_file = format!("objects/{}", stable_id(&[spec.bucket, spec.name]));
-    let mut object = StoredObject {
-        name: spec.name.to_owned(),
-        bucket: spec.bucket.to_owned(),
-        generation,
-        metageneration: 1,
-        content_type: Some(spec.content_type.to_owned()),
-        storage_class: "STANDARD".to_owned(),
-        content_disposition: None,
-        content_encoding: None,
-        content_language: None,
-        cache_control: None,
-        download_tokens: token.into_iter().collect(),
-        custom_metadata: spec.metadata,
-        time_created: now.clone(),
-        updated: now,
-        size: uploaded.size,
-        md5_hash: uploaded.md5_hash,
-        crc32c: uploaded.crc32c,
-        etag: etag(generation, 1),
-        data_file: data_file.clone(),
-    };
-    apply_metadata(&mut object, spec.object_metadata);
-    if let Some(previous) = &before {
-        object.time_created.clone_from(&previous.time_created);
-    }
+    let guard = state.mutation.lock().await;
+    let commit = write::prepare_commit(state, &guard, &spec, &uploaded);
     // Every upload is `create`, with `resource` set when the object exists
     // (storage-rules-v1 upload-over-existing). The rules see the object
     // before the Firebase presentation defaults are applied.
@@ -2086,8 +2091,8 @@ async fn commit_staging(
                 bucket: spec.bucket,
                 name: spec.name,
                 operation: Operation::Create,
-                before: before.as_ref(),
-                after: Some(&object),
+                before: commit.before.as_ref(),
+                after: Some(&commit.object),
                 authorization: spec.authorization,
                 console: spec.console,
             },
@@ -2096,40 +2101,19 @@ async fn commit_staging(
         uploaded.staged.discard();
         return Err(error.upload_final());
     }
-    // The official emulator dispatches finalize before defaulting the
-    // disposition on the (shared) stored record, so the finalize event lacks
-    // it while later events and responses carry "inline".
-    let disposition_defaulted = spec.firebase && object.content_disposition.is_none();
-    if disposition_defaulted {
-        object.content_disposition = Some("inline".to_owned());
-    }
-    let final_path = state.config.data_dir.join(&data_file);
-    tokio::fs::rename(uploaded.staged.path(), &final_path)
-        .await
-        .map_err(io_error)?;
-    uploaded.staged.committed();
-    // The bytes were recorded under the staging path; sync the published one.
-    state.metadata.note_unsynced_file(final_path.clone());
-    let revision = {
-        let mut data = lock(&state.inner);
-        data.put(
-            object.clone(),
-            &ChangeContext::from_authorization(spec.authorization, spec.console),
-        );
-        persist_change(
-            state,
-            &data,
-            metadata::Change::Object(&object_key(spec.bucket, spec.name)),
-        )?;
-        data.revision
-    };
-    if disposition_defaulted {
-        let mut event_object = object.clone();
-        event_object.content_disposition = None;
-        state.dispatch_change(revision, StorageEvent::Finalize, &event_object);
-    } else {
-        state.dispatch_change(revision, StorageEvent::Finalize, &object);
-    }
+    let mut pending = write::Pending::default();
+    let object = write::commit_locked(
+        state,
+        &guard,
+        &mut pending,
+        commit,
+        uploaded,
+        &ChangeContext::from_authorization(spec.authorization, spec.console),
+    )
+    .await?;
+    pending.commit(state).await?;
+    drop(guard);
+    pending.dispatch(state);
     Ok(object)
 }
 

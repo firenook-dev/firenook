@@ -196,6 +196,41 @@ pub enum ChangeEvent {
     Reset,
 }
 
+/// What a batch changed, per bucket, until it is announced.
+#[derive(Debug, Default)]
+pub(crate) struct Batch {
+    buckets: std::collections::BTreeMap<String, Touched>,
+}
+
+#[derive(Debug, Default)]
+struct Touched {
+    revision: u64,
+    touches: Vec<(Arc<str>, ObjectChangeKind)>,
+    sessions: Vec<String>,
+}
+
+impl Batch {
+    fn touch(
+        &mut self,
+        bucket: &str,
+        revision: u64,
+        object: Option<(&str, ObjectChangeKind)>,
+        session: Option<String>,
+    ) {
+        if !self.buckets.contains_key(bucket) {
+            self.buckets.insert(bucket.to_owned(), Touched::default());
+        }
+        let touched = self.buckets.get_mut(bucket).expect("bucket present");
+        touched.revision = revision;
+        if let Some((name, kind)) = object {
+            touched.touches.push((Arc::from(name), kind));
+        }
+        if let Some(id) = session {
+            touched.sessions.push(id);
+        }
+    }
+}
+
 /// The change broadcast and the activity ring, shared by the object map
 /// (which writes them under its lock) and the console handle (which reads
 /// them without it).
@@ -463,8 +498,19 @@ impl StorageData {
         Some(before)
     }
 
-    /// Records and announces one committed object change.
-    fn committed(&self, record: ObjectChangeRecord) {
+    /// Records and announces one committed object change; inside a batch
+    /// the announcement waits for the batch's end.
+    fn committed(&mut self, record: ObjectChangeRecord) {
+        if let Some(batch) = &mut self.batch {
+            batch.touch(
+                &record.bucket,
+                record.revision,
+                Some((&record.name, record.kind)),
+                None,
+            );
+            self.feed.ring().push(record);
+            return;
+        }
         let event = ChangeEvent::Committed {
             bucket: Arc::from(record.bucket.as_str()),
             revision: record.revision,
@@ -475,12 +521,37 @@ impl StorageData {
         self.feed.announce(event);
     }
 
+    /// Starts a batch: until [`Self::end_batch`], changes are recorded at
+    /// once but announced together, one [`ChangeEvent::Committed`] per
+    /// bucket, so a bulk batch of 200 names is one live event, not 200.
+    /// Upload sessions that change meanwhile join the batch's event, so the
+    /// announced revisions keep their order.
+    pub(crate) fn begin_batch(&mut self) {
+        self.batch.get_or_insert_with(Batch::default);
+    }
+
+    /// Ends a batch, announcing what it changed.
+    pub(crate) fn end_batch(&mut self) {
+        let Some(batch) = self.batch.take() else {
+            return;
+        };
+        for (bucket, touched) in batch.buckets {
+            self.feed.announce(ChangeEvent::Committed {
+                bucket: Arc::from(bucket.as_str()),
+                revision: touched.revision,
+                touches: Arc::from(touched.touches),
+                sessions: Arc::from(touched.sessions),
+            });
+        }
+    }
+
     /// Every object and upload session of every bucket goes, as
     /// `/internal/reset` asks. The revision never goes back: it moves on
     /// once, so a client's "nothing newer than what I hold" stays true across
     /// a reset. No per-object record is made and no Storage event is sent;
     /// one [`ChangeEvent::Reset`] says everything changed.
     pub(crate) fn clear(&mut self) {
+        self.batch = None;
         self.objects.clear();
         self.uploads.clear();
         self.next_id = 0;
@@ -492,7 +563,12 @@ impl StorageData {
 
     /// The one way to record an upload session's new state (started,
     /// advanced, refused, cancelled).
-    pub(crate) fn put_session(&mut self, session: UploadSession) {
+    pub(crate) fn put_session(&mut self, mut session: UploadSession) {
+        let now = unix_millis(OffsetDateTime::now_utc());
+        if session.started_at_ms == 0 {
+            session.started_at_ms = now;
+        }
+        session.updated_at_ms = now;
         let (bucket, id) = (session.bucket.clone(), session.id.clone());
         self.uploads.insert(id.clone(), session);
         self.session_committed(&bucket, id);
@@ -507,6 +583,10 @@ impl StorageData {
 
     fn session_committed(&mut self, bucket: &str, id: String) {
         self.revision += 1;
+        if let Some(batch) = &mut self.batch {
+            batch.touch(bucket, self.revision, None, Some(id));
+            return;
+        }
         self.feed.announce(ChangeEvent::Committed {
             bucket: Arc::from(bucket),
             revision: self.revision,

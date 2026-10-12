@@ -360,6 +360,10 @@ impl StorageConsoleApi {
         Self { state }
     }
 
+    pub(crate) const fn state_ref(&self) -> &StorageState {
+        &self.state
+    }
+
     /// The bucket `getStorage()` uses when given none.
     #[must_use]
     pub fn default_bucket(&self) -> String {

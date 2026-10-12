@@ -56,6 +56,10 @@ Storage events are sent only when the suite runs Functions, as the official
 emulator dispatches them only then; with `--only storage` an upload, a
 metadata change or a delete queues nothing.
 
+Resumable upload sessions idle for seven days are removed with their staged
+bytes (production expires a resumable session URI after a week; the official
+emulator keeps unfinished sessions for ever).
+
 The package supports only its enumerated native targets after their exact
 candidate checks pass. Linux musl, Windows ARM64/32-bit, network-filesystem
 durability and Windows power-loss recovery are not qualified.

@@ -66,6 +66,9 @@ fn incremental_metadata_roundtrips_changes_without_resurrecting_legacy_objects()
             authorization: None,
             denied: false,
             cancelled: false,
+            total: Some(64),
+            started_at_ms: 1_700_000_000_000,
+            updated_at_ms: 1_700_000_000_500,
         },
     );
     store
