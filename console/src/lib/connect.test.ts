@@ -31,7 +31,7 @@ function status(project = 'demo-shop', host = '127.0.0.1'): ConsoleStatus {
     sections: [],
     features: { diagnostics: true },
     unsupported: [],
-    backgroundTriggers: { enabled: true },
+    backgroundTriggers: { enabled: true, since: null, dropped: [] },
     data: {
       mode: 'memory',
       stateDir: null,

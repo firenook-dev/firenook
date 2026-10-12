@@ -12,14 +12,18 @@ use std::sync::Arc;
 
 use axum::Router;
 use firenook_suite_front::RingBudget;
+use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::api_error::ApiError;
 use crate::foreign::ForeignProjects;
 use crate::instance::Instance;
+use crate::jobs::{JobHandle, JobRegistry};
 use crate::live::LiveTopic;
 use crate::live::badges::BadgeBoard;
+use crate::search::SearchSource;
 use crate::sse::Shutdown;
 
 /// The sidebar's sections in their one canonical order, read from the file
@@ -85,6 +89,8 @@ pub(crate) struct SectionContext {
     pub(crate) badges: BadgeBoard,
     /// This engine run (its cursors' epoch).
     pub(crate) instance: Instance,
+    /// Where the section starts its bulk work.
+    pub(crate) jobs: JobRegistry,
     /// The process's ring budget, for a section's own feeds.
     pub(crate) rings: RingBudget,
     /// Project ids requests named that are not the configured one.
@@ -107,12 +113,46 @@ pub(crate) trait Section: Send + Sync + 'static {
     fn topics(&self, _context: &SectionContext) -> Vec<Arc<dyn LiveTopic>> {
         Vec::new()
     }
+    /// What ⌘K finds here (`GET /search`).
+    fn search(&self, _context: &SectionContext) -> Option<Arc<dyn SearchSource>> {
+        None
+    }
     /// Counts and a headline for sidebar section `id` (one this module
     /// answers for), for the Overview and the nav tooltip. Cheap: counters
     /// the section keeps anyway. Asked only while `id` is ready.
     fn summary(&self, _id: &str) -> Option<SectionSummary> {
         None
     }
+    /// Removes everything sidebar section `id` holds (`POST /suite/clear`),
+    /// reporting progress to `job` and checking `job.cancelled()` between
+    /// batches. `None`: the section cannot be cleared. Building the future
+    /// does no work; the clear starts when the job polls it.
+    fn clear(
+        &self,
+        _id: &str,
+        _job: JobHandle,
+        _options: ClearOptions,
+    ) -> Option<BoxFuture<'static, Result<ClearReport, ApiError>>> {
+        None
+    }
+}
+
+/// How a clear runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ClearOptions {
+    /// Deliver the triggers the removals would fire (`runTriggers`); off by
+    /// default, so a reset does not set off every function that listens.
+    pub(crate) run_triggers: bool,
+}
+
+/// What a clear removed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct ClearReport {
+    /// The section id.
+    pub section: String,
+    /// Documents, users, objects, messages or tasks removed.
+    #[ts(type = "number")]
+    pub removed: u64,
 }
 
 /// One sidebar section and whether it can be used now.

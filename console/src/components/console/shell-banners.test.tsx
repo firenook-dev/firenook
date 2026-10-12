@@ -32,7 +32,9 @@ describe('the suite-wide banners', () => {
   })
 
   it('say background triggers are paused, with Resume, only where functions run', async () => {
-    const paused = { backgroundTriggers: { enabled: false } }
+    const paused = {
+      backgroundTriggers: { enabled: false, since: '2026-01-01T00:00:00Z', dropped: [] },
+    }
     await renderInConsole(() => <ShellBanners section="firestore" />, {
       status: testStatus({ ...paused, services: functionsRunning }),
     })

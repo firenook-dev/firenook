@@ -19,8 +19,8 @@ use axum::serve::{ListenerExt as _, TapIo};
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
     AllowedHosts, CONSOLE_PATH, ChangeFeed, ComputeParts, ConsoleFeatures, ConsoleServices,
-    DatabaseCatalog, FirestoreConsole, ForeignProjects, Late, QueryExplainer, RulesEditor,
-    RulesEvaluator, SchemaIndex, Shutdown, console_router,
+    DatabaseCatalog, FirestoreConsole, ForeignProjects, JobRegistry, Late, QueryExplainer,
+    RulesEditor, RulesEvaluator, SchemaIndex, Shutdown, console_router,
 };
 use firenook_core_store::{
     DatabaseName, DiskDurability, DiskOptions, DocumentKey, Precondition, Store, StoreOptions,
@@ -516,6 +516,7 @@ struct ShutdownSuite {
     triggers: TriggerRegistry,
     foreign: ForeignProjects,
     compute: Option<ComputeParts>,
+    jobs: JobRegistry,
     pubsub: Option<firenook_pubsub_front::PubsubRuntime>,
     servers: Vec<JoinHandle<()>>,
     shutdown: watch::Sender<bool>,
@@ -661,6 +662,8 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         .functions
         .then(|| Late::pending("Cloud Tasks"));
     let pubsub_late = config.services.pubsub.then(|| Late::pending("Pub/Sub"));
+    // The console's bulk work; the suite stops it first when it stops.
+    let console_jobs = JobRegistry::new();
     let hooks = HookContext {
         compute: compute_parts.as_ref(),
         ..hooks
@@ -710,6 +713,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                 ),
                 foreign: foreign.clone(),
                 allowed_hosts,
+                jobs: console_jobs.clone(),
             }),
         )
     });
@@ -881,6 +885,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
             triggers,
             foreign,
             compute: compute_parts,
+            jobs: console_jobs,
             pubsub,
             servers,
             shutdown,
@@ -1264,6 +1269,7 @@ impl ShutdownSuite {
     fn hooks(&self) -> HookContext<'_> {
         HookContext {
             compute: self.compute.as_ref(),
+            jobs: Some(&self.jobs),
             auth: self.auth.as_ref(),
             storage: self.storage.as_ref(),
             functions: self.functions.as_ref(),

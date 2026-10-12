@@ -22,7 +22,7 @@ export function testStatus(overrides: Partial<ConsoleStatus> = {}): ConsoleStatu
     sections: [],
     features: { diagnostics: true },
     unsupported: [],
-    backgroundTriggers: { enabled: true },
+    backgroundTriggers: { enabled: true, since: null, dropped: [] },
     data: {
       mode: 'memory',
       stateDir: null,

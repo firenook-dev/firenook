@@ -25,6 +25,7 @@ use firenook_core_store::{
 };
 use firenook_suite_front::replay::random_epoch;
 use firenook_suite_front::{Cursor, Entry, ReplayRing, RingBudget, RingLimits};
+use futures_util::future::BoxFuture;
 use futures_util::stream::{self, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -32,14 +33,19 @@ use ts_rs::TS;
 use crate::api_error::ApiError;
 use crate::databases::DatabaseCatalog;
 use crate::explain::QueryExplainer;
+use crate::firestore_search::FirestoreSearch;
 use crate::http::forwarded;
+use crate::jobs::JobHandle;
 use crate::live::badges::{BadgeKind, BadgeNoun};
 use crate::live::replay::{ReplayOptions, replay_topic};
 use crate::live::{LiveTopic, ResetReason, TopicEvent, TopicStream, topic_params};
 use crate::rules::RulesEditor;
 use crate::rules_eval::RulesEvaluator;
 use crate::schema::SchemaIndex;
-use crate::section::{Section, SectionContext, SectionStatus, SectionSummary};
+use crate::search::SearchSource;
+use crate::section::{
+    ClearOptions, ClearReport, Section, SectionContext, SectionStatus, SectionSummary,
+};
 use crate::time::rfc3339;
 
 /// What the change ring keeps: 20,000 batches or 4 MiB of paths, and never
@@ -594,8 +600,24 @@ impl Section for FirestoreSection {
         ]
     }
 
+    fn search(&self, _context: &SectionContext) -> Option<Arc<dyn SearchSource>> {
+        Some(Arc::new(FirestoreSearch::new(
+            self.0.schema.clone(),
+            self.0.databases.clone(),
+        )))
+    }
+
     fn summary(&self, _id: &str) -> Option<SectionSummary> {
         crate::observe::firestore_data::summary(&self.0)
+    }
+
+    fn clear(
+        &self,
+        _id: &str,
+        job: JobHandle,
+        options: ClearOptions,
+    ) -> Option<BoxFuture<'static, Result<ClearReport, ApiError>>> {
+        crate::observe::firestore_data::clear(&self.0, job, options)
     }
 }
 

@@ -215,6 +215,39 @@ impl SchemaIndex {
             .await
     }
 
+    /// The shape of `database_id` when the index has already been built for
+    /// it, and `None` otherwise: never starts the walk. ⌘K reads it, and a
+    /// search must not make the engine read every key of a database nobody
+    /// opened.
+    #[must_use]
+    pub fn snapshot_if_ready(&self, database_id: &str) -> Option<SchemaSnapshot> {
+        match lock(&self.databases).get(database_id) {
+            Some(Entry::Ready(index)) => Some(index.tree(database_id)),
+            _ => None,
+        }
+    }
+
+    /// The databases whose index is built, in id order.
+    pub(crate) fn indexed_databases(&self) -> Vec<String> {
+        let mut ids: Vec<String> = lock(&self.databases)
+            .iter()
+            .filter(|(_, entry)| matches!(entry, Entry::Ready(_)))
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// The store the index follows, for reads beside it.
+    pub(crate) const fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// The project the index follows.
+    pub(crate) fn project(&self) -> &str {
+        &self.project
+    }
+
     /// The subcollections of every path in `paths`, in the order asked.
     /// Answered from the index, so a whole screen of grid rows costs one
     /// request and no document read.

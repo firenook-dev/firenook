@@ -354,6 +354,7 @@ async fn every_hook_runs_once_and_finishing_follows_the_fixed_order() {
             .iter()
             .map(|stream| format!("{stream}.ready")),
     );
+    expected.push("console.jobs".to_owned());
     expected.extend(
         ["storage", "messaging", "auth", "compute", "observe"]
             .iter()
@@ -458,4 +459,77 @@ fn export_destinations_refuse_the_seed_while_the_engine_resumes_from_it() {
         "{listed:?}"
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_auth_wiring_records_restored_projects_that_hold_users_as_foreign() {
+    let config = test_config();
+    let registry = TriggerRegistry::default();
+    let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
+    let auth = Arc::new(
+        firenook_auth_front::AuthRuntime::new(&config.project_id, observer.queue(), registry, None)
+            .expect("auth"),
+    );
+    // The restored state: users in the configured project, in my-prod,
+    // and in a tenant of tenant-prod; an empty other project.
+    auth.runtime()
+        .update(|data| {
+            let user = |uid: &str| {
+                json!({ "email": format!("{uid}@example.test") })
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            let mine = data.agent(&config.project_id);
+            mine.project
+                .create_user_with_local_id("mine", &user("mine"))
+                .expect("created");
+            let prod = data.agent("my-prod");
+            prod.project
+                .create_user_with_local_id("p1", &user("p1"))
+                .expect("created");
+            let tenanted = data.agent("tenant-prod");
+            tenanted.ensure_tenant("tenant-prod", "acme");
+            tenanted
+                .tenants
+                .get_mut("acme")
+                .expect("tenant")
+                .project
+                .create_user_with_local_id("t1", &user("t1"))
+                .expect("created");
+            let _ = data.agent("empty-prod");
+        })
+        .expect("saved");
+    let logging = LoggingRuntime::new();
+    let triggers = TriggerRegistry::default();
+    let foreign = firenook_console_front::ForeignProjects::default();
+    let context = HookContext {
+        auth: Some(&auth),
+        ..HookContext::new(&config, &logging, &foreign, &triggers)
+    };
+    auth::prepared(&context);
+    let mut recorded: Vec<(String, Vec<String>)> = foreign
+        .snapshot()
+        .into_iter()
+        .map(|project| (project.project_id, project.services))
+        .collect();
+    recorded.sort();
+    assert_eq!(
+        recorded,
+        [
+            ("my-prod".to_owned(), vec!["auth".to_owned()]),
+            ("tenant-prod".to_owned(), vec!["auth".to_owned()]),
+        ]
+    );
+    // With several projects intended, nothing is foreign.
+    let several = SuiteConfig {
+        single_project_mode: false,
+        ..test_config()
+    };
+    let quiet = firenook_console_front::ForeignProjects::default();
+    auth::prepared(&HookContext {
+        auth: Some(&auth),
+        ..HookContext::new(&several, &logging, &quiet, &triggers)
+    });
+    assert_eq!(quiet.count(), 0);
 }

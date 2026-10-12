@@ -13,19 +13,26 @@ mod auth;
 mod blocking;
 mod compute;
 mod databases;
+mod entity;
 mod explain;
+mod filter;
 mod firestore;
+mod firestore_search;
 mod foreign;
 mod guard;
 mod http;
 mod instance;
+mod jobs;
+mod json;
 mod late;
 mod live;
 mod messaging;
 mod observe;
+mod paging;
 mod rules;
 mod rules_eval;
 mod schema;
+mod search;
 mod section;
 mod sse;
 mod storage;
@@ -51,13 +58,15 @@ use tokio_stream::wrappers::WatchStream;
 use ts_rs::TS;
 
 pub use api_error::{ApiError, ApiErrorBody, ApiErrorDetail, ErrorCode};
-pub use auth::AuthConsole;
+pub use auth::{AuthConsole, AuthToken, AuthTokenRequest, IdentityUser};
 pub use compute::{ComputeConsole, ComputeParts};
 pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
+pub use entity::EntityRef;
 pub use explain::{
     ExplainCandidates, ExplainIndex, ExplainIndexField, ExplainOrder, ExplainStrategy, Explanation,
     QueryExplainer,
 };
+pub use filter::FieldSpecInfo;
 pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeKind, ChangedCollection, DocumentChange, FirestoreConsole,
 };
@@ -66,6 +75,7 @@ pub use guard::{
     ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
     KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
 };
+pub use jobs::{BulkTarget, Job, JobError, JobList, JobRegistry, JobState};
 pub use late::Late;
 pub use live::badges::{Badge, BadgeKind, BadgeNoun, BadgeSet, BadgeTone};
 pub use live::{
@@ -74,6 +84,7 @@ pub use live::{
 };
 pub use messaging::{PubsubConsole, TasksConsole};
 pub use observe::ObserveConsole;
+pub use paging::{BatchGetItem, BatchGetRequest, BatchGetResponse, ListMeta, Page, Total};
 pub use rules::{
     CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
     RulesDiagnostic, RulesDocument, RulesEditor, RulesFileStatus, RulesInstalled, RulesLintCode,
@@ -89,15 +100,16 @@ pub use schema::{
     ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
     SubcollectionsSnapshot,
 };
+pub use search::{SearchGroup, SearchHit, SearchResults};
 pub use section::{
-    AbsentKind, AbsentReason, SectionFix, SectionFixKind, SectionState, SectionStatus,
+    AbsentKind, AbsentReason, ClearReport, SectionFix, SectionFixKind, SectionState, SectionStatus,
     SectionSummary, SummaryFigure, SummaryUnit,
 };
 pub use sse::Shutdown;
 pub use storage::StorageConsole;
 pub use suite::{
-    BackgroundTriggers, DataFacts, DataMode, ExportDestination, ExportResult, MemoryReport,
-    RingSize, SuiteControls, SuiteSettings,
+    BackgroundTriggers, DataFacts, DataMode, DroppedCount, ExportDestination, ExportResult,
+    MemoryReport, RingSize, SuiteControls, SuiteSettings,
 };
 
 use instance::Instance;
@@ -249,6 +261,9 @@ pub struct ConsoleServices {
     /// Hosts the console answers for; every other `Host` is refused, so a
     /// page that rebinds its own name to this machine reaches nothing.
     pub allowed_hosts: AllowedHosts,
+    /// The console's bulk work. The suite keeps a clone and stops the jobs
+    /// first when it stops.
+    pub jobs: JobRegistry,
 }
 
 impl ConsoleServices {
@@ -273,6 +288,7 @@ impl ConsoleServices {
             suite: SuiteControls::detached(),
             foreign: ForeignProjects::default(),
             allowed_hosts: AllowedHosts::loopback(),
+            jobs: JobRegistry::new(),
         }
     }
 }
@@ -418,9 +434,7 @@ impl StatusSource {
 
     /// Ticks whenever the status may have changed.
     pub(crate) fn changes(&self) -> BoxStream<'static, ()> {
-        let suite = WatchStream::from_changes(self.inner.suite.changes())
-            .map(|_| ())
-            .boxed();
+        let suite = self.inner.suite.changes();
         let foreign = WatchStream::from_changes(self.inner.foreign.changes())
             .map(|_| ())
             .boxed();
@@ -476,16 +490,23 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         shutdown: services.shutdown.clone(),
         badges: BadgeBoard::default(),
         instance: instance.clone(),
+        jobs: services.jobs.clone(),
         rings: RingBudget::shared(),
         foreign: services.foreign.clone(),
     };
     spawn_foreign_badge(&context);
+    context
+        .jobs
+        .attach(&context.badges, context.shutdown.clone());
     let sections = assemble(&mut services);
     let status = StatusSource::new(&services, instance.clone(), sections.clone());
-    let mut topics: Vec<Arc<dyn live::LiveTopic>> = vec![Arc::new(live::shell::ShellTopic::new(
-        status.clone(),
-        context.badges.clone(),
-    ))];
+    let mut topics: Vec<Arc<dyn live::LiveTopic>> = vec![
+        Arc::new(live::shell::ShellTopic::new(
+            status.clone(),
+            context.badges.clone(),
+        )),
+        Arc::new(context.jobs.topic()),
+    ];
     for section in &sections {
         topics.extend(section.topics(&context));
     }
@@ -499,11 +520,22 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         },
         services.shutdown.clone(),
     );
+    let sources = sections
+        .iter()
+        .filter_map(|section| section.search(&context))
+        .collect();
     let mut api = Router::new()
         .route("/status", get(status_route))
         .with_state(status)
+        .merge(search::Search::new(sources).router())
         .merge(suite::memory_router(context.rings.clone()))
         .merge(services.suite.router())
+        .merge(suite::clear_router(
+            sections.clone(),
+            context.jobs.clone(),
+            context.project.clone(),
+        ))
+        .merge(context.jobs.router())
         .merge(hub.router());
     for section in &sections {
         api = api.merge(section.router(&context));
@@ -514,7 +546,9 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
     for prefix in firestore::REST_PREFIXES {
         natives.add(&format!("/api/v1/firestore{prefix}"));
     }
-    natives.add("/api/v1/auth");
+    for path in auth::NATIVE_PATHS {
+        natives.add(&format!("/api/v1/auth{path}"));
+    }
     let policy = guard::GuardPolicy {
         hosts: services.allowed_hosts,
         natives: Arc::new(natives),
@@ -638,6 +672,8 @@ const NOT_BUILT_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>Fire
 or work on the console with <code>npm run dev --prefix console</code>, which proxies this engine's console API.</p>";
 
 #[cfg(test)]
+mod generated_names;
+#[cfg(test)]
 mod router_tests;
 
 #[cfg(test)]
@@ -711,36 +747,53 @@ mod tests {
         (status, headers, body)
     }
 
+    /// Where the console reads its generated types from.
+    pub(crate) const GENERATED: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../console/src/api/generated"
+    );
+
+    /// Writes every TypeScript binding the console reads into `config`'s
+    /// directory: the foundation's types, then each section module's.
+    pub(crate) fn export_all_bindings(config: &ts_rs::Config) {
+        ConsoleStatus::export_all(config).expect("TypeScript bindings written");
+        ChangeBatch::export_all(config).expect("TypeScript bindings written");
+        SchemaSnapshot::export_all(config).expect("TypeScript bindings written");
+        SubcollectionsSnapshot::export_all(config).expect("TypeScript bindings written");
+        DatabaseList::export_all(config).expect("TypeScript bindings written");
+        Explanation::export_all(config).expect("TypeScript bindings written");
+        RulesDocument::export_all(config).expect("TypeScript bindings written");
+        RulesInstalled::export_all(config).expect("TypeScript bindings written");
+        RulesDiagnostic::export_all(config).expect("TypeScript bindings written");
+        RulesCheck::export_all(config).expect("TypeScript bindings written");
+        RulesVersion::export_all(config).expect("TypeScript bindings written");
+        RulesChanged::export_all(config).expect("TypeScript bindings written");
+        RulesFileStatus::export_all(config).expect("TypeScript bindings written");
+        ApiErrorBody::export_all(config).expect("TypeScript bindings written");
+        ExportDestination::export_all(config).expect("TypeScript bindings written");
+        ExportResult::export_all(config).expect("TypeScript bindings written");
+        MemoryReport::export_all(config).expect("TypeScript bindings written");
+        JobList::export_all(config).expect("TypeScript bindings written");
+        BulkTarget::export_all(config).expect("TypeScript bindings written");
+        ClearReport::export_all(config).expect("TypeScript bindings written");
+        EntityRef::export_all(config).expect("TypeScript bindings written");
+        Page::<()>::export_all(config).expect("TypeScript bindings written");
+        BatchGetRequest::export_all(config).expect("TypeScript bindings written");
+        BatchGetResponse::<()>::export_all(config).expect("TypeScript bindings written");
+        ListMeta::export_all(config).expect("TypeScript bindings written");
+        SearchResults::export_all(config).expect("TypeScript bindings written");
+        live::export_bindings(config);
+        auth::export_bindings(config);
+        storage::export_bindings(config);
+        compute::export_bindings(config);
+        messaging::export_bindings(config);
+        observe::export_bindings(config);
+    }
+
     #[test]
     fn export_bindings() {
-        let out = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../console/src/api/generated"
-        );
-        let config = ts_rs::Config::new().with_out_dir(out);
-        ConsoleStatus::export_all(&config).expect("TypeScript bindings written");
-        ChangeBatch::export_all(&config).expect("TypeScript bindings written");
-        SchemaSnapshot::export_all(&config).expect("TypeScript bindings written");
-        SubcollectionsSnapshot::export_all(&config).expect("TypeScript bindings written");
-        DatabaseList::export_all(&config).expect("TypeScript bindings written");
-        Explanation::export_all(&config).expect("TypeScript bindings written");
-        RulesDocument::export_all(&config).expect("TypeScript bindings written");
-        RulesInstalled::export_all(&config).expect("TypeScript bindings written");
-        RulesDiagnostic::export_all(&config).expect("TypeScript bindings written");
-        RulesCheck::export_all(&config).expect("TypeScript bindings written");
-        RulesVersion::export_all(&config).expect("TypeScript bindings written");
-        RulesChanged::export_all(&config).expect("TypeScript bindings written");
-        RulesFileStatus::export_all(&config).expect("TypeScript bindings written");
-        ApiErrorBody::export_all(&config).expect("TypeScript bindings written");
-        ExportDestination::export_all(&config).expect("TypeScript bindings written");
-        ExportResult::export_all(&config).expect("TypeScript bindings written");
-        MemoryReport::export_all(&config).expect("TypeScript bindings written");
-        live::export_bindings(&config);
-        auth::export_bindings(&config);
-        storage::export_bindings(&config);
-        compute::export_bindings(&config);
-        messaging::export_bindings(&config);
-        observe::export_bindings(&config);
+        let out = GENERATED;
+        export_all_bindings(&ts_rs::Config::new().with_out_dir(out));
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(
@@ -753,6 +806,12 @@ mod tests {
         );
         let figure = std::fs::read_to_string(format!("{out}/SummaryFigure.ts")).expect("read");
         assert!(figure.contains("value: number | null"), "{figure}");
+        // Generic types are written once, generic.
+        let page = std::fs::read_to_string(format!("{out}/Page.ts")).expect("read");
+        assert!(page.contains("export type Page<T>"), "{page}");
+        assert!(page.contains("items: Array<T>"), "{page}");
+        let batch = std::fs::read_to_string(format!("{out}/BatchGetResponse.ts")).expect("read");
+        assert!(batch.contains("BatchGetResponse<T>"), "{batch}");
         let badge = std::fs::read_to_string(format!("{out}/live/Badge.ts")).expect("read");
         assert!(badge.contains("cursor?: string"), "{badge}");
         // Live types live in their own directory and import root types
@@ -802,7 +861,7 @@ mod tests {
         // foreign project.
         assert_eq!(
             value["backgroundTriggers"],
-            serde_json::json!({ "enabled": true })
+            serde_json::json!({ "enabled": true, "since": null, "dropped": [] })
         );
         assert_eq!(value["data"]["mode"], "memory");
         assert_eq!(value["data"]["stateDir"], serde_json::Value::Null);
