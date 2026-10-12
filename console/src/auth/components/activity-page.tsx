@@ -473,13 +473,9 @@ export function ActivityPage() {
     <SectionPage section="auth" page="activity" title="Activity" testId="auth-activity">
       <SectionPanel label="Filters">
         <PanelHeader>
-          <TenantPicker
-            project={project}
-            page="activity"
-            value={scope}
-            onChange={setScope}
-            className="flex-1"
-          />
+          <div className="min-w-0 flex-1">
+            <TenantPicker project={project} page="activity" scope={scope} onChange={setScope} />
+          </div>
         </PanelHeader>
         <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto px-1.5 py-3">
           <FacetList
@@ -509,14 +505,15 @@ export function ActivityPage() {
         <ToolbarRow testId="activity-row-one">
           <PanelToggle where="toolbar" />
           {!panelOpen && (
-            <TenantPicker
-              project={project}
-              page="activity"
-              value={scope}
-              onChange={setScope}
-              className="w-56"
-              testId="tenant-picker-toolbar"
-            />
+            <div className="w-56 min-w-0 shrink" data-testid="toolbar-tenant">
+              <TenantPicker
+                project={project}
+                page="activity"
+                scope={scope}
+                onChange={setScope}
+                testId="toolbar-tenant-picker"
+              />
+            </div>
           )}
           <span className="min-w-0 flex-1" />
           <LiveNotice

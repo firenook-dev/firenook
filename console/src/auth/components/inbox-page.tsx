@@ -445,13 +445,9 @@ export function InboxPage() {
     <SectionPage section="auth" page="inbox" title="Inbox" testId="auth-inbox">
       <SectionPanel label="Filters">
         <PanelHeader>
-          <TenantPicker
-            project={project}
-            page="inbox"
-            value={scope}
-            onChange={setScope}
-            className="flex-1"
-          />
+          <div className="min-w-0 flex-1">
+            <TenantPicker project={project} page="inbox" scope={scope} onChange={setScope} />
+          </div>
         </PanelHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-3" data-testid="inbox-facets">
           <FacetList
@@ -465,14 +461,15 @@ export function InboxPage() {
         <ToolbarRow testId="inbox-row-one">
           <PanelToggle where="toolbar" />
           {!panelOpen && (
-            <TenantPicker
-              project={project}
-              page="inbox"
-              value={scope}
-              onChange={setScope}
-              className="w-56"
-              testId="tenant-picker-toolbar"
-            />
+            <div className="w-56 min-w-0 shrink" data-testid="toolbar-tenant">
+              <TenantPicker
+                project={project}
+                page="inbox"
+                scope={scope}
+                onChange={setScope}
+                testId="toolbar-tenant-picker"
+              />
+            </div>
           )}
           <span className="min-w-0 flex-1" />
           <LiveNotice status={feed.status} what="the inbox" onRetry={() => liveChannel.retry()} />

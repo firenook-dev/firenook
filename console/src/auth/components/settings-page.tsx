@@ -75,11 +75,13 @@ export function SettingsPage() {
         ? { kind: 'edit', tenant: editing }
         : undefined
 
-  // `?section=` brings its card into view once, as the page opens.
-  const scrolled = useRef(false)
+  // `?section=` brings its card into view as the page opens, and again when
+  // it names another card (the tenant picker's Manage tenants… does), never
+  // on the page's own changes to the address.
+  const scrolled = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (scrolled.current || !search.section) return
-    scrolled.current = true
+    if (!search.section || scrolled.current === search.section) return
+    scrolled.current = search.section
     document.getElementById(`auth-settings-${search.section}`)?.scrollIntoView({ block: 'start' })
   }, [search.section])
 
@@ -158,14 +160,15 @@ export function SettingsPage() {
             id="sign-in"
             title="Sign-in behaviour"
             action={
-              <TenantPicker
-                project={project}
-                page="settings"
-                value={scope}
-                onChange={setScope}
-                className="w-64"
-                testId="settings-tenant"
-              />
+              <div className="w-64 min-w-0">
+                <TenantPicker
+                  project={project}
+                  page="settings"
+                  scope={scope}
+                  onChange={setScope}
+                  testId="settings-tenant"
+                />
+              </div>
             }
           >
             {scope.kind === 'tenant' ? (

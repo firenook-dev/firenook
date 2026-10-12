@@ -21,6 +21,7 @@ import { JsonTree } from '@/components/console/json-tree'
 import { PanelTitle, StatusDot } from '@/components/kit'
 import { inspectToken } from '../api'
 import { takeInspectDraft, useInspectDraft } from '../inspect-draft'
+import { takeHandedOffToken } from '../inspect-handoff'
 import { AUTH } from '../queries'
 import { userRef } from '../links'
 
@@ -66,7 +67,9 @@ export function kindLine(inspection: AuthTokenInspection): string {
 const SETTLE_MS = 300
 
 export function InspectToken({ project, onClose }: { project: string; onClose: () => void }) {
-  const [text, setText] = useState(takeInspectDraft)
+  // The token dialog hands its token over through inspect-handoff; a call's
+  // "Inspect this token" through the draft, which also reaches an open panel.
+  const [text, setText] = useState(() => takeHandedOffToken() ?? takeInspectDraft())
   // A token handed over while the panel is already open replaces what is in it.
   useEffect(
     () =>
