@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import { type Engine, expect, test } from './fixtures'
 import { ownerFetch } from './support/api'
+import { type KitBuild, type KitHarness, buildKitHarness, openKitHarness } from './support/kit'
 import { dropLive, liveRequests, loadHidden, restoreLive, setVisibility } from './support/live'
 import {
   badgeOf,
@@ -661,5 +662,76 @@ test.describe('@perf', () => {
     test.info().annotations.push({ type: 'first page', description: `${firstPage} ms` })
     expect(live.open()).toBeLessThanOrEqual(1)
     expect(firstPage).toBeLessThanOrEqual(500)
+  })
+})
+
+// The kit's own primitives at the load §8.1 sizes them for, on the kit
+// harness (`e2e/kit-harness`): FeedList as Logs draws it, fed 10,000 lines a
+// second the way the live channel hands them over, and JsonView as an
+// inspector draws it, handed a 5 MB value. A primitive's budget is its own,
+// whichever page draws it; the harness's files are the only thing served
+// beside the engine, and no console API is involved.
+test.describe('@perf kit', () => {
+  test.skip(!PERF, 'opt-in: FIRENOOK_PERF=1')
+
+  let kit: KitBuild | undefined
+  test.beforeAll(async () => {
+    test.setTimeout(180_000)
+    kit = await buildKitHarness()
+  })
+  test.afterAll(() => kit?.remove())
+
+  test('@perf a feed fed 10,000 lines a second for 10 s paints at frame p95 ≤ 25 ms in bounded memory', async ({
+    page,
+    engine,
+  }) => {
+    if (!kit) throw new Error('the kit harness did not build')
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await openKitHarness(page, engine.origin, kit, 'feed')
+    const cdp = await page.context().newCDPSession(page)
+    const heap = async () => {
+      await cdp.send('HeapProfiler.collectGarbage')
+      return (await cdp.send('Runtime.getHeapUsage')).usedSize
+    }
+    const before = await heap()
+    let run: Awaited<ReturnType<KitHarness['feed']>> | undefined
+    const frames = await framesDuring(page, async () => {
+      run = await page.evaluate(() =>
+        (globalThis as unknown as { __kit: KitHarness }).__kit.feed(10_000, 10),
+      )
+    })
+    const grown = (await heap()) - before
+    test
+      .info()
+      .annotations.push(
+        { type: 'frame p95', description: `${p95(frames).toFixed(1)} ms` },
+        { type: 'heap growth', description: `${(grown / 1024 / 1024).toFixed(1)} MB` },
+        { type: 'late windows', description: String(run?.late) },
+      )
+    // Every line reached the ring, which kept the newest 10,000 and drew a
+    // screenful of them, following the newest.
+    expect(run).toMatchObject({ pushed: 100_000, size: 10_000, dropped: 90_000, newestShown: true })
+    expect(run?.drawn).toBeLessThan(100)
+    expect(p95(frames)).toBeLessThanOrEqual(25)
+    expect(grown).toBeLessThanOrEqual(50 * 1024 * 1024)
+  })
+
+  test('@perf a 5 MB JSON paints its tree within 100 ms of arriving', async ({ page, engine }) => {
+    if (!kit) throw new Error('the kit harness did not build')
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await openKitHarness(page, engine.origin, kit, 'json')
+    const run = await page.evaluate(() =>
+      (globalThis as unknown as { __kit: KitHarness }).__kit.json(5),
+    )
+    test
+      .info()
+      .annotations.push(
+        { type: 'first paint', description: `${run.paintMs.toFixed(1)} ms` },
+        { type: 'parse', description: `${run.parseMs.toFixed(1)} ms` },
+        { type: 'values', description: String(run.nodes) },
+      )
+    expect(run.bytes).toBeGreaterThanOrEqual(5 * 1024 * 1024)
+    expect(run.drawn).toBeGreaterThan(0)
+    expect(run.paintMs).toBeLessThanOrEqual(100)
   })
 })
