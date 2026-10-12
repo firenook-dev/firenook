@@ -23,14 +23,24 @@ pub(crate) fn auth_console(
     }
 }
 
-/// The suite's services are prepared; the console is not built yet. Every
-/// project other than the configured one that holds users in the restored
-/// state is a foreign project (the app wrote there), as long as the
-/// emulator runs in single-project mode.
+/// The suite's services are prepared; the console is not built yet.
+///
+/// Auth gets its own origin for the action links it writes, as the
+/// registered official emulator uses its own URL: without one a link took
+/// the request's `Host`, so a code requested through the console mount
+/// pointed at the console's port, where no action page is served.
+///
+/// Every project other than the configured one that holds users in the
+/// restored state is a foreign project (the app wrote there), as long as
+/// the emulator runs in single-project mode.
 pub(crate) fn prepared(context: &HookContext<'_>) {
-    let (Some(auth), true) = (context.auth, context.config.single_project_mode) else {
+    let Some(auth) = context.auth else {
         return;
     };
+    auth.set_origin(&context.config.origin(context.config.ports.auth));
+    if !context.config.single_project_mode {
+        return;
+    }
     let configured = context.config.project_id.as_str();
     let holding: Vec<String> = auth.runtime().read(|data| {
         data.projects

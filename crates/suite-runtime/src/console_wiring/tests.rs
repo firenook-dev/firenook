@@ -601,3 +601,65 @@ async fn the_auth_shutdown_hook_writes_the_state_left_after_a_burst() {
     drop(auth);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A code requested through the console mount links to the Auth emulator's
+/// own origin, where the action page is served, not to the console's.
+#[tokio::test]
+async fn action_links_requested_through_the_console_point_at_the_auth_port() {
+    let config = test_config();
+    let logging = LoggingRuntime::new();
+    let triggers = TriggerRegistry::default();
+    let foreign = firenook_console_front::ForeignProjects::default();
+    let registry = TriggerRegistry::default();
+    let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
+    let auth = Arc::new(
+        firenook_auth_front::AuthRuntime::new(&config.project_id, observer.queue(), registry, None)
+            .expect("auth"),
+    );
+    auth::prepared(&HookContext {
+        auth: Some(&auth),
+        ..HookContext::new(&config, &logging, &foreign, &triggers)
+    });
+    let router = console_router(ConsoleServices {
+        auth: Some(auth::auth_console(&auth, &config, &logging)),
+        ..ConsoleServices::new(directory(), running())
+    });
+    let admin = format!(
+        "/api/v1/auth/identitytoolkit.googleapis.com/v1/projects/{}",
+        config.project_id
+    );
+    let (status, _, value) = call(
+        &router,
+        Request::post(format!("{admin}/accounts"))
+            .header(header::HOST, "127.0.0.1:4000")
+            .header(header::AUTHORIZATION, "Bearer owner")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "email": "ada@example.test", "password": "secret-1" }).to_string(),
+            ))
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    let (status, _, value) = call(
+        &router,
+        Request::post(format!("{admin}/accounts:sendOobCode"))
+            .header(header::HOST, "127.0.0.1:4000")
+            .header(header::AUTHORIZATION, "Bearer owner")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "requestType": "PASSWORD_RESET",
+                    "email": "ada@example.test",
+                    "returnOobLink": true
+                })
+                .to_string(),
+            ))
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    let link = value["oobLink"].as_str().expect("a link");
+    let expected = format!("{}/emulator/action?", config.origin(config.ports.auth));
+    assert!(link.starts_with(&expected), "{link}");
+}
