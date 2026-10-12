@@ -10,8 +10,11 @@
 
 import { Button, Checkbox, Dialog, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { TrashIcon, XIcon } from '@phosphor-icons/react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { statusQuery } from '@/api/queries'
+import { TriggerLineItem, triggerLine } from '@/components/console/danger-confirm'
+import { useTriggersFor } from '@/lib/triggers'
 import { exportPages } from '../export'
 import { isEmptyQuery, printQuery } from '../query'
 import { commit, deletePath } from '../rest'
@@ -27,6 +30,9 @@ export type DeleteTarget =
 /** Writes per commit, Firestore's own limit. */
 const COMMIT_LIMIT = 500
 
+/** A document id that stands for any document of a collection, for the trigger matcher. */
+const ANY_DOCUMENT = '__any_document__'
+
 export function DeleteDialog({
   target,
   onOpenChange,
@@ -41,6 +47,23 @@ export function DeleteDialog({
   const clear = useSelection((state) => state.clear)
   const [recursive, setRecursive] = useState(true)
   const [done, setDone] = useState<number | undefined>()
+  const status = useQuery(statusQuery)
+  // Which functions the delete runs, as every destructive confirmation says
+  // (the engine's own matcher): asked for one document of what goes, which
+  // stands for them all — ticked rows share a collection, and everything a
+  // query matches is in the one it reads. A collection group spans several,
+  // and another project's data no function listens to: no line then.
+  const sample =
+    target?.kind === 'paths'
+      ? target.paths[0]
+      : target && !workbench.group && workbench.collectionPath
+        ? `${workbench.collectionPath}/${ANY_DOCUMENT}`
+        : undefined
+  const triggers = useTriggersFor(
+    'firestore',
+    sample && !workbench.foreign ? `${workbench.database}|${sample}` : undefined,
+    'deleted',
+  )
 
   const remove = useMutation({
     mutationFn: async (): Promise<number> => {
@@ -117,6 +140,7 @@ export function DeleteDialog({
   const where = isEmptyQuery(workbench.query)
     ? workbench.collectionPath
     : `${workbench.collectionPath} matching ${printQuery(workbench.query)}`
+  const line = triggerLine(triggers, count, status.data?.backgroundTriggers)
   return (
     <Dialog.Root open={target !== null} onOpenChange={onOpenChange}>
       <Dialog size="base" className="p-6">
@@ -143,8 +167,18 @@ export function DeleteDialog({
               from the emulator, including the ones the grid has not loaded.
             </>
           )}{' '}
-          Listeners and triggers see the delete like any other write.
+          {line
+            ? 'Listeners see the delete like any other write.'
+            : 'Listeners and triggers see the delete like any other write.'}
         </Dialog.Description>
+        {line && (
+          <ul
+            className="mt-3 grid list-disc gap-1 pl-5 text-[14px] text-kumo-subtle"
+            data-testid="delete-dialog-consequences"
+          >
+            <TriggerLineItem line={line} testId="delete-dialog" />
+          </ul>
+        )}
         <div className="mt-4">
           <Checkbox
             checked={recursive}

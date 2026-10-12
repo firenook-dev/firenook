@@ -364,6 +364,17 @@ test('a real Firestore write fires the trigger and links back to the document', 
   await listed.filter({ hasText: 'onOrderWritten' }).getByRole('link').click()
   await expect(page).toHaveURL(/\/console\/functions\?/)
   await expect(page.getByTestId('function-name')).toHaveText('onOrderWritten')
+
+  // Deleting it says which of them the delete runs: the write trigger, not
+  // the create one.
+  await page.goto(`${engine.origin}/console/firestore?path=orders`)
+  await page.getByLabel(`Select ${id}`).click()
+  await page.getByTestId('delete-selected').click()
+  const consequences = page.getByTestId('delete-dialog-consequences')
+  await expect(consequences.getByTestId('delete-dialog-triggers')).toHaveCount(1)
+  await expect(consequences).toContainText('onOrderWritten runs once.')
+  await expect(consequences).not.toContainText('onOrderCreated')
+  await page.keyboard.press('Escape')
 })
 
 test('a test event runs the trigger and writes nothing', async ({ page, engine }) => {

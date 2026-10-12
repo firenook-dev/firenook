@@ -376,7 +376,8 @@ export function DangerConfirmBody({
   )
 }
 
-function TriggerLineItem({ line, testId }: { line: TriggerLine; testId: string }) {
+/** The trigger line's items (`<li>`s for a list): each function and how often it runs, or why none does. */
+export function TriggerLineItem({ line, testId }: { line: TriggerLine; testId: string }) {
   if (line.kind === 'none')
     return <li data-testid={`${testId}-triggers`}>No function listens to this.</li>
   if (line.kind === 'paused')
