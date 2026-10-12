@@ -1172,7 +1172,7 @@ fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeE
         })?;
     }
     for message in startup_log_messages(config) {
-        logging.record("INFO", Some("hub"), message);
+        logging.emit(console_wiring::observe::configured_input(message));
     }
     for (level, message) in startup_banner(config) {
         if level == "WARN" {
@@ -1180,7 +1180,7 @@ fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeE
         } else {
             println!("firenook: {message}");
         }
-        logging.record(level, Some("hub"), message);
+        logging.emit(console_wiring::observe::banner_input(level, message));
     }
     Ok(logging)
 }
