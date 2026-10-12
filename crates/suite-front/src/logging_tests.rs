@@ -540,3 +540,9 @@ fn levels_reach_the_feed_in_lower_case_as_the_official_feed_writes_them() {
     assert!(lines[0].starts_with("[INFO] "), "{lines:?}");
     assert!(lines[1].starts_with("[WARN] "), "{lines:?}");
 }
+
+#[test]
+fn the_official_feeds_history_has_a_name_of_its_own_in_the_memory_report() {
+    let logging = LoggingRuntime::new();
+    assert_eq!(logging.state.history.name(), "logging");
+}

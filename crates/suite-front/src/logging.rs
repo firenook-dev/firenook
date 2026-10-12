@@ -63,7 +63,14 @@ impl LoggingRuntime {
         let (owner, shutdown) = watch::channel(false);
         Self {
             state: LoggingState {
-                history: ReplayRing::new("logs", LOG_RING, random_epoch(), &RingBudget::shared()),
+                // Named apart from the console's own log rings (`logs`,
+                // `logs.problems`) in the memory report.
+                history: ReplayRing::new(
+                    "logging",
+                    LOG_RING,
+                    random_epoch(),
+                    &RingBudget::shared(),
+                ),
                 shutdown,
                 slots: Arc::new(Semaphore::new(MAXIMUM_SUBSCRIBERS)),
                 file: Arc::new(Mutex::new(None)),
