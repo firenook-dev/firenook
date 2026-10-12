@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use firenook_core_store::{DatabaseName, DocumentKey, Snapshot};
 
 use crate::databases::DatabaseCatalog;
+use crate::entity::EntityRef;
 use crate::schema::{SchemaIndex, SchemaNode};
 use crate::search::{SEARCH_BUDGET, SearchHit, SearchSource, SourceHits, match_rank};
 
@@ -54,9 +55,14 @@ struct Ranked {
     hit: SearchHit,
 }
 
-/// `<database>|<path or pattern>`: a database id never contains `|`.
-fn entity_key(database: &str, path: &str) -> String {
-    format!("{database}|{path}")
+/// A hit for `entity`, keyed as the entity's kind writes it.
+fn hit(entity: EntityRef, title: String, detail: Option<String>) -> SearchHit {
+    SearchHit {
+        kind: entity.kind,
+        key: entity.key,
+        title,
+        detail,
+    }
 }
 
 /// "1 document", "1,234 documents".
@@ -125,12 +131,11 @@ impl FirestoreSearch {
                 };
                 found.push(Ranked {
                     order: (0, 0, 0, place, path.to_owned()),
-                    hit: SearchHit {
-                        kind: "firestore.document".to_owned(),
-                        key: entity_key(database, path),
-                        title: path.to_owned(),
-                        detail: in_database(Some(detail), database),
-                    },
+                    hit: hit(
+                        EntityRef::firestore_document(database, path),
+                        path.to_owned(),
+                        in_database(Some(detail), database),
+                    ),
                 });
             }
         }
@@ -176,12 +181,11 @@ impl FirestoreSearch {
                     if let Some(rank) = rank {
                         found.push(Ranked {
                             order: (1, rank, depth, place, node.pattern.clone()),
-                            hit: SearchHit {
-                                kind: "firestore.collection".to_owned(),
-                                key: entity_key(database, &node.pattern),
-                                title: node.pattern.clone(),
-                                detail: in_database(Some(documents(node.documents)), database),
-                            },
+                            hit: hit(
+                                EntityRef::firestore_collection(database, &node.pattern),
+                                node.pattern.clone(),
+                                in_database(Some(documents(node.documents)), database),
+                            ),
                         });
                     }
                     stack.extend(node.children.iter().rev().map(|child| (child, depth + 1)));
@@ -199,12 +203,11 @@ impl FirestoreSearch {
                 if let Some(rank) = match_rank(&id, lower) {
                     found.push(Ranked {
                         order: (1, rank, 0, place, id.clone()),
-                        hit: SearchHit {
-                            kind: "firestore.collection".to_owned(),
-                            key: entity_key(database, &id),
-                            detail: in_database(None, database),
-                            title: id,
-                        },
+                        hit: hit(
+                            EntityRef::firestore_collection(database, &id),
+                            id,
+                            in_database(None, database),
+                        ),
                     });
                 }
             }

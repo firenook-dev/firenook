@@ -1,4 +1,6 @@
-//! HTTP helpers every section shares.
+//! HTTP helpers every section shares: answers that arrive over time
+//! ([`ndjson_response`]), files the browser saves ([`attachment`]), and
+//! service applications mounted under the console ([`forwarded`]).
 //!
 //! [`forwarded`] is how a service's own application is mounted under the
 //! console (`/console/api/v1/<service>/native/*`, and the older Firestore
@@ -7,11 +9,18 @@
 //! Storage object shown inline — would otherwise be a document of the
 //! console itself, with every console route in reach of its scripts.
 
+use std::fmt::Write as _;
+
 use axum::Router;
+use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, header};
 use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::response::{IntoResponse as _, Response};
+use futures_util::{Stream, StreamExt as _};
+use serde::Serialize;
+
+use crate::sse::Shutdown;
 
 /// `x-forwarded-host`: the host the browser addressed.
 const FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
@@ -19,6 +28,76 @@ const FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
 const FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
 /// `x-forwarded-prefix`: where the application is mounted on that host.
 const FORWARDED_PREFIX: HeaderName = HeaderName::from_static("x-forwarded-prefix");
+
+/// `application/x-ndjson`: one JSON value per line, each line sent as soon
+/// as its item arrives, ending when `items` ends or the suite stops. For
+/// answers that arrive over time and are not a subscription: an
+/// invocation's frames, an export.
+#[allow(
+    dead_code,
+    reason = "the section streams answer exports and invocations with it"
+)]
+pub(crate) fn ndjson_response<S, T>(items: S, shutdown: Shutdown) -> Response
+where
+    S: Stream<Item = T> + Send + 'static,
+    T: Serialize,
+{
+    let lines = items
+        .map(|item| {
+            // The console's own types always serialize.
+            let mut line = serde_json::to_vec(&item).unwrap_or_else(|_| b"null".to_vec());
+            line.push(b'\n');
+            Ok::<_, std::convert::Infallible>(Bytes::from(line))
+        })
+        .take_until(shutdown.stopped());
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/x-ndjson"),
+            ),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            (
+                HeaderName::from_static("x-accel-buffering"),
+                HeaderValue::from_static("no"),
+            ),
+        ],
+        Body::from_stream(lines),
+    )
+        .into_response()
+}
+
+/// `Content-Disposition: attachment` for a streamed body the browser saves
+/// as `filename`: an ASCII `filename` for old clients and the exact name as
+/// RFC 5987 `filename*`.
+#[allow(dead_code, reason = "the section streams name their exports with it")]
+pub(crate) fn attachment(filename: &str) -> [(HeaderName, HeaderValue); 1] {
+    let fallback: String = filename
+        .chars()
+        .map(|character| {
+            if character.is_ascii_graphic() && !matches!(character, '"' | '\\' | '%' | ';') {
+                character
+            } else if character == ' ' {
+                ' '
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut encoded = String::with_capacity(filename.len() * 3);
+    for byte in filename.bytes() {
+        if byte.is_ascii_alphanumeric() || b"!#$&+-.^_`|~".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    let value = format!("attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}");
+    [(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&value).unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+    )]
+}
 
 /// Mounts a service's own application under the console. Every response is
 /// sandboxed (`Content-Security-Policy: sandbox`, `X-Content-Type-Options:
@@ -236,6 +315,52 @@ mod tests {
         assert_eq!(
             body,
             "localhost:4000 http /console/api/v1/storage/native - -"
+        );
+    }
+
+    #[tokio::test]
+    async fn ndjson_sends_each_item_as_it_comes_and_ends_on_stop() {
+        let (items, receiver) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+        let (stop, stopped) = tokio::sync::watch::channel(false);
+        let response = ndjson_response(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
+            Shutdown::new(stopped),
+        );
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "application/x-ndjson"
+        );
+        let mut body = response.into_body().into_data_stream();
+        items.send(serde_json::json!({ "frame": 1 })).expect("sent");
+        let first = tokio::time::timeout(std::time::Duration::from_secs(5), body.next())
+            .await
+            .expect("the first line came alone")
+            .expect("a chunk")
+            .expect("bytes");
+        assert_eq!(&first[..], b"{\"frame\":1}\n");
+        items.send(serde_json::json!("two")).expect("sent");
+        let second = body.next().await.expect("a chunk").expect("bytes");
+        assert_eq!(&second[..], b"\"two\"\n");
+        stop.send(true).expect("stopped");
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), body.next())
+            .await
+            .expect("the body ended on stop");
+        assert!(end.is_none(), "{end:?}");
+        drop(items);
+    }
+
+    #[test]
+    fn an_attachment_names_a_unicode_file_both_ways() {
+        let [(name, value)] = attachment("users 火🔥 \"q\".ndjson");
+        assert_eq!(name, header::CONTENT_DISPOSITION);
+        assert_eq!(
+            value.to_str().expect("ascii"),
+            "attachment; filename=\"users __ _q_.ndjson\"; filename*=UTF-8''users%20%E7%81%AB%F0%9F%94%A5%20%22q%22.ndjson"
+        );
+        let [(_, plain)] = attachment("export.csv");
+        assert_eq!(
+            plain.to_str().expect("ascii"),
+            "attachment; filename=\"export.csv\"; filename*=UTF-8''export.csv"
         );
     }
 

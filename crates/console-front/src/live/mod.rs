@@ -30,7 +30,6 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
-use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Response};
@@ -45,6 +44,7 @@ use ts_rs::TS;
 
 use crate::api_error::{ApiError, ApiErrorDetail};
 use crate::instance::{Instance, random_id};
+use crate::json::ConsoleJson;
 use crate::sse::{KEEPALIVE, Shutdown, sse_response};
 
 /// Live connections one engine accepts; the next is refused with 429.
@@ -59,8 +59,6 @@ const QUEUE_BYTES: usize = 8 * 1024 * 1024;
 /// Room beside the data events for `reset`, `end` and `stopping`, which are
 /// small and must not be refused for want of space.
 const CONTROL_ROOM: usize = 128;
-/// The largest subscriptions request accepted.
-const POST_LIMIT: usize = 64 * 1024;
 /// The longest subscription id.
 const MAX_ID_CHARS: usize = 32;
 
@@ -422,17 +420,8 @@ async fn open_live(State(hub): State<LiveHub>, Query(query): Query<LiveQuery>) -
 async fn subscriptions(
     State(hub): State<LiveHub>,
     Path(connection): Path<String>,
-    body: Body,
+    ConsoleJson(request): ConsoleJson<LiveSubscriptionsRequest>,
 ) -> Result<Json<LiveSubscriptionsResponse>, ApiError> {
-    let bytes = axum::body::to_bytes(body, POST_LIMIT).await.map_err(|_| {
-        ApiError::too_large(format!(
-            "This request is larger than {} KiB, the most this route accepts.",
-            POST_LIMIT / 1024
-        ))
-    })?;
-    let request: LiveSubscriptionsRequest = serde_json::from_slice(&bytes).map_err(|error| {
-        ApiError::invalid(format!("This subscriptions request is not valid: {error}."))
-    })?;
     let gone = || {
         ApiError::not_found(format!("No live connection named {connection}."))
             .with_fix("Subscribe again after the next hello on the live stream.")

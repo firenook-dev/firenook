@@ -1,38 +1,42 @@
 //! Suite-wide state no section owns: whether background triggers are
 //! delivered, where the data lives, saving an export on the engine's
-//! machine, and the console's buffer memory.
+//! machine, clearing sections, and the console's buffer memory.
 //!
 //! Each is drawn once, by the shell (its banners and engine popover) and the
 //! Overview; no section keeps a copy. `POST /suite/background` is the only
 //! console route that pauses or resumes background triggers, and it does
 //! exactly what the hub's own switches do. `POST /suite/export` sends the
 //! hub's export command to a destination the engine lists: the browser
-//! names a destination, never a path.
+//! names a destination, never a path. `POST /suite/clear` runs each named
+//! section's `Section::clear` in sidebar order, inside one job.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::body::Body;
 use axum::extract::State;
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use firenook_functions_bridge::TriggerRegistry;
 use firenook_suite_front::{BackgroundRequest, ExportCommand, RingBudget};
-use serde::de::DeserializeOwned;
+use futures_util::FutureExt as _;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
 use ts_rs::TS;
 
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
+use crate::jobs::{JobRegistry, accepted};
+use crate::json::ConsoleJson;
+use crate::section::{
+    ClearOptions, Section, SectionState, section_label, section_order, section_rank,
+};
 
 /// How long a switch waits for the Functions runtime to acknowledge it, as
 /// the hub's own switches do.
 const BACKGROUND_ACK: Duration = Duration::from_secs(30);
-/// The largest request body these routes accept.
-const BODY_LIMIT: usize = 64 * 1024;
 /// What an export may name in `targets`.
 const EXPORT_TARGETS: [&str; 3] = ["firestore", "auth", "storage"];
 
@@ -243,6 +247,135 @@ impl SuiteControls {
     }
 }
 
+/// What `POST /suite/clear` reaches.
+struct ClearScope {
+    sections: Vec<Arc<dyn Section>>,
+    jobs: JobRegistry,
+    project: Arc<str>,
+}
+
+/// `POST /suite/clear` over `sections`, as jobs of `jobs`, confirmed with
+/// `project`.
+pub(crate) fn clear_router(
+    sections: Vec<Arc<dyn Section>>,
+    jobs: JobRegistry,
+    project: Arc<str>,
+) -> Router {
+    Router::new()
+        .route("/suite/clear", post(clear))
+        .with_state(Arc::new(ClearScope {
+            sections,
+            jobs,
+            project,
+        }))
+}
+
+/// `{ sections, confirm?, runTriggers? }`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ClearRequest {
+    sections: Vec<String>,
+    /// The project id; needed when more than one section is named.
+    #[serde(default)]
+    confirm: Option<String>,
+    /// Deliver the triggers the removals would fire.
+    #[serde(default)]
+    run_triggers: bool,
+}
+
+/// `Clear Firestore`, `Clear Firestore, Authentication and Storage`.
+fn clear_title(ids: &[String]) -> String {
+    let labels: Vec<&str> = ids.iter().map(|id| section_label(id)).collect();
+    match labels.as_slice() {
+        [] => "Clear".to_owned(),
+        [only] => format!("Clear {only}"),
+        [rest @ .., last] => format!("Clear {} and {last}", rest.join(", ")),
+    }
+}
+
+/// `POST /suite/clear`: one `suite.clear` job running each named section's
+/// clear in sidebar order (`202` with the job). Everything is checked before
+/// the job starts: each section exists, runs and can be cleared, and
+/// clearing more than one names the project id in `confirm`.
+async fn clear(
+    State(scope): State<Arc<ClearScope>>,
+    ConsoleJson(request): ConsoleJson<ClearRequest>,
+) -> Result<Response, ApiError> {
+    let mut ids: Vec<String> = Vec::new();
+    for id in request.sections {
+        if section_rank(&id) == usize::MAX {
+            return Err(ApiError::invalid(format!(
+                "There is no section named `{id}`; the sections are {}.",
+                section_order().join(", ")
+            )));
+        }
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    if ids.is_empty() {
+        return Err(ApiError::invalid("Name at least one section to clear."));
+    }
+    ids.sort_by_key(|id| section_rank(id));
+    if ids.len() > 1 && request.confirm.as_deref() != Some(&*scope.project) {
+        return Err(ApiError::invalid(format!(
+            "Clearing more than one section needs confirm set to the project id, {}.",
+            scope.project
+        ))
+        .with_fix("Type the project id to confirm, and send the request again."));
+    }
+    let options = ClearOptions {
+        run_triggers: request.run_triggers,
+    };
+    let title = clear_title(&ids);
+    let job = scope
+        .jobs
+        .try_start("suite", "suite.clear", title, None, |handle| {
+            let mut parts = Vec::new();
+            for id in &ids {
+                let label = section_label(id);
+                let Some((module, state)) = scope.sections.iter().find_map(|module| {
+                    module
+                        .statuses()
+                        .into_iter()
+                        .find(|status| status.id == *id)
+                        .map(|status| (module, status.state))
+                }) else {
+                    return Err(ApiError::precondition(format!(
+                        "{label} is not part of this engine, so there is nothing to clear."
+                    )));
+                };
+                if state != SectionState::Ready {
+                    return Err(ApiError::precondition(format!(
+                        "{label} is still starting; clear it once it is ready."
+                    )));
+                }
+                let part = handle.part();
+                let Some(work) = module.clear(id, part.clone(), options) else {
+                    return Err(ApiError::invalid(format!(
+                        "{label} cannot be cleared from the console."
+                    )));
+                };
+                parts.push((part, work));
+            }
+            Ok(async move {
+                let mut reports = Vec::new();
+                for (part, work) in parts {
+                    if handle.cancelled() {
+                        break;
+                    }
+                    part.start_at(handle.done());
+                    let report = work.await?;
+                    reports.push(report);
+                    handle.set_result(serde_json::to_value(&reports).unwrap_or_default());
+                }
+                Ok(())
+            }
+            .boxed())
+        })?;
+    Ok(accepted(job))
+}
+
 /// `GET /status/memory`.
 pub(crate) fn memory_router(rings: RingBudget) -> Router {
     Router::new()
@@ -267,19 +400,6 @@ async fn memory(State(rings): State<RingBudget>) -> Json<MemoryReport> {
     })
 }
 
-/// Reads a JSON body of at most 64 KiB; the guard has already required
-/// the JSON content type.
-async fn json_body<T: DeserializeOwned>(body: Body, what: &str) -> Result<T, ApiError> {
-    let bytes = axum::body::to_bytes(body, BODY_LIMIT).await.map_err(|_| {
-        ApiError::too_large(format!(
-            "This request is larger than {} KiB, the most this route accepts.",
-            BODY_LIMIT / 1024
-        ))
-    })?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| ApiError::invalid(format!("This {what} is not valid: {error}.")))
-}
-
 /// `{ enabled }`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -293,9 +413,8 @@ struct BackgroundRequestBody {
 /// acknowledgement (up to 30 s) — then the shell's status says so.
 async fn set_background(
     State(suite): State<SuiteControls>,
-    body: Body,
+    ConsoleJson(request): ConsoleJson<BackgroundRequestBody>,
 ) -> Result<Json<BackgroundTriggers>, ApiError> {
-    let request: BackgroundRequestBody = json_body(body, "background trigger switch").await?;
     let Some(triggers) = &suite.inner.triggers else {
         return Err(ApiError::precondition(
             "This console is not attached to a running suite, so there are no background triggers to switch.",
@@ -338,9 +457,8 @@ struct ExportRequest {
 /// `POST /suite/export`: the hub's export, to a listed destination.
 async fn export(
     State(suite): State<SuiteControls>,
-    body: Body,
+    ConsoleJson(request): ConsoleJson<ExportRequest>,
 ) -> Result<Json<ExportResult>, ApiError> {
-    let request: ExportRequest = json_body(body, "export request").await?;
     let Some(exporter) = suite.inner.exporter.clone() else {
         return Err(ApiError::precondition(
             "This console is not attached to a running suite, so there is nothing to export.",
@@ -426,6 +544,7 @@ async fn export(
 
 #[cfg(test)]
 mod tests {
+    use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use serde_json::{Value, json};
     use tower::ServiceExt as _;
@@ -659,6 +778,198 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::PRECONDITION_FAILED);
+    }
+
+    /// A section that clears by recording its turn and reporting `removed`.
+    struct Clearable {
+        id: &'static str,
+        removed: u64,
+        ready: bool,
+        turns: Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>,
+    }
+
+    impl Section for Clearable {
+        fn statuses(&self) -> Vec<crate::section::SectionStatus> {
+            if self.ready {
+                vec![crate::section::SectionStatus::ready(self.id)]
+            } else {
+                vec![crate::section::SectionStatus::starting(
+                    self.id,
+                    "Starting…",
+                )]
+            }
+        }
+
+        fn router(&self, _context: &crate::section::SectionContext) -> Router {
+            Router::new()
+        }
+
+        fn clear(
+            &self,
+            id: &str,
+            job: crate::jobs::JobHandle,
+            options: ClearOptions,
+        ) -> Option<
+            futures_util::future::BoxFuture<'static, Result<crate::section::ClearReport, ApiError>>,
+        > {
+            if id == "logs" {
+                return None;
+            }
+            let turns = Arc::clone(&self.turns);
+            let id = self.id;
+            let removed = self.removed;
+            Some(
+                async move {
+                    turns
+                        .lock()
+                        .expect("turns")
+                        .push((id, options.run_triggers));
+                    job.progress(removed);
+                    Ok(crate::section::ClearReport {
+                        section: id.to_owned(),
+                        removed,
+                    })
+                }
+                .boxed(),
+            )
+        }
+    }
+
+    type Turns = Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>;
+
+    /// Firestore, Auth and Storage that clear; Logs that cannot; Pub/Sub
+    /// still starting.
+    fn clearing_suite() -> (Router, JobRegistry, Turns) {
+        let turns: Turns = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let section = |id, removed, ready| -> Arc<dyn Section> {
+            Arc::new(Clearable {
+                id,
+                removed,
+                ready,
+                turns: Arc::clone(&turns),
+            })
+        };
+        let jobs = JobRegistry::new();
+        let router = clear_router(
+            vec![
+                section("storage", 7, true),
+                section("firestore", 30, true),
+                section("auth", 5, true),
+                section("logs", 0, true),
+                section("pubsub", 1, false),
+            ],
+            jobs.clone(),
+            Arc::from("demo-clear"),
+        );
+        (router, jobs, turns)
+    }
+
+    #[tokio::test]
+    async fn a_clear_is_refused_before_any_job_when_it_cannot_run() {
+        let (router, jobs, turns) = clearing_suite();
+        // Two sections need the project id.
+        let (status, body) = post(
+            &router,
+            "/suite/clear",
+            json!({ "sections": ["storage", "auth"] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(
+            body["error"]["message"],
+            "Clearing more than one section needs confirm set to the project id, demo-clear."
+        );
+        let (status, _) = post(
+            &router,
+            "/suite/clear",
+            json!({ "sections": ["storage", "auth"], "confirm": "my-prod" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        for (sections, status, message) in [
+            (
+                json!([]),
+                StatusCode::BAD_REQUEST,
+                "Name at least one section to clear.",
+            ),
+            (
+                json!(["nothing"]),
+                StatusCode::BAD_REQUEST,
+                "There is no section named `nothing`; the sections are firestore, auth, storage, functions, extensions, pubsub, eventarc, tasks, logs.",
+            ),
+            (
+                json!(["tasks"]),
+                StatusCode::PRECONDITION_FAILED,
+                "Cloud Tasks is not part of this engine, so there is nothing to clear.",
+            ),
+            (
+                json!(["pubsub"]),
+                StatusCode::PRECONDITION_FAILED,
+                "Pub/Sub is still starting; clear it once it is ready.",
+            ),
+            (
+                json!(["logs"]),
+                StatusCode::BAD_REQUEST,
+                "Logs cannot be cleared from the console.",
+            ),
+        ] {
+            let (answer, body) =
+                post(&router, "/suite/clear", json!({ "sections": sections })).await;
+            assert_eq!(answer, status, "{body}");
+            assert_eq!(body["error"]["message"], message);
+        }
+        assert_eq!(
+            jobs.list(None),
+            Vec::new(),
+            "nothing refused left a job behind"
+        );
+        assert_eq!(*turns.lock().expect("turns"), []);
+    }
+
+    #[tokio::test]
+    async fn a_clear_runs_each_section_in_sidebar_order_inside_one_job() {
+        let (router, jobs, turns) = clearing_suite();
+        let (status, job) = post(
+            &router,
+            "/suite/clear",
+            json!({
+                "sections": ["storage", "firestore", "auth", "storage"],
+                "confirm": "demo-clear",
+                "runTriggers": true,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{job}");
+        assert_eq!(job["kind"], "suite.clear");
+        assert_eq!(job["section"], "suite");
+        assert_eq!(job["title"], "Clear Firestore, Authentication and Storage");
+        let id = job["id"].as_str().expect("id").to_owned();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let done = loop {
+            let job = jobs.get(&id).expect("kept");
+            if job.state != crate::jobs::JobState::Running {
+                break job;
+            }
+            assert!(Instant::now() < deadline, "the clear never finished");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        assert_eq!(done.state, crate::jobs::JobState::Done);
+        assert_eq!(
+            done.done, 42,
+            "each section counts from where the last left off"
+        );
+        assert_eq!(
+            *turns.lock().expect("turns"),
+            [("firestore", true), ("auth", true), ("storage", true)]
+        );
+        assert_eq!(
+            done.result,
+            Some(json!([
+                { "section": "firestore", "removed": 30 },
+                { "section": "auth", "removed": 5 },
+                { "section": "storage", "removed": 7 },
+            ]))
+        );
     }
 
     #[tokio::test]

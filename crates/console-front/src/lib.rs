@@ -13,6 +13,7 @@ mod auth;
 mod blocking;
 mod compute;
 mod databases;
+mod entity;
 mod explain;
 mod filter;
 mod firestore;
@@ -21,6 +22,8 @@ mod foreign;
 mod guard;
 mod http;
 mod instance;
+mod jobs;
+mod json;
 mod late;
 mod live;
 mod messaging;
@@ -58,6 +61,7 @@ pub use api_error::{ApiError, ApiErrorBody, ApiErrorDetail, ErrorCode};
 pub use auth::AuthConsole;
 pub use compute::{ComputeConsole, ComputeParts};
 pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
+pub use entity::EntityRef;
 pub use explain::{
     ExplainCandidates, ExplainIndex, ExplainIndexField, ExplainOrder, ExplainStrategy, Explanation,
     QueryExplainer,
@@ -72,6 +76,7 @@ pub use guard::{
     ACTIVITY_HEADER, AllowedHosts, CAUSE_HEADER_PREFIX, CONSOLE_HEADER, EXECUTION_HEADER,
     KEEP_TOKENS_HEADER, METADATA_HEADER, PREVIEW_HEADER,
 };
+pub use jobs::{BulkTarget, Job, JobError, JobList, JobRegistry, JobState};
 pub use late::Late;
 pub use live::badges::{Badge, BadgeKind, BadgeNoun, BadgeSet, BadgeTone};
 pub use live::{
@@ -98,7 +103,7 @@ pub use schema::{
 };
 pub use search::{SearchGroup, SearchHit, SearchResults};
 pub use section::{
-    AbsentKind, AbsentReason, SectionFix, SectionFixKind, SectionState, SectionStatus,
+    AbsentKind, AbsentReason, ClearReport, SectionFix, SectionFixKind, SectionState, SectionStatus,
     SectionSummary, SummaryFigure, SummaryUnit,
 };
 pub use sse::Shutdown;
@@ -257,6 +262,9 @@ pub struct ConsoleServices {
     /// Hosts the console answers for; every other `Host` is refused, so a
     /// page that rebinds its own name to this machine reaches nothing.
     pub allowed_hosts: AllowedHosts,
+    /// The console's bulk work. The suite keeps a clone and stops the jobs
+    /// first when it stops.
+    pub jobs: JobRegistry,
 }
 
 impl ConsoleServices {
@@ -281,6 +289,7 @@ impl ConsoleServices {
             suite: SuiteControls::detached(),
             foreign: ForeignProjects::default(),
             allowed_hosts: AllowedHosts::loopback(),
+            jobs: JobRegistry::new(),
         }
     }
 }
@@ -484,16 +493,23 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         shutdown: services.shutdown.clone(),
         badges: BadgeBoard::default(),
         instance: instance.clone(),
+        jobs: services.jobs.clone(),
         rings: RingBudget::shared(),
         foreign: services.foreign.clone(),
     };
     spawn_foreign_badge(&context);
+    context
+        .jobs
+        .attach(&context.badges, context.shutdown.clone());
     let sections = assemble(&mut services);
     let status = StatusSource::new(&services, instance.clone(), sections.clone());
-    let mut topics: Vec<Arc<dyn live::LiveTopic>> = vec![Arc::new(live::shell::ShellTopic::new(
-        status.clone(),
-        context.badges.clone(),
-    ))];
+    let mut topics: Vec<Arc<dyn live::LiveTopic>> = vec![
+        Arc::new(live::shell::ShellTopic::new(
+            status.clone(),
+            context.badges.clone(),
+        )),
+        Arc::new(context.jobs.topic()),
+    ];
     for section in &sections {
         topics.extend(section.topics(&context));
     }
@@ -517,6 +533,12 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         .merge(search::Search::new(sources).router())
         .merge(suite::memory_router(context.rings.clone()))
         .merge(services.suite.router())
+        .merge(suite::clear_router(
+            sections.clone(),
+            context.jobs.clone(),
+            context.project.clone(),
+        ))
+        .merge(context.jobs.router())
         .merge(hub.router());
     for section in &sections {
         api = api.merge(section.router(&context));
@@ -749,6 +771,10 @@ mod tests {
         ExportDestination::export_all(&config).expect("TypeScript bindings written");
         ExportResult::export_all(&config).expect("TypeScript bindings written");
         MemoryReport::export_all(&config).expect("TypeScript bindings written");
+        JobList::export_all(&config).expect("TypeScript bindings written");
+        BulkTarget::export_all(&config).expect("TypeScript bindings written");
+        ClearReport::export_all(&config).expect("TypeScript bindings written");
+        EntityRef::export_all(&config).expect("TypeScript bindings written");
         Page::<()>::export_all(&config).expect("TypeScript bindings written");
         BatchGetRequest::export_all(&config).expect("TypeScript bindings written");
         BatchGetResponse::<()>::export_all(&config).expect("TypeScript bindings written");

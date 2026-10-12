@@ -28,6 +28,7 @@ use firenook_core_store::{
 };
 use firenook_suite_front::replay::random_epoch;
 use firenook_suite_front::{Cursor, Entry, ReplayRing, RingBudget, RingLimits};
+use futures_util::future::BoxFuture;
 use futures_util::stream::{self, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -40,6 +41,7 @@ use crate::databases::DatabaseCatalog;
 use crate::explain::QueryExplainer;
 use crate::firestore_search::FirestoreSearch;
 use crate::http::forwarded;
+use crate::jobs::JobHandle;
 use crate::live::badges::{BadgeKind, BadgeNoun};
 use crate::live::replay::{ReplayOptions, replay_topic};
 use crate::live::{LiveTopic, ResetReason, TopicEvent, TopicStream, topic_params};
@@ -47,7 +49,9 @@ use crate::rules::RulesEditor;
 use crate::rules_eval::RulesEvaluator;
 use crate::schema::SchemaIndex;
 use crate::search::SearchSource;
-use crate::section::{Section, SectionContext, SectionStatus, SectionSummary};
+use crate::section::{
+    ClearOptions, ClearReport, Section, SectionContext, SectionStatus, SectionSummary,
+};
 use crate::sse::{Shutdown, json_event, sse_response};
 use crate::time::rfc3339;
 
@@ -722,6 +726,15 @@ impl Section for FirestoreSection {
 
     fn summary(&self, _id: &str) -> Option<SectionSummary> {
         crate::observe::firestore_data::summary(&self.0)
+    }
+
+    fn clear(
+        &self,
+        _id: &str,
+        job: JobHandle,
+        options: ClearOptions,
+    ) -> Option<BoxFuture<'static, Result<ClearReport, ApiError>>> {
+        crate::observe::firestore_data::clear(&self.0, job, options)
     }
 }
 

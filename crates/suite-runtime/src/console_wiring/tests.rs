@@ -354,6 +354,7 @@ async fn every_hook_runs_once_and_finishing_follows_the_fixed_order() {
             .iter()
             .map(|stream| format!("{stream}.ready")),
     );
+    expected.push("console.jobs".to_owned());
     expected.extend(
         ["storage", "messaging", "auth", "compute", "observe"]
             .iter()

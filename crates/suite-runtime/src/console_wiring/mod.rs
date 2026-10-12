@@ -15,8 +15,9 @@
 //! - `ready`: the stream's services are up (compute's `ready` runs right
 //!   after Functions start and hands the runtime to the console; the
 //!   others once every service has started);
-//! - `before_finish`: from `finish_suite`, in a fixed order — Storage,
-//!   Pub/Sub, Auth, compute, observe — before background delivery drains;
+//! - `before_finish`: from `finish_suite`, in a fixed order — the
+//!   console's jobs (cancelled and awaited), Storage, Pub/Sub, Auth,
+//!   compute, observe — before background delivery drains;
 //! - `inventory_refreshed`: after each Functions reload.
 
 pub(crate) mod auth;
@@ -31,8 +32,8 @@ use std::sync::Arc;
 
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::{
-    AbsentKind, AbsentReason, ComputeParts, ForeignProjects, SectionFix, SectionFixKind,
-    UnsupportedService,
+    AbsentKind, AbsentReason, ComputeParts, ForeignProjects, JobRegistry, SectionFix,
+    SectionFixKind, UnsupportedService,
 };
 use firenook_functions_bridge::{FunctionsInventory, TriggerRegistry};
 use firenook_functions_runtime::FunctionsRuntime;
@@ -57,6 +58,8 @@ pub(crate) struct HookContext<'a> {
     pub(crate) foreign: &'a ForeignProjects,
     pub(crate) triggers: &'a TriggerRegistry,
     pub(crate) compute: Option<&'a ComputeParts>,
+    /// The console's bulk work, stopped first when the suite stops.
+    pub(crate) jobs: Option<&'a JobRegistry>,
     pub(crate) auth: Option<&'a Arc<AuthRuntime>>,
     pub(crate) storage: Option<&'a Arc<StorageRuntime>>,
     pub(crate) functions: Option<&'a FunctionsRuntime>,
@@ -79,6 +82,7 @@ impl<'a> HookContext<'a> {
             foreign,
             triggers,
             compute: None,
+            jobs: None,
             auth: None,
             storage: None,
             functions: None,
@@ -138,6 +142,12 @@ pub(crate) fn ready(context: &HookContext<'_>) {
 /// The suite is stopping: each stream's last work, in the fixed order, before
 /// background delivery drains.
 pub(crate) async fn before_finish(context: &HookContext<'_>) {
+    // The console's jobs first: they may still be writing through the
+    // services the hooks below stop.
+    record("console.jobs");
+    if let Some(jobs) = context.jobs {
+        jobs.stop().await;
+    }
     record("storage.before_finish");
     storage::before_finish(context).await;
     record("messaging.before_finish");
