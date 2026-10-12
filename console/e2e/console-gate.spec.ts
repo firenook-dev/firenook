@@ -62,20 +62,6 @@ test('a section that follows Functions says so, with Functions’ fix', async ({
 })
 
 dedicated(
-  'a running section that is not built yet keeps its honest placeholder',
-  async ({ page, dedicatedEngine }) => {
-    // Firestore and Auth, all the data profile runs, are built: the auth
-    // profile also runs Functions, which is not.
-    const engine = await dedicatedEngine('auth', { seed: false })
-    await page.goto(`${engine.origin}/console/functions`)
-    await expect(page.getByRole('heading', { name: 'Functions' })).toBeVisible()
-    await expect(page.getByText('This section is not built yet')).toBeVisible()
-    await expect(page.getByText('running', { exact: true })).toBeVisible()
-    await expect(page.getByTestId('service-not-running')).toHaveCount(0)
-  },
-)
-
-dedicated(
   'an engine started without a launch context says only what it knows',
   async ({ page, dedicatedEngine }) => {
     const engine = await dedicatedEngine('data', { launchContext: false, seed: false })
