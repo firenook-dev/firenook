@@ -2464,7 +2464,154 @@ inside `a`. Container marks stop at the end of their first line: a
 geopoint is four lines of JSON and underlining all four to say one thing
 reads as damage.
 
-## Authentication (on the way, `src/auth/`)
+## Authentication (built, `src/auth/`)
+
+**Pages**: `/auth` (Users, `routes/auth.tsx`), `/auth/inbox`,
+`/auth/activity` and `/auth/settings` (`routes/auth_.<page>.tsx`, route
+ids `/auth_/<page>`). `tenant` is each page's scope param
+(`auth/tenant-scope.ts`): absent means the page's default — the project's
+own users on Users and Settings, every tenant on Inbox and Activity —
+`(none)` is the project's users on a feed, anything else a tenant id. The
+section is project-scoped: every route and topic takes `project` from
+`useConsoleProject()`. Every view is a link: Users has `q`, `sort`, `user`
+and `tab`; create dialogs open from `?new=` (`user`, `import`, `sample`;
+`tenant` goes to Settings, where the tenant dialog lives) and Export from
+`?dialog=export`; Inbox has `message`, Activity `entry`, `console` (the
+console's own edits shown), `panel=try|inspect` and `method`; Settings has
+`section`. A feed paused is `?paused=true`.
+
+**Links**: the registry's `routes` open `auth.user` (`<tenant>|<uid>`,
+split at the first bar; no bar is a project user), `auth.call` (call id)
+and `auth.message` (message id); keys are built in Rust only by
+`EntityRef::auth_user/auth_call/auth_message`, in TypeScript by
+`auth/links.ts`. Never write an Auth URL by hand from another section, and
+never write another section's URL from Auth (`EntityLink`, `linkToLogs`,
+`serializeViewAs`, the rules pages' search schema through `rulesLineLink`).
+
+**The engine owns the list, and reads it outside the lock.** `GET
+/auth/users?tenant=&q=&sort=&cursor=&before=&limit=` filters, sorts and
+counts over the `UserIndex` (`crates/auth-front/src/console/index.rs`):
+`im` structures, so a console read holds the data lock only to clone a
+snapshot, and one ordered set per sortable column kept up to date one
+change at a time, so nothing is ever rebuilt. A filtered first page pins
+its match list (eight per scope, two minutes idle); later pages slice it.
+Auth sends the count and facets with the first page and with every
+`users:batchGet`, so the page reads them from `usersFiguresQuery`, never
+from `useCursorRows`' total, which vanishes once the window slides. Never
+read the whole user list through the official API (`accounts:query`): it
+has no paging, and the official emulator refuses its `limit`.
+
+**Console reads never create anything.** `AuthData::agent` creates a
+project and `Scope::new` a tenant on first reference (official behaviour);
+console reads use `data.projects.get` and `agent.tenants.get` and answer
+`not-found` or an empty page. An unknown tenant refuses the `auth.users`
+subscription too.
+
+**Writes go through the official API**: `callAuthEmulator` (`auth/api.ts`)
+sends Identity Toolkit calls through the mount with `x-firenook-console:
+write` (`try` and `replay` for Try a sign-in and Replay), so every edit is
+recorded in Activity and behaves as the Admin SDK's. The answer carries
+`x-firenook-activity: <call id>` only when the request carried the console
+header. Bulk changes (`POST /auth/users:<verb>`: disable, enable, verify,
+revoke, setClaims, removeClaims, delete) take a `BulkTarget` (keys or the
+page's `q`) and answer a preview on `dryRun`, else a foundation job that
+works in chunks of 2,000 and can be cancelled between them; imports upload
+first (`POST /auth/imports`, streamed), preview, then run as a job (`POST
+/auth/users:import`); export is `GET /auth/users:export` in the emulator's
+own format; `POST /auth/tenants` creates a tenant with the id you choose.
+
+**Tokens come from the engine** through the foundation's
+`resolveAuthorization`: `POST /auth/tokens` mints what a sign-in would —
+provider, tenant, the account's first second factor unless told otherwise,
+a draft of custom claims, beforeSignIn when `runBeforeSignIn` is set —
+mutates nothing, and lists in `differences` what still differs from a real
+sign-in. Auth extends the request only with optional fields; `idToken` and
+`expiresAt` keep the foundation's meaning. The beacon follows `auth.users`
+for every scope with a cached token and drops a token the moment its
+account's token fields change or it is deleted. `POST /auth/token/inspect`
+judges a pasted token for each consumer (the rules, the emulator's own
+calls, `verifyIdToken` with and without the revocation check, a sign-in)
+with a reason and a fix.
+
+**Live**: topics on the one channel per browser — `auth.users` (keys with
+fields, coalesced in 100 ms windows, a refresh-only change sends nothing,
+resume compares the scope's index generation, a reset past 1,000 keys),
+`auth.activity` and `auth.inbox` (feeds on `replay_topic`, filtered by the
+engine with the page's `q`; subscribe with `after` = the first page's
+`liveAfter` and skip the replay's `tick` events), `auth.config` and
+`auth.hooks`; subscribe only from the page that shows the data. The users
+grid hands a window's uids to `useCursorRows.applyKeys`; one `POST
+/auth/users:batchGet` patches rows and brings the count and facets. It
+never refetches every loaded page or a head page. The inbox badge is the
+engine's `auth.inbox` counter. Row one shows `LiveNotice` only when this
+page's subscription ended; the channel's state is the top-bar badge.
+
+**Codes are fetched by call id, never raced**: `GET
+/auth/messages?activity=<call id>` returns what that call sent
+(`callMessagesQuery`). The observer records a call before its response is
+returned.
+
+**Activity comes from the Auth app itself**: one `CallRecord` per finished
+call (the engine keeps the newest 10,000; messages 2,000) with its steps —
+blocking functions with the function's own message, its custom and session
+claims and the invocation id read from `x-firenook-execution` after
+sending `x-firenook-cause-auth-call`; triggers; messages sent and used;
+user changes; configuration. Bodies are kept as received and sent, at
+most 16 KiB each, and only with diagnostics on. `x-firenook-console:
+write` calls are hidden unless `?console=true`; `try` and `replay` are
+always shown; Replay asks first for operations that are not idempotent.
+Errors are explained from `auth/errors.ts` with the SDK's own code and
+sentence from `auth/sdk-errors.gen.ts`, which `scripts/auth-sdk-errors.mjs`
+regenerates from `@firebase/auth` (1.13.5); `operations.ts` must label
+every operation the engine dispatches (its test reads the Rust sources).
+
+**Claims**: the 1,000 limit counts JavaScript string length (UTF-16 code
+units) of the compact JSON, as the official emulator does; the claims
+meter measures that as soon as the text is JSON. Kumo's `Meter` paints its
+bar as a brand gradient, so a tone replaces the `from-`/`via-`/`to-` stops
+(a `bg-` colour never shows). Auth overwrites `email`, `email_verified`,
+`phone_number`, `provider_id`, `user_id` and `auth_time` in the token, and
+custom `name`/`picture` replace the profile's (`shadowed`, `overrides` on
+the minted token). Where rules read a claim comes from
+`Ruleset::claim_reads()` (`crates/rules-engine/src/claim_reads.rs`) on the
+rules documents (`claimReads`) — never a regex over rule text.
+
+**Suite facts are not Auth's**: foreign projects (`ForeignProjects`, which
+Auth feeds at start), background triggers (`ConsoleStatus`), which
+functions listen (`useTriggersFor`), connection snippets (`lib/connect.ts`)
+and toasts (`lib/toasts.ts`) each have one owner; Auth draws no banner for
+them.
+
+**Persistence** is snapshotted under the lock and encoded off it
+(`crates/auth-front/src/persist.rs`): a change reaches `auth-state.json`
+within 250 ms (four times the last encode when that is longer), and
+`flush()` writes at once — the native checkpoint, an import and the
+`before_finish` hook at shutdown use it. A test that reads the file must
+flush first.
+
+**Test hooks**: the `auth` Playwright project (`e2e/auth-*.spec.ts`; the
+journeys that need their own engine are in `auth-engines.spec.ts`).
+Journeys that count, bulk-change or import work in a scratch tenant
+(`scratchTenant`/`inScratchTenant` in `e2e/support/auth.ts`) deleted in
+`finally`; counts are read from the engine at test time (`usersCount`);
+`app()` calls the Identity Toolkit as an app would, without the console
+header, so Activity shows the call and the beacon toasts its codes. Sample
+users are `sample-*` on `sample.test`; the seed (`scripts/seed/auth.mjs`)
+exports `SEED_TENANT`, `SEED_MFA_USER` and `SEED_ADMIN`; the codebase's
+only blocking functions and account triggers
+(`scripts/fixtures/functions/auth.js`) are benign for every email but
+`@blocked.test` and `@claims.test`; `SEED_USERS` are never edited.
+
+**What building it taught**:
+- `im` 15.1's `next_back` loses runs once a set is three levels deep
+  (about 2,100 entries): the index never steps backwards through an
+  `im` set; it walks down with a fresh `range(..last).next_back()` per
+  step.
+- A toast renders under a modal's inert backdrop, where role queries miss
+  it: find it by text.
+- `page.route` does not intercept a redirect's target.
+- A Kumo `Select` reads `''` as no value: scope sentinels are `(none)` and
+  `(all)`.
 
 ## Storage (on the way, `src/storage/`)
 

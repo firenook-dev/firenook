@@ -5,7 +5,7 @@ Firenook is not yet a universal Firebase Emulator Suite replacement.
 | Surface | Current preview | Not claimed |
 | --- | --- | --- |
 | Firestore | Native/Admin and browser SDK paths, rules, realtime targets, disk/WAL, official-format import/export, named databases with per-database rules | Every production feature, edition or arbitrary client version |
-| Auth | Every operation the official Auth emulator implements (61), replayed from a 1068-step oracle corpus with parity: password, anonymous, custom token, email link, phone, fake IdP (Google/Apple/SAML/OIDC-shaped credentials), account update/delete, OOB and phone codes, session cookies, tenants, SMS MFA, passkeys, Admin batch create/get/delete/query, project and tenant configuration, emulator inspection routes, legacy `relyingparty` routes, blocking functions and lifecycle triggers, official-format export/import, the local popup/redirect helper pages | Anything the official emulator itself answers with 501 (IdP/SAML/OIDC provider configuration, `initializeAuth`, IAM on tenants, Game Center, reCAPTCHA enforcement, TOTP MFA); real email/SMS delivery; production token verification |
+| Auth | Every operation the official Auth emulator implements (61), replayed from a 1068-step oracle corpus and an 18-step custom-claims-limit corpus with parity: password, anonymous, custom token, email link, phone, fake IdP (Google/Apple/SAML/OIDC-shaped credentials), account update/delete, OOB and phone codes, session cookies, tenants, SMS MFA, passkeys, Admin batch create/get/delete/query, project and tenant configuration, emulator inspection routes, legacy `relyingparty` routes, blocking functions and lifecycle triggers, official-format export/import, the local popup/redirect helper pages | Anything the official emulator itself answers with 501 (IdP/SAML/OIDC provider configuration, `initializeAuth`, IAM on tenants, Game Center, reCAPTCHA enforcement, TOTP MFA); real email/SMS delivery; production token verification |
 | Storage | Captured Firebase/GCS paths, metadata, gzip, pagination, single-file and multi-bucket rules, export/import; Security Rules evaluated natively (no Java) with the recorded official request model and production expression semantics, including `firestore.get`/`exists` and `/internal/setRules` | All GCS features; the official emulator's prefix-template `list` matching and missing `request.method` (production semantics are followed and recorded as divergences) |
 | Functions | Firenook runtime with one Node worker per codebase: discovery through the pinned SDK control API or `functions.yaml`, HTTP/callable/streaming, Firestore/Storage/Auth/Pub/Sub/Eventarc/schedule/task-queue triggers, blocking Auth functions, dotenv/secret files, reload, background controls, `--inspect-functions`; Extensions resolved and run by Firenook with the recorded parameter, spec and trigger semantics from local, vendored, cached or registry sources | Pure Rust JavaScript execution, a network sandbox, Python/Dart runtimes, dynamic (in-code) extensions, Secret Manager access |
 | Cloud Tasks | The official emulator's four routes (queue registration, enqueue, delete, `/queueStats`), a queue per `onTaskDispatched` export, and its dispatcher (token bucket, dispatch slots, the `X-CloudTasks-*` headers, the retry ladder and backoff formula, execution count on non-5xx failures, `dispatchDeadline`), replayed from a 61-step oracle corpus with parity; the Admin SDK's `taskQueue().enqueue()`/`delete()` under `CLOUD_TASKS_EMULATOR_HOST` | Everything the official emulator does not do either: `scheduleTime` as a delay, OIDC tokens, queue pause/resume/purge, task listing, the Cloud Tasks v2 API surface, persistence, a UI tab |
@@ -44,6 +44,18 @@ identical to the rules in force is left alone (the console's own save lands
 there), and a file that does not compile leaves the rules in force serving
 requests: the diagnostics are logged and the console shows them beside the
 file.
+
+Auth's action links (password reset, email verification, email sign-in and
+email change) always carry the Auth emulator's own address, as the
+registered official emulator's do, including for a code requested through
+the console. Custom claims are held to the 1,000 limit as the official
+emulator counts them: JavaScript string length (UTF-16 code units) of the
+compact JSON, so `é` counts one and an emoji two. Auth state is written to
+`auth-state.json` after the response instead of before it: a change reaches
+the file within 250 ms (four times the last encode when that is longer,
+which only a very large state takes), encoded off the request path, while
+the native checkpoint, an import and a clean stop write it at once. A tool
+that reads the file while the suite runs can see a state that much older.
 
 The package supports only its enumerated native targets after their exact
 candidate checks pass. Linux musl, Windows ARM64/32-bit, network-filesystem

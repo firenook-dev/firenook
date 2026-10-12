@@ -166,7 +166,7 @@ export function InspectToken({ project, onClose }: { project: string; onClose: (
           <InspectorSection title="Verdicts" testId="inspect-token-verdicts">
             <ul className="m-0 grid list-none gap-2.5 p-0">
               {result.checks.map((check) => (
-                <Verdict key={check.consumer} check={check} kind={result.kind} />
+                <TokenVerdict key={check.consumer} check={check} kind={result.kind} />
               ))}
             </ul>
           </InspectorSection>
@@ -197,7 +197,8 @@ export function InspectToken({ project, onClose }: { project: string; onClose: (
   )
 }
 
-function Verdict({ check, kind }: { check: AuthTokenCheck; kind: AuthTokenKind }) {
+/** One consumer's verdict: a dot, who judges, then the reason and the fix. */
+export function TokenVerdict({ check, kind }: { check: AuthTokenCheck; kind: AuthTokenKind }) {
   return (
     <li
       className="grid gap-0.5"
