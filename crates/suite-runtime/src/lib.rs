@@ -617,16 +617,24 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         background_sender,
         foreign,
     } = prepared;
+    let (shutdown, _) = watch::channel(false);
+    let hook_shutdown = Shutdown::new(shutdown.subscribe());
+    let firestore_rules = console_firestore
+        .as_ref()
+        .map(|parts| parts.rules_runtime.clone());
     // What every console lifecycle hook can read; the later services are
     // filled in at each call.
     let hooks = HookContext {
         auth: auth.as_ref(),
         storage: storage.as_ref(),
+        store: Some(&store),
+        firestore_rules: firestore_rules.as_ref(),
+        shutdown: Some(&hook_shutdown),
+        exporter: Some(&export_sender),
         ..HookContext::new(&config, &logging, &foreign, &triggers)
     };
     console_wiring::prepared(&hooks);
     let mut listeners = bind_listeners(&config).await?;
-    let (shutdown, _) = watch::channel(false);
     // Each configured rules file reloads on change, as the official CLI's
     // watcher does, until the suite stops; whichever services run.
     let rules_targets =
@@ -695,7 +703,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                 compute: compute_parts.clone(),
                 pubsub: pubsub_late.clone(),
                 tasks: tasks_late.clone(),
-                observe: console_wiring::observe::observe_console(&logging, &config),
+                observe: console_wiring::observe::observe_console(&hooks),
                 absent: console_wiring::absent_reasons(
                     &config,
                     config.launch.as_ref(),
@@ -2088,7 +2096,7 @@ async fn start_functions_runtime(
     logging: &LoggingRuntime,
     console: FunctionsConsoleOptions,
 ) -> Result<FunctionsRuntime, SuiteRuntimeError> {
-    let FunctionsConsoleOptions {} = console;
+    let FunctionsConsoleOptions { log: console_log } = console;
     let firebase_json: serde_json::Value = serde_json::from_slice(
         &tokio::fs::read(&config.firebase_json)
             .await
@@ -2105,7 +2113,10 @@ async fn start_functions_runtime(
             "DEBUG" => {}
             _ => println!("firenook {line}"),
         }
-        sink_logging.record(&event.level, Some("functions"), line);
+        match &console_log {
+            Some(consumer) => consumer(&event),
+            None => sink_logging.record(&event.level, Some("functions"), line),
+        }
     });
     let extensions = load_extensions(config, &sink).await?;
     let host = |port: u16| config.endpoint(port);
