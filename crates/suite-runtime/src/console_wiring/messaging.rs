@@ -1,9 +1,10 @@
 //! The messaging stream's part of the console: Pub/Sub and Cloud Tasks,
 //! built from the running suite.
 //!
-//! `pubsub_ready` and `tasks_ready` hand each runtime to the console and
-//! give it a log sink whose lines reach observe's log with the resources
-//! they are about; `before_finish` stops the Pub/Sub lease and push timer.
+//! `pubsub_ready` and `tasks_ready` hand each runtime to the console, with
+//! compute's invocation record when Functions run, and give it a log sink
+//! whose lines reach observe's log with the resources they are about;
+//! `before_finish` stops the Pub/Sub lease and push timer.
 //! The foreign projects an app names on these ports are recorded by
 //! `project_scope`, which wraps both listeners; nothing here adds to that.
 
@@ -20,16 +21,14 @@ use firenook_tasks_front::{LOG_FAILED, LogSink, TasksLogLine, TasksRuntime};
 use super::{FunctionsConsoleOptions, HookContext};
 use crate::SuiteConfig;
 
-/// Compute's invocation record, which joins each delivery and attempt to
-/// the invocation it caused.
+/// Compute's invocation record, which joins each delivery, schedule run
+/// and task attempt to the invocation it caused: the monitor the Functions
+/// runtime records into (`start_functions_runtime` takes the same one).
 ///
-/// `None` until `ComputeParts` carries the record (compute's
-/// `ComputeParts::monitor()`); then this is
-/// `compute.map(|parts| parts.monitor().clone())`. Without it the console
-/// serves everything but the deliveries routes and topic, which say
-/// Functions is not running.
-const fn monitor_of(_compute: Option<&ComputeParts>) -> Option<Monitor> {
-    None
+/// `None` in a suite without Functions; the console then serves everything
+/// but the deliveries routes and topic, which say Functions is not running.
+fn monitor_of(compute: Option<&ComputeParts>) -> Option<Monitor> {
+    compute.map(|parts| parts.monitor().clone())
 }
 
 /// A Pub/Sub line as observe's log takes it: the schedule's and the push

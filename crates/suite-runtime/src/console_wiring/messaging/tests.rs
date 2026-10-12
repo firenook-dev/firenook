@@ -1,6 +1,7 @@
 //! Pub/Sub and Cloud Tasks as the suite hands them to the console: their
 //! statuses, a live channel across a stop, the Pub/Sub timer stopped in
-//! `before_finish`, one clear over both sections, and log lines with refs.
+//! `before_finish`, one clear over both sections, log lines with refs, and
+//! compute's invocation record shared with both consoles.
 
 #![allow(
     clippy::too_many_lines,
@@ -11,11 +12,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::body::{Body, to_bytes};
-use axum::http::{Method, Request, StatusCode};
+use axum::body::{Body, Bytes, to_bytes};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode};
 use firenook_console_front::{ConsoleServices, ForeignProjects, Shutdown, console_router};
 use firenook_functions_bridge::{
     DispatchRequest, FunctionsInventory, TriggerObserver, TriggerRegistry,
+};
+use firenook_functions_runtime::monitor::{
+    FunctionKind, InvocationCause, InvocationEnd, InvocationOrigin, InvocationStart,
+    InvocationTarget,
 };
 use firenook_pubsub_front::google::pubsub::v1::{PubsubMessage, PushConfig, Subscription, Topic};
 use firenook_suite_front::{ConsoleSink, ServiceInfo, SuiteDirectory};
@@ -533,4 +538,134 @@ async fn one_clear_job_empties_both_sections_and_tasks_lines_carry_their_refs() 
     assert_eq!(suite.tasks.totals().pending, 0);
     assert_eq!(suite.tasks.totals().queues, 1, "queues stay");
     suite.stop.send(true).expect("stop");
+}
+
+// ------------------------------------------------------------ compute's record
+
+/// A suite with Functions: one subscriber of `orders`.
+fn subscriber_inventory() -> FunctionsInventory {
+    FunctionsInventory::from_backends_json(
+        &json!({
+            "backends": [{
+                "functionTriggers": [{
+                    "name": "onOrderPlaced",
+                    "region": "us-central1",
+                    "platform": "gcfv2",
+                    "eventTrigger": {
+                        "eventType": "google.cloud.pubsub.topic.v1.messagePublished",
+                        "resource": format!("projects/{PROJECT}/topics/orders"),
+                    },
+                }],
+            }],
+        }),
+        1,
+    )
+    .expect("inventory")
+}
+
+#[tokio::test]
+async fn both_consoles_read_the_record_functions_write_into() {
+    // Without Functions there is no record: deliveries say so.
+    let without = messaging();
+    let (status, body) = call(
+        &without.router,
+        Method::GET,
+        "/api/v1/pubsub/deliveries?topic=projects%2Fdemo-diagnostics%2Ftopics%2Forders",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    without.stop.send(true).expect("stop");
+
+    // With Functions, `run()` builds compute's parts first and hands the
+    // same parts to the Functions runtime and to both ready hooks.
+    let config = test_config();
+    let logging = LoggingRuntime::new();
+    let compute = ComputeParts::new();
+    let inventory = subscriber_inventory();
+    let background = TriggerRegistry::default();
+    let (observer, mut deliveries) = TriggerObserver::channel(background.clone());
+    let pubsub = firenook_pubsub_front::router(PROJECT, &inventory, observer.queue(), background);
+    let tasks = TasksRuntime::new(
+        PROJECT,
+        &inventory,
+        "http://127.0.0.1:1",
+        Arc::new(|_: &str, _: &str| {}),
+    );
+    let pubsub_late = Late::pending("Pub/Sub");
+    let tasks_late = Late::pending("Cloud Tasks");
+    let (stop, receiver) = watch::channel(false);
+    let router = console_router(ConsoleServices {
+        pubsub: Some(pubsub_late.clone()),
+        tasks: Some(tasks_late.clone()),
+        ..ConsoleServices::new(directory(), Shutdown::new(receiver))
+    });
+    pubsub_ready(&pubsub_late, &pubsub, Some(&compute), &config, &logging);
+    tasks_ready(&tasks_late, &tasks, Some(&compute), &config, &logging);
+    let topic = format!("projects/{PROJECT}/topics/orders");
+    let (_, published) = pubsub
+        .broker()
+        .publish(
+            &topic,
+            vec![PubsubMessage {
+                data: b"{\"order\":1}".to_vec(),
+                ..PubsubMessage::default()
+            }],
+        )
+        .expect("publish");
+    pubsub.deliver_to_functions(&published);
+    let dispatch = deliveries.recv().await.expect("dispatch");
+    // The Functions runtime records the request as it arrives, with the
+    // headers the delivery queue sent.
+    let mut headers = HeaderMap::new();
+    for (name, value) in &dispatch.headers {
+        headers.append(
+            HeaderName::from_bytes(name.as_bytes()).expect("name"),
+            HeaderValue::from_str(value).expect("value"),
+        );
+    }
+    let monitor = compute.monitor();
+    let token = monitor.begin(InvocationStart {
+        function_id: "us-central1-onOrderPlaced".to_owned(),
+        codebase: "default".to_owned(),
+        kind: FunctionKind::Pubsub,
+        origin: InvocationOrigin::Emulator,
+        cause: InvocationCause::Unknown,
+        summary: "POST /".to_owned(),
+        target: InvocationTarget::Trigger,
+        method: "POST".to_owned(),
+        path: "/".to_owned(),
+        headers,
+        body: Bytes::from(dispatch.body.clone()),
+        replay_of: None,
+        delivery: None,
+    });
+    monitor.response_head(&token, 204, &HeaderMap::new());
+    monitor.finish(&token, InvocationEnd::default());
+    let (status, page) = call(
+        &router,
+        Method::GET,
+        "/api/v1/pubsub/deliveries?topic=projects%2Fdemo-diagnostics%2Ftopics%2Forders",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let row = &page["items"][0];
+    assert_eq!(row["eventId"], dispatch.event_id);
+    assert_eq!(row["mark"], "delivered");
+    assert_eq!(row["status"], 204);
+    assert_eq!(row["invocation"]["kind"], "functions.invocation");
+    assert_eq!(row["invocation"]["key"], &*token.id);
+    // Cloud Tasks reads the same record for its attempts' links.
+    let tasks_console = tasks_late.get().expect("Cloud Tasks is ready");
+    assert_eq!(
+        tasks_console
+            .monitor
+            .as_ref()
+            .and_then(|record| record.by_event_id(&dispatch.event_id))
+            .map(|invocation| invocation.id),
+        Some(token.id.to_string())
+    );
+    stop.send(true).expect("stop");
+    pubsub.shutdown().await;
 }
