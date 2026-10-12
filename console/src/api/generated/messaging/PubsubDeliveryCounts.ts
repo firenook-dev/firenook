@@ -3,4 +3,9 @@
 /**
  * Deliveries per mark, over the records kept.
  */
-export type PubsubDeliveryCounts = { all: number, queued: number, running: number, delivered: number, failed: number, skipped: number, };
+export type PubsubDeliveryCounts = { 
+/**
+ * Every record, those whose invocation is no longer kept included
+ * (their outcome is unknown, so no other count has them).
+ */
+all: number, queued: number, running: number, delivered: number, failed: number, skipped: number, };

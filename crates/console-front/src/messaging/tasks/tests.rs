@@ -10,13 +10,17 @@
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use axum::body::Body;
-use axum::http::{Method, Request, StatusCode};
+use axum::body::{Body, Bytes};
+use axum::http::{HeaderMap, Method, Request, StatusCode};
+use firenook_functions_runtime::monitor::FunctionKind;
+use firenook_functions_runtime::{Monitor, MonitorLimits};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
 use super::*;
-use crate::messaging::tests::{PROCESS_ORDER, PROJECT, Suite, suite};
+use crate::messaging::tests::{
+    PROCESS_ORDER, PROJECT, Suite, begin_invocation, finish_invocation, inventory, suite,
+};
 use crate::search::SearchSource as _;
 
 /// Registers a client queue over the Tasks port, as an app would; answers
@@ -323,6 +327,94 @@ async fn tasks_through_the_console() {
         .await;
     assert_eq!(queue["origin"], "client");
     assert_eq!(queue["config"]["maxAttempts"], 5.0);
+    suite.stop.send(true).expect("stop");
+}
+
+// ------------------------------------------------------------ R-CF-06, attempts
+
+#[tokio::test]
+async fn an_attempt_links_the_invocation_it_caused() {
+    let monitor = Monitor::new(MonitorLimits::default());
+    let suite = suite(Some(monitor.clone()));
+    // The function's port: compute records each request as it arrives,
+    // with the headers Cloud Tasks sent, and the handler answers 200.
+    let recording = monitor.clone();
+    let function = Router::new().fallback(move |headers: HeaderMap, body: Bytes| {
+        let monitor = recording.clone();
+        async move {
+            let token = begin_invocation(
+                &monitor,
+                "us-central1-processOrder",
+                FunctionKind::Tasks,
+                headers
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.to_str().unwrap_or_default())),
+                &body,
+            );
+            finish_invocation(&monitor, &token, 200, None);
+            StatusCode::OK
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let origin = format!("http://{}", listener.local_addr().expect("address"));
+    let server = tokio::spawn(async move { axum::serve(listener, function).await });
+    suite.tasks.runtime.refresh_inventory(&inventory(), &origin);
+    // A named task runs at once and succeeds.
+    let (status, task) = suite
+        .call(
+            Method::POST,
+            "/api/v1/tasks/tasks",
+            Some(json!({ "queue": PROCESS_ORDER, "data": "{\"order\":7}", "name": "order-7" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let id = task["id"].as_str().expect("id").to_owned();
+    let history = wait_for(
+        &suite,
+        "the task in the history",
+        |history| history["total"]["count"] == 1,
+        &format!("/api/v1/tasks/history?queue={}", encoded(PROCESS_ORDER)),
+    )
+    .await;
+    assert_eq!(history["items"][0]["outcome"], "succeeded", "{history}");
+    let recorded = monitor
+        .by_task(PROCESS_ORDER, "order-7", 0)
+        .expect("compute recorded the attempt");
+    let (status, detail) = suite
+        .call(
+            Method::GET,
+            &format!(
+                "/api/v1/tasks/task?queue={}&id={id}",
+                encoded(PROCESS_ORDER)
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let attempt = &detail["attempts"][0];
+    assert_eq!(attempt["status"], 200, "{detail}");
+    assert_eq!(attempt["retryCount"], 0);
+    assert_eq!(
+        attempt["invocation"],
+        json!({ "kind": "functions.invocation", "key": recorded.id }),
+        "the full task name joins by its last segment, as the header sends it"
+    );
+    // Once compute lets the invocation go, the link goes with it.
+    monitor.clear_invocations();
+    let (_, detail) = suite
+        .call(
+            Method::GET,
+            &format!(
+                "/api/v1/tasks/task?queue={}&id={id}",
+                encoded(PROCESS_ORDER)
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(detail["attempts"][0]["invocation"], Value::Null);
+    server.abort();
     suite.stop.send(true).expect("stop");
 }
 

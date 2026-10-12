@@ -498,6 +498,8 @@ pub(crate) struct PubsubDeliveryPage {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubDeliveryCounts {
+    /// Every record, those whose invocation is no longer kept included
+    /// (their outcome is unknown, so no other count has them).
     pub all: u32,
     pub queued: u32,
     pub running: u32,

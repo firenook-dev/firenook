@@ -226,7 +226,10 @@ pub(crate) fn attempt(record: &AttemptRecord, monitor: Option<&Monitor>) -> Task
         retry_count: record.retry_count,
         invocation: monitor
             .and_then(|monitor| {
-                monitor.by_task(&record.queue_key, &record.task_name, record.retry_count)
+                // Compute keys an attempt by the headers it was sent with,
+                // whose X-CloudTasks-TaskName is the name's last segment.
+                let short = record.task_name.rsplit('/').next().unwrap_or_default();
+                monitor.by_task(&record.queue_key, short, record.retry_count)
             })
             .map(|invocation| EntityRef::invocation(&invocation.id)),
     }

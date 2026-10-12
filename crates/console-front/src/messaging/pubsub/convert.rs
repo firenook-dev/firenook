@@ -404,9 +404,10 @@ impl<'a> Join<'a> {
     }
 
     /// One fanout target's mark: the invocation's outcome while compute
-    /// keeps it; skipped when background triggers were off; queued when the
-    /// record has let go of nothing of its kind since the fanout (so no
-    /// invocation has begun); otherwise no longer kept.
+    /// keeps it; skipped when background triggers were off at the publish
+    /// (a later redelivery was sent); queued when the record has let go of
+    /// nothing of its kind that began after the target was handed over (so
+    /// no invocation of it has begun); otherwise no longer kept.
     pub(crate) fn mark(
         &self,
         topic: &str,
@@ -421,7 +422,7 @@ impl<'a> Join<'a> {
                 InvocationOutcomeClass::Running => PubsubFunctionMark::Running,
             };
         }
-        if fanout.skipped == Some(FanoutSkip::BackgroundOff) {
+        if fanout.skipped == Some(FanoutSkip::BackgroundOff) && !target.redelivery {
             return PubsubFunctionMark::Skipped;
         }
         let kept = match self.targets.kind(topic, &target.function_id) {
@@ -429,7 +430,7 @@ impl<'a> Join<'a> {
             _ => self.kept_pubsub,
         };
         match kept {
-            Some(since) if fanout.at < since => PubsubFunctionMark::NotKept,
+            Some(since) if target.at < since => PubsubFunctionMark::NotKept,
             _ => PubsubFunctionMark::Queued,
         }
     }

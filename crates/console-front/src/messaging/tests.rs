@@ -11,10 +11,14 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use axum::body::{Body, to_bytes};
-use axum::http::{Method, Request, StatusCode};
+use axum::body::{Body, Bytes, to_bytes};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode};
 use firenook_functions_bridge::{
     DispatchRequest, FunctionsInventory, TriggerObserver, TriggerRegistry,
+};
+use firenook_functions_runtime::monitor::{
+    FunctionKind, InvocationCause, InvocationEnd, InvocationOrigin, InvocationStart,
+    InvocationTarget, InvocationToken,
 };
 use firenook_pubsub_front::google::pubsub::v1::{
     DeadLetterPolicy, PubsubMessage, Subscription, Topic,
@@ -250,6 +254,71 @@ pub(crate) fn create_subscription(console: &PubsubConsole, name: &str, topic: &s
             ..Subscription::default()
         })
         .expect("subscription");
+}
+
+/// Compute's side of one invocation: begun with the headers its request
+/// arrived with, as the Functions runtime records it.
+pub(crate) fn begin_invocation<'h>(
+    monitor: &Monitor,
+    function_id: &str,
+    kind: FunctionKind,
+    headers: impl IntoIterator<Item = (&'h str, &'h str)>,
+    body: &[u8],
+) -> InvocationToken {
+    let mut map = HeaderMap::new();
+    for (name, value) in headers {
+        map.append(
+            HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+            HeaderValue::from_str(value).expect("header value"),
+        );
+    }
+    monitor.begin(InvocationStart {
+        function_id: function_id.to_owned(),
+        codebase: "default".to_owned(),
+        kind,
+        origin: InvocationOrigin::Emulator,
+        cause: InvocationCause::Unknown,
+        summary: "POST /".to_owned(),
+        target: InvocationTarget::Trigger,
+        method: "POST".to_owned(),
+        path: "/".to_owned(),
+        headers: map,
+        body: Bytes::copy_from_slice(body),
+        replay_of: None,
+        delivery: None,
+    })
+}
+
+/// The handler answered `status`; `error` is what it threw.
+pub(crate) fn finish_invocation(
+    monitor: &Monitor,
+    token: &InvocationToken,
+    status: u16,
+    error: Option<&str>,
+) {
+    monitor.response_head(token, status, &HeaderMap::new());
+    monitor.finish(
+        token,
+        InvocationEnd {
+            error: error.map(str::to_owned),
+            ..InvocationEnd::default()
+        },
+    );
+}
+
+/// [`begin_invocation`] for a Pub/Sub dispatch, with the headers the
+/// delivery queue sends it with.
+pub(crate) fn begin_dispatch(monitor: &Monitor, dispatch: &DispatchRequest) -> InvocationToken {
+    begin_invocation(
+        monitor,
+        "us-central1-onOrderPlaced",
+        FunctionKind::Pubsub,
+        dispatch
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+        &dispatch.body,
+    )
 }
 
 pub(crate) fn publish(console: &PubsubConsole, topic: &str, data: &str) -> u64 {

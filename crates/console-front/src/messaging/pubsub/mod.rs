@@ -1602,8 +1602,10 @@ fn count_marks(rows: &[(DeliveryCursor, PubsubDeliveryRow)]) -> PubsubDeliveryCo
             PubsubFunctionMark::Queued => counts.queued += 1,
             PubsubFunctionMark::Running => counts.running += 1,
             PubsubFunctionMark::Delivered => counts.delivered += 1,
-            PubsubFunctionMark::Failed | PubsubFunctionMark::NotKept => counts.failed += 1,
+            PubsubFunctionMark::Failed => counts.failed += 1,
             PubsubFunctionMark::Skipped => counts.skipped += 1,
+            // Its outcome is unknown, not a failure: only `all` counts it.
+            PubsubFunctionMark::NotKept => {}
         }
     }
     counts
@@ -1632,11 +1634,7 @@ async fn deliveries(
         }
         let counts = count_marks(&rows);
         if let Some(outcome) = query.outcome {
-            rows.retain(|(_, row)| {
-                row.mark == outcome
-                    || (outcome == PubsubFunctionMark::Failed
-                        && row.mark == PubsubFunctionMark::NotKept)
-            });
+            rows.retain(|(_, row)| row.mark == outcome);
         }
         let total = u64_of(rows.len());
         let (start, end) = match (after, before) {
