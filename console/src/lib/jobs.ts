@@ -5,11 +5,14 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, apiGet, apiSend } from '@/api/client'
-import type { Job } from '@/lib/live/contract'
+import type { Job } from '@/api/generated/Job'
+import type { JobList } from '@/api/generated/JobList'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { queryClient } from '@/lib/query'
 
-export type { Job, JobError, JobState } from '@/lib/live/contract'
+export type { Job } from '@/api/generated/Job'
+export type { JobError } from '@/api/generated/JobError'
+export type { JobState } from '@/api/generated/JobState'
 
 export const jobKey = (id: string) => ['jobs', id] as const
 export const sectionJobsKey = (section: string) => ['jobs', 'section', section] as const
@@ -51,8 +54,7 @@ export function useJobs(section: string): readonly Job[] {
   const client = useQueryClient()
   const query = useQuery({
     queryKey: sectionJobsKey(section),
-    queryFn: async ({ signal }) =>
-      (await apiGet<{ jobs: Job[] }>('/jobs', { section }, signal)).jobs,
+    queryFn: async ({ signal }) => (await apiGet<JobList>('/jobs', { section }, signal)).jobs,
     staleTime: Number.POSITIVE_INFINITY,
     // An engine without the jobs routes has no jobs to list; asking again
     // would only repeat the 404.

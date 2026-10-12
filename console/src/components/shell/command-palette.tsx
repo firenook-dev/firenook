@@ -22,12 +22,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { ApiError, apiGet, apiSend } from '@/api/client'
 import type { BackgroundTriggers } from '@/api/generated/BackgroundTriggers'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import type { SearchResults } from '@/api/generated/SearchResults'
 import { statusQuery } from '@/api/queries'
 import { Kbd, PanelIcon } from '@/components/kit'
 import { describeTheme, useTheme } from '@/lib/color-mode'
 import { useLayout } from '@/lib/layout'
 import { linkTo } from '@/lib/links'
-import type { SearchResults } from '@/lib/live/contract'
 import {
   type PaletteGroup,
   type PaletteItem,

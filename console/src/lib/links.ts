@@ -6,8 +6,8 @@
 
 import { useQuery } from '@tanstack/react-query'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import type { EntityRef } from '@/api/generated/EntityRef'
 import { statusQuery } from '@/api/queries'
-import type { EntityRef } from './live/contract'
 import { queryClient } from './query'
 import { type SectionLink, sectionById } from './services'
 

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Job } from './live/contract'
+import type { Job } from '@/api/generated/Job'
 
 // The hooks read the engine through `apiGet` and the `jobs` topic; both are
 // stood in for here so the hook's own bookkeeping is what is tested. The
