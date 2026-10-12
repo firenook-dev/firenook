@@ -1,9 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { ENGINE_REVISION, RELEASE_VERSION } from './engine'
 
 const origin = () => {
   const value = process.env.FIRENOOK_CONSOLE_ORIGIN
-  if (!value) throw new Error('the engine global setup did not run')
+  if (!value) throw new Error('the worker engine did not start')
   return value
 }
 const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'

@@ -1,24 +1,27 @@
 // Seeds a synthetic project with data that exercises every Firestore value
-// type, sparse fields, subcollections and a missing ancestor document, plus a
-// few Auth users to view the data as. Console development and the browser
-// journey use it; nothing here is real.
+// type, sparse fields, subcollections and a missing ancestor document, plus
+// the seed people (`SEED_USERS`) as Auth users to view the data as. Console
+// development and the browser journeys use it; nothing here is real.
 //
-//   node scripts/seed-firestore.mjs http://127.0.0.1:34000 demo-console-synthetic
+//   npm run seed -- http://127.0.0.1:34000 demo-console-synthetic
 //
 // The origin is the console's UI origin: writes go through the console's
 // same-origin Firestore and Auth mounts, exactly as the workbench does.
+// FIRENOOK_SEED_SCALE=large adds 20,000 documents under `bulk` for the
+// perf journeys.
 
 import { fileURLToPath } from 'node:url'
+import { SEED_USERS, ensureSeedUsers, largeScale } from './identities.mjs'
 
 const headers = { authorization: 'Bearer owner', 'content-type': 'application/json' }
 
 // A tiny deterministic generator so every run seeds the same project.
-let seed = 0x2f6b7d
+let state = 0x2f6b7d
 function random() {
-  seed ^= seed << 13
-  seed ^= seed >>> 17
-  seed ^= seed << 5
-  return ((seed >>> 0) % 1_000_000) / 1_000_000
+  state ^= state << 13
+  state ^= state >>> 17
+  state ^= state << 5
+  return ((state >>> 0) % 1_000_000) / 1_000_000
 }
 const pick = (items) => items[Math.floor(random() * items.length)]
 const int = (min, max) => min + Math.floor(random() * (max - min + 1))
@@ -79,10 +82,9 @@ const PRODUCTS = [
  * @returns {Promise<{ documents: number, users: Array<{ uid: string, email: string }> }>}
  */
 export async function seedFirestore(origin, project, database = '(default)') {
-  seed = 0x2f6b7d
+  state = 0x2f6b7d
   const root = `projects/${project}/databases/${database}/documents`
   const documents = `${origin}/console/api/v1/firestore/v1/${root}`
-  const auth = `${origin}/console/api/v1/auth/identitytoolkit.googleapis.com/v1`
 
   const v = {
     s: (stringValue) => ({ stringValue }),
@@ -134,6 +136,13 @@ export async function seedFirestore(origin, project, database = '(default)') {
     set(`users/${uid}`, fields)
   }
 
+  // The seed people are the generator's first three users; a change to
+  // the generator that moved them would split every profile's people.
+  for (const [index, user] of SEED_USERS.entries())
+    if (userIds[index] !== user.uid)
+      throw new Error(
+        `The Firestore seeder's user ${index} is ${userIds[index]}, but SEED_USERS says ${user.uid}; keep scripts/seed/identities.mjs and the generator in step.`,
+      )
   const ada = userIds[0]
   set(`users/${ada}`, {
     displayName: v.s('Ada Lovelace'),
@@ -260,6 +269,16 @@ export async function seedFirestore(origin, project, database = '(default)') {
       })
   }
 
+  // The perf journeys' long list: one collection deep enough to scroll
+  // through fifty pages and more.
+  if (largeScale())
+    for (let index = 0; index < LARGE_DOCUMENTS; index += 1)
+      set(`bulk/b${String(index).padStart(6, '0')}`, {
+        index: v.i(index),
+        label: v.s(`${pick(PRODUCTS)} ${index}`),
+        createdAt: v.t(iso(index % 365)),
+      })
+
   async function post(url, body) {
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
     if (!response.ok) throw new Error(`${url} → ${response.status} ${await response.text()}`)
@@ -270,23 +289,22 @@ export async function seedFirestore(origin, project, database = '(default)') {
     await post(`${documents}:commit`, { writes: writes.slice(index, index + 200) })
   }
 
-  const accounts = [
-    ['ada@example.test', 'Ada Lovelace', ada],
-    ['grace@example.test', 'Grace Hopper', userIds[1]],
-    ['linus@example.test', 'Linus Torvalds', userIds[2]],
-  ]
-  for (const [email, displayName, localId] of accounts) {
-    await post(`${auth}/accounts:signUp?key=fake-api-key`, {
-      email,
-      password: 'password-1',
-      displayName,
-      localId,
-      returnSecureToken: true,
-    }).catch((error) => {
-      if (!/EMAIL_EXISTS|DUPLICATE_LOCAL_ID/.test(String(error))) throw error
-    })
+  await ensureSeedUsers({ origin })
+  return {
+    documents: writes.length,
+    users: SEED_USERS.map(({ uid, email }) => ({ uid, email })),
   }
-  return { documents: writes.length, users: accounts.map(([email, , uid]) => ({ uid, email })) }
+}
+
+/** The documents `bulk` holds at the large scale. */
+const LARGE_DOCUMENTS = 20_000
+
+/**
+ * The profile seeder's entry: the engine's project, through its console.
+ * @param {{ origin: string, project: string }} engine
+ */
+export async function seed(engine) {
+  await seedFirestore(engine.origin, engine.project)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

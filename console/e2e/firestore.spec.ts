@@ -1,10 +1,25 @@
-import { type Locator, expect, test } from '@playwright/test'
+import type { Locator } from '@playwright/test'
+import { expect, test } from './fixtures'
+import { readClipboard, ticked } from './support/clipboard'
+import { readDownload } from './support/downloads'
 import { dropLive, restoreLive } from './support/live'
+import {
+  band,
+  cutRings,
+  faded,
+  fieldLook,
+  onTop,
+  paint,
+  paintOf,
+  paintedAtItsOwnCentre,
+  ringRoom,
+} from './support/look'
 
-// The Firestore workbench against a real engine seeded by scripts/seed-firestore.mjs.
+// The Firestore workbench against a real engine (project `data`) seeded by
+// scripts/seed/firestore.mjs.
 const origin = () => {
   const value = process.env.FIRENOOK_CONSOLE_ORIGIN
-  if (!value) throw new Error('the engine global setup did not run')
+  if (!value) throw new Error('the worker engine did not start')
   return value
 }
 const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'
@@ -1269,9 +1284,7 @@ test('explain names what the query reads, and the index production would need', 
   await expect(page.getByTestId('copy-index-entry')).toContainText('Copied')
   await ticked(page.getByTestId('copy-index-entry'))
   // What it copies has to be a real index file entry for this query.
-  const copied = await page.evaluate(() =>
-    (navigator as Navigator & { clipboard: { readText(): Promise<string> } }).clipboard.readText(),
-  )
+  const copied = await readClipboard(page)
   expect(JSON.parse(copied)).toMatchObject({
     collectionGroup: 'users',
     queryScope: 'COLLECTION',
@@ -1419,180 +1432,6 @@ test('a typed export imports back as the same documents', async ({ page }) => {
 })
 
 /**
- * A control's colour as the eye sees it, as one luminance level (0–255):
- * its own fill and every layer under it down to the first opaque ground,
- * composited — background images (the hover's ink is one) above
- * background colours, as the browser paints them.
- */
-const paintOf = (control: Locator) =>
-  control.evaluate((el) => {
-    const view = el.ownerDocument.defaultView!
-    const canvas = el.ownerDocument.createElement('canvas') as unknown as {
-      width: number
-      height: number
-      getContext: (kind: '2d') => {
-        clearRect: (...xs: number[]) => void
-        fillRect: (...xs: number[]) => void
-        fillStyle: string
-        getImageData: (...xs: number[]) => { data: ArrayLike<number> }
-      }
-    }
-    canvas.width = canvas.height = 1
-    const ink = canvas.getContext('2d')
-    const rgba = (css: string) => {
-      ink.clearRect(0, 0, 1, 1)
-      ink.fillStyle = css
-      ink.fillRect(0, 0, 1, 1)
-      const [r = 0, g = 0, b = 0, a = 0] = Array.from(ink.getImageData(0, 0, 1, 1).data)
-      return [r, g, b, a / 255]
-    }
-    // A flat gradient's first stop, which is the colour it paints.
-    const stopColour = (image: string) => {
-      const start = image.indexOf('linear-gradient(')
-      if (start === -1) return undefined
-      let depth = 0
-      for (let at = start + 16; at < image.length; at++) {
-        if (image[at] === '(') depth++
-        else if (image[at] === ')') depth--
-        if (depth === 0 && (image[at] === ',' || image[at] === ')'))
-          return rgba(image.slice(start + 16, at).trim())
-        if (depth < 0) break
-      }
-      return undefined
-    }
-    const layers: number[][] = []
-    for (let at: typeof el | null = el; at; at = at.parentElement) {
-      const style = view.getComputedStyle(at)
-      const stop = stopColour(style.backgroundImage)
-      if (stop) layers.push(stop)
-      const colour = rgba(style.backgroundColor)
-      layers.push(colour)
-      if (at !== el && (colour[3] ?? 0) > 0.99) break
-    }
-    let colour = [255, 255, 255]
-    for (const [r = 0, g = 0, b = 0, a = 0] of layers.toReversed())
-      colour = [r, g, b].map((value, i) => value * a + (colour[i] ?? 0) * (1 - a))
-    const [r = 0, g = 0, b = 0] = colour
-    return Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b)
-  })
-
-/** A field's outline and ground, as the eye sees them. */
-const fieldLook = (field: Locator) =>
-  field.evaluate((el) => {
-    const style = el.ownerDocument.defaultView!.getComputedStyle(el)
-    return {
-      ring: style.boxShadow
-        .split(/,(?![^(]*\))/)
-        .some(
-          (layer: string) =>
-            layer.trim().endsWith(' 0px 0px 0px 1px') && !layer.includes('rgba(0, 0, 0, 0)'),
-        ),
-      shadow: style.boxShadow,
-      background: style.backgroundColor,
-      height: (el as { offsetHeight: number }).offsetHeight,
-      radius: style.borderRadius,
-    }
-  })
-
-/** The least room any ancestor that clips leaves around a box, px. */
-const ringRoom = (field: Locator) =>
-  field.evaluate((el) => {
-    const view = el.ownerDocument.defaultView!
-    const box = el.getBoundingClientRect()
-    let room = Infinity
-    for (let up = el.parentElement; up; up = up.parentElement) {
-      const style = view.getComputedStyle(up)
-      if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
-      const clip = up.getBoundingClientRect()
-      // A scroller clips at its padding edge, inside its border.
-      const top = clip.top + Number.parseFloat(style.borderTopWidth)
-      const bottom = clip.bottom - Number.parseFloat(style.borderBottomWidth)
-      const left = clip.left + Number.parseFloat(style.borderLeftWidth)
-      room = Math.min(room, box.top - top, bottom - box.bottom, box.left - left)
-    }
-    return room
-  })
-
-/**
- * Every outer ring on the page — a frame or a focus ring, both a
- * `box-shadow` spread outside the box — that an ancestor's clip cuts, or
- * only the focused element's. A control partly scrolled out of a scroller
- * is content, not chrome, and is passed over.
- */
-const cutRings = (page: import('@playwright/test').Page, focusedOnly = false) =>
-  page.locator('body').evaluate((body, only) => {
-    const doc = body.ownerDocument
-    const view = doc.defaultView!
-    const cut: string[] = []
-    const candidates = only ? [doc.activeElement] : [...doc.querySelectorAll('body *')]
-    for (const el of candidates) {
-      if (!el) continue
-      const style = view.getComputedStyle(el)
-      if (style.visibility === 'hidden' || style.display === 'none') continue
-      let spread = 0
-      for (const part of style.boxShadow.split(/,(?![^(]*\))/)) {
-        if (part.includes('inset')) continue
-        const ring = /^(.*\))\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px$/.exec(
-          part.trim(),
-        )
-        if (!ring || /rgba\(0, 0, 0, 0\)|\/ 0\)$/.test(ring[1] ?? '')) continue
-        if (Number(ring[2]) === 0 && Number(ring[3]) === 0)
-          spread = Math.max(spread, Number(ring[5]))
-      }
-      const box = el.getBoundingClientRect()
-      if (spread === 0 || box.width === 0 || box.height === 0) continue
-      for (let up = el.parentElement; up; up = up.parentElement) {
-        const clip = view.getComputedStyle(up)
-        if (clip.overflowX === 'visible' && clip.overflowY === 'visible') continue
-        const bounds = up.getBoundingClientRect()
-        const left = bounds.left + Number.parseFloat(clip.borderLeftWidth)
-        const top = bounds.top + Number.parseFloat(clip.borderTopWidth)
-        // A scroller clips at its padding edge, inside its scrollbar too.
-        const right = left + up.clientWidth
-        const bottom = top + up.clientHeight
-        const room = {
-          left: box.left - left,
-          right: right - box.right,
-          top: box.top - top,
-          bottom: bottom - box.bottom,
-        }
-        if (Object.values(room).some((value) => value < -0.5)) break
-        const short = Object.entries(room).filter(([, value]) => value < spread - 0.05)
-        if (short.length > 0) {
-          const name = el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.tagName
-          cut.push(`${name}: ${short.map(([side]) => side).join(', ')}`)
-          break
-        }
-      }
-    }
-    return cut
-  }, focusedOnly)
-
-/** A download's bytes, as text. */
-async function readDownload(download: { path(): Promise<string> }): Promise<string> {
-  const { readFile } = await import('node:fs/promises')
-  return readFile(await download.path(), 'utf8')
-}
-
-async function paintedAtItsOwnCentre(locator: Locator): Promise<boolean> {
-  return locator.evaluate((el) => {
-    const box = el.getBoundingClientRect()
-    const hit = el.ownerDocument.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
-    return el === hit || el.contains(hit)
-  })
-}
-
-/** Whether anything above this element is holding it at zero opacity. */
-async function faded(handle: Locator): Promise<boolean> {
-  return handle.evaluate((el) => {
-    const view = el.ownerDocument.defaultView!
-    for (let node = el.parentElement; node; node = node.parentElement)
-      if (Number(view.getComputedStyle(node).opacity) < 0.05) return true
-    return false
-  })
-}
-
-/**
  * Point at a row, then press one of its controls. The strip holding them is
  * drawn — and takes a click — only while its own line is under the pointer,
  * so reaching straight for a button that nothing is pointing at is asking
@@ -1655,19 +1494,6 @@ async function boxedValues(fields: Locator): Promise<boolean[]> {
 }
 
 /** Keys with a number each, for a map wide enough to be worth shutting. */
-/** How a control is drawn: the two properties a variant change shows up in. */
-async function paint(locator: Locator): Promise<{ background: string; opacity: string }> {
-  return await locator.evaluate((el) => {
-    const style = el.ownerDocument.defaultView!.getComputedStyle(el)
-    return { background: style.backgroundColor, opacity: style.opacity }
-  })
-}
-
-/** The drawn height of a band of panel chrome. */
-async function band(locator: Locator): Promise<number> {
-  return (await locator.boundingBox())!.height
-}
-
 function numbered(keys: string[]): Record<string, unknown> {
   return Object.fromEntries(keys.map((key, index) => [key, { integerValue: String(index) }]))
 }
@@ -3235,32 +3061,6 @@ const panelGlyph = (button: Locator) =>
     ]),
   )
 
-/**
- * A copy button that has copied: the copy mark gone up out of its box and
- * the tick risen into it, as Kumo's ClipboardText moves them.
- */
-const ticked = async (button: Locator) => {
-  const glyph = button.locator('[data-copied]')
-  await expect(glyph).toHaveCount(1)
-  await expect
-    .poll(() =>
-      glyph
-        .locator('[data-part="tick"]')
-        .evaluate((tick) => tick.ownerDocument.defaultView!.getComputedStyle(tick).opacity),
-    )
-    .toBe('1')
-}
-
-const onTop = (item: Locator) =>
-  item.evaluate((el) => {
-    const box = el.getBoundingClientRect()
-    const hit = el.ownerDocument.elementFromPoint(
-      box.left + box.width / 2,
-      box.top + box.height / 2,
-    )
-    return hit !== null && el.contains(hit)
-  })
-
 async function reach(page: import('@playwright/test').Page, path: string, field: string) {
   const cell = page.locator(`tr[data-path="${path}"] td[data-field="${field}"]`)
   const grid = page.getByTestId('grid-scroll')
@@ -3685,12 +3485,7 @@ test('the keyboard walks the cells, edits the one it is on, and copies it', asyn
     })
     .toEqual(text('Renamed'))
 
-  const clipboard = () =>
-    page.evaluate(() =>
-      (
-        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
-      ).clipboard.readText(),
-    )
+  const clipboard = () => readClipboard(page)
   await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('ControlOrMeta+c')
   await expect.poll(clipboard).toBe('p1@example.test')
@@ -3886,13 +3681,7 @@ test('ticked rows turn the query line into their own bar, which reaches every do
   await page.getByTestId('copy-json').click()
   await expect(page.getByText('Copied 2 documents as JSON')).toBeVisible()
   await ticked(page.getByTestId('copy-selection'))
-  const copied = JSON.parse(
-    await page.evaluate(() =>
-      (
-        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
-      ).clipboard.readText(),
-    ),
-  ) as Record<string, unknown>
+  const copied = JSON.parse(await readClipboard(page)) as Record<string, unknown>
   expect(Object.keys(copied)).toEqual(['s001', 's002'])
 
   // Every document, not the loaded hundred.
@@ -3914,12 +3703,7 @@ test('ticked rows turn the query line into their own bar, which reaches every do
 })
 
 test('every copy answers with the same tick', async ({ page }) => {
-  const clipboard = () =>
-    page.evaluate(() =>
-      (
-        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
-      ).clipboard.readText(),
-    )
+  const clipboard = () => readClipboard(page)
 
   // The path's copy said nothing at all: a click on it looked like a
   // click that missed. Now the tick rises in, and goes again.

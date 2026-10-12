@@ -16,8 +16,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "e2e:sdk": "npm ci --prefix e2e/functions-sdk --ignore-scripts --no-audit --no-fund",
+    "engine": "node scripts/synthetic-engine.mjs",
     "budget": "node scripts/bundle-budget.mjs",
-    "seed": "node scripts/seed-firestore.mjs",
+    "seed": "node scripts/seed/firestore.mjs",
     "design-system": "node scripts/design-system/build.mjs",
     "design-system:dev": "vite --config design-system/vite.config.ts"
   },
