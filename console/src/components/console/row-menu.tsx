@@ -198,7 +198,9 @@ export function RowMenuButton({
           />
         }
       />
-      <DropdownMenu.Content align="end">
+      {/* Opened from the keyboard, the popup takes focus until an item is
+          highlighted; an outline round the whole menu says nothing. */}
+      <DropdownMenu.Content align="end" className="outline-none">
         <div data-testid="row-menu">
           <MenuItems items={items} />
         </div>
