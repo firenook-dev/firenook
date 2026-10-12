@@ -80,3 +80,23 @@ dedicated(
     await expect(page.getByTestId('rules-toolbar')).toContainText('Open default rules')
   },
 )
+
+dedicated(
+  'an engine that records no decisions says so where they would be',
+  async ({ page, dedicatedEngine }) => {
+    const engine = await dedicatedEngine('storage', {
+      only: 'storage,auth',
+      seed: false,
+      project: 'demo-console-storage-quiet',
+      args: ['--no-diagnostics'],
+    })
+    await page.goto(`${engine.origin}/console/storage/rules`)
+    await expect(page.getByTestId('rules-source')).toContainText('service firebase.storage')
+    await expect(page.getByTestId('decisions-empty')).toHaveText(
+      'Rules decisions are off: the suite was started with --no-diagnostics.',
+    )
+    // Coverage counts nothing either, and the toggle says so rather than failing.
+    await expect(page.getByTestId('rules-coverage')).toBeVisible()
+    await expect(page.getByTestId('query-error')).toHaveCount(0)
+  },
+)
