@@ -595,7 +595,7 @@ pub(crate) fn diagnostics(error: &LoadError) -> Vec<RulesDiagnostic> {
     error.diagnostics.iter().map(diagnostic).collect()
 }
 
-fn diagnostic(diagnostic: &Diagnostic) -> RulesDiagnostic {
+pub(crate) fn diagnostic(diagnostic: &Diagnostic) -> RulesDiagnostic {
     RulesDiagnostic {
         severity: match diagnostic.severity {
             DiagnosticSeverity::Error => RulesSeverity::Error,
@@ -627,11 +627,11 @@ const fn operation(operation: RequestOperation) -> RulesOperation {
     }
 }
 
-fn operations(operations: &[RequestOperation]) -> Vec<RulesOperation> {
+pub(crate) fn operations(operations: &[RequestOperation]) -> Vec<RulesOperation> {
     operations.iter().copied().map(operation).collect()
 }
 
-fn outline_view(outline: &firenook_rules_engine::RulesOutline) -> RulesOutline {
+pub(crate) fn outline_view(outline: &firenook_rules_engine::RulesOutline) -> RulesOutline {
     RulesOutline {
         rules_version: outline.rules_version,
         matches: outline
@@ -698,7 +698,7 @@ fn collect_patterns(node: &SchemaNode, patterns: &mut Vec<String>) {
     }
 }
 
-fn version(version: InstalledVersion) -> RulesVersion {
+pub(crate) fn version(version: InstalledVersion) -> RulesVersion {
     RulesVersion {
         hash: version.hash,
         source: version.source.to_string(),
@@ -707,7 +707,7 @@ fn version(version: InstalledVersion) -> RulesVersion {
     }
 }
 
-const fn origin(origin: firenook_rules_runtime::RulesOrigin) -> RulesOrigin {
+pub(crate) const fn origin(origin: firenook_rules_runtime::RulesOrigin) -> RulesOrigin {
     match origin {
         firenook_rules_runtime::RulesOrigin::Startup => RulesOrigin::Startup,
         firenook_rules_runtime::RulesOrigin::Console => RulesOrigin::Console,
@@ -718,7 +718,7 @@ const fn origin(origin: firenook_rules_runtime::RulesOrigin) -> RulesOrigin {
 
 /// A change refused because the rules did not compile: nothing changed, and
 /// the compiler's diagnostics ride beside the error.
-fn not_compiled(diagnostics: &[RulesDiagnostic]) -> ApiError {
+pub(crate) fn not_compiled(diagnostics: &[RulesDiagnostic]) -> ApiError {
     ApiError::invalid("these rules did not compile; nothing changed").with_extra(
         "diagnostics",
         serde_json::to_value(diagnostics).unwrap_or_default(),
