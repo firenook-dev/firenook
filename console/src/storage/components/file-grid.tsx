@@ -104,7 +104,9 @@ export function FileGrid({
     count: lines,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => geometry.row,
-    overscan: 2,
+    // One row past the view: every rendered tile asks for its picture, so
+    // a second row would be pictures nobody is looking at.
+    overscan: 1,
     paddingStart: INSET,
     paddingEnd: INSET,
   })
