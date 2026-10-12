@@ -350,8 +350,11 @@ test('J-PS-19 one type scale, and toolbar groups that never overlap', async ({ p
     expect(overflow).toBeLessThanOrEqual(1)
   }
 
-  // The panel's toggle is one spot, in the panel and in the toolbar.
+  // The panel's toggle is one spot, in the panel and in the toolbar. Below
+  // 1280 px the panel stood aside for the open inspector; it is back once
+  // the window is wide again, and only then is its toggle measured.
   await page.setViewportSize({ width: 1440, height: 800 })
+  await expect(page.getByTestId('section-panel')).toBeVisible()
   const inPanel = await page.getByTestId('panel-toggle').boundingBox()
   await page.getByTestId('panel-toggle').click()
   const inToolbar = await page.getByTestId('panel-toggle').boundingBox()
