@@ -506,13 +506,6 @@ pub(crate) fn cleared_input(database: &str, documents: u64) -> LogInput {
 /// `router` (the Firestore HTTP routes), with the official clear route
 /// logged: after a successful `DELETE …/databases/{database}/documents`, a
 /// `firestore.cleared` marker with the documents the store lost meanwhile.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "applied where the suite builds the Firestore HTTP routes, by the follow-up that wires it"
-    )
-)]
 pub(crate) fn firestore_cleared_layer(
     router: Router,
     logging: &LoggingRuntime,

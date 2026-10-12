@@ -1218,16 +1218,25 @@ fn prepare_firestore(
         service.clone(),
     )
     .merge(webchannel_router(FirestoreBackend::new(service.clone())));
+    // The official clear route is logged for the console.
+    let firestore_http =
+        console_wiring::observe::firestore_cleared_layer(firestore_http, logging, store);
     let schema = SchemaIndex::attach(store, &config.project_id);
     let console = ConsoleFirestoreParts {
-        rest: rest_router(
-            store.clone(),
-            query_policy,
-            None,
-            firestore_rules,
-            triggers.clone(),
-            service.clone(),
-        ),
+        // Its evaluations, reads and writes, report the console as their
+        // origin, so a "View as" denial is told apart from one an app caused.
+        rest: {
+            let console_rules =
+                firestore_rules.with_origin(firenook_rules_runtime::DenialOrigin::Console);
+            rest_router(
+                store.clone(),
+                query_policy,
+                None,
+                console_rules.clone(),
+                triggers.clone(),
+                service.with_rules(console_rules),
+            )
+        },
         changes: ChangeFeed::attach(store),
         schema: schema.clone(),
         databases: DatabaseCatalog::new(
