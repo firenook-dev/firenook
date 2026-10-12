@@ -278,6 +278,14 @@ export async function startEngine(options = {}) {
       env: { ...process.env, ...options.env },
       stdio: ['ignore', options.inherit ? 'inherit' : 'pipe', options.inherit ? 'inherit' : 'pipe'],
     })
+    // An engine never outlives the process that started it, even one that
+    // exits without stopping it (an uncaught error, a worker shut down
+    // early): what is still running when this process exits is killed.
+    const orphaned = () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    }
+    process.once('exit', orphaned)
+    child.once('exit', () => process.off('exit', orphaned))
     const origin = `http://${HOST}:${ports.ui}`
     let stopped
     const stop = () =>
