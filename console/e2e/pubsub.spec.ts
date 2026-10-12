@@ -634,6 +634,42 @@ test('J-PS-23 an interval job outlives the composer and the tab', async ({ page,
   }
 })
 
+test('a message published while the page subscribes is listed and counted', async ({
+  page,
+  engine,
+}) => {
+  const topic = uniqueId('race')
+  try {
+    await createTopic(engine, topic)
+    await publishOverPort(engine, topic, [{ data: { n: 1 } }])
+    // The page's live subscriptions wait until its first read is in, and a
+    // message lands in between: the engine takes the topic after it, so no
+    // event will tell of it.
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route(/\/console\/api\/v1\/live\/[^/]+\/subscriptions$/, async (route) => {
+      await held
+      await route.continue()
+    })
+    const read = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/console/api/v1/pubsub/messages',
+    )
+    await openTopics(page, engine.origin, `topic=${topic}`)
+    await read
+    const count = page.getByTestId('pubsub-message-count')
+    await expect(count).toHaveText('1 message')
+    await publishOverPort(engine, topic, [{ data: { n: 2 } }])
+    release?.()
+    await expect(count).toHaveText('2 messages')
+    await expect(page.getByTestId('pubsub-message-table').getByTestId('data-row')).toHaveCount(2)
+  } finally {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+    await deleteTopic(engine, topic)
+  }
+})
+
 test('J-PS-16b the palette opens the composer on a topic', async ({ page, engine }) => {
   await openTopics(page, engine.origin, 'topic=orders')
   await page.keyboard.press('ControlOrMeta+k')

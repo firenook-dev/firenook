@@ -59,6 +59,15 @@ export interface TopicListener {
   /** `error` undefined: the topic finished; set: its source went away (the channel resubscribes with backoff). */
   onEnd(error: ApiErrorDetail | undefined): void
   onRefused?(error: ApiErrorDetail): void
+  /**
+   * The engine took this subscription: first, or again after it ended or
+   * was given back. Its topic tells of what changes from here on; a page
+   * that read its data before this moment without a cursor to resume from
+   * (an invalidation topic's list, whose first read races the subscription)
+   * reads it again now, and that read sees everything the topic will not.
+   * Not called when the subscription is told to reset instead.
+   */
+  onTaken?(): void
   /** This subscription's state, whenever it changes; `useLiveTopic` reads it. */
   onState?(state: SubscriptionState): void
 }
@@ -350,14 +359,20 @@ export function createLiveChannel(
    * The engine took this subscription. One that waited without a cursor
    * missed whatever happened while it waited, so its page reloads what it
    * shows, as after a gap; a `compare` topic sends its state on open and
-   * needs nothing more.
+   * needs nothing more. Otherwise, the first time it is taken (each event
+   * also passes here), the page hears `onTaken`.
    */
   function activate(local: LocalSub) {
+    const taken = local.state !== 'active'
     setLocalState(local, 'active')
-    if (!local.resync) return
-    local.resync = false
-    if (local.cursor !== undefined || resumeOf(local.topic) === 'compare') return
-    safely(() => local.listener.onReset('gap', null))
+    if (local.resync) {
+      local.resync = false
+      if (local.cursor === undefined && resumeOf(local.topic) !== 'compare') {
+        safely(() => local.listener.onReset('gap', null))
+        return
+      }
+    }
+    if (taken) safely(() => local.listener.onTaken?.())
   }
 
   function offer(local: LocalSub) {

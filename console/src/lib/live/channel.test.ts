@@ -12,6 +12,11 @@ import {
 } from './channel'
 import { FakeBrowser, type FakeTab, settle } from './fakes.test-support'
 import { LEADER_LOCK, TAB_LOCK_PREFIX } from './leader'
+import { type TopicName, declareTopic } from './topics'
+
+// An invalidation topic of the kind a list page holds (pubsub.topic, auth.users).
+const LIST = 'test.list' as TopicName
+declareTopic(LIST, 'none')
 
 interface Recorded {
   events: Array<{ name: string; data: unknown; cursor: string | undefined }>
@@ -19,6 +24,8 @@ interface Recorded {
   ends: Array<ApiErrorDetail | undefined>
   refused: ApiErrorDetail[]
   states: SubscriptionState[]
+  /** One entry per `onTaken`. */
+  taken: true[]
   listener: TopicListener
 }
 
@@ -29,6 +36,7 @@ function record(): Recorded {
     ends: [],
     refused: [],
     states: [],
+    taken: [],
   }
   return {
     ...recorded,
@@ -38,6 +46,7 @@ function record(): Recorded {
       onEnd: (error) => recorded.ends.push(error),
       onRefused: (error) => recorded.refused.push(error),
       onState: (state) => recorded.states.push(state),
+      onTaken: () => recorded.taken.push(true),
     },
   }
 }
@@ -573,6 +582,45 @@ describe('a page that read its data before it could subscribe', () => {
     await settle()
     expect(logs?.states.at(-1)).toBe('active')
     expect(logs?.resets).toEqual([{ reason: 'gap', missed: null }])
+    // Told to reload, it is not also told it was taken.
+    expect(logs?.taken).toHaveLength(1)
+  })
+
+  it('taken by the engine, a list read alongside its subscription hears it once', async () => {
+    const a = await leaderWith([LIST, { topic: 'orders' }])
+    const [list] = a.recorded
+    expect(list?.states.at(-1)).toBe('active')
+    expect(list?.taken).toHaveLength(1)
+    expect(list?.resets).toEqual([])
+    // Its events pass through the same door, and say nothing more.
+    browser.engine.ev(browser.engine.idOf(LIST), 'published', null, { added: 1 })
+    await settle()
+    expect(list?.events).toHaveLength(1)
+    expect(list?.taken).toHaveLength(1)
+  })
+
+  it('a tab joining a list subscription another tab holds hears it taken too', async () => {
+    await leaderWith([LIST, { topic: 'orders' }])
+    const b = open(browser.tab())
+    const joined = record()
+    b.subscribe(LIST, { topic: 'orders' }, joined.listener)
+    await settle()
+    expect(browser.engine.held().filter((sub) => sub.topic === LIST)).toHaveLength(1)
+    expect(joined.states.at(-1)).toBe('active')
+    expect(joined.taken).toHaveLength(1)
+  })
+
+  it('opened in the background, a list is told to reload instead of being told it was taken', async () => {
+    const tab = browser.tab({ hidden: true })
+    const channel = open(tab)
+    const list = record()
+    channel.subscribe(LIST, { topic: 'orders' }, list.listener)
+    tab.document.show()
+    await settle()
+    browser.engine.hello()
+    await settle()
+    expect(list.resets).toEqual([{ reason: 'gap', missed: null }])
+    expect(list.taken).toEqual([])
   })
 })
 

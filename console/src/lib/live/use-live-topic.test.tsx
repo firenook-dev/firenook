@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChangeBatch } from '@/api/generated/ChangeBatch'
 import type { LiveChannel, SubscribeOptions, TopicListener } from './channel'
-import { createInvalidator, useInvalidateOn, useLiveTopic } from './use-live-topic'
+import { createInvalidator, readStarted, useInvalidateOn, useLiveTopic } from './use-live-topic'
 
 /** A channel that records subscriptions and lets a test speak for the engine. */
 function fakeChannel() {
@@ -138,6 +138,46 @@ describe('useLiveTopic', () => {
     expect(result.current).toBe('paused')
     act(() => fake.active()[0]?.listener.onState?.('refused'))
     expect(result.current).toBe('refused')
+  })
+
+  it('tells the page its subscription was taken, through the latest handler', () => {
+    const fake = fakeChannel()
+    const seen: string[] = []
+    const { rerender } = renderHook(
+      ({ tag }: { tag: string }) =>
+        useLiveTopic(
+          'firestore.changes',
+          { database: '(default)' },
+          { onTaken: () => seen.push(tag) },
+          fake.channel,
+        ),
+      { initialProps: { tag: 'first' }, wrapper },
+    )
+    rerender({ tag: 'second' })
+    act(() => fake.active()[0]?.listener.onTaken?.())
+    expect(seen).toEqual(['second'])
+  })
+})
+
+describe('readStarted', () => {
+  it('is a read served or on its way, not a query that has not asked yet', async () => {
+    const key = ['list']
+    expect(readStarted(client.getQueryState(key))).toBe(false)
+    // Disabled until its filter is known: in the cache, never read.
+    client.getQueryCache().build(client, { queryKey: key })
+    expect(readStarted(client.getQueryState(key))).toBe(false)
+    let answer: ((rows: string[]) => void) | undefined
+    const reading = client.fetchQuery({
+      queryKey: key,
+      queryFn: () =>
+        new Promise<string[]>((resolve) => {
+          answer = resolve
+        }),
+    })
+    expect(readStarted(client.getQueryState(key))).toBe(true)
+    answer?.(['m1'])
+    await reading
+    expect(readStarted(client.getQueryState(key))).toBe(true)
   })
 })
 

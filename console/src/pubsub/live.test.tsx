@@ -301,6 +301,14 @@ describe('the other Pub/Sub topics (U-06)', () => {
     expect(onReset).toHaveBeenCalledTimes(2)
   })
 
+  it('pubsub.topic tells the tables when the engine took it, so a first read raced by a publish reads again', () => {
+    const onTaken = vi.fn()
+    renderHook(() => live.useTopicLive(PROJECT, ORDERS, undefined, { onTaken }), { wrapper })
+    const held = subscribed('pubsub.topic')
+    act(() => (held.handlers.onTaken as () => void)())
+    expect(onTaken).toHaveBeenCalledTimes(1)
+  })
+
   it('pubsub.push upserts streaks in place', () => {
     const { result } = renderHook(() => live.usePushFeed(PROJECT, WORKER), { wrapper })
     const onAttempts = subscribed('pubsub.push').handlers.onAttempts as (batch: {

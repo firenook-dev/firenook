@@ -242,6 +242,12 @@ export interface TopicLiveHandlers {
   onMessageKeys?: (ids: string[]) => void
   /** The subscription lost track (a reconnect, a burst past 1,000 keys): the page's tables go back to page one. */
   onReset?: () => void
+  /**
+   * The engine took the subscription. The topic names what changes from
+   * here on, so a table read before this moment (its first read races the
+   * subscription) reads its rows again, keeping them on screen.
+   */
+  onTaken?: () => void
 }
 
 /** What a message list following a topic does with a `published` event. */
@@ -308,6 +314,7 @@ export function useTopicLive(
       handlers.onReset?.()
     },
     onEnd: () => handlers.onReset?.(),
+    onTaken: () => handlers.onTaken?.(),
   })
 }
 

@@ -2,7 +2,7 @@
 // hands each event to a typed handler; `useInvalidateOn` is the common case,
 // where every event names query keys to refresh.
 
-import { type QueryKey, hashKey, useQueryClient } from '@tanstack/react-query'
+import { type FetchStatus, type QueryKey, hashKey, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ApiErrorDetail } from '@/api/generated/ApiErrorDetail'
 import type { ResetReason } from '@/api/generated/live/ResetReason'
@@ -27,6 +27,8 @@ type EventHandlers<K extends TopicName> = {
 export type Handlers<K extends TopicName> = EventHandlers<K> & {
   onReset?: (reason: ResetReason, missed: number | null) => void
   onEnd?: (error: ApiErrorDetail | undefined) => void
+  /** The engine took the subscription (`TopicListener.onTaken`): a list read before it, without a cursor, reads again. */
+  onTaken?: () => void
 }
 
 /** `change` → `onChange`. */
@@ -70,6 +72,7 @@ function useSubscription(
         onReset: (reason, missed) => listener.current.onReset(reason, missed),
         onEnd: (error) => listener.current.onEnd(error),
         onRefused: (error) => listener.current.onRefused?.(error),
+        onTaken: () => listener.current.onTaken?.(),
         onState: (state) => setOwn({ key, state }),
       },
       begin.current?.after ? { after: begin.current.after } : undefined,
@@ -111,8 +114,24 @@ export function useLiveTopic<K extends TopicName>(
     onEnd(error) {
       latest.current.onEnd?.(error)
     },
+    onTaken() {
+      latest.current.onTaken?.()
+    },
   })
   return useSubscription(topic, params, listener, channel, start)
+}
+
+/**
+ * Whether a query was read, or is being read, when its page's subscription
+ * is taken (`onTaken`, with `queryClient.getQueryState(key)`): that read may
+ * have been served before the subscription, missing what changed between,
+ * so the page reads it again. A query not read yet reads after the
+ * subscription and needs nothing more.
+ */
+export function readStarted(
+  state: { data: unknown; fetchStatus: FetchStatus } | undefined,
+): boolean {
+  return state !== undefined && (state.data !== undefined || state.fetchStatus === 'fetching')
 }
 
 /**

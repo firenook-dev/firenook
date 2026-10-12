@@ -211,6 +211,8 @@ export function PullView({
   useTopicLive(project, config.summary.topic ?? undefined, subscription, {
     onBacklogKeys: () => void queryClient.invalidateQueries({ queryKey: heldKey, exact: true }),
     onReset: () => void queryClient.invalidateQueries({ queryKey: heldKey, exact: true }),
+    // Leases read before the engine took the subscription are read again, from now.
+    onTaken: () => void queryClient.invalidateQueries({ queryKey: heldKey, exact: true }),
   })
   const noteAttempts = usePulled((state) => state.noteAttempts)
   useEffect(() => {

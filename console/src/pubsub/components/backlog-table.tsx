@@ -42,6 +42,7 @@ import { StatusDot } from '@/components/kit'
 import { useNow } from '@/lib/clock'
 import { formatBytes, formatNumber } from '@/lib/format'
 import type { SubscriptionStatus } from '@/lib/live/channel'
+import { readStarted } from '@/lib/live/use-live-topic'
 import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
 import { dedupeRows, renumberPlaces } from '@/messaging/rows'
@@ -263,6 +264,11 @@ export function BacklogView({
   const live = useTopicLive(project, topic ?? undefined, subscription, {
     onBacklogKeys: (keys) => cursor.applyKeys(keys),
     onReset: () => cursor.reset(),
+    // Rows read before the engine took the subscription are read again, from now.
+    onTaken: () => {
+      if (readStarted(queryClient.getQueryState(list.queryKey)))
+        void queryClient.refetchQueries({ queryKey: list.queryKey, exact: true })
+    },
   })
   useEffect(() => onLiveStatus(live), [live, onLiveStatus])
   // A subscription whose topic was deleted has no topic to follow: its

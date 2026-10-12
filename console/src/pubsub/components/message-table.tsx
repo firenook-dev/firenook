@@ -56,6 +56,7 @@ import { checkFilter } from '@/lib/filter'
 import { formatNumber } from '@/lib/format'
 import { useShortcuts } from '@/lib/shortcuts'
 import type { SubscriptionStatus } from '@/lib/live/channel'
+import { readStarted } from '@/lib/live/use-live-topic'
 import { toast } from '@/lib/toasts'
 import { compareIds, dedupeRows, idsAbove } from '@/messaging/rows'
 import { MESSAGE_FIELDS, MESSAGE_FILTER_PLACEHOLDER, messageFields } from '../filters'
@@ -447,6 +448,11 @@ export function MessagesView({
     onReset: () => {
       setNewAbove(0)
       cursor.reset()
+    },
+    // A head read (or on its way) before the engine took the subscription
+    // misses what was published in between: read it once more, from now.
+    onTaken: () => {
+      if (readStarted(queryClient.getQueryState(list.queryKey))) void readHead()
     },
   })
   useEffect(() => onLiveStatus(live), [live, onLiveStatus])
