@@ -179,6 +179,8 @@ export function RulesToolbar<K extends QueryKey>({
   noFileText = 'No rules file in firebase.json',
   noFileTip,
   applyTip,
+  historyOpen,
+  onHistoryOpen,
 }: {
   /** What leads the row: the scope picker, or a chip naming what the rules govern. */
   scope: ReactNode
@@ -192,6 +194,9 @@ export function RulesToolbar<K extends QueryKey>({
   noFileText?: string
   noFileTip: string
   applyTip?: string | undefined
+  /** The history dialog, when the page opens it from elsewhere too (⌘K). */
+  historyOpen?: boolean | undefined
+  onHistoryOpen?: ((open: boolean) => void) | undefined
 }) {
   const file = draft.rules.data?.path
   const name = fileName(file)
@@ -222,7 +227,13 @@ export function RulesToolbar<K extends QueryKey>({
       <DraftState draft={draft} />
       <span className="ml-auto flex items-center gap-1.5">
         <CoverageToggle coverage={coverage} on={coverageOn} onChange={onCoverage} />
-        <HistoryButton draft={draft} history={history} origins={origins} />
+        <HistoryButton
+          draft={draft}
+          history={history}
+          origins={origins}
+          open={historyOpen}
+          onOpenChange={onHistoryOpen}
+        />
         <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
         <DraftActions draft={draft} noFileTip={noFileTip} applyTip={applyTip} />
       </span>

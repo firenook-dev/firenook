@@ -51,6 +51,7 @@ import {
   type SectionLink,
   type ServiceArea,
   itemBadges,
+  shownPages,
 } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
 import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
@@ -279,7 +280,7 @@ function Navigation() {
             <Sidebar.GroupLabel>{AREA_LABELS[area]}</Sidebar.GroupLabel>
             <Sidebar.Menu>
               {SECTIONS.filter((section) => section.area === area).map((section) =>
-                section.pages ? (
+                shownPages(section) ? (
                   <SectionWithPages
                     key={section.id}
                     section={section}
@@ -405,7 +406,7 @@ function SectionWithPages({
   pathname: string
 }) {
   const go = useGo()
-  const pages = section.pages ?? []
+  const pages = shownPages(section) ?? []
   const everyBadge = [...itemBadges(section), ...pages.flatMap((page) => page.badges ?? [])]
   const badge = useNavBadge(everyBadge)
   const state = entry?.state ?? 'ready'

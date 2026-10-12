@@ -1,4 +1,4 @@
-// Completion for Firestore rules, by where the cursor stands.
+// Completion for security rules, by where the cursor stands.
 //
 // The scanner's state after the token before the cursor says what may come
 // next — a member after a dot, an operation after `allow`, a statement
@@ -9,6 +9,13 @@
 // that can be done from the text alone: `request.auth.token` is the token
 // map, `.diff(…)` gives a MapDiff, `resource.data` is the document's map,
 // whose fields come from the data the console has seen.
+//
+// Storage's rules are the same language with other names in scope: the
+// dialect (the page's, or the text's own `service firebase.storage`) picks
+// `match /b/{bucket}/o`, a request with no query, `resource` as the file
+// (`size`, `contentType`, `metadata`, …), its custom metadata keys sampled
+// from the bucket, and `firestore.get()` / `firestore.exists()` in place of
+// Firestore's own `get()` and `exists()`.
 
 import {
   type Completion,
@@ -25,6 +32,7 @@ import type { EditorView } from '@codemirror/view'
 import {
   DOCUMENT_FUNCTIONS,
   type Entry,
+  FIRESTORE_NAMESPACE,
   GENERIC_METHODS,
   type GenericMethod,
   GLOBAL_FUNCTION_ENTRIES,
@@ -38,6 +46,12 @@ import {
   NAMESPACE_FUNCTIONS,
   OPERATION_ENTRIES,
   PROPERTIES,
+  type RulesDialect,
+  STORAGE_KEYWORD_INFO,
+  STORAGE_OBJECT,
+  STORAGE_OPERATION_ENTRIES,
+  STORAGE_REQUEST,
+  STORAGE_VARIABLES,
   TYPE_NAMES,
   showKind,
   signature,
@@ -69,6 +83,7 @@ interface Scope {
   at: number
   doc: Text
   options: RulesLanguageOptions
+  dialect: RulesDialect
 }
 
 /** A type, with what is known of the document it describes. */
@@ -132,14 +147,21 @@ function complete(context: CompletionContext, options: RulesLanguageOptions): An
   const index = lastCodeBefore(o.code, word.from)
   const prev = index >= 0 ? o.code[index]! : null
   const st = prev ? prev.after : initialState()
-  const scope: Scope = { o, at: word.from, doc: state.doc, options }
+  const dialect = options.dialect ?? dialectOf(o)
+  const scope: Scope = { o, at: word.from, doc: state.doc, options, dialect }
   const from = word.from
 
-  // `service cloud.firestore`: the one product name a Firestore ruleset has.
+  // `service cloud.firestore` or `service firebase.storage`: the one product
+  // name each kind of ruleset has.
   if (st.header === 'service') {
-    if (prev?.text === 'service') return result(from, [SERVICE_NAME])
+    if (prev?.text === 'service')
+      return result(from, [dialect === 'storage' ? STORAGE_SERVICE_NAME : SERVICE_NAME])
     if (prev?.text === '.' && o.code[index - 1]?.text === 'cloud')
       return result(from, [{ label: 'firestore', type: 'namespace', info: 'Cloud Firestore.' }])
+    if (prev?.text === '.' && o.code[index - 1]?.text === 'firebase')
+      return result(from, [
+        { label: 'storage', type: 'namespace', info: 'Cloud Storage for Firebase.' },
+      ])
     return null
   }
   if (st.prev === 'dot') return members(scope, index)
@@ -149,22 +171,34 @@ function complete(context: CompletionContext, options: RulesLanguageOptions): An
   if (st.header === 'match') {
     const block = innermostAt(o, from)
     return prev?.text === 'match' && block?.kind === 'service'
-      ? result(from, [DATABASES_PATH])
+      ? result(from, [dialect === 'storage' ? BUCKETS_PATH : DATABASES_PATH])
       : null
   }
   if (st.allow) {
     if (prev?.text !== 'allow' && prev?.text !== ',') return null
-    return result(from, operations(o, index))
+    return result(from, operations(o, index, dialect))
   }
   if (prev?.text === ':' && prev.style === 'punctuation' && stateBefore(o, index).allow)
-    return result(from, [keyword('if')])
+    return result(from, [keyword('if', dialect)])
   if (st.prev === 'is') return result(from, TYPE_NAMES.map(typeCompletion))
   if (st.prev === 'start') {
     const block = innermostAt(o, from)
     if (block === null || isBlock(block)) return result(from, statements(block, scope))
   }
-  if (st.prev === 'operand') return result(from, [keyword('in'), keyword('is')])
+  if (st.prev === 'operand') return result(from, [keyword('in', dialect), keyword('is', dialect)])
   return result(from, expressions(scope))
+}
+
+/**
+ * The dialect a text declares in its `service` header: `firebase.storage`
+ * is Storage's; anything else, or no header yet, is Firestore's.
+ */
+export function dialectOf(o: Outline): RulesDialect {
+  const at = o.code.findIndex((t) => t.text === 'service' && t.style === 'keyword')
+  if (at < 0) return 'firestore'
+  let name = ''
+  for (let i = at + 1; i < o.code.length && o.code[i]!.text !== '{'; i++) name += o.code[i]!.text
+  return name === 'firebase.storage' ? 'storage' : 'firestore'
 }
 
 function result(from: number, options: Completion[]): CompletionResult {
@@ -238,13 +272,31 @@ const DATABASES_PATH: Completion = {
   info: "The root of every database's documents. Matches inside it are relative to it.",
 }
 
-function keyword(name: string, boost = 0): Completion {
-  const info = KEYWORD_INFO[name]
+const STORAGE_SERVICE_NAME: Completion = {
+  label: 'firebase.storage',
+  type: 'namespace',
+  info: 'Cloud Storage for Firebase: the rules in this block secure its files.',
+}
+
+const BUCKETS_PATH: Completion = {
+  label: '/b/{bucket}/o',
+  type: 'text',
+  detail: 'objects root',
+  info: "The root of every bucket's files. Matches inside it are relative to it.",
+}
+
+/** What a keyword means, in the dialect's words. */
+function keywordInfo(name: string, dialect: RulesDialect): string | undefined {
+  return (dialect === 'storage' ? STORAGE_KEYWORD_INFO[name] : undefined) ?? KEYWORD_INFO[name]
+}
+
+function keyword(name: string, dialect: RulesDialect, boost = 0): Completion {
+  const info = keywordInfo(name, dialect)
   return { label: name, type: 'keyword', boost, ...(info ? { info } : {}) }
 }
 
-function snip(template: string, label: string, detail: string): Completion {
-  const info = KEYWORD_INFO[label]
+function snip(template: string, label: string, detail: string, dialect: RulesDialect): Completion {
+  const info = keywordInfo(label, dialect)
   return snippetCompletion(template, {
     label,
     type: 'keyword',
@@ -255,57 +307,82 @@ function snip(template: string, label: string, detail: string): Completion {
 }
 
 function statements(block: Bracket | null, scope: Scope): Completion[] {
+  const { dialect } = scope
   if (!block)
     return [
-      keyword('rules_version'),
-      snip("rules_version = '2';", 'rules_version', "= '2';"),
-      keyword('service'),
-      snip(
-        'service cloud.firestore {\n\tmatch /databases/{database}/documents {\n\t\t${}\n\t}\n}',
-        'service',
-        'cloud.firestore { … }',
-      ),
+      keyword('rules_version', dialect),
+      snip("rules_version = '2';", 'rules_version', "= '2';", dialect),
+      keyword('service', dialect),
+      dialect === 'storage'
+        ? snip(
+            'service firebase.storage {\n\tmatch /b/{bucket}/o {\n\t\t${}\n\t}\n}',
+            'service',
+            'firebase.storage { … }',
+            dialect,
+          )
+        : snip(
+            'service cloud.firestore {\n\tmatch /databases/{database}/documents {\n\t\t${}\n\t}\n}',
+            'service',
+            'cloud.firestore { … }',
+            dialect,
+          ),
     ]
   if (block.kind === 'function')
     return [
-      keyword('let'),
-      snip('let ${name} = ${value};', 'let', '… = …;'),
-      keyword('return'),
-      snip('return ${expression};', 'return', '…;'),
+      keyword('let', dialect),
+      snip('let ${name} = ${value};', 'let', '… = …;', dialect),
+      keyword('return', dialect),
+      snip('return ${expression};', 'return', '…;', dialect),
     ]
   const inService = block.kind === 'service' && matchesAt(scope.o, scope.at).length === 0
   const options = [
-    keyword('match'),
+    keyword('match', dialect),
     inService
-      ? snip(
-          'match /databases/{database}/documents {\n\t${}\n}',
-          'match',
-          '/databases/{database}/documents { … }',
-        )
-      : snip('match /${collection}/{${document}} {\n\t${}\n}', 'match', '/…/{…} { … }'),
-    keyword('function'),
-    snip('function ${name}(${}) {\n\treturn ${expression};\n}', 'function', '…() { return …; }'),
+      ? dialect === 'storage'
+        ? snip('match /b/{bucket}/o {\n\t${}\n}', 'match', '/b/{bucket}/o { … }', dialect)
+        : snip(
+            'match /databases/{database}/documents {\n\t${}\n}',
+            'match',
+            '/databases/{database}/documents { … }',
+            dialect,
+          )
+      : dialect === 'storage'
+        ? snip('match /${folder}/{${file}} {\n\t${}\n}', 'match', '/…/{…} { … }', dialect)
+        : snip('match /${collection}/{${document}} {\n\t${}\n}', 'match', '/…/{…} { … }', dialect),
+    keyword('function', dialect),
+    snip(
+      'function ${name}(${}) {\n\treturn ${expression};\n}',
+      'function',
+      '…() { return …; }',
+      dialect,
+    ),
   ]
   if (!inService)
-    options.push(keyword('allow'), snip('allow ${read}: if ${condition};', 'allow', '…: if …;'))
+    options.push(
+      keyword('allow', dialect),
+      snip('allow ${read}: if ${condition};', 'allow', '…: if …;', dialect),
+    )
   return options
 }
 
 /** The operations for an `allow`, less those it already lists. */
-function operations(o: Outline, index: number): Completion[] {
+function operations(o: Outline, index: number, dialect: RulesDialect): Completion[] {
   const listed = new Set<string>()
   for (let i = index; i >= 0; i--) {
     const t = o.code[i]!
     if (t.style === 'operation') listed.add(t.text)
     else if (t.style !== 'separator' || t.text !== ',') break
   }
-  return OPERATION_ENTRIES.filter((op) => !listed.has(op.name)).map((op, i, all) => ({
-    label: op.name,
-    type: 'keyword',
-    detail: op.detail,
-    info: op.info,
-    boost: all.length - i,
-  }))
+  const entries = dialect === 'storage' ? STORAGE_OPERATION_ENTRIES : OPERATION_ENTRIES
+  return entries
+    .filter((op) => !listed.has(op.name))
+    .map((op, i, all) => ({
+      label: op.name,
+      type: 'keyword',
+      detail: op.detail,
+      info: op.info,
+      boost: all.length - i,
+    }))
 }
 
 function typeCompletion(entry: Entry): Completion {
@@ -382,7 +459,8 @@ function expressions(scope: Scope): Completion[] {
     })
   }
 
-  for (const entry of GLOBAL_VARIABLES)
+  const storage = scope.dialect === 'storage'
+  for (const entry of storage ? STORAGE_VARIABLES : GLOBAL_VARIABLES)
     options.push({
       label: entry.name,
       type: 'variable',
@@ -392,6 +470,8 @@ function expressions(scope: Scope): Completion[] {
     })
   const database = databaseName(scope)
   for (const entry of GLOBAL_FUNCTION_ENTRIES) {
+    // Storage reads documents through `firestore.`, not with these.
+    if (storage && DOCUMENT_FUNCTIONS.has(entry.name)) continue
     const option = callCompletion(entry, 'function', RANK.globalFunction)
     if (DOCUMENT_FUNCTIONS.has(entry.name)) {
       const root = database ? `$(${database})` : '(default)'
@@ -402,7 +482,7 @@ function expressions(scope: Scope): Completion[] {
     }
     options.push(option)
   }
-  for (const entry of NAMESPACE_ENTRIES)
+  for (const entry of storage ? [...NAMESPACE_ENTRIES, FIRESTORE_NAMESPACE] : NAMESPACE_ENTRIES)
     options.push({ label: entry.name, type: 'namespace', info: entry.info, boost: RANK.namespace })
   for (const entry of LITERALS)
     options.push({ label: entry.name, type: 'constant', info: entry.info, boost: RANK.literal })
@@ -607,7 +687,14 @@ function documentPatternAt(scope: Scope): string | null {
 }
 
 function identifierType(scope: Scope, name: string): Ty {
-  if (name === 'request' || name === 'resource') return ty(name, documentPatternAt(scope))
+  if (scope.dialect === 'storage') {
+    if (name === 'request') return ty('request')
+    if (name === 'resource') return ty('object')
+  } else {
+    if (name === 'request' || name === 'resource') return ty(name, documentPatternAt(scope))
+    // Firestore's rules have no `firestore` namespace: it is just a name there.
+    if (name === 'firestore') return ty('unknown')
+  }
   if (NAMESPACES.has(name)) return ty(`ns:${name}` as Kind)
   if (name === 'true' || name === 'false') return ty('bool')
   if (name === 'null') return ty('null')
@@ -617,16 +704,26 @@ function identifierType(scope: Scope, name: string): Ty {
   return ty('unknown')
 }
 
-function globalCallType(name: string, args: readonly Token[]): Ty {
+function globalCallType(name: string, args: readonly Token[], dialect: RulesDialect): Ty {
+  // Storage has no global document functions: `firestore.get()` instead.
+  if (dialect === 'storage' && DOCUMENT_FUNCTIONS.has(name)) return ty('unknown')
   if (name === 'get' || name === 'getAfter') return ty('resource', patternOfPath(args))
   const entry = GLOBAL_FUNCTION_ENTRIES.find((e) => e.name === name)
   return ty(entry ? entry.returns : 'unknown')
 }
 
-function memberType(receiver: Ty, name: string): Ty {
+/** The properties a type has in the dialect: Storage's request and file are its own. */
+function propertiesOf(kind: Kind, dialect: RulesDialect): readonly Entry[] {
+  if (kind === 'object') return STORAGE_OBJECT
+  if (kind === 'request' && dialect === 'storage') return STORAGE_REQUEST
+  return PROPERTIES[kind] ?? []
+}
+
+function memberType(receiver: Ty, name: string, dialect: RulesDialect): Ty {
   switch (receiver.kind) {
     case 'request':
-      if (name === 'resource') return ty('resource', receiver.pattern)
+      if (name === 'resource')
+        return dialect === 'storage' ? ty('object') : ty('resource', receiver.pattern)
       break
     case 'resource':
       if (name === 'data') return ty('data', receiver.pattern)
@@ -637,11 +734,14 @@ function memberType(receiver: Ty, name: string): Ty {
     case 'data':
       return ty('data', receiver.pattern, `${receiver.prefix}${name}.`)
   }
-  const entry = PROPERTIES[receiver.kind]?.find((e) => e.name === name)
+  const entry = propertiesOf(receiver.kind, dialect).find((e) => e.name === name)
   return ty(entry ? entry.returns : 'unknown')
 }
 
-function methodType(receiver: Ty, name: string): Ty {
+function methodType(receiver: Ty, name: string, args: readonly Token[]): Ty {
+  // `firestore.get(/databases/(default)/documents/users/$(uid))` is a
+  // document of `users`, as Firestore's own `get()` is.
+  if (receiver.kind === 'ns:firestore' && name === 'get') return ty('resource', patternOfPath(args))
   if (receiver.kind.startsWith('ns:')) {
     const entry = NAMESPACE_FUNCTIONS[receiver.kind]?.find((e) => e.name === name)
     return ty(entry ? entry.returns : 'unknown')
@@ -660,7 +760,7 @@ function receiverType(scope: Scope, dot: number): Ty | null {
     case 'name': {
       const first = links[0]!
       if (links[1]?.kind === 'call') {
-        receiver = globalCallType(first.name, links[1].args)
+        receiver = globalCallType(first.name, links[1].args, scope.dialect)
         k = 2
       } else {
         receiver = identifierType(scope, first.name)
@@ -681,10 +781,10 @@ function receiverType(scope: Scope, dot: number): Ty | null {
     if (link.kind !== 'name') {
       receiver = ty('unknown')
     } else if (links[k + 1]?.kind === 'call') {
-      receiver = methodType(receiver, link.name)
+      receiver = methodType(receiver, link.name, links[k + 1]!.args)
       k++
     } else {
-      receiver = memberType(receiver, link.name)
+      receiver = memberType(receiver, link.name, scope.dialect)
     }
   }
   return receiver
@@ -743,14 +843,30 @@ function members(scope: Scope, dot: number): Answer {
     case 'query':
     case 'resource':
     case 'firebase':
+    case 'object':
       return result(
         from,
-        (PROPERTIES[receiver.kind] ?? []).map((entry) => propertyCompletion(entry)),
+        propertiesOf(receiver.kind, scope.dialect).map((entry) => propertyCompletion(entry)),
       )
     case 'token':
       return result(from, [...claims(scope), ...ownMethods('map', RANK.methods)])
     case 'data':
       return dataMembers(scope, receiver)
+    case 'metadata':
+      return metadataMembers(scope)
+    case 'ns:firestore':
+      if (scope.dialect !== 'storage') return null
+      return result(
+        from,
+        (NAMESPACE_FUNCTIONS['ns:firestore'] ?? []).map((entry) => {
+          const option = callCompletion(entry, 'function', 0)
+          option.apply = applyCall(
+            entry.name,
+            `${entry.name}(/databases/(default)/documents/\${path})\${}`,
+          )
+          return option
+        }),
+      )
     case 'ns:math':
     case 'ns:timestamp':
     case 'ns:duration':
@@ -847,6 +963,57 @@ function dataMembers(scope: Scope, receiver: Ty): Answer {
   let names: readonly string[] | Promise<readonly string[]>
   try {
     names = scope.options.fields(pattern)
+  } catch {
+    return build([])
+  }
+  if (isPromiseLike(names))
+    return Promise.resolve(names).then(
+      (found) => build(Array.isArray(found) ? found : []),
+      () => build([]),
+    )
+  return build(Array.isArray(names) ? names : [])
+}
+
+/**
+ * The folder a Storage match starts with, which custom metadata keys are
+ * sampled from: `match /b/{bucket}/o { match /users/{uid}/{f=**} }` → `users/`,
+ * the bucket's root (`''`) when the first segment is a wildcard.
+ */
+export function storageFolderAt(o: Outline, pos: number): string {
+  const all = matchesAt(o, pos).flatMap((b) => b.path.split('/').filter((part) => part !== ''))
+  if (all[0] !== 'b' || all[2] !== 'o') return ''
+  const literal: string[] = []
+  for (const part of all.slice(3)) {
+    if (part.startsWith('{')) break
+    literal.push(part)
+  }
+  return literal.length === 0 ? '' : `${literal.join('/')}/`
+}
+
+/**
+ * A Storage file's custom metadata: the keys seen on files under the
+ * match's folder, then the map's methods.
+ */
+function metadataMembers(scope: Scope): Answer {
+  const build = (names: readonly string[]): Result => {
+    const keys = [...new Set(names)].filter((name) => typeof name === 'string' && name !== '')
+    return result(scope.at, [
+      ...keys.map((key) =>
+        keyCompletion(key, {
+          label: key,
+          type: 'property',
+          detail: 'metadata key',
+          info: 'A custom metadata key seen on files here.',
+          boost: RANK.field,
+        }),
+      ),
+      ...ownMethods('map', RANK.methods),
+    ])
+  }
+  if (!scope.options.metadataKeys) return build([])
+  let names: readonly string[] | Promise<readonly string[]>
+  try {
+    names = scope.options.metadataKeys(storageFolderAt(scope.o, scope.at))
   } catch {
     return build([])
   }

@@ -56,8 +56,18 @@ const PORT_ATTEMPTS = 3
 /**
  * @typedef {{
  *   name: string,
- *   prepare(directory: string, firebaseJson: Record<string, unknown>, options: { fixtureEnv: Record<string, string> }): void | Promise<void>,
+ *   prepare(directory: string, firebaseJson: Record<string, unknown>, options: { fixtureEnv: Record<string, string>, project: string, firebaseRc: FirebaseRc }): void | Promise<void>,
  * }} Fixture
+ */
+
+/**
+ * The project's `.firebaserc`, which a fixture may add to before it is
+ * written: Storage's per-bucket rules name their buckets through `targets`,
+ * as a real project's do (the CLI resolves a target to its bucket there).
+ * @typedef {{
+ *   projects: { default: string },
+ *   targets?: Record<string, Record<string, Record<string, string[]>>>,
+ * }} FirebaseRc
  */
 
 /** @param {string} name @returns {Promise<Profile>} */
@@ -219,6 +229,8 @@ export async function startEngine(options = {}) {
   // What a real project's firebase.json holds: an emulators entry for each
   // service the profile runs, then whatever each fixture adds.
   const firebaseJson = { emulators: { ui: { enabled: true } } }
+  /** @type {FirebaseRc} */
+  const firebaseRc = { projects: { default: project } }
   for (const name of profile.only.split(','))
     if (name !== 'functions' && name !== 'firestore' && name !== 'storage')
       firebaseJson.emulators[name] = {}
@@ -226,10 +238,10 @@ export async function startEngine(options = {}) {
     /** @type {Fixture} */
     const fixture = (await import(pathToFileURL(join(HERE, 'fixtures', `${name}.mjs`)).href))
       .default
-    await fixture.prepare(directory, firebaseJson, { fixtureEnv })
+    await fixture.prepare(directory, firebaseJson, { fixtureEnv, project, firebaseRc })
   }
   writeFileSync(join(directory, 'firebase.json'), JSON.stringify(firebaseJson, null, 2))
-  writeFileSync(join(directory, '.firebaserc'), JSON.stringify({ projects: { default: project } }))
+  writeFileSync(join(directory, '.firebaserc'), JSON.stringify(firebaseRc))
   mkdirSync(join(directory, 'state'), { recursive: true })
 
   const typed = ['--project', project, '--only', only]

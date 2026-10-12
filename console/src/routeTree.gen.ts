@@ -21,6 +21,7 @@ import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as StorageRouteImport } from './routes/storage'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
+import { Route as StorageRulesRouteImport } from './routes/storage_.rules'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -82,6 +83,11 @@ const FirestoreRulesRoute = FirestoreRulesRouteImport.update({
   path: '/firestore/rules',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StorageRulesRoute = StorageRulesRouteImport.update({
+  id: '/storage_/rules',
+  path: '/storage/rules',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -96,6 +102,7 @@ export interface FileRoutesByFullPath {
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/firestore/rules': typeof FirestoreRulesRoute
+  '/storage/rules': typeof StorageRulesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -110,6 +117,7 @@ export interface FileRoutesByTo {
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/firestore/rules': typeof FirestoreRulesRoute
+  '/storage/rules': typeof StorageRulesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -125,6 +133,7 @@ export interface FileRoutesById {
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/firestore_/rules': typeof FirestoreRulesRoute
+  '/storage_/rules': typeof StorageRulesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/storage'
     | '/tasks'
     | '/firestore/rules'
+    | '/storage/rules'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -155,6 +165,7 @@ export interface FileRouteTypes {
     | '/storage'
     | '/tasks'
     | '/firestore/rules'
+    | '/storage/rules'
   id:
     | '__root__'
     | '/'
@@ -169,6 +180,7 @@ export interface FileRouteTypes {
     | '/storage'
     | '/tasks'
     | '/firestore_/rules'
+    | '/storage_/rules'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -184,6 +196,7 @@ export interface RootRouteChildren {
   StorageRoute: typeof StorageRoute
   TasksRoute: typeof TasksRoute
   FirestoreRulesRoute: typeof FirestoreRulesRoute
+  StorageRulesRoute: typeof StorageRulesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -272,6 +285,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FirestoreRulesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/storage_/rules': {
+      id: '/storage_/rules'
+      path: '/storage/rules'
+      fullPath: '/storage/rules'
+      preLoaderRoute: typeof StorageRulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -288,6 +308,7 @@ const rootRouteChildren: RootRouteChildren = {
   StorageRoute: StorageRoute,
   TasksRoute: TasksRoute,
   FirestoreRulesRoute: FirestoreRulesRoute,
+  StorageRulesRoute: StorageRulesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

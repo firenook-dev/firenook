@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { shownPages } from '../services'
 import { storage } from './storage'
 
 const storageRoute = (kind: string, key: string) => storage.routes?.[kind]?.(key)
@@ -51,9 +52,18 @@ describe('where Storage things open', () => {
     },
   )
 
-  it('stays unbuilt, with no pages, until its journeys pass', () => {
+  it('lists Files and Rules, the rules page carrying the rules badge', () => {
+    expect(storage.pages?.map((page) => [page.to, page.label])).toEqual([
+      ['/storage', 'Files'],
+      ['/storage/rules', 'Rules'],
+    ])
+    expect(storage.pages?.[0]?.exact).toBe(true)
+    expect(storage.pages?.[1]?.badges).toEqual(['storage.rules'])
+  })
+
+  it('stays unbuilt until its journeys pass, so the nav shows none of its pages yet', () => {
     expect(storage.built).toBe(false)
-    expect(storage.pages).toBeUndefined()
+    expect(shownPages(storage)).toBeUndefined()
     expect(storage.projectScope).toBeUndefined()
   })
 })

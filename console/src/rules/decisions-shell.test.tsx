@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RulesOutcome } from '@/api/generated/RulesOutcome'
 import { stubLayout } from '@/test/layout'
-import { DecisionsShell } from './decisions-shell'
+import { DecisionsShell, listRows } from './decisions-shell'
 
 interface Row {
   id: string
@@ -24,10 +24,12 @@ function Panel({
   items = rows,
   pick = false,
   onPick = ignore,
+  gaps,
 }: {
   items?: Row[]
   pick?: boolean
   onPick?: (row: Row) => void
+  gaps?: ReadonlyMap<string, number | null>
 }) {
   const [selected, setSelected] = useState<string | undefined>()
   const [picking, setPicking] = useState(pick)
@@ -52,6 +54,8 @@ function Panel({
       renderRow={(row) => <span>{row.path}</span>}
       renderDetail={(row) => <div data-testid="detail">{row.path}</div>}
       footer={<span data-testid="window">Holding the last 3 decisions</span>}
+      gaps={gaps}
+      renderGap={(missed) => `${missed ?? 'Some'} missed here`}
     />
   )
 }
@@ -112,5 +116,32 @@ describe('the decisions panel shell', () => {
     render(<Panel items={[]} />)
     expect(screen.getByTestId('decisions-empty')).toHaveTextContent('No rules decisions yet.')
     expect(screen.getByTestId('decisions-count')).toHaveTextContent('0 decisions')
+  })
+
+  it('draws a gap where decisions were missed, above the decision just older than it', () => {
+    render(<Panel gaps={new Map([['s2', 1204]])} />)
+    const list = screen.getByTestId('decision-list')
+    expect([...list.querySelectorAll('li')].map((item) => item.textContent)).toEqual([
+      'public/logo.png',
+      '1204 missed here',
+      'users/u2/a.png',
+      'reports/q3.pdf',
+    ])
+    // Gaps are rows of the list, not decisions: the count is the decisions'.
+    expect(screen.getByTestId('decisions-count')).toHaveTextContent('3 decisions')
+  })
+})
+
+const key = (row: Row) => row.id
+
+describe('the list’s rows', () => {
+  it('are the items alone without gaps, and a gap row before the item a gap is keyed by', () => {
+    expect(listRows(rows, key, undefined).map((row) => row.kind)).toEqual(['item', 'item', 'item'])
+    expect(listRows(rows, key, new Map([['s1', null]]))).toEqual([
+      { kind: 'item', item: rows[0] },
+      { kind: 'item', item: rows[1] },
+      { kind: 'gap', key: 'gap:s1', missed: null },
+      { kind: 'item', item: rows[2] },
+    ])
   })
 })

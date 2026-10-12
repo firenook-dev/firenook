@@ -7,7 +7,9 @@ import {
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { afterEach, describe, expect, it } from 'vitest'
+import { dialectOf } from './complete'
 import { type RulesLanguageOptions, rulesLanguage } from './index'
+import { outline } from './outline'
 
 const CARET = '‸'
 
@@ -587,5 +589,138 @@ describe('applying a completion', () => {
     )
     expect(doc).toContain('allow read: if owns(user, doc)')
     expect(selected).toBe('user')
+  })
+})
+
+const BUCKET = (body: string) =>
+  `rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n${body}\n  }\n}\n`
+
+const USERS = (condition: string) =>
+  BUCKET(`    match /users/{uid}/{allPaths=**} {\n      allow write: if ${condition};\n    }`)
+
+describe('the Storage dialect', () => {
+  const storage: RulesLanguageOptions = { dialect: 'storage' }
+
+  it('is read from the service header when the page does not say', () => {
+    expect(dialectOf(outline(BUCKET('')))).toBe('storage')
+    expect(dialectOf(outline('service cloud.firestore {}'))).toBe('firestore')
+    expect(dialectOf(outline(''))).toBe('firestore')
+  })
+
+  it('offers the Storage service, its name and its root', async () => {
+    const header = await complete(CARET, { explicit: true, options: storage })
+    expect(option(header, 'service', 'firebase.storage { … }').info).toMatch(/firebase.storage/)
+    expect(
+      labels(await complete(`service ${CARET}`, { explicit: true, options: storage })),
+    ).toEqual(['firebase.storage'])
+    expect(labels(await complete(`service firebase.st${CARET}`))).toEqual(['storage'])
+    expect(
+      labels(await complete(`service firebase.storage {\n  match ${CARET}`, { explicit: true })),
+    ).toEqual(['/b/{bucket}/o'])
+    const inService = await complete(`service firebase.storage {\n  m${CARET}\n}`)
+    expect(option(inService, 'match', '/b/{bucket}/o { … }')).toBeTruthy()
+    expect(option(inService, 'match').info).toMatch(/files/)
+  })
+
+  it('names the operations in terms of files', async () => {
+    const result = await complete(BUCKET(`    match /a/{b} {\n      allow ${CARET}`), {
+      explicit: true,
+    })
+    expect(option(result, 'create').info).toMatch(/Uploading a file/)
+    expect(option(result, 'list').info).toMatch(/listAll/)
+    expect(option(result, 'update').info).toMatch(/metadata/)
+  })
+
+  it('reads request.resource as the file an upload proposes, not a document', async () => {
+    const result = await complete(USERS(`request.resource.${CARET}`))
+    expect(labels(result)).toEqual(expect.arrayContaining(['size', 'contentType', 'metadata']))
+    expect(labels(result)).not.toContain('data')
+    expect(option(result, 'size').detail).toBe('int')
+  })
+
+  it('reads resource as the file with the fourteen keys the rules see', async () => {
+    const result = await complete(USERS(`resource.${CARET}`))
+    expect(new Set(labels(result))).toEqual(
+      new Set([
+        'name',
+        'bucket',
+        'size',
+        'contentType',
+        'contentDisposition',
+        'contentEncoding',
+        'metadata',
+        'generation',
+        'metageneration',
+        'timeCreated',
+        'updated',
+        'md5Hash',
+        'crc32c',
+        'etag',
+      ]),
+    )
+  })
+
+  it('has a request without a query', async () => {
+    const result = await complete(USERS(`request.${CARET}`))
+    expect(new Set(labels(result))).toEqual(new Set(['auth', 'method', 'path', 'resource', 'time']))
+  })
+
+  it('offers custom metadata keys sampled from the folder the match starts with', async () => {
+    const asked: string[] = []
+    const options: RulesLanguageOptions = {
+      metadataKeys: async (prefix) => {
+        asked.push(prefix)
+        return ['ownerUid', 'source', 'has-dash']
+      },
+    }
+    const result = await complete(USERS(`request.resource.metadata.${CARET}`), { options })
+    expect(asked).toEqual(['users/'])
+    expect(labels(result)).toEqual(expect.arrayContaining(['ownerUid', 'source', 'has-dash']))
+    expect(option(result, 'ownerUid').detail).toBe('metadata key')
+    expect(labels(result)).toEqual(expect.arrayContaining(['keys', 'size']))
+    const atRoot = await complete(
+      BUCKET(`    match /{file} {\n      allow read: if resource.metadata.${CARET}`),
+      { options },
+    )
+    expect(asked.at(-1)).toBe('')
+    expect(labels(atRoot)).toContain('ownerUid')
+  })
+
+  it('reads Firestore through firestore.get and firestore.exists, not get() and exists()', async () => {
+    const globals = await complete(USERS(CARET), { explicit: true })
+    expect(labels(globals)).toEqual(expect.arrayContaining(['request', 'resource', 'firestore']))
+    for (const gone of ['get', 'exists', 'getAfter', 'existsAfter'])
+      expect(labels(globals)).not.toContain(gone)
+    const namespace = await complete(USERS(`firestore.${CARET}`))
+    expect(new Set(labels(namespace))).toEqual(new Set(['get', 'exists']))
+    const read = await complete(
+      USERS(`firestore.get(/databases/(default)/documents/users/$(uid)).${CARET}`),
+    )
+    expect(labels(read)).toEqual(expect.arrayContaining(['data', 'id']))
+  })
+
+  it('keeps the Storage names out of Firestore rules', async () => {
+    const result = await complete(ORDERS(CARET), { explicit: true })
+    expect(labels(result)).not.toContain('firestore')
+    expect(labels(await complete(ORDERS(`request.resource.${CARET}`)))).toContain('data')
+    expect(labels(await complete(ORDERS(`resource.${CARET}`)))).not.toContain('contentType')
+  })
+
+  it('writes the document path for firestore.get()', async () => {
+    const source = USERS(`firestore.g${CARET}`)
+    const result = await complete(source)
+    const picked = option(result, 'get')
+    const { state, pos } = stateAt(source)
+    const view = new EditorView({ state, parent: document.body })
+    try {
+      if (typeof picked.apply === 'function') picked.apply(view, picked, result!.from, pos)
+      const { main } = view.state.selection
+      expect(view.state.doc.toString()).toContain(
+        'firestore.get(/databases/(default)/documents/path)',
+      )
+      expect(view.state.sliceDoc(main.from, main.to)).toBe('path')
+    } finally {
+      view.destroy()
+    }
   })
 })

@@ -1,10 +1,16 @@
 // What the rules language provides, as completion knows it: the request
 // and resource variables, the global functions and namespaces, and the
 // methods of each type, with their signatures and a line or two from the
-// Firestore Security Rules reference.
+// Security Rules reference. Two dialects share it: Cloud Firestore's
+// (`service cloud.firestore`, documents) and Firebase Storage's
+// (`service firebase.storage`, objects, `firestore.get()`); the entries that
+// belong to one dialect only say so in their names.
 //
 // Plain data, so the completion source can be read as logic and this file
 // checked against the reference on its own.
+
+/** Which service's rules a text is: the `service` header decides, or the page says. */
+export type RulesDialect = 'firestore' | 'storage'
 
 /** A type as far as completion follows it. */
 export type Kind =
@@ -36,6 +42,12 @@ export type Kind =
   | 'ns:duration'
   | 'ns:latlng'
   | 'ns:hashing'
+  /** Storage: a file, as `resource` and `request.resource` are. */
+  | 'object'
+  /** Storage: a file's custom metadata. */
+  | 'metadata'
+  /** Storage: `firestore.get()` and `firestore.exists()`. */
+  | 'ns:firestore'
 
 export interface Entry {
   name: string
@@ -61,6 +73,8 @@ const SHOWN: Partial<Record<Kind, string>> = {
   query: 'map',
   resource: 'Resource',
   data: 'map',
+  object: 'Object',
+  metadata: 'map',
   mapDiff: 'MapDiff',
   unknown: 'any',
 }
@@ -154,6 +168,57 @@ export const PROPERTIES: Partial<Record<Kind, readonly Entry[]>> = {
     prop('__name__', 'path', 'The full document name, as a path.'),
   ],
 }
+
+/** Storage's `request`: no query, and `resource` is the file being written. */
+export const STORAGE_REQUEST: readonly Entry[] = [
+  prop(
+    'auth',
+    'auth',
+    'The signed-in user: their uid and token claims. null when the request is not authenticated.',
+  ),
+  prop(
+    'method',
+    'string',
+    "The operation: 'get', 'list', 'create', 'update' or 'delete'. An upload is a create, even over an existing file.",
+  ),
+  prop('path', 'path', 'The path of the file or folder the request is about.'),
+  prop(
+    'resource',
+    'object',
+    'The file as it would be after the write: its size, contentType and metadata. Present on create and update only.',
+  ),
+  prop('time', 'timestamp', 'When the service received the request.'),
+]
+
+/** A Storage file as the rules see it: the fourteen keys `resource` and `request.resource` carry. */
+export const STORAGE_OBJECT: readonly Entry[] = [
+  prop('name', 'string', 'The full name of the file, its path in the bucket: users/u1/avatar.png.'),
+  prop('bucket', 'string', 'The bucket the file is in.'),
+  prop('size', 'int', 'The size of the file in bytes.'),
+  prop(
+    'contentType',
+    'string',
+    "The file's content type, such as 'image/png'. Check it with matches('image/.*').",
+  ),
+  prop('contentDisposition', 'string', "The file's Content-Disposition, if set."),
+  prop('contentEncoding', 'string', "The file's Content-Encoding, if set, such as 'gzip'."),
+  prop(
+    'metadata',
+    'metadata',
+    "The file's custom metadata: a map of the string keys and values your app set.",
+  ),
+  prop('generation', 'int', "The file's generation: it changes each time the bytes are replaced."),
+  prop(
+    'metageneration',
+    'int',
+    "The file's metageneration: it changes each time the metadata changes.",
+  ),
+  prop('timeCreated', 'timestamp', 'When the file was created.'),
+  prop('updated', 'timestamp', 'When the file was last changed.'),
+  prop('md5Hash', 'string', 'The MD5 hash of the bytes, base64.'),
+  prop('crc32c', 'string', 'The CRC32C checksum of the bytes.'),
+  prop('etag', 'string', "The file's ETag."),
+]
 
 export const METHODS: Partial<Record<Kind, readonly Entry[]>> = {
   string: [
@@ -301,7 +366,7 @@ export const METHODS: Partial<Record<Kind, readonly Entry[]>> = {
 }
 
 /** A map's methods also apply to these, which are maps underneath. */
-export const MAP_LIKE: ReadonlySet<Kind> = new Set(['map', 'data', 'token', 'firebase'])
+export const MAP_LIKE: ReadonlySet<Kind> = new Set(['map', 'data', 'token', 'firebase', 'metadata'])
 
 /**
  * Methods of several types under one name, described for all of them, for
@@ -424,6 +489,20 @@ export const NAMESPACE_FUNCTIONS: Partial<Record<Kind, readonly Entry[]>> = {
   'ns:latlng': [
     fn('value', ['lat', 'lng'], 'latlng', 'A geopoint from a latitude and a longitude.'),
   ],
+  'ns:firestore': [
+    fn(
+      'get',
+      ['path'],
+      'resource',
+      'The Firestore document at path, or null if it does not exist. Each call is a billed document read.',
+    ),
+    fn(
+      'exists',
+      ['path'],
+      'bool',
+      'Whether a Firestore document exists at path. Each call is a billed document read.',
+    ),
+  ],
   'ns:hashing': [
     fn(
       'crc32',
@@ -488,6 +567,27 @@ export const DOCUMENT_FUNCTIONS: ReadonlySet<string> = new Set([
   'existsAfter',
 ])
 
+/** The two variables of Storage rules. */
+export const STORAGE_VARIABLES: readonly Entry[] = [
+  prop(
+    'request',
+    'request',
+    'The incoming request: its auth, method, path, time and, for an upload or a metadata change, the file it proposes (resource).',
+  ),
+  prop(
+    'resource',
+    'object',
+    'The file as it is before the request: absent on an upload of a new file.',
+  ),
+]
+
+/** Storage rules reach Firestore through this namespace. */
+export const FIRESTORE_NAMESPACE: Entry = prop(
+  'firestore',
+  'ns:firestore',
+  "Reads from the project's Firestore: get and exists.",
+)
+
 export const GLOBAL_VARIABLES: readonly Entry[] = [
   prop(
     'request',
@@ -547,6 +647,45 @@ export const OPERATION_ENTRIES: readonly { name: string; detail: string; info: s
   { name: 'update', detail: 'write', info: 'Writing to a document that already exists.' },
   { name: 'delete', detail: 'write', info: 'Deleting a document.' },
 ]
+
+/** What each operation means for files. */
+export const STORAGE_OPERATION_ENTRIES: readonly { name: string; detail: string; info: string }[] =
+  [
+    {
+      name: 'read',
+      detail: 'get + list',
+      info: 'Any read: downloading a file, reading its metadata, or listing a folder.',
+    },
+    {
+      name: 'write',
+      detail: 'create + update + delete',
+      info: 'Any write: uploading a file, changing its metadata, or deleting it.',
+    },
+    {
+      name: 'get',
+      detail: 'read',
+      info: 'Downloading a file or reading its metadata: getBytes(), getDownloadURL(), getMetadata().',
+    },
+    {
+      name: 'list',
+      detail: 'read',
+      info: "Listing a folder: list() and listAll(). Needs rules_version = '2'.",
+    },
+    {
+      name: 'create',
+      detail: 'write',
+      info: 'Uploading a file, including an upload over a file that already exists.',
+    },
+    { name: 'update', detail: 'write', info: "Changing a file's metadata: updateMetadata()." },
+    { name: 'delete', detail: 'write', info: 'Deleting a file.' },
+  ]
+
+/** Storage's own wording for the keywords whose meaning changes with the service. */
+export const STORAGE_KEYWORD_INFO: Readonly<Record<string, string>> = {
+  service: 'Declares the product these rules secure: firebase.storage for Cloud Storage.',
+  match:
+    'Declares a path pattern; its rules apply to the files it matches. {name} binds one segment, {name=**} the rest of the path.',
+}
 
 export const KEYWORD_INFO: Readonly<Record<string, string>> = {
   rules_version:

@@ -13,7 +13,9 @@
 //   adapter's `empty`);
 // - narrowing comes from the URL, so a denied read elsewhere links straight
 //   to the decision behind it, and `pick` opens the newest matching denial
-//   once — going back to the list afterwards is going back to the list.
+//   once — going back to the list afterwards is going back to the list;
+// - a feed that lost decisions (a tab away longer than the engine keeps
+//   them) says so in the list, where they are missing (`gaps`).
 
 import { Button, Text } from '@cloudflare/kumo'
 import { ArrowLeftIcon, CaretLeftIcon, CaretRightIcon, XIcon } from '@phosphor-icons/react'
@@ -47,6 +49,8 @@ export function DecisionsShell<T>({
   renderRow,
   renderDetail,
   footer,
+  gaps,
+  renderGap,
   clock = 'minute',
 }: {
   /** The decisions to list, newest first, already narrowed. */
@@ -73,6 +77,10 @@ export function DecisionsShell<T>({
   renderDetail: (item: T) => ReactNode
   /** Under the list: the window the feed holds. */
   footer?: ReactNode
+  /** Decisions the feed missed, keyed by the decision just older than each gap; the count when known. */
+  gaps?: ReadonlyMap<string, number | null> | undefined
+  /** A gap's line in the list. */
+  renderGap?: ((missed: number | null) => ReactNode) | undefined
   /** How often relative times move. */
   clock?: 'second' | 'minute'
 }) {
@@ -174,6 +182,8 @@ export function DecisionsShell<T>({
           now={now}
           onOpen={onOpen}
           renderRow={renderRow}
+          gaps={gaps}
+          renderGap={renderGap}
         />
       )}
       {footer}
@@ -199,38 +209,73 @@ export function NarrowChip({ label, value, onRemove }: DecisionNarrowing) {
   )
 }
 
+type ListRow<T> = { kind: 'item'; item: T } | { kind: 'gap'; key: string; missed: number | null }
+
+/** The list's rows: the decisions, with a gap's line above the decision just older than it. */
+export function listRows<T>(
+  items: readonly T[],
+  itemKey: (item: T) => string,
+  gaps: ReadonlyMap<string, number | null> | undefined,
+): ListRow<T>[] {
+  if (!gaps || gaps.size === 0) return items.map((item) => ({ kind: 'item', item }))
+  const rows: ListRow<T>[] = []
+  for (const item of items) {
+    const key = itemKey(item)
+    if (gaps.has(key)) rows.push({ kind: 'gap', key: `gap:${key}`, missed: gaps.get(key) ?? null })
+    rows.push({ kind: 'item', item })
+  }
+  return rows
+}
+
 function DecisionList<T>({
   items,
   itemKey,
   now,
   onOpen,
   renderRow,
+  gaps,
+  renderGap,
 }: {
   items: readonly T[]
   itemKey: (item: T) => string
   now: number
   onOpen: (item: T) => void
   renderRow: (item: T, now: number) => ReactNode
+  gaps: ReadonlyMap<string, number | null> | undefined
+  renderGap: ((missed: number | null) => ReactNode) | undefined
 }) {
   'use no memo'
   const scroller = useRef<HTMLDivElement>(null)
+  const listed = listRows(items, itemKey, renderGap ? gaps : undefined)
   // oxlint-disable-next-line react/incompatible-library -- the directive above opts this component out of the compiler
   const rows = useVirtualizer({
-    count: items.length,
+    count: listed.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => DECISION_ROW,
     overscan: 8,
     getItemKey: (index) => {
-      const item = items[index]
-      return item === undefined ? index : itemKey(item)
+      const row = listed[index]
+      return row === undefined ? index : row.kind === 'gap' ? row.key : itemKey(row.item)
     },
   })
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" data-testid="decision-list">
       <ul className="relative" style={{ height: rows.getTotalSize() }}>
         {rows.getVirtualItems().map((row) => {
-          const item = items[row.index]
-          if (item === undefined) return null
+          const entry = listed[row.index]
+          if (entry === undefined) return null
+          if (entry.kind === 'gap')
+            return (
+              <li
+                key={row.key}
+                className="absolute inset-x-0 flex items-center border-b border-kumo-hairline bg-kumo-tint px-3 text-[12px] text-kumo-subtle"
+                style={{ top: row.start, height: DECISION_ROW }}
+                data-testid="decision-gap"
+              >
+                {renderGap?.(entry.missed)}
+              </li>
+            )
+          const item = entry.item
           return (
             <li
               key={row.key}

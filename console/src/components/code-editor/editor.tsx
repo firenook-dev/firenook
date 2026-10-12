@@ -479,8 +479,12 @@ function languageFor(
       // The callbacks are read through on each completion rather than
       // captured, so a new schema sample never rebuilds the language.
       rulesLanguage({
+        get dialect() {
+          return completion()?.dialect
+        },
         fields: (pattern) => completion()?.fields?.(pattern) ?? [],
         claims: () => completion()?.claims?.() ?? [],
+        metadataKeys: (prefix) => completion()?.metadataKeys?.(prefix) ?? [],
       }),
       // ⌘↵ is the rules page's Apply. CodeMirror's own binding for it
       // inserts a blank line, which went into the rules with every Apply
