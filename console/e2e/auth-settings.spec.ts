@@ -56,6 +56,14 @@ test('S1 a tenant made with its own id holds its users, its switches and its del
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
 
+    // Empty, its Users page says so, names the scopes that do hold users,
+    // and offers the ways to add some.
+    await page.goto(`${engine.origin}/console/auth?tenant=${tenant}`)
+    const empty = page.getByTestId('users-empty')
+    await expect(empty).toContainText(`No users in tenant ${tenant} yet`)
+    await expect(empty).toContainText('Project users has')
+    await expect(empty.getByRole('button', { name: 'New user' })).toBeVisible()
+
     // A user made there is that tenant's alone.
     await page.goto(`${engine.origin}/console/auth?tenant=${tenant}&new=user`)
     const create = page.getByTestId('create-user-dialog')

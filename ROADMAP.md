@@ -949,16 +949,19 @@ served until every section has landed.
   field, words, regular expressions, and `-` to exclude any of them — with
   live counts per value and a volume strip to pick a time from, opens any
   line with the lines around it, and downloads exactly what the filter
-  shows. Notable engine events are lines of their own: a refused rules
-  decision with a link to why (told apart from the console's own "view as"
-  reads), rules applied from the console or reloaded from their file, a
-  rules file that stopped compiling, the official Firestore clear, a reset
-  from the console, background triggers paused and resumed. Found on the
+  shows. Everything a function prints says which call printed it,
+  firebase-functions' structured lines arrive as fields, and every call has
+  exactly one end line even when nobody reads its response. Notable engine
+  events are lines of their own: a refused rules decision with a link to
+  why (told apart from the console's own "view as" reads), rules applied
+  from the console or reloaded from their file, a rules file that stopped
+  compiling, the official Firestore clear, a reset from the console,
+  background triggers paused and resumed. Found on the
   way: the official feed writes levels in lower case and Firenook wrote them
   in capitals, and the debug log dropped any line longer than 8 KiB.
 - [x] Overview: what runs, where, and whether it is healthy — each section's
-  address, its live figures once the section counts them, its current
-  problems, why a section is not running and the exact fix, the recent errors, failures and denials over
+  address, its live figures, its current problems, why a section is not
+  running and the exact fix, the recent errors, failures and denials over
   the last hour, the code to connect an app on every platform with the host
   it sees, the engine's own configuration and what the console's buffers
   cost. The suite's own warnings — an app writing to another project id,
@@ -969,8 +972,8 @@ served until every section has landed.
 - [x] Snapshots and resets from the console, as engine jobs: download the
   emulators' data as a standard export (the zip unpacks into a folder
   `--import` reads), save one on the engine's machine, or reset a section's
-  data — each section's reset lands with its pages, Firestore's first — or
-  every resettable section at once. One data job runs at a time, shows its
+  data (Firestore, Authentication, Storage, Pub/Sub, Cloud Tasks) or every
+  resettable section at once. One data job runs at a time, shows its
   progress in every tab, survives the tab that started it, and is cancelled
   cleanly before the engine exits. A Firestore reset runs no Functions
   triggers unless asked to — it commits as maintenance, which the trigger

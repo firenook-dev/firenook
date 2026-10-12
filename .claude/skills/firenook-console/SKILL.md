@@ -236,9 +236,19 @@ then `SectionGate`, which reads `ConsoleStatus.sections`:
   marked seen while it is mounted and visible.
 
 A feature that needs another section says so with `RequiresNotice`
-(absent: why and How to start it; starting: works as soon as it is up).
-Never present a section, or a feature of one, as working before its
-journeys pass.
+(absent: why and How to start it; starting: works as soon as it is up); the
+section it names links to that section's page (its gate, or the page that
+fills in). Never present a section, or a feature of one, as working before
+its journeys pass.
+
+Every `EntityRef` kind the engine constructs resolves to a page that takes
+its search: `crates/suite-front/src/entity.rs` pins one sample per kind into
+`src/lib/entity-kinds.json` (regenerate with `FIRENOOK_WRITE_ENTITY_KINDS=1
+cargo test -p firenook-suite-front entity`) and `src/lib/links-every-kind.test.ts`
+resolves each through the registries and the route tree. A new kind needs a
+constructor, a sample and a `routes` entry. A `SearchSource` may answer for
+another section's kinds (compute's finds Extensions instances): ⌘K labels
+and draws each hit by the section its kind belongs to.
 
 ### Page anatomy
 
@@ -578,7 +588,26 @@ route chunks. Identity: requests run as a `ViewAs` through
 `components/console/request/` (`sendComposed` streams, `requestAsCode`,
 `useRequestHistory`, `ResponseView`, `CodePopover`). Every piece has a
 design-system card (`console/design-system/src/cards/`, one file per
-stream, loaded by glob).
+stream, loaded by glob). A few behaviours worth knowing:
+
+- `DangerConfirm` draws `DangerConfirmBody`, which is exported: a card (or
+  any page that needs the confirmation at rest) draws the real body framed,
+  handed a `Job` instead of subscribing. `TriggerLineItem` and
+  `triggerLine` are the trigger line any destructive dialog draws
+  (Firestore's delete dialog uses them).
+- `StatusDot` keeps its width; let it shrink (`className="min-w-0
+  shrink"`) and its word ends in an ellipsis. `OutcomeChip` keeps its width
+  beside a truncating sibling; `shrink` lets it give way (put the whole word
+  in `detail`).
+- Custom claim keys come from `lib/claim-keys.ts` `useClaimKeys(project)`
+  (the engine's claim index, asked when completion opens): `fresh` for a
+  rules editor's `rulesCompletion.claims`, `now` for `JsonField`'s
+  `completeKeys`.
+- A design-system card whose views subscribe to a live topic (a trigger
+  line holds `functions.events`) calls `quietLiveChannel()` from
+  `cards/shared.tsx` in its providers, so nothing opens a connection; and
+  answers any API read from the query cache. `npm run design-system` fails
+  on any browser error.
 
 ### End-to-end
 
@@ -3246,11 +3275,12 @@ separate `rest_router` with a `with_origin(Console)` rules handle: a new
 console data route must use it, or its denials count as the app's (and raise
 the Rules badge). The engine refuses a bad regex with `span` beside `error`;
 `logs/api.ts` reads it itself (`LogsRequestError`), because the client's
-`ApiError` keeps code, message and fix only. TanStack's default
-`parseSearch` JSON-parses every value, so a hand-typed `?q="Cart is empty"`
-arrives as words; links the console writes are encoded right. Pass
-`LogLine` a `SourceChip`, not a string: a string source truncates inside a
-flex box with no ellipsis. A value derived from `useSyncExternalStore` must
+`ApiError` keeps code, message and fix only. The router parses search with
+`lib/search-params.ts` `parseSearch`: a bare number stays text (a
+hand-typed `?invocation=40406e-694` or `?uid=12345`), so a param that is a
+number coerces it (`z.coerce.number()`); a hand-typed `?q="Cart is empty"`
+still arrives as words. A string `LogLine` source truncates with an
+ellipsis (inside a FeedList the row's hover is the only ink). A value derived from `useSyncExternalStore` must
 take the store's version as an input, or the compiled hook keeps its first
 answer (`useNotices`). Kumo's `Button` turns `title` into a tooltip on a
 disabled button; that is how a data control says why it waits.
