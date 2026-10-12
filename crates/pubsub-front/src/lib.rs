@@ -16,12 +16,16 @@ pub mod grpc;
 pub mod http;
 pub mod names;
 pub mod runtime;
+pub mod schedule_control;
 pub mod scheduler;
 
 pub use broker::Broker;
 pub use error::PubsubError;
 pub use functions::ScheduleDefinition;
 pub use runtime::PubsubRuntime;
+pub use schedule_control::{
+    RunOutcome, RunScheduleError, RunTrigger, ScheduleControl, ScheduleRun, ScheduleView,
+};
 pub use scheduler::{ScheduleError, SchedulerRuntime};
 
 use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};

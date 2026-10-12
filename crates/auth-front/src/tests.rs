@@ -1197,3 +1197,68 @@ async fn custom_claims_of_a_thousand_accented_characters_are_stored_and_minted()
         json!([{ "index": 1, "message": "Custom claims provided are too large." }])
     );
 }
+
+#[tokio::test]
+async fn lifecycle_events_name_their_user_and_paused_ones_are_counted() {
+    use firenook_functions_bridge::{DroppedService, cause};
+    let registry = TriggerRegistry::default();
+    let (observer, mut dispatches) = TriggerObserver::channel(registry.clone());
+    let runtime =
+        AuthRuntime::new("demo-auth", observer.queue(), registry.clone(), None).expect("runtime");
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
+        &json!({ "email": "ada@example.test", "password": "password1" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let uid = body["localId"].as_str().expect("uid").to_owned();
+    tokio::task::yield_now().await;
+    let dispatch = dispatches.try_recv().expect("create dispatch");
+    let event: JsonValue = serde_json::from_slice(&dispatch.body).expect("event");
+    assert_eq!(dispatch.headers[cause::UID], uid);
+    assert_eq!(dispatch.headers[cause::EMAIL], "ada@example.test");
+    assert!(!dispatch.headers.contains_key(cause::TENANT));
+    assert_eq!(dispatch.headers[cause::EVENT_ID], event["eventId"]);
+    assert_eq!(dispatch.headers["content-type"], "application/json");
+
+    // A tenant's user names the tenant.
+    let (status, tenant) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v2/projects/demo-auth/tenants",
+        &json!({ "displayName": "acme", "allowPasswordSignup": true }),
+    )
+    .await;
+    assert_eq!(status, 200, "{tenant}");
+    let tenant_id = tenant["tenantId"].as_str().expect("tenant id").to_owned();
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
+        &json!({ "email": "grace@example.test", "password": "password1", "tenantId": tenant_id }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    tokio::task::yield_now().await;
+    let dispatch = dispatches.try_recv().expect("tenant create dispatch");
+    assert_eq!(dispatch.headers[cause::TENANT], tenant_id);
+    assert_eq!(dispatch.headers[cause::EMAIL], "grace@example.test");
+
+    registry.set_background_enabled(false);
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
+        &json!({ "email": "paused@example.test", "password": "password1" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    tokio::task::yield_now().await;
+    assert!(
+        dispatches.try_recv().is_err(),
+        "nothing is sent while paused"
+    );
+    assert_eq!(registry.dropped().counts, [(DroppedService::Auth, 1)]);
+}

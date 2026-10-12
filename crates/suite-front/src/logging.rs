@@ -1,8 +1,12 @@
 //! Bounded log replay with an atomic replay/live boundary and owned lifetimes.
-use std::collections::VecDeque;
+//!
+//! The history is a [`ReplayRing`]: one sequenced buffer that the official
+//! Logging WebSocket replays from (the newest 1,024 records, byte for byte).
+//! Every line also reaches the console's sink, when a console runs, as the
+//! structured [`LogInput`] its producer described.
 use std::io::Write as _;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::Router;
@@ -12,16 +16,28 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::get;
 use futures_util::{Sink, SinkExt as _, StreamExt as _};
-use serde_json::json;
+use serde_json::{Map, Value as JsonValue, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::{Semaphore, broadcast, watch};
 
 use super::{LOG_REPLAY_CAPACITY, LogRecord, lock};
+use crate::console_input::{Audience, ConsoleSink, LogInput, LogLevel};
+use crate::replay::{ReplayRing, RingBudget, RingLimits, random_epoch};
 
 pub(super) const MAXIMUM_RECORD_BYTES: usize = 8192;
+/// What the log ring keeps: the records the official UI replays, each at
+/// most [`MAXIMUM_RECORD_BYTES`], as `benchmarks/phase-b-logging.json` bounds
+/// them.
+const LOG_RING: RingLimits = RingLimits {
+    entries: LOG_REPLAY_CAPACITY,
+    bytes: LOG_REPLAY_CAPACITY * MAXIMUM_RECORD_BYTES,
+    floor: 256,
+};
 pub(super) const MAXIMUM_SUBSCRIBERS: usize = 4;
 const SEND_DEADLINE: Duration = Duration::from_secs(30);
+/// What the official feed carries in place of a record it cannot keep.
+const OMISSION: &str = "Oversized log record omitted; diagnostic payload was not retained";
 
 /// Bounded Logging WebSocket producer and router.
 #[derive(Clone)]
@@ -42,15 +58,14 @@ impl LoggingRuntime {
     /// Creates an empty bounded log buffer.
     #[must_use]
     pub fn new() -> Self {
-        let (live, _) = broadcast::channel(LOG_REPLAY_CAPACITY);
         let (owner, shutdown) = watch::channel(false);
         Self {
             state: LoggingState {
-                history: Arc::new(Mutex::new(VecDeque::new())),
-                live,
+                history: ReplayRing::new("logs", LOG_RING, random_epoch(), &RingBudget::shared()),
                 shutdown,
                 slots: Arc::new(Semaphore::new(MAXIMUM_SUBSCRIBERS)),
                 file: Arc::new(Mutex::new(None)),
+                console: Arc::new(RwLock::new(None)),
             },
             _owner: Arc::new(owner),
         }
@@ -83,15 +98,90 @@ impl LoggingRuntime {
         Router::new().fallback(get(upgrade)).with_state(state)
     }
 
-    /// Records one bounded complete entry, or an explicit payload-free omission.
+    /// Installs the console's sink: from now on every line meant for the
+    /// console reaches it. Without one (`--no-ui`), nothing is built or kept
+    /// for the console.
+    pub fn set_console_sink(&self, sink: Arc<dyn ConsoleSink>) {
+        *self
+            .state
+            .console
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink);
+    }
+
+    /// Records one line for every audience it is meant for: for
+    /// [`Audience::Everyone`], the official Logging record and the debug-log
+    /// line exactly as the suite has always written them (its legacy text,
+    /// level and emulator, one record per printed line), plus the trigger id,
+    /// extension instance and payload the official feed carries for function
+    /// output; then the console's sink, when one is installed.
+    ///
+    /// # Panics
+    /// Panics if the internal string-only log representation cannot serialize.
+    pub fn emit(&self, input: LogInput) {
+        if input.audience == Audience::Everyone {
+            let level = input.legacy_level.unwrap_or_else(|| input.level.legacy());
+            let emulator = input.legacy_emulator.unwrap_or(input.service.as_str());
+            let extras = RecordExtras {
+                function: input.function.as_deref(),
+                extension: input.extension.as_deref(),
+                user: input.payload.as_ref().filter(|payload| payload.is_object()),
+            };
+            match &input.legacy_text {
+                Some(text) => {
+                    for line in printed_lines(text) {
+                        self.official(level, Some(emulator), line, &extras);
+                    }
+                }
+                None => self.official(level, Some(emulator), &input.message, &extras),
+            }
+        }
+        if let Some(sink) = self.console_sink() {
+            sink.accept(input);
+        }
+    }
+
+    /// Records one bounded complete entry, or an explicit payload-free omission,
+    /// and hands the console the same line (service `hub` when no emulator is
+    /// named).
     ///
     /// # Panics
     /// Panics if the internal string-only log representation cannot serialize.
     pub fn record(&self, level: &str, emulator: Option<&str>, message: impl Into<String>) {
         let message = message.into();
+        self.official(level, emulator, &message, &RecordExtras::default());
+        if let Some(sink) = self.console_sink() {
+            sink.accept(LogInput {
+                level: LogLevel::parse(level),
+                service: emulator.unwrap_or("hub").to_owned(),
+                message,
+                ..LogInput::default()
+            });
+        }
+    }
+
+    fn console_sink(&self) -> Option<Arc<dyn ConsoleSink>> {
+        self.state
+            .console
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// One official record (or its omission) and its debug-log line. The
+    /// file keeps the whole line even when the feed's record is omitted for
+    /// its size, as the official debug log does; a record whose labels are
+    /// invalid is omitted in both.
+    fn official(
+        &self,
+        level: &str,
+        emulator: Option<&str>,
+        message: &str,
+        extras: &RecordExtras<'_>,
+    ) {
         let valid_labels = level.len() <= 64 && emulator.is_none_or(|name| name.len() <= 64);
         let mut record = if valid_labels && message.len() <= MAXIMUM_RECORD_BYTES {
-            record(level, emulator, message)
+            record(level, emulator, message, extras)
         } else {
             omitted()
         };
@@ -102,31 +192,30 @@ impl LoggingRuntime {
         }
         let encoded: Arc<str> = encoded.into();
         if let Some(file) = lock(&self.state.file).as_mut() {
+            let (file_level, file_message) = if valid_labels {
+                (level, message)
+            } else {
+                (record.level.as_str(), record.message.as_str())
+            };
             let line = format!(
-                "[{}] [{}] [{}] {}\n",
-                record.level,
+                "[{file_level}] [{}] [{}] {file_message}\n",
                 record.timestamp,
                 emulator.unwrap_or("suite"),
-                record.message
             );
             // A full disk or a removed file must not stop the suite; the
             // in-memory replay keeps serving the UI.
             let _ = file.write_all(line.as_bytes());
         }
-        let mut history = lock(&self.state.history);
-        if history.len() == LOG_REPLAY_CAPACITY {
-            history.pop_front();
-        }
-        history.push_back(encoded.clone());
-        // Subscription+snapshot uses this same lock: no gap or duplicate at the
-        // boundary, and producers never wait on network I/O.
-        let _ = self.state.live.send(encoded);
+        // The ring snapshots and subscribes under the lock it pushes with:
+        // no gap or duplicate at the boundary, and producers never wait on
+        // network I/O.
+        self.state.history.push((), encoded);
     }
 
     /// Current bounded record count.
     #[must_use]
     pub fn len(&self) -> usize {
-        lock(&self.state.history).len()
+        self.state.history.len()
     }
 
     /// Whether no entries have been recorded.
@@ -136,16 +225,56 @@ impl LoggingRuntime {
     }
 }
 
-fn record(level: &str, emulator: Option<&str>, message: String) -> LogRecord {
-    let data = emulator.map_or_else(
-        || json!({}),
-        |name| json!({"metadata":{"emulator":{"name":name},"message":message}}),
-    );
+/// What the official feed carries for function output beyond the emulator
+/// name: the keys the Google Emulator UI filters and renders by.
+#[derive(Default)]
+struct RecordExtras<'a> {
+    /// `data.metadata.function.name`.
+    function: Option<&'a str>,
+    /// `data.metadata.extension.instanceId`.
+    extension: Option<&'a str>,
+    /// `data.user`: a structured logger call's fields.
+    user: Option<&'a JsonValue>,
+}
+
+/// The lines of a legacy text, one official record each, split as a worker's
+/// output is read: at line breaks (a `\r\n` counts as one), with no record
+/// for a final break. A text without a break is one record, unchanged.
+fn printed_lines(text: &str) -> Box<dyn Iterator<Item = &str> + '_> {
+    if text.contains('\n') {
+        Box::new(text.lines())
+    } else {
+        Box::new(std::iter::once(text))
+    }
+}
+
+fn record(
+    level: &str,
+    emulator: Option<&str>,
+    message: &str,
+    extras: &RecordExtras<'_>,
+) -> LogRecord {
+    let mut data = Map::new();
+    if let Some(name) = emulator {
+        let mut metadata = Map::new();
+        metadata.insert("emulator".to_owned(), json!({ "name": name }));
+        metadata.insert("message".to_owned(), JsonValue::from(message));
+        if let Some(function) = extras.function {
+            metadata.insert("function".to_owned(), json!({ "name": function }));
+        }
+        if let Some(extension) = extras.extension {
+            metadata.insert("extension".to_owned(), json!({ "instanceId": extension }));
+        }
+        data.insert("metadata".to_owned(), JsonValue::Object(metadata));
+        if let Some(user) = extras.user {
+            data.insert("user".to_owned(), user.clone());
+        }
+    }
     let now = OffsetDateTime::now_utc();
     LogRecord {
         level: level.into(),
-        data,
-        message,
+        data: JsonValue::Object(data),
+        message: message.to_owned(),
         timestamp: now
             .format(&Rfc3339)
             .unwrap_or_else(|_| now.unix_timestamp().to_string()),
@@ -153,20 +282,17 @@ fn record(level: &str, emulator: Option<&str>, message: String) -> LogRecord {
 }
 
 fn omitted() -> LogRecord {
-    record(
-        "WARN",
-        Some("hub"),
-        "Oversized log record omitted; diagnostic payload was not retained".into(),
-    )
+    record("WARN", Some("hub"), OMISSION, &RecordExtras::default())
 }
 
 #[derive(Clone)]
 pub(super) struct LoggingState {
-    pub(super) history: Arc<Mutex<VecDeque<Arc<str>>>>,
-    pub(super) live: broadcast::Sender<Arc<str>>,
+    pub(super) history: ReplayRing<()>,
     pub(super) slots: Arc<Semaphore>,
     shutdown: watch::Receiver<bool>,
     file: Arc<Mutex<Option<std::fs::File>>>,
+    /// The console's sink, shared by every clone of the runtime.
+    console: Arc<RwLock<Option<Arc<dyn ConsoleSink>>>>,
 }
 
 async fn upgrade(State(state): State<LoggingState>, websocket: WebSocketUpgrade) -> Response {
@@ -192,18 +318,15 @@ async fn upgrade(State(state): State<LoggingState>, websocket: WebSocketUpgrade)
 }
 
 async fn session(mut state: LoggingState, socket: WebSocket) {
-    let (replay, mut live) = {
-        let history = lock(&state.history);
-        (
-            history.iter().cloned().collect::<Vec<_>>(),
-            state.live.subscribe(),
-        )
-    };
+    let follow = state.history.follow(None);
+    let mut live = follow.live;
+    // The official UI replays the newest records, as many as it always has.
+    let skip = follow.replay.len().saturating_sub(LOG_REPLAY_CAPACITY);
     let (mut output, mut input) = socket.split();
-    for record in replay {
+    for record in follow.replay.into_iter().skip(skip) {
         if !send(
             &mut output,
-            Message::Text(record.as_ref().into()),
+            Message::Text(record.json.as_ref().into()),
             &mut state.shutdown,
         )
         .await
@@ -222,7 +345,7 @@ async fn session(mut state: LoggingState, socket: WebSocket) {
                 _=>return,
             },
             record=live.recv()=>match record {
-                Ok(record)=>if !send(&mut output,Message::Text(record.as_ref().into()),&mut state.shutdown).await {return;},
+                Ok(record)=>if !send(&mut output,Message::Text(record.json.as_ref().into()),&mut state.shutdown).await {return;},
                 Err(broadcast::error::RecvError::Lagged(_))=>{
                     let close=Message::Close(Some(CloseFrame {code:1013,reason:"Log history overrun; reconnect for retained history".into()}));
                     let _=send(&mut output,close,&mut state.shutdown).await;return;

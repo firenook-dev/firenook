@@ -41,6 +41,7 @@ fn prepared(name: &str) -> Prepared {
         &store,
         &TriggerRegistry::default(),
         &LoggingRuntime::new(),
+        &ForeignProjects::default(),
     )
     .expect("firestore prepares")
     .expect("firestore is selected");
@@ -56,7 +57,6 @@ fn prepared(name: &str) -> Prepared {
             rules: console.rules,
             rules_evaluator: console.rules_evaluator,
             requests: None,
-            shutdown,
         }),
         ..ConsoleServices::new(
             SuiteDirectory::new(
@@ -67,6 +67,7 @@ fn prepared(name: &str) -> Prepared {
                 ],
             )
             .expect("directory"),
+            Shutdown::new(shutdown),
         )
     });
     Prepared {
