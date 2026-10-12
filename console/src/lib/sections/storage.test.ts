@@ -41,6 +41,16 @@ describe('where Storage things open', () => {
     })
   })
 
+  // The import compiles the beacon and React on first use: slow on a busy machine.
+  it(
+    'mounts the uploads beacon from the shell, as a chunk of its own',
+    { timeout: 30_000 },
+    async () => {
+      const mounted = await storage.shellMount?.()
+      expect(typeof mounted?.default).toBe('function')
+    },
+  )
+
   it('stays unbuilt, with no pages, until its journeys pass', () => {
     expect(storage.built).toBe(false)
     expect(storage.pages).toBeUndefined()

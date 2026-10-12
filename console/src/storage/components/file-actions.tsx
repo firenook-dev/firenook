@@ -118,6 +118,10 @@ export interface FileActions {
   deleteTicked: () => void
   /** Copy an object of this project here (a pasted gs:// URL). */
   copyHere: (bucket: string, name: string) => void
+  /** Asks to delete every object in the bucket. */
+  askEmpty: () => void
+  /** Edit the metadata of the ticked rows. */
+  editSelection: () => void
   /** Opens "Uploads in progress" beside an element. */
   showSessions: (anchor: Element | null) => void
   /** Resumable uploads the bucket holds. */
@@ -418,6 +422,33 @@ export function useFileActions(selectionScope: {
     }
   }
 
+  const askEmpty = () => {
+    setError(undefined)
+    setJobId(undefined)
+    setConfirm({ kind: 'empty', preview: undefined })
+    void as((authorization) =>
+      previewBulk(
+        'delete',
+        {
+          bucket: files.bucket,
+          target: {
+            by: 'query',
+            q: '',
+            scope: { bucket: files.bucket, prefix: '', flat: true },
+          },
+          onConflict: 'skip',
+        },
+        { authorization },
+      ),
+    )
+      .then((preview) =>
+        setConfirm((current) => (current?.kind === 'empty' ? { ...current, preview } : current)),
+      )
+      .catch((thrown: unknown) =>
+        setError(thrown instanceof Error ? thrown.message : String(thrown)),
+      )
+  }
+
   // ---- Metadata ------------------------------------------------------------
 
   const askMetadata = (target: BulkTarget, known?: number) => {
@@ -555,34 +586,7 @@ export function useFileActions(selectionScope: {
       <DropdownMenu.Item
         icon={TrashIcon}
         variant="danger"
-        onClick={() => {
-          setError(undefined)
-          setJobId(undefined)
-          setConfirm({ kind: 'empty', preview: undefined })
-          void as((authorization) =>
-            previewBulk(
-              'delete',
-              {
-                bucket: files.bucket,
-                target: {
-                  by: 'query',
-                  q: '',
-                  scope: { bucket: files.bucket, prefix: '', flat: true },
-                },
-                onConflict: 'skip',
-              },
-              { authorization },
-            ),
-          )
-            .then((preview) =>
-              setConfirm((current) =>
-                current?.kind === 'empty' ? { ...current, preview } : current,
-              ),
-            )
-            .catch((thrown: unknown) =>
-              setError(thrown instanceof Error ? thrown.message : String(thrown)),
-            )
-        }}
+        onClick={askEmpty}
         data-testid="bucket-empty"
       >
         Empty the bucket…
@@ -703,6 +707,8 @@ export function useFileActions(selectionScope: {
     deleteTicked,
     copyHere,
     showSessions: setSessionsAnchor,
+    askEmpty,
+    editSelection: () => askMetadata(selected()),
     unfinished,
     element,
   }

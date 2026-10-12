@@ -1,12 +1,14 @@
-// Storage's registry entry. The section stays `built: false` — the route
-// shows the placeholder, the nav lists no pages, ⌘K offers none of its
-// actions and links into it are text — until its journeys pass; what is
-// filled in already is what the rest of the console routes through it: where
-// an object, a folder or a rules decision opens, the ⌘K group labels, and the
-// create actions. Buckets are not per project, so there is no `projectScope`.
+// Storage's registry entry. The section stays `built: false` — the nav lists
+// no pages, ⌘K offers none of its actions, links into it are text and the
+// shell mounts no beacon — until its journeys pass; what is filled in is what
+// the rest of the console routes through it once it is: where an object, a
+// folder or a rules decision opens, the ⌘K group labels, the create actions
+// and the uploads beacon. Buckets are not per project, so there is no
+// `projectScope`.
 //
 // A registry file loads with the first route: icons, types and pure string
-// helpers only (`splitKey`, `parentOf`).
+// helpers only (`splitKey`, `parentOf`); the beacon is a lazy import, its own
+// small chunk.
 
 import { FolderPlusIcon, HardDrivesIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 import { parentOf } from '@/storage/paths'
@@ -32,6 +34,9 @@ export const storage: ConsoleSection = {
   // `storage.uploads` is this tab's own badge ("3 uploading"), set by the
   // uploads beacon; `storage.jobs` comes with every section's item.
   badges: ['storage.uploads'],
+  // While Storage is ready, on every page: the uploads badge and the
+  // leave-page guard while this tab's upload queue holds bytes.
+  shellMount: () => import('@/storage/uploads-beacon'),
   actions: [
     {
       id: 'storage.upload',

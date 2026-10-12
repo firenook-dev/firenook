@@ -53,6 +53,7 @@ import {
 } from '../drop'
 import { baseName, gsUrl, parentOf } from '../paths'
 import { folderQuery, objectQuery, objectsMetaQuery, profileQuery, rulesScope } from '../queries'
+import { useStoragePalette } from '../palette'
 import { useStorageRecents, recentsKey } from '../recents'
 import { resetFileSelection, selectionFigures, useFileSelection } from '../selection'
 import { type UploadItem, isActive, useUploadQueue } from '../upload-queue-store'
@@ -121,6 +122,7 @@ export function FilesWorkbench() {
   useEffect(() => resetFileSelection(selectionScope), [selectionScope])
 
   // Where you have been, for ⌘K.
+  const recents = useStorageRecents((state) => state.items)
   const loadRecents = useStorageRecents((state) => state.load)
   const recordRecent = useStorageRecents((state) => state.record)
   useEffect(
@@ -363,6 +365,19 @@ export function FilesWorkbench() {
       },
     },
   ])
+
+  useStoragePalette({
+    files,
+    recents,
+    actions: {
+      uploadFiles: () => filesInput.current?.click(),
+      uploadFolder: () => folderInput.current?.click(),
+      showSessions: () =>
+        fileActions.showSessions(document.querySelector('[data-testid="storage-toolbar"]')),
+      editSelection: selecting ? fileActions.editSelection : undefined,
+      emptyBucket: fileActions.askEmpty,
+    },
+  })
 
   const meta = useQuery(objectsMetaQuery(files.project))
   const profile = useQuery(profileQuery(files.project, files.bucket, files.prefix))
