@@ -22,13 +22,15 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
-use firenook_core_store::{CommitObservation, DatabaseName, Store};
+use firenook_core_store::{CommitObservation, DatabaseName, Precondition, Store, Write};
+use futures_util::FutureExt as _;
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt as _};
 use tokio::sync::watch;
 use tokio::time::Instant;
 
 use crate::api_error::ApiError;
+use crate::blocking::blocking;
 use crate::firestore::FirestoreConsole;
 use crate::jobs::JobHandle;
 use crate::section::{ClearOptions, ClearReport, SectionSummary, SummaryFigure, SummaryUnit};
@@ -334,14 +336,127 @@ pub(crate) fn status_changes(firestore: &FirestoreConsole) -> BoxStream<'static,
     .boxed()
 }
 
-/// Removes every document of every database, for `POST /suite/clear`;
-/// `None` until the observe stream implements it.
+/// Documents one reset batch deletes, as the official clear route does.
+const CLEAR_BATCH: usize = 500;
+
+/// Removes every document of every database of the project, for `POST
+/// /suite/clear`: key-only batches of 500 on the blocking pool, progress
+/// after each, the cancel checked between them. Committed as housekeeping,
+/// so no Functions trigger fires and open pages reload twice (when the
+/// reset starts and when it ends) instead of once per batch; with
+/// `run_triggers`, committed as a client would, and every listener and
+/// trigger sees each deletion as it always has.
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "the shape of the Firestore section's clear hook, which answers None for a section that cannot be cleared"
+)]
 pub(crate) fn clear(
-    _firestore: &FirestoreConsole,
-    _job: JobHandle,
-    _options: ClearOptions,
+    firestore: &FirestoreConsole,
+    job: JobHandle,
+    options: ClearOptions,
 ) -> Option<BoxFuture<'static, Result<ClearReport, ApiError>>> {
-    None
+    let store = firestore.changes.store().clone();
+    let changes = firestore.changes.clone();
+    let project = firestore.schema.project().to_owned();
+    Some(
+        async move {
+            // Which databases hold documents, and how many: one key-only
+            // pass, so the progress has a total.
+            let (databases, total) = {
+                let store = store.clone();
+                blocking("the Firestore reset", move || {
+                    let snapshot = store.snapshot();
+                    let databases = snapshot.databases(&project);
+                    let mut total: usize = 0;
+                    for database in &databases {
+                        let mut keys = snapshot.key_cursor(database, "");
+                        while keys.next().is_some() {
+                            total += 1;
+                        }
+                    }
+                    Ok((databases, u64::try_from(total).unwrap_or(u64::MAX)))
+                })
+                .await?
+            };
+            job.set_total(job.done().saturating_add(total));
+            let announce = !options.run_triggers;
+            if announce {
+                for database in &databases {
+                    changes.announce_rebuilt(database.database_id());
+                }
+            }
+            let mut removed: u64 = 0;
+            let mut outcome = Ok(());
+            'databases: for database in &databases {
+                loop {
+                    if job.cancelled() {
+                        break 'databases;
+                    }
+                    let batch = {
+                        let store = store.clone();
+                        let database = database.clone();
+                        blocking("the Firestore reset", move || {
+                            delete_batch(&store, &database, options.run_triggers)
+                        })
+                        .await
+                    };
+                    match batch {
+                        Ok(0) => break,
+                        Ok(count) => {
+                            removed += count;
+                            job.progress(removed);
+                        }
+                        Err(error) => {
+                            outcome = Err(error);
+                            break 'databases;
+                        }
+                    }
+                }
+            }
+            if announce {
+                for database in &databases {
+                    changes.announce_rebuilt(database.database_id());
+                }
+            }
+            outcome.map(|()| ClearReport {
+                section: "firestore".to_owned(),
+                removed,
+            })
+        }
+        .boxed(),
+    )
+}
+
+/// Deletes up to [`CLEAR_BATCH`] documents of `database` in one commit;
+/// how many.
+fn delete_batch(store: &Store, database: &DatabaseName, as_client: bool) -> Result<u64, ApiError> {
+    let snapshot = store.snapshot();
+    let mut keys = snapshot.key_cursor(database, "");
+    let mut writes: Vec<Write> = Vec::with_capacity(CLEAR_BATCH);
+    while writes.len() < CLEAR_BATCH {
+        let Some(key) = keys.next() else {
+            break;
+        };
+        writes.push(Write::Delete {
+            key,
+            precondition: Precondition::None,
+        });
+    }
+    if writes.is_empty() {
+        return Ok(0);
+    }
+    let committed = if as_client {
+        store.commit(&writes)
+    } else {
+        store.commit_maintenance(&writes)
+    };
+    committed.map_err(|error| {
+        ApiError::internal(format!(
+            "The reset could not delete documents of {}: {error}",
+            database.database_id()
+        ))
+    })?;
+    Ok(u64::try_from(writes.len()).unwrap_or(u64::MAX))
 }
 
 #[cfg(test)]

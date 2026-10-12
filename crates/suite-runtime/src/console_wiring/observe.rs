@@ -23,7 +23,7 @@ use firenook_rules_runtime::{
 use firenook_suite_front::{
     Audience, EntityRef, LogInput, LogLevel, LoggingRuntime, OverviewConnection,
     OverviewEngineConfig, OverviewEngineDetails, OverviewEnvSource, OverviewEnvVariable,
-    OverviewNotice, OverviewNoticeLevel, kinds,
+    OverviewNotice, OverviewNoticeLevel, SnapshotPort, kinds,
 };
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
@@ -46,10 +46,101 @@ pub(crate) fn observe_console(context: &HookContext<'_>) -> ObserveConsole {
     let demo_credentials = std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
         .map(std::path::PathBuf::from)
         .and_then(|path| demo_credentials(&path));
-    ObserveConsole::over(context.logging).with_overview(
+    let console = ObserveConsole::over(context.logging).with_overview(
         engine_details(context.config, demo_credentials),
         notices(context.config),
-    )
+    );
+    match snapshot_port(context) {
+        Some(port) => console.with_snapshots(port),
+        None => console,
+    }
+}
+
+/// What the snapshot download needs from the suite: the exporter, a
+/// staging folder beside the state directory (or under the project's
+/// `.firenook` folder when that one overlaps the state or the seed), the
+/// free space there and the size an export writes. `None` without the
+/// suite's exporter.
+pub(crate) fn snapshot_port(context: &HookContext<'_>) -> Option<SnapshotPort> {
+    let exporter = context.exporter?.clone();
+    let config = context.config.clone();
+    let services = config.services;
+    let targets: Vec<String> = [
+        ("firestore", services.firestore),
+        ("auth", services.auth),
+        ("storage", services.storage),
+    ]
+    .into_iter()
+    .filter(|(_, runs)| *runs)
+    .map(|(name, _)| name.to_owned())
+    .collect();
+    let store = context.store.cloned();
+    let project = config.project_id.clone();
+    Some(SnapshotPort {
+        exporter,
+        staging: Arc::new(move || snapshot_staging(&config)),
+        free_space: Arc::new(free_space),
+        size: Arc::new(move |targets: &std::collections::BTreeSet<String>| {
+            // Firestore's logical bytes: the bulk of nearly every export.
+            store
+                .as_ref()
+                .filter(|_| targets.contains("firestore"))
+                .map_or(0, |store| {
+                    store.snapshot().logical_memory_usage().logical_bytes
+                })
+        }),
+        targets,
+        project,
+    })
+}
+
+/// A fresh staging folder for a snapshot: beside the state directory, or
+/// under `<project dir>/.firenook/snapshots`. While the engine resumes its
+/// state from an import seed, each is checked never to nest in or hold the
+/// state directory or the seed, as every export is then.
+pub(crate) fn snapshot_staging(config: &SuiteConfig) -> Result<std::path::PathBuf, String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let name = format!(".firenook-snapshot-{}-{nanos}", std::process::id());
+    let candidates = [
+        config.state_dir.parent().map(|parent| parent.join(&name)),
+        Some(
+            config
+                .project_dir
+                .join(".firenook")
+                .join("snapshots")
+                .join(&name),
+        ),
+    ];
+    let mut refusal = String::from("no folder to stage it in");
+    for candidate in candidates.into_iter().flatten() {
+        if candidate.starts_with(&config.state_dir) {
+            continue;
+        }
+        if !config.resume_state {
+            return Ok(candidate);
+        }
+        match crate::native_state::validate_export_destination(config, &candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) => refusal = error.to_string(),
+        }
+    }
+    Err(refusal)
+}
+
+/// Bytes free on the volume holding `path` (its nearest existing folder).
+#[cfg(unix)]
+pub(crate) fn free_space(path: &std::path::Path) -> Option<u64> {
+    let existing = path.ancestors().find(|ancestor| ancestor.exists())?;
+    let stats = rustix::fs::statvfs(existing).ok()?;
+    Some(stats.f_bavail.saturating_mul(stats.f_frsize))
+}
+
+/// Other platforms report the export's own I/O error instead.
+#[cfg(not(unix))]
+pub(crate) fn free_space(_path: &std::path::Path) -> Option<u64> {
+    None
 }
 
 /// The engine's configuration and what an app needs to reach it.

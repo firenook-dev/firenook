@@ -6,12 +6,15 @@ pub(crate) mod firestore_data;
 pub(crate) mod log;
 pub(crate) mod logs;
 pub(crate) mod overview;
+pub(crate) mod snapshots;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use firenook_suite_front::{Cursor, LoggingRuntime, OverviewEngineDetails, OverviewNotice};
+use firenook_suite_front::{
+    Cursor, LoggingRuntime, OverviewEngineDetails, OverviewNotice, SnapshotPort,
+};
 use futures_util::StreamExt as _;
 use futures_util::stream::{self, BoxStream};
 
@@ -39,6 +42,9 @@ pub struct ObserveConsole {
     pub(crate) engine: Arc<OverviewEngineDetails>,
     /// The configuration notices the Overview shows.
     pub(crate) notices: Arc<Vec<OverviewNotice>>,
+    /// The suite exporter and staging rules, for the snapshot download;
+    /// `None` without a suite.
+    pub(crate) snapshots: Option<SnapshotPort>,
 }
 
 impl ObserveConsole {
@@ -63,6 +69,7 @@ impl ObserveConsole {
             log: log.map(|log| ConsoleLog::clone(&log)),
             engine: Arc::default(),
             notices: Arc::default(),
+            snapshots: None,
         }
     }
 
@@ -75,7 +82,15 @@ impl ObserveConsole {
             log: None,
             engine: Arc::default(),
             notices: Arc::default(),
+            snapshots: None,
         }
+    }
+
+    /// The same console, able to prepare snapshot downloads through `port`.
+    #[must_use]
+    pub fn with_snapshots(mut self, port: SnapshotPort) -> Self {
+        self.snapshots = Some(port);
+        self
     }
 
     /// The same console, with the engine's details and configuration
@@ -110,6 +125,11 @@ impl Section for ObserveSection {
             shutdown: context.shutdown.clone(),
         })
         .merge(overview::router(self.overview()))
+        .merge(snapshots::router(snapshots::Snapshots::new(
+            self.0.snapshots.clone(),
+            context.jobs.clone(),
+            context.shutdown.clone(),
+        )))
     }
 
     fn topics(&self, _context: &SectionContext) -> Vec<Arc<dyn LiveTopic>> {
@@ -264,6 +284,8 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     LogHistogram::export_all(config).expect("TypeScript bindings written");
     overview::OverviewState::export_all(config).expect("TypeScript bindings written");
     OverviewEngineDetails::export_all(config).expect("TypeScript bindings written");
+    snapshots::OverviewSnapshotFile::export_all(config).expect("TypeScript bindings written");
+    snapshots::OverviewSnapshotRequest::export_all(config).expect("TypeScript bindings written");
     let directory = config.out_dir().join("observe");
     std::fs::create_dir_all(&directory).expect("generated/observe/ created");
     std::fs::write(directory.join("logKinds.ts"), log_kinds_module())

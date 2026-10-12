@@ -166,3 +166,194 @@ async fn the_summary_stays_cheap_at_a_million_documents() {
     println!("summary p99 at 1,000,000 documents: {p99:?}");
     assert!(p99 < Duration::from_micros(5), "{p99:?}");
 }
+
+/// The origin of every commit the store installs, in order.
+#[derive(Default)]
+struct Origins(Mutex<Vec<firenook_core_store::CommitOrigin>>);
+
+impl firenook_core_store::CommitObserver for Origins {
+    fn committed(&self, observation: &CommitObservation) {
+        lock(&self.0).push(observation.origin);
+    }
+}
+
+fn seeded(documents: &[(&str, usize)]) -> (Store, FirestoreConsole) {
+    let store = Store::default();
+    let console = firestore_console(&store);
+    for (database, count) in documents {
+        for chunk in 0..count.div_ceil(500) {
+            let writes: Vec<Write> = (chunk * 500..((chunk + 1) * 500).min(*count))
+                .map(|index| create(database, &format!("items/{index}")))
+                .collect();
+            store.commit(&writes).expect("seeded");
+        }
+    }
+    (store, console)
+}
+
+/// Runs the clear as the suite's clear job does; the finished job.
+async fn cleared(
+    console: &FirestoreConsole,
+    options: ClearOptions,
+    cancel_at_once: bool,
+) -> crate::jobs::Job {
+    let registry = crate::jobs::JobRegistry::new();
+    let work = console.clone();
+    let job = registry
+        .start(
+            "suite",
+            "suite.clear",
+            "Clear Firestore".to_owned(),
+            None,
+            move |handle| {
+                let clear =
+                    clear(&work, handle.clone(), options).expect("Firestore can be cleared");
+                async move {
+                    let report = clear.await?;
+                    handle.set_result(serde_json::to_value(&report).expect("json"));
+                    Ok(())
+                }
+                .boxed()
+            },
+        )
+        .expect("started");
+    if cancel_at_once {
+        registry.cancel(&job.id);
+    }
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let now = registry.get(&job.id).expect("kept");
+            if now.state != crate::jobs::JobState::Running {
+                return now;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the clear finishes")
+}
+
+/// Every event `stream` has for us within a moment.
+async fn drain(stream: &mut crate::live::TopicStream) -> Vec<crate::live::TopicEvent> {
+    let mut events = Vec::new();
+    while let Ok(Some(event)) =
+        tokio::time::timeout(Duration::from_millis(400), stream.next()).await
+    {
+        events.push(event);
+    }
+    events
+}
+
+#[tokio::test]
+async fn a_reset_is_housekeeping_that_open_pages_reload_twice_for() {
+    use crate::live::{LiveTopic as _, ResetReason, TopicEvent};
+    let (store, console) = seeded(&[("(default)", 5_000), ("analytics", 1_200)]);
+    let origins = Arc::new(Origins::default());
+    store.add_commit_observer(origins.clone());
+    let topic = console.changes.topic();
+    let mut default = topic
+        .open(&serde_json::json!({ "database": "(default)" }), None)
+        .expect("opened");
+    let mut analytics = topic
+        .open(&serde_json::json!({ "database": "analytics" }), None)
+        .expect("opened");
+    drain(&mut default).await;
+    drain(&mut analytics).await;
+    let job = cleared(&console, ClearOptions::default(), false).await;
+    assert_eq!(job.state, crate::jobs::JobState::Done, "{job:?}");
+    assert_eq!(job.total, Some(6_200));
+    assert_eq!(job.done, 6_200);
+    assert_eq!(
+        job.result,
+        Some(serde_json::json!({ "section": "firestore", "removed": 6_200 }))
+    );
+    assert_eq!(store.snapshot().logical_memory_usage().entries, 0);
+    // Every batch was housekeeping: no trigger fires for one.
+    let origins = lock(&origins.0).clone();
+    assert_eq!(origins.len(), 13, "{origins:?}");
+    assert!(
+        origins
+            .iter()
+            .all(|origin| *origin == firenook_core_store::CommitOrigin::Maintenance)
+    );
+    // Each database's open page is told when the reset starts and when it
+    // ends (one reset when both land in one 100 ms window), last of all, and
+    // gets no batch.
+    for stream in [&mut default, &mut analytics] {
+        let events = drain(stream).await;
+        let rebuilt = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    TopicEvent::Reset {
+                        reason: ResetReason::Rebuilt,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!((1..=2).contains(&rebuilt), "{events:?}");
+        assert!(
+            matches!(
+                events.last(),
+                Some(TopicEvent::Reset {
+                    reason: ResetReason::Rebuilt,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, TopicEvent::Event { name: "change", .. })),
+            "{events:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_reset_that_runs_triggers_commits_as_a_client_and_sends_batches() {
+    use crate::live::{LiveTopic as _, TopicEvent};
+    let (store, console) = seeded(&[("(default)", 600)]);
+    let origins = Arc::new(Origins::default());
+    store.add_commit_observer(origins.clone());
+    let mut default = console
+        .changes
+        .topic()
+        .open(&serde_json::json!({ "database": "(default)" }), None)
+        .expect("opened");
+    drain(&mut default).await;
+    let job = cleared(&console, ClearOptions { run_triggers: true }, false).await;
+    assert_eq!(job.done, 600);
+    assert!(
+        lock(&origins.0)
+            .iter()
+            .all(|origin| *origin == firenook_core_store::CommitOrigin::Client)
+    );
+    let events = drain(&mut default).await;
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, TopicEvent::Event { name: "change", .. })),
+        "{events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| !matches!(event, TopicEvent::Reset { .. })),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_reset_stops_at_the_next_batch() {
+    let (store, console) = seeded(&[("(default)", 5_000)]);
+    let job = cleared(&console, ClearOptions::default(), true).await;
+    assert_eq!(job.state, crate::jobs::JobState::Cancelled, "{job:?}");
+    let left = store.snapshot().logical_memory_usage().entries;
+    assert!(left > 0, "the reset stopped before the end");
+    assert_eq!(left % 500, 0, "whole batches only: {left}");
+    assert_eq!(job.done, 5_000 - left);
+}

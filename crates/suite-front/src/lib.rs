@@ -18,7 +18,8 @@ pub use entity::EntityRef;
 pub use logging::LoggingRuntime;
 pub use overview_input::{
     OverviewConnection, OverviewEngineConfig, OverviewEngineDetails, OverviewEnvSource,
-    OverviewEnvVariable, OverviewNotice, OverviewNoticeLevel,
+    OverviewEnvVariable, OverviewNotice, OverviewNoticeLevel, SnapshotFreeSpace, SnapshotPort,
+    SnapshotSize, SnapshotStaging,
 };
 pub use replay::{Cursor, Entry, Follow, ReplayRing, RingBudget, RingLimits, RingSize};
 #[cfg(test)]

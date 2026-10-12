@@ -118,3 +118,43 @@ pub enum OverviewNoticeLevel {
     Info,
     Warn,
 }
+
+/// Picks a fresh staging folder for a snapshot (not created yet), or says
+/// why none can be used.
+pub type SnapshotStaging =
+    std::sync::Arc<dyn Fn() -> Result<std::path::PathBuf, String> + Send + Sync>;
+/// Bytes free on the volume holding a path, when the platform can tell.
+pub type SnapshotFreeSpace = std::sync::Arc<dyn Fn(&std::path::Path) -> Option<u64> + Send + Sync>;
+/// About how many bytes an export of these services writes.
+pub type SnapshotSize =
+    std::sync::Arc<dyn Fn(&std::collections::BTreeSet<String>) -> u64 + Send + Sync>;
+
+/// What the console's snapshot download needs from the suite: the suite
+/// exporter (the hub's export channel, one export at a time), where to
+/// stage an export, how much room one needs and how much there is.
+#[derive(Clone)]
+pub struct SnapshotPort {
+    /// The suite exporter's channel.
+    pub exporter: tokio::sync::mpsc::Sender<crate::ExportCommand>,
+    /// A fresh staging folder beside the state directory, checked against
+    /// the state directory and the import seed.
+    pub staging: SnapshotStaging,
+    /// Bytes free next to a staging folder (Unix); `None` elsewhere.
+    pub free_space: SnapshotFreeSpace,
+    /// About how many bytes an export of the named services writes.
+    pub size: SnapshotSize,
+    /// The services an export can cover in this engine: `firestore`,
+    /// `auth`, `storage`, those that run.
+    pub targets: Vec<String>,
+    /// The project id, which names the archive.
+    pub project: String,
+}
+
+impl std::fmt::Debug for SnapshotPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SnapshotPort")
+            .field("targets", &self.targets)
+            .field("project", &self.project)
+            .finish_non_exhaustive()
+    }
+}

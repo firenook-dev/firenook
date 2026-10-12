@@ -717,3 +717,102 @@ fn notices_say_what_the_startup_banner_warned_about() {
     };
     assert_eq!(codes(&demo), Vec::<String>::new());
 }
+
+#[test]
+fn a_snapshot_is_staged_beside_the_state_directory_never_inside_it() {
+    let root =
+        std::env::temp_dir().join(format!("firenook-observe-staging-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("state")).expect("state");
+    std::fs::create_dir_all(root.join("seed")).expect("seed");
+    // An import seed is an export: its metadata names what it holds.
+    for seed in [root.join("seed"), root.clone()] {
+        std::fs::write(
+            seed.join("firebase-export-metadata.json"),
+            r#"{"version":"14.0.0"}"#,
+        )
+        .expect("metadata");
+    }
+    let config = SuiteConfig {
+        state_dir: root.join("state"),
+        project_dir: root.join("app"),
+        ..test_config()
+    };
+    let staging = snapshot_staging(&config).expect("a staging folder");
+    assert_eq!(staging.parent(), Some(root.as_path()));
+    assert!(
+        staging
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(".firenook-snapshot-")),
+        "{}",
+        staging.display()
+    );
+    assert_ne!(
+        snapshot_staging(&config).expect("another"),
+        staging,
+        "each one fresh"
+    );
+    // Resuming from a seed: the sibling passes the export check.
+    let resuming = SuiteConfig {
+        resume_state: true,
+        import: Some(root.join("seed")),
+        ..config.clone()
+    };
+    let checked = snapshot_staging(&resuming).expect("a checked staging folder");
+    assert_eq!(checked.parent(), Some(root.as_path()));
+    assert!(crate::native_state::validate_export_destination(&resuming, &checked).is_ok());
+    // A seed that holds both the state's parent and the project is refused
+    // with the engine's reason.
+    let holding = SuiteConfig {
+        resume_state: true,
+        import: Some(root.clone()),
+        project_dir: root.join("app"),
+        ..config.clone()
+    };
+    let refused = snapshot_staging(&holding).expect_err("every candidate overlaps the seed");
+    assert!(refused.contains("separate"), "{refused}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn free_space_is_read_from_the_nearest_existing_folder() {
+    let missing = std::env::temp_dir()
+        .join("firenook-observe-no-such-folder")
+        .join("deeper");
+    let free = free_space(&missing).expect("the volume's free space");
+    assert!(free > 0);
+}
+
+#[tokio::test]
+async fn the_snapshot_port_covers_the_running_services_and_sizes_firestore() {
+    let (logging, _) = captured();
+    let config = SuiteConfig {
+        services: ServiceSelection::parse("firestore,auth").expect("selection"),
+        ..test_config()
+    };
+    let foreign = ForeignProjects::default();
+    let triggers = TriggerRegistry::default();
+    let store = Store::default();
+    store
+        .commit(&[Write::Create {
+            key: DocumentKey::new(database(), "users/u_1").expect("key"),
+            fields: Fields::new(),
+        }])
+        .expect("seeded");
+    let (exporter, _commands) = tokio::sync::mpsc::channel(1);
+    let base = HookContext::new(&config, &logging, &foreign, &triggers);
+    assert!(snapshot_port(&base).is_none(), "no exporter, no snapshots");
+    let port = snapshot_port(&HookContext {
+        exporter: Some(&exporter),
+        store: Some(&store),
+        ..base
+    })
+    .expect("a port");
+    assert_eq!(port.targets, ["firestore", "auth"]);
+    assert_eq!(port.project, "demo-diagnostics");
+    let everything: std::collections::BTreeSet<String> = ["firestore".to_owned()].into();
+    assert!((port.size)(&everything) > 0);
+    assert_eq!((port.size)(&std::collections::BTreeSet::new()), 0);
+}
