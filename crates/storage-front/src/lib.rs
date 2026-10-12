@@ -228,12 +228,27 @@ impl StorageRuntime {
         queue: DispatchQueue,
         background: TriggerRegistry,
     ) -> Result<Self, StorageError> {
-        validate_config(&config)?;
+        // The directories off the runtime's threads; the rest of opening is
+        // reading the metadata store, as `open` does.
         tokio::fs::create_dir_all(config.data_dir.join("objects"))
             .await
             .map_err(|error| StorageError(format!("failed to create Storage root: {error}")))?;
-        tokio::fs::create_dir_all(config.data_dir.join("uploads"))
-            .await
+        Self::open(config, options, queue, background)
+    }
+
+    /// [`Self::start_with`], without awaiting: opening is local disk work.
+    /// Call it from within a Tokio runtime (its background tasks start
+    /// there).
+    pub fn open(
+        config: StorageConfig,
+        options: StorageOptions,
+        queue: DispatchQueue,
+        background: TriggerRegistry,
+    ) -> Result<Self, StorageError> {
+        validate_config(&config)?;
+        std::fs::create_dir_all(config.data_dir.join("objects"))
+            .map_err(|error| StorageError(format!("failed to create Storage root: {error}")))?;
+        std::fs::create_dir_all(config.data_dir.join("uploads"))
             .map_err(|error| StorageError(format!("failed to create upload root: {error}")))?;
         let (metadata, mut data) =
             metadata::MetadataStore::open(&config.data_dir, config.durability)?;

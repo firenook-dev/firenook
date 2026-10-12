@@ -10,15 +10,15 @@ use firenook_suite_front::{Audience, LogInput, LogLevel, LoggingRuntime};
 use super::{FunctionsConsoleOptions, HookContext};
 use crate::SuiteConfig;
 
-/// Storage's console: the Storage emulator's own application.
+/// Storage's console: the Storage emulator's own application, the
+/// service's console handle, and the suite's log for the `storage.denied`
+/// lines.
 pub(crate) fn storage_console(
     storage: &Arc<StorageRuntime>,
     _config: &SuiteConfig,
-    _logging: &LoggingRuntime,
+    logging: &LoggingRuntime,
 ) -> StorageConsole {
-    StorageConsole {
-        native: storage.application(),
-    }
+    StorageConsole::new(storage.application(), storage.console(), logging.clone())
 }
 
 /// Storage's own log lines (rules runtime errors, failed flushes) as suite

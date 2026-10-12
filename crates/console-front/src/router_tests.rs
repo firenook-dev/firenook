@@ -85,9 +85,9 @@ pub(crate) fn full_services(store: &Store, hosts: AllowedHosts) -> ConsoleServic
             native: auth_application(),
             runtime: auth_runtime(),
         }),
-        storage: Some(StorageConsole {
-            native: native_application("storage"),
-        }),
+        storage: Some(crate::storage::router_console(native_application(
+            "storage",
+        ))),
         compute: Some(compute),
         pubsub: Some(pubsub),
         tasks: Some(tasks),
