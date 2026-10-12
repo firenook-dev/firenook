@@ -24,6 +24,7 @@ pub mod discovery;
 pub mod dotenv;
 pub mod log;
 pub mod manifest;
+pub mod monitor;
 pub mod registry;
 mod server;
 mod watcher;
@@ -31,6 +32,7 @@ pub mod worker;
 
 pub use log::{LogEvent, LogSink};
 pub use manifest::Definition;
+pub use monitor::{LiveSink, Monitor, MonitorLimits};
 pub use registry::BlockingConfig;
 
 /// The gcloud configuration directory every worker sees.
