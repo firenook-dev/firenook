@@ -41,21 +41,13 @@ impl SourceWatcher {
         // the runtime that started the watcher.
         let handle = tokio::runtime::Handle::current();
         let (sender, receiver) = std::sync::mpsc::channel::<Vec<PathBuf>>();
+        let root = directory.to_path_buf();
         let mut watcher =
             notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
                 let Ok(event) = event else {
                     return;
                 };
-                if !matches!(
-                    event.kind,
-                    notify::EventKind::Modify(_)
-                        | notify::EventKind::Create(_)
-                        | notify::EventKind::Remove(_)
-                ) {
-                    return;
-                }
-                let kept: Vec<PathBuf> =
-                    event.paths.into_iter().filter(|path| keep(path)).collect();
+                let kept = changed_paths(event, &root, mode, &keep);
                 if !kept.is_empty() {
                     let _ = sender.send(kept);
                 }
@@ -121,6 +113,46 @@ impl SourceWatcher {
     pub fn stop(self) {
         self.stopped.store(true, Ordering::SeqCst);
     }
+}
+
+/// The paths one notification reports, `keep` applied. A rescan notice
+/// (macOS `FSEvents`' "must scan subdirectories" when its queue overflows under
+/// heavy disk activity, or notify's own) says events were lost and anything
+/// may have changed: a recursive watch reports its directory, a flat watch
+/// every entry `keep` accepts that is there now (the consumers compare
+/// content, so an unchanged file reads as unchanged). Without this a save
+/// during a burst of other disk work went unheard.
+fn changed_paths(
+    event: notify::Event,
+    root: &Path,
+    mode: WatchMode,
+    keep: &dyn Fn(&Path) -> bool,
+) -> Vec<PathBuf> {
+    if event.need_rescan() {
+        return match mode {
+            WatchMode::Recursive => vec![root.to_path_buf()],
+            WatchMode::NonRecursive => {
+                let mut entries: Vec<PathBuf> = std::fs::read_dir(root)
+                    .map(|entries| {
+                        entries
+                            .filter_map(Result::ok)
+                            .map(|entry| entry.path())
+                            .filter(|path| keep(path))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                entries.sort();
+                entries
+            }
+        };
+    }
+    if !matches!(
+        event.kind,
+        notify::EventKind::Modify(_) | notify::EventKind::Create(_) | notify::EventKind::Remove(_)
+    ) {
+        return Vec::new();
+    }
+    event.paths.into_iter().filter(|path| keep(path)).collect()
 }
 
 /// The reload watcher's filter: whether a change under `root` is ignored.
@@ -242,6 +274,45 @@ mod tests {
         assert!(is_env_file(".secret.local"));
         assert!(!is_env_file(".envrc"));
         assert!(!is_env_file("env"));
+    }
+
+    #[test]
+    fn a_rescan_notice_reports_what_may_have_changed() {
+        use notify::event::{EventKind, Flag, ModifyKind};
+        let directory = tempfile::tempdir().expect("a directory");
+        let root = directory.path();
+        std::fs::write(root.join(".env"), "A=1\n").expect("written");
+        std::fs::write(root.join("index.js"), "x").expect("written");
+        let env_only = |path: &Path| {
+            path.file_name()
+                .is_some_and(|name| is_env_file(&name.to_string_lossy()))
+        };
+        let rescan = || notify::Event::new(EventKind::Other).set_flag(Flag::Rescan);
+        // A recursive watch: its directory, whatever `keep` says of it.
+        assert_eq!(
+            changed_paths(rescan(), root, WatchMode::Recursive, &|_| false),
+            [root.to_path_buf()],
+        );
+        // A flat watch: every entry it keeps that is there now.
+        assert_eq!(
+            changed_paths(rescan(), root, WatchMode::NonRecursive, &env_only),
+            [root.join(".env")],
+        );
+        // An ordinary change still reports only its own kept paths, and
+        // other kinds of event report nothing.
+        let modified = notify::Event::new(EventKind::Modify(ModifyKind::Any))
+            .add_path(root.join("index.js"))
+            .add_path(root.join(".env"));
+        assert_eq!(
+            changed_paths(modified, root, WatchMode::NonRecursive, &env_only),
+            [root.join(".env")],
+        );
+        let accessed = notify::Event::new(EventKind::Access(notify::event::AccessKind::Any))
+            .add_path(root.join(".env"));
+        assert_eq!(
+            changed_paths(accessed, root, WatchMode::NonRecursive, &env_only),
+            Vec::<PathBuf>::new(),
+        );
     }
 
     #[tokio::test]

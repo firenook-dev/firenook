@@ -6,7 +6,6 @@ import { setVisibility } from './support/live'
 import {
   ADA,
   GRACE,
-  type LogEntry,
   NEEDS_ATTRIBUTION,
   attributesInvocations,
   callFunction,
@@ -284,23 +283,14 @@ test('debug lines show by default, and engine internals are one switch away', as
   )
 
   // Saving a file of the codebase: the engine's debug line about the reload.
-  // On a busy disk macOS can drop a lone metadata change before the
-  // engine's watcher hears it, so the file is saved again, as a developer
-  // would, until the engine says it saw a save.
+  // (A save the platform's watcher drops under heavy disk activity arrives
+  // as a rescan notice, which the engine treats as a change.)
   const before = await cursorOf(engine, '"Functions routing refreshed"')
   const { utimesSync } = await import('node:fs')
   const { join } = await import('node:path')
-  const source = join(engine.directory, 'functions', 'observe.js')
-  let detected: LogEntry | undefined
-  for (let save = 0; save < 3 && detected === undefined; save += 1) {
-    const now = new Date()
-    utimesSync(source, now, now)
-    detected = await lineOf(engine, '"File change detected"', {
-      ...(before ? { after: before } : {}),
-      timeout: 8_000,
-    }).catch(() => undefined)
-  }
-  if (!detected) throw new Error('The engine reported none of three saves of observe.js.')
+  const now = new Date()
+  utimesSync(join(engine.directory, 'functions', 'observe.js'), now, now)
+  const detected = await lineOf(engine, '"File change detected"', before ? { after: before } : {})
   expect(detected.level).toBe('debug')
   const row = page.locator(`[data-testid="log-row"][data-cursor="${detected.cursor}"]`)
   await expect(row).toBeVisible()
