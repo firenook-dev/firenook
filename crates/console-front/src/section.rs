@@ -20,6 +20,7 @@ use crate::foreign::ForeignProjects;
 use crate::instance::Instance;
 use crate::live::LiveTopic;
 use crate::live::badges::BadgeBoard;
+use crate::search::SearchSource;
 use crate::sse::Shutdown;
 
 /// The sidebar's sections in their one canonical order, read from the file
@@ -106,6 +107,10 @@ pub(crate) trait Section: Send + Sync + 'static {
     /// Live topics this section publishes.
     fn topics(&self, _context: &SectionContext) -> Vec<Arc<dyn LiveTopic>> {
         Vec::new()
+    }
+    /// What ⌘K finds here (`GET /search`).
+    fn search(&self, _context: &SectionContext) -> Option<Arc<dyn SearchSource>> {
+        None
     }
     /// Counts and a headline for sidebar section `id` (one this module
     /// answers for), for the Overview and the nav tooltip. Cheap: counters

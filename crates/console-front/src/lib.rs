@@ -14,7 +14,9 @@ mod blocking;
 mod compute;
 mod databases;
 mod explain;
+mod filter;
 mod firestore;
+mod firestore_search;
 mod foreign;
 mod guard;
 mod http;
@@ -23,9 +25,11 @@ mod late;
 mod live;
 mod messaging;
 mod observe;
+mod paging;
 mod rules;
 mod rules_eval;
 mod schema;
+mod search;
 mod section;
 mod sse;
 mod storage;
@@ -58,6 +62,7 @@ pub use explain::{
     ExplainCandidates, ExplainIndex, ExplainIndexField, ExplainOrder, ExplainStrategy, Explanation,
     QueryExplainer,
 };
+pub use filter::FieldSpecInfo;
 pub use firestore::{
     ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, ChangedCollection, DocumentChange,
     FirestoreConsole,
@@ -75,6 +80,7 @@ pub use live::{
 };
 pub use messaging::{PubsubConsole, TasksConsole};
 pub use observe::ObserveConsole;
+pub use paging::{BatchGetItem, BatchGetRequest, BatchGetResponse, ListMeta, Page, Total};
 pub use rules::{
     CollectionRules, GoverningMatch, OutlineAllow, OutlineMatch, RulesChanged, RulesCheck,
     RulesDiagnostic, RulesDocument, RulesEditor, RulesFileStatus, RulesInstalled, RulesLintCode,
@@ -90,6 +96,7 @@ pub use schema::{
     ParentSubcollections, SchemaError, SchemaIndex, SchemaNode, SchemaSnapshot, Subcollection,
     SubcollectionsSnapshot,
 };
+pub use search::{SearchGroup, SearchHit, SearchResults};
 pub use section::{
     AbsentKind, AbsentReason, SectionFix, SectionFixKind, SectionState, SectionStatus,
     SectionSummary, SummaryFigure, SummaryUnit,
@@ -500,9 +507,14 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         },
         services.shutdown.clone(),
     );
+    let sources = sections
+        .iter()
+        .filter_map(|section| section.search(&context))
+        .collect();
     let mut api = Router::new()
         .route("/status", get(status_route))
         .with_state(status)
+        .merge(search::Search::new(sources).router())
         .merge(suite::memory_router(context.rings.clone()))
         .merge(services.suite.router())
         .merge(hub.router());
@@ -737,6 +749,11 @@ mod tests {
         ExportDestination::export_all(&config).expect("TypeScript bindings written");
         ExportResult::export_all(&config).expect("TypeScript bindings written");
         MemoryReport::export_all(&config).expect("TypeScript bindings written");
+        Page::<()>::export_all(&config).expect("TypeScript bindings written");
+        BatchGetRequest::export_all(&config).expect("TypeScript bindings written");
+        BatchGetResponse::<()>::export_all(&config).expect("TypeScript bindings written");
+        ListMeta::export_all(&config).expect("TypeScript bindings written");
+        SearchResults::export_all(&config).expect("TypeScript bindings written");
         live::export_bindings(&config);
         auth::export_bindings(&config);
         storage::export_bindings(&config);
@@ -755,6 +772,12 @@ mod tests {
         );
         let figure = std::fs::read_to_string(format!("{out}/SummaryFigure.ts")).expect("read");
         assert!(figure.contains("value: number | null"), "{figure}");
+        // Generic types are written once, generic.
+        let page = std::fs::read_to_string(format!("{out}/Page.ts")).expect("read");
+        assert!(page.contains("export type Page<T>"), "{page}");
+        assert!(page.contains("items: Array<T>"), "{page}");
+        let batch = std::fs::read_to_string(format!("{out}/BatchGetResponse.ts")).expect("read");
+        assert!(batch.contains("BatchGetResponse<T>"), "{batch}");
         let badge = std::fs::read_to_string(format!("{out}/live/Badge.ts")).expect("read");
         assert!(badge.contains("cursor?: string"), "{badge}");
         // Live types live in their own directory and import root types

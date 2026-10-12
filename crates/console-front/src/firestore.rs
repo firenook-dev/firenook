@@ -38,6 +38,7 @@ use ts_rs::TS;
 use crate::api_error::ApiError;
 use crate::databases::DatabaseCatalog;
 use crate::explain::QueryExplainer;
+use crate::firestore_search::FirestoreSearch;
 use crate::http::forwarded;
 use crate::live::badges::{BadgeKind, BadgeNoun};
 use crate::live::replay::{ReplayOptions, replay_topic};
@@ -45,6 +46,7 @@ use crate::live::{LiveTopic, ResetReason, TopicEvent, TopicStream, topic_params}
 use crate::rules::RulesEditor;
 use crate::rules_eval::RulesEvaluator;
 use crate::schema::SchemaIndex;
+use crate::search::SearchSource;
 use crate::section::{Section, SectionContext, SectionStatus, SectionSummary};
 use crate::sse::{Shutdown, json_event, sse_response};
 use crate::time::rfc3339;
@@ -709,6 +711,13 @@ impl Section for FirestoreSection {
             Arc::new(self.0.changes.topic()),
             Arc::new(self.0.rules.topic()),
         ]
+    }
+
+    fn search(&self, _context: &SectionContext) -> Option<Arc<dyn SearchSource>> {
+        Some(Arc::new(FirestoreSearch::new(
+            self.0.schema.clone(),
+            self.0.databases.clone(),
+        )))
     }
 
     fn summary(&self, _id: &str) -> Option<SectionSummary> {
