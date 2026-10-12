@@ -36,7 +36,7 @@ use ts_rs::TS;
 use super::ComputeState;
 use super::extensions::ExtensionsChanged;
 use super::filters::{event_filter, invocation_filter};
-use super::functions::{FunctionCodebaseEntry, invocation_view};
+use super::functions::{FunctionCodebaseEntry, invocation_view, kept};
 use super::live::{ComputeLive, EventarcMeta, FunctionsMeta};
 use crate::api_error::{ApiError, ApiErrorDetail};
 use crate::live::replay::{MAX_ITEMS, ReplayOptions, WINDOW, replay_topic};
@@ -321,7 +321,7 @@ impl LiveTopic for Invocation {
     ) -> Result<TopicStream, ApiError> {
         let InvocationParams { id } = topic_params(params)?;
         let monitor = self.state.monitor().clone();
-        if monitor.invocation(&id).is_none() {
+        if !kept(&monitor, &id) {
             return Err(not_kept(&monitor, &id));
         }
         // Subscribed before the snapshot is read, so no change is lost

@@ -1260,7 +1260,7 @@ async fn reveal_header(
     Path((id, name)): Path<(String, String)>,
 ) -> Result<Json<FunctionRevealedValue>, ApiError> {
     let monitor = state.monitor();
-    if monitor.invocation(&id).is_none() {
+    if !kept(monitor, &id) {
         return Err(not_kept(monitor, &id));
     }
     monitor
@@ -1274,7 +1274,7 @@ async fn recorded_body(
     Path((id, part)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
     let monitor = state.monitor();
-    if monitor.invocation(&id).is_none() {
+    if !kept(monitor, &id) {
         return Err(not_kept(monitor, &id));
     }
     let body = match part.as_str() {
@@ -1316,7 +1316,7 @@ async fn replay(
 ) -> Result<Response, ApiError> {
     let runtime = state.runtime()?;
     let monitor = state.monitor();
-    if monitor.invocation(&id).is_none() {
+    if !kept(monitor, &id) {
         return Err(not_kept(monitor, &id));
     }
     let stream = runtime.replay(&id).await.map_err(console_error)?;
@@ -1424,6 +1424,15 @@ async fn restart(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/// Whether the monitor still keeps invocation `id`, without copying its
+/// record.
+pub(crate) fn kept(monitor: &Monitor, id: &str) -> bool {
+    monitor
+        .seq_of(id)
+        .and_then(|seq| monitor.summary(seq))
+        .is_some()
+}
 
 fn no_codebase(codebase: &str) -> ApiError {
     ApiError::not_found(format!("There is no codebase {codebase}."))
