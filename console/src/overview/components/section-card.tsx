@@ -2,8 +2,8 @@
 // it is healthy, the address an app connects to, the figures its stream
 // counts (`SectionStatus.summary`), its current problems (the section's
 // gauge badges, each linking to the page that carries it) and where to go
-// from here. A section whose stream counts nothing yet shows its address
-// and state, never a made-up zero.
+// from here. A section whose stream counts nothing yet shows its address,
+// its state and a line of what it holds, never a made-up zero.
 
 import { Tooltip, cn } from '@cloudflare/kumo'
 import { WarningIcon } from '@phosphor-icons/react'
@@ -13,7 +13,7 @@ import type { SummaryFigure } from '@/api/generated/SummaryFigure'
 import { CopyField } from '@/components/console/copy-button'
 import { StatusDot } from '@/components/kit'
 import { useFlash } from '../flash'
-import { type SectionCard as Card, addressOf, cardConnect, figureText } from '../model'
+import { type SectionCard as Card, addressOf, cardConnect, cardHolds, figureText } from '../model'
 import { LINK_CLASS, TextLink } from './text-link'
 
 export function SectionCard({
@@ -101,6 +101,15 @@ export function SectionCard({
           {status.detail}
         </p>
       ) : null}
+
+      {figures.length === 0 && status.state === 'ready' && (
+        <p
+          className="line-clamp-2 text-[12px] leading-4 text-kumo-subtle"
+          data-testid={`overview-card-${section.id}-holds`}
+        >
+          {cardHolds(section.id)}
+        </p>
+      )}
 
       {figures.length > 0 && (
         <dl

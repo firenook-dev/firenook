@@ -87,6 +87,24 @@ describe('a section card', () => {
     expect(within(article).getByRole('link', { name: 'Open Firestore' })).toBeInTheDocument()
     expect(within(article).getByRole('link', { name: 'Rules' })).toBeInTheDocument()
     expect(screen.getByTestId('overview-card-firestore-health')).toHaveTextContent('Running')
+    expect(screen.queryByTestId('overview-card-firestore-holds')).not.toBeInTheDocument()
+  })
+
+  it('says what a section holds while it counts nothing, never a made-up figure', async () => {
+    const status = testStatus({
+      projectId: 'demo-overview',
+      services,
+      sections: [sectionEntry('firestore')],
+    })
+    const [card] = sectionCards(status, new Map())
+    if (!card) throw new Error('no card')
+    await renderInConsole(() => <SectionCard card={card} tick={status} onConnect={() => {}} />, {
+      status,
+    })
+    expect(screen.getByTestId('overview-card-firestore-holds')).toHaveTextContent(
+      'Documents in every database, and the rules that guard them.',
+    )
+    expect(screen.queryByTestId('overview-card-firestore-figures')).not.toBeInTheDocument()
   })
 
   it('flashes a figure that changed, and only once in a burst of changes', async () => {

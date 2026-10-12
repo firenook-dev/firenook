@@ -272,6 +272,27 @@ export function holdsNothing(summary: SectionSummary | null): boolean {
   return summary?.figures[0]?.value === 0
 }
 
+/**
+ * What a section holds, in one sentence: what its card says in place of
+ * figures while the section's stream counts nothing, so the card reads as
+ * the section it opens rather than an empty box. Never a number.
+ */
+const CARD_HOLDS: Record<SectionId, string> = {
+  firestore: 'Documents in every database, and the rules that guard them.',
+  auth: 'Users and tenants, and every code and link the emulator sends.',
+  storage: 'Buckets and their objects, and the rules that guard them.',
+  functions: 'HTTP, callable and background functions, and every invocation.',
+  extensions: 'Extension instances from firebase.json, running beside your functions.',
+  eventarc: 'Custom events published to channels, and the functions they reach.',
+  pubsub: 'Topics and subscriptions, and every message published to them.',
+  tasks: 'Queues and their tasks, dispatched to your functions.',
+  logs: 'Every line every service logs, in one place.',
+}
+
+export function cardHolds(id: SectionId): string {
+  return CARD_HOLDS[id]
+}
+
 /** The snippet a card's "Connect" opens: what an app of that section is written with. */
 const CARD_CONNECT: Partial<Record<SectionId, ConnectParam>> = {
   firestore: 'web',
