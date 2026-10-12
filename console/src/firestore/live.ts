@@ -27,7 +27,14 @@ import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { EMPTY_QUERY, type WorkbenchQuery, parseQuery } from './query'
 import { FS } from './queries'
-import { type FirestoreScope, type QueryPage, batchGetDocuments, keySlot } from './rest'
+import { identityOfKey } from '@/lib/identity'
+import {
+  type FirestoreScope,
+  type QueryPage,
+  batchGetDocuments,
+  keySlot,
+  withIdentity,
+} from './rest'
 import type { FsDocument, FsValue } from './value'
 
 interface LiveState {
@@ -305,10 +312,11 @@ async function patchUpdated(
       for (const entry of entries) for (const path of entry.paths) wanted.add(path)
       let fetched: Map<string, FsDocument>
       try {
-        const documents = await batchGetDocuments(
-          { ...scope, authorization: identity || undefined },
-          [...wanted],
-        )
+        // The pages were read as `identity`; so are their patches, or a
+        // document the rules hide from it would appear in its grid.
+        const documents = await batchGetDocuments(withIdentity(scope, identityOfKey(identity)), [
+          ...wanted,
+        ])
         fetched = new Map(documents.map((document) => [document.path, document]))
       } catch {
         // Refused as this identity (the rules changed under it) or not

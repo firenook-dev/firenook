@@ -1529,9 +1529,17 @@ indenting: paste instead (`pasteRules`).
   rows. Payloads are paths only, never documents. No route of its own
   streams: `only_live_streams` (console-front) fails if one does, and the
   `EventSource` global is a lint error outside `src/lib/live`.
-- Identity: `Authorization: Bearer owner` bypasses rules; "view as" mints
-  an unsigned `alg: none` emulator token for an Auth user
-  (`src/firestore/view-as.ts`), so rules run exactly as for the app.
+- Identity: `Authorization: Bearer owner` bypasses rules; "view as" is the
+  kit's `IdentityPicker` (`components/console/identity-picker.tsx`, test id
+  `view-as`) over `lib/identity.ts`: an Auth user reads with the token the
+  Auth emulator itself issues for the account (`POST /auth/tokens`, cached
+  under `['auth', project, 'token', tenant, uid]`, minted again five minutes
+  before it expires and once more on a 401), found through the bounded
+  `GET /auth/identities` search, never every account; a custom identity (any
+  uid and claims) and a uid the engine cannot mint read with an unsigned
+  `alg: none` token made in the browser. `FirestoreScope` carries `identity`
+  and `authorize(signal)`; query keys hold `identityKey(identity)`, never a
+  token, so rules run exactly as for the app.
 - View state is the URL (`path`, `q`, `group`, `as`, `doc`, `tab`);
   selection and focus are Zustand; queries are keyed
   `['fs', db, kind, scope, ...]` so the channel can target them.

@@ -7,11 +7,14 @@ import { cn } from '@cloudflare/kumo'
 
 export type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
 
+// Kumo's `inactive` is a text colour only (`--text-color-kumo-inactive`), so
+// a `bg-kumo-inactive` dot was drawn in nothing at all; `interact` is the same
+// grey in both modes as a fill.
 const DOT: Record<StatusTone, string> = {
   success: 'bg-kumo-success',
   warning: 'bg-kumo-warning',
   danger: 'bg-kumo-danger',
-  neutral: 'bg-kumo-inactive',
+  neutral: 'bg-kumo-interact',
   brand: 'bg-kumo-brand',
 }
 
@@ -46,7 +49,12 @@ export function StatusDot({
       <span className="relative flex size-1.5" aria-hidden>
         {pulse && (
           <span
-            className={cn('absolute inline-flex size-full animate-ping rounded-full', DOT[tone])}
+            className={cn(
+              // Still for anyone who asked their system for less motion.
+              'absolute inline-flex size-full animate-ping rounded-full motion-reduce:hidden',
+              DOT[tone],
+            )}
+            data-part="pulse"
           />
         )}
         <span className={cn('relative inline-flex size-1.5 rounded-full', DOT[tone])} />

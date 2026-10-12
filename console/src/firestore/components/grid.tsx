@@ -865,7 +865,10 @@ function QueryFailure({ error }: { error: Error }) {
                     search: {
                       db: workbench.database === DEFAULT_DATABASE ? undefined : workbench.database,
                       path: workbench.collectionPath || undefined,
-                      uid: workbench.viewAs.kind === 'user' ? workbench.viewAs.uid : undefined,
+                      uid:
+                        workbench.viewAs.kind === 'user' || workbench.viewAs.kind === 'custom'
+                          ? workbench.viewAs.uid
+                          : undefined,
                       denied: true,
                       pick: true,
                     },
@@ -892,7 +895,9 @@ function describe(workbench: ReturnType<typeof useWorkbench>): string {
     ? 'an anonymous client'
     : viewAs.kind === 'user'
       ? (viewAs.email ?? viewAs.uid)
-      : 'admin'
+      : viewAs.kind === 'custom'
+        ? `${viewAs.email ?? viewAs.uid}, a custom identity`
+        : 'admin'
 }
 
 /**

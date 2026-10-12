@@ -14,18 +14,18 @@ import {
   listMissingDocuments,
   runQuery,
 } from './rest'
+import { identityKey } from '@/lib/identity'
 import { type FsDocument, type RestValue, encodeValue } from './value'
-import { listAuthUsers } from './view-as'
 
 export const FS = 'fs' as const
 
 export function scopeKey(scope: FirestoreScope): string {
-  return `${scope.project}/${scope.database}/${scope.authorization ?? 'anonymous'}`
+  return `${scope.project}/${scope.database}/${identityKey(scope.identity)}`
 }
 
 export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
   queryOptions({
-    queryKey: [FS, keySlot(scope), 'collections', parent, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'collections', parent, identityKey(scope.identity)],
     queryFn: () => listCollectionIds(scope, parent),
     staleTime: 30_000,
     retry: false,
@@ -34,7 +34,7 @@ export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
 /** Document ids in one collection from a prefix, for completing a reference. */
 export const documentIdsQuery = (scope: FirestoreScope, collection: string, from: string) =>
   queryOptions({
-    queryKey: [FS, keySlot(scope), 'ids', collection, from, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'ids', collection, from, identityKey(scope.identity)],
     queryFn: () => listDocumentIds(scope, collection, from, 20),
     staleTime: 30_000,
     retry: false,
@@ -55,7 +55,7 @@ export const countQueryOptions = (
       collectionPath,
       group,
       printQuery({ ...query, limit: 1 }),
-      scope.authorization ?? '',
+      identityKey(scope.identity),
     ],
     queryFn: () => {
       // A count has no limit; the structured query drops it.
@@ -74,7 +74,7 @@ export const countQueryOptions = (
 
 export const documentQuery = (scope: FirestoreScope, path: string) =>
   queryOptions({
-    queryKey: [FS, keySlot(scope), 'doc', path, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'doc', path, identityKey(scope.identity)],
     queryFn: () => getDocument(scope, path),
     staleTime: 30_000,
     retry: false,
@@ -82,17 +82,10 @@ export const documentQuery = (scope: FirestoreScope, path: string) =>
 
 export const missingDocumentsQuery = (scope: FirestoreScope, collectionPath: string) =>
   queryOptions({
-    queryKey: [FS, keySlot(scope), 'missing', collectionPath, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'missing', collectionPath, identityKey(scope.identity)],
     queryFn: () => listMissingDocuments(scope, collectionPath, 300),
     staleTime: 30_000,
     retry: false,
-  })
-
-export const authUsersQuery = (project: string) =>
-  queryOptions({
-    queryKey: ['auth', project, 'users'],
-    queryFn: () => listAuthUsers(project),
-    staleTime: 60_000,
   })
 
 /** `users/u1/orders` → parent `users/u1`, collection `orders`; group queries run from the root. */
@@ -168,7 +161,7 @@ export const pageQueryOptions = (
       collectionPath,
       group,
       printQuery(query),
-      scope.authorization ?? '',
+      identityKey(scope.identity),
     ],
     queryFn: async ({ pageParam }: { pageParam: PageParam }) => {
       if (pageParam && 'before' in pageParam) {

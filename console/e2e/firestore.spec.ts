@@ -298,6 +298,66 @@ test('viewing as a user applies the rules the app would hit', async ({ page }) =
   await expect(page.getByTestId('decisions')).toContainText(/line \d+/)
 })
 
+test('view as picks an Auth user, read with the token the engine minted, or a custom identity', async ({
+  page,
+}) => {
+  const minted: unknown[] = []
+  page.on('request', (request) => {
+    if (request.url().endsWith('/console/api/v1/auth/tokens'))
+      minted.push(JSON.parse(request.postData() ?? 'null'))
+  })
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+
+  // The users come from the engine's bounded identity search, never every account.
+  await page.getByTestId('view-as').click()
+  const ada = page.getByRole('menuitem', { name: /ada@example\.test/ })
+  await expect(ada).toContainText('u_k65eq')
+  await ada.click()
+  await expect(page).toHaveURL(/as=u_k65eq(%3A|:)ada(%40|@)example\.test/)
+  await expect(page.getByTestId('view-as')).toHaveAttribute('data-kind', 'user')
+  // Listing every user is not hers to do; her own document is.
+  await expect(page.getByText('Denied by security rules')).toBeVisible()
+  // One mint for every read the page made as her, the grid, the count and the tree.
+  expect(minted).toEqual([{ uid: 'u_k65eq' }])
+  await page.goto(
+    `${origin()}/console/firestore?path=users&as=u_k65eq%3Aada%40example.test&doc=users%2Fu_k65eq`,
+  )
+  await expect(page.getByTestId('inspector').getByLabel('displayName value')).toHaveValue(
+    'Ada Lovelace',
+  )
+
+  // A custom identity: any uid and claims, minted in the browser, no Auth record needed.
+  await page.getByTestId('view-as').click()
+  await page.getByTestId('view-as-custom').click()
+  const form = page.getByTestId('view-as-custom-dialog')
+  await expect(form).toBeVisible()
+  // It starts from the identity in force.
+  await expect(form.getByTestId('view-as-custom-dialog-uid')).toHaveValue('u_k65eq')
+  await form.getByTestId('view-as-custom-dialog-uid').fill('u_3wc4h')
+  await form.getByTestId('view-as-custom-dialog-email').fill('')
+  await form.getByTestId('view-as-custom-dialog-use').click()
+  await expect(form).toBeHidden()
+  await expect(page).toHaveURL(/as=custom\./)
+  await expect(page.getByTestId('view-as')).toHaveAttribute('data-kind', 'custom')
+  await expect(page.getByTestId('view-as')).toContainText('u_3wc4h')
+  // Grace's own document reads as her uid; Ada's no longer does.
+  const asGrace = new URL(page.url()).searchParams.get('as') ?? ''
+  await page.goto(
+    `${origin()}/console/firestore?path=users&as=${encodeURIComponent(asGrace)}&doc=users%2Fu_3wc4h`,
+  )
+  await expect(page.getByTestId('inspector').getByLabel('displayName value')).toBeVisible()
+  await page.goto(
+    `${origin()}/console/firestore?path=users&as=${encodeURIComponent(asGrace)}&doc=users%2Fu_k65eq`,
+  )
+  await expect(page.getByTestId('inspector')).toContainText(/denied|permission|insufficient/i)
+  await expect(page.getByTestId('inspector').getByLabel('displayName value')).toHaveCount(0)
+  // Only the Auth user's token came from the engine (once per page load:
+  // the page's reads share it); the custom identity's never does.
+  expect(minted.length).toBeGreaterThan(0)
+  for (const asked of minted) expect(asked).toEqual({ uid: 'u_k65eq' })
+})
+
 test('the inspector saves typed edits and the change flashes back through the live channel', async ({
   page,
 }) => {
@@ -1645,7 +1705,12 @@ test('an integer and a double are told apart, and stay that way', async ({ page 
   expect(after.fields.count).toEqual({ integerValue: '4' })
 
   // Duplicating writes every field, which is where the narrowing used to
-  // happen without anyone touching the number at all.
+  // happen without anyone touching the number at all. The save's toast
+  // sits over the inspector's footer for a few seconds, and a pointer
+  // resting on a toast keeps it open: the pointer waits elsewhere until it
+  // has gone, as a person's would, rather than racing its entrance.
+  await page.mouse.move(0, 0)
+  await expect(page.getByText('Document saved')).toBeHidden({ timeout: 15_000 })
   await inspector.getByTestId('duplicate-document').click()
   await page.getByTestId('create-submit').click()
   await expect(page.getByText('Document added')).toBeVisible()
