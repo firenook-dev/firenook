@@ -57,11 +57,16 @@ export function itemsAfter<T>(store: FeedStore<T>, mark: string | undefined): nu
  * How many items arrived since the feed paused: the store's own count in
  * `freeze` mode, the rows past the newest one at the moment of pausing in
  * `buffer` mode. The list's pill and the page's `PauseButton` both read it.
+ * A frozen store appends nothing that arrives, so rows that appear while it
+ * is paused are the page's own (a fresh page for a new filter, the lines
+ * around one opened by a link) and never count as new: pass `mode` the
+ * store's `pausedMode`.
  */
 export function useFeedPending<T>(
   store: FeedStore<T>,
   paused: boolean,
   rowKey: (item: T) => string,
+  mode: 'freeze' | 'buffer' = 'buffer',
 ): number {
   // It reads the store's rows while rendering (the newest key when the feed
   // pauses, the rows after it since), and the store is mutable: the compiler
@@ -78,6 +83,7 @@ export function useFeedPending<T>(
     setMark(current)
   }
   if (!paused) return 0
+  if (mode === 'freeze') return store.pending()
   return store.pending() + itemsAfter(store, current.key)
 }
 
@@ -113,6 +119,8 @@ export interface FeedListProps<T> {
   onSelect?: ((item: T) => void) | undefined
   /** `o` on the selected row: open its target (the Auth Inbox link). */
   onOpenTarget?: ((item: T) => void) | undefined
+  /** The store's `pausedMode` (default `buffer`): in `freeze` the pill counts only what the store held back. */
+  pausedMode?: 'freeze' | 'buffer' | undefined
   /** At the live edge; the URL's `paused` is its negation. */
   follow: boolean
   onFollowChange: (follow: boolean) => void
@@ -150,6 +158,7 @@ export function FeedList<T>({
   selectedKey,
   onSelect,
   onOpenTarget,
+  pausedMode = 'buffer',
   follow,
   onFollowChange,
   hasMore = false,
@@ -161,7 +170,7 @@ export function FeedList<T>({
 }: FeedListProps<T>) {
   'use no memo' // the virtualizer hands out functions the compiler cannot memoize safely
   const { size, version } = useFeed(store)
-  const pending = useFeedPending(store, !follow, rowKey)
+  const pending = useFeedPending(store, !follow, rowKey, pausedMode)
   const scrollRef = useRef<HTMLDivElement>(null)
   const newestLast = order === 'newest-last'
   /** Store position (0 = oldest kept) of the row drawn at `display`. */

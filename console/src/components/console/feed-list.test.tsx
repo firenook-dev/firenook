@@ -244,6 +244,23 @@ describe('FeedList', () => {
     expect(screen.getByTestId('pending')).toHaveTextContent('13')
   })
 
+  it('in freeze mode never counts rows the page writes itself while paused', async () => {
+    const store = createFeedStore<Line>({ max: 10_000, key: rowKey, pausedMode: 'freeze' })
+    render(<Feed store={store} startPaused pausedMode="freeze" />)
+    await frame()
+    // A fresh page for a new filter, written while the list holds still.
+    act(() => {
+      store.resume()
+      store.push(lines(30))
+      store.pause()
+    })
+    await frame()
+    expect(screen.queryByTestId('jump-to-latest')).not.toBeInTheDocument()
+    act(() => store.push(lines(3, 30)))
+    await frame()
+    expect(screen.getByTestId('jump-to-latest')).toHaveTextContent('3 new · Jump to latest')
+  })
+
   it('keeps the reader’s row in place while older history pages in above it', async () => {
     const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
     store.push(lines(100, 100))
