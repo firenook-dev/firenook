@@ -50,6 +50,7 @@ import { CODE_LABEL_AT, useInspectorWidth } from '@/components/console/inspector
 import { WidthHandle } from '@/components/console/width-handle'
 import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
+import { TriggerChip } from './trigger-chip'
 import { useWorkbench } from './workbench-context'
 
 /** Where an app sends REST calls: the Firestore port the engine advertises. */
@@ -164,6 +165,11 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
               />
             )}
           </span>
+        )}
+        {/* Which functions a change to this document runs, when any do; the
+            functions listen to the emulator's own project only. */}
+        {document.data && !workbench.foreign && (
+          <TriggerChip database={workbench.database} path={path} />
         )}
         {parentCollection(path) !== workbench.collectionPath && (
           <Tooltip

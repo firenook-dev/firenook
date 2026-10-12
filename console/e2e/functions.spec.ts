@@ -351,6 +351,19 @@ test('a real Firestore write fires the trigger and links back to the document', 
   await page.keyboard.press('o')
   await expect(page).toHaveURL(/\/console\/firestore\?/)
   await expect(page.getByTestId('inspector')).toContainText(`orders/${id}`)
+
+  // The document's inspector says which functions a change to it runs, and
+  // on which changes; each opens in Functions.
+  const chip = page.getByTestId('inspector').getByTestId('document-triggers')
+  await expect(chip).toHaveText('2')
+  await chip.click()
+  const listed = page.getByTestId('document-triggers-list').getByTestId('document-trigger')
+  await expect(listed).toHaveCount(2)
+  await expect(listed.filter({ hasText: 'onOrderCreated' })).toContainText('— create')
+  await expect(listed.filter({ hasText: 'onOrderWritten' })).toContainText('— every write')
+  await listed.filter({ hasText: 'onOrderWritten' }).getByRole('link').click()
+  await expect(page).toHaveURL(/\/console\/functions\?/)
+  await expect(page.getByTestId('function-name')).toHaveText('onOrderWritten')
 })
 
 test('a test event runs the trigger and writes nothing', async ({ page, engine }) => {
