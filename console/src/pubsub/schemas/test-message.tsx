@@ -7,7 +7,7 @@
 import { Button, Select, Tabs, Text, Tooltip } from '@cloudflare/kumo'
 import { CheckCircleIcon, MagicWandIcon, WarningIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PubsubMessageCheckBody } from '@/api/generated/messaging/PubsubMessageCheckBody'
 import type { PubsubSchemaDetail } from '@/api/generated/messaging/PubsubSchemaDetail'
 import { CodeEditor } from '@/components/code-editor'
@@ -61,15 +61,30 @@ export function TestMessage({
     enabled: settled.trim() !== '',
   })
   const result = settled === text && settled.trim() !== '' ? check.data : undefined
+  // What is typed now, for an example that arrives after typing began.
+  const typed = useRef(text)
+  useEffect(() => {
+    typed.current = text
+  }, [text])
   const example = useMutation({
-    mutationFn: () => schemaExample({ schema: chosen ? `${detail.name}@${chosen}` : detail.name }),
-    onSuccess: (answer) => {
-      if (answer.json === null) return
+    /** `opening`: the panel's own first fill, which never replaces what was typed meanwhile. */
+    mutationFn: (_opening: boolean) =>
+      schemaExample({ schema: chosen ? `${detail.name}@${chosen}` : detail.name }),
+    onSuccess: (answer, opening) => {
+      if (answer.json === null || (opening && typed.current.trim() !== '')) return
       setEncoding('JSON')
       setText(answer.json)
       setSettled(answer.json)
     },
   })
+  // The panel opens on a message of the schema, ready to be changed: an
+  // empty editor would only say that nothing is not JSON.
+  const started = useRef(false)
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    example.mutate(true)
+  }, [example])
   const checkNow = () => setSettled(text)
   useShortcuts({ id: 'pubsub-schema-test', label: 'Test message' }, [
     {
@@ -97,7 +112,7 @@ export function TestMessage({
                   size="sm"
                   icon={<MagicWandIcon />}
                   loading={example.isPending}
-                  onClick={() => example.mutate()}
+                  onClick={() => example.mutate(false)}
                   data-testid="schema-test-example"
                 >
                   Fill example

@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react'
 import type { PubsubSchemaDetail } from '@/api/generated/messaging/PubsubSchemaDetail'
 import type { PubsubSchemaRevision } from '@/api/generated/messaging/PubsubSchemaRevision'
 import { CodeEditor } from '@/components/code-editor'
-import { RelativeTime, exactTime } from '@/components/console/relative-time'
+import { RelativeTime } from '@/components/console/relative-time'
 import { type DiffLine, diffLines, diffSize } from '@/firestore/rules-page/diff'
 import { describeKey } from '@/lib/shortcuts'
 import { schemaCheckQuery } from '../queries'
@@ -261,15 +261,10 @@ function RevisionView({
         }
       >
         Revision <span className="font-mono text-[12px]">{revisionLabel(revision.id)}</span>{' '}
-        <Tooltip
-          content={exactTime(revision.createdAt)}
-          render={
-            <span className="text-kumo-subtle">
-              from {new Date(revision.createdAt).toLocaleTimeString()}
-            </span>
-          }
-        />{' '}
-        <span className="text-kumo-subtle">· read-only</span>
+        <span className="text-kumo-subtle">
+          · <RelativeTime iso={revision.createdAt} prefix="made" className="text-[13px]" /> ·
+          read-only
+        </span>
       </Bar>
       <div className="flex min-h-0 flex-1 flex-col">
         <CodeEditor

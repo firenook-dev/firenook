@@ -188,6 +188,8 @@ test('J-SC-03 a test message names the path that fails, and an example passes', 
     await openSchemas(page, engine.origin, `schema=${id}`)
     await page.getByTestId('pubsub-schema-test-toggle').click()
     await expect(page).toHaveURL(/panel=test/)
+    // It opens on the engine's example, which passes.
+    await expect(page.getByTestId('schema-test-valid')).toContainText('Valid against the latest')
     await replaceText(page, 'schema-test-data', '{"orderId":"o_1","amount":"42.5"}')
     await expect(page.getByTestId('schema-test-problem')).toHaveText(
       '$.amount: expected a number, found string "42.5"',
