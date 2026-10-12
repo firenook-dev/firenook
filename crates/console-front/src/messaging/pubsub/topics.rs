@@ -33,7 +33,7 @@ use super::convert;
 use super::types::{
     PubsubCountersFrame, PubsubDeliveriesChanged, PubsubPublished, PubsubPushStreak,
     PubsubRejectedChanged, PubsubResourcesChanged, PubsubScheduleState, PubsubSchedulesFrame,
-    PubsubStale, PubsubThroughput,
+    PubsubStale, PubsubSubscriptionCounters, PubsubThroughput, PubsubTopicCounters,
 };
 use crate::api_error::ApiError;
 use crate::late::Late;
@@ -54,6 +54,9 @@ const MAX_CHANGED: usize = 200;
 const KEY_WINDOW: Duration = Duration::from_millis(100);
 /// Topics whose throughput one counters subscription follows.
 const MAX_THROUGHPUT: usize = 24;
+/// Topics and subscriptions the state a subscriber without a cursor opens
+/// with may hold; a project with more opens with `reset` (it reloads).
+const OPEN_MAX: usize = 1_000;
 /// The push ring: 20,000 streaks, 16 MiB.
 const PUSH_RING: RingLimits = RingLimits {
     entries: 20_000,
@@ -235,6 +238,12 @@ impl LiveTopic for CountersTopic {
 }
 
 /// One counters subscriber.
+///
+/// A subscriber without a cursor opens with the state: every topic's and
+/// subscription's counters of the project and the throughput it follows,
+/// in one frame whose revision is its cursor (a state topic's snapshot on
+/// open, which the channel shares with a browser's other tabs). One with a
+/// cursor resumes: nothing when it is the current revision, else `reset`.
 struct Counters {
     console: PubsubConsole,
     scope: DeltaScope,
@@ -244,6 +253,9 @@ struct Counters {
     throughput: BTreeMap<String, SecondWindow>,
     last: Option<Instant>,
     pause_until: Option<Instant>,
+    /// The opening state is still to send (read on the first poll, not in
+    /// the subscribing request).
+    opening: bool,
     outbox: VecDeque<TopicEvent>,
 }
 
@@ -286,6 +298,7 @@ impl Counters {
             throughput: BTreeMap::new(),
             last: None,
             pause_until: None,
+            opening: after.is_none(),
             outbox,
             console,
         };
@@ -297,6 +310,9 @@ impl Counters {
 
     async fn next(&mut self) -> Option<TopicEvent> {
         loop {
+            if std::mem::take(&mut self.opening) {
+                self.open_frame();
+            }
             if let Some(event) = self.outbox.pop_front() {
                 return Some(event);
             }
@@ -314,6 +330,71 @@ impl Counters {
             self.watch.mark_unchanged();
             self.frame();
         }
+    }
+
+    /// The state a subscriber without a cursor opens with: the project's
+    /// index read once, then whatever changed between that read and the
+    /// cursor's (a second short read), so the frame is the state at its
+    /// revision and the next frame carries only what changed after it.
+    fn open_frame(&mut self) {
+        let broker = self.console.runtime.broker();
+        let index = broker.topics_index(&self.scope.project);
+        let mut topics: BTreeMap<String, PubsubTopicCounters> = index
+            .topics
+            .iter()
+            .map(|topic| (topic.name.clone(), convert::topic_counters(&topic.counters)))
+            .collect();
+        let mut subscriptions: BTreeMap<String, PubsubSubscriptionCounters> = index
+            .topics
+            .iter()
+            .flat_map(|topic| &topic.subscriptions)
+            .chain(&index.detached)
+            .map(|subscription| {
+                (
+                    subscription.name.clone(),
+                    convert::subscription_counters(&subscription.counters),
+                )
+            })
+            .collect();
+        self.cursor = ConsoleCursor::at(index.revision);
+        let delta = broker.console_delta(&mut self.cursor, &self.scope);
+        self.last = Some(Instant::now());
+        if delta.overflow || topics.len() + subscriptions.len() > OPEN_MAX {
+            self.outbox.push_back(TopicEvent::Reset {
+                reason: ResetReason::Lagged,
+                missed: None,
+            });
+            return;
+        }
+        for topic in &delta.topics {
+            topics.insert(topic.name.clone(), convert::topic_counters(topic));
+        }
+        for subscription in &delta.subscriptions {
+            subscriptions.insert(
+                subscription.name.clone(),
+                convert::subscription_counters(subscription),
+            );
+        }
+        let throughput = delta
+            .throughput
+            .iter()
+            .map(|(topic, window)| PubsubThroughput {
+                topic: topic.clone(),
+                window: second_window(window),
+            })
+            .collect();
+        self.throughput = delta.throughput.into_iter().collect();
+        let frame = PubsubCountersFrame {
+            revision: delta.revision,
+            topics: topics.into_values().collect(),
+            subscriptions: subscriptions.into_values().collect(),
+            throughput,
+        };
+        self.outbox.push_back(TopicEvent::json(
+            "counters",
+            Some(delta.revision.to_string()),
+            &frame,
+        ));
     }
 
     /// Reads one delta under the broker's lock and turns it into events.
@@ -959,7 +1040,7 @@ impl Schedules {
                 missed: None,
             });
         }
-        let state = Self {
+        let mut state = Self {
             console,
             revision: now,
             watch,
@@ -969,6 +1050,14 @@ impl Schedules {
             due: None,
             outbox,
         };
+        // Without a cursor the subscriber opens with every schedule's state
+        // (a handful: one per scheduled function).
+        if after.is_none() {
+            let views = state.console.runtime.schedules_view();
+            if !views.is_empty() {
+                state.send(&views);
+            }
+        }
         stream::unfold(state, |mut state| async move {
             state.next().await.map(|event| (event, state))
         })
