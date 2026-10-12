@@ -9,7 +9,9 @@ export type CountTone = 'danger' | 'attention' | 'neutral'
 
 const TONES: Record<CountTone, string> = {
   danger: 'bg-kumo-danger text-kumo-inverse',
-  attention: 'bg-kumo-warning-tint text-kumo-default ring ring-kumo-warning',
+  // The ring is drawn inside the pill: a nav item clips its label row at the
+  // pill's own height, and an outer ring was cut there.
+  attention: 'bg-kumo-warning-tint text-kumo-default ring ring-inset ring-kumo-warning',
   neutral: 'bg-kumo-tint text-kumo-subtle',
 }
 
