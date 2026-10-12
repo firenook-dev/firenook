@@ -1178,6 +1178,40 @@ impl IndexSnapshot {
         Some((slot, self.data.digest(slot)?))
     }
 
+    /// The uids `filter` matches, in uid order: what a bulk action or an
+    /// export over a query works through. One pass over the digests.
+    pub(crate) fn matching_uids(&self, filter: &UserFilter) -> Vec<Arc<str>> {
+        if filter.is_empty() {
+            return self.data.by_uid.keys().cloned().collect();
+        }
+        let compiled = CompiledFilter::new(filter, &self.data);
+        self.data
+            .by_uid
+            .iter()
+            .filter(|(_, slot)| {
+                self.data
+                    .digest(**slot)
+                    .is_some_and(|digest| compiled.matches(digest))
+            })
+            .map(|(uid, _)| uid.clone())
+            .collect()
+    }
+
+    /// Whether the scope holds `uid`.
+    pub(crate) fn contains(&self, uid: &str) -> bool {
+        self.data.by_uid.contains_key(uid)
+    }
+
+    /// The uid of the account whose email is `email` (compared lower-cased).
+    pub(crate) fn uid_of_email(&self, email: &str) -> Option<Arc<str>> {
+        let key: Arc<str> = Arc::from(email.to_lowercase().as_str());
+        let (found, slot) = self.data.email.range((key.clone(), 0)..).next()?;
+        if *found != key {
+            return None;
+        }
+        self.data.digest(*slot).map(|digest| digest.uid.clone())
+    }
+
     /// The row the table shows for `uid`.
     pub(crate) fn row_of(&self, uid: &str, tenant: Option<&str>) -> Option<UserRow> {
         self.digest_of(uid)

@@ -76,6 +76,33 @@ pub fn issue_tokens(
     })
 }
 
+/// The tokens a sign-in of `user` would produce, without signing in.
+#[derive(Debug, Clone)]
+pub struct MintedTokens {
+    pub id_token: String,
+    pub refresh_token: String,
+}
+
+/// Mints what [`issue_tokens`] would for `user`, but changes nothing: no
+/// `lastRefreshAt`, no `lastLoginAt`, no generation moved. The console's
+/// "sign in as" and "view as" tokens.
+#[must_use]
+pub fn mint_without_sign_in(
+    user: &UserRecord,
+    project_id: &str,
+    tenant_id: Option<&str>,
+    sign_in_provider: &str,
+    options: &IssueOptions,
+) -> MintedTokens {
+    MintedTokens {
+        id_token: generate_jwt(user, project_id, sign_in_provider, options, tenant_id),
+        refresh_token: create_refresh_token(project_id, user, sign_in_provider, options),
+    }
+}
+
+/// How long an issued ID token is accepted, seconds.
+pub const ID_TOKEN_LIFETIME: i64 = EXPIRES_IN_SECONDS;
+
 /// `generateJwt`: the exact claim set of the official emulator.
 #[must_use]
 pub fn generate_jwt(

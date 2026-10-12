@@ -361,6 +361,31 @@ impl ProjectState {
         true
     }
 
+    /// Removes these accounts without a lifecycle event or a notice each:
+    /// the console's clear, which says once that the scope was cleared
+    /// ([`ProjectState::note_cleared`]). Answers how many were removed.
+    pub(crate) fn remove_users_quietly(&mut self, uids: &[Arc<str>]) -> u64 {
+        let mut removed = 0;
+        for uid in uids {
+            let Some(user) = self.users.get(&**uid).cloned() else {
+                continue;
+            };
+            self.users.remove(&**uid);
+            self.user_index.remove(uid);
+            self.remove_user_from_index(&user);
+            removed += 1;
+        }
+        if removed > 0 {
+            self.mutated();
+        }
+        removed
+    }
+
+    /// Every account of this scope was deleted (for the console's record).
+    pub(crate) fn note_cleared(&mut self) {
+        self.notices.push(Notice::Cleared);
+    }
+
     /// `updateUserByLocalId`: mirrors every field of `fields` (a `null`
     /// value deletes), then maintains indexes and provider entries.
     pub fn update_user_by_local_id(

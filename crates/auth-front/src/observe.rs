@@ -818,6 +818,7 @@ pub fn kind_of(operation: &str) -> CallKind {
         | "emulator.projects.accounts.delete" => CallKind::Account,
         other if other.starts_with("emulator.action.") => CallKind::Account,
         other if other.starts_with("firenook.console.users.") => CallKind::Account,
+        "firenook.console.clear" => CallKind::Account,
         _ => CallKind::Other,
     }
 }

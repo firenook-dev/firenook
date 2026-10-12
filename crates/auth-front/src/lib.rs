@@ -72,6 +72,32 @@ pub struct BlockingFunctions {
     pub forward_refresh_token: bool,
 }
 
+/// The blocking functions a project would call now (`Runtime::blocking_targets`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockingTargets {
+    pub before_create: Option<HookTarget>,
+    pub before_sign_in: Option<HookTarget>,
+    pub forward_id_token: bool,
+    pub forward_access_token: bool,
+    pub forward_refresh_token: bool,
+}
+
+/// One blocking function and where its registration comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookTarget {
+    pub uri: String,
+    pub source: HookSource,
+}
+
+/// Where a blocking function's registration comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookSource {
+    /// Set with `updateConfig` (`blockingFunctions.triggers`).
+    Config,
+    /// Discovered by the Functions emulator.
+    Functions,
+}
+
 /// Resolves the current blocking-function configuration at sign-in time.
 pub trait BlockingResolver: Send + Sync {
     fn resolve(&self) -> Pin<Box<dyn Future<Output = BlockingFunctions> + Send + '_>>;
@@ -649,6 +675,24 @@ impl Runtime {
         context: &BlockingContext,
         oauth: &OauthTokens,
     ) -> Result<BlockingOutcome, ApiError> {
+        self.blocking_reported(ctx, event, user, context, oauth)
+            .await
+            .0
+    }
+
+    /// [`Runtime::blocking`], and how the call went when a function was
+    /// called (its step is already on the trace).
+    pub(crate) async fn blocking_reported(
+        &self,
+        ctx: &Ctx,
+        event: BlockingEvent,
+        user: &UserRecord,
+        context: &BlockingContext,
+        oauth: &OauthTokens,
+    ) -> (
+        Result<BlockingOutcome, ApiError>,
+        Option<blocking::BlockingReport>,
+    ) {
         let configured = {
             let mut data = lock(&self.inner.data);
             let scope = Scope::new(&mut data, &ctx.project_id, ctx.tenant_id.as_deref());
@@ -696,7 +740,7 @@ impl Runtime {
             ctx.trace.id(),
         )
         .await;
-        if let Some(report) = report.filter(|_| ctx.trace.recording()) {
+        if let Some(report) = report.clone().filter(|_| ctx.trace.recording()) {
             let outcome = result.as_ref().ok();
             let updates = outcome.map(|outcome| &outcome.updates);
             ctx.trace.push(Step::Blocking {
@@ -724,7 +768,78 @@ impl Runtime {
                 failure: report.failure,
             });
         }
-        result
+        (result, report)
+    }
+
+    /// The blocking functions a sign-up and a sign-in of `project` would
+    /// call now, resolved as [`Runtime::blocking`] resolves them (the
+    /// project's configuration first, then the Functions emulator's
+    /// registration), without calling anything or creating the project.
+    pub async fn blocking_targets(&self, project: &str) -> BlockingTargets {
+        let configured = {
+            let data = lock(&self.inner.data);
+            data.projects.get(project).map(|agent| {
+                (
+                    agent.blocking_uri(BlockingEvent::BeforeCreate),
+                    agent.blocking_uri(BlockingEvent::BeforeSignIn),
+                    [
+                        agent.forward_credential("idToken"),
+                        agent.forward_credential("accessToken"),
+                        agent.forward_credential("refreshToken"),
+                    ],
+                )
+            })
+        };
+        let (create, sign_in, forward) = configured.unwrap_or((None, None, [false; 3]));
+        let resolver = self
+            .inner
+            .blocking
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone());
+        let registered = match (&create, &sign_in, resolver) {
+            (Some(_), Some(_), _) | (_, _, None) => None,
+            (_, _, Some(resolver)) => Some(resolver.resolve().await),
+        };
+        let hook = |configured: Option<String>, registered: Option<String>| {
+            configured
+                .map(|uri| HookTarget {
+                    uri,
+                    source: HookSource::Config,
+                })
+                .or_else(|| {
+                    registered.map(|uri| HookTarget {
+                        uri,
+                        source: HookSource::Functions,
+                    })
+                })
+        };
+        let any_configured = create.is_some() || sign_in.is_some();
+        let forward = match (&registered, any_configured) {
+            (Some(functions), false) => [
+                functions.forward_id_token,
+                functions.forward_access_token,
+                functions.forward_refresh_token,
+            ],
+            _ => forward,
+        };
+        BlockingTargets {
+            before_create: hook(
+                create,
+                registered
+                    .as_ref()
+                    .and_then(|functions| functions.before_create.clone()),
+            ),
+            before_sign_in: hook(
+                sign_in,
+                registered
+                    .as_ref()
+                    .and_then(|functions| functions.before_sign_in.clone()),
+            ),
+            forward_id_token: forward[0],
+            forward_access_token: forward[1],
+            forward_refresh_token: forward[2],
+        }
     }
 
     fn dispatch_lifecycle(

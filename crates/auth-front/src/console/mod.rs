@@ -22,8 +22,13 @@ use crate::state::{AuthData, ProjectState, UserRecord};
 use crate::util::{str_field, truthy, truthy_str};
 use crate::{Runtime, lock};
 
+pub mod bulk;
+pub mod export;
 pub mod filter;
+pub mod import;
 pub(crate) mod index;
+pub mod mint;
+pub mod tenants;
 
 #[cfg(test)]
 mod tests;
@@ -55,18 +60,39 @@ pub struct ConsoleError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConsoleErrorKind {
-    /// A tenant or a user that does not exist.
+    /// A tenant, a user, an upload or a second factor that does not exist.
     NotFound,
-    /// A request the engine cannot answer as asked (a cursor of another sort).
+    /// A request the engine cannot answer as asked (a cursor of another
+    /// sort, claims Firebase refuses, a tenant id of the wrong shape).
     InvalidArgument,
+    /// Something with that name exists already (a tenant id).
+    AlreadyExists,
+    /// The request is fine but the state refuses it (a triggered delete
+    /// over the limit, beforeSignIn refused the sign-in).
+    FailedPrecondition,
+    /// The engine could not do it (a file it could not read or write).
+    Internal,
 }
 
 impl ConsoleError {
-    fn not_found(message: String, fix: &str) -> Self {
+    pub(crate) fn not_found(message: String, fix: &str) -> Self {
         Self {
             kind: ConsoleErrorKind::NotFound,
             message,
             fix: Some(fix.to_owned()),
+        }
+    }
+
+    pub(crate) fn with_fix(mut self, fix: impl Into<String>) -> Self {
+        self.fix = Some(fix.into());
+        self
+    }
+
+    pub(crate) fn of_kind(kind: ConsoleErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            fix: None,
         }
     }
 
@@ -78,14 +104,14 @@ impl ConsoleError {
         }
     }
 
-    fn unknown_tenant(tenant: &str) -> Self {
+    pub(crate) fn unknown_tenant(tenant: &str) -> Self {
         Self::not_found(
             format!("There is no tenant `{tenant}` in this project."),
             "Pick a tenant from the list, or create it in Settings.",
         )
     }
 
-    fn unknown_user(uid: &str, tenant: Option<&str>) -> Self {
+    pub(crate) fn unknown_user(uid: &str, tenant: Option<&str>) -> Self {
         let message = match tenant {
             None => format!("There is no user `{uid}` among the project's users."),
             Some(tenant) => format!("There is no user `{uid}` in tenant `{tenant}`."),
@@ -569,7 +595,7 @@ impl Runtime {
 }
 
 /// The accounts of `project` or its `tenant`, read without creating either.
-fn find_scope<'a>(
+pub(crate) fn find_scope<'a>(
     data: &'a AuthData,
     project: &str,
     tenant: Option<&str>,
@@ -581,6 +607,113 @@ fn find_scope<'a>(
             .and_then(|agent| agent.tenants.get(tenant))
             .map(|state| Some(&state.project))
             .ok_or_else(|| ConsoleError::unknown_tenant(tenant)),
+    }
+}
+
+/// What a console operation reports to the Activity feed: one record, as
+/// an Identity Toolkit call reports one, with the steps it caused.
+pub(crate) struct ConsoleCall {
+    id: u64,
+    at_millis: i64,
+    started: std::time::Instant,
+    operation: String,
+    path: String,
+    project: String,
+    tenant: Option<String>,
+    origin: crate::observe::ConsoleOrigin,
+    trace: crate::observe::Trace,
+    identifier: Option<String>,
+    uid: Option<String>,
+}
+
+impl ConsoleCall {
+    /// A call `firenook.console.<action>` at `path` in a scope.
+    pub(crate) fn start(
+        runtime: &Runtime,
+        action: &str,
+        path: &str,
+        project: &str,
+        tenant: Option<&str>,
+        origin: crate::observe::ConsoleOrigin,
+    ) -> Self {
+        let id = runtime.next_call_id();
+        Self {
+            id,
+            at_millis: crate::util::now_millis(),
+            started: std::time::Instant::now(),
+            operation: format!("firenook.console.{action}"),
+            path: path.to_owned(),
+            project: project.to_owned(),
+            tenant: tenant.map(str::to_owned),
+            origin,
+            trace: crate::observe::Trace::new(id, Some(origin), runtime.observed().is_some()),
+            identifier: None,
+            uid: None,
+        }
+    }
+
+    pub(crate) const fn trace(&self) -> &crate::observe::Trace {
+        &self.trace
+    }
+
+    pub(crate) const fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub(crate) fn describe(&mut self, identifier: Option<String>, uid: Option<String>) {
+        self.identifier = identifier;
+        self.uid = uid;
+    }
+
+    /// Hands the record to the observer: `error` when it failed.
+    pub(crate) fn finish(self, runtime: &Runtime, error: Option<&ConsoleError>) {
+        use crate::observe::{Body, CallError, CallRecord, Caller, Credential, kind_of};
+        if runtime.observed().is_none() {
+            return;
+        }
+        let status = error.map_or(200, |error| match error.kind {
+            ConsoleErrorKind::NotFound => 404,
+            ConsoleErrorKind::InvalidArgument => 400,
+            ConsoleErrorKind::AlreadyExists => 409,
+            ConsoleErrorKind::FailedPrecondition => 412,
+            ConsoleErrorKind::Internal => 500,
+        });
+        runtime.record(CallRecord {
+            id: self.id,
+            at_millis: self.at_millis,
+            duration: self.started.elapsed(),
+            project: self.project,
+            tenant: self.tenant,
+            caller: Caller::Console,
+            origin: Some(self.origin),
+            credential: Credential::None,
+            client: Some("Firenook console".to_owned()),
+            method: "POST".to_owned(),
+            path: self.path,
+            kind: kind_of(&self.operation),
+            operation: self.operation,
+            identifier: self.identifier,
+            provider: None,
+            uid: self.uid,
+            new_user: None,
+            status,
+            error: error.map(|error| CallError {
+                code: match error.kind {
+                    ConsoleErrorKind::NotFound => "NOT_FOUND",
+                    ConsoleErrorKind::InvalidArgument => "INVALID_ARGUMENT",
+                    ConsoleErrorKind::AlreadyExists => "ALREADY_EXISTS",
+                    ConsoleErrorKind::FailedPrecondition => "FAILED_PRECONDITION",
+                    ConsoleErrorKind::Internal => "INTERNAL",
+                }
+                .to_owned(),
+                message: error.message.clone(),
+            }),
+            request: Body::NotKept,
+            response: Body::NotKept,
+            query: Vec::new(),
+            headers: Vec::new(),
+            steps: self.trace.take(),
+        });
     }
 }
 

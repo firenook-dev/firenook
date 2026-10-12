@@ -195,7 +195,9 @@ pub fn batch_create(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
     })
 }
 
-fn import_one(
+/// One user of `batchCreate`: validated and stored as the official
+/// emulator does, without a lifecycle event.
+pub(crate) fn import_one(
     scope: &mut crate::state::Scope<'_>,
     info: &JsonMap<String, JsonValue>,
     allow_overwrite: bool,
