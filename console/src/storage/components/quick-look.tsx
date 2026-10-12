@@ -1,6 +1,6 @@
 // Quick Look: the file in view, large, over everything — ←/→ through the
 // files of the listing (the next page read when the end is reached), the
-// inspector one click away, Esc or Shift+Space to close. `dialog=quick-look`
+// inspector one click away, Esc (the first press) or Shift+Space to close. `dialog=quick-look`
 // in the address, so a link opens it. A file this identity may not read
 // shows the refusal, never the picture.
 
@@ -13,6 +13,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { formatBytes, formatNumber } from '@/lib/format'
 import { describeViewAsShort } from '@/lib/identity'
 import { StorageApiError } from '../api'
@@ -47,6 +48,24 @@ export function QuickLook({
     else if (by > 0 && hasMore) loadMore()
   }
   const object = query.data
+  // Escape closes on the first press. Opened from the keyboard, the dialog
+  // focuses its first button, whose tooltip shows and would take that press
+  // for itself before the dialog sees it, so the window hears it first.
+  const closeRef = useRef(close)
+  useLayoutEffect(() => {
+    closeRef.current = close
+  })
+  useEffect(() => {
+    if (!open) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      event.stopPropagation()
+      closeRef.current()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [open])
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && close()}>
       <Dialog className="h-[calc(100vh-4rem)] p-0 sm:top-8 sm:w-[min(1280px,calc(100vw-4rem))]">
