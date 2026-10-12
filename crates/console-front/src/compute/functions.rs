@@ -12,6 +12,7 @@
 //! `firenook_functions_runtime::monitor` and are exported beside them.
 
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
@@ -30,8 +31,9 @@ use firenook_functions_runtime::console::{
 use firenook_functions_runtime::monitor::{
     FunctionBodyEncoding, FunctionCodebase, FunctionHeader, FunctionKind, FunctionLogLine,
     FunctionStats, FunctionsPhase, InvocationCause, InvocationDetail, InvocationOrigin,
-    InvocationQuery, InvocationSummary, InvocationTarget,
+    InvocationQuery, InvocationSummary, InvocationTarget, format_timestamp,
 };
+use firenook_pubsub_front::{RunScheduleError, ScheduleControl as _};
 use futures_util::stream::{self, Stream, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1055,12 +1057,30 @@ async fn run(
             "Background triggers are paused, so the tick was not published.",
         ));
     }
-    if state.pubsub.is_some() {
-        // The clock's own tick: `{}` on the schedule's topic, delivered to
-        // every function listening on it.
+    if let Some(pubsub) = &state.pubsub {
+        // The clock's own tick through the scheduler: the same message to
+        // the same topic, delivered to every function listening on it, and
+        // recorded as a run in Pub/Sub › Schedules.
+        let pubsub = pubsub.get()?;
         let topic = schedule_topic(&state.project, &view.name);
-        let message_id =
-            publish_to(&state, &topic, json!({ "data": BASE64.encode(b"{}") })).await?;
+        let message_id = match pubsub.runtime.run(&id) {
+            Ok(outcome) => outcome.message_id,
+            Err(RunScheduleError::BackgroundPaused) => {
+                return Err(paused(
+                    "Background triggers are paused, so the tick was not published.",
+                ));
+            }
+            Err(RunScheduleError::Publish(message)) => {
+                return Err(ApiError::unavailable(format!(
+                    "Pub/Sub refused the tick: {message}"
+                )));
+            }
+            // A schedule the scheduler does not hold yet (its inventory is
+            // refreshed after a load): the clock's message, published directly.
+            Err(RunScheduleError::NotScheduled) => {
+                publish_to(&state, &topic, json!({ "data": BASE64.encode(b"{}") })).await?
+            }
+        };
         return Ok(Json(FunctionBrokerResult {
             transport: FunctionBrokerTransport::Pubsub,
             target: Some(EntityRef::pubsub_message(&topic, &message_id)),
@@ -2122,6 +2142,36 @@ fn schedule_of(
         .definition
         .get("schedule")
         .or_else(|| view.definition.get("scheduleTrigger"));
+    let retry = schedule.and_then(|schedule| schedule.get("retryConfig").cloned());
+    let recorded = counters.last.as_ref().map(|last| last.started_at.clone());
+    // The scheduler's own view when Pub/Sub runs: the zone it evaluates the
+    // expression in, whether the clock runs it, its pause, its next tick.
+    let scheduler = state
+        .pubsub
+        .as_ref()
+        .and_then(|pubsub| pubsub.get().ok())
+        .and_then(|pubsub| pubsub.runtime.schedule(&view.id));
+    if let Some(scheduled) = scheduler {
+        return FunctionSchedule {
+            expression: scheduled.expression,
+            time_zone: scheduled.time_zone,
+            topic: scheduled.topic,
+            evaluated_in: Some(scheduled.evaluated_in),
+            automatic: scheduled.automatic,
+            manual_reason: scheduled.problem,
+            paused: scheduled.paused,
+            next_run: scheduled
+                .next_run_at
+                .map(|at| format_timestamp(SystemTime::from(at))),
+            last_run: scheduled
+                .last_run
+                .map(|run| format_timestamp(SystemTime::from(run.at)))
+                .or(recorded),
+            pubsub: true,
+            schedule_ref: Some(EntityRef::pubsub_schedule(&view.id)),
+            retry,
+        };
+    }
     let pubsub = state.pubsub.is_some();
     FunctionSchedule {
         expression: schedule
@@ -2130,14 +2180,18 @@ fn schedule_of(
         time_zone: schedule.and_then(|schedule| string_at(schedule, "timeZone")),
         topic: schedule_topic(&state.project, &view.name),
         evaluated_in: None,
-        automatic: pubsub,
-        manual_reason: (!pubsub).then(|| "Pub/Sub is not running in this suite.".to_owned()),
+        automatic: false,
+        manual_reason: Some(if pubsub {
+            "Pub/Sub is still starting.".to_owned()
+        } else {
+            "Pub/Sub is not running in this suite.".to_owned()
+        }),
         paused: false,
         next_run: None,
-        last_run: counters.last.as_ref().map(|last| last.started_at.clone()),
+        last_run: recorded,
         pubsub,
         schedule_ref: pubsub.then(|| EntityRef::pubsub_schedule(&view.id)),
-        retry: schedule.and_then(|schedule| schedule.get("retryConfig").cloned()),
+        retry,
     }
 }
 
