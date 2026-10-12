@@ -140,8 +140,10 @@ pub struct LogInput {
 }
 
 /// Where [`LoggingRuntime::emit`](crate::LoggingRuntime::emit) hands every
-/// line meant for the console.
-pub trait ConsoleSink: Send + Sync + 'static {
+/// line meant for the console. A sink is [`Any`](std::any::Any), so the
+/// console can find its own log again behind the runtime's
+/// [`console_sink`](crate::LoggingRuntime::console_sink).
+pub trait ConsoleSink: std::any::Any + Send + Sync + 'static {
     /// Takes one line. Never blocks: no I/O, no await, two short locks at
     /// most, because every producer calls it on its own path.
     fn accept(&self, input: LogInput);

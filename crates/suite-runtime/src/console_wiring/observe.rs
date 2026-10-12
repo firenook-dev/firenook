@@ -8,11 +8,10 @@ use firenook_suite_front::LoggingRuntime;
 use super::{FunctionsConsoleOptions, HookContext};
 use crate::SuiteConfig;
 
-/// Logs' and the Overview's console: the suite's log.
+/// Logs' and the Overview's console: the suite's log, with the console log
+/// `prepare_logging` installed in it.
 pub(crate) fn observe_console(logging: &LoggingRuntime, _config: &SuiteConfig) -> ObserveConsole {
-    ObserveConsole {
-        logging: logging.clone(),
-    }
+    ObserveConsole::over(logging)
 }
 
 /// The suite's services are prepared; the console is not built yet.

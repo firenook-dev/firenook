@@ -1,0 +1,845 @@
+{
+  "note": "The Logs filter's golden cases (crates/console-front/src/observe/fields.rs, console/src/logs/fields.ts). Both sides parse and validate every text against these fields, the Logs field set, and must give exactly this result or this error, message and UTF-16 span included. Logs is the one field set that takes /regex/ items.",
+  "regex": true,
+  "fields": [
+    {
+      "key": "level",
+      "aliases": ["severity"],
+      "kind": "enum",
+      "help": "How serious the line is",
+      "values": ["debug", "info", "warn", "error"]
+    },
+    {
+      "key": "service",
+      "aliases": ["emulator"],
+      "kind": "enum",
+      "help": "The emulator that wrote it",
+      "values": ["hub", "firestore", "auth", "storage", "functions", "pubsub", "eventarc", "tasks"]
+    },
+    {
+      "key": "function",
+      "aliases": ["fn"],
+      "kind": "exact",
+      "help": "Functions trigger id; end with * for a prefix"
+    },
+    {
+      "key": "instance",
+      "aliases": ["ext", "extension"],
+      "kind": "exact",
+      "help": "Extension instance"
+    },
+    {
+      "key": "codebase",
+      "kind": "exact",
+      "help": "Functions codebase"
+    },
+    {
+      "key": "execution",
+      "aliases": ["exec"],
+      "kind": "exact",
+      "help": "One function invocation"
+    },
+    {
+      "key": "kind",
+      "kind": "exact",
+      "help": "What happened, like function.failed; end with * for a prefix"
+    },
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "Problems, engine internals or markers",
+      "values": ["problem", "internal", "marker"]
+    },
+    {
+      "key": "payload",
+      "kind": "path",
+      "help": "A field of the structured payload; * for any value",
+      "prefixes": ["payload."]
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "level",
+      "text": "level:error",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "level-alias-severity",
+      "text": "severity:warn",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "warn",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      },
+      "note": "An alias is written back as the canonical key."
+    },
+    {
+      "name": "level-any-case",
+      "text": "LEVEL:Error",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "level-unknown-value",
+      "text": "level:warning",
+      "error": {
+        "from": 0,
+        "to": 13,
+        "message": "\"level:\" is one of debug, info, warn, error."
+      }
+    },
+    {
+      "name": "levels-ored",
+      "text": "level:warn level:error",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "warn",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          },
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 11,
+            "to": 22
+          }
+        ]
+      },
+      "note": "Plain terms of one key are ORed."
+    },
+    {
+      "name": "level-negated",
+      "text": "-level:debug",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "debug",
+            "negated": true,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "level-not-ordered",
+      "text": "level:>error",
+      "error": {
+        "from": 0,
+        "to": 12,
+        "message": "\">\" works on times, numbers, sizes and durations only."
+      }
+    },
+    {
+      "name": "service",
+      "text": "service:functions",
+      "ok": {
+        "terms": [
+          {
+            "key": "service",
+            "op": "eq",
+            "value": "functions",
+            "negated": false,
+            "from": 0,
+            "to": 17
+          }
+        ]
+      }
+    },
+    {
+      "name": "service-alias-emulator",
+      "text": "emulator:pubsub",
+      "ok": {
+        "terms": [
+          {
+            "key": "service",
+            "op": "eq",
+            "value": "pubsub",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "service-unknown",
+      "text": "service:database",
+      "error": {
+        "from": 0,
+        "to": 16,
+        "message": "\"service:\" is one of hub, firestore, auth, storage, functions, pubsub, eventarc, tasks."
+      }
+    },
+    {
+      "name": "services-each-excluded",
+      "text": "-service:pubsub -service:tasks",
+      "ok": {
+        "terms": [
+          {
+            "key": "service",
+            "op": "eq",
+            "value": "pubsub",
+            "negated": true,
+            "from": 0,
+            "to": 15
+          },
+          {
+            "key": "service",
+            "op": "eq",
+            "value": "tasks",
+            "negated": true,
+            "from": 16,
+            "to": 30
+          }
+        ]
+      },
+      "note": "Repeated negated terms of one key each exclude."
+    },
+    {
+      "name": "function",
+      "text": "function:us-central1-hello",
+      "ok": {
+        "terms": [
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-hello",
+            "negated": false,
+            "from": 0,
+            "to": 26
+          }
+        ]
+      }
+    },
+    {
+      "name": "function-alias-prefix",
+      "text": "fn:us-central1-*",
+      "ok": {
+        "terms": [
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-*",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      },
+      "note": "A trailing * matches every function id it starts."
+    },
+    {
+      "name": "instance",
+      "text": "instance:resize-images",
+      "ok": {
+        "terms": [
+          {
+            "key": "instance",
+            "op": "eq",
+            "value": "resize-images",
+            "negated": false,
+            "from": 0,
+            "to": 22
+          }
+        ]
+      }
+    },
+    {
+      "name": "instance-alias-ext",
+      "text": "ext:resize",
+      "ok": {
+        "terms": [
+          {
+            "key": "instance",
+            "op": "eq",
+            "value": "resize",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "instance-alias-extension",
+      "text": "extension:resize",
+      "ok": {
+        "terms": [
+          {
+            "key": "instance",
+            "op": "eq",
+            "value": "resize",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "codebase",
+      "text": "codebase:default",
+      "ok": {
+        "terms": [
+          {
+            "key": "codebase",
+            "op": "eq",
+            "value": "default",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "execution",
+      "text": "execution:a3f9c1-1284",
+      "ok": {
+        "terms": [
+          {
+            "key": "execution",
+            "op": "eq",
+            "value": "a3f9c1-1284",
+            "negated": false,
+            "from": 0,
+            "to": 21
+          }
+        ]
+      }
+    },
+    {
+      "name": "execution-alias-exec",
+      "text": "exec:a3f9c1-1284",
+      "ok": {
+        "terms": [
+          {
+            "key": "execution",
+            "op": "eq",
+            "value": "a3f9c1-1284",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind-prefix",
+      "text": "kind:function.*",
+      "ok": {
+        "terms": [
+          {
+            "key": "kind",
+            "op": "eq",
+            "value": "function.*",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind",
+      "text": "kind:rules.denied",
+      "ok": {
+        "terms": [
+          {
+            "key": "kind",
+            "op": "eq",
+            "value": "rules.denied",
+            "negated": false,
+            "from": 0,
+            "to": 17
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind-needs-value",
+      "text": "kind:",
+      "error": {
+        "from": 0,
+        "to": 5,
+        "message": "\"kind:\" needs a value."
+      }
+    },
+    {
+      "name": "is-problem",
+      "text": "is:problem",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "problem",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-internal",
+      "text": "is:internal",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "internal",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-marker-negated",
+      "text": "-is:marker",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "marker",
+            "negated": true,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-unknown",
+      "text": "is:broken",
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "\"is:\" is one of problem, internal, marker."
+      }
+    },
+    {
+      "name": "payload",
+      "text": "payload.orderId:o_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "payload.orderId",
+            "op": "eq",
+            "value": "o_1",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ]
+      }
+    },
+    {
+      "name": "payload-prefix-any-case",
+      "text": "PAYLOAD.orderId:o_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "payload.orderId",
+            "op": "eq",
+            "value": "o_1",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ]
+      },
+      "note": "The prefix is matched in any case; the field name keeps its case."
+    },
+    {
+      "name": "payload-json",
+      "text": "payload.items:[]",
+      "ok": {
+        "terms": [
+          {
+            "key": "payload.items",
+            "op": "eq",
+            "value": "[]",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "payload-quoted",
+      "text": "payload.cartId:\"c_19\"",
+      "ok": {
+        "terms": [
+          {
+            "key": "payload.cartId",
+            "op": "eq",
+            "value": "c_19",
+            "negated": false,
+            "from": 0,
+            "to": 21
+          }
+        ]
+      }
+    },
+    {
+      "name": "payload-nested-present",
+      "text": "payload.user.name:*",
+      "ok": {
+        "terms": [
+          {
+            "key": "payload.user.name",
+            "op": "eq",
+            "value": "*",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ]
+      }
+    },
+    {
+      "name": "payload-absent",
+      "text": "-payload.debug:*",
+      "ok": {
+        "terms": [
+          {
+            "key": "payload.debug",
+            "op": "eq",
+            "value": "*",
+            "negated": true,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "payload-ordered",
+      "text": "payload.count:>3",
+      "ok": {
+        "terms": [
+          {
+            "key": "payload.count",
+            "op": "gt",
+            "value": "3",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "payload-needs-field",
+      "text": "payload:x",
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "\"payload.\" needs a field name after it, like payload.userId:u_1."
+      }
+    },
+    {
+      "name": "payload-needs-field-after-dot",
+      "text": "payload.:x",
+      "error": {
+        "from": 0,
+        "to": 10,
+        "message": "\"payload.\" needs a field name after it, like payload.userId:u_1."
+      }
+    },
+    {
+      "name": "payload-needs-value",
+      "text": "payload.orderId:",
+      "error": {
+        "from": 0,
+        "to": 16,
+        "message": "\"payload.orderId:\" needs a value."
+      }
+    },
+    {
+      "name": "unknown-key",
+      "text": "foo:bar",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "Unknown filter \"foo:\". Use level, service, function, instance, codebase, execution, kind, is or payload.…; quote it to search for the text."
+      }
+    },
+    {
+      "name": "quoted-key-is-text",
+      "text": "\"foo:bar\"",
+      "ok": {
+        "words": [
+          {
+            "text": "foo:bar",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      },
+      "note": "Quoting a key searches for the text."
+    },
+    {
+      "name": "word",
+      "text": "heartbeat",
+      "ok": {
+        "words": [
+          {
+            "text": "heartbeat",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "phrase-negated",
+      "text": "-\"heartbeat ok\"",
+      "ok": {
+        "words": [
+          {
+            "text": "heartbeat ok",
+            "negated": true,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      },
+      "note": "Hide lines like this."
+    },
+    {
+      "name": "regex-case-insensitive",
+      "text": "/timed? out/i",
+      "ok": {
+        "regexes": [
+          {
+            "pattern": "timed? out",
+            "caseInsensitive": true,
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "regex-negated",
+      "text": "-/heartbeat/",
+      "ok": {
+        "regexes": [
+          {
+            "pattern": "heartbeat",
+            "caseInsensitive": false,
+            "negated": true,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "regex-escaped-slash",
+      "text": "/a\\/b/",
+      "ok": {
+        "regexes": [
+          {
+            "pattern": "a\\/b",
+            "caseInsensitive": false,
+            "negated": false,
+            "from": 0,
+            "to": 6
+          }
+        ]
+      }
+    },
+    {
+      "name": "regex-unclosed",
+      "text": "/unclosed",
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "A \"/\" starts a regex in this filter; quote the text to search for a path, like \"/api/users\"."
+      },
+      "note": "Logs take regex items, so a lone slash is an error, not a word."
+    },
+    {
+      "name": "path-quoted",
+      "text": "\"/api/users\"",
+      "ok": {
+        "words": [
+          {
+            "text": "/api/users",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "spec-example",
+      "text": "level:error function:us-central1-hello -\"heartbeat ok\" payload.orderId:\"o_1\" /timed? out/i",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          },
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-hello",
+            "negated": false,
+            "from": 12,
+            "to": 38
+          },
+          {
+            "key": "payload.orderId",
+            "op": "eq",
+            "value": "o_1",
+            "negated": false,
+            "from": 55,
+            "to": 76
+          }
+        ],
+        "words": [
+          {
+            "text": "heartbeat ok",
+            "negated": true,
+            "from": 39,
+            "to": 54
+          }
+        ],
+        "regexes": [
+          {
+            "pattern": "timed? out",
+            "caseInsensitive": true,
+            "negated": false,
+            "from": 77,
+            "to": 90
+          }
+        ]
+      }
+    },
+    {
+      "name": "link-to-logs",
+      "text": "function:us-central1-hello execution:a3f9c1-1284 instance:resize",
+      "ok": {
+        "terms": [
+          {
+            "key": "function",
+            "op": "eq",
+            "value": "us-central1-hello",
+            "negated": false,
+            "from": 0,
+            "to": 26
+          },
+          {
+            "key": "execution",
+            "op": "eq",
+            "value": "a3f9c1-1284",
+            "negated": false,
+            "from": 27,
+            "to": 48
+          },
+          {
+            "key": "instance",
+            "op": "eq",
+            "value": "resize",
+            "negated": false,
+            "from": 49,
+            "to": 64
+          }
+        ]
+      },
+      "note": "What linkToLogs writes."
+    },
+    {
+      "name": "utf16-spans",
+      "text": "is:problem -kind:rules.denied 火🔥",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "problem",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          },
+          {
+            "key": "kind",
+            "op": "eq",
+            "value": "rules.denied",
+            "negated": true,
+            "from": 11,
+            "to": 29
+          }
+        ],
+        "words": [
+          {
+            "text": "火🔥",
+            "negated": false,
+            "from": 30,
+            "to": 33
+          }
+        ]
+      },
+      "note": "Spans count UTF-16 code units."
+    }
+  ]
+}

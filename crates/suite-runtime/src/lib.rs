@@ -1150,6 +1150,11 @@ fn forward_auth_log(auth: &AuthRuntime, logging: &LoggingRuntime) {
 /// The log runtime with the `--debug-log` sink and the startup lines.
 fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeError> {
     let logging = LoggingRuntime::new();
+    // The console keeps every line as a structured entry, from the startup
+    // lines on; without the console (`--no-ui`) nothing is kept for it.
+    if config.ui_enabled {
+        firenook_console_front::ObserveConsole::install_log(&logging);
+    }
     if let Some(path) = &config.debug_log {
         logging.set_file_sink(path).map_err(|error| {
             failure(format!(

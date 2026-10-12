@@ -162,7 +162,10 @@ impl LoggingRuntime {
         }
     }
 
-    fn console_sink(&self) -> Option<Arc<dyn ConsoleSink>> {
+    /// The console's sink, when one is installed: every clone of this
+    /// runtime shares it.
+    #[must_use]
+    pub fn console_sink(&self) -> Option<Arc<dyn ConsoleSink>> {
         self.state
             .console
             .read()
