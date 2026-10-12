@@ -332,6 +332,14 @@ export function FilterField({
   // the one Enter takes; with nothing typed, Enter takes nothing until an
   // arrow says so.
   const typedPrefix = 'prefix' in context && context.prefix !== ''
+  // Tab completes what is begun — a word, a `-`, a key waiting for its
+  // value or path — with the first match; in an empty spot it moves on, so
+  // a Tab walk through the page never fills the filter.
+  const begun =
+    typedPrefix ||
+    context.kind === 'value' ||
+    context.kind === 'path' ||
+    (context.kind === 'key' && context.negated)
   const active =
     highlight >= 0 && highlight < items.length
       ? highlight
@@ -484,8 +492,7 @@ export function FilterField({
                   showing &&
                   !event.shiftKey
                 ) {
-                  const item =
-                    items[active === -1 && event.key === 'Tab' && items.length > 0 ? 0 : active]
+                  const item = items[active === -1 && event.key === 'Tab' && begun ? 0 : active]
                   if (!item) return
                   pick(item)
                   handled()

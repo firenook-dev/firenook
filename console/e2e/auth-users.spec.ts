@@ -1075,6 +1075,8 @@ for (const scheme of ['light', 'dark'] as const)
       await page.keyboard.press('Tab')
       expect(await cutRings(page, true), `Tab ${step + 1}`).toEqual([])
     }
+    // The walk passed through the filter without filling it.
+    await expect(page.getByTestId('users-filter-input')).toHaveValue('')
 
     // Row one and row two keep their controls apart at every width. The
     // walk may have left focus in the filter, whose completions open over

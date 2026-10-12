@@ -129,6 +129,29 @@ describe('the filter field', () => {
     expect(completions()).toEqual([])
   })
 
+  it('lets Tab walk past an empty filter, and completes with Tab what is begun', async () => {
+    const user = userEvent.setup()
+    render(<Users />)
+    await user.click(input())
+    expect(completions()).toHaveLength(5)
+    // Nothing typed: Tab moves on and leaves the filter as it was.
+    await user.keyboard('{Tab}')
+    expect(input()).toHaveValue('')
+    expect(input()).not.toHaveFocus()
+    expect(screen.getByTestId('q')).toHaveTextContent('')
+    // A word begun: Tab takes the first match, then the first value of the key it put in.
+    await user.click(input())
+    await user.keyboard('pro{Tab}')
+    expect(input()).toHaveValue('provider:')
+    expect(input()).toHaveFocus()
+    await user.keyboard('{Tab}')
+    expect(input()).toHaveValue('provider:password ')
+    // After a whole term, the next spot is empty again: Tab moves on.
+    await user.keyboard('{Tab}')
+    expect(input()).toHaveValue('provider:password ')
+    expect(input()).not.toHaveFocus()
+  })
+
   it('draws each term on a tinted ground under its text', async () => {
     render(<Users initial="provider:google -is:disabled ada" />)
     const grounds = screen.getByTestId('users-filter').querySelectorAll('.bg-kumo-fill')
