@@ -38,6 +38,9 @@ const COUNTERS_EVERY: Duration = Duration::from_millis(250);
 const RESET_PAUSE: Duration = Duration::from_secs(1);
 /// Changed queues one frame lists before it resets.
 const MAX_CHANGED: usize = 200;
+/// Queues the state a subscriber without a cursor opens with may hold; a
+/// project with more opens with `reset` (it reloads).
+const OPEN_MAX: usize = 1_000;
 /// How long `tasks.queue` collects keys before it sends them.
 const KEY_WINDOW: Duration = Duration::from_millis(100);
 /// The attempts ring: 10,000 attempts, 8 MiB.
@@ -186,6 +189,9 @@ impl LiveTopic for CountersTopic {
     }
 }
 
+/// One `tasks.counters` subscriber. Without a cursor it opens with the
+/// state, every queue's counters of the project in one frame whose revision
+/// is its cursor; with one it resumes (nothing when current, else `reset`).
 struct Counters {
     console: TasksConsole,
     scope: TasksScope,
@@ -193,6 +199,8 @@ struct Counters {
     watch: watch::Receiver<u64>,
     last: Option<Instant>,
     pause_until: Option<Instant>,
+    /// The opening state is still to send (read on the first poll).
+    opening: bool,
     outbox: VecDeque<TopicEvent>,
 }
 
@@ -224,6 +232,7 @@ impl Counters {
             watch,
             last: None,
             pause_until: None,
+            opening: after.is_none(),
             outbox,
         };
         stream::unfold(state, |mut state| async move {
@@ -232,8 +241,56 @@ impl Counters {
         .boxed()
     }
 
+    /// The state a subscriber without a cursor opens with: the project's
+    /// queues read once, then whatever changed between that read and the
+    /// cursor's, so the frame is the state at its revision. The official
+    /// `/queueStats` figures are never streamed.
+    fn open_frame(&mut self) {
+        let project = self.scope.project.clone();
+        let list = self.console.runtime.queues_view(project.as_deref());
+        let mut queues: std::collections::BTreeMap<String, _> = list
+            .queues
+            .iter()
+            .map(|queue| (queue.key.clone(), convert::counters(&queue.counters)))
+            .collect();
+        self.cursor = TasksCursor::at(list.revision);
+        let delta = self
+            .console
+            .runtime
+            .console_delta(&mut self.cursor, &self.scope);
+        self.last = Some(Instant::now());
+        if delta.overflow || queues.len() > OPEN_MAX {
+            self.outbox.push_back(TopicEvent::Reset {
+                reason: ResetReason::Lagged,
+                missed: None,
+            });
+            return;
+        }
+        for queue in &delta.queues {
+            queues.insert(queue.key.clone(), convert::counters(queue));
+        }
+        let frame = TasksCountersFrame {
+            revision: delta.revision,
+            queues: queues
+                .into_values()
+                .map(|mut counters| {
+                    counters.official = None;
+                    counters
+                })
+                .collect(),
+        };
+        self.outbox.push_back(TopicEvent::json(
+            "counters",
+            Some(delta.revision.to_string()),
+            &frame,
+        ));
+    }
+
     async fn next(&mut self) -> Option<TopicEvent> {
         loop {
+            if std::mem::take(&mut self.opening) {
+                self.open_frame();
+            }
             if let Some(event) = self.outbox.pop_front() {
                 return Some(event);
             }

@@ -26,6 +26,8 @@ import { Route as AuthSettingsRouteImport } from './routes/auth_.settings'
 import { Route as EventarcChannelsRouteImport } from './routes/eventarc_.channels'
 import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
 import { Route as FunctionsInvocationsRouteImport } from './routes/functions_.invocations'
+import { Route as PubsubSchedulesRouteImport } from './routes/pubsub_.schedules'
+import { Route as PubsubSchemasRouteImport } from './routes/pubsub_.schemas'
 import { Route as StorageRulesRouteImport } from './routes/storage_.rules'
 
 const IndexRoute = IndexRouteImport.update({
@@ -113,6 +115,16 @@ const FunctionsInvocationsRoute = FunctionsInvocationsRouteImport.update({
   path: '/functions/invocations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PubsubSchedulesRoute = PubsubSchedulesRouteImport.update({
+  id: '/pubsub_/schedules',
+  path: '/pubsub/schedules',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PubsubSchemasRoute = PubsubSchemasRouteImport.update({
+  id: '/pubsub_/schemas',
+  path: '/pubsub/schemas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StorageRulesRoute = StorageRulesRouteImport.update({
   id: '/storage_/rules',
   path: '/storage/rules',
@@ -137,6 +149,8 @@ export interface FileRoutesByFullPath {
   '/eventarc/channels': typeof EventarcChannelsRoute
   '/firestore/rules': typeof FirestoreRulesRoute
   '/functions/invocations': typeof FunctionsInvocationsRoute
+  '/pubsub/schedules': typeof PubsubSchedulesRoute
+  '/pubsub/schemas': typeof PubsubSchemasRoute
   '/storage/rules': typeof StorageRulesRoute
 }
 export interface FileRoutesByTo {
@@ -157,6 +171,8 @@ export interface FileRoutesByTo {
   '/eventarc/channels': typeof EventarcChannelsRoute
   '/firestore/rules': typeof FirestoreRulesRoute
   '/functions/invocations': typeof FunctionsInvocationsRoute
+  '/pubsub/schedules': typeof PubsubSchedulesRoute
+  '/pubsub/schemas': typeof PubsubSchemasRoute
   '/storage/rules': typeof StorageRulesRoute
 }
 export interface FileRoutesById {
@@ -178,6 +194,8 @@ export interface FileRoutesById {
   '/eventarc_/channels': typeof EventarcChannelsRoute
   '/firestore_/rules': typeof FirestoreRulesRoute
   '/functions_/invocations': typeof FunctionsInvocationsRoute
+  '/pubsub_/schedules': typeof PubsubSchedulesRoute
+  '/pubsub_/schemas': typeof PubsubSchemasRoute
   '/storage_/rules': typeof StorageRulesRoute
 }
 export interface FileRouteTypes {
@@ -200,6 +218,8 @@ export interface FileRouteTypes {
     | '/eventarc/channels'
     | '/firestore/rules'
     | '/functions/invocations'
+    | '/pubsub/schedules'
+    | '/pubsub/schemas'
     | '/storage/rules'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -220,6 +240,8 @@ export interface FileRouteTypes {
     | '/eventarc/channels'
     | '/firestore/rules'
     | '/functions/invocations'
+    | '/pubsub/schedules'
+    | '/pubsub/schemas'
     | '/storage/rules'
   id:
     | '__root__'
@@ -240,6 +262,8 @@ export interface FileRouteTypes {
     | '/eventarc_/channels'
     | '/firestore_/rules'
     | '/functions_/invocations'
+    | '/pubsub_/schedules'
+    | '/pubsub_/schemas'
     | '/storage_/rules'
   fileRoutesById: FileRoutesById
 }
@@ -261,6 +285,8 @@ export interface RootRouteChildren {
   EventarcChannelsRoute: typeof EventarcChannelsRoute
   FirestoreRulesRoute: typeof FirestoreRulesRoute
   FunctionsInvocationsRoute: typeof FunctionsInvocationsRoute
+  PubsubSchedulesRoute: typeof PubsubSchedulesRoute
+  PubsubSchemasRoute: typeof PubsubSchemasRoute
   StorageRulesRoute: typeof StorageRulesRoute
 }
 
@@ -385,6 +411,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FunctionsInvocationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pubsub_/schedules': {
+      id: '/pubsub_/schedules'
+      path: '/pubsub/schedules'
+      fullPath: '/pubsub/schedules'
+      preLoaderRoute: typeof PubsubSchedulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pubsub_/schemas': {
+      id: '/pubsub_/schemas'
+      path: '/pubsub/schemas'
+      fullPath: '/pubsub/schemas'
+      preLoaderRoute: typeof PubsubSchemasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/storage_/rules': {
       id: '/storage_/rules'
       path: '/storage/rules'
@@ -413,6 +453,8 @@ const rootRouteChildren: RootRouteChildren = {
   EventarcChannelsRoute: EventarcChannelsRoute,
   FirestoreRulesRoute: FirestoreRulesRoute,
   FunctionsInvocationsRoute: FunctionsInvocationsRoute,
+  PubsubSchedulesRoute: PubsubSchedulesRoute,
+  PubsubSchemasRoute: PubsubSchemasRoute,
   StorageRulesRoute: StorageRulesRoute,
 }
 export const routeTree = rootRouteImport

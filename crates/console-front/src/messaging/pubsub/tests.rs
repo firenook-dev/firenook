@@ -1221,6 +1221,22 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     assert_eq!(row["queueDepth"], Value::Null);
     assert_eq!(delivery(&page, &second.event_id)["mark"], "failed");
     assert_eq!(delivery(&page, &resent)["mark"], "delivered");
+    // Each delivery's own request: the run again carries its own event id.
+    let (_, body) = suite
+        .call(
+            Method::GET,
+            &format!(
+                "/api/v1/pubsub/dispatch?topic={}&id={paused}&function=us-central1-onOrderPlaced&event={resent}",
+                encoded(ORDERS)
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(body["rebuilt"], false);
+    assert_eq!(
+        body["body"].as_str().map(str::as_bytes),
+        Some(resent_dispatch.body.as_slice())
+    );
     assert_eq!(page["counts"]["all"], 4);
     assert_eq!(page["counts"]["delivered"], 1);
     assert_eq!(
@@ -1279,6 +1295,64 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     );
     let (_, page) = suite.call(Method::GET, &deliveries, None).await;
     assert_eq!(delivery(&page, &second.event_id)["mark"], "not-kept");
+    suite.stop.send(true).expect("stop");
+}
+
+/// An SDK that catches the handler's error itself (`onSchedule` logs the
+/// message and answers 500 with no body) leaves compute no handler error:
+/// the delivery says what the invocation logged at error level instead.
+#[tokio::test]
+async fn a_failure_the_sdk_caught_says_what_the_handler_logged() {
+    let monitor = Monitor::new(MonitorLimits::default());
+    let mut suite = suite(Some(monitor.clone()));
+    let deliveries = format!("/api/v1/pubsub/deliveries?topic={}", encoded(ORDERS));
+    publish(&suite.pubsub, ORDERS, "{\"order\":1}");
+    let dispatch = suite.deliveries.recv().await.expect("dispatch");
+    let token = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &dispatch);
+    let line = |level: &str, message: &str| {
+        firenook_functions_runtime::LogEvent::new(level, "functions", message.to_owned())
+            .with_execution(&*token.id)
+    };
+    monitor.log(&line("INFO", "starting the digest"));
+    // The SDK's logger writes a structured line; its severity is the level.
+    monitor.log(&line(
+        "INFO",
+        r#"{"severity":"ERROR","message":"digest service unavailable\nretry later"}"#,
+    ));
+    monitor.log(&line("ERROR", "a second error"));
+    finish_invocation(&monitor, &token, 500, None);
+    let (status, page) = suite.call(Method::GET, &deliveries, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let row = delivery(&page, &dispatch.event_id);
+    assert_eq!(row["mark"], "failed");
+    assert_eq!(row["status"], 500);
+    assert_eq!(row["error"], "digest service unavailable");
+
+    // A handler error compute recorded wins over any line.
+    publish(&suite.pubsub, ORDERS, "{\"order\":2}");
+    let second = suite.deliveries.recv().await.expect("dispatch");
+    let token = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &second);
+    monitor.log(
+        &firenook_functions_runtime::LogEvent::new("ERROR", "functions", "logged".to_owned())
+            .with_execution(&*token.id),
+    );
+    finish_invocation(&monitor, &token, 500, Some("Error: thrown"));
+    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
+    assert_eq!(delivery(&page, &second.event_id)["error"], "Error: thrown");
+
+    // A success that logged an error is no failure, and has no error.
+    publish(&suite.pubsub, ORDERS, "{\"order\":3}");
+    let third = suite.deliveries.recv().await.expect("dispatch");
+    let token = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &third);
+    monitor.log(
+        &firenook_functions_runtime::LogEvent::new("ERROR", "functions", "noisy".to_owned())
+            .with_execution(&*token.id),
+    );
+    finish_invocation(&monitor, &token, 200, None);
+    let (_, page) = suite.call(Method::GET, &deliveries, None).await;
+    let row = delivery(&page, &third.event_id);
+    assert_eq!(row["mark"], "delivered");
+    assert_eq!(row["error"], Value::Null);
     suite.stop.send(true).expect("stop");
 }
 

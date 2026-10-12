@@ -262,6 +262,10 @@ pub(crate) struct DispatchQuery {
     topic: String,
     id: String,
     function: String,
+    /// One delivery of the function (its event id): a run again has its
+    /// own request. Absent: the newest delivery whose request is kept.
+    #[serde(default)]
+    event: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1037,6 +1041,12 @@ async fn dispatch(
             .iter()
             .rev()
             .filter(|target| target.function_id == query.function)
+            .filter(|target| {
+                query
+                    .event
+                    .as_ref()
+                    .is_none_or(|event| &target.event_id == event)
+            })
             .find_map(|target| {
                 let invocation = monitor.by_event_id(&target.event_id)?;
                 monitor.request_body(&invocation.id)

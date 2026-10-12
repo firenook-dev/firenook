@@ -445,17 +445,24 @@ async fn routes_answer_starting_until_the_runtime_is_set() {
     pubsub.set(console.clone());
     let (status, _) = call(&router, Method::GET, "/api/v1/pubsub/topics", None).await;
     assert_eq!(status, StatusCode::OK);
-    // The waiting stream starts where the runtime arrived.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The waiting stream opens with the state where the runtime arrived,
+    // and goes on from there.
+    let (name, opening) = event(&arrival(&mut arrivals).await);
+    assert_eq!(name, "counters");
+    assert!(opening["revision"].is_u64(), "{opening}");
     create_topic(&console, "projects/demo-console/topics/late");
-    let first = tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
-        .await
-        .expect("an event")
-        .expect("the stream goes on");
-    let (name, data) = event(&first);
+    let (name, data) = event(&arrival(&mut arrivals).await);
     assert_eq!(name, "resources");
     assert_eq!(data["kinds"], json!(["topics"]));
     drop(stop);
+}
+
+/// The next event a spawned stream passed on, within five seconds.
+async fn arrival(arrivals: &mut mpsc::UnboundedReceiver<TopicEvent>) -> TopicEvent {
+    tokio::time::timeout(Duration::from_secs(5), arrivals.recv())
+        .await
+        .expect("an event")
+        .expect("the stream goes on")
 }
 
 #[tokio::test]
@@ -700,6 +707,97 @@ async fn messaging_topics_on_the_hub() {
     suite.stop.send(true).expect("stop");
 }
 
+/// A state topic's subscriber without a cursor (a page that just loaded, a
+/// tab shown again, a browser's first subscriber the channel then shares)
+/// opens with the state; with the current cursor it resumes with nothing.
+#[tokio::test]
+async fn the_counters_topics_open_with_their_state() {
+    let suite = suite(None);
+    let pubsub = PubsubSection::new({
+        let late = Late::pending("Pub/Sub");
+        late.set(suite.pubsub.clone());
+        late
+    });
+    let tasks = TasksSection::new({
+        let late = Late::pending("Cloud Tasks");
+        late.set(suite.tasks.clone());
+        late
+    });
+    let workers = "projects/demo-console/subscriptions/opening-workers";
+    create_subscription(&suite.pubsub, workers, ORDERS);
+    publish(&suite.pubsub, ORDERS, "one");
+    publish(&suite.pubsub, ORDERS, "two");
+    let topics = pubsub.topics(&context(&suite.stop));
+    let counters = topic(&topics, "pubsub.counters");
+    let mut opened = counters
+        .open(&json!({ "throughput": [ORDERS] }), None)
+        .expect("open");
+    let first = next(&mut opened).await;
+    let TopicEvent::Event {
+        name: "counters",
+        cursor: Some(cursor),
+        ..
+    } = &first
+    else {
+        panic!("the opening state, not {first:?}");
+    };
+    let (_, frame) = event(&first);
+    // Its revision is the cursor it carries, and the index's.
+    assert_eq!(cursor.parse::<u64>().ok(), frame["revision"].as_u64());
+    let (_, index) = suite.call(Method::GET, "/api/v1/pubsub/topics", None).await;
+    assert_eq!(frame["revision"], index["revision"]);
+    let orders = frame["topics"]
+        .as_array()
+        .and_then(|topics| topics.iter().find(|entry| entry["name"] == ORDERS))
+        .expect("the topic");
+    assert_eq!(orders["published"], 2);
+    let backlog = frame["subscriptions"]
+        .as_array()
+        .and_then(|subscriptions| subscriptions.iter().find(|entry| entry["name"] == workers))
+        .expect("the subscription");
+    assert_eq!(backlog["backlog"], 2);
+    assert_eq!(frame["throughput"][0]["topic"], ORDERS);
+    // A subscriber at the current revision gets nothing until a change.
+    let mut current = counters
+        .open(&json!({}), Some(&frame["revision"].to_string()))
+        .expect("open");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(400), current.next())
+            .await
+            .is_err(),
+        "nothing to say at the current revision"
+    );
+    publish(&suite.pubsub, ORDERS, "three");
+    let (name, frame) = event(&next(&mut current).await);
+    assert_eq!(name, "counters");
+    assert!(
+        frame["topics"].as_array().is_some_and(|topics| topics
+            .iter()
+            .any(|entry| entry["name"] == ORDERS && entry["published"] == 3)),
+        "{frame}"
+    );
+
+    // Cloud Tasks: every queue of the project, the official figures left out.
+    let topics = tasks.topics(&context(&suite.stop));
+    let mut opened = topic(&topics, "tasks.counters")
+        .open(&json!({}), None)
+        .expect("open");
+    let (name, frame) = event(&next(&mut opened).await);
+    assert_eq!(name, "counters");
+    let queues = frame["queues"].as_array().expect("queues");
+    assert!(
+        queues.iter().any(|queue| queue["key"] == PROCESS_ORDER),
+        "{frame}"
+    );
+    assert!(
+        queues.iter().all(|queue| queue["official"].is_null()),
+        "{frame}"
+    );
+    let (_, list) = suite.call(Method::GET, "/api/v1/tasks/queues", None).await;
+    assert_eq!(frame["revision"], list["revision"]);
+    suite.stop.send(true).expect("stop");
+}
+
 #[tokio::test]
 async fn the_push_feed_replays_what_a_reconnect_missed() {
     let suite = suite(None);
@@ -810,6 +908,15 @@ async fn too_many_changes_in_one_frame_are_a_reset() {
     let mut counters = topic(&topics, "pubsub.counters")
         .open(&json!({}), None)
         .expect("open");
+    // It opens with the state, every topic in it.
+    let (name, opening) = event(&next(&mut counters).await);
+    assert_eq!(name, "counters");
+    assert!(
+        opening["topics"]
+            .as_array()
+            .is_some_and(|topics| topics.len() >= 201),
+        "{opening}"
+    );
     // A publish to each stamps 201 topics in one window.
     for index in 0..201 {
         publish(
@@ -1010,6 +1117,10 @@ async fn the_schedules_topic_follows_each_runs_outcome() {
     let topics = section.topics(&context(&suite.stop));
     let schedules = topic(&topics, "pubsub.schedules");
     let mut stream = schedules.open(&json!({}), None).expect("open");
+    // Without a cursor it opens with every schedule's state.
+    let (_, opening) = schedule_state(&mut stream).await;
+    assert_eq!(opening["runs"], 0);
+    assert_eq!(opening["lastOutcome"], Value::Null);
     let run_now = json!({ "functionId": "us-central1-nightlyCleanup" });
     // Run now records the run: queued, nothing has begun.
     let (status, run) = suite

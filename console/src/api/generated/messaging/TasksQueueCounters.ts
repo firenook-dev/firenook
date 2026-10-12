@@ -2,6 +2,7 @@
 import type { MessagingSecondWindow } from "./MessagingSecondWindow";
 import type { MessagingTenSecondWindow } from "./MessagingTenSecondWindow";
 import type { TasksOfficialStats } from "./TasksOfficialStats";
+import type { TasksOutcomeCounts } from "./TasksOutcomeCounts";
 
 /**
  * A queue's live figures.
@@ -31,6 +32,10 @@ tokens: number, maxTokens: number, refilledAt: string, maxDispatchesPerSecond: n
  * Stamped windows the console ages.
  */
 dispatched: MessagingSecondWindow, succeeded: MessagingSecondWindow, failed: MessagingTenSecondWindow, added: MessagingTenSecondWindow, oldestPendingAt: string | null, history: number, 
+/**
+ * The history by outcome (they add up to `history`).
+ */
+outcomes: TasksOutcomeCounts, 
 /**
  * What `/queueStats` answers for this queue, quirks included (computed
  * on request, never streamed).

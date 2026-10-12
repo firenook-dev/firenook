@@ -3005,7 +3005,148 @@ passes its own credential. A handler error the SDK catches itself (a
 schedule answering 500 with an empty body) leaves `InvocationSummary.error`
 null.
 
-## Pub/Sub and Cloud Tasks (on the way, `src/pubsub/`, `src/tasks/`)
+## Pub/Sub and Cloud Tasks (built, `src/pubsub/`, `src/tasks/`, shared code in `src/messaging/`)
+
+**Pages.** Pub/Sub is one nav entry with three pages: Topics (`/pubsub`,
+`routes/pubsub.tsx`), Schemas (`/pubsub/schemas`, `routes/pubsub_.schemas.tsx`)
+and Schedules (`/pubsub/schedules`, `routes/pubsub_.schedules.tsx`). Schedules
+lives under Pub/Sub because a tick is a publish to `firebase-schedule-<name>`;
+this stream owns the scheduler and the `ScheduleControl` trait
+(`crates/pubsub-front/src/schedule_control.rs`) that compute's Run now calls.
+Cloud Tasks is one page (`/tasks`, `routes/tasks.tsx`): the queues in the
+panel, a queue with Tasks, Attempts, History and Configuration, a task in the
+inspector (Payload, Request, Attempts).
+
+**Search parameters.** Topics: `topic` and `subscription` (an id under the
+page's project, or a full name that travelled whole), `view` (`messages`,
+`subscriptions`, `deliveries`, `snapshots`, `settings` on a topic; `backlog`,
+`pull`, `push`, `dead-letters`, `settings` on a subscription), `message`,
+`tab`, `q`, `expr` (a subscription filter expression over attributes),
+`state`, `function`, `outcome`, `paused`, `new`, `dialog` (`replay`, `setup`,
+`export`), `prefill`, `project`. Schemas: `schema`, `revision`, `diff`, `view`,
+`panel=test`, `new=schema`. Schedules: `schedule` (the function id). Tasks:
+`queue` by id with `location` only when two locations register that id (the
+page drops it otherwise), `view`, `task` (the console's decimal id), `tab`,
+`state`, `outcome`, `q`, `paused`, `new=task`, `prefill`. The router parses
+query values as JSON, so `?message=40` arrives as a number and an id of
+digits is written quoted (`message=%2246%22`): the schemas accept a string or
+a number and normalize (`text` in `routes/pubsub.tsx`, `src/tasks/search.ts`).
+
+**Links.** `pubsub.topic`, `pubsub.subscription` and `pubsub.schema` are keyed
+by full name, `pubsub.message` by `<topic full name>|<id>`, `pubsub.schedule`
+by function id, `tasks.queue` by `<project>|<location>|<queue>` and
+`tasks.task` by that plus `|<task id>`; the registries' `routes` open them
+(`src/messaging/links.ts`). A link always writes `project` (and `location`
+for Tasks) and the page tidies what it does not need; a subscription link
+carries no topic, which the Topics page completes from its index. These pages
+link out only through `EntityLink`, `linkTo` and `linkToLogs`, and never
+write another section's URL.
+
+**Topics, not streams.** Eight, declared in `src/pubsub/live.ts` and
+`src/tasks/live.ts`: `pubsub.counters`, `pubsub.schedules` and
+`tasks.counters` are `compare` (state: without a cursor they open with every
+entity of the project, and over 1,000 they answer a reset instead; then
+changes after the revision, at most every 250 ms and 200 a frame, throughput
+for at most 24 topics on screen); `pubsub.topic`, `pubsub.deliveries` and
+`tasks.queue` are invalidation (published ids, moved backlog keys, delivery
+event ids, task row keys and finished ids, which the page reads back through
+`:batchGet`); `pubsub.push` and `tasks.attempts` are `replay` over a console
+ring fed inline by the runtime's sink. Time is a stamp, not a window: a
+throughput window carries its end and the client ages it
+(`src/messaging/windows.ts`). A list read again catches up with the frames
+that arrived meanwhile (`src/messaging/frames.ts`, 32 frames or 10 s per
+project), because a tab joining a shared subscription gets only the latest
+event of each name. `pubsub.schedules` also follows compute's Monitor, so a
+run's outcome arrives live; a reconnect while Functions run gets a reset.
+Never a per-message broadcast, never `new EventSource`.
+
+**The broker has two watches.** `changed` is deliverability: waiting pulls
+wake on it. Everything the console needs goes on `console`. A console-only
+bump on `changed` makes every waiting pull spin.
+
+**Lists are pages with meta; mutable rows are patched.** `messageList`,
+`backlogList`, `deliveryList`, `taskList` and `historyList` (in each section's
+`queries.ts`) go through `useCursorRows`. Backlog, task and delivery rows are
+keyed by position or event id and patched in place through `:batchGet`;
+message and History heads read again at the top and count `newAbove` below
+it; the window is 20 pages. Message rows are deduplicated by id and backlog
+places renumbered (`src/messaging/rows.ts`).
+
+**Peek is the default, Pull is a choice.** Nothing on screen leases a message
+unless the person pressed Pull. Pull warns when a subscriber is connected, is
+absent on a subscription the functions consumer drains, and explains itself
+on a push subscription. `a`, `x` and `e` act only in the Pull tab, on a
+received row.
+
+**Console-only controls never reach the wire**: pause, hold, stop retrying,
+force acknowledge, release, publish jobs (foundation `Job`s), schedule pause
+and clear. Every engine change in these crates passes the oracle replays:
+`npm run replay:pubsub` and `npm run replay:functions:runtime -- --fixture
+fixtures/tasks-v1/emulator-programs.json --profiles tasks`.
+
+**Deliveries are compute's record joined by event id**: a topic's Deliveries
+tab and a message's deliveries read the fanout the runtime recorded and the
+invocation compute keeps; `GET /pubsub/dispatch?event=` serves the request
+each delivery received (a run again has its own CloudEvent id). When the SDK
+caught the handler's throw itself (`onSchedule` answers 500 with no body), the
+failure takes its error from the invocation's first error-level log line.
+Never add a second journal. Suite facts are not drawn here: background
+triggers and foreign projects are the shell banner's.
+
+**Setup export and import** (`src/pubsub/setup.ts`, `dialog=setup`): version 2,
+indented JSON, function-managed resources (schedule topics, `emulator-sub-*`)
+left out; the import previews what it creates, what exists and what it leaves
+out, and moves a file from another project into the one shown.
+
+**Cloud Tasks reads the engine's figures.** History's counts by outcome, the
+retry ladder, a task's retry plan and the sentence saying when the emulator
+gives up come from the engine (`TasksQueueCounters.outcomes`,
+`TasksQueueConfig.ladder`, the dispatcher's own rules), never from the
+browser. A newly enqueued task opens in the inspector. A real
+`onTaskDispatched` answers 204, and an `HttpsError` arrives in the attempt's
+response snippet, not its error.
+
+**Names travel whole in query strings**, never as path segments; a queue
+travels to the engine as its opaque key.
+
+**Memory bounds** are DESIGN.md's (Pub/Sub and Cloud Tasks for the console).
+Any new console-held state in these crates needs a bound and an eviction rule
+in the same commit.
+
+**Shared code** (`src/messaging/`): `api.ts` (query strings, page cursors),
+`frames.ts`, `links.ts`, `rows.ts`, `windows.ts` and `confirm-popover.tsx`
+(`useConfirmPopover`, `errorText`, `rowElement`): Run again, Run now and
+Enqueue again ask in a popover anchored to the row or the button, because
+they run the handler; Delete goes through `DangerConfirm`.
+
+**The messaging fixture**: `scripts/fixtures/functions/messaging.js` (the real
+SDK, loaded through `FIXTURE_STREAMS`) and the seeders `scripts/seed/pubsub.mjs`
+and `scripts/seed/tasks.mjs`. Journeys create their own topics and client
+queues through `e2e/support/messaging.ts` and need the functions SDK
+(`npm run e2e:sdk`, or `FIRENOOK_FUNCTIONS_SDK` pointing at a `node_modules`
+holding it). The scale journeys (`pubsub-scale.spec.ts`,
+`tasks-scale.spec.ts`, `@perf`) are opt-in with `FIRENOOK_PERF=1` and need no
+`FIRENOOK_SEED_SCALE`: each starts its own engine and seeds it.
+
+**Honest notes**: one sentence where the emulator differs from production,
+shown only where the difference bites — push retries every second and never
+dead-letters (the Push tab), `maxAttempts` + 1 runs (the Attempt column and
+the retry plan), a schedule time does not delay a task unless the queue holds
+scheduled tasks (the ETA column), a re-registration replaces a queue (its
+banner).
+
+**Keys**: the foundation's reserved-keys table, no new row. `n` publishes on
+a topic (a new schema on Schemas, Enqueue on a queue), `p` pauses the Push
+and Attempts feeds, `r` and Shift+R run again (behind a confirmation, or
+through a form), `l` opens in Logs while Logs is built, `a`/`x`/`e` only in
+the Pull tab, Delete acknowledges ticked backlog rows, `c` and Shift+C copy
+in the Attempts feed.
+
+**Testing gotchas.** Kumo `Select` does not forward `data-testid`: find it with
+`getByRole('combobox', { name })`. A single-key shortcut pressed while focus
+is still in a closing popover or dialog is skipped, so wait for the overlay to
+go. `DataTable` draws only the rows on screen: count with the `MatchCount` or
+the footer. The design-system cards are `console/design-system/src/cards/messaging.tsx`.
 
 ## Logs and the overview (on the way, `src/logs/`, `src/overview/`)
 

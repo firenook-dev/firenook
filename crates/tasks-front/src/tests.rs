@@ -1843,6 +1843,22 @@ mod console {
         })
     }
 
+    /// The history's counts by outcome, as kept, after checking them
+    /// against a count of the history itself.
+    fn outcomes(runtime: &TasksRuntime, key: &str) -> crate::inspect::OutcomeCounts {
+        let mut scanned = crate::inspect::OutcomeCounts::default();
+        for entry in history(runtime, key) {
+            scanned.add(entry.finished.outcome);
+        }
+        let kept = runtime.queue_view(key).unwrap().counters.outcomes;
+        assert_eq!(kept, scanned, "the outcome counts follow the history");
+        assert_eq!(
+            usize::try_from(kept.total()).unwrap(),
+            history(runtime, key).len()
+        );
+        kept
+    }
+
     async fn wait_until(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
         let deadline = Instant::now() + timeout;
         while !done() {
@@ -2048,6 +2064,11 @@ mod console {
         assert_eq!(kept[0].finished.task.name, "t1", "the oldest went first");
         let dropped = runtime.with_state(|state| state.console[&key].dropped);
         assert_eq!(dropped, 1);
+        assert_eq!(
+            outcomes(&runtime, &key).purged,
+            1_000,
+            "the evicted one left the count"
+        );
 
         // 33 bodies of 1 MiB: the history keeps at most 32 MiB.
         let heavy = client_queue(
@@ -2077,6 +2098,7 @@ mod console {
         assert!(bytes <= crate::runtime::HISTORY_BYTES);
         assert_eq!(kept, 31, "33 MiB of bodies trimmed under 32 MiB");
         assert!(total >= bytes);
+        assert_eq!(outcomes(&runtime, &heavy).purged, 31);
         runtime.shutdown().await;
     }
 
@@ -2131,6 +2153,16 @@ mod console {
         assert!(outcomes.contains(&(failed, TaskOutcome::Failed)));
         assert!(outcomes.contains(&(deleted, TaskOutcome::Deleted)));
         assert!(outcomes.contains(&(purged, TaskOutcome::Purged)));
+        let counts = self::outcomes(&runtime, &key);
+        assert_eq!(
+            (
+                counts.succeeded,
+                counts.failed,
+                counts.deleted,
+                counts.purged
+            ),
+            (1, 1, 1, 1)
+        );
         runtime.shutdown().await;
     }
 
@@ -3453,6 +3485,45 @@ mod inspect {
     }
 
     #[tokio::test]
+    async fn the_retry_ladder_is_the_dispatchers() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        // processOrder's options in the messaging fixture.
+        let key = client_queue(
+            &runtime,
+            "ladder",
+            &json!({
+                "retryConfig": {"maxAttempts": 3, "minBackoffSeconds": 1, "maxBackoffSeconds": 4},
+                "rateLimits": {"maxConcurrentDispatches": 2, "maxDispatchesPerSecond": 10},
+                "defaultUri": "http://127.0.0.1:1/x"
+            }),
+        )
+        .await;
+        let ladder = runtime.queue_view(&key).unwrap().config.ladder;
+        let steps: Vec<(u32, f64, f64, bool)> = ladder
+            .iter()
+            .map(|step| {
+                (
+                    step.attempt,
+                    step.backoff_seconds,
+                    step.after_seconds,
+                    step.last,
+                )
+            })
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                (1, 0.0, 0.0, false),
+                (2, 1.0, 1.0, false),
+                (3, 2.0, 3.0, false),
+                (4, 4.0, 7.0, true),
+            ],
+            "maxAttempts 3 runs four times, the backoff doubling up to 4 s"
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn clear_removes_tasks_history_and_names() {
         let (runtime, _) = runtime("http://127.0.0.1:5001");
         let key = client_queue(
@@ -3484,6 +3555,10 @@ mod inspect {
         let view = runtime.queue_view(&key).unwrap();
         assert_eq!((view.counters.pending, view.counters.held), (0, 0));
         assert_eq!(view.counters.history, 0);
+        assert_eq!(
+            view.counters.outcomes,
+            crate::inspect::OutcomeCounts::default()
+        );
         assert!(view.paused && view.hold_scheduled, "controls stay");
         assert_eq!(view.config.max_attempts, 7.0, "configuration stays");
         // The name can be used again.

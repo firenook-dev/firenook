@@ -96,6 +96,73 @@ pub struct ConfigView {
     pub values: Vec<ConfigValue>,
     /// The `taskQueueConfig` document as stored.
     pub document: String,
+    /// The attempts a task that fails every time runs, from the first: the
+    /// dispatcher's own backoff and stop rule (`retry_plan`), with requests
+    /// that take no time.
+    pub ladder: Vec<LadderStep>,
+}
+
+/// One rung of a queue's retry ladder.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LadderStep {
+    pub attempt: u32,
+    /// The backoff before it (0 for the first attempt).
+    pub backoff_seconds: f64,
+    /// When it runs at the earliest, after the first attempt.
+    pub after_seconds: f64,
+    /// The dispatcher gives up after this one.
+    pub last: bool,
+}
+
+/// A queue's history by outcome, kept in step with the history itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OutcomeCounts {
+    pub succeeded: u32,
+    pub failed: u32,
+    pub cancelled: u32,
+    pub deleted: u32,
+    pub purged: u32,
+    pub replaced: u32,
+}
+
+impl OutcomeCounts {
+    fn slot(&mut self, outcome: TaskOutcome) -> &mut u32 {
+        match outcome {
+            TaskOutcome::Succeeded => &mut self.succeeded,
+            TaskOutcome::Failed => &mut self.failed,
+            TaskOutcome::Cancelled => &mut self.cancelled,
+            TaskOutcome::Deleted => &mut self.deleted,
+            TaskOutcome::Purged => &mut self.purged,
+            TaskOutcome::Replaced => &mut self.replaced,
+        }
+    }
+
+    /// A finished task of `outcome` joined the history.
+    pub(crate) fn add(&mut self, outcome: TaskOutcome) {
+        let slot = self.slot(outcome);
+        *slot = slot.saturating_add(1);
+    }
+
+    /// A finished task of `outcome` left the history.
+    pub(crate) fn remove(&mut self, outcome: TaskOutcome) {
+        let slot = self.slot(outcome);
+        *slot = slot.saturating_sub(1);
+    }
+
+    /// Every outcome together: the history's length.
+    #[must_use]
+    pub fn total(&self) -> u32 {
+        [
+            self.succeeded,
+            self.failed,
+            self.cancelled,
+            self.deleted,
+            self.purged,
+            self.replaced,
+        ]
+        .into_iter()
+        .fold(0, u32::saturating_add)
+    }
 }
 
 /// One value of the stored configuration.
@@ -138,6 +205,8 @@ pub struct QueueCounters {
     pub oldest_pending_at: Option<SystemTime>,
     /// Finished tasks the history holds.
     pub history: u32,
+    /// The same, by outcome.
+    pub outcomes: OutcomeCounts,
     /// What `/queueStats` answers for the queue, computed on request.
     pub official: Option<OfficialStats>,
 }
@@ -560,6 +629,15 @@ fn config_view(config: &QueueConfig) -> ConfigView {
         max_dispatches_per_second: config.max_dispatches_per_second,
         values,
         document: config.document().stringify(),
+        ladder: retry_plan(config, 1, Duration::ZERO, Duration::ZERO)
+            .into_iter()
+            .map(|step| LadderStep {
+                attempt: step.attempt,
+                backoff_seconds: step.backoff_seconds,
+                after_seconds: step.after.as_secs_f64(),
+                last: step.last,
+            })
+            .collect(),
     }
 }
 
@@ -633,6 +711,7 @@ fn counters(
         added: window(|console| console.windows.added.window()),
         oldest_pending_at,
         history: console.map_or(0, |console| count(console.history.len())),
+        outcomes: console.map_or_else(OutcomeCounts::default, |console| console.outcomes),
         official,
     }
 }
