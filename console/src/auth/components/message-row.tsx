@@ -19,7 +19,7 @@ import { FeedTime } from './feed-time'
  * The Inbox row's columns: the unread dot, the channel, who it went to and
  * what it is for (these two share what is left, 3 : 2), the code with its
  * copy button, what became of it, and the time (wide enough for the clock
- * form, `14:02:11.348`, and for "saved state"). With every tenant shown and
+ * form, `14:02:11.348`). With every tenant shown and
  * room for it, a tenant column sits before the time.
  */
 const MESSAGE_COLUMNS = 'grid-cols-[16px_24px_minmax(96px,3fr)_minmax(120px,2fr)_96px_92px_92px]'
@@ -50,7 +50,7 @@ function MessageRowView({
     <FeedMenuRow rowKey={String(message.id)} label={`Actions for ${message.to}`} handle={handle}>
       {/* One grid template for every row, so each column starts where the
           rows above it do whatever a row carries: an unread dot, a code, a
-          chip, a tenant, the time in any clock form or "saved state". */}
+          chip, a tenant, the time in any clock form or none. */}
       <span
         className={cn(
           'grid h-full min-w-0 flex-1 items-center',

@@ -49,6 +49,9 @@ dedicated.describe('with engines of their own', () => {
       const row = page.getByTestId('inbox-feed').getByTestId('feed-row').filter({ hasText: phone })
       await expect(row).toBeVisible()
       await expect(row.getByTestId('message-status')).toHaveText('saved state')
+      // Said once: the time column has no time to show, and says only that.
+      await expect(row).not.toContainText(/saved state.*saved state/)
+      await expect(row.getByLabel('No time')).toHaveText('—')
       await expect(row.getByTestId('unread-dot')).toHaveCount(0)
       await page.getByTestId('inbox-facets').locator('button[data-term="is:restored"]').click()
       await expect(page).toHaveURL(/q=is%3Arestored/)

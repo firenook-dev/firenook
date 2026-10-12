@@ -5,6 +5,7 @@
 // success tone, else the emulator's code in the danger tone with the name
 // the SDK gives it — what it caused, and how long it took.
 
+import { Tooltip } from '@cloudflare/kumo'
 import { memo } from 'react'
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
 import { OutcomeChip } from '@/components/console/outcome-chip'
@@ -61,12 +62,20 @@ function ActivityRowView({
       <span className="flex min-w-36 flex-[3] basis-0 items-center gap-2 overflow-hidden pr-3">
         {call.error ? (
           <>
-            {/* The code keeps its width; the SDK's name gives way. */}
-            <span className="flex shrink-0">
-              <OutcomeChip word={call.error.code} tone="danger" mono testId="activity-outcome" />
+            {/* The SDK's name gives way first, then the code, each ending in
+                an ellipsis; the whole of both is in the tooltip. */}
+            <span className="flex min-w-0">
+              <OutcomeChip
+                word={call.error.code}
+                tone="danger"
+                mono
+                shrink
+                detail={`${call.error.code} · ${sdkCode(call.error.code)}`}
+                testId="activity-outcome"
+              />
             </span>
             <span
-              className="hidden truncate font-mono text-[11px] text-kumo-subtle @2xl:inline"
+              className="hidden min-w-0 shrink-[9] truncate font-mono text-[11px] text-kumo-subtle @2xl:inline"
               data-testid="activity-sdk"
             >
               {sdkCode(call.error.code)}
@@ -76,16 +85,11 @@ function ActivityRowView({
           <OutcomeChip word="ok" tone="success" mono testId="activity-outcome" />
         )}
       </span>
-      <span className="hidden min-w-0 flex-[3] basis-0 items-center gap-1 overflow-hidden pr-3 @4xl:flex">
-        {shown.map((chip) => (
-          <span
-            key={chip.text}
-            className={`${QUIET_CHIP} ${chip.tone === 'danger' ? 'text-kumo-danger' : ''}`}
-            data-testid="activity-step"
-          >
-            {chip.text}
-          </span>
-        ))}
+      <span className="hidden min-w-0 flex-[3] basis-0 items-center gap-1 pr-3 @4xl:flex">
+        {/* One line of whole chips: a chip that does not fit wraps out of
+            sight rather than being cut mid-word; every step is in the
+            tooltip. */}
+        <StepChips chips={shown} all={chips} />
         {hidden > 0 && (
           <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">+{hidden}</span>
         )}
@@ -98,6 +102,35 @@ function ActivityRowView({
       </span>
     </FeedMenuRow>
   )
+}
+
+function StepChips({
+  chips,
+  all,
+}: {
+  chips: ReturnType<typeof stepChips>
+  all: ReturnType<typeof stepChips>
+}) {
+  if (chips.length === 0) return null
+  const line = (
+    <span
+      className="flex h-4.5 min-w-0 flex-wrap items-center gap-x-1 overflow-hidden"
+      aria-label={all.map((chip) => chip.text).join(', ')}
+      data-testid="activity-steps"
+    >
+      {chips.map((chip) => (
+        <span
+          key={chip.text}
+          className={`${QUIET_CHIP} ${chip.tone === 'danger' ? 'text-kumo-danger' : ''}`}
+          data-testid="activity-step"
+        >
+          {chip.text}
+        </span>
+      ))}
+    </span>
+  )
+  if (all.length === 1) return line
+  return <Tooltip content={all.map((chip) => chip.text).join(' · ')} render={line} />
 }
 
 export const ActivityRow = memo(ActivityRowView)

@@ -39,6 +39,45 @@ const rowOf = (page: Page, id: number) =>
   page.getByTestId('activity-feed').locator(`[data-testid="feed-row"][data-key="${id}"]`)
 const detail = (page: Page) => page.getByTestId('call-detail')
 
+/**
+ * What in a row is cut off with nothing to say so: an outcome whose text
+ * runs past its box without an ellipsis, or a step chip on the visible
+ * line that its strip clips. A chip that wrapped out of sight is whole.
+ */
+const silentlyCut = (row: ReturnType<typeof rowOf>) =>
+  row.evaluate((element) => {
+    // This file is typed for Node: the page's elements as far as they are used.
+    type Box = { top: number; bottom: number; right: number }
+    type Node = {
+      scrollWidth: number
+      clientWidth: number
+      textContent: string | null
+      parentElement: Node | null
+      getBoundingClientRect(): Box
+      querySelectorAll(selector: string): Iterable<Node>
+    }
+    const root = element as unknown as Node
+    const view = (element as unknown as { ownerDocument: { defaultView: unknown } }).ownerDocument
+      .defaultView as { getComputedStyle(node: Node): { textOverflow: string; overflow: string } }
+    const cut: string[] = []
+    for (const node of root.querySelectorAll('[data-testid="activity-outcome"] *')) {
+      const style = view.getComputedStyle(node)
+      if (
+        node.scrollWidth > node.clientWidth + 1 &&
+        style.overflow !== 'visible' &&
+        style.textOverflow !== 'ellipsis'
+      )
+        cut.push(`outcome: ${node.textContent ?? ''}`)
+    }
+    for (const chip of root.querySelectorAll('[data-testid="activity-step"]')) {
+      const strip = chip.parentElement?.getBoundingClientRect()
+      const box = chip.getBoundingClientRect()
+      if (strip && box.top < strip.bottom && box.right > strip.right + 0.5)
+        cut.push(`step: ${chip.textContent ?? ''}`)
+    }
+    return cut
+  })
+
 test('A1 a failed sign-in is explained in the SDK’s words, its password masked', async ({
   page,
   engine,
@@ -395,6 +434,18 @@ test('A8 blocking functions refuse and add claims, step by step, with their own 
     await detail(page).getByTestId('call-raw-toggle').click()
     await expect(detail(page).getByTestId('call-raw-toggle')).toHaveText('Hide the raw error')
     await expect(step.locator('code')).toContainText('blocked.test')
+
+    // In the list beside the open detail, at 1440 px, the long code ends in
+    // an ellipsis rather than being cut mid-word, the whole of it and the
+    // SDK's name a hover away, and every step chip is whole or out of sight.
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const listed = rowOf(page, refusedCall.id)
+    await expect(listed).toBeVisible()
+    expect(await silentlyCut(listed)).toEqual([])
+    await listed.getByTestId('activity-outcome').hover()
+    await expect(page.locator('.kumo-tooltip-popup')).toContainText(
+      'BLOCKING_FUNCTION_ERROR_RESPONSE · auth/internal-error',
+    )
 
     // beforeSignIn adds claims and session claims to the token.
     const created = await app<{ localId: string; idToken: string }>(

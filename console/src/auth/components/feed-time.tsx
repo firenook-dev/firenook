@@ -26,11 +26,22 @@ export function FeedTime({
 }) {
   const { format } = useClockFormat()
   const now = useNow(format === 'relative' ? 'second' : 'minute')
+  // A code found in saved state has no time; the row's status chip already
+  // says where it came from, so the column only says there is none.
   if (iso === null)
     return (
-      <span className={cn('text-[12px] text-kumo-subtle', className)} data-testid={testId}>
-        saved state
-      </span>
+      <Tooltip
+        content="No time: this was found in saved state"
+        render={
+          <span
+            className={cn('cursor-default text-[12px] text-kumo-subtle', className)}
+            aria-label="No time"
+            data-testid={testId}
+          >
+            —
+          </span>
+        }
+      />
     )
   return (
     <Tooltip

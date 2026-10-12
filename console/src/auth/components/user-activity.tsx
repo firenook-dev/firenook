@@ -21,22 +21,12 @@ import { filterValueText } from '@/lib/filter'
 import { MESSAGE_KIND_LABELS } from '../fields'
 import { callRef, messageRef, rulesDecisionsLink } from '../links'
 import { useActivityFeed, useInboxFeed } from '../live'
+import { callLabel } from '../operations'
 import type { TenantScope } from '../tenant-scope'
 
 /** The most calls, and the most messages, the tab holds. */
 export const USER_ACTIVITY_CAPACITY = 500
 const ROW = 32
-
-/** An operation id in words: `identitytoolkit.accounts.signInWithPassword` → "Sign in with password". */
-export function operationWords(operation: string): string {
-  const last = operation.split(/[./:]/).findLast(Boolean) ?? operation
-  const words = last
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .trim()
-    .toLowerCase()
-  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : operation
-}
 
 type Entry =
   | { kind: 'call'; at: number; key: string; call: AuthActivitySummary }
@@ -189,7 +179,7 @@ function CallLine({ call }: { call: AuthActivitySummary }) {
     <>
       <LightningIcon size={13} className="shrink-0 text-kumo-subtle" aria-hidden />
       <span className="min-w-0 flex-1 truncate font-sans text-kumo-default">
-        {operationWords(call.operation)}
+        {callLabel(call)}
         {call.origin && (
           <span className="ml-1.5 rounded bg-kumo-tint px-1 font-mono text-[11px] text-kumo-subtle">
             {call.origin === 'write' ? 'console' : call.origin}
