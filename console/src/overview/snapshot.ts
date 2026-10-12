@@ -127,6 +127,19 @@ export function useSnapshotFlow(project: string) {
   }
 }
 
+/** The page's snapshot, as `useSnapshotFlow` answers it. */
+export type SnapshotFlow = ReturnType<typeof useSnapshotFlow>
+
+/**
+ * What the Data cards draw of the snapshot and can do with it: the page's
+ * `SnapshotFlow`, or a fixed one (the design system draws the cards
+ * without an engine). Only the file's `data` is read.
+ */
+export type SnapshotView = Pick<
+  SnapshotFlow,
+  'running' | 'job' | 'ready' | 'taken' | 'refusal' | 'starting' | 'start' | 'download'
+> & { file: Pick<SnapshotFlow['file'], 'data'> }
+
 /** `DELETE` that outlives the page (`keepalive`), with the body and header the engine's guard asks for. */
 function fetchKeepalive(url: string): Promise<unknown> {
   return fetch(url, {

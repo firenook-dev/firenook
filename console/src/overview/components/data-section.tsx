@@ -20,7 +20,7 @@ import { cancelJob } from '@/lib/jobs'
 import { SNAPSHOT_JOB } from '../api'
 import { holdsNothing, resettableSections } from '../model'
 import type { OverviewDialog } from '../search'
-import { snapshotSize, useSnapshotFlow } from '../snapshot'
+import { type SnapshotView, snapshotSize, useSnapshotFlow } from '../snapshot'
 import { ResetDialog, type ResetTarget } from './reset-dialog'
 import { SaveSnapshotDialog } from './save-snapshot-dialog'
 import { SnapshotDialog } from './snapshot-dialog'
@@ -49,7 +49,6 @@ export function DataSection({
   const snapshot = useSnapshotFlow(project)
   const resettable = resettableSections(status)
   const running = snapshot.running
-  const services = snapshotServices(status)
   // `?dialog=reset` names no section: the one there is, or all of them.
   const resetTarget: ResetTarget | undefined =
     reset ??
@@ -58,7 +57,6 @@ export function DataSection({
         ? { kind: 'section', id: resettable[0].section.id }
         : { kind: 'everything' }
       : undefined)
-  const busy = running ? `A data job is running: ${running.title}` : undefined
 
   return (
     <section
@@ -69,117 +67,7 @@ export function DataSection({
       <h2 id="overview-data-title" className="text-lg font-semibold">
         Data
       </h2>
-      <div className="grid gap-3 md:grid-cols-2">
-        <article
-          className="flex min-w-0 flex-col gap-3 rounded-lg bg-kumo-base px-5 py-4 shadow-xs ring ring-kumo-line"
-          data-testid="overview-snapshot"
-        >
-          <div className="grid gap-1">
-            <h3 className="text-[14px] font-semibold">Snapshot</h3>
-            <p className="text-[13px] text-kumo-subtle">
-              {services.length > 0
-                ? `${listedLabels(services)}, as a standard export the engine imports at start.`
-                : 'No service this engine runs keeps data a snapshot could hold.'}
-            </p>
-          </div>
-          {services.length > 0 && (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="primary"
-                  icon={<DownloadSimpleIcon />}
-                  loading={snapshot.starting}
-                  disabled={running !== undefined}
-                  title={busy}
-                  onClick={() => void snapshot.start()}
-                  data-testid="overview-snapshot-download"
-                >
-                  Download snapshot
-                </Button>
-                <Button
-                  variant="secondary"
-                  icon={<FloppyDiskIcon />}
-                  disabled={running !== undefined}
-                  title={busy}
-                  onClick={() => onDialog('save')}
-                  data-testid="overview-snapshot-save"
-                >
-                  Save on the engine&apos;s machine…
-                </Button>
-              </div>
-              <SnapshotState snapshot={snapshot} />
-              <p className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pt-1 text-[12px] text-kumo-subtle">
-                Start from one with
-                <CopyField value={IMPORT_COMMAND} className="text-kumo-default" />
-              </p>
-            </>
-          )}
-        </article>
-
-        <article
-          className="flex min-w-0 flex-col gap-3 rounded-lg bg-kumo-base px-5 py-4 shadow-xs ring ring-kumo-line"
-          data-testid="overview-reset"
-        >
-          <div className="grid gap-1">
-            <h3 className="text-[14px] font-semibold">Reset</h3>
-            <p className="text-[13px] text-kumo-subtle">
-              {resettable.length > 0
-                ? 'Delete a section’s data without restarting the engine. Rules, Functions code and configuration stay.'
-                : 'None of the sections this engine runs can be reset from the console.'}
-            </p>
-          </div>
-          {resettable.length > 0 && (
-            <div
-              className="grid grid-cols-[max-content_minmax(0,1fr)_max-content] items-center gap-x-4 gap-y-1"
-              data-testid="overview-reset-rows"
-            >
-              {resettable.map(({ section, status: entry }) => (
-                <div
-                  key={section.id}
-                  className="contents"
-                  data-testid={`overview-reset-${section.id}`}
-                >
-                  <span className="text-[13px] text-kumo-default">{section.label}</span>
-                  <span className="truncate font-mono text-[12px] text-kumo-subtle">
-                    {entry.summary?.headline ?? ''}
-                  </span>
-                  {holdsNothing(entry.summary) ? (
-                    <span className="px-2 text-[12px] text-kumo-subtle">Empty</span>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      icon={<ArrowCounterClockwiseIcon className="text-kumo-danger" />}
-                      disabled={running !== undefined}
-                      title={busy}
-                      onClick={() => onReset({ kind: 'section', id: section.id })}
-                      data-testid={`overview-reset-${section.id}-open`}
-                    >
-                      <span className="text-kumo-danger">Reset…</span>
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {resettable.length > 1 && (
-            <div className="flex justify-end border-t border-kumo-hairline pt-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<ArrowCounterClockwiseIcon className="text-kumo-danger" />}
-                disabled={running !== undefined}
-                title={busy}
-                onClick={() => onReset({ kind: 'everything' })}
-                data-testid="overview-reset-everything"
-              >
-                <span className="text-kumo-danger">Reset everything…</span>
-              </Button>
-            </div>
-          )}
-          {running && running.kind !== SNAPSHOT_JOB && <JobLine job={running} />}
-        </article>
-      </div>
+      <DataCards status={status} snapshot={snapshot} onDialog={onDialog} onReset={onReset} />
 
       <SnapshotDialog
         open={dialog === 'snapshot'}
@@ -221,8 +109,145 @@ export function DataSection({
   )
 }
 
+/**
+ * The Snapshot and Reset cards, drawn from what they are given: the page
+ * hands them its snapshot flow, the design system a fixed one. Pressing a
+ * control asks the page (`onDialog`, `onReset`) or the flow (`start`,
+ * `download`); the cards hold no state of their own.
+ */
+export function DataCards({
+  status,
+  snapshot,
+  onDialog,
+  onReset,
+}: {
+  status: ConsoleStatus
+  snapshot: SnapshotView
+  onDialog: (dialog: OverviewDialog | undefined) => void
+  onReset: (target: ResetTarget | undefined) => void
+}) {
+  const resettable = resettableSections(status)
+  const running = snapshot.running
+  const services = snapshotServices(status)
+  const busy = running ? `A data job is running: ${running.title}` : undefined
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <article
+        className="flex min-w-0 flex-col gap-3 rounded-lg bg-kumo-base px-5 py-4 shadow-xs ring ring-kumo-line"
+        data-testid="overview-snapshot"
+      >
+        <div className="grid gap-1">
+          <h3 className="text-[14px] font-semibold">Snapshot</h3>
+          <p className="text-[13px] text-kumo-subtle">
+            {services.length > 0
+              ? `${listedLabels(services)}, as a standard export the engine imports at start.`
+              : 'No service this engine runs keeps data a snapshot could hold.'}
+          </p>
+        </div>
+        {services.length > 0 && (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                icon={<DownloadSimpleIcon />}
+                loading={snapshot.starting}
+                disabled={running !== undefined}
+                title={busy}
+                onClick={() => void snapshot.start()}
+                data-testid="overview-snapshot-download"
+              >
+                Download snapshot
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<FloppyDiskIcon />}
+                disabled={running !== undefined}
+                title={busy}
+                onClick={() => onDialog('save')}
+                data-testid="overview-snapshot-save"
+              >
+                Save on the engine&apos;s machine…
+              </Button>
+            </div>
+            <SnapshotState snapshot={snapshot} />
+            <p className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pt-1 text-[12px] text-kumo-subtle">
+              Start from one with
+              <CopyField value={IMPORT_COMMAND} className="text-kumo-default" />
+            </p>
+          </>
+        )}
+      </article>
+
+      <article
+        className="flex min-w-0 flex-col gap-3 rounded-lg bg-kumo-base px-5 py-4 shadow-xs ring ring-kumo-line"
+        data-testid="overview-reset"
+      >
+        <div className="grid gap-1">
+          <h3 className="text-[14px] font-semibold">Reset</h3>
+          <p className="text-[13px] text-kumo-subtle">
+            {resettable.length > 0
+              ? 'Delete a section’s data without restarting the engine. Rules, Functions code and configuration stay.'
+              : 'None of the sections this engine runs can be reset from the console.'}
+          </p>
+        </div>
+        {resettable.length > 0 && (
+          <div
+            className="grid grid-cols-[max-content_minmax(0,1fr)_max-content] items-center gap-x-4 gap-y-1"
+            data-testid="overview-reset-rows"
+          >
+            {resettable.map(({ section, status: entry }) => (
+              <div
+                key={section.id}
+                className="contents"
+                data-testid={`overview-reset-${section.id}`}
+              >
+                <span className="text-[13px] text-kumo-default">{section.label}</span>
+                <span className="truncate font-mono text-[12px] text-kumo-subtle">
+                  {entry.summary?.headline ?? ''}
+                </span>
+                {holdsNothing(entry.summary) ? (
+                  <span className="px-2 text-[12px] text-kumo-subtle">Empty</span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<ArrowCounterClockwiseIcon className="text-kumo-danger" />}
+                    disabled={running !== undefined}
+                    title={busy}
+                    onClick={() => onReset({ kind: 'section', id: section.id })}
+                    data-testid={`overview-reset-${section.id}-open`}
+                  >
+                    <span className="text-kumo-danger">Reset…</span>
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {resettable.length > 1 && (
+          <div className="flex justify-end border-t border-kumo-hairline pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<ArrowCounterClockwiseIcon className="text-kumo-danger" />}
+              disabled={running !== undefined}
+              title={busy}
+              onClick={() => onReset({ kind: 'everything' })}
+              data-testid="overview-reset-everything"
+            >
+              <span className="text-kumo-danger">Reset everything…</span>
+            </Button>
+          </div>
+        )}
+        {running && running.kind !== SNAPSHOT_JOB && <JobLine job={running} />}
+      </article>
+    </div>
+  )
+}
+
 /** What the snapshot is doing now: preparing, ready to download, downloaded, refused or failed. */
-function SnapshotState({ snapshot }: { snapshot: ReturnType<typeof useSnapshotFlow> }) {
+function SnapshotState({ snapshot }: { snapshot: SnapshotView }) {
   const { running, job, ready, taken, refusal, file } = snapshot
   if (running?.kind === SNAPSHOT_JOB) return <JobLine job={running} />
   if (refusal)

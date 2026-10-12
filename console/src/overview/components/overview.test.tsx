@@ -3,13 +3,16 @@ import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import type { Job } from '@/api/generated/Job'
 import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { statusQuery } from '@/api/queries'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
 import { sectionCards } from '../model'
 import { createNoticeStore } from '../notices'
+import type { SnapshotView } from '../snapshot'
 import { ConnectSection } from './connect'
+import { DataCards } from './data-section'
 import { Notices } from './notices'
 import { RecentProblems } from './problems'
 import { SectionCard } from './section-card'
@@ -329,5 +332,98 @@ describe('connect your app', () => {
     expect(snippet).toHaveTextContent('FIRESTORE_EMULATOR_HOST=127.0.0.1:8080')
     expect(snippet).toHaveTextContent('FIREBASE_EMULATOR_HUB=127.0.0.1:4400')
     expect(screen.getByTestId('overview-connect-note')).toHaveTextContent('emulators:exec')
+  })
+})
+
+/** A suite job three seconds in. */
+const job = (overrides: Partial<Job>): Job => ({
+  id: 'job-1',
+  kind: 'suite.clear',
+  section: 'suite',
+  title: 'Clear Firestore',
+  total: 1596,
+  done: 412,
+  skipped: 0,
+  errors: [],
+  errorCount: 0,
+  state: 'running',
+  startedAt: new Date(Date.now() - 3_000).toISOString(),
+  finishedAt: null,
+  ...overrides,
+})
+
+/** The page's snapshot flow at rest: nothing prepared, nothing running. */
+const view = (overrides: Partial<SnapshotView> = {}): SnapshotView => ({
+  running: undefined,
+  job: undefined,
+  ready: undefined,
+  taken: undefined,
+  refusal: undefined,
+  starting: false,
+  start: vi.fn(async () => true),
+  download: vi.fn(),
+  file: { data: undefined },
+  ...overrides,
+})
+
+describe('the data cards', () => {
+  it('follow a running reset and hold back every control that would start another job', async () => {
+    const status = withDocuments(1596)
+    const running = job({})
+    await renderInConsole(
+      () => (
+        <DataCards
+          status={status}
+          snapshot={view({ running, job: running })}
+          onDialog={() => {}}
+          onReset={() => {}}
+        />
+      ),
+      { status },
+    )
+    expect(screen.getByTestId('overview-job')).toHaveTextContent(
+      'Clear Firestore: 412 of 1,596 deleted',
+    )
+    // Kumo turns a disabled button's title into its tooltip: why it waits.
+    expect(screen.getByTestId('overview-snapshot-download')).toBeDisabled()
+    expect(screen.getByTestId('overview-snapshot-save')).toBeDisabled()
+    expect(screen.getByTestId('overview-reset-firestore-open')).toBeDisabled()
+  })
+
+  it('offer a prepared snapshot for download, and open a reset for its row', async () => {
+    const user = userEvent.setup()
+    const status = withDocuments(1596)
+    const onReset = vi.fn()
+    const download = vi.fn()
+    const done = job({
+      id: 'job-2',
+      kind: 'suite.snapshot',
+      title: 'Prepare a snapshot',
+      total: 1,
+      done: 1,
+      state: 'done',
+    })
+    await renderInConsole(
+      () => (
+        <DataCards
+          status={status}
+          snapshot={view({
+            job: done,
+            ready: { snapshot: '0123456789abcdef0123456789abcdef', files: 3, bytes: 2_355 },
+            download,
+          })}
+          onDialog={() => {}}
+          onReset={onReset}
+        />
+      ),
+      { status },
+    )
+    expect(screen.getByTestId('overview-snapshot-ready')).toHaveTextContent(
+      'Snapshot ready·3 files, 2.3 KB·Download',
+    )
+    await user.click(screen.getByTestId('overview-snapshot-ready-download'))
+    expect(download).toHaveBeenCalledOnce()
+    await user.click(screen.getByTestId('overview-reset-firestore-open'))
+    expect(onReset).toHaveBeenCalledWith({ kind: 'section', id: 'firestore' })
   })
 })
