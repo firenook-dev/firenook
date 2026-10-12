@@ -190,6 +190,31 @@ describe('the JSON tree', () => {
     )
   })
 
+  it('offers filter on a leaf’s strip when the page can filter, never on a masked value', async () => {
+    const user = userEvent.setup()
+    const onFilter = vi.fn()
+    render(
+      <JsonTree
+        value={EVENT}
+        rootLabel="payload"
+        defaultDepth={2}
+        mask={mask}
+        onFilter={onFilter}
+        ariaLabel="Event"
+        testId="tree"
+      />,
+    )
+    await user.click(within(rowNamed('payload.user.uid')).getByTestId('tree-filter'))
+    expect(onFilter).toHaveBeenCalledWith(['user', 'uid'], 'u_9f3k2')
+    expect(within(rowNamed('payload.user')).queryByTestId('tree-filter')).not.toBeInTheDocument()
+    expect(
+      within(rowNamed('payload.passwordHash')).queryByTestId('tree-filter'),
+    ).not.toBeInTheDocument()
+    cleanup()
+    render(<JsonTree value={EVENT} defaultDepth={2} ariaLabel="Event" testId="tree" />)
+    expect(within(rowNamed('id')).queryByTestId('tree-filter')).not.toBeInTheDocument()
+  })
+
   it('cuts a long string with how much more there is, and shows all of it on request', async () => {
     const user = userEvent.setup()
     const note = 'x'.repeat(CUT_AT + 1234)
