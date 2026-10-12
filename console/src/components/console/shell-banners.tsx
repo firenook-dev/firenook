@@ -15,6 +15,7 @@ import type { ForeignProject } from '@/api/generated/ForeignProject'
 import { statusQuery } from '@/api/queries'
 import { PanelTitle } from '@/components/kit'
 import { connectSnippet } from '@/lib/connect'
+import { formatCount } from '@/lib/format'
 import { useLiveStatus } from '@/lib/live/channel'
 import { useConsoleProject } from '@/lib/project'
 import { type SectionId, sectionById, serviceLabel } from '@/lib/services'
@@ -52,6 +53,56 @@ export function foreignToShow(
   return foreign.find((project) => !dismissed.includes(project.projectId))
 }
 
+/** What a dropped event of each service is called, as the banner counts them. */
+const DROPPED_NOUNS: Record<string, { one: string; other: string }> = {
+  firestore: { one: 'Firestore change', other: 'Firestore changes' },
+  auth: { one: 'Auth event', other: 'Auth events' },
+  storage: { one: 'Storage event', other: 'Storage events' },
+  pubsub: { one: 'Pub/Sub message', other: 'Pub/Sub messages' },
+  schedule: { one: 'scheduled run', other: 'scheduled runs' },
+}
+
+const pad = (value: number) => String(value).padStart(2, '0')
+
+/** "14:02:11" today; with the local date in front on another day. */
+function pausedAt(iso: string, now: number): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  if (date.toDateString() === new Date(now).toDateString()) return time
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
+}
+
+/** "A", "A and B", "A, B and C". */
+function listed(parts: readonly string[]): string {
+  if (parts.length < 2) return parts.join('')
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
+/**
+ * The paused banner's line: since when, and what reached no function
+ * meanwhile, per service ("— since 14:02:11, 312 Firestore changes and 2
+ * Storage events reached no function."); just "— since 14:02:11." while
+ * nothing has been dropped.
+ */
+export function triggersPausedText(triggers: BackgroundTriggers, now = Date.now()): string {
+  const lead = 'Background triggers are paused, so events are dropped, not queued'
+  if (!triggers.since) return `${lead}.`
+  const since = `${lead} — since ${pausedAt(triggers.since, now)}`
+  const counts = triggers.dropped
+    .filter((entry) => entry.count > 0)
+    .map((entry) =>
+      formatCount(
+        entry.count,
+        DROPPED_NOUNS[entry.service] ?? {
+          one: `${entry.service} event`,
+          other: `${entry.service} events`,
+        },
+      ),
+    )
+  return counts.length === 0 ? `${since}.` : `${since}, ${listed(counts)} reached no function.`
+}
+
 /** Paused delivery matters only where functions could have run. */
 function triggersPaused(status: ConsoleStatus): boolean {
   return (
@@ -74,7 +125,9 @@ export function ShellBanners({
   return (
     <div className="flex shrink-0 flex-col" data-testid="shell-banners">
       {updated && <EngineUpdatedBanner />}
-      {status.data && triggersPaused(status.data) && <TriggersPausedBanner />}
+      {status.data && triggersPaused(status.data) && (
+        <TriggersPausedBanner triggers={status.data.backgroundTriggers} />
+      )}
       {status.data && (
         <ForeignProjectBanner
           status={status.data}
@@ -102,18 +155,18 @@ function EngineUpdatedBanner() {
   )
 }
 
-function TriggersPausedBanner() {
+function TriggersPausedBanner({ triggers }: { triggers: BackgroundTriggers }) {
   const client = useQueryClient()
   const [pending, setPending] = useState(false)
   const resume = async () => {
     setPending(true)
     try {
-      const triggers = await apiSend<BackgroundTriggers>('POST', '/suite/background', {
+      const resumed = await apiSend<BackgroundTriggers>('POST', '/suite/background', {
         enabled: true,
       })
       // The shell topic pushes the new status too; this saves the wait.
       client.setQueryData<ConsoleStatus>(statusQuery.queryKey, (current) =>
-        current ? { ...current, backgroundTriggers: triggers } : current,
+        current ? { ...current, backgroundTriggers: resumed } : current,
       )
     } catch (error) {
       toast({
@@ -142,7 +195,7 @@ function TriggersPausedBanner() {
         </Button>
       }
     >
-      Background triggers are paused, so events are dropped, not queued.
+      {triggersPausedText(triggers)}
     </SectionBanner>
   )
 }

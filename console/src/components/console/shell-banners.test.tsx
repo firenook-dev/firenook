@@ -5,7 +5,7 @@ import type { ForeignProject } from '@/api/generated/ForeignProject'
 import { useLiveStatus } from '@/lib/live/channel'
 import { renderInConsole } from '@/test/render'
 import { testStatus } from '@/test/status'
-import { ShellBanners, foreignToShow } from './shell-banners'
+import { ShellBanners, foreignToShow, triggersPausedText } from './shell-banners'
 
 const myProd: ForeignProject = {
   projectId: 'my-prod',
@@ -32,14 +32,23 @@ describe('the suite-wide banners', () => {
   })
 
   it('say background triggers are paused, with Resume, only where functions run', async () => {
+    const since = new Date()
+    since.setHours(14, 2, 11, 0)
     const paused = {
-      backgroundTriggers: { enabled: false, since: '2026-01-01T00:00:00Z', dropped: [] },
+      backgroundTriggers: {
+        enabled: false,
+        since: since.toISOString(),
+        dropped: [
+          { service: 'firestore', count: 312 },
+          { service: 'storage', count: 2 },
+        ],
+      },
     }
     await renderInConsole(() => <ShellBanners section="firestore" />, {
       status: testStatus({ ...paused, services: functionsRunning }),
     })
     expect(screen.getByTestId('banner-triggers-paused')).toHaveTextContent(
-      'Background triggers are paused, so events are dropped, not queued.',
+      'Background triggers are paused, so events are dropped, not queued — since 14:02:11, 312 Firestore changes and 2 Storage events reached no function.',
     )
     expect(screen.getByTestId('resume-triggers')).toBeInTheDocument()
     cleanup()
@@ -47,6 +56,38 @@ describe('the suite-wide banners', () => {
       status: testStatus(paused),
     })
     expect(screen.queryByTestId('banner-triggers-paused')).not.toBeInTheDocument()
+  })
+
+  it('count what reached no function per service, and only since when while nothing has', () => {
+    const now = new Date(2026, 9, 12, 15, 0, 0).getTime()
+    const since = new Date(2026, 9, 12, 14, 2, 11).toISOString()
+    const lead = 'Background triggers are paused, so events are dropped, not queued'
+    const paused = (dropped: { service: string; count: number }[], at: string | null = since) =>
+      triggersPausedText({ enabled: false, since: at, dropped }, now)
+    expect(paused([])).toBe(`${lead} — since 14:02:11.`)
+    expect(paused([{ service: 'firestore', count: 0 }])).toBe(`${lead} — since 14:02:11.`)
+    expect(paused([{ service: 'firestore', count: 1 }])).toBe(
+      `${lead} — since 14:02:11, 1 Firestore change reached no function.`,
+    )
+    expect(
+      paused([
+        { service: 'firestore', count: 1204 },
+        { service: 'auth', count: 1 },
+        { service: 'pubsub', count: 3 },
+        { service: 'schedule', count: 2 },
+      ]),
+    ).toBe(
+      `${lead} — since 14:02:11, 1,204 Firestore changes, 1 Auth event, 3 Pub/Sub messages and 2 scheduled runs reached no function.`,
+    )
+    expect(paused([{ service: 'eventarc', count: 2 }])).toBe(
+      `${lead} — since 14:02:11, 2 eventarc events reached no function.`,
+    )
+    // Paused on another day: the date comes first, so the time is not read as today's.
+    expect(paused([], new Date(2026, 9, 11, 9, 5, 0).toISOString())).toBe(
+      `${lead} — since 2026-10-11 09:05:00.`,
+    )
+    // The hub paused them before the engine kept a time: no clause at all.
+    expect(paused([], null)).toBe(`${lead}.`)
   })
 
   it('name the project the app uses, and offer to show it where the page can', async () => {
