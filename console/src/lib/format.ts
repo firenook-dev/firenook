@@ -5,9 +5,16 @@
 
 import { create } from 'zustand'
 
+/**
+ * One formatter for every grouped integer: `toLocaleString('en-US')` builds
+ * a new one per call (about 20 µs each), which a tree of shut rows or a
+ * table's counts pay once a row.
+ */
+const GROUPED = new Intl.NumberFormat('en-US')
+
 /** A count as the console writes it: grouped integers, fractions as typed. */
 export function formatNumber(value: number): string {
-  if (Number.isInteger(value)) return value.toLocaleString('en-US')
+  if (Number.isInteger(value)) return GROUPED.format(value)
   return String(value)
 }
 

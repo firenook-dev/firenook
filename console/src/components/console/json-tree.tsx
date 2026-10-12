@@ -31,6 +31,7 @@ import {
   useState,
 } from 'react'
 import type { EntityRef } from '@/api/generated/EntityRef'
+import { formatNumber } from '@/lib/format'
 import { describeKey, isMac } from '@/lib/shortcuts'
 import { EntityLink } from './entity-link'
 import {
@@ -482,14 +483,14 @@ function Row({
         {guides}
         <span className="w-4 shrink-0" />
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 font-sans text-[12px] text-kumo-subtle">
-          <span>{left.toLocaleString('en-US')} more not shown</span>
+          <span>{formatNumber(left)} more not shown</span>
           <button
             type="button"
             tabIndex={-1}
             className="rounded-md px-1 text-kumo-link hover:ink"
             onClick={() => onMore(row)}
           >
-            Show {Math.min(PAGE, left).toLocaleString('en-US')} more
+            Show {formatNumber(Math.min(PAGE, left))} more
           </button>
           {left > PAGE && (
             <button
@@ -644,7 +645,7 @@ function Leaf({
         </span>
         {value.length > CUT_AT && (
           <span className="font-sans text-[11px] text-kumo-subtle">
-            {cut && ` ${(value.length - CUT_AT).toLocaleString('en-US')} more characters ·`}{' '}
+            {cut && ` ${formatNumber(value.length - CUT_AT)} more characters ·`}{' '}
             <button
               type="button"
               tabIndex={-1}

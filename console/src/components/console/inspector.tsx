@@ -18,6 +18,7 @@
 import { Button, InlineCopyText, Tabs, Tooltip } from '@cloudflare/kumo'
 import { CaretDownIcon, CaretUpIcon, XIcon } from '@phosphor-icons/react'
 import { type ReactNode, createContext, useContext, useMemo } from 'react'
+import { formatNumber } from '@/lib/format'
 import { isTyping } from '@/lib/shortcuts'
 import { CODE_LABEL_AT, useInspectorWidth } from './inspector-width'
 import { WidthHandle } from './width-handle'
@@ -279,7 +280,7 @@ export function InspectorSection({
       <div className={`flex min-h-6 items-center gap-2 ${hasBody ? 'mb-1' : ''}`}>
         <h3 className="m-0 text-[12px] font-normal text-kumo-subtle">
           {title}
-          {count !== undefined && ` · ${empty ? 'none' : count.toLocaleString('en-US')}`}
+          {count !== undefined && ` · ${empty ? 'none' : formatNumber(count)}`}
         </h3>
         {action !== undefined && action !== null && (
           <span className="ml-auto flex items-center">{action}</span>

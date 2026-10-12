@@ -37,6 +37,7 @@ import {
 } from 'react'
 import type { Total } from '@/api/generated/Total'
 import { MenuCheck } from '@/components/kit'
+import { formatNumber } from '@/lib/format'
 import { type Shortcut, isTyping, matchesKey, useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
 import { ColumnResizer } from './column-resizer'
@@ -868,7 +869,7 @@ export function DataTable<Row>({
               }}
               data-testid="new-above"
             >
-              {pill.toLocaleString('en-US')} new · Show
+              {formatNumber(pill)} new · Show
             </Button>
           </div>
         )}

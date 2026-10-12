@@ -61,7 +61,9 @@ export function JsonView({
   const [hits, setHits] = useState({ count: 0, stopped: false })
   const [active, setActive] = useState(0)
   const { copied, copy } = useCopied()
-  const raw = text ?? rawOf(value)
+  // The text is laid out only when it is read: a 5 MB value would pay a
+  // whole JSON.stringify on the way to its tree.
+  const raw = tab === 'raw' ? (text ?? rawOf(value)) : ''
   const step = (by: 1 | -1) => {
     if (hits.count === 0) return
     setActive((current) => (current + by + hits.count) % hits.count)
@@ -185,7 +187,7 @@ export function JsonView({
                 variant="ghost"
                 size="sm"
                 icon={<CopyGlyph copied={copied} />}
-                onClick={() => void copy(raw)}
+                onClick={() => void copy(text ?? rawOf(value))}
                 aria-label={copied ? 'Copied' : 'Copy the JSON'}
                 data-testid={`${ids}-copy`}
               >

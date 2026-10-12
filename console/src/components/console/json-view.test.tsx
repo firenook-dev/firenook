@@ -34,6 +34,14 @@ describe('the JSON view', () => {
     expect(await navigator.clipboard.readText()).toBe(text)
   })
 
+  it('copies a value that came without text laid out, from the tree', async () => {
+    const user = userEvent.setup()
+    render(<JsonView value={{ name: 'ada', n: 3 }} testId="view" />)
+    expect(screen.getByTestId('view-search')).toBeInTheDocument()
+    await user.click(screen.getByTestId('view-copy'))
+    expect(await navigator.clipboard.readText()).toBe('{\n  "name": "ada",\n  "n": 3\n}')
+  })
+
   it('shows the raw text on its tab', async () => {
     const user = userEvent.setup()
     render(<JsonView value={{ a: 1 }} testId="view" />)

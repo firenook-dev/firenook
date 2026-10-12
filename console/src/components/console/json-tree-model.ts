@@ -4,6 +4,8 @@
 // containers it has to open to show it. Pure, so the component is a
 // virtualized list over this and the rules are unit-tested here.
 
+import { formatNumber } from '@/lib/format'
+
 /** A value's place in the tree: keys and indices from the root. */
 export type JsonPath = readonly (string | number)[]
 
@@ -81,7 +83,7 @@ export function childSegments(value: unknown): (string | number)[] {
 export function preview(value: unknown): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]'
-    return `[${value.length.toLocaleString('en-US')} ${value.length === 1 ? 'item' : 'items'}]`
+    return `[${formatNumber(value.length)} ${value.length === 1 ? 'item' : 'items'}]`
   }
   if (value === null || typeof value !== 'object') return ''
   const keys = Object.keys(value)
@@ -94,7 +96,7 @@ export function preview(value: unknown): string {
     used += key.length + 2
   }
   const rest = keys.length - shown.length
-  return `{ ${shown.join(', ')}${rest > 0 ? `, +${rest.toLocaleString('en-US')}` : ''} }`
+  return `{ ${shown.join(', ')}${rest > 0 ? `, +${formatNumber(rest)}` : ''} }`
 }
 
 /** A leaf as JSON writes it, which is also what search and copy read. */
