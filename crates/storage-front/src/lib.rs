@@ -23,9 +23,9 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
-use firenook_functions_bridge::{
-    DispatchQueue, DispatchRequest, DroppedService, TriggerRegistry, cause,
-};
+use firenook_functions_bridge::{DispatchQueue, DroppedService, TriggerRegistry};
+#[cfg(test)]
+use firenook_functions_bridge::DispatchRequest;
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,7 @@ mod console;
 mod decisions;
 mod download;
 mod dry_run;
+mod events;
 mod folder_index;
 mod listing;
 mod log;
@@ -2289,6 +2290,17 @@ impl StorageState {
     /// what happened: nothing at all without Functions in the suite (as the
     /// official emulator), nothing while background triggers are paused.
     fn dispatch(&self, event: StorageEvent, object: &StoredObject) -> EventDelivery {
+        self.dispatch_with(event, object, None)
+    }
+
+    /// [`Self::dispatch`]; a `nonce` gives the event new ids, so a delivery
+    /// runtime that drops ids it has seen delivers it again.
+    fn dispatch_with(
+        &self,
+        event: StorageEvent,
+        object: &StoredObject,
+        nonce: Option<&str>,
+    ) -> EventDelivery {
         if !self.options.functions {
             return EventDelivery::NoFunctions;
         }
@@ -2296,103 +2308,10 @@ impl StorageState {
             self.background.note_dropped(DroppedService::Storage);
             return EventDelivery::Paused;
         }
-        let (legacy, cloud) = match event {
-            StorageEvent::Finalize => (
-                "google.storage.object.finalize",
-                "google.cloud.storage.object.v1.finalized",
-            ),
-            StorageEvent::Metadata => (
-                "google.storage.object.metadataUpdate",
-                "google.cloud.storage.object.v1.metadataUpdated",
-            ),
-            StorageEvent::Delete => (
-                "google.storage.object.delete",
-                "google.cloud.storage.object.v1.deleted",
-            ),
-        };
-        let data = event_metadata(self, object);
-        let timestamp = now_rfc3339();
-        let source = format!(
-            "//storage.googleapis.com/projects/_/buckets/{}/objects/{}",
-            object.bucket, object.name
-        );
+        let bodies = events::bodies(self, event, object, nonce);
         let mut failed = false;
-        let legacy_id = decimal_id(&stable_id(&[
-            &self.config.project,
-            &object.bucket,
-            &object.name,
-            legacy,
-            &object.generation.to_string(),
-            &object.metageneration.to_string(),
-        ]));
-        let cloud_id = uuid_shaped(&Sha256::digest(
-            stable_id(&[
-                &self.config.project,
-                &object.bucket,
-                &object.name,
-                cloud,
-                &object.generation.to_string(),
-                &object.metageneration.to_string(),
-            ])
-            .as_bytes(),
-        ));
-        for (generation, body, content_type, body_id) in [
-            (
-                "v1",
-                json!({
-                    "eventId": legacy_id,
-                    "timestamp": timestamp,
-                    "eventType": legacy,
-                    "resource": {
-                        "service": "storage.googleapis.com",
-                        "name": format!("projects/_/buckets/{}/objects/{}", object.bucket, object.name),
-                        "type": "storage#object"
-                    },
-                    "data": data
-                }),
-                "application/json",
-                &legacy_id,
-            ),
-            (
-                "v2",
-                json!({
-                    "specversion": "1.0",
-                    "id": cloud_id,
-                    "type": cloud,
-                    "source": source,
-                    "time": timestamp,
-                    "data": data
-                }),
-                "application/cloudevents+json; charset=UTF-8",
-                &cloud_id,
-            ),
-        ] {
-            let event_id = stable_id(&[
-                &self.config.project,
-                &object.bucket,
-                &object.name,
-                legacy,
-                generation,
-                &object.generation.to_string(),
-                &object.metageneration.to_string(),
-            ]);
-            let enqueued = self.queue.enqueue(DispatchRequest {
-                path: format!(
-                    "/functions/projects/{}/trigger_multicast",
-                    self.config.project
-                ),
-                // What caused it, for the Functions runtime's record of
-                // each invocation the multicast starts.
-                headers: BTreeMap::from([
-                    ("content-type".to_owned(), content_type.to_owned()),
-                    (cause::BUCKET.to_owned(), cause::encode(&object.bucket)),
-                    (cause::OBJECT.to_owned(), cause::encode(&object.name)),
-                    (cause::EVENT_ID.to_owned(), cause::encode(body_id)),
-                ]),
-                body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
-                event_id,
-            });
-            if enqueued.is_err() {
+        for request in bodies.requests(self, object) {
+            if self.queue.enqueue(request).is_err() {
                 failed = true;
             }
         }
