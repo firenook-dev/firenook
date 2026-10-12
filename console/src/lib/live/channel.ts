@@ -63,9 +63,26 @@ export interface TopicListener {
   onState?(state: SubscriptionState): void
 }
 
+/** How a subscription starts. */
+export interface SubscribeOptions {
+  /**
+   * Resume from this cursor rather than from the topic's start: a feed page
+   * that read its history first (`GET /logs/entries` → `tail`) subscribes
+   * after it, so nothing comes twice and nothing is missed between the two.
+   * The channel moves it on with every event, as for any subscription, and
+   * drops it on an engine restart (the new run's cursors mean nothing old).
+   */
+  after?: string | undefined
+}
+
 export interface LiveChannel {
   /** Subscribes (connecting on first use); returns the unsubscribe. */
-  subscribe(topic: string, params: object, listener: TopicListener): () => void
+  subscribe(
+    topic: string,
+    params: object,
+    listener: TopicListener,
+    options?: SubscribeOptions,
+  ): () => void
   /** Called once per engine restart, after every query was invalidated. */
   onEngineRestart(callback: () => void): () => void
   /**
@@ -1036,14 +1053,15 @@ export function createLiveChannel(
   return {
     tab,
     status: store,
-    subscribe(topic, params, listener) {
+    subscribe(topic, params, listener, start) {
       localSerial += 1
       const local: LocalSub = {
         id: `${tab}.s${localSerial}`,
         topic,
         params: wireParams(params),
         listener,
-        cursor: undefined,
+        // A page that read up to a cursor first starts after it.
+        cursor: start?.after,
         state: 'pending',
         attempt: 0,
         retry: undefined,
@@ -1151,7 +1169,8 @@ function page(): LiveChannelInstance {
 
 /** The page's channel, created on first use. */
 export const liveChannel: LiveChannel = {
-  subscribe: (topic, params, listener) => page().subscribe(topic, params, listener),
+  subscribe: (topic, params, listener, options) =>
+    page().subscribe(topic, params, listener, options),
   onEngineRestart: (callback) => page().onEngineRestart(callback),
   retry: () => page().retry(),
 }

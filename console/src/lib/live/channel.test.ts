@@ -475,6 +475,42 @@ describe('a page that read its data before it could subscribe', () => {
     expect(logs?.resets).toEqual([{ reason: 'gap', missed: null }])
   })
 
+  it('a page that read up to a cursor subscribes after it, and is not told to reload', async () => {
+    const tab = browser.tab()
+    const channel = open(tab)
+    const logs = record()
+    channel.subscribe('logs.entries', { q: 'level:error' }, logs.listener, { after: 'e.41' })
+    await settle()
+    browser.engine.hello()
+    await settle()
+    expect(browser.engine.posts.at(-1)?.add[0]).toEqual(
+      expect.objectContaining({ topic: 'logs.entries', after: 'e.41' }),
+    )
+    browser.engine.ev(browser.engine.idOf('logs.entries'), 'entries', 'e.42', { items: [] })
+    await settle()
+    expect(logs.resets).toEqual([])
+    // The cursor moves on with the events: a reconnect resumes from the newest.
+    browser.engine.drop()
+    browser.engine.hello()
+    await settle()
+    expect(browser.engine.posts.at(-1)?.add[0]?.after).toBe('e.42')
+  })
+
+  it('opened in the background with a cursor, it resumes from it when shown', async () => {
+    const tab = browser.tab({ hidden: true })
+    const channel = open(tab)
+    const logs = record()
+    channel.subscribe('logs.entries', {}, logs.listener, { after: 'e.7' })
+    tab.document.show()
+    await settle()
+    browser.engine.hello()
+    await settle()
+    expect(browser.engine.posts.at(-1)?.add[0]?.after).toBe('e.7')
+    browser.engine.ev(browser.engine.idOf('logs.entries'), 'entries', 'e.8', { items: [] })
+    await settle()
+    expect(logs.resets).toEqual([])
+  })
+
   it('ended with an error before it had a cursor, it reloads when it comes back', async () => {
     const a = await leaderWith(['logs.entries', {}])
     const [logs] = a.recorded
