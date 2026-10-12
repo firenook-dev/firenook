@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
 import { type Engine, expect, test } from './fixtures'
@@ -464,6 +464,13 @@ test('a broken reload says what broke and keeps serving the last good load', asy
   await expect(page.getByTestId('codebase-failed')).toContainText(
     'broken did not load. None of its functions are running.',
   )
+  // Node's own output, its file named from the project's root.
+  await page.getByTestId('codebase-failed-toggle').click()
+  const output = page.getByTestId('codebase-failed-detail')
+  await expect(output).toContainText('./broken/index.js')
+  // Neither spelling of the project's directory is left in it.
+  await expect(output).not.toContainText(engine.directory)
+  await expect(output).not.toContainText(realpathSync(engine.directory))
   await expect(badge).toHaveText('1')
   await expect(badge).toHaveAccessibleName('1 codebase failed to load')
   try {
