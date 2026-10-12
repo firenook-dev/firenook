@@ -713,13 +713,40 @@ test.describe('@perf', () => {
           record.__longest = Math.max(record.__longest, entry.duration)
       }).observe({ type: 'longtask', buffered: false })
     })
+    // A row pressed mid-burst opens in the inspector quickly: pressed in the
+    // page the moment the burst's first row is drawn, timed until the
+    // inspector's title reads it (the browser's clock, not the harness's).
+    const inspector = page.evaluate(() => {
+      const record = globalThis as unknown as PerfRecorder
+      return new Promise<number>((resolve, reject) => {
+        const started = record.performance.now()
+        let pressed: number | undefined
+        const step = () => {
+          const doc = record.document
+          if (pressed === undefined) {
+            const row = [...doc.querySelectorAll('[data-testid="log-row"]')].find((node) =>
+              node.textContent.includes('of 20000'),
+            )
+            if (row) {
+              pressed = record.performance.now()
+              row.dispatchEvent(new record.PointerEvent('pointerdown', { bubbles: true }))
+              row.dispatchEvent(new record.MouseEvent('click', { bubbles: true }))
+            }
+          } else if (
+            doc
+              .querySelector('[data-testid="log-inspector-title"]')
+              ?.textContent.includes('of 20000')
+          )
+            return resolve(record.performance.now() - pressed)
+          if (record.performance.now() - started > 30_000)
+            return reject(new Error('the burst never reached the page'))
+          record.requestAnimationFrame(step)
+        }
+        record.requestAnimationFrame(step)
+      })
+    })
     const call = callFunction(engine, 'burst', { n: 20_000 })
-    await expect(logRow(page, 'of 20000').first()).toBeVisible()
-    // A row pressed mid-burst opens in the inspector quickly.
-    const pressed = Date.now()
-    await logRow(page, 'of 20000').first().click()
-    await expect(page.getByTestId('log-inspector-title')).toContainText('of 20000')
-    const opened = Date.now() - pressed
+    const opened = await inspector
     await call
     await lineOf(engine, '"burst line 19999 of 20000"')
     const { frames, longest } = await page.evaluate(() => {
@@ -734,7 +761,7 @@ test.describe('@perf', () => {
       .annotations.push(
         { type: 'frame p95', description: `${p95.toFixed(1)} ms` },
         { type: 'longest task', description: `${longest.toFixed(0)} ms` },
-        { type: 'inspector', description: `${opened} ms` },
+        { type: 'inspector', description: `${opened.toFixed(0)} ms` },
       )
     expect(p95).toBeLessThanOrEqual(25)
     expect(longest).toBeLessThanOrEqual(150)
@@ -749,7 +776,19 @@ interface PerfRecorder {
   __longest: number
   requestAnimationFrame(callback: (now: number) => void): number
   performance: { now(): number }
+  document: {
+    querySelectorAll(selector: string): Iterable<PerfNode>
+    querySelector(selector: string): PerfNode | null
+  }
+  PointerEvent: new (type: string, init: { bubbles: boolean }) => object
+  MouseEvent: new (type: string, init: { bubbles: boolean }) => object
   PerformanceObserver: new (callback: (list: { getEntries(): { duration: number }[] }) => void) => {
     observe(options: { type: string; buffered: boolean }): void
   }
+}
+
+/** An element as the perf journey touches it. */
+interface PerfNode {
+  textContent: string
+  dispatchEvent(event: object): boolean
 }

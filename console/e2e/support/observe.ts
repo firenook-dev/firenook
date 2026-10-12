@@ -303,7 +303,8 @@ export async function openLogs(
 ): Promise<void> {
   const params = new URLSearchParams(search)
   await page.goto(`${engine.origin}/console/logs${params.size > 0 ? `?${params}` : ''}`)
-  await expect(page.getByTestId('logs-page')).toBeVisible()
+  // The first open loads the page's chunk from a debug engine on a shared host.
+  await expect(page.getByTestId('logs-page')).toBeVisible({ timeout: 15_000 })
   await expect(
     page
       .getByTestId('log-row')
