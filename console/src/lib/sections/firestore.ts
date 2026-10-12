@@ -11,6 +11,17 @@ function dbParam(database: string): string | undefined {
   return database === '(default)' || database === '' ? undefined : database
 }
 
+// The collection id of a collection-group pattern (`**/orders`,
+// `users/u_1/**/orders`); `undefined` for a collection path or a schema
+// pattern (`users/*/orders`), which the page reads as they are.
+function collectionGroupOf(pattern: string): string | undefined {
+  const segments = pattern.split('/')
+  const wildcard = segments.indexOf('**')
+  if (wildcard === -1) return undefined
+  const id = segments.at(-1)
+  return wildcard === segments.length - 2 && id && id !== '**' && id !== '*' ? id : undefined
+}
+
 /** `<db>|<rest>`: the database and the path, pattern or request id after it. */
 function split(key: string): [string, string] {
   const [database = '', rest = ''] = splitKey(key)
@@ -53,6 +64,13 @@ export const firestore: ConsoleSection = {
   routes: {
     'firestore.collection': (key): SectionLink => {
       const [database, pattern] = split(key)
+      // A collection group as the rules engine names a refused list
+      // (`**/orders`, or `users/u_1/**/orders` under one document): the
+      // grid's group view of `orders`, which runs from the root — the page
+      // has no ancestor-scoped group, so the link opens the whole group.
+      const group = collectionGroupOf(pattern)
+      if (group !== undefined)
+        return { to: '/firestore', search: { db: dbParam(database), path: group, group: true } }
       return { to: '/firestore', search: { db: dbParam(database), path: pattern } }
     },
     'firestore.document': (key): SectionLink => {
