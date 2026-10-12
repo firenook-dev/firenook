@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use ts_rs::TS;
@@ -291,7 +291,7 @@ impl InvocationOutcome {
 }
 
 /// Which address an invocation went to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "compute/")]
 pub enum InvocationTarget {
@@ -429,7 +429,7 @@ pub struct InvocationSummary {
 }
 
 /// How a recorded body's `text` is written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "compute/")]
 pub enum FunctionBodyEncoding {

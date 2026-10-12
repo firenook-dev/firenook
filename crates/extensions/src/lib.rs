@@ -34,7 +34,7 @@ impl std::fmt::Display for ExtensionsError {
 impl std::error::Error for ExtensionsError {}
 
 /// APIs the suite emulates (`EMULATED_APIS` in the official validation).
-const EMULATED_APIS: [&str; 4] = [
+pub const EMULATED_APIS: [&str; 4] = [
     "storage-component.googleapis.com",
     "firestore.googleapis.com",
     "pubsub.googleapis.com",
