@@ -1563,11 +1563,16 @@ impl Monitor {
     }
 
     /// Drops every finished invocation (running ones stay); each kind that
-    /// lost records reads as let go now.
+    /// lost records reads as let go now. Every function's figures start over
+    /// with the record: runs, failures, percentiles and the last run go,
+    /// calls in flight stay counted.
     pub fn clear_invocations(&self) {
         let mut state = self.lock();
         let removed = state.finished.clear(SystemTime::now());
         state.forget(&removed);
+        for counters in state.stats.values_mut() {
+            counters.start_over();
+        }
         drop(state);
         drop(removed);
     }

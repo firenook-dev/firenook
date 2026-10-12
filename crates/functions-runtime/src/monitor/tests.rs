@@ -874,6 +874,15 @@ fn clearing_keeps_running_calls_and_marks_the_kinds_let_go() {
     assert!(monitor.invocation(&running.id).is_some());
     assert!(monitor.kept_after(FunctionKind::Http).is_some());
     assert_eq!(monitor.kept_after(FunctionKind::Pubsub), None);
+    // The figures start over with the record; the call in flight still counts.
+    let stats = monitor.stats("us-central1-api");
+    assert_eq!((stats.runs, stats.failures, stats.in_flight), (0, 0, 1));
+    assert_eq!((stats.p50_ms, stats.p95_ms), (None, None));
+    assert!(stats.last.is_none());
+    finish_ok(&monitor, &running);
+    let stats = monitor.stats("us-central1-api");
+    assert_eq!((stats.runs, stats.in_flight), (1, 0));
+    assert_eq!(stats.last.map(|last| last.id), Some(running.id.to_string()));
 }
 
 #[test]

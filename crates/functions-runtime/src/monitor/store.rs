@@ -320,6 +320,17 @@ impl StatsState {
         self.p95 = percentile(&mut sorted, 95);
     }
 
+    /// The figures of a cleared history: nothing ran yet, calls in flight
+    /// still count.
+    pub(crate) fn start_over(&mut self) {
+        self.runs = 0;
+        self.failures = 0;
+        self.last = None;
+        self.durations.clear();
+        self.p50 = None;
+        self.p95 = None;
+    }
+
     pub(crate) fn snapshot(&self) -> FunctionStats {
         FunctionStats {
             runs: self.runs,
