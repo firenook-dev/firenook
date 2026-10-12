@@ -3,7 +3,7 @@
 // came (or laid out, when only the value is here). One band above holds the
 // switch, the tree's search — "2 of 5" with ↑ ↓ — and Copy JSON.
 
-import { Button, Tabs, Tooltip } from '@cloudflare/kumo'
+import { Button, Tabs, Tooltip, cn } from '@cloudflare/kumo'
 import { CaretDownIcon, CaretUpIcon, MagnifyingGlassIcon, XIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { CopyGlyph, useCopied } from '@/components/kit'
@@ -18,6 +18,14 @@ function rawOf(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? String(value)
 }
 
+/** How tall the raw text grows in a `content` view before it scrolls: fifteen lines. */
+function rawHeight(text: string): number {
+  let lines = 1
+  for (let at = text.indexOf('\n'); at !== -1 && lines < 15; at = text.indexOf('\n', at + 1))
+    lines += 1
+  return Math.max(3, lines) * 20 + 16
+}
+
 /** A hand-made square for the band: Kumo's extra-small one is 12 px at this root. */
 const SQUARE =
   'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-kumo-subtle outline-none hover:ink hover:text-kumo-default focus-visible:ring focus-visible:ring-kumo-focus disabled:text-kumo-inactive disabled:hover:bg-none'
@@ -27,6 +35,8 @@ export function JsonView({
   text,
   defaultTab = 'tree',
   mask,
+  height = 'fill',
+  raw: offerRaw = true,
   testId,
 }: {
   value: unknown
@@ -35,9 +45,18 @@ export function JsonView({
   defaultTab?: 'tree' | 'raw' | undefined
   /** Values the tree masks; the Raw tab is then not offered, since it would show them. */
   mask?: ((path: JsonPath) => boolean) | undefined
+  /**
+   * `'fill'` flexes in an inspector's column; `'content'` is as tall as the
+   * value (the tree up to 480 px, the raw text up to fifteen lines) with a
+   * 12 px inset, for a box inside a form such as a composer's response.
+   */
+  height?: 'fill' | 'content' | undefined
+  /** `false` when the page shows the text elsewhere already (a response's own Raw tab). */
+  raw?: boolean | undefined
   testId?: string | undefined
 }) {
-  const [tab, setTab] = useState<'tree' | 'raw'>(mask ? 'tree' : defaultTab)
+  const rawOffered = offerRaw && mask === undefined
+  const [tab, setTab] = useState<'tree' | 'raw'>(rawOffered ? defaultTab : 'tree')
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState({ count: 0, stopped: false })
   const [active, setActive] = useState(0)
@@ -49,11 +68,20 @@ export function JsonView({
   }
   const searching = query.trim() !== ''
   const ids = testId ?? 'json-view'
+  const fill = height === 'fill'
 
   return (
-    <div className="flex min-h-[240px] min-w-0 flex-1 flex-col" data-testid={testId}>
-      <div className="flex shrink-0 items-center gap-2 border-b border-kumo-line px-5 py-1.5">
-        {mask === undefined && (
+    <div
+      className={cn('flex min-w-0 flex-col', fill && 'min-h-[240px] flex-1')}
+      data-testid={testId}
+    >
+      <div
+        className={cn(
+          'flex shrink-0 items-center gap-2 border-b border-kumo-line py-1.5',
+          fill ? 'px-5' : 'px-3',
+        )}
+      >
+        {rawOffered && (
           <Tabs
             size="sm"
             variant="segmented"
@@ -168,20 +196,24 @@ export function JsonView({
         </span>
       </div>
       {tab === 'tree' ? (
-        <div className="flex min-h-0 flex-1 flex-col py-1">
+        <div className={cn('flex flex-col py-1', fill && 'min-h-0 flex-1')}>
           <JsonTree
             value={value}
             search={query}
             activeHit={searching && hits.count > 0 ? Math.min(active, hits.count - 1) : undefined}
             onHits={(count, stopped) => setHits({ count, stopped })}
-            height="fill"
+            height={fill ? 'fill' : undefined}
             mask={mask}
             ariaLabel="JSON tree"
             testId={`${ids}-tree`}
           />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col p-3">
+        <div
+          className={cn('flex flex-col p-3', fill && 'min-h-0 flex-1')}
+          // Measured in lines of the text, which a class cannot count.
+          style={fill ? undefined : { height: rawHeight(raw) + 24 }}
+        >
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md ring ring-kumo-line">
             <CodeEditor
               value={raw}

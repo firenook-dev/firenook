@@ -1,12 +1,12 @@
 // The body of a composed request: none, JSON, text, a form or bytes. JSON
-// gets the console's code editor (it marks what does not parse, and
-// Format tidies it); text, a form (`a=1&b=2`) and base64 get a plain box
-// in the data face. Switching kind keeps what was typed, so a person who
-// picks the wrong one does not lose it.
+// is the kit's JsonField (the code editor, what does not parse said with
+// its line and column, and a Format that keeps every value as typed);
+// text, a form (`a=1&b=2`) and base64 get a plain box in the data face.
+// Switching kind keeps what was typed, so a person who picks the wrong one
+// does not lose it.
 
-import { Button, InputArea, Tabs, Text } from '@cloudflare/kumo'
-import { BracketsCurlyIcon } from '@phosphor-icons/react'
-import { CodeEditor } from '@/components/code-editor'
+import { InputArea, Tabs, Text } from '@cloudflare/kumo'
+import { JsonField } from '../json-field'
 import type { BodyKind, RequestBody } from './types'
 
 const KIND_LABELS: Record<BodyKind, string> = {
@@ -25,15 +25,6 @@ const PLACEHOLDERS: Record<Exclude<BodyKind, 'none' | 'json'>, string> = {
   base64: 'Bytes as base64, sent decoded',
 }
 
-/** The JSON text tidied, or undefined when it does not parse. */
-export function formatJson(text: string): string | undefined {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return undefined
-  }
-}
-
 export function BodyEditor({
   value,
   onChange,
@@ -46,34 +37,17 @@ export function BodyEditor({
   kinds?: readonly BodyKind[]
   testId?: string
 }) {
-  const formatted = value.kind === 'json' ? formatJson(value.text) : undefined
   return (
     <div className="flex min-h-0 flex-col gap-2" data-testid={testId} data-kind={value.kind}>
-      {(kinds.length > 1 || value.kind === 'json') && (
-        <div className="flex items-center justify-between gap-2">
-          {kinds.length > 1 ? (
-            <Tabs
-              size="sm"
-              variant="segmented"
-              value={value.kind}
-              onValueChange={(next) => onChange({ ...value, kind: next as BodyKind })}
-              tabs={kinds.map((kind) => ({ value: kind, label: KIND_LABELS[kind] }))}
-            />
-          ) : (
-            <span />
-          )}
-          {value.kind === 'json' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<BracketsCurlyIcon />}
-              disabled={formatted === undefined || formatted === value.text}
-              onClick={() => formatted !== undefined && onChange({ ...value, text: formatted })}
-              data-testid={`${testId}-format`}
-            >
-              Format
-            </Button>
-          )}
+      {kinds.length > 1 && (
+        <div className="flex items-center gap-2">
+          <Tabs
+            size="sm"
+            variant="segmented"
+            value={value.kind}
+            onValueChange={(next) => onChange({ ...value, kind: next as BodyKind })}
+            tabs={kinds.map((kind) => ({ value: kind, label: KIND_LABELS[kind] }))}
+          />
         </div>
       )}
       {value.kind === 'none' ? (
@@ -81,14 +55,14 @@ export function BodyEditor({
           No body is sent.
         </Text>
       ) : value.kind === 'json' ? (
-        <div className="flex h-40 min-h-0 flex-col overflow-hidden rounded-md ring ring-kumo-line focus-within:ring-kumo-focus">
-          <CodeEditor
-            value={value.text}
-            onChange={(text) => onChange({ ...value, text })}
-            ariaLabel="Body"
-            testId={`${testId}-json`}
-          />
-        </div>
+        <JsonField
+          value={value.text}
+          onChange={(text) => onChange({ ...value, text })}
+          minLines={7}
+          maxLines={16}
+          ariaLabel="Body"
+          testId={`${testId}-json`}
+        />
       ) : (
         <InputArea
           size="sm"

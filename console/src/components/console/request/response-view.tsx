@@ -5,10 +5,10 @@
 import { Button, Tabs, Text } from '@cloudflare/kumo'
 import { DownloadSimpleIcon } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
-import { CodeEditor } from '@/components/code-editor'
 import { StatusDot, type StatusTone } from '@/components/kit'
 import { download } from '@/lib/download'
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
+import { JsonView } from '../json-view'
 import { isTextual } from './send'
 import type { ResponseRecord } from './types'
 
@@ -45,8 +45,10 @@ export function responseFigures(response: ResponseRecord): string {
   return parts.join(' · ')
 }
 
-/** The body as text when it is text; JSON tidied for reading. */
-function bodyFor(response: ResponseRecord): { text: string; json: boolean } | undefined {
+/** The body as text when it is text, with its value when it is JSON. */
+function bodyFor(
+  response: ResponseRecord,
+): { text: string; json: { value: unknown } | undefined } | undefined {
   const text =
     response.bodyText ??
     (response.chunks && response.receiving
@@ -58,20 +60,12 @@ function bodyFor(response: ResponseRecord): { text: string; json: boolean } | un
     (response.contentType === undefined && /^\s*[[{]/.test(text))
   if (looksJson && !response.receiving) {
     try {
-      return { text: JSON.stringify(JSON.parse(text), null, 2), json: true }
+      return { text, json: { value: JSON.parse(text) as unknown } }
     } catch {
       // Not JSON after all: shown as it came.
     }
   }
-  return { text, json: false }
-}
-
-/** Rows of 20 px plus the editor's padding, between three lines and fifteen. */
-function jsonHeight(text: string): number {
-  let lines = 1
-  for (let at = text.indexOf('\n'); at !== -1 && lines < 15; at = text.indexOf('\n', at + 1))
-    lines += 1
-  return Math.max(3, lines) * 20 + 16
+  return { text, json: undefined }
 }
 
 function bytesOf(base64: string): Uint8Array {
@@ -216,7 +210,7 @@ function ResponseBody({
   testId,
 }: {
   response: ResponseRecord
-  body: { text: string; json: boolean } | undefined
+  body: ReturnType<typeof bodyFor>
   testId: string
 }) {
   if (response.bodyBase64 !== undefined) {
@@ -272,17 +266,15 @@ function ResponseBody({
         </Text>
       )}
       {body.json ? (
-        <div
-          className="flex min-h-0 flex-col overflow-hidden rounded-md ring ring-kumo-line"
-          // As tall as the answer, up to fifteen lines, then it scrolls: a
-          // short answer leaves no empty box, a long one no endless page.
-          style={{ height: jsonHeight(body.text) }}
-        >
-          <CodeEditor
-            value={body.text}
-            onChange={() => {}}
-            readOnly
-            ariaLabel="Response body"
+        // The tree to fold, search and copy a path from (the text as it came
+        // is the response's own Raw tab); as tall as the answer up to 480 px,
+        // so a short answer leaves no empty box and a long one no endless page.
+        <div className="overflow-hidden rounded-md ring ring-kumo-line">
+          <JsonView
+            value={body.json.value}
+            text={body.text}
+            height="content"
+            raw={false}
             testId={`${testId}-json`}
           />
         </div>

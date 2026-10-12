@@ -13,14 +13,13 @@
 import { Button, Checkbox, Dialog, Input, Text } from '@cloudflare/kumo'
 import { TrashIcon, XIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
 import type { BackgroundTriggers } from '@/api/generated/BackgroundTriggers'
 import { statusQuery } from '@/api/queries'
 import { formatNumber } from '@/lib/format'
 import { type Job, cancelJob, useJob } from '@/lib/jobs'
-import { useLinkTo } from '@/lib/links'
 import type { TriggerFunction, TriggersAnswer } from '@/lib/triggers'
+import { EntityLink } from './entity-link'
 
 /** What the trigger line says, or nothing for an answer the engine does not have. */
 export type TriggerLine =
@@ -309,17 +308,7 @@ function TriggerLineItem({ line, testId }: { line: TriggerLine; testId: string }
 
 /** A function's name, linking to it once the Functions section shows it. */
 function FunctionName({ fn }: { fn: TriggerFunction }) {
-  const link = useLinkTo({ kind: 'functions.function', key: fn.functionId })
   // `us-central1-onUserDeleted` reads as the export the developer wrote.
   const name = fn.functionId.replace(/^[a-z]+-[a-z]+\d+-/, '')
-  if (!link) return <span className="font-mono text-[0.9em] text-kumo-default">{name}</span>
-  return (
-    <Link
-      to={link.to as never}
-      search={link.search as never}
-      className="font-mono text-[0.9em] text-kumo-link hover:underline"
-    >
-      {name}
-    </Link>
-  )
+  return <EntityLink entity={{ kind: 'functions.function', key: fn.functionId, label: name }} />
 }

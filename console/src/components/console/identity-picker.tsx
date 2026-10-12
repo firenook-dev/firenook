@@ -24,7 +24,6 @@ import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useState } from 'react'
 import { ApiError } from '@/api/client'
 import { statusQuery } from '@/api/queries'
-import { CodeEditor } from '@/components/code-editor'
 import { MenuCheck } from '@/components/kit'
 import {
   IDENTITY_PAGE,
@@ -37,6 +36,7 @@ import {
   userTokenQuery,
   viewAsOfUser,
 } from '@/lib/identity'
+import { type JsonParse, JsonField } from './json-field'
 
 export type IdentityMode = 'owner' | 'anonymous' | 'user' | 'custom'
 
@@ -430,8 +430,12 @@ function CustomIdentityForm({
     initial?.kind === 'custom' ? (initial.emailVerified ?? false) : Boolean(initial?.email),
   )
   const [claims, setClaims] = useState(() => JSON.stringify(initial?.claims ?? {}, null, 2))
+  // The field says what is wrong with text that is not JSON, under itself,
+  // with the line and column; the form adds only what the field cannot know.
+  const [read, setRead] = useState<JsonParse | undefined>(undefined)
 
   const parsed = parseClaims(claims)
+  const notJson = read !== undefined && !read.ok
   const problem =
     uid.trim() === '' ? 'Give the identity a uid.' : 'error' in parsed ? parsed.error : undefined
   const use = () => {
@@ -518,16 +522,17 @@ function CustomIdentityForm({
           </div>
         </div>
         <Field label="Claims">
-          <div className="flex h-28 min-h-0 flex-col overflow-hidden rounded-md ring ring-kumo-line focus-within:ring-kumo-focus">
-            <CodeEditor
-              value={claims}
-              onChange={setClaims}
-              ariaLabel="Claims"
-              testId={`${testId}-claims`}
-            />
-          </div>
+          <JsonField
+            value={claims}
+            onChange={setClaims}
+            onParsed={setRead}
+            minLines={4}
+            maxLines={10}
+            ariaLabel="Claims"
+            testId={`${testId}-claims`}
+          />
         </Field>
-        {problem && uid.trim() !== '' && (
+        {problem && uid.trim() !== '' && !notJson && (
           <Text size="sm" variant="error">
             {problem}
           </Text>

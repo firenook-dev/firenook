@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
+import { giveListsALayout } from '@/test/virtual'
 import {
   ResponseView,
   hexLines,
@@ -11,6 +12,7 @@ import {
 } from './response-view'
 import type { ResponseRecord } from './types'
 
+giveListsALayout()
 afterEach(cleanup)
 
 const ok: ResponseRecord = {
@@ -61,6 +63,24 @@ describe('the answer to a request', () => {
     expect(rawResponse(ok)).toBe(
       'HTTP/1.1 200 OK\ncontent-type: text/plain\nx-firenook-execution: a3f9c1-1284\n\nhello ada',
     )
+  })
+
+  it('shows a JSON answer as a tree to search, and copies it exactly as it came', async () => {
+    const user = userEvent.setup()
+    const text = '{"user":{"uid":"u_1","plan":"pro"},"n":3.0}'
+    render(
+      <ResponseView
+        response={{ ...ok, bodyText: text, contentType: 'application/json', headers: [] }}
+        pending={false}
+      />,
+    )
+    expect(screen.getByRole('tree', { name: 'JSON tree' })).toBeInTheDocument()
+    // One Raw tab: the exchange's. The tree's own would show the same text again.
+    expect(screen.getAllByRole('tab', { name: 'Raw' })).toHaveLength(1)
+    await user.type(screen.getByTestId('response-json-search'), 'pro')
+    expect(screen.getByTestId('response-json-hits')).toHaveTextContent('1 of 1')
+    await user.click(screen.getByTestId('response-json-copy'))
+    expect(await navigator.clipboard.readText()).toBe(text)
   })
 
   it('lists the chunks of a streamed answer', async () => {

@@ -48,7 +48,7 @@ export function RelativeTime({
       render={
         <time
           dateTime={iso}
-          className={cn('text-[12px] whitespace-nowrap', className)}
+          className={cn('font-sans text-[12px] whitespace-nowrap', className)}
           data-testid={testId}
         >
           {prefix ? `${prefix} ${text}` : text}

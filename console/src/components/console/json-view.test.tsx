@@ -42,6 +42,13 @@ describe('the JSON view', () => {
     expect(await screen.findByText(/"a": 1/)).toBeInTheDocument()
   })
 
+  it('leaves the raw tab out when the page shows the text elsewhere, and sizes to the value', () => {
+    render(<JsonView value={{ a: 1 }} raw={false} height="content" testId="view" />)
+    expect(screen.queryByRole('tab', { name: 'Raw' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('view')).not.toHaveClass('min-h-[240px]')
+    expect(screen.getByTestId('view-tree')).toHaveStyle({ height: '20px' })
+  })
+
   it('offers no raw text when the tree masks values, since it would show them', () => {
     render(<JsonView value={{ hash: 'x' }} mask={() => true} defaultTab="raw" testId="view" />)
     expect(screen.queryByRole('tab', { name: 'Raw' })).not.toBeInTheDocument()
