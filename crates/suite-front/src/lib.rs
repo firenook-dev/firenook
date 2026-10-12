@@ -6,10 +6,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod entity;
 mod logging;
 mod release;
 pub mod replay;
 mod requests;
+pub use entity::EntityRef;
 pub use logging::LoggingRuntime;
 pub use replay::{Cursor, Entry, Follow, ReplayRing, RingBudget, RingLimits, RingSize};
 #[cfg(test)]
