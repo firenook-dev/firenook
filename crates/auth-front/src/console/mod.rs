@@ -555,7 +555,7 @@ impl Runtime {
         let (record, index) = {
             let data = lock(&self.inner.data);
             let scope = find_scope(&data, project, tenant)?;
-            let record = scope.and_then(|scope| scope.users.get(uid).cloned());
+            let record = scope.and_then(|scope| scope.shared_user(uid));
             let record = record.ok_or_else(|| ConsoleError::unknown_user(uid, tenant))?;
             let index =
                 scope.map_or_else(IndexSnapshot::empty, |scope| scope.user_index().snapshot());
@@ -564,7 +564,7 @@ impl Runtime {
         let row = index
             .row_of(uid, tenant)
             .ok_or_else(|| ConsoleError::unknown_user(uid, tenant))?;
-        Ok(detail(row, record))
+        Ok(detail(row, UserRecord::clone(&record)))
     }
 }
 

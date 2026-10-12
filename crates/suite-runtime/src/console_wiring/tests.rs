@@ -533,3 +533,71 @@ fn the_auth_wiring_records_restored_projects_that_hold_users_as_foreign() {
     });
     assert_eq!(quiet.count(), 0);
 }
+
+/// The Auth state reaches its file off the request path within 250 ms;
+/// the shutdown hook writes it at once, so a stop right after a burst of
+/// writes leaves the file equal to the state.
+#[tokio::test]
+async fn the_auth_shutdown_hook_writes_the_state_left_after_a_burst() {
+    let config = test_config();
+    let logging = LoggingRuntime::new();
+    let triggers = TriggerRegistry::default();
+    let foreign = firenook_console_front::ForeignProjects::default();
+    let root = std::env::temp_dir().join(format!(
+        "firenook-auth-finish-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let file = root.join("auth-state.json");
+    let registry = TriggerRegistry::default();
+    let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
+    let auth = Arc::new(
+        firenook_auth_front::AuthRuntime::new(
+            &config.project_id,
+            observer.queue(),
+            registry,
+            Some(file.clone()),
+        )
+        .expect("auth"),
+    );
+    let router = auth.application();
+    for index in 0..200 {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::post("/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "email": format!("burst{index}@example.test"), "password": "password1" })
+                            .to_string(),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    auth::before_finish(&HookContext {
+        auth: Some(&auth),
+        ..HookContext::new(&config, &logging, &foreign, &triggers)
+    })
+    .await;
+    let on_disk: Value =
+        serde_json::from_slice(&std::fs::read(&file).expect("state file")).expect("JSON");
+    let in_memory = auth
+        .runtime()
+        .read(|data| serde_json::to_value(data).expect("JSON"));
+    assert_eq!(on_disk, in_memory);
+    assert_eq!(
+        on_disk["projects"][config.project_id.as_str()]["users"]
+            .as_object()
+            .map(serde_json::Map::len),
+        Some(200)
+    );
+    drop(router);
+    drop(auth);
+    let _ = std::fs::remove_dir_all(&root);
+}

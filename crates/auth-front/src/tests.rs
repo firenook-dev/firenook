@@ -854,7 +854,11 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
+    // Changes reach the file off the request path; a flush writes them now.
+    runtime.flush().expect("flush");
     let after_signup = modified().expect("sign-up persists the state");
+    let encodes = || runtime.runtime().persist_stats().expect("persists").encodes;
+    let first_writes = encodes();
     let id_token = body["idToken"].as_str().expect("id token").to_owned();
     let local_id = body["localId"].as_str().expect("local id").to_owned();
     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -889,11 +893,13 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
     )
     .await;
     assert_eq!(status, 200);
+    runtime.flush().expect("flush");
     assert_eq!(
         modified().expect("state file"),
         after_signup,
         "reads must not rewrite the state file"
     );
+    assert_eq!(encodes(), first_writes, "reads are never encoded");
 
     // A mutation persists again.
     let (status, body) = call(
@@ -904,6 +910,7 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
+    runtime.flush().expect("flush");
     assert_ne!(modified().expect("state file"), after_signup);
     let persisted: JsonValue =
         serde_json::from_slice(&std::fs::read(&state_file).expect("state bytes")).expect("json");
@@ -963,7 +970,7 @@ fn query_users_by_cloning(
         .filter(|user| {
             start_token.is_none_or(|token| str_field(user, "localId").unwrap_or_default() > token)
         })
-        .cloned()
+        .map(|user| UserRecord::clone(user))
         .collect();
     users.sort_by(|a, b| str_field(a, "localId").cmp(&str_field(b, "localId")));
     if order == state::QueryOrder::Desc {

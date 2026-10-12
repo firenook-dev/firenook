@@ -267,10 +267,12 @@ impl fmt::Debug for UserIndex {
 
 impl UserIndex {
     /// An index of `users`, built from scratch (state load, rebuilds).
-    pub(crate) fn build<'a>(users: impl IntoIterator<Item = (&'a String, &'a UserRecord)>) -> Self {
+    pub(crate) fn build<'a, R: std::borrow::Borrow<UserRecord> + 'a>(
+        users: impl IntoIterator<Item = (&'a String, &'a R)>,
+    ) -> Self {
         let mut index = Self::default();
         for (local_id, record) in users {
-            index.upsert(local_id, record);
+            index.upsert(local_id, record.borrow());
         }
         index
     }

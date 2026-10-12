@@ -1564,7 +1564,9 @@ async fn console_reads_never_mutate_or_create() {
             .map(|meta| (meta.len(), meta.modified().ok()))
     };
     let generation = || lock(&runtime.runtime().inner.data).generation();
-    let before = (stamp().expect("persisted"), generation());
+    runtime.flush().expect("flush");
+    let encodes = || runtime.runtime().persist_stats().expect("persists").encodes;
+    let before = (stamp().expect("persisted"), generation(), encodes());
     std::thread::sleep(Duration::from_millis(20));
 
     let handle = runtime.runtime();
@@ -1599,8 +1601,9 @@ async fn console_reads_never_mutate_or_create() {
     assert!(handle.user(PROJECT, Some("no-such-tenant"), "t1").is_err());
     assert!(handle.users("demo-other", None).expect("empty").is_empty());
     assert!(handle.users("demo-other", Some("acme")).is_err());
+    runtime.flush().expect("flush");
     assert_eq!(
-        (stamp().expect("state file"), generation()),
+        (stamp().expect("state file"), generation(), encodes()),
         before,
         "reads change nothing"
     );
@@ -2215,4 +2218,154 @@ fn resident_kib() -> usize {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .and_then(|text| text.trim().parse().ok())
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------- persistence bench
+
+/// A runtime that persists to a fresh state file, holding `users` realistic
+/// project users, and the (email, password) of its password users.
+fn persisted(users: usize, seed: u64) -> (AuthRuntime, std::path::PathBuf, Vec<(String, String)>) {
+    let directory = std::env::temp_dir().join(format!(
+        "firenook-auth-bench-{}-{users}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let state_file = directory.join("auth-state.json");
+    let registry = firenook_functions_bridge::TriggerRegistry::default();
+    let (observer, _receiver) =
+        firenook_functions_bridge::TriggerObserver::channel(registry.clone());
+    let runtime = AuthRuntime::new(
+        PROJECT,
+        observer.queue(),
+        registry,
+        Some(state_file.clone()),
+    )
+    .expect("runtime");
+    let mut random = Lcg::new(seed);
+    let credentials = runtime
+        .runtime()
+        .update(|data| {
+            let state = &mut data.agent(PROJECT).project;
+            let mut credentials = Vec::new();
+            for index in 0..users {
+                let (uid, user) = realistic_user(index, &mut random);
+                if let (Some(email), Some(hash), false) = (
+                    str_field(&user, "email"),
+                    str_field(&user, "passwordHash"),
+                    truthy(user.get("disabled")),
+                ) && let Some(password) = recoverable_password(hash)
+                {
+                    credentials.push((email.to_owned(), password));
+                }
+                state
+                    .create_user_with_local_id(&uid, &user)
+                    .expect("create")
+                    .expect("new");
+            }
+            credentials
+        })
+        .expect("populated");
+    runtime.flush().expect("flush");
+    (runtime, directory, credentials)
+}
+
+/// Password sign-ins through the Auth application, timed one by one after
+/// ten to warm up.
+async fn sign_in_latencies(
+    runtime: &AuthRuntime,
+    credentials: &[(String, String)],
+    samples: usize,
+) -> Vec<Duration> {
+    let mut latencies = Vec::with_capacity(samples);
+    for round in 0..samples + 10 {
+        let (email, password) = &credentials[round % credentials.len()];
+        let started = Instant::now();
+        let (status, body) = call(
+            runtime,
+            Method::POST,
+            &format!("{CLIENT}/accounts:signInWithPassword?key=fake"),
+            &json!({ "email": email, "password": password, "returnSecureToken": true }),
+        )
+        .await;
+        let took = started.elapsed();
+        assert_eq!(status, 200, "{body}");
+        if round >= 10 {
+            latencies.push(took);
+        }
+    }
+    latencies
+}
+
+/// A sign-in never waits for the state to be encoded: at 10,000 users with
+/// persistence on its p99 stays within 50 ms and within three times (plus
+/// 2 ms of scheduling slack) the 100-user p99 measured in the same run.
+#[tokio::test]
+async fn a_sign_in_with_persistence_on_does_not_grow_with_the_user_count() {
+    let mut p99 = Vec::new();
+    for users in [100, 10_000] {
+        let (runtime, directory, credentials) = persisted(users, 31);
+        let mut latencies = sign_in_latencies(&runtime, &credentials, 200).await;
+        p99.push(percentiles(&mut latencies).2);
+        drop(runtime);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+    let (small, large) = (p99[0], p99[1]);
+    assert!(
+        large <= Duration::from_millis(50),
+        "p99 {large:?} at 10,000 users"
+    );
+    assert!(
+        large <= small * 3 + Duration::from_millis(2),
+        "p99 {large:?} at 10,000 users, {small:?} at 100"
+    );
+}
+
+/// Percentiles of `samples` (sorted in place): p50, p95, p99.
+fn percentiles(samples: &mut [Duration]) -> (Duration, Duration, Duration) {
+    samples.sort();
+    let at = |fraction: f64| {
+        let last = samples.len().saturating_sub(1);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "an index into a short sample list"
+        )]
+        let index = ((last as f64) * fraction).round() as usize;
+        samples[index.min(last)]
+    };
+    (at(0.50), at(0.95), at(0.99))
+}
+
+/// `cargo test -p firenook-auth-front --release -- --ignored --nocapture
+/// sign_in_bench`: password sign-in latency through the Auth application
+/// with persistence on, at 100, 10,000 and 100,000 users, and the size of
+/// the state file (figures for a product claim come from the private
+/// acceptance host only).
+#[test]
+#[ignore = "a benchmark, run by hand in release"]
+fn sign_in_bench_with_persistence() {
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio");
+    for (users, samples) in [(100, 300), (10_000, 300), (100_000, 100)] {
+        let (runtime, directory, credentials) = persisted(users, 29);
+        let mut latencies = executor.block_on(sign_in_latencies(&runtime, &credentials, samples));
+        let (p50, p95, p99) = percentiles(&mut latencies);
+        runtime.flush().expect("flush");
+        let stats = runtime.runtime().persist_stats().expect("persists");
+        let bytes = std::fs::metadata(directory.join("auth-state.json"))
+            .map_or(0, |metadata| metadata.len());
+        println!(
+            "{users} users: sign-in p50 {p50:?} p95 {p95:?} p99 {p99:?}; auth-state.json {bytes} bytes; \
+             {} encodes, last {:?}, writer lock hold at most {:?}",
+            stats.encodes, stats.last_encode, stats.longest_hold
+        );
+        drop(runtime);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 }

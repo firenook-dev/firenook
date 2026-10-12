@@ -35,6 +35,7 @@ pub mod error;
 pub mod legacy;
 pub mod ops;
 pub mod pages;
+mod persist;
 pub mod spec;
 pub mod state;
 pub mod token;
@@ -43,6 +44,8 @@ pub mod util;
 use blocking::{BlockingContext, BlockingOutcome, BlockingTarget, OauthTokens};
 use error::ApiError;
 use ops::Ctx;
+pub use persist::PersistStats;
+use persist::Persister;
 use state::{AuthData, BlockingEvent, Lifecycle, Scope, UpdateOptions, UserRecord};
 use util::{decode_jwt, now_iso, random_uuid, str_field};
 
@@ -101,11 +104,10 @@ impl std::error::Error for AuthError {}
 
 struct Inner {
     default_project: String,
-    data: Mutex<AuthData>,
-    /// Serializes state-file writes issued outside the data lock, so two
-    /// requests cannot publish their snapshots out of order.
-    state_write: Mutex<()>,
-    state_file: Option<PathBuf>,
+    /// The state, shared with the state file's writer thread.
+    data: Arc<Mutex<AuthData>>,
+    /// Writes the state file off the request path; absent without one.
+    persister: Option<Persister>,
     queue: DispatchQueue,
     background: TriggerRegistry,
     blocking: RwLock<Option<Arc<dyn BlockingResolver>>>,
@@ -132,13 +134,17 @@ impl AuthRuntime {
         let mut data = state_file
             .as_deref()
             .map_or_else(|| Ok(AuthData::default()), load_state)?;
+        data.version = STATE_VERSION;
         data.rebuild_indexes();
+        let data = Arc::new(Mutex::new(data));
+        let persister = state_file
+            .map(|file| Persister::start(file, data.clone()))
+            .transpose()?;
         let runtime = Runtime {
             inner: Arc::new(Inner {
                 default_project: project.to_owned(),
-                data: Mutex::new(data),
-                state_write: Mutex::new(()),
-                state_file,
+                data,
+                persister,
                 queue,
                 background,
                 blocking: RwLock::new(None),
@@ -194,7 +200,14 @@ impl AuthRuntime {
 
     /// Publishes native state, including an intentionally empty Auth database.
     pub fn checkpoint_native_state(&self) -> Result<(), AuthError> {
-        self.runtime.persist(&lock(&self.runtime.inner.data))
+        self.runtime.write_state(true)
+    }
+
+    /// Writes the state file now if anything changed since the last write.
+    /// Changes otherwise reach the file within 250 ms, written off the
+    /// request path; a test that reads the file flushes first.
+    pub fn flush(&self) -> Result<(), AuthError> {
+        self.runtime.flush()
     }
 
     /// Number of users in the configured project.
@@ -263,7 +276,9 @@ impl AuthRuntime {
             imported += 1;
         }
         project.events.clear();
-        self.runtime.persist(&data)?;
+        drop(data);
+        self.runtime.mark_dirty();
+        self.runtime.flush()?;
         Ok(imported)
     }
 
@@ -320,7 +335,9 @@ impl AuthRuntime {
                     },
                 );
             }
-            self.runtime.persist(&data)?;
+            drop(data);
+            self.runtime.mark_dirty();
+            self.runtime.flush()?;
         }
         Ok(imported)
     }
@@ -377,35 +394,55 @@ impl Runtime {
         body(&lock(&self.inner.data))
     }
 
-    /// Changes the state under its lock, writes it when it changed and
-    /// dispatches the lifecycle events it queued, as an operation's scope
-    /// does, without resolving (or creating) a project or tenant first. For
-    /// writes beside the emulator's own operations (the console minting a
-    /// token for an existing account).
+    /// Changes the state under its lock, marks it for writing when it
+    /// changed and dispatches the lifecycle events it queued, as an
+    /// operation's scope does, without resolving (or creating) a project or
+    /// tenant first. For writes beside the emulator's own operations (the
+    /// console minting a token for an existing account).
     pub fn update<T>(&self, body: impl FnOnce(&mut AuthData) -> T) -> Result<T, AuthError> {
-        // The state is serialized under the lock only when the request
-        // changed it, and the file is written after the lock is released, so
-        // a lookup never rewrites the state and a write never stalls readers
-        // on disk I/O.
-        let (result, events, encoded) = {
+        // Nothing is encoded here: a change only marks the state dirty, and
+        // the writer snapshots it in O(1) and encodes it off the request
+        // path, so a lookup never rewrites the state and a write never waits
+        // for an encode, whatever the number of users.
+        let (result, events, changed) = {
             let mut data = lock(&self.inner.data);
             let before = data.generation();
             let result = body(&mut data);
             let events = data.take_events();
-            let encoded = if data.generation() == before {
-                None
-            } else {
-                self.encode_state(&data)?
-            };
-            (result, events, encoded)
+            (result, events, data.generation() != before)
         };
-        if let Some(encoded) = encoded {
-            self.write_state(&encoded)?;
+        if changed {
+            self.mark_dirty();
         }
         for (project_id, kind, user) in events {
             self.dispatch_lifecycle(&project_id, kind, &user);
         }
         Ok(result)
+    }
+
+    /// Writes the state file now if anything changed since the last write.
+    pub fn flush(&self) -> Result<(), AuthError> {
+        self.write_state(false)
+    }
+
+    /// How the state file's writer has done, when the runtime persists.
+    #[must_use]
+    pub fn persist_stats(&self) -> Option<PersistStats> {
+        self.inner.persister.as_ref().map(Persister::stats)
+    }
+
+    fn mark_dirty(&self) {
+        if let Some(persister) = &self.inner.persister {
+            persister.mark_dirty();
+        }
+    }
+
+    /// Writes the state when it changed (or always, with `force`).
+    fn write_state(&self, force: bool) -> Result<(), AuthError> {
+        match &self.inner.persister {
+            Some(persister) => persister.flush(&self.inner.data, force),
+            None => Ok(()),
+        }
     }
 
     /// `fetchBlockingFunction` for `event`, resolved from the project
@@ -457,33 +494,6 @@ impl Runtime {
         };
         blocking::fetch_blocking_function(&self.inner.client, target, event, user, context, oauth)
             .await
-    }
-
-    fn persist(&self, data: &AuthData) -> Result<(), AuthError> {
-        match self.encode_state(data)? {
-            Some(encoded) => self.write_state(&encoded),
-            None => Ok(()),
-        }
-    }
-
-    /// The state's on-disk bytes, or `None` when persistence is disabled.
-    fn encode_state(&self, data: &AuthData) -> Result<Option<Vec<u8>>, AuthError> {
-        match &self.inner.state_file {
-            Some(_) => serde_json::to_vec_pretty(data)
-                .map(Some)
-                .map_err(|error| AuthError(format!("failed to serialize Auth state: {error}"))),
-            None => Ok(None),
-        }
-    }
-
-    fn write_state(&self, encoded: &[u8]) -> Result<(), AuthError> {
-        match &self.inner.state_file {
-            Some(path) => {
-                let _guard = lock(&self.inner.state_write);
-                write_atomic_bytes(path, encoded)
-            }
-            None => Ok(()),
-        }
     }
 
     fn dispatch_lifecycle(&self, project_id: &str, kind: Lifecycle, user: &UserRecord) {
@@ -1163,21 +1173,49 @@ fn validate_project(project: &str) -> Result<(), AuthError> {
     Ok(())
 }
 
+/// The layout of the state file this engine writes: per project its users,
+/// codes, proofs, configuration and tenants.
+const STATE_VERSION: u32 = 2;
+
+/// What `load_state` reads first to tell the layouts apart, skipping
+/// everything else.
+#[derive(serde::Deserialize)]
+struct LayoutProbe {
+    #[serde(default)]
+    version: Option<u64>,
+    #[serde(default)]
+    projects: BTreeMap<String, AgentProbe>,
+}
+
+#[derive(serde::Deserialize)]
+struct AgentProbe {
+    #[serde(default)]
+    tenants: Option<serde::de::IgnoredAny>,
+}
+
 fn load_state(path: &FilePath) -> Result<AuthData, AuthError> {
     if !path.is_file() {
         return Ok(AuthData::default());
     }
     let bytes = std::fs::read(path)
         .map_err(|error| AuthError(format!("failed to read Auth state: {error}")))?;
-    let value: JsonValue = serde_json::from_slice(&bytes)
+    let probe: LayoutProbe = serde_json::from_slice(&bytes)
         .map_err(|error| AuthError(format!("invalid Auth state JSON: {error}")))?;
-    if value.get("version").and_then(JsonValue::as_u64) == Some(2) {
-        return serde_json::from_value(value)
+    // Engines before this one wrote the current layout with `version: 0`
+    // when they started without a state file; every project they wrote
+    // carries `tenants`, which the older layout never had.
+    let current = probe.version == Some(u64::from(STATE_VERSION))
+        || (probe.version.is_none_or(|version| version == 0)
+            && !probe.projects.is_empty()
+            && probe.projects.values().all(|agent| agent.tenants.is_some()));
+    if current {
+        return serde_json::from_slice(&bytes)
             .map_err(|error| AuthError(format!("invalid Auth state: {error}")));
     }
+    let value: JsonValue = serde_json::from_slice(&bytes)
+        .map_err(|error| AuthError(format!("invalid Auth state JSON: {error}")))?;
     // The next.7 layout: `projects.<id>.{users, config}` with a flat config.
     let mut data = AuthData::default();
-    data.version = 2;
     for (project_id, project) in value
         .get("projects")
         .and_then(JsonValue::as_object)
@@ -1192,7 +1230,10 @@ fn load_state(path: &FilePath) -> Result<AuthData, AuthError> {
             .flatten()
         {
             if let Some(record) = user.as_object() {
-                agent.project.users.insert(local_id.clone(), record.clone());
+                agent
+                    .project
+                    .users
+                    .insert(local_id.clone(), Arc::new(record.clone()));
             }
         }
         if let Some(config) = project.get("config").and_then(JsonValue::as_object) {
@@ -1243,6 +1284,15 @@ fn write_atomic_bytes(path: &FilePath, bytes: &[u8]) -> Result<(), AuthError> {
     std::fs::rename(&temporary, path)
         .map_err(|error| AuthError(format!("failed to publish Auth state: {error}")))?;
     Ok(())
+}
+
+impl Drop for Inner {
+    /// The last handle is gone: stop the writer and write what is left.
+    fn drop(&mut self) {
+        if let Some(persister) = &self.persister {
+            persister.stop(&self.data);
+        }
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

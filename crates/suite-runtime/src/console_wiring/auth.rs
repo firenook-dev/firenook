@@ -5,7 +5,7 @@ use std::sync::Arc;
 use firenook_auth_front::AuthRuntime;
 use firenook_console_front::AuthConsole;
 use firenook_functions_bridge::FunctionsInventory;
-use firenook_suite_front::LoggingRuntime;
+use firenook_suite_front::{LogInput, LogLevel, LoggingRuntime, kinds};
 
 use super::{FunctionsConsoleOptions, HookContext};
 use crate::SuiteConfig;
@@ -61,12 +61,28 @@ pub(crate) fn functions_options(
 /// Every service has started.
 pub(crate) fn ready(_context: &HookContext<'_>) {}
 
-/// The suite is stopping (see `before_finish` in `mod.rs` for the order).
-#[allow(
-    clippy::unused_async,
-    reason = "the stream awaits its own stop work here"
-)]
-pub(crate) async fn before_finish(_context: &HookContext<'_>) {}
+/// The suite is stopping (see `before_finish` in `mod.rs` for the order):
+/// Auth writes its state file now, since changes otherwise reach it within
+/// 250 ms, off the request path. The encode runs on a blocking thread; a
+/// failure is said in the log, as the native checkpoint says its own.
+pub(crate) async fn before_finish(context: &HookContext<'_>) {
+    let Some(auth) = context.auth.cloned() else {
+        return;
+    };
+    let flushed = match tokio::task::spawn_blocking(move || auth.flush()).await {
+        Ok(written) => written.map_err(|error| error.to_string()),
+        Err(error) => Err(format!("the flush did not finish: {error}")),
+    };
+    if let Err(error) = flushed {
+        context.logging.emit(LogInput {
+            level: LogLevel::Warn,
+            service: "auth".to_owned(),
+            kind: Some(kinds::ENGINE_NOTICE),
+            message: format!("The Auth state could not be saved at shutdown: {error}"),
+            ..LogInput::default()
+        });
+    }
+}
 
 /// Functions reloaded and routing was refreshed for the inventory.
 pub(crate) fn inventory_refreshed(_context: &HookContext<'_>, _inventory: &FunctionsInventory) {}

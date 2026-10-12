@@ -4,6 +4,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
+use std::sync::Arc;
+
+use im::OrdMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
@@ -85,16 +88,22 @@ pub struct TemporaryProof {
 }
 
 /// Accounts and codes of one project or tenant.
+///
+/// The persisted maps are `im` persistent maps (the same JSON map on disk),
+/// so the state can be snapshotted under the data lock in O(1) and encoded
+/// outside it (`persist.rs`), and a console read can hold one account's
+/// record without copying it. The accessors keep their signatures: a lookup
+/// still answers an owned [`UserRecord`].
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ProjectState {
     #[serde(default)]
-    pub users: BTreeMap<String, UserRecord>,
+    pub users: OrdMap<String, Arc<UserRecord>>,
     #[serde(default)]
-    pub oobs: BTreeMap<String, OobRecord>,
+    pub oobs: OrdMap<String, OobRecord>,
     #[serde(default, rename = "verificationCodes")]
-    pub verification_codes: BTreeMap<String, VerificationRecord>,
+    pub verification_codes: OrdMap<String, VerificationRecord>,
     #[serde(default, rename = "temporaryProofs")]
-    pub temporary_proofs: BTreeMap<String, TemporaryProof>,
+    pub temporary_proofs: OrdMap<String, TemporaryProof>,
     // Indexes are derived; rebuilt after deserialization.
     #[serde(skip)]
     local_id_for_email: BTreeMap<String, String>,
@@ -158,7 +167,7 @@ impl ProjectState {
         self.local_ids_for_provider_email.clear();
         self.user_for_provider_raw_id.clear();
         self.local_id_for_passkey.clear();
-        let users: Vec<UserRecord> = self.users.values().cloned().collect();
+        let users: Vec<Arc<UserRecord>> = self.users.values().cloned().collect();
         for user in users {
             self.index_user(&user);
         }
@@ -227,7 +236,7 @@ impl ProjectState {
         }
         let mut record = UserRecord::new();
         record.insert("localId".to_owned(), json!(local_id));
-        self.users.insert(local_id.to_owned(), record);
+        self.users.insert(local_id.to_owned(), Arc::new(record));
         self.pending_local_ids.remove(local_id);
         let providers = provider_infos_of(props);
         let user = self
@@ -266,7 +275,7 @@ impl ProjectState {
                 .unwrap_or_else(|| json!(now.to_string())),
         );
         record.insert("lastLoginAt".to_owned(), json!(now.to_string()));
-        self.users.insert(local_id.to_owned(), record);
+        self.users.insert(local_id.to_owned(), Arc::new(record));
         let providers = provider_infos_of(props);
         self.update_user_by_local_id(
             local_id,
@@ -313,7 +322,7 @@ impl ProjectState {
             .iter()
             .map(|provider| (*provider).to_owned())
             .collect();
-        let mut user = self.users.get(local_id).cloned().ok_or_else(|| {
+        let mut user = owned(self.users.get(local_id)).ok_or_else(|| {
             ApiError::internal(
                 format!("Internal assertion error: trying to update nonexistent user: {local_id}"),
                 "INTERNAL",
@@ -393,10 +402,10 @@ impl ProjectState {
         if let Some(enrollments) = user.get("mfaInfo").and_then(JsonValue::as_array) {
             validate_mfa_enrollments(enrollments)?;
         }
-        self.users.insert(local_id.to_owned(), user.clone());
         let updated = self.update_user_provider_info(user, upsert_providers, &delete_providers);
         self.user_index.upsert(local_id, &updated);
-        self.users.insert(local_id.to_owned(), updated.clone());
+        self.users
+            .insert(local_id.to_owned(), Arc::new(updated.clone()));
         Ok(updated)
     }
 
@@ -508,6 +517,13 @@ impl ProjectState {
 
     #[must_use]
     pub fn get_user_by_local_id(&self, local_id: &str) -> Option<UserRecord> {
+        owned(self.users.get(local_id))
+    }
+
+    /// The stored record of `local_id`, shared: an O(1) clone that a console
+    /// read takes under the lock and reads after releasing it.
+    #[must_use]
+    pub fn shared_user(&self, local_id: &str) -> Option<Arc<UserRecord>> {
         self.users.get(local_id).cloned()
     }
 
@@ -515,24 +531,21 @@ impl ProjectState {
     pub fn get_user_by_email(&self, email: &str) -> Option<UserRecord> {
         self.local_id_for_email
             .get(email)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
     pub fn get_user_by_initial_email(&self, email: &str) -> Option<UserRecord> {
         self.local_id_for_initial_email
             .get(email)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
     pub fn get_user_by_phone_number(&self, phone: &str) -> Option<UserRecord> {
         self.local_id_for_phone
             .get(phone)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
@@ -540,16 +553,14 @@ impl ProjectState {
         self.user_for_provider_raw_id
             .get(provider)
             .and_then(|map| map.get(raw_id))
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
     pub fn get_user_by_passkey_credential_id(&self, credential: &str) -> Option<UserRecord> {
         self.local_id_for_passkey
             .get(credential)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     /// `getUsersByEmailOrProviderEmail`: the account owning the email first,
@@ -561,7 +572,7 @@ impl ProjectState {
         if let Some(id) = self.local_id_for_email.get(email)
             && let Some(user) = self.users.get(id)
         {
-            users.push(user.clone());
+            users.push(UserRecord::clone(user));
             seen.insert(id.clone());
         }
         if let Some(ids) = self.local_ids_for_provider_email.get(email) {
@@ -569,7 +580,7 @@ impl ProjectState {
                 if seen.insert(id.clone())
                     && let Some(user) = self.users.get(id)
                 {
-                    users.push(user.clone());
+                    users.push(UserRecord::clone(user));
                 }
             }
         }
@@ -714,7 +725,7 @@ impl ProjectState {
         if text.is_empty() {
             for user in self.users.values().take(limit) {
                 budget.read += 1;
-                found.push(user);
+                found.push(user.as_ref());
             }
             return found;
         }
@@ -730,13 +741,13 @@ impl ProjectState {
             if let Some((id, user)) = self.users.get_key_value(local_id.as_str()) {
                 budget.read += 1;
                 if seen.insert(id.as_str()) {
-                    found.push(user);
+                    found.push(user.as_ref());
                 }
             }
         }
         let uids = self
             .users
-            .range::<str, _>((Bound::Included(text), Bound::Unbounded))
+            .range::<_, str>((Bound::Included(text), Bound::Unbounded))
             .take_while(|(id, _)| id.starts_with(text));
         for (id, user) in uids {
             if found.len() >= limit {
@@ -744,7 +755,7 @@ impl ProjectState {
             }
             budget.read += 1;
             if seen.insert(id.as_str()) {
-                found.push(user);
+                found.push(user.as_ref());
             }
         }
         for (id, user) in &self.users {
@@ -766,7 +777,7 @@ impl ProjectState {
             };
             if matches("displayName") || matches("email") {
                 seen.insert(id.as_str());
-                found.push(user);
+                found.push(user.as_ref());
             }
         }
         found
@@ -819,8 +830,8 @@ impl ProjectState {
     ) -> impl DoubleEndedIterator<Item = &'a UserRecord> {
         let lower = start_token.map_or(Bound::Unbounded, Bound::Excluded);
         self.users
-            .range::<str, _>((lower, Bound::Unbounded))
-            .map(|(_, user)| user)
+            .range::<_, str>((lower, Bound::Unbounded))
+            .map(|(_, user)| user.as_ref())
     }
 }
 
@@ -892,6 +903,11 @@ pub fn validate_mfa_enrollments(enrollments: &[JsonValue]) -> Result<(), ApiErro
         ids.insert(id);
     }
     Ok(())
+}
+
+/// An owned copy of a shared record.
+fn owned(user: Option<&Arc<UserRecord>>) -> Option<UserRecord> {
+    user.map(|user| UserRecord::clone(user))
 }
 
 /// `providerUserInfo` entries of a record.
