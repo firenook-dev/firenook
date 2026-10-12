@@ -207,6 +207,8 @@ test('facets, words, regular expressions and exclusions narrow the log, in the U
 }) => {
   await timeOut(engine)
   await callFunction(engine, 'burst', { n: 2000 })
+  const hiding = unique('hide')
+  await callFunction(engine, 'hello', { uid: hiding })
   await openLogs(page, engine)
 
   // "Only" on Error: the filter is the level, the rows are errors.
@@ -257,10 +259,12 @@ test('facets, words, regular expressions and exclusions narrow the log, in the U
   await expect(logRows(page).first()).toBeVisible()
   await expect(logRow(page, 'burst line')).toHaveCount(0)
 
-  // "Hide lines like this" from a row's menu adds the line's start, negated.
-  const hello = logRow(page, 'http function initialized').first()
-  const hidden = await part(hello, 'message').innerText()
-  await hello.click({ button: 'right' })
+  // "Hide lines like this" from a row's menu adds the line's start, negated:
+  // a line this journey printed last (every call's start and end lines are
+  // in the log too, so the engine's first lines are far up the list).
+  const printed = logRow(page, `loading cart for ${hiding}`)
+  const hidden = await part(printed, 'message').innerText()
+  await printed.click({ button: 'right' })
   await page.getByTestId('log-row-menu').getByText('Hide lines like this').click()
   const q = queryOf(page) ?? ''
   expect(q.startsWith('-"burst line" -"')).toBe(true)

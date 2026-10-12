@@ -1313,7 +1313,13 @@ test('acting as a person: what they may do, why a refusal, and nothing they may 
       request.url().includes('/storage/objects?') &&
       (request.headers().authorization ?? '').startsWith('Bearer ey'),
   )
-  await page.getByTestId('identity-picker-user').filter({ hasText: ada.email }).click()
+  // The engine lists every user the seeds made (Auth's seed makes dozens):
+  // Ada is found by searching, as a person with many users would.
+  await page.getByTestId('identity-picker-search').fill(ada.email)
+  await page
+    .getByTestId('identity-picker-user')
+    .filter({ hasText: new RegExp(`^${ada.email.replaceAll('.', '\\.')}`) })
+    .click()
   await expect.poll(() => searchOf(page).get('as')).toBe(`${ada.uid}:${ada.email}`)
   await minted
   // What she may do with each file, from a dry run: read it, not delete it

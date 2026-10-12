@@ -72,16 +72,14 @@ test('a card per running section: its address, its figures, its health', async (
   await expect(logs).toContainText('Lines kept')
   await expect(logs).toContainText('Errors since start')
 
-  // A section whose stream has not given it a summary shows no figures (yet),
-  // but a line of what it holds; a card with figures has no such line.
-  const plain = all.find(
-    (section) => section.state === 'ready' && section.summary === null && section.id !== 'logs',
-  )
-  expect(plain, 'a running section without a summary').toBeDefined()
-  await expect(page.getByTestId(`overview-card-${plain?.id}`)).toBeVisible()
-  await expect(page.getByTestId(`overview-card-${plain?.id}-figures`)).toHaveCount(0)
-  await expect(page.getByTestId(`overview-card-${plain?.id}-holds`)).toHaveText(/\w.+\.$/)
-  await expect(page.getByTestId('overview-card-firestore-holds')).toHaveCount(0)
+  // Every running section counts what it holds: its card has figures, and no
+  // "holds" line stands in for them (a section without a summary still
+  // draws that line; the Overview's unit tests cover it).
+  for (const section of all.filter((entry) => entry.state === 'ready')) {
+    expect(section.summary, `${section.id} gives a summary`).not.toBeNull()
+    await expect(page.getByTestId(`overview-card-${section.id}-figures`)).toBeVisible()
+    await expect(page.getByTestId(`overview-card-${section.id}-holds`)).toHaveCount(0)
+  }
 })
 
 test('a figure follows the writes, and flashes once however many there are', async ({

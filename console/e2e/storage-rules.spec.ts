@@ -351,7 +351,12 @@ test('the playground tries an upload against the draft, and a saved test guards 
   await page.getByRole('tab', { name: 'create' }).click()
   await page.getByTestId('playground-path').fill(`users/${ada.uid}/big.mov`)
   await page.getByTestId('playground-who').click()
-  await page.getByTestId('playground-who-user').filter({ hasText: ada.email }).click()
+  // Among every user the seeds made, found by searching.
+  await page.getByTestId('playground-who-search').fill(ada.email)
+  await page
+    .getByTestId('playground-who-user')
+    .filter({ hasText: new RegExp(`^${ada.email.replaceAll('.', '\\.')}`) })
+    .click()
   await page.getByTestId('playground-size').fill('7')
   await page.getByTestId('playground-type').getByRole('combobox').fill('video/quicktime')
   await page.getByTestId('playground-run').click()
