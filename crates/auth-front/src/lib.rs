@@ -24,7 +24,9 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use firenook_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
+use firenook_functions_bridge::{
+    DispatchQueue, DispatchRequest, DroppedService, TriggerRegistry, cause,
+};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 pub mod blocking;
@@ -360,6 +362,26 @@ impl Runtime {
         ctx: &Ctx,
         body: impl FnOnce(&mut Scope<'_>) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
+        self.update(|data| {
+            let mut scope = Scope::new(data, &ctx.project_id, ctx.tenant_id.as_deref());
+            body(&mut scope)
+        })
+        .map_err(|error| ApiError::unknown(error.0, "persist"))?
+    }
+
+    /// Reads the state under its lock: no project or tenant is created and
+    /// nothing is written. For reads beside the emulator's own operations
+    /// (the console's identity search).
+    pub fn read<T>(&self, body: impl FnOnce(&AuthData) -> T) -> T {
+        body(&lock(&self.inner.data))
+    }
+
+    /// Changes the state under its lock, writes it when it changed and
+    /// dispatches the lifecycle events it queued, as an operation's scope
+    /// does, without resolving (or creating) a project or tenant first. For
+    /// writes beside the emulator's own operations (the console minting a
+    /// token for an existing account).
+    pub fn update<T>(&self, body: impl FnOnce(&mut AuthData) -> T) -> Result<T, AuthError> {
         // The state is serialized under the lock only when the request
         // changed it, and the file is written after the lock is released, so
         // a lookup never rewrites the state and a write never stalls readers
@@ -367,28 +389,22 @@ impl Runtime {
         let (result, events, encoded) = {
             let mut data = lock(&self.inner.data);
             let before = data.generation();
-            let mut scope = Scope::new(&mut data, &ctx.project_id, ctx.tenant_id.as_deref());
-            let result = body(&mut scope);
+            let result = body(&mut data);
             let events = data.take_events();
             let encoded = if data.generation() == before {
                 None
             } else {
-                match self.encode_state(&data) {
-                    Ok(encoded) => encoded,
-                    Err(error) => return Err(ApiError::unknown(error.0, "persist")),
-                }
+                self.encode_state(&data)?
             };
             (result, events, encoded)
         };
-        if let Some(encoded) = encoded
-            && let Err(error) = self.write_state(&encoded)
-        {
-            return Err(ApiError::unknown(error.0, "persist"));
+        if let Some(encoded) = encoded {
+            self.write_state(&encoded)?;
         }
         for (project_id, kind, user) in events {
             self.dispatch_lifecycle(&project_id, kind, &user);
         }
-        result
+        Ok(result)
     }
 
     /// `fetchBlockingFunction` for `event`, resolved from the project
@@ -471,6 +487,7 @@ impl Runtime {
 
     fn dispatch_lifecycle(&self, project_id: &str, kind: Lifecycle, user: &UserRecord) {
         if !self.inner.background.background_enabled() {
+            self.inner.background.note_dropped(DroppedService::Auth);
             return;
         }
         let event_type = match kind {
@@ -486,9 +503,24 @@ impl Runtime {
             "timestamp": now_iso(),
             "data": user_info_payload(user),
         });
+        // What caused it, for the Functions runtime's record of each
+        // invocation the multicast starts.
+        let mut headers = BTreeMap::from([
+            ("content-type".to_owned(), "application/json".to_owned()),
+            (cause::EVENT_ID.to_owned(), cause::encode(&event_id)),
+        ]);
+        for (header, field) in [
+            (cause::UID, "localId"),
+            (cause::EMAIL, "email"),
+            (cause::TENANT, "tenantId"),
+        ] {
+            if let Some(value) = str_field(user, field).filter(|value| !value.is_empty()) {
+                headers.insert(header.to_owned(), cause::encode(value));
+            }
+        }
         let _ = self.inner.queue.enqueue(DispatchRequest {
             path: format!("/functions/projects/{project_id}/trigger_multicast"),
-            headers: BTreeMap::from([("content-type".to_owned(), "application/json".to_owned())]),
+            headers,
             body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
             event_id,
         });

@@ -6,14 +6,20 @@
 
 #![forbid(unsafe_code)]
 
+pub mod console_input;
+pub mod entity;
 mod logging;
 mod release;
+pub mod replay;
 mod requests;
+pub use console_input::{Audience, ConsoleSink, LogInput, LogLevel, kinds};
+pub use entity::EntityRef;
 pub use logging::LoggingRuntime;
+pub use replay::{Cursor, Entry, Follow, ReplayRing, RingBudget, RingLimits, RingSize};
 #[cfg(test)]
 mod logging_tests;
 pub use release::{ENGINE_REVISION_VARIABLE, EngineRelease, RELEASE_VERSION_VARIABLE};
-pub use requests::requests_router;
+pub use requests::{requests_router, requests_router_with_log};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter, Write as _};
@@ -667,14 +673,14 @@ mod tests {
             logging.record("info", Some("functions"), format!("record-{index}-火🔥"));
         }
         assert_eq!(logging.len(), LOG_REPLAY_CAPACITY);
-        let history = lock(&logging.state.history);
+        let history = logging.state.history.snapshot();
         let decode = |record: &str| serde_json::from_str::<LogRecord>(record).unwrap();
         assert_eq!(
-            decode(history.front().expect("first")).message,
+            decode(&history.first().expect("first").json).message,
             "record-10-火🔥"
         );
         assert_eq!(
-            decode(history.back().expect("last")).message,
+            decode(&history.last().expect("last").json).message,
             format!("record-{}-火🔥", LOG_REPLAY_CAPACITY + 9)
         );
     }

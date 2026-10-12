@@ -15,6 +15,9 @@ use futures_util::{Sink, SinkExt as _, StreamExt as _};
 use serde_json::json;
 use tokio::sync::watch;
 
+use crate::LoggingRuntime;
+use crate::console_input::{Audience, LogInput, LogLevel, kinds};
+
 #[derive(Clone)]
 struct RequestsState {
     history: Option<RequestHistory>,
@@ -26,8 +29,27 @@ struct RequestsState {
 /// feed. Must be called inside a Tokio runtime. The owner must signal shutdown
 /// (or drop the sender) so idle housekeeping and active connections terminate.
 pub fn requests_router(history: Option<RequestHistory>, shutdown: watch::Receiver<bool>) -> Router {
+    router(history, shutdown, None)
+}
+
+/// [`requests_router`] whose loss reports also reach the console's log, as
+/// `diagnostics.omitted` lines (the official Logging feed never carried
+/// them, so they stay out of it).
+pub fn requests_router_with_log(
+    history: Option<RequestHistory>,
+    shutdown: watch::Receiver<bool>,
+    logging: &LoggingRuntime,
+) -> Router {
+    router(history, shutdown, Some(logging.clone()))
+}
+
+fn router(
+    history: Option<RequestHistory>,
+    shutdown: watch::Receiver<bool>,
+    logging: Option<LoggingRuntime>,
+) -> Router {
     if let Some(history) = history.clone() {
-        tokio::spawn(maintain(history, shutdown.clone()));
+        tokio::spawn(maintain(history, shutdown.clone(), logging));
     }
     Router::new()
         .route("/requests", get(upgrade))
@@ -81,7 +103,11 @@ async fn upgrade(State(state): State<RequestsState>, websocket: WebSocketUpgrade
 /// still making diagnostic loss explicit.
 const REPORT_INTERVAL: Duration = Duration::from_secs(60);
 
-async fn maintain(history: RequestHistory, mut shutdown: watch::Receiver<bool>) {
+async fn maintain(
+    history: RequestHistory,
+    mut shutdown: watch::Receiver<bool>,
+    logging: Option<LoggingRuntime>,
+) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_omitted = 0;
@@ -99,15 +125,44 @@ async fn maintain(history: RequestHistory, mut shutdown: watch::Receiver<bool>) 
                 if let Some(stats) = history.maintain()
                     && (stats.omitted_events != last_omitted || stats.disconnected_subscribers != last_disconnected)
                     && last_report.is_none_or(|reported| reported.elapsed() >= REPORT_INTERVAL) {
-                        eprintln!("firenook Requests diagnostics: {} omitted events ({} busy, {} oversized, {} invalid; {} since the last report), {} slow clients disconnected; retained history may be incomplete",
+                        let since = stats.omitted_events.saturating_sub(last_omitted);
+                        let message = format!("Requests diagnostics: {} omitted events ({} busy, {} oversized, {} invalid; {since} since the last report), {} slow clients disconnected; retained history may be incomplete",
                             stats.omitted_events, stats.omitted_busy, stats.omitted_oversized, stats.omitted_invalid,
-                            stats.omitted_events.saturating_sub(last_omitted), stats.disconnected_subscribers);
+                            stats.disconnected_subscribers);
+                        eprintln!("firenook {message}");
+                        if let Some(logging) = &logging {
+                            logging.emit(omission_line(&stats, since, message));
+                        }
                         last_omitted = stats.omitted_events;
                         last_disconnected = stats.disconnected_subscribers;
                         last_report = Some(tokio::time::Instant::now());
                 }
             }
         }
+    }
+}
+
+/// The console's line for one loss report: its counts as the payload.
+fn omission_line(
+    stats: &firenook_rules_runtime::request_history::HistoryStatistics,
+    since: usize,
+    message: String,
+) -> LogInput {
+    LogInput {
+        level: LogLevel::Warn,
+        service: "firestore".to_owned(),
+        kind: Some(kinds::DIAGNOSTICS_OMITTED),
+        message,
+        payload: Some(json!({
+            "omittedEvents": stats.omitted_events,
+            "busy": stats.omitted_busy,
+            "oversized": stats.omitted_oversized,
+            "invalid": stats.omitted_invalid,
+            "sinceLastReport": since,
+            "slowClientsDisconnected": stats.disconnected_subscribers,
+        })),
+        audience: Audience::Console,
+        ..LogInput::default()
     }
 }
 

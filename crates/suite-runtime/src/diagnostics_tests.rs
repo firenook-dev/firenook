@@ -35,6 +35,7 @@ async fn suite_listener_assembly_shares_real_evaluations_and_closes_idle_debug_c
             &mut ListenerSet(listeners),
             applications,
             &logging,
+            &firenook_console_front::ForeignProjects::default(),
             &shutdown,
             &failed,
         )
@@ -143,6 +144,7 @@ pub(super) fn test_config() -> SuiteConfig {
     let root = std::env::temp_dir();
     SuiteConfig {
         host: "127.0.0.1".into(),
+        allowed_hosts: Vec::new(),
         project_id: "demo-diagnostics".into(),
         services: ServiceSelection::ALL,
         ui_enabled: true,
@@ -178,5 +180,6 @@ pub(super) fn test_config() -> SuiteConfig {
             tasks: 11,
         },
         minimum_functions: 0,
+        launch: None,
     }
 }

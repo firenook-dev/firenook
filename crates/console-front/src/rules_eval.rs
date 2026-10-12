@@ -27,8 +27,6 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use firenook_core_store::{DatabaseName, DocumentKey, Store, Timestamp as StoreTimestamp};
@@ -45,6 +43,8 @@ use serde_json::{Map, Value as JsonValue, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use ts_rs::TS;
+
+use crate::api_error::ApiError;
 
 /// Requests one dry run may carry.
 const MAX_REQUESTS: usize = 200;
@@ -449,29 +449,25 @@ impl RulesEvaluator {
             .with_state(self)
     }
 
-    fn database(&self, database_id: Option<&str>) -> Result<DatabaseName, EvalError> {
+    fn database(&self, database_id: Option<&str>) -> Result<DatabaseName, ApiError> {
         DatabaseName::new(self.project.as_ref(), database_id.unwrap_or("(default)"))
-            .map_err(|error| EvalError::Invalid(error.to_string()))
+            .map_err(|error| ApiError::invalid(error.to_string()))
     }
 
-    fn rules(
-        &self,
-        database: &DatabaseName,
-        draft: Option<&str>,
-    ) -> Result<DryRunRules, EvalError> {
+    fn rules(&self, database: &DatabaseName, draft: Option<&str>) -> Result<DryRunRules, ApiError> {
         if draft.is_some_and(|source| source.len() > MAX_SOURCE_BYTES) {
-            return Err(EvalError::Invalid(format!(
+            return Err(ApiError::invalid(format!(
                 "a ruleset is at most {MAX_SOURCE_BYTES} bytes"
             )));
         }
         self.rules
             .dry_run_rules(database, draft)
-            .map_err(|error| EvalError::Diagnostics(crate::rules::diagnostics(&error)))
+            .map_err(|error| draft_not_compiled(&crate::rules::diagnostics(&error)))
     }
 
-    fn evaluate(&self, body: &RulesEvaluateBody) -> Result<RulesEvaluation, EvalError> {
+    fn evaluate(&self, body: &RulesEvaluateBody) -> Result<RulesEvaluation, ApiError> {
         if body.requests.len() > MAX_REQUESTS {
-            return Err(EvalError::Invalid(format!(
+            return Err(ApiError::invalid(format!(
                 "a dry run carries at most {MAX_REQUESTS} requests"
             )));
         }
@@ -483,7 +479,7 @@ impl RulesEvaluator {
             .enumerate()
             .map(|(index, request)| {
                 self.decode(&database, request)
-                    .map_err(|message| EvalError::Invalid(format!("requests[{index}]: {message}")))
+                    .map_err(|message| ApiError::invalid(format!("requests[{index}]: {message}")))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let snapshot = self.store.snapshot();
@@ -512,9 +508,9 @@ impl RulesEvaluator {
         Ok(RulesEvaluation { results })
     }
 
-    fn decision(&self, request_id: &str) -> Result<DecisionDetail, EvalError> {
+    fn decision(&self, request_id: &str) -> Result<DecisionDetail, ApiError> {
         let Some(decision) = self.rules.decision(request_id) else {
-            return Err(EvalError::NotFound(if self.rules.retains_decisions() {
+            return Err(ApiError::not_found(if self.rules.retains_decisions() {
                 format!(
                     "decision {request_id} is not retained: decisions are kept for ten minutes, up to the 256 most recent"
                 )
@@ -537,7 +533,7 @@ impl RulesEvaluator {
         })
     }
 
-    fn impact(&self, body: &RulesImpactBody) -> Result<RulesImpact, EvalError> {
+    fn impact(&self, body: &RulesImpactBody) -> Result<RulesImpact, ApiError> {
         let database = self.database(body.database.as_deref())?;
         let draft = self.rules(&database, Some(&body.source))?;
         let draft = draft
@@ -1086,48 +1082,20 @@ fn now() -> StoreTimestamp {
     .expect("the system clock is a valid timestamp")
 }
 
-/// Why a call was refused.
-#[derive(Debug)]
-enum EvalError {
-    Invalid(String),
-    /// The draft did not compile.
-    Diagnostics(Vec<crate::RulesDiagnostic>),
-    NotFound(String),
-}
-
-impl IntoResponse for EvalError {
-    fn into_response(self) -> Response {
-        match self {
-            Self::Invalid(message) => (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": { "message": message } })),
-            )
-                .into_response(),
-            Self::Diagnostics(diagnostics) => (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": { "message": "the draft rules did not compile" },
-                    "diagnostics": diagnostics,
-                })),
-            )
-                .into_response(),
-            Self::NotFound(message) => (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": { "message": message } })),
-            )
-                .into_response(),
-        }
-    }
+/// A draft that did not compile: the compiler's diagnostics ride beside the
+/// error.
+fn draft_not_compiled(diagnostics: &[crate::RulesDiagnostic]) -> ApiError {
+    ApiError::invalid("the draft rules did not compile")
+        .with_extra("diagnostics", json!(diagnostics))
 }
 
 /// Evaluation is CPU-bound and reads whole documents; keep it off the
 /// request threads.
 async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, EvalError> + Send + 'static,
-) -> Result<Json<T>, EvalError> {
-    tokio::task::spawn_blocking(work)
+    work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<Json<T>, ApiError> {
+    crate::blocking::blocking("the evaluation task", work)
         .await
-        .map_err(|_| EvalError::Invalid("the evaluation task did not finish".to_owned()))?
         .map(Json)
 }
 
@@ -1135,7 +1103,7 @@ async fn blocking<T: Send + 'static>(
 async fn evaluate(
     State(evaluator): State<RulesEvaluator>,
     Json(body): Json<RulesEvaluateBody>,
-) -> Result<Json<RulesEvaluation>, EvalError> {
+) -> Result<Json<RulesEvaluation>, ApiError> {
     blocking(move || evaluator.evaluate(&body)).await
 }
 
@@ -1143,7 +1111,7 @@ async fn evaluate(
 async fn decision(
     State(evaluator): State<RulesEvaluator>,
     Path(request_id): Path<String>,
-) -> Result<Json<DecisionDetail>, EvalError> {
+) -> Result<Json<DecisionDetail>, ApiError> {
     blocking(move || evaluator.decision(&request_id)).await
 }
 
@@ -1151,7 +1119,7 @@ async fn decision(
 async fn impact(
     State(evaluator): State<RulesEvaluator>,
     Json(body): Json<RulesImpactBody>,
-) -> Result<Json<RulesImpact>, EvalError> {
+) -> Result<Json<RulesImpact>, ApiError> {
     blocking(move || evaluator.impact(&body)).await
 }
 

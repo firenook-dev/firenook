@@ -3,6 +3,7 @@
 //! proofs, and the agent/tenant configuration split.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Bound;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
@@ -668,6 +669,83 @@ impl ProjectState {
         self.users.len()
     }
 
+    /// Up to `limit` accounts matching `text`, for an identity picker: an
+    /// email prefix (lowercased) and a uid prefix as ranges over the maps
+    /// this state keeps anyway, then, only while fewer than `limit` matched,
+    /// a display-name or email substring scanned within `budget` (which one
+    /// search shares across the project and its tenants). Empty `text`: the
+    /// first `limit` accounts by uid. Each account appears once, best match
+    /// first.
+    #[must_use]
+    pub fn search_identities(
+        &self,
+        text: &str,
+        limit: usize,
+        budget: &mut IdentityBudget,
+    ) -> Vec<&UserRecord> {
+        let mut found: Vec<&UserRecord> = Vec::new();
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        if text.is_empty() {
+            for user in self.users.values().take(limit) {
+                budget.read += 1;
+                found.push(user);
+            }
+            return found;
+        }
+        let lower = text.to_lowercase();
+        let emails = self
+            .local_id_for_email
+            .range::<str, _>((Bound::Included(lower.as_str()), Bound::Unbounded))
+            .take_while(|(email, _)| email.starts_with(lower.as_str()));
+        for (_, local_id) in emails {
+            if found.len() >= limit {
+                return found;
+            }
+            if let Some((id, user)) = self.users.get_key_value(local_id.as_str()) {
+                budget.read += 1;
+                if seen.insert(id.as_str()) {
+                    found.push(user);
+                }
+            }
+        }
+        let uids = self
+            .users
+            .range::<str, _>((Bound::Included(text), Bound::Unbounded))
+            .take_while(|(id, _)| id.starts_with(text));
+        for (id, user) in uids {
+            if found.len() >= limit {
+                return found;
+            }
+            budget.read += 1;
+            if seen.insert(id.as_str()) {
+                found.push(user);
+            }
+        }
+        for (id, user) in &self.users {
+            if found.len() >= limit {
+                break;
+            }
+            if budget.remaining == 0 {
+                budget.exhausted = true;
+                break;
+            }
+            budget.remaining -= 1;
+            budget.examined += 1;
+            budget.read += 1;
+            if seen.contains(id.as_str()) {
+                continue;
+            }
+            let matches = |field: &str| {
+                str_field(user, field).is_some_and(|value| value.to_lowercase().contains(&lower))
+            };
+            if matches("displayName") || matches("email") {
+                seen.insert(id.as_str());
+                found.push(user);
+            }
+        }
+        found
+    }
+
     /// `queryUsers`: every account after `start_token`, sorted by localId.
     #[must_use]
     pub fn query_users(&self, order: QueryOrder, start_token: Option<&str>) -> Vec<UserRecord> {
@@ -685,6 +763,47 @@ impl ProjectState {
             users.reverse();
         }
         users
+    }
+}
+
+/// How far one identity search may scan for substrings, shared by the
+/// project and every tenant it searches.
+#[derive(Debug)]
+pub struct IdentityBudget {
+    remaining: usize,
+    examined: u64,
+    read: u64,
+    exhausted: bool,
+}
+
+impl IdentityBudget {
+    /// A budget of `accounts` scanned for substrings.
+    #[must_use]
+    pub const fn new(accounts: usize) -> Self {
+        Self {
+            remaining: accounts,
+            examined: 0,
+            read: 0,
+            exhausted: false,
+        }
+    }
+
+    /// Accounts the substring scan examined.
+    #[must_use]
+    pub const fn examined(&self) -> u64 {
+        self.examined
+    }
+
+    /// Accounts read in all, by the prefix ranges and the scan.
+    #[must_use]
+    pub const fn read(&self) -> u64 {
+        self.read
+    }
+
+    /// Whether the scan stopped because the budget ran out.
+    #[must_use]
+    pub const fn exhausted(&self) -> bool {
+        self.exhausted
     }
 }
 
@@ -1289,5 +1408,107 @@ impl<'a> Scope<'a> {
     #[must_use]
     pub fn forward_credential(&self, kind: &str) -> bool {
         self.agent.forward_credential(kind)
+    }
+}
+
+#[cfg(test)]
+mod identity_search_tests {
+    use super::*;
+
+    fn user(state: &mut ProjectState, uid: &str, email: Option<&str>, name: Option<&str>) {
+        let mut props = UserRecord::new();
+        if let Some(email) = email {
+            props.insert("email".to_owned(), json!(email));
+        }
+        if let Some(name) = name {
+            props.insert("displayName".to_owned(), json!(name));
+        }
+        state
+            .create_user_with_local_id(uid, &props)
+            .expect("created")
+            .expect("new");
+    }
+
+    fn uids(found: &[&UserRecord]) -> Vec<String> {
+        found
+            .iter()
+            .map(|user| str_field(user, "localId").unwrap_or_default().to_owned())
+            .collect()
+    }
+
+    /// 10,000 accounts and three that match `ada` by email.
+    fn crowd() -> ProjectState {
+        let mut state = ProjectState::default();
+        for index in 0..10_000 {
+            user(
+                &mut state,
+                &format!("u{index:05}"),
+                Some(&format!("person{index}@example.test")),
+                None,
+            );
+        }
+        user(&mut state, "a1", Some("ada@example.test"), Some("Ada"));
+        user(&mut state, "a2", Some("ada.l@example.test"), None);
+        user(&mut state, "a3", Some("adams@example.test"), None);
+        state
+    }
+
+    #[test]
+    fn an_email_prefix_is_a_range_that_reads_no_other_account() {
+        let state = crowd();
+        let mut budget = IdentityBudget::new(20_000);
+        let found = state.search_identities("ADA", 3, &mut budget);
+        // In email order: `ada.l@` sorts before `ada@`.
+        assert_eq!(uids(&found), ["a2", "a1", "a3"]);
+        assert_eq!(budget.read(), 3, "only the accounts in the range were read");
+        assert_eq!(budget.examined(), 0, "no scan was needed");
+    }
+
+    #[test]
+    fn a_uid_prefix_is_a_range_too() {
+        let state = crowd();
+        let mut budget = IdentityBudget::new(20_000);
+        let found = state.search_identities("u0999", 10, &mut budget);
+        assert_eq!(found.len(), 10);
+        assert_eq!(uids(&found)[0], "u09990");
+        assert_eq!(budget.read(), 10);
+    }
+
+    #[test]
+    fn a_substring_scans_only_while_more_are_wanted_and_stops_at_the_budget() {
+        let mut state = crowd();
+        user(
+            &mut state,
+            "zz",
+            Some("z@example.test"),
+            Some("Lovelace, Ada"),
+        );
+        let mut budget = IdentityBudget::new(20_000);
+        let found = state.search_identities("lovelace", 5, &mut budget);
+        assert_eq!(uids(&found), ["zz"]);
+        assert_eq!(budget.examined(), 10_004, "every account once");
+        assert!(!budget.exhausted());
+        let mut small = IdentityBudget::new(100);
+        let found = state.search_identities("lovelace", 5, &mut small);
+        assert_eq!(found.len(), 0);
+        assert!(small.exhausted());
+        assert_eq!(small.examined(), 100);
+        // A budget spent is spent for the next scope too.
+        let found = state.search_identities("lovelace", 5, &mut small);
+        assert_eq!(found.len(), 0);
+        assert_eq!(small.examined(), 100);
+        // Matches by prefix come first, then substrings, each once.
+        let mut budget = IdentityBudget::new(20_000);
+        let found = state.search_identities("ada", 5, &mut budget);
+        assert_eq!(uids(&found), ["a2", "a1", "a3", "zz"]);
+    }
+
+    #[test]
+    fn no_text_lists_the_first_accounts_by_uid() {
+        let state = crowd();
+        let mut budget = IdentityBudget::new(20_000);
+        let found = state.search_identities("", 3, &mut budget);
+        assert_eq!(uids(&found), ["a1", "a2", "a3"]);
+        assert_eq!(budget.read(), 3);
     }
 }

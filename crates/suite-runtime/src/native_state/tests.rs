@@ -23,6 +23,7 @@ impl Case {
         let config = SuiteConfig {
             durability: firenook_core_store::DiskDurability::default(),
             host: "127.0.0.1".into(),
+            allowed_hosts: Vec::new(),
             project_id: "demo-native-resume".into(),
             services: crate::ServiceSelection::ALL,
             ui_enabled: true,
@@ -60,6 +61,7 @@ impl Case {
                 tasks: 11,
             },
             minimum_functions: 1,
+            launch: None,
         };
         Self { root, config }
     }
