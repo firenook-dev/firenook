@@ -34,7 +34,7 @@ import {
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { SECTIONS, type SectionLink, sectionById } from '@/lib/services'
+import { SECTIONS, type SectionLink, sectionById, shownPages } from '@/lib/services'
 import { describeKey } from '@/lib/shortcuts'
 import { useConsoleUi } from '@/lib/store'
 import { toast } from '@/lib/toasts'
@@ -215,7 +215,7 @@ export function CommandPalette() {
         run: go({ to: section.to }),
       })
       // A section's other pages, under its name: `Firestore › Rules`.
-      for (const page of section.pages?.slice(1) ?? [])
+      for (const page of shownPages(section)?.slice(1) ?? [])
         items.push({
           id: page.to,
           title: page.label,

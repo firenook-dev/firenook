@@ -139,6 +139,15 @@ export function itemBadges(section: ConsoleSection): readonly string[] {
   return [...(section.badges ?? []), `${section.id}.jobs`]
 }
 
+/**
+ * The pages the navigation and ⌘K show under a section: none until it is
+ * built, so a section whose registry already lists its pages is still one
+ * entry leading to its placeholder, and no page is offered before it works.
+ */
+export function shownPages(section: ConsoleSection): readonly SectionPage[] | undefined {
+  return section.built ? section.pages : undefined
+}
+
 /** The section a console path belongs to (`/firestore/rules` → Firestore). */
 export function sectionAt(pathname: string): ConsoleSection | undefined {
   return SECTIONS.find(
