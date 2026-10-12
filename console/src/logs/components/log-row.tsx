@@ -180,7 +180,15 @@ function LineRow({
       trail={
         <>
           {trail && (
-            <span className="truncate font-mono text-[11px] text-kumo-subtle">{trail}</span>
+            // Bounded, so a long path never takes the message's room; the
+            // inspector shows it whole.
+            <span
+              className="max-w-[24ch] truncate font-mono text-[11px] text-kumo-subtle"
+              title={trail}
+              data-testid="log-row-request"
+            >
+              {trail}
+            </span>
           )}
           {entry.truncated && (
             <Tooltip
