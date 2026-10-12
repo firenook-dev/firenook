@@ -21,6 +21,8 @@ import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as StorageRouteImport } from './routes/storage'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
+import { Route as PubsubSchedulesRouteImport } from './routes/pubsub_.schedules'
+import { Route as PubsubSchemasRouteImport } from './routes/pubsub_.schemas'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -82,6 +84,16 @@ const FirestoreRulesRoute = FirestoreRulesRouteImport.update({
   path: '/firestore/rules',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PubsubSchedulesRoute = PubsubSchedulesRouteImport.update({
+  id: '/pubsub_/schedules',
+  path: '/pubsub/schedules',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PubsubSchemasRoute = PubsubSchemasRouteImport.update({
+  id: '/pubsub_/schemas',
+  path: '/pubsub/schemas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -96,6 +108,8 @@ export interface FileRoutesByFullPath {
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/firestore/rules': typeof FirestoreRulesRoute
+  '/pubsub/schedules': typeof PubsubSchedulesRoute
+  '/pubsub/schemas': typeof PubsubSchemasRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -110,6 +124,8 @@ export interface FileRoutesByTo {
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/firestore/rules': typeof FirestoreRulesRoute
+  '/pubsub/schedules': typeof PubsubSchedulesRoute
+  '/pubsub/schemas': typeof PubsubSchemasRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -125,6 +141,8 @@ export interface FileRoutesById {
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/firestore_/rules': typeof FirestoreRulesRoute
+  '/pubsub_/schedules': typeof PubsubSchedulesRoute
+  '/pubsub_/schemas': typeof PubsubSchemasRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,6 +159,8 @@ export interface FileRouteTypes {
     | '/storage'
     | '/tasks'
     | '/firestore/rules'
+    | '/pubsub/schedules'
+    | '/pubsub/schemas'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -155,6 +175,8 @@ export interface FileRouteTypes {
     | '/storage'
     | '/tasks'
     | '/firestore/rules'
+    | '/pubsub/schedules'
+    | '/pubsub/schemas'
   id:
     | '__root__'
     | '/'
@@ -169,6 +191,8 @@ export interface FileRouteTypes {
     | '/storage'
     | '/tasks'
     | '/firestore_/rules'
+    | '/pubsub_/schedules'
+    | '/pubsub_/schemas'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -184,6 +208,8 @@ export interface RootRouteChildren {
   StorageRoute: typeof StorageRoute
   TasksRoute: typeof TasksRoute
   FirestoreRulesRoute: typeof FirestoreRulesRoute
+  PubsubSchedulesRoute: typeof PubsubSchedulesRoute
+  PubsubSchemasRoute: typeof PubsubSchemasRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -272,6 +298,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FirestoreRulesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pubsub_/schedules': {
+      id: '/pubsub_/schedules'
+      path: '/pubsub/schedules'
+      fullPath: '/pubsub/schedules'
+      preLoaderRoute: typeof PubsubSchedulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pubsub_/schemas': {
+      id: '/pubsub_/schemas'
+      path: '/pubsub/schemas'
+      fullPath: '/pubsub/schemas'
+      preLoaderRoute: typeof PubsubSchemasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -288,6 +328,8 @@ const rootRouteChildren: RootRouteChildren = {
   StorageRoute: StorageRoute,
   TasksRoute: TasksRoute,
   FirestoreRulesRoute: FirestoreRulesRoute,
+  PubsubSchedulesRoute: PubsubSchedulesRoute,
+  PubsubSchemasRoute: PubsubSchemasRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
