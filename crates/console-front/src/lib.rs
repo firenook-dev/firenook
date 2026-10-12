@@ -1052,7 +1052,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_firestore_summary_delegates_to_observe_which_counts_nothing_yet() {
+    async fn the_firestore_summary_delegates_to_observe() {
         let store = firenook_core_store::Store::default();
         let status = status_of(ConsoleServices {
             firestore: Some(router_tests::firestore_console(&store)),
@@ -1061,7 +1061,8 @@ mod tests {
         .await;
         let firestore = section(&status, "firestore");
         assert_eq!(firestore["state"], "ready");
-        assert_eq!(firestore["summary"], serde_json::Value::Null);
+        assert_eq!(firestore["summary"]["figures"][0]["label"], "Documents");
+        assert_eq!(firestore["summary"]["figures"][0]["value"], 0);
     }
 
     #[tokio::test]
