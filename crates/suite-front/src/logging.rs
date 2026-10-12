@@ -38,6 +38,8 @@ pub(super) const MAXIMUM_SUBSCRIBERS: usize = 4;
 const SEND_DEADLINE: Duration = Duration::from_secs(30);
 /// What the official feed carries in place of a record it cannot keep.
 const OMISSION: &str = "Oversized log record omitted; diagnostic payload was not retained";
+/// The level of that omission, as the suite's lines spell it.
+const OMISSION_LEVEL: &str = "WARN";
 
 /// Bounded Logging WebSocket producer and router.
 #[derive(Clone)]
@@ -192,10 +194,12 @@ impl LoggingRuntime {
         }
         let encoded: Arc<str> = encoded.into();
         if let Some(file) = lock(&self.state.file).as_mut() {
+            // The file keeps its own upper-case `[LEVEL]` format, whatever
+            // case the feed writes.
             let (file_level, file_message) = if valid_labels {
                 (level, message)
             } else {
-                (record.level.as_str(), record.message.as_str())
+                (OMISSION_LEVEL, record.message.as_str())
             };
             let line = format!(
                 "[{file_level}] [{}] [{}] {file_message}\n",
@@ -272,7 +276,10 @@ fn record(
     }
     let now = OffsetDateTime::now_utc();
     LogRecord {
-        level: level.into(),
+        // The official Logging feed writes levels in lower case (`info`,
+        // `warn`), and the Emulator UI styles each line by that class; the
+        // suite's producers spell them `INFO`, `WARN`.
+        level: level.to_ascii_lowercase(),
         data: JsonValue::Object(data),
         message: message.to_owned(),
         timestamp: now
@@ -282,7 +289,12 @@ fn record(
 }
 
 fn omitted() -> LogRecord {
-    record("WARN", Some("hub"), OMISSION, &RecordExtras::default())
+    record(
+        OMISSION_LEVEL,
+        Some("hub"),
+        OMISSION,
+        &RecordExtras::default(),
+    )
 }
 
 #[derive(Clone)]
