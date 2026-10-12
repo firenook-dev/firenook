@@ -1,7 +1,15 @@
 import { expect, test } from './fixtures'
 import { readClipboard } from './support/clipboard'
 import { statusOf } from './support/shell'
-import { ADA, callFunction, lineOf, logRow, runWithAdminSdk, writeOnPort } from './support/observe'
+import {
+  ADA,
+  callFunction,
+  cursorOf,
+  lineOf,
+  logRow,
+  runWithAdminSdk,
+  writeOnPort,
+} from './support/observe'
 
 // The Overview against the worker's engine (project `observe`: every
 // service, seeded by every stream's seeder): what runs and where, the
@@ -107,15 +115,18 @@ test('recent problems: a failure lands on the page, and opens in Logs', async ({
   await page.goto(`${engine.origin}/console`)
   const problems = page.getByTestId('overview-problems')
   await expect(problems).toBeVisible()
-  // A call that times out: the engine's own error line about it.
+  // A call that times out: the engine's own error line about it, found by
+  // the line it opens (the worker's engine holds earlier ones like it).
+  const timedOut = '"Your function timed out after ~1s."'
+  const earlier = await cursorOf(engine, timedOut)
   const call = await callFunction(engine, 'stalls')
   expect(call.status).toBe(500)
-  const line = await lineOf(engine, '"Your function timed out after ~1s."')
+  const line = await lineOf(engine, timedOut, earlier ? { after: earlier } : {})
   const row = page
     .getByTestId('overview-problem')
-    .filter({ hasText: 'Your function timed out after ~1s.' })
-    .first()
+    .filter({ has: page.locator(`a[href$="entry=${line.cursor}"]`) })
   await expect(row).toBeVisible()
+  await expect(row).toContainText('Your function timed out after ~1s.')
   await expect(row).toHaveAttribute('data-level', 'error')
   // Its source is the function, by its short name.
   await expect(row).toContainText('stalls')
@@ -134,11 +145,15 @@ test('recent problems: a failure lands on the page, and opens in Logs', async ({
 
   // A handler's own error, by its message.
   await page.goto(`${engine.origin}/console`)
+  const failing = 'level:error "cannot read"'
+  const before = await cursorOf(engine, failing)
   await callFunction(engine, 'fails')
+  const failure = await lineOf(engine, failing, before ? { after: before } : {})
   const thrown = page
     .getByTestId('overview-problem')
-    .filter({ hasText: "TypeError: cannot read 'id' of undefined" })
+    .filter({ has: page.locator(`a[href$="entry=${failure.cursor}"]`) })
   await expect(thrown).toBeVisible()
+  await expect(thrown).toContainText("TypeError: cannot read 'id' of undefined")
   await expect(thrown).toContainText('fails')
   // "Open logs" is every problem.
   await page.goto(`${engine.origin}/console`)
