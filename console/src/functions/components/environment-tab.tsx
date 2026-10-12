@@ -12,7 +12,7 @@
 // official CLI's prompt writes). Every change goes through the same dialog
 // and the same atomic write with restore as Extensions' reconfigure.
 
-import { Button, Input, SensitiveInput, Select, Text } from '@cloudflare/kumo'
+import { Button, Input, Select, Text } from '@cloudflare/kumo'
 import { PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { type KeyboardEvent, useState } from 'react'
@@ -24,6 +24,7 @@ import { InspectorSection } from '@/components/console/inspector'
 import { KeyValueList } from '@/components/console/key-value-list'
 import { MaskedValue } from '@/components/console/masked-value'
 import { StatusDot } from '@/components/kit'
+import { SecretInput } from '@/compute/secret-input'
 import { formatNumber } from '@/lib/format'
 import { matchesKey } from '@/lib/shortcuts'
 import { functionsSnapshotQuery, revealSecret } from '../api'
@@ -470,15 +471,14 @@ function EditBox({
     <div className="grid gap-1">
       <div className="flex min-w-0 items-center gap-1.5">
         {secret ? (
-          <SensitiveInput
-            size="sm"
-            className="min-w-0 flex-1 font-mono"
+          <SecretInput
+            className="flex-1"
             value={value}
-            onValueChange={onChange}
+            onChange={onChange}
             onKeyDown={(event) => editKeys(event, onStage, onCancel)}
-            aria-label={label}
+            label={label}
             autoFocus
-            data-testid="env-edit-value"
+            testId="env-edit-value"
           />
         ) : (
           <Input

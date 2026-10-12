@@ -6,12 +6,13 @@
 // A secret is never on screen until asked for (the engine reads it from
 // `.secret.local` when the eye is pressed), and is typed fresh to change it.
 
-import { Combobox, Input, Select, SensitiveInput, Tooltip, cn } from '@cloudflare/kumo'
+import { Combobox, Input, Select, Tooltip, cn } from '@cloudflare/kumo'
 import { CaretRightIcon, LockSimpleIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 import type { ExtensionParam } from '@/api/generated/compute/ExtensionParam'
 import { MaskedValue } from '@/components/console/masked-value'
 import { KIND_CHIP } from '@/compute/kind-badge'
+import { SecretInput } from '@/compute/secret-input'
 import { multiValues, optionLabel, sourceWord } from '../params'
 import { MarkdownView } from './markdown-view'
 
@@ -123,15 +124,13 @@ function EditValue({
   if (param.type === 'secret')
     return (
       <div className="min-w-0 flex-1">
-        <SensitiveInput
-          size="sm"
+        <SecretInput
           value={value}
-          onValueChange={onChange}
+          onChange={onChange}
+          label={name}
           placeholder={param.provided ? 'Leave empty to keep the current value' : 'Type the secret'}
-          variant={invalid ? 'error' : 'default'}
-          aria-label={name}
-          className="w-full font-mono placeholder:font-sans"
-          data-testid="param-input"
+          invalid={invalid}
+          testId="param-input"
         />
       </div>
     )
