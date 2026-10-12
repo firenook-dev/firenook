@@ -218,7 +218,12 @@ export function FeedList<T>({
       return
     }
     const held = anchor.current
-    if (!held) return
+    if (!held) {
+      // Paused without a scroll (the Pause button, `p`, a link that says
+      // paused): the row on screen now is the one to hold.
+      recordAnchor()
+      return
+    }
     const display = displayOf(store.indexOf(held.key))
     if (display === -1) return
     const start = virtualizer.measurementsCache[display]?.start ?? display * rowHeight
