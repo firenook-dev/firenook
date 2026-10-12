@@ -49,6 +49,7 @@ import {
 } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { useEffect, useRef } from 'react'
+import { isPreviewLanguage, loadPreviewLanguage } from './languages'
 import type { CodeEditorProps, CodeGutterNote, CodeInlineValue, CodeLineMark } from './props'
 import { rulesLanguage } from './rules'
 
@@ -79,6 +80,14 @@ const INK = HighlightStyle.define([
   { tag: tags.squareBracket, color: 'var(--color-firenook-code-punctuation)' },
   { tag: tags.brace, color: 'var(--color-firenook-code-punctuation)' },
   { tag: tags.invalid, color: 'var(--text-color-kumo-danger)' },
+  // Markup (Markdown, HTML, XML, previews of stored files): structure in the
+  // key's hue, the way JSON's keys and the rules' words take it; text keeps
+  // the text colour.
+  { tag: [tags.heading, tags.tagName], color: 'var(--color-firenook-code-key)', fontWeight: '500' },
+  { tag: tags.attributeName, color: 'var(--color-firenook-code-key)' },
+  { tag: [tags.url, tags.link], color: 'var(--color-firenook-code-literal)' },
+  { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.strong, fontWeight: '600' },
   // Rules. The words of the language take the key's hue, as JSON's keys
   // do — the structure — and the wildcards in a path the literal's, since
   // they are the values a path binds. Operators and punctuation recede.
@@ -478,6 +487,9 @@ function languageFor(
       // from the keyboard; claimed here, the key reaches the page alone.
       Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => true }])),
     ]
+  // A preview language arrives by itself once its grammar has loaded
+  // (`loadPreviewLanguage`); until then the text is plain.
+  if (isPreviewLanguage(language)) return []
   return [
     json(),
     linter(jsonParseLinter(), { delay: 150 }),
@@ -645,6 +657,14 @@ export default function CodeEditor({
     view.current?.dispatch({
       effects: LANGUAGE.reconfigure(languageFor(language, () => latest.current.rulesCompletion)),
     })
+    if (!isPreviewLanguage(language)) return undefined
+    let current = true
+    void loadPreviewLanguage(language).then((grammar) => {
+      if (current) view.current?.dispatch({ effects: LANGUAGE.reconfigure(grammar) })
+    })
+    return () => {
+      current = false
+    }
   }, [language])
 
   // The engine's marks are for a text that may since have moved on by a

@@ -48,8 +48,22 @@ export interface CodeGutterNote {
 export interface CodeEditorProps {
   value: string
   onChange: (next: string) => void
-  /** The language the text is written in. JSON unless told otherwise. */
-  language?: 'json' | 'rules' | undefined
+  /**
+   * The language the text is written in. JSON unless told otherwise; the
+   * preview languages (JavaScript and TypeScript, XML, YAML, Markdown, CSS,
+   * HTML, plain text) load their grammar the first time they are shown.
+   */
+  language?:
+    | 'json'
+    | 'rules'
+    | 'javascript'
+    | 'xml'
+    | 'yaml'
+    | 'markdown'
+    | 'css'
+    | 'html'
+    | 'text'
+    | undefined
   /**
    * For rules: what completion can offer beyond the language itself —
    * the fields documents of a collection carry, the custom claims users

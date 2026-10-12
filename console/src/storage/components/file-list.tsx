@@ -76,6 +76,11 @@ export function fileRows(
   })
 }
 
+/** A folder whose own name is empty (`a//`): its label is the slash alone. */
+export function emptySegment(label: string): boolean {
+  return label === '/' || label.endsWith('//')
+}
+
 /** May the identity read a row's bytes: always as Admin; once the check answers as a client. */
 export function rowRead(row: FileRow): boolean | undefined {
   if (!row.client) return true
@@ -121,7 +126,11 @@ function NameCell({ row }: { row: FileRow }) {
           tabIndex={-1}
           data-testid="folder-link"
         >
-          <MiddleName name={row.label || '(empty)'} />
+          {emptySegment(row.label) ? (
+            <span className="font-sans italic">(empty)/</span>
+          ) : (
+            <MiddleName name={row.label} />
+          )}
         </Link>
         {entry.empty && (
           <span className="shrink-0 font-sans text-[11px] text-kumo-subtle">empty</span>

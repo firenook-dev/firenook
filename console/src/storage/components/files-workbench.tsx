@@ -16,6 +16,7 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
+import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectDetail'
 import type { Total } from '@/api/generated/Total'
 import { EmptyState, NoMatch, QueryError } from '@/components/console/empty-state'
 import { FilterField } from '@/components/console/filter-field'
@@ -46,6 +47,8 @@ import { resetFileSelection, selectionFigures, useFileSelection } from '../selec
 import { FileGrid } from './file-grid'
 import { type FileRow, FileList, fileRows } from './file-list'
 import { FoldersPanel } from './folders-panel'
+import { FileInspector } from './inspector/file-inspector'
+import { QuickLook } from './quick-look'
 import { LayoutToggle } from './layout-toggle'
 import { StoragePathBar } from './path-bar'
 import { useRulesText } from './refusal-detail'
@@ -72,8 +75,10 @@ export interface FilesExtras {
   emptyActions?: ReactNode
   /** Under the toolbar: job banners. */
   banners?: ReactNode
-  /** Beside the list: the inspector. */
-  aside?: ReactNode
+  /** More tools for the inspector's foot (download, move, duplicate). */
+  inspectorTools?: (object: StorageObjectDetail) => ReactNode
+  /** The inspector's destructive control. */
+  inspectorDanger?: (object: StorageObjectDetail) => ReactNode
   /** Over the content column: the drop overlay, the upload tray. */
   overlay?: ReactNode
   /** Uploads in flight in this folder, by name (0–1), drawn in their rows. */
@@ -119,6 +124,14 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
     lineText: line,
     progress: extras.progress,
   })
+
+  // The files of the listing, in view order: the inspector's ↑ ↓ and Quick Look's ← →.
+  const fileNames = rows.flatMap((row) => (row.entry.type === 'file' ? [row.key] : []))
+  const openAt = files.object === undefined ? -1 : fileNames.indexOf(files.object)
+  const step = (by: number) => {
+    const next = openAt === -1 ? undefined : fileNames[openAt + by]
+    return next === undefined ? undefined : () => files.openObject(next, { replace: true })
+  }
 
   const [cursor, setCursor] = useState<StorageEntry | undefined>(undefined)
   const open = (entry: StorageEntry) => {
@@ -175,6 +188,15 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
       label: 'Flip between the list and the grid',
       run: () =>
         files.update({ layout: files.layout === 'list' ? 'grid' : undefined }, { replace: true }),
+    },
+    {
+      key: 'Shift+Space',
+      label: 'Quick Look on the file',
+      when: () => cursor?.type === 'file' || files.object !== undefined,
+      run: () => {
+        const name = cursor?.type === 'file' ? cursor.name : files.object
+        if (name !== undefined) files.update({ object: name, dialog: 'quick-look' })
+      },
     },
     {
       key: 'Alt+Mod+c',
@@ -362,8 +384,23 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
           />
           {extras.overlay}
         </div>
-        {extras.aside}
+        {files.object !== undefined && (
+          <FileInspector
+            key={`${files.bucket}|${files.search.as ?? ''}`}
+            name={files.object}
+            onPrev={step(-1)}
+            onNext={step(1)}
+            onQuickLook={() => files.update({ dialog: 'quick-look' })}
+            tools={extras.inspectorTools}
+            danger={extras.inspectorDanger}
+          />
+        )}
       </SectionBody>
+      <QuickLook
+        names={fileNames}
+        hasMore={listing.rows.hasMore}
+        loadMore={listing.rows.loadMore}
+      />
     </>
   )
 }
