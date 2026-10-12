@@ -1630,11 +1630,19 @@ impl fmt::Debug for Monitor {
 #[must_use]
 pub fn load_error(text: &str, project_dir: &std::path::Path, at: SystemTime) -> FunctionLoadError {
     let project = project_dir.display().to_string();
-    let cleaned = if project.is_empty() {
-        text.to_owned()
-    } else {
-        text.replace(&project, ".")
-    };
+    let mut cleaned = text.to_owned();
+    // Node names files by their real path: a project reached through a link
+    // (macOS's /var is /private/var) appears in the text under its real
+    // spelling, which holds the given one inside it, so it goes first.
+    if let Ok(real) = std::fs::canonicalize(project_dir) {
+        let real = real.display().to_string();
+        if !real.is_empty() && real != project {
+            cleaned = cleaned.replace(&real, ".");
+        }
+    }
+    if !project.is_empty() {
+        cleaned = cleaned.replace(&project, ".");
+    }
     let mut lines = cleaned.splitn(2, '\n');
     let message = lines.next().unwrap_or_default().trim_end().to_owned();
     let detail = lines

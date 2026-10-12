@@ -864,6 +864,25 @@ fn codebases_follow_loads_workers_and_stale_flags() {
 }
 
 #[test]
+fn a_load_error_names_files_from_the_project_whichever_way_it_was_reached() {
+    let real = tempfile::tempdir().expect("a directory");
+    let linked = tempfile::tempdir().expect("a directory");
+    let project = linked.path().join("project");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(real.path(), &project).expect("a link");
+    #[cfg(not(unix))]
+    let project = real.path().to_path_buf();
+    // Node writes the real path of the file that failed.
+    let canonical = std::fs::canonicalize(real.path()).expect("a real path");
+    let text = format!(
+        "Failed to load: SyntaxError\n  at {}/broken/index.js:7",
+        canonical.display()
+    );
+    let error = load_error(&text, &project, SystemTime::now());
+    assert_eq!(error.detail.as_deref(), Some("  at ./broken/index.js:7"));
+}
+
+#[test]
 fn clearing_keeps_running_calls_and_marks_the_kinds_let_go() {
     let monitor = Monitor::new(MonitorLimits::default());
     let done = http(&monitor, "us-central1-api");
