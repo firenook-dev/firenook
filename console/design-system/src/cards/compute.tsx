@@ -162,6 +162,11 @@ const INVOCATION: FunctionLogLine[] = [
   line(5, { message: 'receipt queued after the answer', offsetMs: 1_240, afterFinish: true }),
 ]
 
+const INFO_ONLY: FunctionLogLine[] = [
+  line(0, { message: 'order o_123 placed for cart c_19, 2 items, total 42.50', offsetMs: 0.4 }),
+  line(1, { message: 'receipt queued for ada@example.test', offsetMs: 6.8 }),
+]
+
 const LOAD_LOG: FunctionLogLine[] = [
   line(0, { message: 'Loaded environment variables from .env, .env.demo-x.', offsetMs: 0 }),
   line(1, { message: 'compute fixture loaded', offsetMs: 0 }),
@@ -208,6 +213,12 @@ function FunctionLogLinesCard() {
         note="Offsets from its start, every message whole; a structured entry's fields open under it ({}); lines printed after it returned sit under the divider, quieter; a running one ends in a breathing dot."
       >
         <Lines lines={INVOCATION} mode="invocation" open />
+      </Section>
+      <Section
+        title="Only info lines"
+        note="No level column while every line is info, so a one-line message keeps the row; the first debug, warn or error line brings the column back for every row."
+      >
+        <Lines lines={INFO_ONLY} mode="invocation" />
       </Section>
       <Section
         title="A codebase's load log"
@@ -263,7 +274,7 @@ defineCards([
     group: 'Patterns',
     name: 'Function log lines',
     subtitle:
-      "An invocation's own lines and a codebase's load log on the shared LogLine: levels, a structured entry, the after-it-returned divider",
+      "An invocation's own lines and a codebase's load log on the shared LogLine: levels, a structured entry, the after-it-returned divider, info only",
     width: 720,
     surface: 'canvas',
     render: () => <FunctionLogLinesCard />,
