@@ -20,6 +20,7 @@ import { MenuCheck, TypeBadge } from '@/components/kit'
 import { type InferredColumn, coverage, describeTypes } from '../columns'
 import { printQuery } from '../query'
 import { useColumns, useQueryLine } from '../query-line-store'
+import { formatNumber } from '../value'
 import { useWorkbench } from './workbench-context'
 
 export function HeaderMenu({ column }: { column: InferredColumn }) {
@@ -99,8 +100,7 @@ export function HeaderMenu({ column }: { column: InferredColumn }) {
             </DropdownMenu.Label>
             {share !== undefined && (
               <div className="px-2 pb-1 text-[12px] text-kumo-default" data-testid="column-present">
-                In {column.present.toLocaleString('en-US')} of the{' '}
-                {column.of.toLocaleString('en-US')} loaded documents
+                In {formatNumber(column.present)} of the {formatNumber(column.of)} loaded documents
               </div>
             )}
             {column.holds && (
@@ -161,7 +161,7 @@ export function FoldedHeader({ folded }: { folded: readonly InferredColumn[] }) 
             data-testid="column-folded"
           >
             <span className="truncate font-mono text-[12px] font-medium text-kumo-subtle">
-              +{folded.length.toLocaleString('en-US')} fields
+              +{formatNumber(folded.length)} fields
             </span>
             <CaretDownIcon
               size={12}
@@ -176,9 +176,8 @@ export function FoldedHeader({ folded }: { folded: readonly InferredColumn[] }) 
             Rare fields, folded
           </DropdownMenu.Label>
           <div className="max-w-72 px-2 pb-1.5 text-[12px] text-kumo-default">
-            {folded.length.toLocaleString('en-US')} fields that{' '}
-            {most === 1 ? 'only one' : `${most} or fewer`} of the {of.toLocaleString('en-US')}{' '}
-            loaded documents have. Each row lists the ones it has.
+            {formatNumber(folded.length)} fields that {most === 1 ? 'only one' : `${most} or fewer`}{' '}
+            of the {formatNumber(of)} loaded documents have. Each row lists the ones it has.
           </div>
           <div className="max-w-72 truncate px-2 pb-1.5 font-mono text-[12px] text-kumo-subtle">
             {names.join(', ')}

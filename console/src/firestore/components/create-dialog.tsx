@@ -15,6 +15,7 @@ import {
   decodeFields,
   encodeFields,
   encodeValue,
+  formatNumber,
   fromJson,
   isRestShape,
 } from '../value'
@@ -331,7 +332,7 @@ function ImportForm({ collection, onClose }: { collection: string; onClose: () =
     onSuccess: (count) => {
       void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
       toasts.add({
-        title: `${count.toLocaleString('en-US')} document${count === 1 ? '' : 's'} imported`,
+        title: `${formatNumber(count)} document${count === 1 ? '' : 's'} imported`,
         description: collection,
         variant: 'success',
       })
@@ -410,7 +411,7 @@ function ImportForm({ collection, onClose }: { collection: string; onClose: () =
               ) : (
                 <>
                   <span className="font-mono text-[0.95em] text-kumo-default tabular-nums">
-                    {preview.documents.length.toLocaleString('en-US')}
+                    {formatNumber(preview.documents.length)}
                   </span>{' '}
                   document{preview.documents.length === 1 ? '' : 's'} ·{' '}
                   {preview.documents.some((document) => document.id !== undefined)
@@ -434,7 +435,7 @@ function ImportForm({ collection, onClose }: { collection: string; onClose: () =
           <Text variant="secondary" size="sm" as="span">
             Writing{' '}
             <span className="font-mono tabular-nums">
-              {progress.done.toLocaleString('en-US')} / {progress.total.toLocaleString('en-US')}
+              {formatNumber(progress.done)} / {formatNumber(progress.total)}
             </span>
           </Text>
         )}
@@ -450,7 +451,7 @@ function ImportForm({ collection, onClose }: { collection: string; onClose: () =
           data-testid="import-submit"
         >
           Import
-          {preview && !preview.error ? ` ${preview.documents.length.toLocaleString('en-US')}` : ''}
+          {preview && !preview.error ? ` ${formatNumber(preview.documents.length)}` : ''}
         </Button>
       </div>
     </div>

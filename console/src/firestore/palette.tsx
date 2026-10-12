@@ -35,6 +35,7 @@ import { useQueryLine } from './query-line-store'
 import { collectionsQuery } from './queries'
 import { useRecents } from './recents'
 import { flattenSchema, patternOf, workbenchSchemaQuery } from './schema'
+import { formatNumber } from './value'
 
 export function useFirestorePalette() {
   const workbench = useWorkbench()
@@ -75,7 +76,7 @@ export function useFirestorePalette() {
       ...recents.map((recent) => recent.path),
     ])
     const plural = (count: number, word: string) =>
-      `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`
+      `${formatNumber(count)} ${word}${count === 1 ? '' : 's'}`
     const collections: PaletteItem[] = [
       ...(selected
         ? (under.data ?? []).map<PaletteItem>((id) => ({
@@ -213,9 +214,12 @@ export function useFirestorePalette() {
         { label: 'Collections', items: filter(collections) },
         { label: 'Firestore', items: filter(actions) },
       ].filter((group) => group.items.length > 0)
-      // Text shaped like a path, or matching nothing, can be opened as one.
+      // Text shaped like a path, or one word matching nothing here, can be
+      // opened as one. Words with spaces between them are a sentence — an
+      // action's name ("Download a snapshot") meant for another group — so
+      // they are not offered as a collection id ahead of it.
       const path = normalizePath(query)
-      const pathLike = query.includes('/') || groups.length === 0
+      const pathLike = query.includes('/') || (groups.length === 0 && !/\s/.test(query.trim()))
       if (path && pathLike && !known.has(path))
         groups.unshift({
           label: 'Go to',

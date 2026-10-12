@@ -197,3 +197,23 @@ export async function paint(locator: Locator): Promise<{ background: string; opa
 export async function band(locator: Locator): Promise<number> {
   return (await locator.boundingBox())!.height
 }
+
+/**
+ * Waits until the page's CSS transitions have finished — a hover's fill
+ * fading in or out — instead of guessing how long they take, so a colour
+ * measured next is the settled one even on a loaded machine.
+ */
+export const transitionsDone = (control: Locator) =>
+  control.evaluate((el) => {
+    // This file is typed for Node; the page's animations as far as they are used.
+    const running = (
+      el.ownerDocument as unknown as {
+        getAnimations(): { constructor: { name: string }; finished: Promise<unknown> }[]
+      }
+    ).getAnimations()
+    return Promise.all(
+      running
+        .filter((animation) => animation.constructor.name === 'CSSTransition')
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ).then(() => undefined)
+  })

@@ -83,7 +83,6 @@ export function SchemaPanel() {
             <InputGroup.Addon align="end">
               <InputGroup.Button
                 variant="ghost"
-                size="xs"
                 shape="square"
                 icon={<XIcon />}
                 aria-label="Clear the filter"

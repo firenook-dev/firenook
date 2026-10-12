@@ -13,6 +13,7 @@ import {
   paintOf,
   paintedAtItsOwnCentre,
   ringRoom,
+  transitionsDone,
 } from './support/look'
 
 // The Firestore workbench against a real engine (project `data`) seeded by
@@ -228,10 +229,11 @@ for (const scheme of ['light', 'dark'] as const)
     const measure = async (name: string, control: Locator, away?: Locator) => {
       if (away) await away.hover()
       else await page.mouse.move(700, 895)
-      await page.waitForTimeout(120)
+      // A hover's fill fades: measure once the page's transitions settle.
+      await transitionsDone(control)
       const rest = await paintOf(control)
       await control.hover()
-      await page.waitForTimeout(160)
+      await transitionsDone(control)
       steps[name] = toward * ((await paintOf(control)) - rest)
     }
     await page.goto(

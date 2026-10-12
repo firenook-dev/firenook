@@ -16,7 +16,7 @@
 // Every rule below is Google's, and the worked example from their page
 // is a unit test, so a misreading of it fails rather than ships.
 
-import { formatBytes } from '@/lib/format'
+import { formatBytes, formatNumber } from '@/lib/format'
 import { type FsValue, isPartial } from './value'
 
 // Moved to `lib/format.ts` with the console's other formats; the footer and
@@ -148,7 +148,7 @@ export function sizeReading(bytes: number, elided = false): SizeReading {
   const tone = share > 1 ? 'over' : share >= CROWDED ? 'crowded' : 'quiet'
   const percent = tone === 'over' ? Math.ceil(share * 100) : Math.floor(share * 100)
   const amount = tone === 'quiet' ? formatBytes(bytes) : `${formatBytes(bytes)} · ${percent}%`
-  const counted = `${bytes.toLocaleString('en-US')} of ${DOCUMENT_LIMIT.toLocaleString('en-US')} bytes a document may hold`
+  const counted = `${formatNumber(bytes)} of ${formatNumber(DOCUMENT_LIMIT)} bytes a document may hold`
   return {
     text: elided ? `≥ ${amount}` : amount,
     tone,

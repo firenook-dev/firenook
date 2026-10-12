@@ -780,7 +780,7 @@ function GridFooter({
     <div className="flex h-9 shrink-0 items-center gap-3 overflow-x-auto border-t border-kumo-line px-3 whitespace-nowrap">
       <span className="shrink-0">
         <Text variant="secondary" size="sm" as="span">
-          <span className="tabular-nums">{loaded.toLocaleString('en-US')}</span> loaded
+          <span className="tabular-nums">{formatNumber(loaded)}</span> loaded
           {/* Said, not offered: the next page is fetched while the last
               twenty rows are still ahead, so a Load more button only
               ever arrived after the rows it would have loaded. */}
@@ -1075,7 +1075,7 @@ function RootCount({ path }: { path: string }) {
   const count = useQuery(countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY))
   return (
     <span className="shrink-0 font-mono text-[11px] text-kumo-subtle tabular-nums">
-      {count.data ? count.data.count.toLocaleString('en-US') : ''}
+      {count.data ? formatNumber(count.data.count) : ''}
     </span>
   )
 }

@@ -43,6 +43,7 @@ import {
   type RestValue,
   compactIso,
   encodeValue,
+  formatNumber,
   relativeTime,
 } from '../value'
 import { CodeBlock } from '@/components/console/code-block'
@@ -315,7 +316,7 @@ function Subcollections({ parent, found }: { parent: string; found: Subcollectio
               <FolderIcon size={14} className="text-kumo-subtle" />
               <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{child.id}</span>
               <span className="font-mono text-[11px] text-kumo-subtle tabular-nums">
-                {child.documents.toLocaleString('en-US')}
+                {formatNumber(child.documents)}
               </span>
             </button>
           </li>
