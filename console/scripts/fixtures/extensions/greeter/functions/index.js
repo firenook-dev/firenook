@@ -1,23 +1,15 @@
 // The greeter extension's functions, written with the real SDK (1st gen, as
 // published extensions are). `greet` answers with the configured greeting
 // and announces it on the instance's Eventarc channel through the Admin
-// SDK, exactly as an extension publishes its events.
-//
-// The Admin SDK's Eventarc client asks for a Google access token before it
-// calls even the local emulator, and the emulator keeps the developer's own
-// credentials away from functions, so its synthetic credential cannot mint
-// one. This extension brings a token of its own; the Eventarc emulator does
-// not check it.
+// SDK, exactly as an extension publishes its events: the default app, no
+// credential of its own (the worker answers the access-token exchange the
+// Admin SDK makes before it calls the local Eventarc emulator).
 
 const functions = require('firebase-functions/v1')
 const { initializeApp } = require('firebase-admin/app')
 const { getEventarc } = require('firebase-admin/eventarc')
 
-initializeApp({
-  credential: {
-    getAccessToken: async () => ({ access_token: 'owner', expires_in: 3600 }),
-  },
-})
+initializeApp()
 
 /** The visitor's name from the query (`?name=Ada`) or a JSON body (`{"name":"Ada"}`). */
 function nameOf(request) {

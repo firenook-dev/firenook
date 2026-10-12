@@ -884,11 +884,13 @@ served until every section has landed.
 - [ ] Extension lifecycle tasks (onInstall/onUpdate/onConfigure): the
   recorded oracle drops the task-queue functions they run; running them
   needs a new recording and a deliberate divergence.
-- [ ] Eventarc publishing from function or extension code through the Admin
-  SDK: it asks Google's token endpoint for an access token, which the
-  synthetic credential every worker gets cannot answer, so such a publish
-  fails unless the code brings its own credential. Answer that exchange
-  locally.
+- [x] Eventarc publishing from function or extension code through the Admin
+  SDK, with no credential of its own: the Admin SDK asks Google's token
+  endpoint for an access token before it calls the local emulator, and the
+  worker now answers that exchange for the synthetic credential every
+  worker holds (a credential the developer configured still goes to
+  Google), so `getEventarc().channel().publish()` works offline as it does
+  in production.
 - [x] Pub/Sub. Topics with their subscriptions and the functions they
   trigger, in a tree that also flags topics written under another project
   id than the emulator's, and publishes the emulator refused because the

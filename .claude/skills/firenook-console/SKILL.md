@@ -2998,12 +2998,11 @@ functions). A worker-scoped `engineOptions` needs a file of its own.
 Restore any env file a journey edits and reload the codebase. Journey 11
 (blocking) skips until the Authentication stream's `auth.js` is in.
 
-**Known gaps.** The Admin SDK's Eventarc publish from function or
-extension code asks Google's token endpoint for an access token, which the
-synthetic credential every worker gets cannot answer; the greeter fixture
-passes its own credential. A handler error the SDK catches itself (a
-schedule answering 500 with an empty body) leaves `InvocationSummary.error`
-null.
+**Known gaps.** A handler error the SDK catches itself (a schedule
+answering 500 with an empty body) leaves `InvocationSummary.error` null.
+(The Admin SDK's Eventarc publish from function or extension code needs no
+credential of its own: the worker answers the synthetic credential's token
+exchange, so the greeter fixture calls a plain `initializeApp()`.)
 
 ## Pub/Sub and Cloud Tasks (built, `src/pubsub/`, `src/tasks/`, shared code in `src/messaging/`)
 

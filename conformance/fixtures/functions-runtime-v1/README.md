@@ -234,8 +234,9 @@ These are asserted by the replay, not skipped:
   gcloud application-default credentials: the Admin SDK's Eventarc `publish`
   fetches a Google access token from `~/.config/gcloud/` before calling the
   local emulator host (the official emulator behaves the same, and the
-  handler answers 500 without them). The replay skips the step on hosts
-  without that file and says so in its report.
+  handler answers 500 without them). Firenook's workers hold a synthetic
+  credential whose token exchange the worker answers itself, so the step
+  reproduces on every host and the replay compares it everywhere.
 
 ## Freezing
 

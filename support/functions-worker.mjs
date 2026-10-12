@@ -24,6 +24,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import util from "node:util";
 
@@ -83,6 +85,127 @@ function stripControlHeaders(request) {
     for (let index = raw.length - 2; index >= 0; index -= 2) {
       if (String(raw[index]).toLowerCase().startsWith(CONTROL_PREFIX)) raw.splice(index, 2);
     }
+  }
+}
+
+// --- The synthetic credential's token exchange --------------------------------
+// The runtime gives every worker a synthetic authorized-user credential
+// (client id, secret and refresh token all "demo"): the Admin SDK then never
+// falls back to the Compute Engine metadata server, and the developer's own
+// gcloud credentials never reach user code. Some Admin SDK clients still ask
+// Google's token endpoint for an access token before they call a local
+// emulator (Eventarc's publishEvents among them), and Google
+// refuses the synthetic refresh token, so such a call failed. That exchange
+// is answered here: requests to the token endpoint go to a loopback answerer
+// in this process, which answers the synthetic refresh grant with a
+// placeholder token (the emulators do not check it) and passes any other
+// request (a credential the developer configured) on to Google unchanged.
+const TOKEN_HOST = "oauth2.googleapis.com";
+const SYNTHETIC_GRANT = { client_id: "demo", client_secret: "demo", refresh_token: "demo" };
+
+/** Whether a token request's body is the synthetic credential's refresh grant. */
+function isSyntheticGrant(text, contentType) {
+  let fields;
+  try {
+    fields = String(contentType).includes("json") ? JSON.parse(text) : Object.fromEntries(new URLSearchParams(text));
+  } catch {
+    return false;
+  }
+  return (
+    fields !== null &&
+    typeof fields === "object" &&
+    fields.grant_type === "refresh_token" &&
+    Object.entries(SYNTHETIC_GRANT).every(([key, value]) => fields[key] === value)
+  );
+}
+
+/** The path of a token-endpoint request, from `https.request`'s arguments; undefined for any other request. */
+function tokenPath(args) {
+  const [first, second] = args;
+  const fromUrl = typeof first === "string" || first instanceof URL;
+  let url;
+  try {
+    url = fromUrl ? new URL(String(first)) : undefined;
+  } catch {
+    return undefined;
+  }
+  const options = (fromUrl ? second : first) ?? {};
+  if (typeof options !== "object") return undefined;
+  const host = options.hostname ?? (typeof options.host === "string" ? options.host.replace(/:\d+$/, "") : undefined) ?? url?.hostname;
+  if (host !== TOKEN_HOST) return undefined;
+  const requested = options.path ?? (url ? `${url.pathname}${url.search}` : "/");
+  return requested.startsWith("/token") ? requested : undefined;
+}
+
+async function answerSyntheticTokenExchange() {
+  const originalRequest = https.request;
+  const originalGet = https.get;
+  const answerer = http.createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = Buffer.concat(chunks);
+      if (request.method === "POST" && isSyntheticGrant(body.toString("utf8"), request.headers["content-type"] ?? "")) {
+        const answer = JSON.stringify({ access_token: "owner", expires_in: 3600, token_type: "Bearer" });
+        response.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(answer) });
+        response.end(answer);
+        return;
+      }
+      // The developer's own credential: to Google as it was sent.
+      const upstream = originalRequest.call(
+        https,
+        { hostname: TOKEN_HOST, port: 443, path: request.url, method: request.method, headers: { ...request.headers, host: TOKEN_HOST } },
+        (answer) => {
+          response.writeHead(answer.statusCode ?? 502, answer.headers);
+          answer.pipe(response);
+        },
+      );
+      upstream.on("error", (error) => {
+        if (!response.headersSent) response.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "unreachable", error_description: String(error && error.message ? error.message : error) }));
+      });
+      upstream.end(body);
+    });
+  });
+  await new Promise((resolve, reject) => {
+    answerer.once("error", reject);
+    answerer.listen(0, "127.0.0.1", resolve);
+  });
+  answerer.unref();
+  const port = answerer.address().port;
+  const toAnswerer = (args, requested) => {
+    const callback = args.find((arg) => typeof arg === "function");
+    const fromUrl = typeof args[0] === "string" || args[0] instanceof URL;
+    const options = (fromUrl ? (typeof args[1] === "object" ? args[1] : undefined) : args[0]) ?? {};
+    // TLS settings and an https agent mean nothing to the loopback hop.
+    const { agent: _agent, hostname: _hostname, host: _host, port: _port, protocol: _protocol, path: _path, ...rest } = options;
+    return http.request({ ...rest, protocol: "http:", host: "127.0.0.1", port, path: requested }, callback);
+  };
+  https.request = function request(...args) {
+    const requested = tokenPath(args);
+    return requested === undefined ? originalRequest.apply(this, args) : toAnswerer(args, requested);
+  };
+  https.get = function get(...args) {
+    const requested = tokenPath(args);
+    if (requested === undefined) return originalGet.apply(this, args);
+    const outgoing = toAnswerer(args, requested);
+    outgoing.end();
+    return outgoing;
+  };
+  const nativeFetch = globalThis.fetch;
+  if (typeof nativeFetch === "function") {
+    globalThis.fetch = function fetch(input, init) {
+      const href = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+      let url;
+      try {
+        url = new URL(href);
+      } catch {
+        return nativeFetch(input, init);
+      }
+      if (url.hostname !== TOKEN_HOST || !url.pathname.startsWith("/token")) return nativeFetch(input, init);
+      const local = `http://127.0.0.1:${port}${url.pathname}${url.search}`;
+      return nativeFetch(input instanceof Request ? new Request(local, input) : local, init);
+    };
   }
 }
 
@@ -179,6 +302,7 @@ function errorMessage(error) {
 
 async function main() {
   const express = resolveFromSdk("express");
+  await answerSyntheticTokenExchange();
   functionModule = await loadModule();
   const app = express();
   app.enable("trust proxy");
