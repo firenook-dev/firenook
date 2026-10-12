@@ -1269,3 +1269,91 @@ async fn lifecycle_events_name_their_user_and_paused_ones_are_counted() {
     );
     assert_eq!(registry.dropped().counts, [(DroppedService::Auth, 1)]);
 }
+
+// ------------------------------------------------------------------
+// The console's hooks card: which blocking functions would run, and a tick
+// whenever that may have changed.
+
+struct Registered(BlockingFunctions);
+
+impl BlockingResolver for Registered {
+    fn resolve(&self) -> Pin<Box<dyn Future<Output = BlockingFunctions> + Send + '_>> {
+        let functions = self.0.clone();
+        Box::pin(async move { functions })
+    }
+}
+
+#[tokio::test]
+async fn blocking_targets_resolve_config_first_and_changes_tick() {
+    let runtime = test_runtime();
+    let handle = runtime.runtime();
+    let mut changes = runtime.blocking_changes();
+    assert_eq!(
+        handle.blocking_targets("demo-auth").await,
+        BlockingTargets::default()
+    );
+    assert!(
+        handle.read(|data| data.projects.is_empty()),
+        "resolving creates nothing"
+    );
+
+    // The Functions emulator registers both; installing it ticks.
+    runtime.set_blocking_functions(Arc::new(Registered(BlockingFunctions {
+        before_create: Some("http://127.0.0.1:5001/demo-auth/us-central1/beforeCreate".to_owned()),
+        before_sign_in: Some("http://127.0.0.1:5001/demo-auth/us-central1/beforeSignIn".to_owned()),
+        forward_id_token: true,
+        ..BlockingFunctions::default()
+    })));
+    assert!(changes.has_changed().expect("open"));
+    changes.borrow_and_update();
+    let targets = handle.blocking_targets("demo-auth").await;
+    assert_eq!(
+        targets.before_create.as_ref().map(|hook| hook.source),
+        Some(HookSource::Functions)
+    );
+    assert!(targets.forward_id_token);
+
+    // The project's configuration wins for its event, and ticks.
+    let (status, body) = call(
+        &runtime,
+        Method::PATCH,
+        "/identitytoolkit.googleapis.com/v2/projects/demo-auth/config?updateMask=blockingFunctions",
+        &json!({ "blockingFunctions": { "triggers": { "beforeCreate": { "functionUri": "http://localhost:9999/custom" } } } }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(changes.has_changed().expect("open"));
+    changes.borrow_and_update();
+    let targets = handle.blocking_targets("demo-auth").await;
+    assert_eq!(
+        targets.before_create,
+        Some(HookTarget {
+            uri: "http://localhost:9999/custom".to_owned(),
+            source: HookSource::Config
+        })
+    );
+    assert_eq!(
+        targets.before_sign_in.as_ref().map(|hook| hook.source),
+        Some(HookSource::Functions)
+    );
+    assert!(
+        !targets.forward_id_token,
+        "the configuration's forwarding applies"
+    );
+
+    // A sign-up is not a change of the blocking functions.
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
+        &json!({}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "anonymous sign-ups call no blocking function: {body}"
+    );
+    assert!(!changes.has_changed().expect("open"));
+    runtime.blocking_changed();
+    assert!(changes.has_changed().expect("open"));
+}

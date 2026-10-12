@@ -188,6 +188,10 @@ struct Inner {
     next_call: AtomicU64,
     /// Message ids, drawn when a code is created (or found in saved state).
     next_message: AtomicU64,
+    /// Moves when the blocking functions may have changed: a resolver was
+    /// installed, the Functions emulator reloaded, the project's
+    /// configuration changed.
+    blocking_changes: tokio::sync::watch::Sender<u64>,
 }
 
 /// Cloneable handle to the shared state, used by every operation.
@@ -227,6 +231,7 @@ impl AuthRuntime {
                 observer: RwLock::new(None),
                 next_call: AtomicU64::new(1),
                 next_message: AtomicU64::new(1),
+                blocking_changes: tokio::sync::watch::Sender::new(0),
                 client: reqwest::Client::builder().build().map_err(|error| {
                     AuthError(format!(
                         "failed to build the blocking-function client: {error}"
@@ -247,6 +252,20 @@ impl AuthRuntime {
         if let Ok(mut slot) = self.runtime.inner.blocking.write() {
             *slot = Some(resolver);
         }
+        self.blocking_changed();
+    }
+
+    /// Ticks when the blocking functions may have changed (see
+    /// [`Runtime::blocking_changes`]).
+    #[must_use]
+    pub fn blocking_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.runtime.blocking_changes()
+    }
+
+    /// The blocking functions may have changed: the Functions emulator
+    /// reloaded its inventory.
+    pub fn blocking_changed(&self) {
+        self.runtime.blocking_changed();
     }
 
     /// Receives log lines the official emulator prints (action links, codes)
@@ -493,6 +512,21 @@ impl Runtime {
         self.inner.next_message.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Ticks when the blocking functions may have changed: a resolver was
+    /// installed, the Functions emulator reloaded, or a project's
+    /// configuration changed. The value counts the changes.
+    #[must_use]
+    pub fn blocking_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.inner.blocking_changes.subscribe()
+    }
+
+    /// Moves [`Runtime::blocking_changes`].
+    pub fn blocking_changed(&self) {
+        self.inner
+            .blocking_changes
+            .send_modify(|changes| *changes = changes.wrapping_add(1));
+    }
+
     /// A fresh call id.
     #[must_use]
     pub fn next_call_id(&self) -> u64 {
@@ -600,6 +634,18 @@ impl Runtime {
         };
         if changed {
             self.mark_dirty();
+        }
+        // A project's configuration holds its blocking functions.
+        if notices.iter().any(|(_, _, notice)| {
+            matches!(
+                notice,
+                Notice::Config {
+                    tenant: None,
+                    what: observe::ConfigChange::Project
+                }
+            )
+        }) {
+            self.blocking_changed();
         }
         if trace.recording() {
             for (_, tenant, notice) in notices {

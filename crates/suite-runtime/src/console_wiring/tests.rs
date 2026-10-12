@@ -663,3 +663,33 @@ async fn action_links_requested_through_the_console_point_at_the_auth_port() {
     let expected = format!("{}/emulator/action?", config.origin(config.ports.auth));
     assert!(link.starts_with(&expected), "{link}");
 }
+
+/// After a Functions reload the console's `auth.hooks` topic is told the
+/// blocking functions may have changed.
+#[test]
+fn the_inventory_hook_tells_auth_its_blocking_functions_may_have_changed() {
+    let config = test_config();
+    let logging = LoggingRuntime::new();
+    let triggers = TriggerRegistry::default();
+    let foreign = firenook_console_front::ForeignProjects::default();
+    let registry = TriggerRegistry::default();
+    let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
+    let auth = Arc::new(
+        firenook_auth_front::AuthRuntime::new(&config.project_id, observer.queue(), registry, None)
+            .expect("auth"),
+    );
+    let mut changes = auth.blocking_changes();
+    let before = *changes.borrow_and_update();
+    auth::inventory_refreshed(
+        &HookContext {
+            auth: Some(&auth),
+            ..HookContext::new(&config, &logging, &foreign, &triggers)
+        },
+        &FunctionsInventory {
+            generation: 2,
+            backends: Vec::new(),
+        },
+    );
+    assert!(changes.has_changed().expect("open"));
+    assert_eq!(*changes.borrow(), before + 1);
+}
