@@ -33,7 +33,7 @@
   ],
   "overrides": [
     {
-      "files": ["src/lib/live/**", "src/firestore/live.ts", "src/firestore/rules-page/api.ts"],
+      "files": ["src/lib/live/**"],
       "rules": {
         "no-restricted-globals": "off"
       }

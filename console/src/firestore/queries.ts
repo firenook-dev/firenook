@@ -8,23 +8,24 @@ import {
   countQuery,
   documentRoot,
   getDocument,
+  keySlot,
   listCollectionIds,
   listDocumentIds,
   listMissingDocuments,
   runQuery,
 } from './rest'
+import { identityKey } from '@/lib/identity'
 import { type FsDocument, type RestValue, encodeValue } from './value'
-import { listAuthUsers } from './view-as'
 
 export const FS = 'fs' as const
 
 export function scopeKey(scope: FirestoreScope): string {
-  return `${scope.project}/${scope.database}/${scope.authorization ?? 'anonymous'}`
+  return `${scope.project}/${scope.database}/${identityKey(scope.identity)}`
 }
 
 export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'collections', parent, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'collections', parent, identityKey(scope.identity)],
     queryFn: () => listCollectionIds(scope, parent),
     staleTime: 30_000,
     retry: false,
@@ -33,7 +34,7 @@ export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
 /** Document ids in one collection from a prefix, for completing a reference. */
 export const documentIdsQuery = (scope: FirestoreScope, collection: string, from: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'ids', collection, from, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'ids', collection, from, identityKey(scope.identity)],
     queryFn: () => listDocumentIds(scope, collection, from, 20),
     staleTime: 30_000,
     retry: false,
@@ -49,12 +50,12 @@ export const countQueryOptions = (
   return queryOptions({
     queryKey: [
       FS,
-      scope.database,
+      keySlot(scope),
       'count',
       collectionPath,
       group,
       printQuery({ ...query, limit: 1 }),
-      scope.authorization ?? '',
+      identityKey(scope.identity),
     ],
     queryFn: () => {
       // A count has no limit; the structured query drops it.
@@ -73,7 +74,7 @@ export const countQueryOptions = (
 
 export const documentQuery = (scope: FirestoreScope, path: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'doc', path, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'doc', path, identityKey(scope.identity)],
     queryFn: () => getDocument(scope, path),
     staleTime: 30_000,
     retry: false,
@@ -81,17 +82,10 @@ export const documentQuery = (scope: FirestoreScope, path: string) =>
 
 export const missingDocumentsQuery = (scope: FirestoreScope, collectionPath: string) =>
   queryOptions({
-    queryKey: [FS, scope.database, 'missing', collectionPath, scope.authorization ?? ''],
+    queryKey: [FS, keySlot(scope), 'missing', collectionPath, identityKey(scope.identity)],
     queryFn: () => listMissingDocuments(scope, collectionPath, 300),
     staleTime: 30_000,
     retry: false,
-  })
-
-export const authUsersQuery = (project: string) =>
-  queryOptions({
-    queryKey: ['auth', project, 'users'],
-    queryFn: () => listAuthUsers(project),
-    staleTime: 60_000,
   })
 
 /** `users/u1/orders` → parent `users/u1`, collection `orders`; group queries run from the root. */
@@ -123,6 +117,32 @@ export function cursorAfter(
   })
 }
 
+/** Pages a grid keeps loaded at most: scrolled deeper, the oldest page goes and comes back if wanted. */
+export const MAX_PAGES = 20
+
+/**
+ * Where a page starts: the query's start (the first page, or the page that
+ * follows an empty one at the top), after a document, or the page before a
+ * document — the query run reversed from it, as the SDKs do for
+ * `limitToLast`.
+ */
+export type PageParam =
+  | undefined
+  | { from: 'start' }
+  | { after: RestValue[] }
+  | { before: RestValue[] }
+
+/** The query with every order direction flipped: what runs to read the page before a document. */
+export function reversedQuery(query: WorkbenchQuery): WorkbenchQuery {
+  return {
+    ...query,
+    orderBy: effectiveOrder(query).map((order) => ({
+      field: order.field,
+      direction: order.direction === 'desc' ? 'asc' : 'desc',
+    })),
+  }
+}
+
 export const pageQueryOptions = (
   scope: FirestoreScope,
   collectionPath: string,
@@ -131,27 +151,54 @@ export const pageQueryOptions = (
 ) => {
   const { parent, collectionId } = splitCollection(collectionPath, group)
   const root = documentRoot(scope)
+  // The cursor compares these, so they must not arrive cut short.
+  const keep = effectiveOrder(query).map((order) => order.field)
   return infiniteQueryOptions({
     queryKey: [
       FS,
-      scope.database,
+      keySlot(scope),
       'page',
       collectionPath,
       group,
       printQuery(query),
-      scope.authorization ?? '',
+      identityKey(scope.identity),
     ],
-    queryFn: ({ pageParam }) =>
-      runQuery(scope, parent, toStructuredQuery(collectionId, group, query, root, pageParam), {
-        // The cursor compares these, so they must not arrive cut short.
-        keep: effectiveOrder(query).map((order) => order.field),
-      }),
-    initialPageParam: undefined as RestValue[] | undefined,
-    getNextPageParam: (last) => {
-      if (last.documents.length < query.limit) return undefined
-      const tail = last.documents.at(-1)
-      return tail ? cursorAfter(tail, query, root) : undefined
+    queryFn: async ({ pageParam }: { pageParam: PageParam }) => {
+      if (pageParam && 'before' in pageParam) {
+        const page = await runQuery(
+          scope,
+          parent,
+          toStructuredQuery(collectionId, group, reversedQuery(query), root, pageParam.before),
+          { keep },
+        )
+        return { ...page, documents: page.documents.toReversed() }
+      }
+      const cursor = pageParam && 'after' in pageParam ? pageParam.after : undefined
+      return runQuery(scope, parent, toStructuredQuery(collectionId, group, query, root, cursor), {
+        keep,
+      })
     },
+    initialPageParam: undefined as PageParam,
+    getNextPageParam: (last, _pages, lastParam): PageParam => {
+      const tail = last.documents.at(-1)
+      if (lastParam && 'before' in lastParam) {
+        // A page read backwards always has its window's next page after it;
+        // an empty one means the window now starts at the query's start.
+        return tail ? { after: cursorAfter(tail, query, root) } : { from: 'start' }
+      }
+      if (last.documents.length < query.limit || !tail) return undefined
+      return { after: cursorAfter(tail, query, root) }
+    },
+    getPreviousPageParam: (first, _pages, firstParam): PageParam => {
+      // The window starts where the query does.
+      if (firstParam === undefined || 'from' in firstParam) return undefined
+      if ('before' in firstParam && first.documents.length < query.limit) return undefined
+      const head = first.documents[0]
+      return head ? { before: cursorAfter(head, query, root) } : undefined
+    },
+    // A grid scrolled 50 pages deep refetches at most 20 on a change, and
+    // holds at most 20 in memory; the oldest is read again if scrolled back.
+    maxPages: MAX_PAGES,
     staleTime: 30_000,
     // Rules decide deterministically; a retry only repeats the denial.
     retry: false,

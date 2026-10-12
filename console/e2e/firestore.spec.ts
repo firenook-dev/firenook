@@ -1,9 +1,25 @@
-import { type Locator, expect, test } from '@playwright/test'
+import type { Locator } from '@playwright/test'
+import { expect, test } from './fixtures'
+import { readClipboard, ticked } from './support/clipboard'
+import { readDownload } from './support/downloads'
+import { dropLive, restoreLive } from './support/live'
+import {
+  band,
+  cutRings,
+  faded,
+  fieldLook,
+  onTop,
+  paint,
+  paintOf,
+  paintedAtItsOwnCentre,
+  ringRoom,
+} from './support/look'
 
-// The Firestore workbench against a real engine seeded by scripts/seed-firestore.mjs.
+// The Firestore workbench against a real engine (project `data`) seeded by
+// scripts/seed/firestore.mjs.
 const origin = () => {
   const value = process.env.FIRENOOK_CONSOLE_ORIGIN
-  if (!value) throw new Error('the engine global setup did not run')
+  if (!value) throw new Error('the worker engine did not start')
   return value
 }
 const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'
@@ -27,6 +43,27 @@ test('a collection is a typed grid counted once, in the query line', async ({ pa
   // where it would carry neither the query nor the identity in force.
   await expect(page.getByTestId('path-bar')).not.toContainText('240')
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
+})
+
+test('an empty collection says how an app writes to it, with this engine’s address', async ({
+  page,
+}) => {
+  const status = (await (await page.request.get(`${origin()}/console/api/v1/status`)).json()) as {
+    services: { name: string; host: string; port: number }[]
+  }
+  const firestore = status.services.find((service) => service.name === 'firestore')!
+  await page.goto(`${origin()}/console/firestore?path=nothing_yet`)
+  const empty = page.getByTestId('empty-collection')
+  await expect(empty).toContainText('No documents in nothing_yet')
+  // The app's way in comes first: the snippet for this engine's host, port
+  // and project, copyable, in the SDK the developer uses.
+  const snippet = page.getByTestId('empty-collection-connect')
+  await expect(snippet).toContainText(
+    `connectFirestoreEmulator(getFirestore(app), '${firestore.host}', ${firestore.port})`,
+  )
+  await expect(snippet).toContainText(project())
+  // Then the console's own: a document added here makes the collection.
+  await expect(page.getByTestId('empty-add-document')).toBeVisible()
 })
 
 test('the query line runs the SDK chain and pages with cursors', async ({ page }) => {
@@ -282,6 +319,66 @@ test('viewing as a user applies the rules the app would hit', async ({ page }) =
   await expect(page.getByTestId('decisions')).toContainText(/line \d+/)
 })
 
+test('view as picks an Auth user, read with the token the engine minted, or a custom identity', async ({
+  page,
+}) => {
+  const minted: unknown[] = []
+  page.on('request', (request) => {
+    if (request.url().endsWith('/console/api/v1/auth/tokens'))
+      minted.push(JSON.parse(request.postData() ?? 'null'))
+  })
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+
+  // The users come from the engine's bounded identity search, never every account.
+  await page.getByTestId('view-as').click()
+  const ada = page.getByRole('menuitem', { name: /ada@example\.test/ })
+  await expect(ada).toContainText('u_k65eq')
+  await ada.click()
+  await expect(page).toHaveURL(/as=u_k65eq(%3A|:)ada(%40|@)example\.test/)
+  await expect(page.getByTestId('view-as')).toHaveAttribute('data-kind', 'user')
+  // Listing every user is not hers to do; her own document is.
+  await expect(page.getByText('Denied by security rules')).toBeVisible()
+  // One mint for every read the page made as her, the grid, the count and the tree.
+  expect(minted).toEqual([{ uid: 'u_k65eq' }])
+  await page.goto(
+    `${origin()}/console/firestore?path=users&as=u_k65eq%3Aada%40example.test&doc=users%2Fu_k65eq`,
+  )
+  await expect(page.getByTestId('inspector').getByLabel('displayName value')).toHaveValue(
+    'Ada Lovelace',
+  )
+
+  // A custom identity: any uid and claims, minted in the browser, no Auth record needed.
+  await page.getByTestId('view-as').click()
+  await page.getByTestId('view-as-custom').click()
+  const form = page.getByTestId('view-as-custom-dialog')
+  await expect(form).toBeVisible()
+  // It starts from the identity in force.
+  await expect(form.getByTestId('view-as-custom-dialog-uid')).toHaveValue('u_k65eq')
+  await form.getByTestId('view-as-custom-dialog-uid').fill('u_3wc4h')
+  await form.getByTestId('view-as-custom-dialog-email').fill('')
+  await form.getByTestId('view-as-custom-dialog-use').click()
+  await expect(form).toBeHidden()
+  await expect(page).toHaveURL(/as=custom\./)
+  await expect(page.getByTestId('view-as')).toHaveAttribute('data-kind', 'custom')
+  await expect(page.getByTestId('view-as')).toContainText('u_3wc4h')
+  // Grace's own document reads as her uid; Ada's no longer does.
+  const asGrace = new URL(page.url()).searchParams.get('as') ?? ''
+  await page.goto(
+    `${origin()}/console/firestore?path=users&as=${encodeURIComponent(asGrace)}&doc=users%2Fu_3wc4h`,
+  )
+  await expect(page.getByTestId('inspector').getByLabel('displayName value')).toBeVisible()
+  await page.goto(
+    `${origin()}/console/firestore?path=users&as=${encodeURIComponent(asGrace)}&doc=users%2Fu_k65eq`,
+  )
+  await expect(page.getByTestId('inspector')).toContainText(/denied|permission|insufficient/i)
+  await expect(page.getByTestId('inspector').getByLabel('displayName value')).toHaveCount(0)
+  // Only the Auth user's token came from the engine (once per page load:
+  // the page's reads share it); the custom identity's never does.
+  expect(minted.length).toBeGreaterThan(0)
+  for (const asked of minted) expect(asked).toEqual({ uid: 'u_k65eq' })
+})
+
 test('the inspector saves typed edits and the change flashes back through the live channel', async ({
   page,
 }) => {
@@ -317,17 +414,51 @@ test('the inspector saves typed edits and the change flashes back through the li
   await expect(page.getByTestId('live-state')).toHaveCount(0)
 })
 
-test('a dropped live channel says the grid may be out of date', async ({ page }) => {
-  await page.route('**/firestore/changes**', (route) => route.abort())
-  await page.goto(`${origin()}/console/firestore?path=users`)
-  await expect(page.getByTestId('grid-row').first()).toBeVisible()
-  const state = page.getByTestId('live-state')
-  await expect(state).toContainText('Reconnecting')
-  await state.hover()
-  await expect(page.locator('.kumo-tooltip-popup')).toContainText('so the grid may be out of date')
-  // Back, and it says nothing again.
-  await page.unroute('**/firestore/changes**')
-  await expect(state).toHaveCount(0, { timeout: 10_000 })
+test('a dropped live channel says so once, in the engine badge, and replays what it missed', async ({
+  page,
+}) => {
+  await page.goto(`${origin()}/console/firestore?path=teams`)
+  const row = page.getByTestId('grid-row').filter({ hasText: 't_real' })
+  await expect(row).toBeVisible()
+  const badge = page.getByTestId('engine-badge')
+  await expect(badge).toHaveText(/^engine /)
+
+  await dropLive(page)
+  await expect(badge).toHaveText('reconnecting', { timeout: 3_000 })
+  await badge.hover()
+  await expect(page.locator('.kumo-tooltip-popup')).toContainText(
+    'so what is on screen may be out of date',
+  )
+  // The whole console shares the one connection, so the drop is said
+  // there and nowhere else: the toolbar keeps quiet.
+  await expect(page.getByTestId('live-state')).toHaveCount(0)
+  // Gone long enough, it says the engine stopped.
+  await expect(badge).toHaveText('engine stopped', { timeout: 5_000 })
+
+  // A write while the channel is down: nobody hears it now, and the
+  // channel replays it when it is back, so the grid catches up without a
+  // reload.
+  const seats = String(40 + Math.floor(Math.random() * 50))
+  const response = await page.request.post(`${documents()}:commit`, {
+    headers: owner,
+    data: {
+      writes: [
+        {
+          update: {
+            name: `${resource()}/teams/t_real`,
+            fields: { seats: { integerValue: seats } },
+          },
+          updateMask: { fieldPaths: ['seats'] },
+        },
+      ],
+    },
+  })
+  expect(response.ok()).toBeTruthy()
+  await expect(row).not.toContainText(seats)
+
+  await restoreLive(page)
+  await expect(badge).toHaveText(/^engine /, { timeout: 15_000 })
+  await expect(row).toContainText(seats, { timeout: 5_000 })
 })
 
 test('documents are added and deleted from the workbench', async ({ page }) => {
@@ -1234,9 +1365,7 @@ test('explain names what the query reads, and the index production would need', 
   await expect(page.getByTestId('copy-index-entry')).toContainText('Copied')
   await ticked(page.getByTestId('copy-index-entry'))
   // What it copies has to be a real index file entry for this query.
-  const copied = await page.evaluate(() =>
-    (navigator as Navigator & { clipboard: { readText(): Promise<string> } }).clipboard.readText(),
-  )
+  const copied = await readClipboard(page)
   expect(JSON.parse(copied)).toMatchObject({
     collectionGroup: 'users',
     queryScope: 'COLLECTION',
@@ -1384,180 +1513,6 @@ test('a typed export imports back as the same documents', async ({ page }) => {
 })
 
 /**
- * A control's colour as the eye sees it, as one luminance level (0–255):
- * its own fill and every layer under it down to the first opaque ground,
- * composited — background images (the hover's ink is one) above
- * background colours, as the browser paints them.
- */
-const paintOf = (control: Locator) =>
-  control.evaluate((el) => {
-    const view = el.ownerDocument.defaultView!
-    const canvas = el.ownerDocument.createElement('canvas') as unknown as {
-      width: number
-      height: number
-      getContext: (kind: '2d') => {
-        clearRect: (...xs: number[]) => void
-        fillRect: (...xs: number[]) => void
-        fillStyle: string
-        getImageData: (...xs: number[]) => { data: ArrayLike<number> }
-      }
-    }
-    canvas.width = canvas.height = 1
-    const ink = canvas.getContext('2d')
-    const rgba = (css: string) => {
-      ink.clearRect(0, 0, 1, 1)
-      ink.fillStyle = css
-      ink.fillRect(0, 0, 1, 1)
-      const [r = 0, g = 0, b = 0, a = 0] = Array.from(ink.getImageData(0, 0, 1, 1).data)
-      return [r, g, b, a / 255]
-    }
-    // A flat gradient's first stop, which is the colour it paints.
-    const stopColour = (image: string) => {
-      const start = image.indexOf('linear-gradient(')
-      if (start === -1) return undefined
-      let depth = 0
-      for (let at = start + 16; at < image.length; at++) {
-        if (image[at] === '(') depth++
-        else if (image[at] === ')') depth--
-        if (depth === 0 && (image[at] === ',' || image[at] === ')'))
-          return rgba(image.slice(start + 16, at).trim())
-        if (depth < 0) break
-      }
-      return undefined
-    }
-    const layers: number[][] = []
-    for (let at: typeof el | null = el; at; at = at.parentElement) {
-      const style = view.getComputedStyle(at)
-      const stop = stopColour(style.backgroundImage)
-      if (stop) layers.push(stop)
-      const colour = rgba(style.backgroundColor)
-      layers.push(colour)
-      if (at !== el && (colour[3] ?? 0) > 0.99) break
-    }
-    let colour = [255, 255, 255]
-    for (const [r = 0, g = 0, b = 0, a = 0] of layers.toReversed())
-      colour = [r, g, b].map((value, i) => value * a + (colour[i] ?? 0) * (1 - a))
-    const [r = 0, g = 0, b = 0] = colour
-    return Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b)
-  })
-
-/** A field's outline and ground, as the eye sees them. */
-const fieldLook = (field: Locator) =>
-  field.evaluate((el) => {
-    const style = el.ownerDocument.defaultView!.getComputedStyle(el)
-    return {
-      ring: style.boxShadow
-        .split(/,(?![^(]*\))/)
-        .some(
-          (layer: string) =>
-            layer.trim().endsWith(' 0px 0px 0px 1px') && !layer.includes('rgba(0, 0, 0, 0)'),
-        ),
-      shadow: style.boxShadow,
-      background: style.backgroundColor,
-      height: (el as { offsetHeight: number }).offsetHeight,
-      radius: style.borderRadius,
-    }
-  })
-
-/** The least room any ancestor that clips leaves around a box, px. */
-const ringRoom = (field: Locator) =>
-  field.evaluate((el) => {
-    const view = el.ownerDocument.defaultView!
-    const box = el.getBoundingClientRect()
-    let room = Infinity
-    for (let up = el.parentElement; up; up = up.parentElement) {
-      const style = view.getComputedStyle(up)
-      if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
-      const clip = up.getBoundingClientRect()
-      // A scroller clips at its padding edge, inside its border.
-      const top = clip.top + Number.parseFloat(style.borderTopWidth)
-      const bottom = clip.bottom - Number.parseFloat(style.borderBottomWidth)
-      const left = clip.left + Number.parseFloat(style.borderLeftWidth)
-      room = Math.min(room, box.top - top, bottom - box.bottom, box.left - left)
-    }
-    return room
-  })
-
-/**
- * Every outer ring on the page — a frame or a focus ring, both a
- * `box-shadow` spread outside the box — that an ancestor's clip cuts, or
- * only the focused element's. A control partly scrolled out of a scroller
- * is content, not chrome, and is passed over.
- */
-const cutRings = (page: import('@playwright/test').Page, focusedOnly = false) =>
-  page.locator('body').evaluate((body, only) => {
-    const doc = body.ownerDocument
-    const view = doc.defaultView!
-    const cut: string[] = []
-    const candidates = only ? [doc.activeElement] : [...doc.querySelectorAll('body *')]
-    for (const el of candidates) {
-      if (!el) continue
-      const style = view.getComputedStyle(el)
-      if (style.visibility === 'hidden' || style.display === 'none') continue
-      let spread = 0
-      for (const part of style.boxShadow.split(/,(?![^(]*\))/)) {
-        if (part.includes('inset')) continue
-        const ring = /^(.*\))\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px$/.exec(
-          part.trim(),
-        )
-        if (!ring || /rgba\(0, 0, 0, 0\)|\/ 0\)$/.test(ring[1] ?? '')) continue
-        if (Number(ring[2]) === 0 && Number(ring[3]) === 0)
-          spread = Math.max(spread, Number(ring[5]))
-      }
-      const box = el.getBoundingClientRect()
-      if (spread === 0 || box.width === 0 || box.height === 0) continue
-      for (let up = el.parentElement; up; up = up.parentElement) {
-        const clip = view.getComputedStyle(up)
-        if (clip.overflowX === 'visible' && clip.overflowY === 'visible') continue
-        const bounds = up.getBoundingClientRect()
-        const left = bounds.left + Number.parseFloat(clip.borderLeftWidth)
-        const top = bounds.top + Number.parseFloat(clip.borderTopWidth)
-        // A scroller clips at its padding edge, inside its scrollbar too.
-        const right = left + up.clientWidth
-        const bottom = top + up.clientHeight
-        const room = {
-          left: box.left - left,
-          right: right - box.right,
-          top: box.top - top,
-          bottom: bottom - box.bottom,
-        }
-        if (Object.values(room).some((value) => value < -0.5)) break
-        const short = Object.entries(room).filter(([, value]) => value < spread - 0.05)
-        if (short.length > 0) {
-          const name = el.getAttribute('data-testid') ?? el.getAttribute('aria-label') ?? el.tagName
-          cut.push(`${name}: ${short.map(([side]) => side).join(', ')}`)
-          break
-        }
-      }
-    }
-    return cut
-  }, focusedOnly)
-
-/** A download's bytes, as text. */
-async function readDownload(download: { path(): Promise<string> }): Promise<string> {
-  const { readFile } = await import('node:fs/promises')
-  return readFile(await download.path(), 'utf8')
-}
-
-async function paintedAtItsOwnCentre(locator: Locator): Promise<boolean> {
-  return locator.evaluate((el) => {
-    const box = el.getBoundingClientRect()
-    const hit = el.ownerDocument.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
-    return el === hit || el.contains(hit)
-  })
-}
-
-/** Whether anything above this element is holding it at zero opacity. */
-async function faded(handle: Locator): Promise<boolean> {
-  return handle.evaluate((el) => {
-    const view = el.ownerDocument.defaultView!
-    for (let node = el.parentElement; node; node = node.parentElement)
-      if (Number(view.getComputedStyle(node).opacity) < 0.05) return true
-    return false
-  })
-}
-
-/**
  * Point at a row, then press one of its controls. The strip holding them is
  * drawn — and takes a click — only while its own line is under the pointer,
  * so reaching straight for a button that nothing is pointing at is asking
@@ -1620,19 +1575,6 @@ async function boxedValues(fields: Locator): Promise<boolean[]> {
 }
 
 /** Keys with a number each, for a map wide enough to be worth shutting. */
-/** How a control is drawn: the two properties a variant change shows up in. */
-async function paint(locator: Locator): Promise<{ background: string; opacity: string }> {
-  return await locator.evaluate((el) => {
-    const style = el.ownerDocument.defaultView!.getComputedStyle(el)
-    return { background: style.backgroundColor, opacity: style.opacity }
-  })
-}
-
-/** The drawn height of a band of panel chrome. */
-async function band(locator: Locator): Promise<number> {
-  return (await locator.boundingBox())!.height
-}
-
 function numbered(keys: string[]): Record<string, unknown> {
   return Object.fromEntries(keys.map((key, index) => [key, { integerValue: String(index) }]))
 }
@@ -1784,8 +1726,15 @@ test('an integer and a double are told apart, and stay that way', async ({ page 
   expect(after.fields.count).toEqual({ integerValue: '4' })
 
   // Duplicating writes every field, which is where the narrowing used to
-  // happen without anyone touching the number at all.
-  await inspector.getByTestId('duplicate-document').click()
+  // happen without anyone touching the number at all. It is pressed at
+  // once, the way a person goes on after Save: the save's toast floats
+  // above the inspector's footer. It used to come up on the footer, under
+  // the pointer that had just pressed Save, and a resting pointer keeps a
+  // toast open, so Duplicate stayed covered until the hand moved.
+  const toasts = await page.getByRole('region', { name: 'Notifications' }).boundingBox()
+  const footer = await inspector.locator('footer').last().boundingBox()
+  expect(toasts!.y + toasts!.height).toBeLessThanOrEqual(footer!.y)
+  await inspector.getByTestId('duplicate-document').click({ timeout: 2_000 })
   await page.getByTestId('create-submit').click()
   await expect(page.getByText('Document added')).toBeVisible()
   const copy = new URL(page.url()).searchParams.get('doc') ?? ''
@@ -3200,32 +3149,6 @@ const panelGlyph = (button: Locator) =>
     ]),
   )
 
-/**
- * A copy button that has copied: the copy mark gone up out of its box and
- * the tick risen into it, as Kumo's ClipboardText moves them.
- */
-const ticked = async (button: Locator) => {
-  const glyph = button.locator('[data-copied]')
-  await expect(glyph).toHaveCount(1)
-  await expect
-    .poll(() =>
-      glyph
-        .locator('[data-part="tick"]')
-        .evaluate((tick) => tick.ownerDocument.defaultView!.getComputedStyle(tick).opacity),
-    )
-    .toBe('1')
-}
-
-const onTop = (item: Locator) =>
-  item.evaluate((el) => {
-    const box = el.getBoundingClientRect()
-    const hit = el.ownerDocument.elementFromPoint(
-      box.left + box.width / 2,
-      box.top + box.height / 2,
-    )
-    return hit !== null && el.contains(hit)
-  })
-
 async function reach(page: import('@playwright/test').Page, path: string, field: string) {
   const cell = page.locator(`tr[data-path="${path}"] td[data-field="${field}"]`)
   const grid = page.getByTestId('grid-scroll')
@@ -3407,6 +3330,36 @@ test('the id stays in view while the fields scroll, and a flash never shows thro
     (td) => td.ownerDocument.defaultView!.getComputedStyle(td).backgroundColor,
   )
   expect(ground).not.toMatch(/rgba|\/ 0?\.\d|transparent/)
+})
+
+test('the stripes stay with their rows while the grid scrolls', async ({ page }) => {
+  // Kumo's zebra is `even:`, and the virtualized grid draws a spacer row
+  // above the rows on screen, so every row scrolled flipped the stripes of
+  // every row in view: a row read white, then grey, then white again.
+  await page.setViewportSize({ width: 1400, height: 700 })
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('match-count')).toContainText('240 documents')
+  const grid = page.getByTestId('grid-scroll')
+  const stripes = () =>
+    Promise.all(
+      [40, 41, 42].map(async (index) => {
+        const row = page.locator(`tr[data-index="${index}"]`)
+        if ((await row.count()) === 0) return 'missing'
+        return row.evaluate(
+          (tr) => tr.ownerDocument.defaultView!.getComputedStyle(tr).backgroundColor,
+        )
+      }),
+    )
+  const seen: string[][] = []
+  for (const top of [32 * 30, 32 * 31, 32 * 32, 32 * 35]) {
+    await grid.evaluate((element, to) => (element.scrollTop = to), top)
+    await expect.poll(stripes).not.toContain('missing')
+    seen.push(await stripes())
+  }
+  for (const stripe of seen) expect(stripe).toEqual(seen[0])
+  // Alternating, as stripes do.
+  expect(seen[0]?.[0]).not.toBe(seen[0]?.[1])
+  expect(seen[0]?.[0]).toBe(seen[0]?.[2])
 })
 
 test('every value edits where it is, as the inspector edits it', async ({ page }) => {
@@ -3650,12 +3603,7 @@ test('the keyboard walks the cells, edits the one it is on, and copies it', asyn
     })
     .toEqual(text('Renamed'))
 
-  const clipboard = () =>
-    page.evaluate(() =>
-      (
-        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
-      ).clipboard.readText(),
-    )
+  const clipboard = () => readClipboard(page)
   await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('ControlOrMeta+c')
   await expect.poll(clipboard).toBe('p1@example.test')
@@ -3851,13 +3799,7 @@ test('ticked rows turn the query line into their own bar, which reaches every do
   await page.getByTestId('copy-json').click()
   await expect(page.getByText('Copied 2 documents as JSON')).toBeVisible()
   await ticked(page.getByTestId('copy-selection'))
-  const copied = JSON.parse(
-    await page.evaluate(() =>
-      (
-        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
-      ).clipboard.readText(),
-    ),
-  ) as Record<string, unknown>
+  const copied = JSON.parse(await readClipboard(page)) as Record<string, unknown>
   expect(Object.keys(copied)).toEqual(['s001', 's002'])
 
   // Every document, not the loaded hundred.
@@ -3879,12 +3821,7 @@ test('ticked rows turn the query line into their own bar, which reaches every do
 })
 
 test('every copy answers with the same tick', async ({ page }) => {
-  const clipboard = () =>
-    page.evaluate(() =>
-      (
-        navigator as Navigator & { clipboard: { readText(): Promise<string> } }
-      ).clipboard.readText(),
-    )
+  const clipboard = () => readClipboard(page)
 
   // The path's copy said nothing at all: a click on it looked like a
   // click that missed. Now the tick rises in, and goes again.

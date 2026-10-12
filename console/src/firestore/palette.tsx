@@ -34,7 +34,7 @@ import { useExportDialog } from './export'
 import { useQueryLine } from './query-line-store'
 import { collectionsQuery } from './queries'
 import { useRecents } from './recents'
-import { flattenSchema, schemaQuery } from './schema'
+import { flattenSchema, patternOf, workbenchSchemaQuery } from './schema'
 
 export function useFirestorePalette() {
   const workbench = useWorkbench()
@@ -49,7 +49,7 @@ export function useFirestorePalette() {
   const recents = useRecents((state) => state.items)
   const selected = workbench.selectedDocument
   const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
-  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: paletteOpen })
+  const schema = useQuery({ ...workbenchSchemaQuery(workbench), enabled: paletteOpen })
   const under = useQuery({
     ...collectionsQuery(workbench.ownerScope, selected ?? ''),
     enabled: paletteOpen && Boolean(selected),
@@ -57,6 +57,15 @@ export function useFirestorePalette() {
 
   const provider = useMemo(() => {
     const go = (path: string) => () => workbench.setPath(path)
+    // What ⌘K's engine search would also find (it searches the emulator's
+    // own project), so it shows each once: a collection by its pattern, a
+    // document by its path. Another project's rows name other things.
+    const ref = (kind: 'collection' | 'document', path: string) =>
+      workbench.foreign
+        ? undefined
+        : { kind: `firestore.${kind}`, key: `${workbench.database}|${path}` }
+    const collectionRef = (path: string) =>
+      patternOf(path) === path ? ref('collection', path) : undefined
     // The schema tree lists every shape; the plain root list stands in
     // until it has answered.
     const shapes = flattenSchema(schema.data)
@@ -90,6 +99,7 @@ export function useFirestorePalette() {
               keywords: node.pattern,
               icon: depth === 0 ? <DatabaseIcon size={16} /> : <FolderIcon size={16} />,
               run: go(node.pattern),
+              ref: ref('collection', node.pattern),
             }
             if (parent) item.breadcrumbs = [parent.pattern]
             return item
@@ -99,6 +109,7 @@ export function useFirestorePalette() {
             title: id,
             icon: <DatabaseIcon size={16} />,
             run: go(id),
+            ref: ref('collection', id),
           }))),
     ]
     const recentItems = recents.map<PaletteItem>((recent) => ({
@@ -111,6 +122,7 @@ export function useFirestorePalette() {
           <ClockCounterClockwiseIcon size={16} />
         ),
       run: go(recent.path),
+      ref: recent.kind === 'document' ? ref('document', recent.path) : collectionRef(recent.path),
     }))
     const actions: PaletteItem[] = []
     actions.push({
@@ -215,6 +227,7 @@ export function useFirestorePalette() {
                 path.split('/').length % 2 === 0 ? 'Open this document' : 'Open this collection',
               icon: <ArrowRightIcon size={16} />,
               run: go(path),
+              ref: path.split('/').length % 2 === 0 ? ref('document', path) : collectionRef(path),
             },
           ],
         })

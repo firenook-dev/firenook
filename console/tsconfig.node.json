@@ -19,5 +19,8 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "e2e", "scripts"]
+  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "e2e", "scripts"],
+  // The kit harness's pages are checked with the app, for the browser; its
+  // types (runs.ts) by both.
+  "exclude": ["e2e/kit-harness/**/*.tsx"]
 }

@@ -6,22 +6,23 @@
 // is either a value it shows or a ref it calls through, so a scroll that
 // only moves the window over the rows re-renders the rows that entered it.
 
-import { Button, Checkbox, Table } from '@cloudflare/kumo'
+import { Button, Checkbox, Table, cn } from '@cloudflare/kumo'
 import { SidebarSimpleIcon, WarningIcon } from '@phosphor-icons/react'
 import { memo } from 'react'
 import type { ChangeKind } from '@/api/generated/ChangeKind'
+import {
+  CHECK_WIDTH,
+  CURSOR,
+  CURSOR_ROW,
+  PIN_CELL,
+  PIN_EDGE,
+} from '@/components/console/table-pins'
 import type { InferredColumn } from '../columns'
 import type { SchemaNode } from '../schema'
 import type { FsDocument } from '../value'
 import { IdCell, ValueCell } from './cells'
 import { SubcollectionsCell } from './subcollections-cell'
 
-/**
- * The box and the way into the row, side by side: the check cell's own
- * twelve pixels, the box, and the open button that shows on hover.
- */
-export const CHECK_WIDTH = 64
-/** The id column's key wherever columns are keyed. Firestore reserves `__…__`. */
 export const ID_COLUMN = '__name__'
 /** The key of the column the rare fields are folded into. */
 export const FOLDED_COLUMN = '__folded__'
@@ -46,35 +47,9 @@ export interface RowActions {
   openReference: (path: string) => void
 }
 
-/**
- * The id stays put while the fields scroll under it. It used to scroll away
- * with them: 800 px to the right and the column saying which document a
- * row is had gone 296 px off the left edge, so every value on screen was a
- * value of nobody in particular.
- *
- * The ground is the row's own, through the variable Kumo's rows set, so a
- * pinned cell is opaque in every state a row can be in.
- */
-export const PIN_CELL = 'sticky z-[1] bg-(--kumo-table-row-bg)'
-export const PIN_HEAD = 'sticky z-[2] bg-kumo-elevated'
-/**
- * The pinned edge, drawn only once something has scrolled under it. At
- * rest there is nothing under the id to separate it from, and a shadow
- * there would be a line through the first field.
- *
- * A strip the full height of the cell, so one row's meets the next and
- * the column has one edge. It was a `box-shadow` of `6px 0 6px -6px`, and
- * the negative spread pulls a shadow in on every side, not only the far
- * one: each cell's shade stopped short of its own top and bottom, and the
- * edge read as a stack of pills — measured beside it, 222 in a row's
- * middle and 254 at every boundary. A cell has one `box-shadow`, too, and
- * the focused row's accent bar already wants the check cell's.
- */
-export const PIN_EDGE =
-  "after:pointer-events-none after:absolute after:inset-y-0 after:-right-[6px] after:w-[6px] after:bg-linear-to-r after:from-kumo-line after:to-transparent after:opacity-0 after:content-[''] group-data-[scrolled]/grid:after:opacity-100"
-
-/** The cell the keyboard is on: the console's accent, inside the cell, so nothing moves. */
-const CURSOR = 'shadow-[inset_0_0_0_1.5px_var(--color-kumo-brand)]'
+// The pinned id, its edge and the cursor cell are the console's table pins
+// (`components/console/table-pins.ts`): every table in the console marks
+// them the same way.
 
 export const GridRow = memo(function GridRow({
   document,
@@ -115,15 +90,23 @@ export const GridRow = memo(function GridRow({
 }) {
   const openReference = (path: string) => actions.current?.openReference(path)
   return (
-    <Table.Row
+    // The stripes go by the row's place in the list, not its place among
+    // the rendered rows: Kumo's `even:` counted the spacer above the window
+    // too, so every row scrolled flipped the stripes of every row on screen.
+    <tr
       data-index={index}
       data-path={document.path}
-      variant={checked ? 'selected' : 'default'}
-      className={`group/row cursor-default ${
-        focused || open
-          ? 'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)] [&>td:first-child]:shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
-          : ''
-      } ${flash ? (flash === 'deleted' ? 'row-flash-deleted' : 'row-flash') : ''}`}
+      // Merged, so the cursor row's tint wins over the stripe it lands on.
+      className={cn(
+        'group/row cursor-default',
+        checked
+          ? 'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)]'
+          : index % 2 === 1
+            ? 'bg-kumo-elevated [--kumo-table-row-bg:var(--color-kumo-elevated)]'
+            : '[--kumo-table-row-bg:var(--color-kumo-base)]',
+        (focused || open) && CURSOR_ROW,
+        flash === 'deleted' ? 'row-flash-deleted' : flash ? 'row-flash' : '',
+      )}
       onClick={(event) =>
         actions.current?.click(document, (event.target as HTMLElement).closest('td'))
       }
@@ -263,7 +246,7 @@ export const GridRow = memo(function GridRow({
       })}
       {after && <Table.Cell aria-hidden />}
       <Table.Cell aria-hidden />
-    </Table.Row>
+    </tr>
   )
 })
 

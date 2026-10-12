@@ -76,7 +76,7 @@ export function DeleteDialog({
         description: paths?.length === 1 ? paths[0] : workbench.collectionPath,
         variant: 'success',
       })
-      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
+      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
     },
     onError: () => setDone(undefined),
   })

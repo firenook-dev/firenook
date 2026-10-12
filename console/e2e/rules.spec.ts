@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs'
-import { type Page, expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { expect, test } from './fixtures'
 
 // The security rules page, against the real engine and the synthetic
 // project's rules file (scripts/synthetic-engine.mjs). Every journey that
@@ -8,7 +9,7 @@ import { type Page, expect, test } from '@playwright/test'
 
 const origin = () => {
   const value = process.env.FIRENOOK_CONSOLE_ORIGIN
-  if (!value) throw new Error('the engine global setup did not run')
+  if (!value) throw new Error('the worker engine did not start')
   return value
 }
 const api = (path: string) => `${origin()}/console/api/v1/firestore/${path}`

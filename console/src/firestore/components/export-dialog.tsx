@@ -115,7 +115,7 @@ export function ExportDialog({
         <Dialog.Description className="text-kumo-subtle">
           <span data-testid="export-scope">{what}</span>, read whole — not the shortened values the
           grid draws.{' '}
-          {workbench.scope.authorization?.startsWith('Bearer owner')
+          {workbench.scope.identity.kind === 'owner'
             ? 'Rules are bypassed, so this is everything the engine holds.'
             : 'Security rules apply, so this is what the identity you are viewing as can read.'}
         </Dialog.Description>
