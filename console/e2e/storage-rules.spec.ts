@@ -330,14 +330,19 @@ test('every decision is listed live, narrowed by the engine, and opens onto why'
   // Narrowed to one folder, through the engine again.
   await page.getByTestId('decision-back').click()
   await page.getByRole('tab', { name: 'All' }).click()
-  await page.getByTestId('decisions-path').fill(`users/${grace.uid}/`)
-  await page.getByTestId('decisions-path').press('Enter')
+  await page.getByTestId('decisions-filter').fill(`users/${grace.uid}/`)
+  await page.getByTestId('decisions-filter').press('Enter')
   await expect(page).toHaveURL(/path=users%2F/)
   await expect(rows.first()).toBeVisible()
   for (const path of await rows.locator('bdi').allTextContents())
     expect(path.startsWith(`users/${grace.uid}/`)).toBe(true)
-  await page.getByTestId('decisions-clear').click()
+  // A uid term narrows by the user, through the engine too, and both read back as typed.
+  await page.getByTestId('decisions-filter').fill(`users/${grace.uid}/ uid:${grace.uid}`)
+  await page.getByTestId('decisions-filter').press('Enter')
+  await expect(page).toHaveURL(new RegExp(`uid=${grace.uid}`))
+  await page.getByTestId('decisions-filter-clear').click()
   await expect(page).not.toHaveURL(/path=/)
+  await expect(page).not.toHaveURL(/uid=/)
 })
 
 test('the playground tries an upload against the draft, and a saved test guards it', async ({

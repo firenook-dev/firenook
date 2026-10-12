@@ -9,6 +9,8 @@ import {
   decidingLines,
   decisionParams,
   gapText,
+  parseDecisionFilter,
+  printDecisionFilter,
   whoAsked,
   windowText,
 } from './decisions'
@@ -56,6 +58,34 @@ describe('narrowing the decisions', () => {
       bucket: 'b',
       path: 'users/u1/a.png',
     })
+  })
+
+  it('reads one field’s terms as the path, the uid and the method, and writes them back', () => {
+    expect(parseDecisionFilter('')).toEqual({ path: undefined, uid: undefined, method: undefined })
+    expect(parseDecisionFilter('users/u1/ uid:u1 create')).toEqual({
+      path: 'users/u1/',
+      uid: 'u1',
+      method: 'create',
+    })
+    // The order is free; `method:` is the long form; a second path word is ignored.
+    expect(parseDecisionFilter('method:LIST  uid:Ada users/ more')).toEqual({
+      path: 'users/',
+      uid: 'Ada',
+      method: 'list',
+    })
+    // A method word is a method, not a file called "get".
+    expect(parseDecisionFilter('get')).toEqual({ path: undefined, uid: undefined, method: 'get' })
+    expect(parseDecisionFilter('uid:')).toEqual({
+      path: undefined,
+      uid: undefined,
+      method: undefined,
+    })
+    expect(printDecisionFilter({ path: 'users/', uid: 'u1', method: 'create' })).toBe(
+      'users/ uid:u1 create',
+    )
+    expect(printDecisionFilter({})).toBe('')
+    for (const text of ['users/u1/a.png', 'uid:u1', 'delete', 'public/ uid:u2 update'])
+      expect(printDecisionFilter(parseDecisionFilter(text))).toBe(text)
   })
 
   it('is the rules kit’s schema, with the bucket and a line', () => {

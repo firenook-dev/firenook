@@ -25,16 +25,20 @@ function Panel({
   pick = false,
   onPick = ignore,
   gaps,
+  onClearList,
 }: {
   items?: Row[]
   pick?: boolean
   onPick?: (row: Row) => void
   gaps?: ReadonlyMap<string, number | null>
+  onClearList?: () => void
 }) {
   const [selected, setSelected] = useState<string | undefined>()
   const [picking, setPicking] = useState(pick)
+  const [text, setText] = useState('')
+  const [denied, setDenied] = useState(false)
   return (
-    <DecisionsShell
+    <DecisionsShell<Row>
       items={items}
       itemKey={(row) => row.id}
       isDenied={(row) => row.outcome !== 'allow'}
@@ -47,13 +51,24 @@ function Panel({
         setPicking(false)
         setSelected(row.id)
       }}
-      filters={<input aria-label="Folder or file" />}
+      filter={{ value: text, onChange: setText, placeholder: 'Filter by path, user or method' }}
+      denied={denied}
+      onDenied={setDenied}
+      onClearList={onClearList}
       narrowed={[{ label: 'Path', value: 'users/', onRemove: () => {} }]}
       notice={<span data-testid="notice">feed is fine</span>}
       empty="No rules decisions yet."
-      renderRow={(row) => <span>{row.path}</span>}
+      row={(row) => ({
+        outcome: row.outcome,
+        method: 'get',
+        path: row.path,
+        at: '2026-10-12T20:10:20Z',
+        who: 'u_ada',
+        extras: row.id === 's2' ? ['5.1 KB image/png'] : undefined,
+        lines: row.id === 's3' ? [6] : [],
+      })}
       renderDetail={(row) => <div data-testid="detail">{row.path}</div>}
-      footer={<span data-testid="window">Holding the last 3 decisions</span>}
+      held="Holding the last 3 decisions"
       gaps={gaps}
       renderGap={(missed) => `${missed ?? 'Some'} missed here`}
     />
@@ -73,16 +88,36 @@ describe('the decisions panel shell', () => {
   it('lists the rows newest first, counts the denials and carries the adapter’s parts', () => {
     render(<Panel />)
     expect(screen.getByTestId('decisions-count')).toHaveTextContent('3 decisions · 2 denied')
-    expect(screen.getAllByTestId('decision-row').map((row) => row.textContent)).toEqual([
-      'public/logo.png',
-      'users/u2/a.png',
-      'reports/q3.pdf',
-    ])
-    expect(screen.getAllByTestId('decision-row')[1]).toHaveAttribute('data-decision-id', 's2')
+    const listed = screen.getAllByTestId('decision-row')
+    expect(
+      listed.map((row) => row.querySelector('[data-outcome]')?.getAttribute('data-outcome')),
+    ).toEqual(['allow', 'deny', 'error'])
+    // One anatomy: verdict, method, path; then when, who, the page's extras, the lines.
+    expect(listed[0]).toHaveTextContent(/Allowed\s*get\s*public\/logo\.png/)
+    expect(listed[0]).toHaveTextContent(/u_ada.*line 6/)
+    expect(listed[1]).toHaveTextContent('5.1 KB image/png')
+    expect(listed[1]).toHaveAttribute('data-decision-id', 's2')
     expect(screen.getByTestId('decisions-narrowed')).toHaveTextContent('Pathusers/')
-    expect(screen.getByLabelText('Folder or file')).toBeInTheDocument()
+    expect(screen.getByTestId('decisions-filter')).toHaveAttribute(
+      'placeholder',
+      'Filter by path, user or method',
+    )
+    expect(screen.getByRole('tab', { name: 'Denied' })).toBeInTheDocument()
     expect(screen.getByTestId('notice')).toBeInTheDocument()
-    expect(screen.getByTestId('window')).toBeInTheDocument()
+    expect(screen.getByTestId('decisions-window')).toHaveTextContent('Holding the last 3 decisions')
+  })
+
+  it('clears its filter from the field, and offers Clear only when the page can forget', () => {
+    const onClearList = vi.fn()
+    const { unmount } = render(<Panel />)
+    expect(screen.queryByTestId('decisions-clear-list')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByTestId('decisions-filter'), { target: { value: 'users' } })
+    fireEvent.click(screen.getByTestId('decisions-filter-clear'))
+    expect(screen.getByTestId('decisions-filter')).toHaveValue('')
+    unmount()
+    render(<Panel onClearList={onClearList} />)
+    fireEvent.click(screen.getByTestId('decisions-clear-list'))
+    expect(onClearList).toHaveBeenCalledTimes(1)
   })
 
   it('opens a row, steps to the older and newer ones, and goes back to the list', () => {
@@ -121,12 +156,13 @@ describe('the decisions panel shell', () => {
   it('draws a gap where decisions were missed, above the decision just older than it', () => {
     render(<Panel gaps={new Map([['s2', 1204]])} />)
     const list = screen.getByTestId('decision-list')
-    expect([...list.querySelectorAll('li')].map((item) => item.textContent)).toEqual([
-      'public/logo.png',
-      '1204 missed here',
-      'users/u2/a.png',
-      'reports/q3.pdf',
-    ])
+    expect(
+      [...list.querySelectorAll('li')].map((item) =>
+        item.querySelector('[data-testid="decision-row"]')
+          ? item.querySelector('.font-mono.text-kumo-default')?.textContent
+          : item.textContent,
+      ),
+    ).toEqual(['public/logo.png', '1204 missed here', 'users/u2/a.png', 'reports/q3.pdf'])
     // Gaps are rows of the list, not decisions: the count is the decisions'.
     expect(screen.getByTestId('decisions-count')).toHaveTextContent('3 decisions')
   })

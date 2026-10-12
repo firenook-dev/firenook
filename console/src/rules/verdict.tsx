@@ -1,12 +1,13 @@
 // A rules verdict as every list on a rules page writes it: the kit's dot and
-// a word — allowed, denied, error — with the outcome on the element, so a
-// journey can read it whatever the word.
+// a status word — Allowed, Denied, Error, capitalised as every outcome word
+// in the console is (an invocation's Succeeded, a delivery's Failed) — with
+// the outcome on the element, so a journey can read it whatever the word.
 
 import type { ReactNode } from 'react'
 import type { RulesOutcome } from '@/api/generated/RulesOutcome'
 import { StatusDot, type StatusTone } from '@/components/kit/status-dot'
 
-const WORD: Record<RulesOutcome, string> = { allow: 'allowed', deny: 'denied', error: 'error' }
+const WORD: Record<RulesOutcome, string> = { allow: 'Allowed', deny: 'Denied', error: 'Error' }
 const TONE: Record<RulesOutcome, StatusTone> = {
   allow: 'success',
   deny: 'danger',

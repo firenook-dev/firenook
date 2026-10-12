@@ -280,7 +280,8 @@ export function filterDecisions(
   })
 }
 
-const LIMIT = 500
+/** The decisions a tab keeps, newest first. */
+export const DECISIONS_KEPT = 500
 
 interface DecisionsState {
   /**
@@ -306,7 +307,7 @@ export const useDecisions = create<DecisionsState>((set) => ({
       // listed is the same decision, not a second one.
       state.decisions.some((known) => known.requestId === decision.requestId)
         ? state
-        : { decisions: [decision, ...state.decisions].slice(0, LIMIT) },
+        : { decisions: [decision, ...state.decisions].slice(0, DECISIONS_KEPT) },
     ),
   setStatus: (status, detail) => set({ status, detail }),
   clear: () => set({ decisions: [] }),

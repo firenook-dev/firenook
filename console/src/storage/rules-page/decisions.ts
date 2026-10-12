@@ -39,6 +39,49 @@ export interface DecisionFilters {
   method?: RulesMethod | undefined
 }
 
+const METHOD_WORDS: readonly RulesMethod[] = ['get', 'list', 'create', 'update', 'delete']
+
+/**
+ * The filter field's terms as the topic's narrowing: `uid:<uid>`, a method
+ * (`create`, or `method:create`), and a path — a folder or a file, as the
+ * engine takes it; the first word that is neither. Terms it does not know
+ * are part of no narrowing. Absent terms are undefined, so the URL loses them.
+ */
+export function parseDecisionFilter(text: string): {
+  path: string | undefined
+  uid: string | undefined
+  method: RulesMethod | undefined
+} {
+  let path: string | undefined
+  let uid: string | undefined
+  let method: RulesMethod | undefined
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    const lower = word.toLowerCase()
+    if (lower.startsWith('uid:')) {
+      uid = word.slice(4) || undefined
+      continue
+    }
+    const named = lower.startsWith('method:') ? lower.slice(7) : lower
+    if ((METHOD_WORDS as readonly string[]).includes(named)) {
+      method = named as RulesMethod
+      continue
+    }
+    if (path === undefined) path = word
+  }
+  return { path, uid, method }
+}
+
+/** A narrowing written back as the field's terms: the path, then `uid:`, then the method. */
+export function printDecisionFilter(filters: {
+  path?: string | undefined
+  uid?: string | undefined
+  method?: RulesMethod | undefined
+}): string {
+  return [filters.path, filters.uid ? `uid:${filters.uid}` : undefined, filters.method]
+    .filter(Boolean)
+    .join(' ')
+}
+
 /**
  * The topic's parameters for a narrowing: the scope's bucket (none when one
  * ruleset governs every bucket, which then lists every bucket's decisions),

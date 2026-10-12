@@ -19,17 +19,21 @@
 // official emulator's conformance fixtures), so this adapter narrows in the
 // browser; Storage's asks the engine.
 
-import { Badge, Button, InputGroup, Tabs, Tooltip } from '@cloudflare/kumo'
-import { MagnifyingGlassIcon, TrashIcon } from '@phosphor-icons/react'
+import { Badge, Tooltip } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { ImpactFlip } from '@/api/generated/ImpactFlip'
-import { relativeTime } from '@/lib/format'
+import { formatClock, formatNumber } from '@/lib/format'
 import { type DecisionNarrowing, DecisionsShell } from '@/rules/decisions-shell'
-import { Verdict } from '@/rules/verdict'
 import { rulesQuery } from '../rules'
 import { DecisionDetail } from './decision-detail'
-import { type RulesDecision, decidingLines, filterDecisions, useDecisions } from './decisions'
+import {
+  DECISIONS_KEPT,
+  type RulesDecision,
+  decidingLines,
+  filterDecisions,
+  useDecisions,
+} from './decisions'
 import { useRulesSearch } from './rules-search'
 
 export function DecisionsPanel({
@@ -106,48 +110,10 @@ export function DecisionsPanel({
       onPick={(decision) =>
         update({ decision: decision.requestId, pick: undefined }, { replace: true })
       }
-      filters={
-        <>
-          <InputGroup size="sm" className="min-w-0 flex-1">
-            <InputGroup.Addon>
-              <MagnifyingGlassIcon size={14} />
-            </InputGroup.Addon>
-            <InputGroup.Input
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder="Filter by path, user or method"
-              aria-label="Filter decisions"
-              spellCheck={false}
-              autoComplete="off"
-              data-testid="decisions-filter"
-            />
-          </InputGroup>
-          <Tabs
-            variant="segmented"
-            size="sm"
-            value={search.denied ? 'denied' : 'all'}
-            onValueChange={(next) => update({ denied: next === 'denied' })}
-            tabs={[
-              { value: 'all', label: 'All' },
-              { value: 'denied', label: 'Denied' },
-            ]}
-          />
-          <Tooltip
-            content="Clear the list in this tab"
-            render={
-              <Button
-                variant="ghost"
-                size="sm"
-                shape="square"
-                icon={<TrashIcon />}
-                aria-label="Clear the list"
-                onClick={clear}
-                disabled={all.length === 0}
-              />
-            }
-          />
-        </>
-      }
+      filter={{ value: text, onChange: setText, placeholder: 'Filter by path, user or method' }}
+      denied={search.denied ?? false}
+      onDenied={(denied) => update({ denied })}
+      onClearList={all.length > 0 ? clear : undefined}
       narrowed={narrowings}
       notice={<FeedNotice status={status} detail={detail} />}
       empty={emptyMessage({
@@ -156,9 +122,16 @@ export function DecisionsPanel({
         filtered: all.some((decision) => decision.database === database),
         enforced: rules.data?.enforced ?? true,
       })}
-      renderRow={(decision, now) => (
-        <DecisionRow decision={decision} flip={flipped.get(decision.requestId)} now={now} />
-      )}
+      row={(decision) => ({
+        outcome: decision.outcome,
+        method: decision.method,
+        path: decision.path,
+        at: decision.time,
+        who: decision.uid ?? 'anonymous',
+        flip: flipped.get(decision.requestId)?.after,
+        lines: decidingLines(decision),
+      })}
+      held={heldText(all.filter((decision) => decision.database === database))}
       renderDetail={(decision) => (
         <DecisionDetail
           key={decision.requestId}
@@ -224,41 +197,16 @@ function emptyMessage({
   return "No decisions in the last ten minutes. Only requests your rules judge appear here: reads and writes from your app's client SDK, or from the data page while View as is a user. The Admin SDK — Cloud Functions, servers, and the console reading as admin — skips the rules, so it never shows."
 }
 
-/** A decision's two lines: verdict, operation and path; when, who, what the draft would make of it, and the deciding lines. */
-function DecisionRow({
-  decision,
-  flip,
-  now,
-}: {
-  decision: RulesDecision
-  flip: ImpactFlip | undefined
-  now: number
-}) {
-  const lines = decidingLines(decision)
-  return (
-    <>
-      <span className="flex min-w-0 items-center gap-2">
-        <Verdict outcome={decision.outcome} />
-        <span className="shrink-0 font-mono text-[12px] text-kumo-subtle">{decision.method}</span>
-        <span className="min-w-0 truncate font-mono text-[12px] text-kumo-default">
-          {decision.path || '/'}
-        </span>
-      </span>
-      <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-kumo-subtle">
-        <span className="shrink-0 tabular-nums">{relativeTime(decision.time, now)}</span>
-        <span aria-hidden>·</span>
-        <span className="min-w-0 truncate font-mono">{decision.uid ?? 'anonymous'}</span>
-        {flip && (
-          <span className="shrink-0 text-kumo-warning" data-testid="decision-flip">
-            → {flip.after === 'allow' ? 'allowed' : 'denied'} by the draft
-          </span>
-        )}
-        {lines.length > 0 && (
-          <span className="ml-auto shrink-0 font-mono">
-            {lines.length === 1 ? `line ${lines[0]}` : `lines ${lines.join(', ')}`}
-          </span>
-        )}
-      </span>
-    </>
-  )
+/**
+ * The footer under the list, as Storage's says what its engine holds:
+ * "Holding the last 12 decisions, since 09:12:04 · this tab keeps the newest 500".
+ */
+export function heldText(
+  decisions: readonly Pick<RulesDecision, 'time'>[],
+  now = Date.now(),
+): string | undefined {
+  const oldest = decisions.at(-1)
+  if (!oldest) return undefined
+  const count = decisions.length
+  return `Holding the last ${formatNumber(count)} ${count === 1 ? 'decision' : 'decisions'}, since ${formatClock(oldest.time, 'time', now)} · this tab keeps the newest ${formatNumber(DECISIONS_KEPT)}`
 }

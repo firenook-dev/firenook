@@ -1,11 +1,16 @@
 // The decisions panel beside a rules editor: every decision the rules made,
-// newest first, and one opened onto who asked and why. The shell is the
-// same on every rules page — the filter row, the narrowing chips, the
-// count, the virtualized list, the detail with its way back and its
-// previous and next — and an adapter fills it: Firestore's reads the
-// official Requests WebSocket and narrows in the browser (that feed cannot
-// be asked to), Storage's reads the `storage.decisions` topic, whose
-// parameters the engine evaluates.
+// newest first, and one opened onto who asked and why. The panel is one
+// design on every rules page — the filter row (one field for path, user and
+// method terms, All or Denied, Clear), the narrowing chips, the count, the
+// virtualized list of two-line rows, the footer that says what is held,
+// the detail with its way back and its previous and next — and an adapter
+// fills it with data: Firestore's reads the official Requests WebSocket and
+// narrows in the browser (that feed cannot be asked to), Storage's reads
+// the `storage.decisions` topic, whose parameters the engine evaluates.
+//
+// A row reads the same on both pages: the verdict, the method, the path;
+// then when, who, what else the page knows (an upload's size and type),
+// what the draft would make of it, and the lines that decided it.
 //
 // - the feed speaks only when something is wrong with it (the adapter's
 //   `notice`);
@@ -17,14 +22,55 @@
 // - a feed that lost decisions (a tab away longer than the engine keeps
 //   them) says so in the list, where they are missing (`gaps`).
 
-import { Button, Text } from '@cloudflare/kumo'
-import { ArrowLeftIcon, CaretLeftIcon, CaretRightIcon, XIcon } from '@phosphor-icons/react'
+import { Button, InputGroup, Tabs, Text, Tooltip } from '@cloudflare/kumo'
+import {
+  ArrowLeftIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
+  MagnifyingGlassIcon,
+  XIcon,
+} from '@phosphor-icons/react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { type ReactNode, useEffect, useRef } from 'react'
+import type { RulesOutcome } from '@/api/generated/RulesOutcome'
+import { ClearHistoryButton } from '@/components/console/clear-history-button'
 import { useNow } from '@/lib/clock'
+import { exactTime } from '@/components/console/relative-time'
+import { relativeTime } from '@/lib/format'
+import { Verdict } from './verdict'
 
 /** A list row's height: two lines of text. */
 export const DECISION_ROW = 44
+
+/** What a row says, the same way on every rules page. */
+export interface DecisionRowParts {
+  outcome: RulesOutcome
+  /** `get`, `create`, …: data, in the data face. */
+  method: string
+  path: string
+  /** Cut a long path from its start, so a file's own name stays (Storage's). */
+  keepEnd?: boolean | undefined
+  /** When, RFC 3339: the row says how long ago, its tooltip the exact time. */
+  at: string
+  /** Who asked: a uid, `anonymous`, `not signed in`. */
+  who: string
+  /** What else the page knows, each in the data face: a bucket, an upload's size and type. */
+  extras?: readonly string[] | undefined
+  /** What applying the draft would make of it, when it would change it. */
+  flip?: RulesOutcome | undefined
+  /** The lines that decided it. */
+  lines: readonly number[]
+}
+
+/** The filter field: path, user and method terms, as each page reads them. */
+export interface DecisionFilter {
+  value: string
+  onChange: (value: string) => void
+  /** Enter, or the field cleared: the page acts now rather than when typing settles. */
+  onCommit?: ((value: string) => void) | undefined
+  /** Says which terms it takes: "Filter by path, user or method". */
+  placeholder: string
+}
 
 /** One narrowing the list is under, shown as a chip that takes it away. */
 export interface DecisionNarrowing {
@@ -42,13 +88,16 @@ export function DecisionsShell<T>({
   onStep,
   pick,
   onPick,
-  filters,
+  filter,
+  denied: deniedOnly,
+  onDenied,
+  onClearList,
   narrowed,
   notice,
   empty,
-  renderRow,
+  row,
   renderDetail,
-  footer,
+  held,
   gaps,
   renderGap,
   clock = 'minute',
@@ -65,18 +114,22 @@ export function DecisionsShell<T>({
   /** Open the newest denial the list holds, once. */
   pick?: boolean | undefined
   onPick: (item: T) => void
-  /** The filter row: a text field or a folder, a user, denials only, a method. */
-  filters: ReactNode
+  filter: DecisionFilter
+  /** Denials only. */
+  denied: boolean
+  onDenied: (denied: boolean) => void
+  /** Forget the decisions this tab holds; absent: nothing to forget. */
+  onClearList?: (() => void) | undefined
   narrowed: readonly DecisionNarrowing[]
   /** At the count line's right end: what is wrong with the feed, when something is. */
   notice?: ReactNode
   /** What an empty list says. */
   empty: string
-  /** A row's two lines, inside the row's button. */
-  renderRow: (item: T, now: number) => ReactNode
+  /** What a row says. */
+  row: (item: T) => DecisionRowParts
   renderDetail: (item: T) => ReactNode
-  /** Under the list: the window the feed holds. */
-  footer?: ReactNode
+  /** Under the list: what the panel holds ("Holding the last 12 decisions, since 09:12:04 · …"). */
+  held?: string | undefined
   /** Decisions the feed missed, keyed by the decision just older than each gap; the count when known. */
   gaps?: ReadonlyMap<string, number | null> | undefined
   /** A gap's line in the list. */
@@ -147,7 +200,35 @@ export function DecisionsShell<T>({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="decisions">
       <div className="grid shrink-0 gap-2 border-b border-kumo-line px-3 py-2">
-        <div className="flex items-center gap-2">{filters}</div>
+        <div className="flex min-w-0 items-center gap-2">
+          <FilterField {...filter} />
+          <Tabs
+            variant="segmented"
+            size="sm"
+            value={deniedOnly ? 'denied' : 'all'}
+            onValueChange={(next) => onDenied(next === 'denied')}
+            tabs={[
+              { value: 'all', label: 'All' },
+              { value: 'denied', label: 'Denied' },
+            ]}
+          />
+          {onClearList && (
+            <Tooltip
+              content="Clear the list in this tab"
+              render={
+                <span className="inline-flex shrink-0">
+                  <ClearHistoryButton
+                    label="Clear"
+                    title="Clear the list"
+                    onClick={onClearList}
+                    disabled={items.length === 0 && narrowed.length === 0}
+                    testId="decisions-clear-list"
+                  />
+                </span>
+              }
+            />
+          )}
+        </div>
         {narrowed.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5" data-testid="decisions-narrowed">
             {narrowed.map((narrowing) => (
@@ -181,13 +262,116 @@ export function DecisionsShell<T>({
           itemKey={itemKey}
           now={now}
           onOpen={onOpen}
-          renderRow={renderRow}
+          row={row}
           gaps={gaps}
           renderGap={renderGap}
         />
       )}
-      {footer}
+      {held && (
+        <div
+          className="shrink-0 border-t border-kumo-line px-3 py-1.5 text-[11px] text-kumo-subtle"
+          data-testid="decisions-window"
+        >
+          {held}
+        </div>
+      )}
     </div>
+  )
+}
+
+/** The one filter field: a magnifier, the terms, and × to clear them. */
+function FilterField({ value, onChange, onCommit, placeholder }: DecisionFilter) {
+  return (
+    <InputGroup size="sm" className="min-w-0 flex-1">
+      <InputGroup.Addon>
+        <MagnifyingGlassIcon size={14} />
+      </InputGroup.Addon>
+      <InputGroup.Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') onCommit?.(value)
+          if (event.key === 'Escape' && value !== '') {
+            event.preventDefault()
+            onChange('')
+            onCommit?.('')
+          }
+        }}
+        placeholder={placeholder}
+        aria-label="Filter decisions"
+        spellCheck={false}
+        autoComplete="off"
+        className="font-mono placeholder:font-sans"
+        data-testid="decisions-filter"
+      />
+      {value !== '' && (
+        <InputGroup.Addon align="end">
+          {/* No size: the group's sm makes it the compact xs, as the panel filter's. */}
+          <InputGroup.Button
+            variant="ghost"
+            shape="square"
+            icon={<XIcon />}
+            aria-label="Clear the filter"
+            onClick={() => {
+              onChange('')
+              onCommit?.('')
+            }}
+            data-testid="decisions-filter-clear"
+          />
+        </InputGroup.Addon>
+      )}
+    </InputGroup>
+  )
+}
+
+/** A decision's two lines. */
+function DecisionRow({ parts, now }: { parts: DecisionRowParts; now: number }) {
+  const { lines } = parts
+  return (
+    <>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="flex shrink-0 items-center">
+          <Verdict outcome={parts.outcome} />
+        </span>
+        <span className="shrink-0 font-mono text-[12px] text-kumo-subtle">{parts.method}</span>
+        {parts.keepEnd ? (
+          <span
+            className="min-w-0 flex-1 truncate text-left font-mono text-[12px] text-kumo-default"
+            dir="rtl"
+            title={parts.path}
+          >
+            <bdi>{parts.path || '/'}</bdi>
+          </span>
+        ) : (
+          <span className="min-w-0 truncate font-mono text-[12px] text-kumo-default">
+            {parts.path || '/'}
+          </span>
+        )}
+      </span>
+      <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-kumo-subtle">
+        <span className="shrink-0 tabular-nums" title={exactTime(parts.at)}>
+          {relativeTime(parts.at, now)}
+        </span>
+        <span aria-hidden>·</span>
+        <span className="min-w-0 truncate font-mono">{parts.who}</span>
+        {(parts.extras ?? []).map((extra) => (
+          <span key={extra} className="flex min-w-0 shrink items-center gap-1.5">
+            <span aria-hidden>·</span>
+            <span className="min-w-0 truncate font-mono">{extra}</span>
+          </span>
+        ))}
+        {parts.flip && (
+          <span className="shrink-0 text-kumo-warning" data-testid="decision-flip">
+            → {parts.flip === 'allow' ? 'allowed' : 'denied'} by the draft
+          </span>
+        )}
+        {lines.length > 0 && (
+          <span className="ml-auto shrink-0 font-mono">
+            {lines.length === 1 ? `line ${lines[0]}` : `lines ${lines.join(', ')}`}
+          </span>
+        )}
+      </span>
+    </>
   )
 }
 
@@ -232,7 +416,7 @@ function DecisionList<T>({
   itemKey,
   now,
   onOpen,
-  renderRow,
+  row: rowOf,
   gaps,
   renderGap,
 }: {
@@ -240,7 +424,7 @@ function DecisionList<T>({
   itemKey: (item: T) => string
   now: number
   onOpen: (item: T) => void
-  renderRow: (item: T, now: number) => ReactNode
+  row: (item: T) => DecisionRowParts
   gaps: ReadonlyMap<string, number | null> | undefined
   renderGap: ((missed: number | null) => ReactNode) | undefined
 }) {
@@ -289,7 +473,7 @@ function DecisionList<T>({
                 data-testid="decision-row"
                 data-decision-id={itemKey(item)}
               >
-                {renderRow(item, now)}
+                <DecisionRow parts={rowOf(item)} now={now} />
               </button>
             </li>
           )
