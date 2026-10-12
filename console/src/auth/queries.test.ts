@@ -80,6 +80,26 @@ describe('the users list', () => {
     expect(client.getQueryData<UsersFigures>(list.figuresKey)?.tookMicros).toBe(180)
   })
 
+  it('reads a page again with the rows that arrived in it when asked to', async () => {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', (url: string) => {
+      asked.push(url)
+      return Promise.resolve(
+        new Response(JSON.stringify(page({})), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+    })
+    const list = usersList('demo-auth', { kind: 'project' }, '', 'created:desc', client)
+    await list.fetchPage({}, new AbortController().signal)
+    await list.fetchPage({ cursor: 'n1', limit: 103 }, new AbortController().signal)
+    expect(asked.map((url) => new URL(url, 'http://x').searchParams.get('limit'))).toEqual([
+      '100',
+      '103',
+    ])
+  })
+
   it('writes the recounted figures from a live batch read and hands the answer on unchanged', async () => {
     const list = usersList('demo-auth', { kind: 'project' }, 'is:disabled', 'created:desc', client)
     client.setQueryData<UsersFigures>(list.figuresKey, {

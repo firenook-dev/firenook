@@ -163,7 +163,15 @@ export function usersList(
     fetchPage: async (page, signal) => {
       const answer = await getUsers(
         project,
-        { tenant, q, sort, cursor: page.cursor, before: page.before, limit: PAGE_SIZE },
+        {
+          tenant,
+          q,
+          sort,
+          cursor: page.cursor,
+          before: page.before,
+          // A page read again with new rows in it asks for them too (`useCursorRows`).
+          limit: page.limit ?? PAGE_SIZE,
+        },
         signal,
       )
       const figures = figuresOfPage(answer)
@@ -230,7 +238,7 @@ export const claimKeysQuery = (project: string, tenant: string | undefined) =>
 export function tenantsList(project: string, q: string) {
   const queryKey = authKeys.tenants(project, q)
   const fetchPage = (page: CursorPageParam, signal: AbortSignal) =>
-    getTenants(project, { q, cursor: page.cursor, limit: PAGE_SIZE }, signal)
+    getTenants(project, { q, cursor: page.cursor, limit: page.limit ?? PAGE_SIZE }, signal)
   return {
     queryKey,
     fetchPage,
