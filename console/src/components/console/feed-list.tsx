@@ -61,6 +61,10 @@ export function useFeedPending<T>(
   paused: boolean,
   rowKey: (item: T) => string,
 ): number {
+  // It reads the store's rows while rendering (the newest key when the feed
+  // pauses, the rows after it since), and the store is mutable: the compiler
+  // may keep such a read for as long as the store is the same object.
+  'use no memo'
   useFeed(store)
   const [mark, setMark] = useState<{ paused: boolean; key: string | undefined }>(() => ({
     paused,

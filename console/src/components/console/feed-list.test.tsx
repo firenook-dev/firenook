@@ -171,6 +171,28 @@ describe('FeedList', () => {
     expect(scroller().scrollTop).toBe(100 * 28)
   })
 
+  it('counts from the newest row each time it pauses, not the first time', async () => {
+    const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
+    render(<Feed store={store} />)
+    act(() => store.push(lines(100)))
+    await frame()
+    readerScrolls(500)
+    act(() => store.push(lines(5, 100)))
+    await frame()
+    expect(screen.getByTestId('pending')).toHaveTextContent('5')
+    fireEvent.click(screen.getByTestId('jump-to-latest'))
+    await frame()
+    act(() => store.push(lines(10, 105)))
+    await frame()
+    expect(screen.getByTestId('pending')).toHaveTextContent('0')
+    // Paused again: what arrived while it followed is not news.
+    readerScrolls(500)
+    act(() => store.push(lines(3, 115)))
+    await frame()
+    expect(screen.getByTestId('following')).toHaveTextContent('false')
+    expect(screen.getByTestId('pending')).toHaveTextContent('3')
+  })
+
   it('never pauses for its own scrolling, and follows again when the reader reaches the edge', async () => {
     const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
     render(<Feed store={store} startPaused />)

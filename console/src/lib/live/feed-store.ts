@@ -47,6 +47,22 @@ export interface FeedStore<T> {
   onEvict(listener: (keys: readonly string[]) => void): () => void
   subscribe(listener: () => void): () => void
   version(): number
+  /** The figures readers draw from, one object per change (`useFeed` hands it out). */
+  snapshot(): FeedSnapshot
+}
+
+/**
+ * A feed's figures at one change. The store itself is mutable and outside
+ * React, so a component reads these from the object `useFeed` returns,
+ * never by calling the store while it renders: the React compiler keeps a
+ * call's answer for as long as its arguments are the same objects, and the
+ * store is always the same object.
+ */
+export interface FeedSnapshot {
+  size: number
+  version: number
+  dropped: number
+  pending: number
 }
 
 /** Non-item rows a feed keeps at most, so markers alone can never grow it without bound. */
@@ -100,6 +116,7 @@ export function createFeedStore<T>(options: {
   let paused = false
   let counted = 0
   let changes = 0
+  let figures: FeedSnapshot = { size: 0, version: 0, dropped: 0, pending: 0 }
   const listeners = new Set<() => void>()
   const evictListeners = new Set<(keys: readonly string[]) => void>()
   const schedule = frameScheduler(() => {
@@ -296,16 +313,15 @@ export function createFeedStore<T>(options: {
       }
     },
     version: () => changes,
+    snapshot() {
+      if (figures.version !== changes)
+        figures = { size: count, version: changes, dropped: evicted, pending: counted }
+      return figures
+    },
   }
 }
 
-/** Re-renders at most once per animation frame. */
-export function useFeed<T>(store: FeedStore<T>): {
-  size: number
-  version: number
-  dropped: number
-  pending: number
-} {
-  const version = useSyncExternalStore(store.subscribe, store.version, store.version)
-  return { size: store.size(), version, dropped: store.dropped(), pending: store.pending() }
+/** Re-renders at most once per animation frame, with the figures of the latest change. */
+export function useFeed<T>(store: FeedStore<T>): FeedSnapshot {
+  return useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot)
 }

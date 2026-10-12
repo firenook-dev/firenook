@@ -58,6 +58,21 @@ describe('the feed store', () => {
     expect(store.version()).toBe(1_000)
   })
 
+  it('hands its readers one figures object per change, the same one until the next', () => {
+    const store = createFeedStore<Line>({ max: 2, key: (item) => item.id, pausedMode: 'freeze' })
+    const empty = store.snapshot()
+    expect(empty).toEqual({ size: 0, version: 0, dropped: 0, pending: 0 })
+    expect(store.snapshot()).toBe(empty)
+    store.push(lines('a', 'b', 'c'))
+    const filled = store.snapshot()
+    expect(filled).toEqual({ size: 2, version: 1, dropped: 1, pending: 0 })
+    expect(filled).not.toBe(empty)
+    expect(store.snapshot()).toBe(filled)
+    store.pause()
+    store.push(lines('d'))
+    expect(store.snapshot()).toEqual({ size: 2, version: 3, dropped: 1, pending: 1 })
+  })
+
   it('upserts in place, keeping the position, and appends what it does not know', () => {
     const store = createFeedStore<Line>({ max: 10, key: (item) => item.id })
     store.push(lines('a', 'b', 'c'))
