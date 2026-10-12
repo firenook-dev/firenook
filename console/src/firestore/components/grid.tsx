@@ -51,6 +51,7 @@ import {
 import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
 import { childrenOf, describeChildren, patternOf, workbenchSchemaQuery } from '../schema'
+import { useGridSteps } from '../grid-steps'
 import { useSelection } from '../selection'
 import { type FsDocument, formatNumber, isPartial } from '../value'
 import { CellEditor } from './cell-editor'
@@ -335,6 +336,22 @@ export function Grid() {
     virtualizer.scrollToIndex(next, { align: 'auto' })
     if (workbench.selectedDocument) workbench.selectDocument(document.path)
   }
+  // The inspector's chevrons step as ↑ ↓ do, from the open document.
+  const mover = useRef(moveRow)
+  useLayoutEffect(() => {
+    mover.current = moveRow
+  })
+  const openIndex = workbench.selectedDocument
+    ? documents.findIndex((document) => document.path === workbench.selectedDocument)
+    : -1
+  const count = documents.length
+  useLayoutEffect(() => {
+    useGridSteps.setState({
+      previous: openIndex > 0 ? () => mover.current(-1) : undefined,
+      next: openIndex !== -1 && openIndex < count - 1 ? () => mover.current(1) : undefined,
+    })
+  }, [openIndex, count])
+  useEffect(() => () => useGridSteps.setState({ previous: undefined, next: undefined }), [])
   const moveField = (step: 1 | -1) => {
     const row = current()
     if (!row) return

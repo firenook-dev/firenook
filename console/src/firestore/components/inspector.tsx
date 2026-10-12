@@ -12,6 +12,8 @@ import {
 } from '@cloudflare/kumo'
 import {
   ArrowSquareOutIcon,
+  CaretDownIcon,
+  CaretUpIcon,
   CodeIcon,
   CopyIcon,
   FolderIcon,
@@ -22,7 +24,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { statusQuery } from '@/api/queries'
 import { PanelTitle } from '@/components/kit'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useCreateDialog } from '../create'
 import { CODE_TARGETS, type CodeTarget, documentAsCode } from '../query'
 import { documentQuery } from '../queries'
@@ -47,11 +49,14 @@ import {
   relativeTime,
 } from '../value'
 import { CodeBlock } from '@/components/console/code-block'
+import { StepButton } from '@/components/console/inspector'
 import { CODE_LABEL_AT, useInspectorWidth } from '@/components/console/inspector-width'
 import { WidthHandle } from '@/components/console/width-handle'
 import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
 import { TriggerChip } from './trigger-chip'
+import { useLayout } from '@/lib/layout'
+import { useGridSteps } from '../grid-steps'
 import { useWorkbench } from './workbench-context'
 
 /** Where an app sends REST calls: the Firestore port the engine advertises. */
@@ -71,6 +76,11 @@ function readSize(path: string, nodes: readonly DraftNode[]): SizeReading {
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
   const { width } = useInspectorWidth('firestore')
+  const steps = useGridSteps()
+  // Counted while open, as the kit's inspector is: on a narrow window the
+  // section panel steps aside for it.
+  const inspectorOpened = useLayout((state) => state.inspectorOpened)
+  useEffect(() => inspectorOpened(), [inspectorOpened])
   const document = useQuery(documentQuery(workbench.scope, path))
   // The editor below holds the draft; the header up here says how big it
   // is. What the editor last reported is kept against the editor it came
@@ -188,6 +198,22 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
             }
           />
         )}
+        <span className="flex shrink-0 items-center gap-0.5">
+          <StepButton
+            label="Previous document"
+            keyHint="↑"
+            icon={<CaretUpIcon />}
+            onClick={steps.previous}
+            testId="inspector-prev"
+          />
+          <StepButton
+            label="Next document"
+            keyHint="↓"
+            icon={<CaretDownIcon />}
+            onClick={steps.next}
+            testId="inspector-next"
+          />
+        </span>
         <Button
           variant="ghost"
           size="sm"
