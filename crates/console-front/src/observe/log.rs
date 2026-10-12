@@ -467,6 +467,31 @@ impl ConsoleLog {
             .collect()
     }
 
+    /// The newest `limit` problems, newest first, from the problem ring.
+    pub(crate) fn recent_problems(&self, limit: usize) -> Vec<Arc<LogMeta>> {
+        self.problems
+            .newest(limit)
+            .into_iter()
+            .rev()
+            .map(|entry| entry.meta)
+            .collect()
+    }
+
+    /// Lines per minute over the hour ending now, oldest first.
+    pub(crate) fn hour(&self, now_ms: i64) -> [LogLevelCounts; 60] {
+        let now = now_ms.div_euclid(60_000);
+        let state = lock(&self.shared.state);
+        let mut hour = [LogLevelCounts::default(); 60];
+        for (offset, slot) in hour.iter_mut().enumerate() {
+            let index = now - 59 + i64::try_from(offset).unwrap_or(0);
+            let minute = state.minutes[minute_slot(index)];
+            if minute.index == index {
+                *slot = minute.counts;
+            }
+        }
+        hour
+    }
+
     /// The line at `seq`, from the main ring or the problem ring.
     pub(crate) fn get(&self, seq: u64) -> Option<Arc<LogMeta>> {
         let find = |lines: Vec<firenook_suite_front::Entry<Arc<LogMeta>>>| {

@@ -519,3 +519,201 @@ fn banner_warnings_are_notices_and_their_records_unchanged() {
     assert_eq!(configured.kind, Some(kinds::ENGINE_CONFIGURED));
     assert!(kinds::is_internal(kinds::ENGINE_CONFIGURED));
 }
+
+#[test]
+fn the_engine_details_say_how_the_engine_was_started() {
+    let config = SuiteConfig {
+        services: ServiceSelection::parse("firestore,functions").expect("selection"),
+        debug_log: Some(std::path::PathBuf::from("/work/debug.log")),
+        ..test_config()
+    };
+    let details = engine_details(&config, None);
+    let engine = details.config.expect("a suite's configuration");
+    assert_eq!(engine.host, "127.0.0.1");
+    assert_eq!(engine.connect_host, "127.0.0.1");
+    assert_eq!(engine.debug_log.as_deref(), Some("/work/debug.log"));
+    assert!(engine.demo_project);
+    assert!(engine.diagnostics);
+    assert_eq!(engine.default_bucket, "demo-diagnostics.appspot.com");
+    assert_eq!(engine.selected, ["functions", "firestore"]);
+    assert_eq!(
+        engine_details(&test_config(), None)
+            .config
+            .expect("config")
+            .selected,
+        Vec::<String>::new(),
+        "every service started: nothing was selected"
+    );
+}
+
+#[test]
+fn the_connection_lists_what_the_sdks_read_for_running_services_only() {
+    let names = |config: &SuiteConfig| {
+        connection_env(config, None)
+            .into_iter()
+            .map(|variable| variable.name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names(&test_config()),
+        [
+            "GCLOUD_PROJECT",
+            "GOOGLE_CLOUD_PROJECT",
+            "FIRESTORE_EMULATOR_HOST",
+            "FIREBASE_AUTH_EMULATOR_HOST",
+            "FIREBASE_STORAGE_EMULATOR_HOST",
+            "STORAGE_EMULATOR_HOST",
+            "FIREBASE_EMULATOR_HUB",
+            "PUBSUB_EMULATOR_HOST",
+            "CLOUD_TASKS_EMULATOR_HOST",
+            "CLOUD_EVENTARC_EMULATOR_HOST",
+        ]
+    );
+    let firestore_only = SuiteConfig {
+        services: ServiceSelection::parse("firestore").expect("selection"),
+        ..test_config()
+    };
+    assert_eq!(
+        names(&firestore_only),
+        [
+            "GCLOUD_PROJECT",
+            "GOOGLE_CLOUD_PROJECT",
+            "FIRESTORE_EMULATOR_HOST",
+            "FIREBASE_EMULATOR_HUB"
+        ]
+    );
+    let env = connection_env(&test_config(), None);
+    let value = |name: &str| {
+        env.iter()
+            .find(|variable| variable.name == name)
+            .expect("listed")
+            .clone()
+    };
+    assert_eq!(value("FIRESTORE_EMULATOR_HOST").value, "127.0.0.1:1");
+    assert_eq!(value("STORAGE_EMULATOR_HOST").value, "http://127.0.0.1:3");
+    assert_eq!(
+        value("CLOUD_EVENTARC_EMULATOR_HOST").value,
+        "http://127.0.0.1:10"
+    );
+    assert_eq!(
+        value("CLOUD_TASKS_EMULATOR_HOST").set_by,
+        OverviewEnvSource::Functions
+    );
+    assert_eq!(
+        value("PUBSUB_EMULATOR_HOST").set_by,
+        OverviewEnvSource::Exec
+    );
+    // Pinned against the two places that set them: the npm CLI's exec
+    // environment and the Functions workers' environment.
+    let exec = include_str!("../../../../packages/cli/src/runtime.mjs");
+    let workers = include_str!("../../../functions-runtime/src/lib.rs");
+    for variable in &env {
+        let source = match variable.set_by {
+            OverviewEnvSource::Exec => exec,
+            OverviewEnvSource::Functions => workers,
+        };
+        assert!(
+            source.contains(&variable.name),
+            "{} is not set where the list says",
+            variable.name
+        );
+        if variable.set_by == OverviewEnvSource::Exec && variable.name != "GOOGLE_CLOUD_PROJECT" {
+            assert!(
+                workers.contains(&variable.name),
+                "{} also reaches Functions workers",
+                variable.name
+            );
+        }
+    }
+    let with_credentials = connection_env(
+        &test_config(),
+        Some((
+            "/work/demo-adc.json".to_owned(),
+            "{\"type\":\"authorized_user\"}".to_owned(),
+        )),
+    );
+    let credentials = with_credentials
+        .iter()
+        .find(|variable| variable.name == "GOOGLE_APPLICATION_CREDENTIALS")
+        .expect("listed");
+    assert_eq!(credentials.value, "/work/demo-adc.json");
+    assert_eq!(
+        credentials.note.as_deref(),
+        Some("{\"type\":\"authorized_user\"}")
+    );
+}
+
+#[test]
+fn only_the_demo_credentials_stub_is_ever_shown() {
+    let directory =
+        std::env::temp_dir().join(format!("firenook-observe-adc-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("directory");
+    let stub = directory.join("demo-adc.json");
+    std::fs::write(
+        &stub,
+        r#"{"type":"authorized_user","client_id":"demo","client_secret":"demo","refresh_token":"demo"}"#,
+    )
+    .expect("written");
+    let real = directory.join("adc.json");
+    std::fs::write(
+        &real,
+        r#"{"type":"authorized_user","client_id":"1234.apps","client_secret":"s3cret","refresh_token":"1//real"}"#,
+    )
+    .expect("written");
+    let (path, note) = demo_credentials(&stub).expect("the stub is shown");
+    assert_eq!(path, stub.display().to_string());
+    assert!(note.contains("\"client_id\":\"demo\""), "{note}");
+    assert_eq!(demo_credentials(&real), None);
+    assert_eq!(demo_credentials(&directory.join("missing.json")), None);
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+#[test]
+fn notices_say_what_the_startup_banner_warned_about() {
+    let codes = |config: &SuiteConfig| {
+        notices(config)
+            .into_iter()
+            .map(|notice| notice.code)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(codes(&test_config()), Vec::<String>::new());
+    let risky = SuiteConfig {
+        project_id: "my-prod".into(),
+        host: "0.0.0.0".into(),
+        diagnostics: false,
+        services: ServiceSelection::parse("firestore,functions").expect("selection"),
+        ..test_config()
+    };
+    let shown = notices(&risky);
+    assert_eq!(
+        shown
+            .iter()
+            .map(|notice| notice.code.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "nonDemoProject",
+            "missingEmulators",
+            "publicHost",
+            "diagnosticsOff"
+        ]
+    );
+    assert_eq!(shown[0].level, OverviewNoticeLevel::Warn);
+    assert!(
+        shown[0].message.contains("\"my-prod\""),
+        "{}",
+        shown[0].message
+    );
+    assert!(
+        shown[1].message.ends_with("auth, pubsub, storage."),
+        "{}",
+        shown[1].message
+    );
+    assert!(shown[2].message.contains("0.0.0.0"));
+    assert_eq!(shown[3].level, OverviewNoticeLevel::Info);
+    // A demo project's missing emulators fail rather than reach production.
+    let demo = SuiteConfig {
+        services: ServiceSelection::parse("functions").expect("selection"),
+        ..test_config()
+    };
+    assert_eq!(codes(&demo), Vec::<String>::new());
+}

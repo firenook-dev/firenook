@@ -5,16 +5,18 @@ pub(crate) mod fields;
 pub(crate) mod firestore_data;
 pub(crate) mod log;
 pub(crate) mod logs;
+pub(crate) mod overview;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use firenook_suite_front::LoggingRuntime;
+use firenook_suite_front::{Cursor, LoggingRuntime, OverviewEngineDetails, OverviewNotice};
 use futures_util::StreamExt as _;
 use futures_util::stream::{self, BoxStream};
 
 use crate::live::LiveTopic;
+use crate::live::badges::{BadgeKind, BadgeNoun, BadgeTone};
 use crate::section::{
     Section, SectionContext, SectionStatus, SectionSummary, SummaryFigure, SummaryUnit,
 };
@@ -33,6 +35,10 @@ pub struct ObserveConsole {
     /// The console log; `None` for a console built without a suite log
     /// (`--no-ui`, tests), whose Logs routes then say so.
     pub(crate) log: Option<ConsoleLog>,
+    /// How the engine was started and what an app needs to reach it.
+    pub(crate) engine: Arc<OverviewEngineDetails>,
+    /// The configuration notices the Overview shows.
+    pub(crate) notices: Arc<Vec<OverviewNotice>>,
 }
 
 impl ObserveConsole {
@@ -55,6 +61,8 @@ impl ObserveConsole {
         Self {
             logging: logging.clone(),
             log: log.map(|log| ConsoleLog::clone(&log)),
+            engine: Arc::default(),
+            notices: Arc::default(),
         }
     }
 
@@ -65,7 +73,22 @@ impl ObserveConsole {
         Self {
             logging: LoggingRuntime::new(),
             log: None,
+            engine: Arc::default(),
+            notices: Arc::default(),
         }
+    }
+
+    /// The same console, with the engine's details and configuration
+    /// notices for the Overview.
+    #[must_use]
+    pub fn with_overview(
+        mut self,
+        engine: OverviewEngineDetails,
+        notices: Vec<OverviewNotice>,
+    ) -> Self {
+        self.engine = Arc::new(engine);
+        self.notices = Arc::new(notices);
+        self
     }
 }
 
@@ -78,17 +101,26 @@ impl Section for ObserveSection {
     }
 
     fn router(&self, context: &SectionContext) -> Router {
+        if let Some(log) = &self.0.log {
+            spawn_badges(log, context);
+        }
         logs::router(logs::LogsApi {
             log: self.0.log.clone(),
             project: context.project.clone(),
             shutdown: context.shutdown.clone(),
         })
+        .merge(overview::router(self.overview()))
     }
 
     fn topics(&self, _context: &SectionContext) -> Vec<Arc<dyn LiveTopic>> {
-        vec![Arc::new(logs::LogsTopic {
-            log: self.0.log.clone(),
-        })]
+        vec![
+            Arc::new(logs::LogsTopic {
+                log: self.0.log.clone(),
+            }),
+            Arc::new(overview::OverviewTopic {
+                api: self.overview(),
+            }),
+        ]
     }
 
     /// Lines kept and errors since the engine started, for the Overview's
@@ -112,6 +144,75 @@ impl Section for ObserveSection {
             .boxed(),
         )
     }
+}
+
+impl ObserveSection {
+    fn overview(&self) -> overview::OverviewApi {
+        overview::OverviewApi {
+            log: self.0.log.clone(),
+            engine: self.0.engine.clone(),
+            notices: self.0.notices.clone(),
+        }
+    }
+}
+
+/// Keeps the two badges observe publishes at the log's totals, until the
+/// suite stops: `logs.errors` (attention) counts every error line, and
+/// `firestore.denials` (neutral) every app request the Firestore rules
+/// refused; denials of the console's own reads are not counted. Each
+/// records the newest counted line's cursor, so the badge link opens at
+/// what is new.
+fn spawn_badges(log: &ConsoleLog, context: &SectionContext) {
+    let errors = context.badges.handle(
+        "logs.errors",
+        BadgeKind::Counter,
+        BadgeNoun::new("new error", "new errors"),
+    );
+    let denials = context.badges.handle(
+        "firestore.denials",
+        BadgeKind::Counter,
+        BadgeNoun::new("rules denial", "rules denials"),
+    );
+    let log = log.clone();
+    let mut changes = log.changes();
+    let stopped = context.shutdown.clone().stopped();
+    tokio::spawn(async move {
+        tokio::pin!(stopped);
+        let epoch = log.epoch();
+        let (mut counted_errors, mut counted_denials) = (0, 0);
+        loop {
+            let totals = log.totals();
+            if let Some(seq) = totals.newest_error
+                && totals.levels.error > counted_errors
+            {
+                errors.add_at(
+                    totals.levels.error - counted_errors,
+                    BadgeTone::Attention,
+                    Cursor { epoch, seq },
+                );
+                counted_errors = totals.levels.error;
+            }
+            if let Some(seq) = totals.newest_denial
+                && totals.denials > counted_denials
+            {
+                denials.add_at(
+                    totals.denials - counted_denials,
+                    BadgeTone::Neutral,
+                    Cursor { epoch, seq },
+                );
+                counted_denials = totals.denials;
+            }
+            tokio::select! {
+                biased;
+                () = &mut stopped => break,
+                moved = changes.changed() => {
+                    if moved.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// How often a section's summary may tick while its counts move.
@@ -161,6 +262,8 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     LogFacets::export_all(config).expect("TypeScript bindings written");
     LogFacetCount::export_all(config).expect("TypeScript bindings written");
     LogHistogram::export_all(config).expect("TypeScript bindings written");
+    overview::OverviewState::export_all(config).expect("TypeScript bindings written");
+    OverviewEngineDetails::export_all(config).expect("TypeScript bindings written");
     let directory = config.out_dir().join("observe");
     std::fs::create_dir_all(&directory).expect("generated/observe/ created");
     std::fs::write(directory.join("logKinds.ts"), log_kinds_module())
@@ -194,3 +297,7 @@ fn log_kinds_module() -> String {
     module.push_str("];\n");
     module
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

@@ -573,6 +573,14 @@ fn problems_outlive_a_flood() {
             .sum::<u64>(),
         3
     );
+    // The Overview's recent problems read the problem ring alone.
+    assert_eq!(
+        log.recent_problems(8)
+            .iter()
+            .map(|line| entry(line).message)
+            .collect::<Vec<_>>(),
+        ["error 2", "error 1", "error 0"]
+    );
     // The reload marker left both rings; its time is still known.
     assert_eq!(log.get(1).map(|line| line.seq), None);
     assert_eq!(log.last_reload().map(|(seq, _)| seq), Some(1));
@@ -620,4 +628,25 @@ fn times_have_exactly_three_fraction_digits() {
     let time = OffsetDateTime::from_unix_timestamp(1_760_241_969).expect("time");
     assert_eq!(format_time(time), "2025-10-12T04:06:09.000Z");
     assert_eq!(format_millis(1_760_241_969_126), "2025-10-12T04:06:09.126Z");
+}
+
+#[test]
+fn the_minute_volume_counts_the_last_hour_and_zeroes_idle_minutes() {
+    let log = log();
+    log.accept(line(LogLevel::Error, "hub", "e"));
+    log.accept(line(LogLevel::Info, "hub", "i"));
+    let now = log.lines(false)[0].time_ms;
+    let hour = log.hour(now);
+    assert_eq!(hour[59].error, 1);
+    assert_eq!(hour[59].info, 1);
+    assert_eq!(hour.iter().map(LogLevelCounts::total).sum::<u64>(), 2);
+    // Half an hour later the minute has moved back; an hour later it is gone.
+    assert_eq!(log.hour(now + 30 * 60_000)[29].total(), 2);
+    assert_eq!(
+        log.hour(now + 61 * 60_000)
+            .iter()
+            .map(LogLevelCounts::total)
+            .sum::<u64>(),
+        0
+    );
 }

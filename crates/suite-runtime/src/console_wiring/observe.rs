@@ -20,7 +20,11 @@ use firenook_functions_runtime::LogEvent;
 use firenook_rules_runtime::{
     Denial, DenialOrigin, RequestOperation, RulesEvent, RulesOrigin, RulesRuntime,
 };
-use firenook_suite_front::{Audience, EntityRef, LogInput, LogLevel, LoggingRuntime, kinds};
+use firenook_suite_front::{
+    Audience, EntityRef, LogInput, LogLevel, LoggingRuntime, OverviewConnection,
+    OverviewEngineConfig, OverviewEngineDetails, OverviewEnvSource, OverviewEnvVariable,
+    OverviewNotice, OverviewNoticeLevel, kinds,
+};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::broadcast;
@@ -28,6 +32,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::Instant;
 
 use super::{FunctionsConsoleOptions, HookContext};
+use crate::{ServiceSelection, SuiteConfig};
 
 /// Denials logged one by one per second, per origin; the rest are counted
 /// and summed up once a second.
@@ -36,9 +41,212 @@ const DENIALS_PER_SECOND: u32 = 50;
 const SUMMARY_EVERY: Duration = Duration::from_secs(1);
 
 /// Logs' and the Overview's console: the suite's log, with the console log
-/// `prepare_logging` installed in it.
+/// `prepare_logging` installed in it, and how the engine was started.
 pub(crate) fn observe_console(context: &HookContext<'_>) -> ObserveConsole {
-    ObserveConsole::over(context.logging)
+    let demo_credentials = std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
+        .map(std::path::PathBuf::from)
+        .and_then(|path| demo_credentials(&path));
+    ObserveConsole::over(context.logging).with_overview(
+        engine_details(context.config, demo_credentials),
+        notices(context.config),
+    )
+}
+
+/// The engine's configuration and what an app needs to reach it.
+/// `credentials` is the demo credentials file `emulators:exec` hands its
+/// command, when the engine was given one (its path and content).
+pub(crate) fn engine_details(
+    config: &SuiteConfig,
+    credentials: Option<(String, String)>,
+) -> OverviewEngineDetails {
+    let shown = |path: &std::path::Path| path.display().to_string();
+    OverviewEngineDetails {
+        config: Some(OverviewEngineConfig {
+            host: config.host.clone(),
+            connect_host: config.connect_host(),
+            project_dir: shown(&config.project_dir),
+            firebase_json: shown(&config.firebase_json),
+            diagnostics: config.diagnostics,
+            debug_log: config.debug_log.as_deref().map(shown),
+            single_project_mode: config.single_project_mode,
+            offline: config.offline,
+            demo_project: config.is_demo_project(),
+            node: shown(&config.node),
+            default_bucket: config.default_bucket.clone(),
+            selected: if config.services == ServiceSelection::ALL {
+                Vec::new()
+            } else {
+                config
+                    .services
+                    .names()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect()
+            },
+        }),
+        connection: OverviewConnection {
+            env: connection_env(config, credentials),
+        },
+    }
+}
+
+/// The environment variables the SDKs read, for the running services:
+/// those `firenook emulators:exec` sets for its command (the npm CLI's
+/// `prepareLaunch`), then those only Functions workers get.
+pub(crate) fn connection_env(
+    config: &SuiteConfig,
+    credentials: Option<(String, String)>,
+) -> Vec<OverviewEnvVariable> {
+    let services = &config.services;
+    let address = |port: u16| config.endpoint(port);
+    let variable =
+        |name: &str, value: String, service: &str, set_by: OverviewEnvSource| OverviewEnvVariable {
+            name: name.to_owned(),
+            value,
+            service: service.to_owned(),
+            set_by,
+            note: None,
+        };
+    let exec = OverviewEnvSource::Exec;
+    let mut env = vec![
+        variable("GCLOUD_PROJECT", config.project_id.clone(), "project", exec),
+        variable(
+            "GOOGLE_CLOUD_PROJECT",
+            config.project_id.clone(),
+            "project",
+            exec,
+        ),
+    ];
+    if services.firestore {
+        env.push(variable(
+            "FIRESTORE_EMULATOR_HOST",
+            address(config.ports.firestore),
+            "firestore",
+            exec,
+        ));
+    }
+    if services.auth {
+        env.push(variable(
+            "FIREBASE_AUTH_EMULATOR_HOST",
+            address(config.ports.auth),
+            "auth",
+            exec,
+        ));
+    }
+    if services.storage {
+        env.push(variable(
+            "FIREBASE_STORAGE_EMULATOR_HOST",
+            address(config.ports.storage),
+            "storage",
+            exec,
+        ));
+        env.push(variable(
+            "STORAGE_EMULATOR_HOST",
+            config.origin(config.ports.storage),
+            "storage",
+            exec,
+        ));
+    }
+    env.push(variable(
+        "FIREBASE_EMULATOR_HUB",
+        address(config.ports.hub),
+        "hub",
+        exec,
+    ));
+    if services.pubsub {
+        env.push(variable(
+            "PUBSUB_EMULATOR_HOST",
+            address(config.ports.pubsub),
+            "pubsub",
+            exec,
+        ));
+    }
+    if let Some((path, content)) = credentials {
+        env.push(OverviewEnvVariable {
+            note: Some(content),
+            ..variable("GOOGLE_APPLICATION_CREDENTIALS", path, "project", exec)
+        });
+    }
+    if services.functions {
+        let functions = OverviewEnvSource::Functions;
+        env.push(variable(
+            "CLOUD_TASKS_EMULATOR_HOST",
+            address(config.ports.tasks),
+            "tasks",
+            functions,
+        ));
+        env.push(variable(
+            "CLOUD_EVENTARC_EMULATOR_HOST",
+            config.origin(config.ports.eventarc),
+            "eventarc",
+            functions,
+        ));
+    }
+    env
+}
+
+/// The demo credentials file at `path` (its path and compact content),
+/// when it is the authorized-user stub `emulators:exec` writes; any other
+/// file is a developer's real credentials and is never shown.
+pub(crate) fn demo_credentials(path: &std::path::Path) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let demo = value["type"] == "authorized_user"
+        && value["client_id"] == "demo"
+        && value["client_secret"] == "demo"
+        && value["refresh_token"] == "demo"
+        && value.as_object().is_some_and(|fields| fields.len() == 4);
+    demo.then(|| (path.display().to_string(), value.to_string()))
+}
+
+/// The configuration notices the Overview keeps showing: the facts the
+/// startup banner warns about once.
+pub(crate) fn notices(config: &SuiteConfig) -> Vec<OverviewNotice> {
+    let notice = |level, code: &str, message: String| OverviewNotice {
+        level,
+        code: code.to_owned(),
+        message,
+    };
+    let mut notices = Vec::new();
+    if !config.is_demo_project() {
+        notices.push(notice(
+            OverviewNoticeLevel::Warn,
+            "nonDemoProject",
+            format!(
+                "Project ID \"{}\" is not a demo project. The emulators never contact Firebase, but code that builds its own clients with real credentials can still reach the real project; a project ID starting with demo- rules that out.",
+                config.project_id
+            ),
+        ));
+        let missing = config.services.missing();
+        if config.services.functions && !missing.is_empty() {
+            notices.push(notice(
+                OverviewNoticeLevel::Warn,
+                "missingEmulators",
+                format!(
+                    "Functions run without these emulators, so calls your functions make to them reach production: {}.",
+                    missing.join(", ")
+                ),
+            ));
+        }
+    }
+    if !crate::is_loopback(&config.host) {
+        notices.push(notice(
+            OverviewNoticeLevel::Warn,
+            "publicHost",
+            format!(
+                "The emulators listen on {} and have no authentication: every service, its data and Functions execution are reachable from any device that can reach this machine.",
+                config.host
+            ),
+        ));
+    }
+    if !config.diagnostics {
+        notices.push(notice(
+            OverviewNoticeLevel::Info,
+            "diagnosticsOff",
+            "Diagnostics are off (--no-diagnostics), so the rules pages show no requests and no coverage.".to_owned(),
+        ));
+    }
+    notices
 }
 
 /// The suite's services are prepared; the console is not built yet. From
