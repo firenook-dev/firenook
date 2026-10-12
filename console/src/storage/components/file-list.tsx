@@ -7,7 +7,7 @@
 // and never asks for a thumbnail.
 
 import { Link } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef } from 'react'
 import type { StorageAccessVerdict } from '@/api/generated/storage/StorageAccessVerdict'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import {
@@ -43,6 +43,10 @@ export interface FileRow {
   lineText: (line: number) => string | undefined
   /** Bytes sent so far, while this tab uploads the file (0–1). */
   progress?: number | undefined
+  /** An upload of this tab that has not arrived yet: drawn, but nothing can be done with it. */
+  pending?: boolean | undefined
+  /** Renamed in place now (F2): its name is an input. */
+  renaming?: ((name: string | undefined) => void) | undefined
 }
 
 /** Where dragged widths and hidden columns are remembered. */
@@ -59,6 +63,12 @@ export function fileRows(
     access: AccessMap | undefined
     lineText: (line: number) => string | undefined
     progress?: ReadonlyMap<string, number> | undefined
+    /** Rows for uploads of this tab that have not arrived. */
+    pending?: boolean | undefined
+    /** The row renamed in place, and what its input reports. */
+    renaming?:
+      | { key: string; finish: (entry: StorageEntry, name: string | undefined) => void }
+      | undefined
   },
 ): FileRow[] {
   return entries.map((entry) => {
@@ -72,6 +82,11 @@ export function fileRows(
       access: options.access?.get(key),
       lineText: options.lineText,
       progress: options.progress?.get(key),
+      pending: options.pending,
+      renaming:
+        options.renaming?.key === key
+          ? (typed: string | undefined) => options.renaming?.finish(entry, typed)
+          : undefined,
     }
   })
 }
@@ -99,8 +114,61 @@ export function MiddleName({ name, className }: { name: string; className?: stri
   )
 }
 
+/** The name being typed over, in place: Enter renames, Escape leaves it, leaving the box renames. */
+function RenameInput({ row }: { row: FileRow }) {
+  const original = row.label.replace(/\/$/, '')
+  const dot = row.entry.type === 'file' ? original.lastIndexOf('.') : -1
+  // Enter, then the blur of the box leaving: one rename, not two.
+  const done = useRef(false)
+  const finish = (value: string | undefined) => {
+    if (done.current) return
+    done.current = true
+    row.renaming?.(value)
+  }
+  return (
+    <input
+      defaultValue={original}
+      // Opens with the name selected, not its extension, as a file manager does.
+      ref={(element) => {
+        if (!element) return
+        element.focus()
+        element.setSelectionRange(0, dot > 0 ? dot : original.length)
+      }}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          finish(event.currentTarget.value)
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          finish(undefined)
+        }
+      }}
+      onBlur={(event) => finish(event.currentTarget.value)}
+      aria-label={`Rename ${original}`}
+      spellCheck={false}
+      autoComplete="off"
+      className="h-6 min-w-0 flex-1 rounded-md bg-kumo-control px-1.5 font-mono text-[12px] text-kumo-default ring ring-kumo-focus ring-inset outline-none"
+      data-testid="rename-input"
+    />
+  )
+}
+
 function NameCell({ row }: { row: FileRow }) {
   const { entry } = row
+  if (row.renaming)
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        {entry.type === 'folder' ? (
+          <FolderGlyph empty={entry.empty} />
+        ) : (
+          <FileIcon contentType={entry.contentType} name={entry.name} />
+        )}
+        <RenameInput row={row} />
+      </span>
+    )
   if (entry.type === 'folder')
     return (
       <span className="flex min-w-0 items-center gap-2">
@@ -241,7 +309,8 @@ export function fileColumns(options: {
     },
   ]
   if (options.client)
-    columns.push({
+    // Right after the time: what this identity may do is what a client reads first.
+    columns.splice(4, 0, {
       id: 'access',
       header: 'Access',
       width: 168,

@@ -10,14 +10,15 @@
 import { Button } from '@cloudflare/kumo'
 import {
   CopySimpleIcon,
+  UploadSimpleIcon,
   FolderSimpleDashedIcon as FolderDashedGlyph,
   HardDrivesIcon as HardDrivesGlyph,
 } from '@phosphor-icons/react'
-import { useQuery } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { type DragEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
-import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectDetail'
 import type { Total } from '@/api/generated/Total'
+import { statusQuery } from '@/api/queries'
 import { EmptyState, NoMatch, QueryError } from '@/components/console/empty-state'
 import { FilterField } from '@/components/console/filter-field'
 import { IdentityPicker } from '@/components/console/identity-picker'
@@ -32,18 +33,32 @@ import { PanelToggle } from '@/components/shell/section-panel'
 import { formatBytes, formatNumber } from '@/lib/format'
 import { liveChannel } from '@/lib/live/channel'
 import { isTyping, useShortcuts } from '@/lib/shortcuts'
+import { toast } from '@/lib/toasts'
 import { useAccess } from '../access'
 import { StorageApiError, mediaUrl } from '../api'
+import { downloadUrl, storageAddress } from '../code'
 import { copyText } from '../copy'
 import { type EntryActions, entryMenu } from '../entry-menu'
 import { useFiles } from '../files-state'
 import { FILTER_PLACEHOLDER, filterFields } from '../filter'
 import { type Listing, useListing } from '../listing'
 import { useStorageObjectsLive, useStorageRulesLive } from '../live'
-import { gsUrl } from '../paths'
-import { folderQuery, objectsMetaQuery, profileQuery, rulesScope } from '../queries'
+import {
+  carriesFiles,
+  dragSummary,
+  filesFromDrop,
+  filesFromInput,
+  pasteMeaning,
+  pastedName,
+} from '../drop'
+import { baseName, gsUrl, parentOf } from '../paths'
+import { folderQuery, objectQuery, objectsMetaQuery, profileQuery, rulesScope } from '../queries'
 import { useStorageRecents, recentsKey } from '../recents'
 import { resetFileSelection, selectionFigures, useFileSelection } from '../selection'
+import { type UploadItem, isActive, useUploadQueue } from '../upload-queue-store'
+import { CreateFolderDialog } from './create-folder-dialog'
+import { DropOverlay } from './drop-overlay'
+import { useFileActions } from './file-actions'
 import { FileGrid } from './file-grid'
 import { type FileRow, FileList, fileRows } from './file-list'
 import { FoldersPanel } from './folders-panel'
@@ -54,6 +69,11 @@ import { StoragePathBar } from './path-bar'
 import { useRulesText } from './refusal-detail'
 import { DeniedPanel } from './denied-panel'
 import { SortMenu } from './sort-menu'
+import { StorageJobs } from './jobs'
+import { UploadDialog } from './upload-dialog'
+import { useUploadFlow } from './upload-flow'
+import { UploadMenu } from './upload-menu'
+import { UploadTray } from './upload-tray'
 
 /** How long the filter waits after the last key before it goes into the URL. */
 const FILTER_DEBOUNCE_MS = 300
@@ -61,33 +81,7 @@ const FILTER_DEBOUNCE_MS = 300
 /** The count slot's widest figures: a view that can go stale holds room for "N changes · Refresh" too. */
 const WIDEST = '0,000,000'
 
-/** What the page can do beyond what commit-by-commit features add. */
-export interface FilesExtras {
-  /** More actions for a row's menu. */
-  entryActions?: Partial<EntryActions>
-  /** More actions for the selection bar, before the destructive one. */
-  selectionActions?: ReactNode
-  /** Items for the panel's bucket menu. */
-  bucketMenu?: ReactNode
-  /** Row one's last group: the primary action. */
-  primary?: ReactNode
-  /** What a bucket that holds nothing offers. */
-  emptyActions?: ReactNode
-  /** Under the toolbar: job banners. */
-  banners?: ReactNode
-  /** More tools for the inspector's foot (download, move, duplicate). */
-  inspectorTools?: (object: StorageObjectDetail) => ReactNode
-  /** The inspector's destructive control. */
-  inspectorDanger?: (object: StorageObjectDetail) => ReactNode
-  /** Over the content column: the drop overlay, the upload tray. */
-  overlay?: ReactNode
-  /** Uploads in flight in this folder, by name (0–1), drawn in their rows. */
-  progress?: ReadonlyMap<string, number>
-}
-
-const NO_EXTRAS: FilesExtras = {}
-
-export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras }) {
+export function FilesWorkbench() {
   const files = useFiles()
   const listing = useListing(files)
   const live = useStorageObjectsLive(files.project, files.bucket, {
@@ -97,6 +91,29 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
   useStorageRulesLive(
     files.project,
     files.buckets.rulesMode === null ? undefined : rulesScope(files.buckets, files.bucket),
+  )
+
+  const fileActions = useFileActions({
+    prefix: files.prefix,
+    flat: files.flat,
+    q: files.q.trim() ? files.q : undefined,
+  })
+  const flow = useUploadFlow()
+  const filesInput = useRef<HTMLInputElement>(null)
+  const folderInput = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
+
+  // This tab's uploads into the folder on screen: their progress in their
+  // rows, and a row for each new name until the file arrives.
+  const uploads = useUploadQueue((state) => state.items)
+  const sending = uploads.filter(
+    (item) =>
+      isActive(item) &&
+      item.bucket === files.bucket &&
+      (files.flat ? item.name.startsWith(files.prefix) : parentOf(item.name) === files.prefix),
+  )
+  const progress = new Map(
+    sending.map((item) => [item.name, item.size > 0 ? item.loaded / item.size : 0]),
   )
 
   // The ticks belong to one listing: another folder, filter, order or identity drops them.
@@ -117,13 +134,33 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
 
   const access = useAccess(files.project, files.bucket, files.viewAs, listing.pages)
   const { line } = useRulesText()
-  const rows = fileRows(listing.rows.rows, {
+  const renaming = fileActions.renaming
+    ? {
+        key: fileActions.renaming,
+        finish: (entry: StorageEntry, name: string | undefined) => {
+          if (name === undefined) fileActions.cancelRename()
+          else fileActions.commitRename(entry, name)
+        },
+      }
+    : undefined
+  const listed = fileRows(listing.rows.rows, {
     prefix: files.prefix,
     flat: files.flat,
     access,
     lineText: line,
-    progress: extras.progress,
+    progress,
+    renaming,
   })
+  const known = new Set(listed.map((row) => row.key))
+  const pendingRows = fileRows(sending.filter((item) => !known.has(item.name)).map(pendingEntry), {
+    prefix: files.prefix,
+    flat: files.flat,
+    access,
+    lineText: line,
+    progress,
+    pending: true,
+  })
+  const rows = [...pendingRows, ...listed]
 
   // The files of the listing, in view order: the inspector's ↑ ↓ and Quick Look's ← →.
   const fileNames = rows.flatMap((row) => (row.entry.type === 'file' ? [row.key] : []))
@@ -133,10 +170,63 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
     return next === undefined ? undefined : () => files.openObject(next, { replace: true })
   }
 
+  // A drag of files over the content: where it would land, said by the overlay.
+  const [drag, setDrag] = useState<{ prefix: string; summary: string | undefined } | undefined>(
+    undefined,
+  )
+  const dragTarget = (event: DragEvent<HTMLElement>) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>('[data-key]')
+    const key = row?.dataset.key
+    return {
+      prefix: key !== undefined && key.endsWith('/') ? key : files.prefix,
+      summary: dragSummary(event.dataTransfer),
+    }
+  }
+  const dropInto = async (prefix: string, transfer: DataTransfer) => {
+    const dropped = await filesFromDrop(transfer)
+    if (dropped.length > 0) await flow.start(dropped, prefix)
+  }
+
+  // A paste on the page: an image uploads here; a gs:// URL of this project
+  // offers a copy here, as a file manager's copy and paste does.
+  const onPaste = (event: ClipboardEvent) => {
+    if (isTyping(event.target) || !event.clipboardData) return
+    const meaning = pasteMeaning(
+      { files: Array.from(event.clipboardData.files), text: event.clipboardData.getData('text') },
+      { buckets: files.buckets.buckets.map((entry) => entry.name), bucket: files.bucket },
+    )
+    if (meaning.kind === 'none') return
+    event.preventDefault()
+    if (meaning.kind === 'image') {
+      const name = pastedName(new Date(), meaning.file.type)
+      void flow.start(
+        [{ file: new File([meaning.file], name, { type: meaning.file.type }), path: name }],
+        files.prefix,
+      )
+      return
+    }
+    const { bucket: from, path: name } = meaning.location
+    toast({
+      key: 'storage-paste',
+      title: `Copy ${baseName(name)} here?`,
+      description: `From gs://${from}/${name} into ${files.prefix || `gs://${files.bucket}`}.`,
+      action: { label: 'Copy here', run: () => fileActions.copyHere(from, name) },
+    })
+  }
+  const pasteRef = useRef(onPaste)
+  useLayoutEffect(() => {
+    pasteRef.current = onPaste
+  })
+  useEffect(() => {
+    const listener = (event: ClipboardEvent) => pasteRef.current(event)
+    document.addEventListener('paste', listener)
+    return () => document.removeEventListener('paste', listener)
+  }, [])
+
   const [cursor, setCursor] = useState<StorageEntry | undefined>(undefined)
   const open = (entry: StorageEntry) => {
     if (entry.type === 'folder') files.goTo(entry.prefix)
-    else files.openObject(entry.name)
+    else if (!progress.has(entry.name) || known.has(entry.name)) files.openObject(entry.name)
   }
   const onCursor = (entry: StorageEntry) => {
     setCursor(entry)
@@ -164,9 +254,30 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
       ),
     copyPath: (entry) =>
       void copyText(entry.type === 'folder' ? entry.prefix : entry.name, 'the path'),
-    ...extras.entryActions,
+    quickLook: (entry) => {
+      if (entry.type === 'file') files.update({ object: entry.name, dialog: 'quick-look' })
+    },
+    // The URL an app's getDownloadURL() gets: Admin reads the token.
+    copyDownloadUrl: files.admin
+      ? (entry) => {
+          if (entry.type !== 'file') return
+          void queryClient
+            .fetchQuery(objectQuery(files.project, files.bucket, entry.name, files.viewAs))
+            .then((object) => {
+              const token = object.downloadTokens[0]
+              const address = storageAddress(queryClient.getQueryData(statusQuery.queryKey))
+              if (token && address)
+                void copyText(
+                  downloadUrl(address, files.bucket, entry.name, token),
+                  'the download URL',
+                )
+            })
+        }
+      : undefined,
+    ...fileActions.entryActions,
   }
-  const menu = (row: FileRow): readonly RowMenuItem[] => entryMenu(row.entry, actions)
+  const menu = (row: FileRow): readonly RowMenuItem[] =>
+    row.pending ? [] : entryMenu(row.entry, actions, accessLimits(row))
 
   const checked = useFileSelection((state) => state.checked)
   const everything = useFileSelection((state) => state.everything)
@@ -207,6 +318,41 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
       },
     },
     {
+      key: 'n',
+      label: 'New folder',
+      run: () => files.update({ new: 'folder' }),
+    },
+    {
+      key: 'u',
+      label: 'Upload files',
+      run: () => filesInput.current?.click(),
+    },
+    {
+      key: 'Shift+u',
+      label: 'Upload a folder',
+      run: () => folderInput.current?.click(),
+    },
+    {
+      key: 'F2',
+      label: 'Rename the cursor row',
+      when: () => cursor !== undefined,
+      run: () => {
+        if (cursor) fileActions.startRename(cursor)
+      },
+    },
+    {
+      key: 'Delete',
+      label: 'Delete the ticked rows',
+      when: () => selecting,
+      run: fileActions.deleteTicked,
+    },
+    {
+      key: 'Backspace',
+      label: 'Delete the ticked rows',
+      when: () => selecting,
+      run: fileActions.deleteTicked,
+    },
+    {
       key: 'Escape',
       label: 'Close the file, then clear the ticks',
       allowInInputs: true,
@@ -238,7 +384,7 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
 
   return (
     <>
-      <FoldersPanel menuItems={extras.bucketMenu} />
+      <FoldersPanel menuItems={fileActions.bucketMenu} onDropFiles={dropInto} />
       <SectionToolbar>
         <ToolbarRow testId="storage-toolbar">
           <PanelToggle where="toolbar" />
@@ -256,12 +402,33 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
             onChange={files.setViewAs}
             testId="identity-picker"
           />
-          {extras.primary && (
-            <>
-              <ToolbarDivider />
-              {extras.primary}
-            </>
-          )}
+          <ToolbarDivider />
+          <UploadMenu filesInput={filesInput} folderInput={folderInput} />
+          <input
+            ref={filesInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => {
+              if (event.target.files)
+                void flow.start(filesFromInput(event.target.files), files.prefix)
+              event.target.value = ''
+            }}
+            data-testid="upload-input"
+          />
+          <input
+            ref={folderInput}
+            type="file"
+            multiple
+            hidden
+            {...({ webkitdirectory: '' } as Record<string, string>)}
+            onChange={(event) => {
+              if (event.target.files)
+                void flow.start(filesFromInput(event.target.files), files.prefix)
+              event.target.value = ''
+            }}
+            data-testid="upload-folder-input"
+          />
         </ToolbarRow>
         <ToolbarRow
           variant="line"
@@ -295,7 +462,7 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
                     >
                       Copy paths
                     </Button>
-                    {extras.selectionActions}
+                    {fileActions.selectionActions}
                   </>
                 }
               />
@@ -343,10 +510,9 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
                   stale={
                     listing.fast ? undefined : { count: listing.stale, onRefresh: listing.refresh }
                   }
-                  hidden={
-                    listing.error instanceof StorageApiError &&
-                    listing.error.code === 'invalid-argument'
-                  }
+                  // A listing the engine refused (a bad filter, a denied
+                  // list) has nothing to count: the slot stays, empty.
+                  hidden={Boolean(listing.error)}
                   testId="listing-count"
                 />
               </span>
@@ -369,9 +535,36 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
           refuses every request. Apply rules on the Rules page.
         </SectionBanner>
       )}
-      {extras.banners}
+      <StorageJobs />
       <SectionBody>
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-testid="files-content">
+        <div
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+          data-testid="files-content"
+          onDragEnter={(event) => {
+            if (!carriesFiles(event.dataTransfer)) return
+            event.preventDefault()
+            setDrag(dragTarget(event))
+          }}
+          onDragOver={(event) => {
+            if (!carriesFiles(event.dataTransfer)) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
+            const next = dragTarget(event)
+            if (next.prefix !== drag?.prefix) setDrag(next)
+          }}
+          onDragLeave={(event) => {
+            // Only leaving the column, not moving between its children.
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+              setDrag(undefined)
+          }}
+          onDrop={(event) => {
+            if (!carriesFiles(event.dataTransfer)) return
+            event.preventDefault()
+            const target = dragTarget(event)
+            setDrag(undefined)
+            void dropInto(target.prefix, event.dataTransfer)
+          }}
+        >
           <Listed
             listing={listing}
             rows={rows}
@@ -380,9 +573,39 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
             onCursor={onCursor}
             sortable={meta.data?.sortable}
             where={where}
-            emptyActions={extras.emptyActions}
+            emptyActions={
+              <Button
+                variant="secondary"
+                icon={<UploadSimpleIcon />}
+                onClick={() => filesInput.current?.click()}
+                data-testid="empty-upload"
+              >
+                Upload files
+              </Button>
+            }
           />
-          {extras.overlay}
+          {drag && (
+            <DropOverlay
+              target={drag.prefix === '' ? `gs://${files.bucket}` : drag.prefix}
+              summary={drag.summary}
+            />
+          )}
+          <UploadTray
+            sessionsLine={
+              fileActions.unfinished > 0 ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between border-t border-kumo-line px-3 py-1.5 text-left text-[12px] text-kumo-subtle hover:ink"
+                  onClick={(event) => fileActions.showSessions(event.currentTarget)}
+                  data-testid="tray-sessions"
+                >
+                  {formatNumber(fileActions.unfinished)} unfinished{' '}
+                  {fileActions.unfinished === 1 ? 'upload' : 'uploads'} from your app
+                  <span className="text-kumo-link">Show</span>
+                </button>
+              ) : undefined
+            }
+          />
         </div>
         {files.object !== undefined && (
           <FileInspector
@@ -391,8 +614,8 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
             onPrev={step(-1)}
             onNext={step(1)}
             onQuickLook={() => files.update({ dialog: 'quick-look' })}
-            tools={extras.inspectorTools}
-            danger={extras.inspectorDanger}
+            tools={fileActions.inspectorTools}
+            danger={fileActions.inspectorDanger}
           />
         )}
       </SectionBody>
@@ -401,6 +624,12 @@ export function FilesWorkbench({ extras = NO_EXTRAS }: { extras?: FilesExtras })
         hasMore={listing.rows.hasMore}
         loadMore={listing.rows.loadMore}
       />
+      <CreateFolderDialog />
+      <UploadDialog
+        onUpload={(picked, options) => void flow.startWith(picked, files.prefix, options)}
+      />
+      {flow.element}
+      {fileActions.element}
     </>
   )
 }
@@ -574,5 +803,37 @@ function useMatchFigures(listing: Listing): {
     detail: data.directFiles > 0 ? formatBytes(data.directBytes) : undefined,
     tooltip: summary,
     loading: false,
+  }
+}
+
+/** What a client may not do with a row, from the access check: its Delete is dimmed with the line. */
+function accessLimits(row: FileRow): { noDelete?: string } {
+  const refused = row.access?.find(
+    (verdict) => verdict.method === 'delete' && verdict.outcome !== 'allow',
+  )
+  return refused
+    ? {
+        noDelete:
+          refused.line === null
+            ? 'No allow lets this identity delete it.'
+            : `Line ${refused.line} refuses this identity a delete.`,
+      }
+    : {}
+}
+
+/** A row for an upload of this tab that has not arrived: its name and size, its bar in place of a time. */
+function pendingEntry(item: UploadItem): StorageEntry {
+  return {
+    type: 'file',
+    name: item.name,
+    size: item.size,
+    contentType: null,
+    contentEncoding: null,
+    updated: '',
+    timeCreated: '',
+    generation: '0',
+    tokens: 0,
+    metadataKeys: [],
+    metadataCount: 0,
   }
 }

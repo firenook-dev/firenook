@@ -20,7 +20,14 @@ import { BucketPicker } from './bucket-picker'
 import { FolderTree } from './folder-tree'
 import { OpenBucketDialog } from './open-bucket-dialog'
 
-export function FoldersPanel({ menuItems }: { menuItems?: ReactNode }) {
+export function FoldersPanel({
+  menuItems,
+  onDropFiles,
+}: {
+  menuItems?: ReactNode
+  /** Files dropped on a folder of the tree upload into it. */
+  onDropFiles?: (prefix: string, transfer: DataTransfer) => void
+}) {
   const files = useFiles()
   const [filter, setFilter] = useState('')
   const [opening, setOpening] = useState(false)
@@ -80,7 +87,7 @@ export function FoldersPanel({ menuItems }: { menuItems?: ReactNode }) {
           </DropdownMenu.Content>
         </DropdownMenu>
       </PanelHeader>
-      <FolderTree filter={filter} />
+      <FolderTree filter={filter} onDropFiles={onDropFiles} />
       <OpenBucketDialog
         open={opening}
         onOpenChange={setOpening}

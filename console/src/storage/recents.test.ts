@@ -30,10 +30,10 @@ describe('recents per project and bucket', () => {
   })
 
   it('works for the page alone when storage refuses', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
       throw new Error('denied')
     })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('denied')
     })
     useStorageRecents.getState().load('k')

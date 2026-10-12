@@ -65,7 +65,13 @@ function unread(prefix: string, count: number): PanelTreeNode[] {
   }))
 }
 
-export function FolderTree({ filter }: { filter: string }) {
+export function FolderTree({
+  filter,
+  onDropFiles,
+}: {
+  filter: string
+  onDropFiles?: ((prefix: string, transfer: DataTransfer) => void) | undefined
+}) {
   const files = useFiles()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set(foldersOf(files.prefix)),
@@ -145,31 +151,64 @@ export function FolderTree({ filter }: { filter: string }) {
     children: childrenOf('', 0),
   }
 
+  // Files dragged onto a folder of the tree go into it; the node under the
+  // pointer is marked while they hover.
+  const [over, setOver] = useState<string | undefined>(undefined)
+  const nodeOf = (target: EventTarget) => {
+    const id = (target as HTMLElement).closest<HTMLElement>('[data-node-id]')?.dataset.nodeId
+    return id === undefined || id.startsWith(MORE) || id.startsWith(LOADING) ? undefined : id
+  }
   return (
-    <PanelTree
-      nodes={[root]}
-      current={files.prefix}
-      expanded={expanded}
-      onToggle={(id, isOpen) =>
-        setExpanded((current) => {
-          const next = new Set(current)
-          if (isOpen) next.add(id)
-          else next.delete(id)
-          return next
-        })
-      }
-      onOpen={(node) => {
-        if (node.id.startsWith(LOADING)) return
-        if (node.id.startsWith(MORE)) {
-          files.goTo(node.id.slice(MORE.length))
-          return
-        }
-        files.goTo(node.id)
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      onDragOver={(event) => {
+        if (!onDropFiles || !Array.from(event.dataTransfer.types).includes('Files')) return
+        const id = nodeOf(event.target)
+        if (id === undefined) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+        if (id !== over) setOver(id)
       }}
-      filter={filter}
-      ariaLabel={`Folders of gs://${files.bucket}`}
-      empty="No loaded folder is named like that."
-      testId="folder-tree"
-    />
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(undefined)
+      }}
+      onDrop={(event) => {
+        const id = nodeOf(event.target)
+        setOver(undefined)
+        if (!onDropFiles || id === undefined) return
+        event.preventDefault()
+        onDropFiles(id, event.dataTransfer)
+      }}
+    >
+      {over !== undefined && (
+        // The tree draws its own rows; the drop target is marked by its id.
+        <style>{`[data-testid="folder-tree"] [data-node-id="${over.replace(/["\\]/g, (character) => `\\${character}`)}"]{box-shadow:inset 0 0 0 1.5px var(--color-kumo-brand)}`}</style>
+      )}
+      <PanelTree
+        nodes={[root]}
+        current={files.prefix}
+        expanded={expanded}
+        onToggle={(id, isOpen) =>
+          setExpanded((current) => {
+            const next = new Set(current)
+            if (isOpen) next.add(id)
+            else next.delete(id)
+            return next
+          })
+        }
+        onOpen={(node) => {
+          if (node.id.startsWith(LOADING)) return
+          if (node.id.startsWith(MORE)) {
+            files.goTo(node.id.slice(MORE.length))
+            return
+          }
+          files.goTo(node.id)
+        }}
+        filter={filter}
+        ariaLabel={`Folders of gs://${files.bucket}`}
+        empty="No loaded folder is named like that."
+        testId="folder-tree"
+      />
+    </div>
   )
 }
