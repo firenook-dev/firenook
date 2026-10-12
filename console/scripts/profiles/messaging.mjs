@@ -1,5 +1,8 @@
-// The Pub/Sub and Cloud Tasks journeys (project `messaging`). The messaging
-// stream owns this file.
+// The Pub/Sub and Cloud Tasks journeys (project `messaging`): Pub/Sub,
+// Functions and Firestore, with Cloud Tasks following Functions. Its
+// functions are `scripts/fixtures/functions/messaging.js` alone
+// (FIXTURE_STREAMS), written with the real SDK; its data comes from the
+// pubsub and tasks seeders. The messaging stream owns this file.
 
 /** @type {import('../synthetic-engine.mjs').Profile} */
 export default {

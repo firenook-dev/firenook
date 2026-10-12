@@ -1,7 +1,8 @@
-// The tasks fixture: what the messaging stream writes into the synthetic
-// project for its journeys. Its emulators entry is written by the engine
-// starter from the profile, so there is nothing more to add until the
-// stream needs project files of its own; the stream owns this file.
+// The tasks fixture writes nothing into the synthetic project: Cloud Tasks
+// runs with Functions, and its queues register from the fixture codebase's
+// `onTaskDispatched` functions (`functions/messaging.js`) as the engine
+// discovers them; journeys register their own client queues over the Tasks
+// port. The messaging stream owns this file.
 
 /** @type {import('../synthetic-engine.mjs').Fixture} */
 export default {
