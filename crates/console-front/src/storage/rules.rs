@@ -67,9 +67,10 @@ pub(crate) struct StorageRulesDocument {
     /// These are the emulator's open default rules for a demo project.
     pub open_default: bool,
     /// Every place the rules in force read a claim of the caller's token
-    /// (`request.auth.token.<claim>`), in source order; empty when no
-    /// ruleset is in force.
-    pub claim_reads: Vec<RulesClaimRead>,
+    /// (`request.auth.token.<claim>`), in source order; null when no
+    /// ruleset is in force, so an empty list always means the rules read
+    /// none.
+    pub claim_reads: Option<Vec<RulesClaimRead>>,
 }
 
 /// `PUT /storage/rules`.
@@ -824,17 +825,14 @@ pub(crate) async fn read_rules(
         file_problems: rules.file_problems(&scope).iter().map(diagnostic).collect(),
         governs,
         open_default: mode == RulesMode::OpenDefault,
-        claim_reads: current
-            .as_ref()
-            .map(|installed| {
-                installed
-                    .ruleset
-                    .claim_reads()
-                    .iter()
-                    .map(RulesClaimRead::from)
-                    .collect()
-            })
-            .unwrap_or_default(),
+        claim_reads: current.as_ref().map(|installed| {
+            installed
+                .ruleset
+                .claim_reads()
+                .iter()
+                .map(RulesClaimRead::from)
+                .collect()
+        }),
     }))
 }
 

@@ -39,7 +39,8 @@ governs: Array<string>,
 openDefault: boolean, 
 /**
  * Every place the rules in force read a claim of the caller's token
- * (`request.auth.token.<claim>`), in source order; empty when no
- * ruleset is in force.
+ * (`request.auth.token.<claim>`), in source order; null when no
+ * ruleset is in force, so an empty list always means the rules read
+ * none.
  */
-claimReads: Array<RulesClaimRead>, };
+claimReads: Array<RulesClaimRead> | null, };
