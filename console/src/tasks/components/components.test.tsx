@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/client'
 import type { TasksTaskDetail } from '@/api/generated/messaging/TasksTaskDetail'
 import { SectionGate } from '@/components/console/section-gate'
+import { logs } from '@/lib/sections/logs'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
+import { whileUnbuilt } from '@/test/unbuilt'
 import type { TasksAttemptEvent } from '@/api/generated/messaging/TasksAttemptEvent'
 import { useFeedPending } from '@/components/console/feed-list'
 import { PauseButton } from '@/components/console/pause-button'
@@ -266,7 +268,19 @@ describe('the attempts timeline (TK-22)', () => {
     expect(screen.getByTestId('attempt-next')).toHaveTextContent(
       /next at \d\d:\d\d:\d\d · in [45] s/,
     )
-    // Logs is not built here: no link into a placeholder.
+    // Each kept attempt opens its function's lines around it in Logs.
+    expect(screen.getAllByTestId('attempt-logs').map((link) => link.getAttribute('href'))).toEqual([
+      expect.stringContaining('/logs?q=function%3Aus-central1-processOrder&from='),
+      expect.stringContaining('/logs?q=function%3Aus-central1-processOrder&from='),
+    ])
+    // While Logs is not built: no link into a placeholder.
+    cleanup()
+    await whileUnbuilt(logs, () =>
+      renderInConsole(() => <AttemptsTimeline detail={detail} queue={testQueue()} />, {
+        status: ready(),
+      }),
+    )
+    expect(screen.getAllByTestId('attempt')).toHaveLength(2)
     expect(screen.queryByTestId('attempt-logs')).not.toBeInTheDocument()
   })
 })
