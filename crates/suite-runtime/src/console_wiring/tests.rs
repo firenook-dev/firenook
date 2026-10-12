@@ -693,3 +693,280 @@ fn the_inventory_hook_tells_auth_its_blocking_functions_may_have_changed() {
     assert!(changes.has_changed().expect("open"));
     assert_eq!(*changes.borrow(), before + 1);
 }
+
+/// Keeps every line the console is handed.
+#[derive(Default)]
+struct ConsoleLines(std::sync::Mutex<Vec<firenook_suite_front::LogInput>>);
+
+impl firenook_suite_front::ConsoleSink for ConsoleLines {
+    fn accept(&self, input: firenook_suite_front::LogInput) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(input);
+    }
+}
+
+fn auth_runtime(config: &SuiteConfig) -> Arc<firenook_auth_front::AuthRuntime> {
+    let registry = TriggerRegistry::default();
+    let (observer, _dispatches) = TriggerObserver::channel(registry.clone());
+    Arc::new(
+        firenook_auth_front::AuthRuntime::new(&config.project_id, observer.queue(), registry, None)
+            .expect("auth"),
+    )
+}
+
+/// The line that prints a code keeps the text, level and emulator the
+/// official record and the debug log have always carried; the console's
+/// line is an `auth.message` linked to its message and its user.
+#[tokio::test]
+async fn a_codes_log_line_keeps_its_legacy_record_and_links_the_console_line() {
+    let config = test_config();
+    let root = std::env::temp_dir().join(format!("firenook-auth-log-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("root");
+    let debug_log = root.join("debug.log");
+    let logging = LoggingRuntime::new();
+    logging.set_file_sink(&debug_log).expect("debug log");
+    let lines = Arc::new(ConsoleLines::default());
+    logging.set_console_sink(lines.clone());
+    let triggers = TriggerRegistry::default();
+    let foreign = firenook_console_front::ForeignProjects::default();
+    let auth = auth_runtime(&config);
+    auth::prepared(&HookContext {
+        auth: Some(&auth),
+        ..HookContext::new(&config, &logging, &foreign, &triggers)
+    });
+    let router = console_router(ConsoleServices {
+        auth: Some(auth::auth_console(&auth, &config, &logging)),
+        ..ConsoleServices::new(directory(), running())
+    });
+    let admin = format!(
+        "/api/v1/auth/identitytoolkit.googleapis.com/v1/projects/{}",
+        config.project_id
+    );
+    let post = |path: String, body: Value| {
+        Request::post(path)
+            .header(header::AUTHORIZATION, "Bearer owner")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request")
+    };
+    let (status, _, user) = call(
+        &router,
+        post(
+            format!("{admin}/accounts"),
+            json!({ "email": "ada@example.test", "password": "secret-1" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{user}");
+    let uid = user["localId"].as_str().expect("uid").to_owned();
+    let (status, _, value) = call(
+        &router,
+        post(
+            format!("{admin}/accounts:sendOobCode"),
+            json!({ "requestType": "PASSWORD_RESET", "email": "ada@example.test" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    let console: Vec<firenook_suite_front::LogInput> = lines
+        .0
+        .lock()
+        .expect("lines")
+        .iter()
+        .filter(|line| line.service == "auth")
+        .cloned()
+        .collect();
+    let printed = console
+        .iter()
+        .find(|line| line.kind == Some(firenook_suite_front::kinds::AUTH_MESSAGE))
+        .expect("the code's console line");
+    let kinds: Vec<&str> = printed
+        .refs
+        .iter()
+        .map(|entity| entity.kind.as_str())
+        .collect();
+    assert_eq!(kinds, ["auth.message", "auth.user"]);
+    assert_eq!(printed.refs[1].key, format!("|{uid}"));
+    assert_eq!(printed.legacy_level, Some("INFO"));
+    // The debug log carries the same text, filed as it always was.
+    let written = std::fs::read_to_string(&debug_log).expect("debug log");
+    let legacy = written
+        .lines()
+        .find(|line| line.starts_with("[INFO] ") && line.contains("] [auth] "))
+        .expect("the auth line");
+    let text = legacy
+        .split_once("] [auth] ")
+        .map(|(_, text)| text)
+        .expect("text");
+    assert_eq!(text, printed.message);
+    assert!(text.contains("ada@example.test"), "{text}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The console the suite builds for Auth, served on a real listener, with
+/// what `before_finish` stops.
+struct Served {
+    address: std::net::SocketAddr,
+    stop: tokio::sync::watch::Sender<bool>,
+    server: tokio::task::JoinHandle<()>,
+    jobs: firenook_console_front::JobRegistry,
+    auth: Arc<firenook_auth_front::AuthRuntime>,
+}
+
+async fn served() -> Served {
+    let config = test_config();
+    let logging = LoggingRuntime::new();
+    let auth = auth_runtime(&config);
+    let (stop, receiver) = tokio::sync::watch::channel(false);
+    let services = ConsoleServices::new(directory(), Shutdown::new(receiver.clone()));
+    let jobs = services.jobs.clone();
+    let router = console_router(ConsoleServices {
+        auth: Some(auth::auth_console(&auth, &config, &logging)),
+        ..services
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener");
+    let address = listener.local_addr().expect("address");
+    let (failed, _failures) = tokio::sync::mpsc::unbounded_channel();
+    let server = crate::spawn_axum("ui", listener, router, receiver, failed);
+    Served {
+        address,
+        stop,
+        server,
+        jobs,
+        auth,
+    }
+}
+
+/// Opens the live channel and subscribes to the five Auth topics; answers
+/// the open stream and which subscriptions were accepted.
+async fn subscribe_to_auth(served: &Served) -> (reqwest::Response, Value) {
+    let mut live = reqwest::get(format!("http://{}/api/v1/live", served.address))
+        .await
+        .expect("live");
+    assert_eq!(live.status(), reqwest::StatusCode::OK);
+    let mut text = String::new();
+    while !text.contains("\n\n") {
+        let chunk = tokio::time::timeout(std::time::Duration::from_secs(3), live.chunk())
+            .await
+            .expect("the hello")
+            .expect("chunk")
+            .expect("open");
+        text.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    let hello: Value = text
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .map(|data| serde_json::from_str(data).expect("json"))
+        .expect("hello data");
+    let connection = hello["connection"].as_str().expect("connection");
+    let add: Vec<Value> = [
+        "auth.users",
+        "auth.activity",
+        "auth.inbox",
+        "auth.config",
+        "auth.hooks",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(index, topic)| json!({ "id": format!("s{index}"), "topic": topic, "params": {} }))
+    .collect();
+    let answer: Value = reqwest::Client::new()
+        .post(format!(
+            "http://{}/api/v1/live/{connection}/subscriptions",
+            served.address
+        ))
+        .json(&json!({ "add": add }))
+        .send()
+        .await
+        .expect("subscribe")
+        .json()
+        .await
+        .expect("json");
+    (live, answer)
+}
+
+#[tokio::test]
+async fn a_suite_with_auth_serves_its_console_api_and_its_five_topics() {
+    let served = served().await;
+    let summary: Value = reqwest::get(format!("http://{}/api/v1/auth/summary", served.address))
+        .await
+        .expect("summary")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(summary["projectId"], "demo-diagnostics", "{summary}");
+    assert_eq!(summary["bodiesRetained"], true, "diagnostics are on");
+    let (live, answer) = subscribe_to_auth(&served).await;
+    assert_eq!(
+        answer["accepted"],
+        json!(["s0", "s1", "s2", "s3", "s4"]),
+        "{answer}"
+    );
+    drop(live);
+    served.stop.send(true).expect("stop");
+    served.jobs.stop().await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), served.server)
+        .await
+        .expect("stopped")
+        .expect("joined");
+}
+
+/// The stop does not wait on a browser that keeps the live channel open on
+/// Auth's topics, nor on a running Auth job.
+#[tokio::test]
+async fn shutdown_with_auth_subscribers_and_a_running_job_finishes_within_the_grace() {
+    let served = served().await;
+    let (live, answer) = subscribe_to_auth(&served).await;
+    assert_eq!(answer["refused"], json!([]), "{answer}");
+    // A bulk change over enough users to still be running at the stop.
+    served
+        .auth
+        .runtime()
+        .update(|data| {
+            let state = &mut data.agent("demo-diagnostics").project;
+            for index in 0..60_000 {
+                state
+                    .create_user_with_local_id(&format!("bulk-{index:05}"), &serde_json::Map::new())
+                    .expect("created");
+            }
+        })
+        .expect("saved");
+    let job: Value = reqwest::Client::new()
+        .post(format!(
+            "http://{}/api/v1/auth/users:disable",
+            served.address
+        ))
+        .json(&json!({ "target": { "by": "query", "q": "" } }))
+        .send()
+        .await
+        .expect("disable")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(job["state"], "running", "{job}");
+    let now: Value = reqwest::get(format!(
+        "http://{}/api/v1/jobs/{}",
+        served.address,
+        job["id"].as_str().expect("id")
+    ))
+    .await
+    .expect("job")
+    .json()
+    .await
+    .expect("json");
+    assert_eq!(now["state"], "running", "still running at the stop: {now}");
+    let started = std::time::Instant::now();
+    served.stop.send(true).expect("stop");
+    served.jobs.stop().await;
+    tokio::time::timeout(crate::DRAIN_GRACE, served.server)
+        .await
+        .expect("the console finishes within the drain grace")
+        .expect("joined");
+    assert!(started.elapsed() < crate::DRAIN_GRACE);
+    // The browser still holds its end.
+    drop(live);
+}

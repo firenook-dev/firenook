@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use firenook_auth_front::AuthRuntime;
+use firenook_auth_front::{AuthLogLine, AuthRuntime, LineSink};
 use firenook_console_front::AuthConsole;
 use firenook_functions_bridge::FunctionsInventory;
-use firenook_suite_front::{LogInput, LogLevel, LoggingRuntime, kinds};
+use firenook_suite_front::{EntityRef, LogInput, LogLevel, LoggingRuntime, kinds};
 
 use super::{FunctionsConsoleOptions, HookContext};
 use crate::SuiteConfig;
@@ -21,12 +21,51 @@ pub(crate) fn auth_console(
     AuthConsole::attach(auth, config.diagnostics, logging.clone())
 }
 
+/// Auth's log lines. The terminal line and the official record (and the
+/// `--debug-log` line) are exactly what the suite has always written:
+/// `firenook auth: <text>` on stdout, or stderr for `WARN` and `ERROR`, and
+/// a record at `INFO` (`BULLET`, `SUCCESS`), `WARN` or `ERROR` filed under
+/// `auth`. The console's line is the same text; a line that prints a code
+/// or a link is an `auth.message` with links to that message and its user.
+pub(crate) fn auth_line_sink(logging: LoggingRuntime) -> LineSink {
+    Arc::new(move |line: &AuthLogLine<'_>| {
+        let legacy = match line.kind {
+            "WARN" => "WARN",
+            "ERROR" => "ERROR",
+            _ => "INFO",
+        };
+        if legacy == "INFO" {
+            println!("firenook auth: {}", line.text);
+        } else {
+            eprintln!("firenook auth: {}", line.text);
+        }
+        let mut refs = Vec::new();
+        if let Some(message) = line.message {
+            refs.push(EntityRef::auth_message(&message.id.to_string()));
+            if let Some(uid) = &message.uid {
+                refs.push(EntityRef::auth_user(message.tenant.as_deref(), uid));
+            }
+        }
+        logging.emit(LogInput {
+            level: LogLevel::parse(legacy),
+            service: "auth".to_owned(),
+            kind: line.message.map(|_| kinds::AUTH_MESSAGE),
+            message: line.text.to_owned(),
+            refs,
+            legacy_level: Some(legacy),
+            ..LogInput::default()
+        });
+    })
+}
+
 /// The suite's services are prepared; the console is not built yet.
 ///
 /// Auth gets its own origin for the action links it writes, as the
 /// registered official emulator uses its own URL: without one a link took
 /// the request's `Host`, so a code requested through the console mount
-/// pointed at the console's port, where no action page is served.
+/// pointed at the console's port, where no action page is served. Its log
+/// lines go through [`auth_line_sink`], which replaces the text sink the
+/// suite installed while preparing (the last sink set wins).
 ///
 /// Every project other than the configured one that holds users in the
 /// restored state is a foreign project (the app wrote there), as long as
@@ -36,6 +75,7 @@ pub(crate) fn prepared(context: &HookContext<'_>) {
         return;
     };
     auth.set_origin(&context.config.origin(context.config.ports.auth));
+    auth.set_line_sink(auth_line_sink(context.logging.clone()));
     if !context.config.single_project_mode {
         return;
     }
