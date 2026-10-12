@@ -859,7 +859,9 @@ fn batch_reads_patch_rows_place_new_ones_and_recount() {
     });
     let _ = users;
     let now = view(&runtime, None);
-    let starts = vec![None, first.next.clone()];
+    // The client sends each loaded page's first row (its `prev`) and the
+    // last loaded page's last row (its `next`).
+    let starts = vec![None, second.prev.clone()];
     let batch = now
         .batch(&UsersBatchQuery {
             uids: vec![
@@ -872,7 +874,8 @@ fn batch_reads_patch_rows_place_new_ones_and_recount() {
             ],
             filter: text.clone(),
             sort: sort(order),
-            page_starts: starts,
+            page_starts: starts.clone(),
+            window_end: second.next.clone(),
         })
         .expect("batch");
     let item = |uid: &str| {
@@ -895,12 +898,39 @@ fn batch_reads_patch_rows_place_new_ones_and_recount() {
         "no longer matches the filter"
     );
     assert_eq!(item("fresh-top").page, Some(0));
-    assert_eq!(
-        item("fresh-bottom").page,
-        Some(1),
-        "below every start: the last loaded page"
-    );
+    if second.next.is_some() {
+        assert_eq!(item("fresh-bottom").page, None, "below the loaded window");
+    } else {
+        assert_eq!(
+            item("fresh-bottom").page,
+            Some(1),
+            "the window reaches the end"
+        );
+    }
     assert!(item("never-existed").row.is_none());
+    // A page's first row belongs to that page.
+    let second_first = second.rows[1].uid.clone();
+    let on_start = now
+        .batch(&UsersBatchQuery {
+            uids: vec![second_first],
+            filter: text.clone(),
+            sort: sort(order),
+            page_starts: vec![None, second.prev.clone()],
+            window_end: None,
+        })
+        .expect("batch");
+    assert!(on_start.items[0].page.is_some());
+    // Without a window end, a row below every start is in the last page.
+    let open_end = now
+        .batch(&UsersBatchQuery {
+            uids: vec!["fresh-bottom".to_owned()],
+            filter: text.clone(),
+            sort: sort(order),
+            page_starts: starts,
+            window_end: None,
+        })
+        .expect("batch");
+    assert_eq!(open_end.items[0].page, Some(1));
     // The figures equal a first page's for the same filter.
     let fresh = now.page(&query(&text, order, 10)).expect("first again");
     assert_eq!(Some(batch.total), fresh.total);
@@ -912,7 +942,8 @@ fn batch_reads_patch_rows_place_new_ones_and_recount() {
             uids: vec!["fresh-top".to_owned(), "fresh-bottom".to_owned()],
             filter: text.clone(),
             sort: sort(order),
-            page_starts: vec![first.next.clone()],
+            page_starts: vec![second.prev.clone()],
+            window_end: None,
         })
         .expect("batch");
     assert_eq!(window.items[0].page, None, "above the loaded window");
@@ -938,7 +969,7 @@ fn batch_reads_patch_rows_place_new_ones_and_recount() {
         .batch(&UsersBatchQuery {
             uids: vec!["u".to_owned()],
             sort: sort("uid:asc"),
-            page_starts: vec![first.next],
+            page_starts: vec![second.prev],
             ..UsersBatchQuery::default()
         })
         .expect_err("a start of another sort");

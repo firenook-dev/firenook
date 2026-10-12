@@ -10,17 +10,15 @@ use firenook_suite_front::{LogInput, LogLevel, LoggingRuntime, kinds};
 use super::{FunctionsConsoleOptions, HookContext};
 use crate::SuiteConfig;
 
-/// Authentication's console: the Auth emulator's own application, and its
-/// state for the console's identity search and tokens.
+/// Authentication's console: the Auth emulator's own application, its
+/// state, and the feed the console installs as the runtime's observer
+/// (request and response bodies kept while diagnostics are on).
 pub(crate) fn auth_console(
     auth: &Arc<AuthRuntime>,
-    _config: &SuiteConfig,
-    _logging: &LoggingRuntime,
+    config: &SuiteConfig,
+    logging: &LoggingRuntime,
 ) -> AuthConsole {
-    AuthConsole {
-        native: auth.application(),
-        runtime: auth.runtime(),
-    }
+    AuthConsole::attach(auth, config.diagnostics, logging.clone())
 }
 
 /// The suite's services are prepared; the console is not built yet.

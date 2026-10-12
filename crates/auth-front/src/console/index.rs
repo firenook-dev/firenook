@@ -1202,6 +1202,101 @@ impl IndexSnapshot {
         self.data.by_uid.contains_key(uid)
     }
 
+    /// Slots whose uid is `text` or whose email is `text` (lower-cased).
+    pub(crate) fn exact_matches(&self, text: &str, lower: &str) -> Vec<u32> {
+        let mut slots = Vec::new();
+        if let Some(slot) = self.data.by_uid.get(text) {
+            slots.push(*slot);
+        }
+        let key: Arc<str> = Arc::from(lower);
+        for (email, slot) in self.data.email.range((key.clone(), 0)..) {
+            if *email != key {
+                break;
+            }
+            if !slots.contains(slot) {
+                slots.push(*slot);
+            }
+        }
+        slots
+    }
+
+    /// Slots whose email starts with `lower`, in email order, then whose
+    /// uid starts with `text`, in uid order: range reads, at most `limit`.
+    pub(crate) fn prefix_matches(&self, text: &str, lower: &str, limit: usize) -> Vec<u32> {
+        let mut slots = Vec::new();
+        let key: Arc<str> = Arc::from(lower);
+        for (email, slot) in self.data.email.range((key, 0)..) {
+            if slots.len() >= limit || !email.starts_with(lower) {
+                break;
+            }
+            slots.push(*slot);
+        }
+        for (uid, slot) in self
+            .data
+            .by_uid
+            .range::<_, str>((Bound::Included(text), Bound::Unbounded))
+        {
+            if slots.len() >= limit || !uid.starts_with(text) {
+                break;
+            }
+            if !slots.contains(slot) {
+                slots.push(*slot);
+            }
+        }
+        slots
+    }
+
+    /// Slots whose searchable text (email, phone digits, uid, display name,
+    /// lower-cased) contains `lower`, in uid order, skipping `seen`, until
+    /// `limit` match or `budget` digests were examined (it is spent as they
+    /// are) or `stop` says so. Answers the matches and whether it stopped
+    /// before the end.
+    pub(crate) fn substring_matches(
+        &self,
+        lower: &str,
+        seen: &[u32],
+        limit: usize,
+        budget: &mut usize,
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<u32>, bool) {
+        let mut slots = Vec::new();
+        for (_, slot) in &self.data.by_uid {
+            if slots.len() >= limit {
+                return (slots, false);
+            }
+            if *budget == 0 || stop() {
+                return (slots, true);
+            }
+            *budget -= 1;
+            if seen.contains(slot) {
+                continue;
+            }
+            if self
+                .data
+                .digest(*slot)
+                .is_some_and(|digest| digest.haystack.contains(lower))
+            {
+                slots.push(*slot);
+            }
+        }
+        (slots, false)
+    }
+
+    /// The first `limit` slots in uid order.
+    pub(crate) fn first_by_uid(&self, limit: usize) -> Vec<u32> {
+        self.data.by_uid.values().take(limit).copied().collect()
+    }
+
+    /// The row at `slot`, and its parsed claims.
+    pub(crate) fn hit_at(
+        &self,
+        slot: u32,
+        tenant: Option<&str>,
+    ) -> Option<(UserRow, Option<JsonMap<String, JsonValue>>)> {
+        let digest = self.data.digest(slot)?;
+        Some((self.row(digest, tenant), digest.parsed_claims()))
+    }
+
     /// The uid of the account whose email is `email` (compared lower-cased).
     pub(crate) fn uid_of_email(&self, email: &str) -> Option<Arc<str>> {
         let key: Arc<str> = Arc::from(email.to_lowercase().as_str());
@@ -1651,6 +1746,11 @@ impl IndexSnapshot {
                     .transpose()
             })
             .collect::<Result<_, _>>()?;
+        let end = query
+            .window_end
+            .as_ref()
+            .map(|cursor| Position::of_cursor(cursor, sort))
+            .transpose()?;
         let filter = CompiledFilter::new(&query.filter, &self.data);
         let items = query
             .uids
@@ -1664,7 +1764,7 @@ impl IndexSnapshot {
                     row: found.map(|(_, digest)| self.row(digest, tenant)),
                     page: found.and_then(|(slot, digest)| {
                         let at = position(slot, digest, sort.column);
-                        page_of(sort, &at, &starts)
+                        page_of(sort, &at, &starts, end.as_ref())
                     }),
                 }
             })
@@ -1769,19 +1869,33 @@ impl IndexSnapshot {
     }
 }
 
-/// The index in `starts` of the last page whose start lies above `at`.
-fn page_of(sort: UserSort, at: &Position, starts: &[Option<Position>]) -> Option<u32> {
+/// The loaded page a row at `at` falls in. Page `i` starts at `starts[i]`
+/// (its first row; `None` for the top of the list) and runs to the next
+/// page's start; the last one ends at `end` (its last row) or runs to the
+/// end of the list. `None` above the first page or below the window.
+fn page_of(
+    sort: UserSort,
+    at: &Position,
+    starts: &[Option<Position>],
+    end: Option<&Position>,
+) -> Option<u32> {
     let mut page = None;
     for (index, start) in starts.iter().enumerate() {
-        let above = start
+        let reached = start
             .as_ref()
-            .is_none_or(|start| compare(sort, start, at) == Ordering::Less);
-        if !above {
+            .is_none_or(|start| compare(sort, start, at) != Ordering::Greater);
+        if !reached {
             break;
         }
-        page = u32::try_from(index).ok();
+        page = Some(index);
     }
-    page
+    let page = page?;
+    if page + 1 == starts.len()
+        && end.is_some_and(|end| compare(sort, at, end) == Ordering::Greater)
+    {
+        return None;
+    }
+    u32::try_from(page).ok()
 }
 
 fn sort_providers(providers: &mut [ProviderCount]) {

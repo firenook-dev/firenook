@@ -28,6 +28,7 @@ pub mod filter;
 pub mod import;
 pub(crate) mod index;
 pub mod mint;
+pub mod search;
 pub mod tenants;
 
 #[cfg(test)]
@@ -381,10 +382,14 @@ pub struct UsersBatchQuery {
     pub uids: Vec<String>,
     pub filter: UserFilter,
     pub sort: UserSort,
-    /// Where each loaded page starts: the cursor it was read with, `None`
-    /// for the page at the top. A row is placed in the last page whose start
-    /// is above it.
+    /// Where each loaded page starts: its first row (the page's `prev`),
+    /// `None` for the page at the top of the list. A row is placed in the
+    /// last page whose start is not below it.
     pub page_starts: Vec<Option<UserCursor>>,
+    /// The last loaded page's last row (its `next`); absent when the loaded
+    /// pages reach the end of the list. A row below it is outside the
+    /// window.
+    pub window_end: Option<UserCursor>,
 }
 
 /// One item per requested uid, in the request's order, and the figures the
@@ -403,7 +408,7 @@ pub struct BatchUser {
     /// Absent: deleted, or no longer matching the filter.
     pub row: Option<UserRow>,
     /// The index in `page_starts` of the loaded page the row sorts into;
-    /// absent above the first loaded page.
+    /// absent outside the loaded window.
     pub page: Option<u32>,
 }
 

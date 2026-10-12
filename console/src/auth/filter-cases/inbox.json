@@ -1,0 +1,288 @@
+{
+  "note": "The Authentication Inbox's filter (crates/console-front/src/auth/filter.rs MESSAGE_FIELDS, console/src/auth/fields.ts). The engine filters the list and the auth.inbox topic with it; the browser parses only to paint tokens and errors.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "What became of the message",
+      "values": ["used", "returned", "restored"]
+    },
+    {
+      "key": "type",
+      "kind": "enum",
+      "help": "Email or SMS",
+      "values": ["email", "sms"]
+    },
+    {
+      "key": "kind",
+      "kind": "enum",
+      "help": "What the message is for",
+      "values": [
+        "verify",
+        "reset",
+        "sign-in",
+        "change",
+        "recover",
+        "sms",
+        "mfa-enroll",
+        "mfa-sign-in"
+      ]
+    },
+    {
+      "key": "uid",
+      "aliases": ["id"],
+      "kind": "exact",
+      "help": "Account id"
+    },
+    {
+      "key": "to",
+      "kind": "text",
+      "help": "Recipient"
+    },
+    {
+      "key": "at",
+      "kind": "time",
+      "help": "When it was sent"
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "code-word",
+      "text": "123456",
+      "ok": {
+        "words": [
+          {
+            "from": 0,
+            "negated": false,
+            "text": "123456",
+            "to": 6
+          }
+        ]
+      }
+    },
+    {
+      "name": "used",
+      "text": "is:used",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 7,
+            "value": "used"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unused",
+      "text": "-is:used",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": true,
+            "op": "eq",
+            "to": 8,
+            "value": "used"
+          }
+        ]
+      }
+    },
+    {
+      "name": "returned",
+      "text": "is:returned",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "returned"
+          }
+        ]
+      }
+    },
+    {
+      "name": "restored",
+      "text": "is:restored",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "is",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "restored"
+          }
+        ]
+      }
+    },
+    {
+      "name": "sms",
+      "text": "type:sms",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "type",
+            "negated": false,
+            "op": "eq",
+            "to": 8,
+            "value": "sms"
+          }
+        ]
+      }
+    },
+    {
+      "name": "email",
+      "text": "type:email",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "type",
+            "negated": false,
+            "op": "eq",
+            "to": 10,
+            "value": "email"
+          }
+        ]
+      }
+    },
+    {
+      "name": "type-unknown",
+      "text": "type:fax",
+      "error": {
+        "from": 0,
+        "to": 8,
+        "message": "\"type:\" is one of email, sms."
+      }
+    },
+    {
+      "name": "kind-reset",
+      "text": "kind:reset",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "kind",
+            "negated": false,
+            "op": "eq",
+            "to": 10,
+            "value": "reset"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind-any-of",
+      "text": "kind:verify kind:sign-in",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "kind",
+            "negated": false,
+            "op": "eq",
+            "to": 11,
+            "value": "verify"
+          },
+          {
+            "from": 12,
+            "key": "kind",
+            "negated": false,
+            "op": "eq",
+            "to": 24,
+            "value": "sign-in"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kind-mfa",
+      "text": "kind:mfa-enroll",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "kind",
+            "negated": false,
+            "op": "eq",
+            "to": 15,
+            "value": "mfa-enroll"
+          }
+        ]
+      }
+    },
+    {
+      "name": "uid",
+      "text": "uid:u_ada",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "uid",
+            "negated": false,
+            "op": "eq",
+            "to": 9,
+            "value": "u_ada"
+          }
+        ]
+      }
+    },
+    {
+      "name": "to",
+      "text": "to:ada@",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "to",
+            "negated": false,
+            "op": "eq",
+            "to": 7,
+            "value": "ada@"
+          }
+        ]
+      }
+    },
+    {
+      "name": "at",
+      "text": "at:>-1h",
+      "ok": {
+        "terms": [
+          {
+            "from": 0,
+            "key": "at",
+            "negated": false,
+            "op": "gt",
+            "to": 7,
+            "value": "-1h"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-key",
+      "text": "foo:1",
+      "error": {
+        "from": 0,
+        "to": 5,
+        "message": "Unknown filter \"foo:\". Use is, type, kind, uid, to or at; quote it to search for the text."
+      }
+    }
+  ]
+}

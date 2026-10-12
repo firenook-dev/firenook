@@ -120,9 +120,12 @@ impl TextTerm {
 }
 
 /// A time range in epoch milliseconds, `from` inclusive and `until`
-/// exclusive (`created:>2026-10-01` is `from` the next millisecond; a day is
-/// `from` its start `until` the next day's). A user without the time never
-/// matches a range, so it always passes a negated one.
+/// exclusive. The console resolves the text: a day is the whole day
+/// (`created:2026-10-01` is `from` its start `until` the next day's,
+/// `created:>2026-10-01` `from` the next day's start), an instant a point
+/// (`created:>2026-10-01T12:00:00Z` is `from` the next millisecond). A user
+/// without the time never matches a range, so it always passes a negated
+/// one.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TimeTerm {
