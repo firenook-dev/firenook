@@ -3389,6 +3389,34 @@ mod console {
                 (second.as_str(), true)
             ]
         );
+        // The deliveries view's records: this message, with every target.
+        let records = runtime.broker().fanouts(&topic).expect("records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.id, id);
+        assert_eq!(records[0].1.targets.len(), 3);
+        assert_eq!(runtime.broker().topics_with_message(id, 5), vec![topic.clone()]);
+        assert_eq!(
+            runtime.broker().topics_with_message(id + 100, 5),
+            Vec::<String>::new()
+        );
+        // The deliveries delta names the message whose marks moved.
+        let scope = DeltaScope {
+            project: PROJECT.to_owned(),
+            topic: Some(topic.clone()),
+            deliveries: true,
+            ..DeltaScope::default()
+        };
+        let mut cursor = ConsoleCursor::default();
+        let _ = runtime.broker().console_delta(&mut cursor, &scope);
+        runtime.redeliver(&topic, id, function).expect("redeliver");
+        let _ = deliveries.recv().await.expect("redelivery");
+        let changes = runtime
+            .broker()
+            .console_delta(&mut cursor, &scope)
+            .deliveries
+            .expect("deliveries");
+        assert_eq!(changes.message_ids, [id]);
+        assert_eq!(changes.event_ids.len(), 4);
         let preview = runtime
             .dispatch_preview(&topic, id, function)
             .expect("preview");

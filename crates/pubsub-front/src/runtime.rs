@@ -1054,6 +1054,13 @@ impl PubsubRuntime {
         lock(&self.inner.rejected).total
     }
 
+    /// The refusals' revision, bumped by every new or repeated refusal and
+    /// by a clear (what a console view compares). O(1).
+    #[must_use]
+    pub fn rejected_revision(&self) -> u64 {
+        lock(&self.inner.rejected).revision
+    }
+
     /// The refused wire requests kept, oldest first, each with the nearest
     /// existing id in its project and a project where its id exists.
     #[must_use]
