@@ -628,6 +628,30 @@ impl Registry {
         pending
     }
 
+    /// A disabled record that a later registration of the same definition
+    /// replaced: background triggers were paused (which disabled it) and
+    /// resumed (which registered the definition again under a new key). The
+    /// official emulator keeps such a record, and the services still deliver
+    /// to it beside the new one; it answers 204 and nothing runs, so it is
+    /// not an invocation of the function.
+    #[must_use]
+    pub fn superseded(&self, key: &str) -> bool {
+        let Some(record) = self.get(key) else {
+            return false;
+        };
+        !record.enabled
+            && !record.stale
+            && self.records.iter().any(|candidate| {
+                candidate.enabled
+                    && !candidate.stale
+                    && candidate.key != record.key
+                    && candidate.codebase == record.codebase
+                    && candidate.definition.entry_point() == record.definition.entry_point()
+                    && candidate.definition.json().get("eventTrigger")
+                        == record.definition.json().get("eventTrigger")
+            })
+    }
+
     /// Whether any delivered record is enabled for the given key.
     #[must_use]
     pub fn is_enabled(&self, key: &str) -> Option<bool> {

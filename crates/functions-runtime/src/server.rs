@@ -263,6 +263,17 @@ impl Default for DispatchContext {
     }
 }
 
+/// What a disabled record answers: an empty 204 (Express drops the body and
+/// content type of a 204).
+fn disabled_answer() -> Response {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = StatusCode::NO_CONTENT;
+    response
+        .headers_mut()
+        .insert("x-powered-by", HeaderValue::from_static(EXPRESS));
+    response
+}
+
 /// `handleHttpsTrigger`: looks the record up and proxies to the codebase's
 /// worker, recording the invocation from its request to its end.
 #[allow(clippy::too_many_lines)]
@@ -279,6 +290,11 @@ pub(crate) async fn dispatch(
             let keys = registry.keys();
             return unknown_function(&state, &keys, trigger_id);
         };
+        if registry.superseded(trigger_id) {
+            // The same delivery reaches the record that replaced this one,
+            // which records it; this one answers as a disabled record does.
+            return disabled_answer();
+        }
         (
             record.codebase.clone(),
             record.definition.clone(),
@@ -403,13 +419,7 @@ pub(crate) async fn dispatch(
                 ..InvocationEnd::default()
             },
         );
-        // Express drops the body and content type of a 204.
-        let mut response = Response::new(Body::empty());
-        *response.status_mut() = StatusCode::NO_CONTENT;
-        response
-            .headers_mut()
-            .insert("x-powered-by", HeaderValue::from_static(EXPRESS));
-        return respond(response);
+        return respond(disabled_answer());
     }
     let signature = definition.signature();
     let mut headers = parts.headers.clone();

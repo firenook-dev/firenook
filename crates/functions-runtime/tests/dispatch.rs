@@ -397,6 +397,22 @@ async fn paused_calls_and_worker_exits_are_recorded() {
     assert_eq!(response.status(), 204);
     let paused = harness.monitor.by_event_id("p-1").expect("recorded");
     assert_eq!(paused.outcome, Some(InvocationOutcome::Paused));
+    // Resumed, the definition is registered again under a new key and the
+    // disabled record stays (as the official emulator keeps it). A service
+    // delivering to both gets 204 from the old one, which records nothing:
+    // the event has one invocation, the new record's.
+    harness.runtime.set_background_enabled(true).await;
+    let (response, _) = harness
+        .call_text(trigger("us-central1-onEvent-0", pubsub_event("p-2", "t")))
+        .await;
+    assert_eq!(response.status(), 204);
+    assert!(harness.monitor.by_event_id("p-2").is_none());
+    let (response, _) = harness
+        .call_text(trigger("us-central1-onEvent-1", pubsub_event("p-2", "t")))
+        .await;
+    assert_eq!(response.status(), 200);
+    let delivered = harness.monitor.by_event_id("p-2").expect("recorded");
+    assert_eq!(delivered.outcome, Some(InvocationOutcome::Succeeded));
     // A worker that exits while idle is reported without another call.
     let (response, _) = harness
         .call_text(
