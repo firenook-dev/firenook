@@ -628,14 +628,11 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let mut listeners = bind_listeners(&config).await?;
     let (shutdown, _) = watch::channel(false);
     // Each configured rules file reloads on change, as the official CLI's
-    // watcher does, until the suite stops.
-    if let Some(parts) = &console_firestore {
-        rules_watch::spawn(
-            watched_rules_files(&config)?,
-            parts.rules_runtime.clone(),
-            &logging,
-            shutdown.subscribe(),
-        );
+    // watcher does, until the suite stops; whichever services run.
+    let rules_targets =
+        rules_watch::rules_watch_targets(&config, console_firestore.as_ref(), storage.as_deref())?;
+    if !rules_targets.is_empty() {
+        rules_watch::spawn(rules_targets, &logging, shutdown.subscribe());
     }
     let (server_failure, mut failed_server) = mpsc::unbounded_channel();
     // One Requests feed serves both the Firestore websocket port and the
@@ -1609,29 +1606,6 @@ fn firestore_rules(config: &SuiteConfig) -> Result<RulesRuntime, SuiteRuntimeErr
     };
     install_firestore_rules(&runtime, &config.project_id, &config.firestore_databases)?;
     Ok(runtime)
-}
-
-/// The rules file of each database that configures one, for the watcher.
-fn watched_rules_files(
-    config: &SuiteConfig,
-) -> Result<Vec<rules_watch::WatchedRules>, SuiteRuntimeError> {
-    config
-        .firestore_databases
-        .iter()
-        .filter_map(|entry| entry.rules.as_ref().map(|path| (entry, path)))
-        .map(|(entry, path)| {
-            DatabaseName::new(config.project_id.as_str(), entry.database_id.as_str())
-                .map(|database| rules_watch::WatchedRules {
-                    database,
-                    path: path.clone(),
-                })
-                .map_err(|error| {
-                    failure(format!(
-                        "firebase.json names an invalid Firestore database: {error}"
-                    ))
-                })
-        })
-        .collect()
 }
 
 fn install_firestore_rules(

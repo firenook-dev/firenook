@@ -1,17 +1,22 @@
-//! The Firestore rules files, watched.
+//! The rules files, watched.
 //!
 //! Saving `firestore.rules` in an editor should take effect the way a save
 //! in the console does, without restarting the emulator: the official CLI
 //! watches each configured rules file and reloads it on change, and so does
 //! this. A file is checked one second after the last change in a burst,
 //! because editors write a file in several steps. One that compiles and
-//! differs from what is in force is installed for its database, recorded
+//! differs from what is in force is installed for its target, recorded
 //! with origin `file`; one identical to what is in force — the console's
 //! own save landing on disk — is left alone, so a save records one version,
 //! not two; one that does not compile leaves the rules in force serving
 //! requests and records why, so the console shows the file's problems next
-//! to the rules that still govern. Every pass is announced on the rules
-//! runtime's channel, success or not.
+//! to the rules that still govern. Every pass is announced on the target's
+//! channel, success or not.
+//!
+//! Each watched file is a [`RulesTarget`]: a Firestore database's rules
+//! ([`FirestoreTarget`]) or, once Storage's rules handle exists, a bucket's.
+//! One watcher serves every target of every service, so a suite started
+//! with only Storage watches its rules file as well.
 //!
 //! The directory holding a file is watched rather than the file itself:
 //! editors commonly save by writing a new file and renaming it over the old
@@ -27,9 +32,12 @@ use std::time::{Duration, Instant};
 
 use firenook_core_store::DatabaseName;
 use firenook_rules_runtime::{LoadError, RulesOrigin, RulesRuntime, source_hash};
+use firenook_storage_front::StorageRuntime;
 use firenook_suite_front::LoggingRuntime;
 use notify::{EventKind, RecursiveMode, Watcher as _};
 use tokio::sync::watch;
+
+use crate::{ConsoleFirestoreParts, SuiteConfig, SuiteRuntimeError, failure};
 
 /// Quiet time after the last change before a file is read, as the official
 /// CLI's chokidar watcher and the Functions source watcher wait.
@@ -38,11 +46,97 @@ const DEBOUNCE: Duration = Duration::from_secs(1);
 /// How often the watch thread looks at its stop flag while idle.
 const IDLE_POLL: Duration = Duration::from_millis(250);
 
-/// One database's configured rules file.
-#[derive(Clone, Debug)]
-pub(crate) struct WatchedRules {
+/// Why a rules file is not what is in force: the compiler's diagnostics, or
+/// one saying the file could not be read.
+pub(crate) type FileProblem = LoadError;
+
+/// One configured rules file and the rules it feeds.
+pub(crate) trait RulesTarget: Send + Sync {
+    /// The service whose rules these are, as its log lines name it:
+    /// `firestore`, `storage`.
+    fn service(&self) -> &'static str;
+    /// What the log lines call these rules, such as `database "(default)"
+    /// rules`.
+    fn label(&self) -> String;
+    /// The file, as configured.
+    fn path(&self) -> &Path;
+    /// The hash ([`source_hash`]) of the source in force, when there is one.
+    fn in_force_hash(&self) -> Option<String>;
+    /// Compiles `source` and puts it in force, recorded with origin `file`;
+    /// on a compile error the rules in force stay.
+    fn install(&self, source: &str) -> Result<(), FileProblem>;
+    /// Records what is wrong with the file (`None` once it is fine again)
+    /// and announces the pass.
+    fn set_file_problems(&self, problems: Option<FileProblem>);
+}
+
+/// A Firestore database's rules file.
+pub(crate) struct FirestoreTarget {
     pub(crate) database: DatabaseName,
     pub(crate) path: PathBuf,
+    pub(crate) runtime: RulesRuntime,
+}
+
+impl RulesTarget for FirestoreTarget {
+    fn service(&self) -> &'static str {
+        "firestore"
+    }
+
+    fn label(&self) -> String {
+        format!("database \"{}\" rules", self.database.database_id())
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn in_force_hash(&self) -> Option<String> {
+        self.runtime
+            .current_version(&self.database)
+            .map(|version| version.hash)
+    }
+
+    fn install(&self, source: &str) -> Result<(), FileProblem> {
+        self.runtime
+            .install_database_from(&self.database, source, RulesOrigin::File)
+    }
+
+    fn set_file_problems(&self, problems: Option<FileProblem>) {
+        self.runtime.set_file_problems(&self.database, problems);
+    }
+}
+
+/// Every configured rules file the suite watches: each Firestore database
+/// with a rules file (its runtime is the console's Firestore runtime, the
+/// one every Firestore front evaluates against). Storage's buckets join
+/// once its rules handle can install a file's rules.
+pub(crate) fn rules_watch_targets(
+    config: &SuiteConfig,
+    firestore: Option<&ConsoleFirestoreParts>,
+    _storage: Option<&StorageRuntime>,
+) -> Result<Vec<Arc<dyn RulesTarget>>, SuiteRuntimeError> {
+    let mut targets: Vec<Arc<dyn RulesTarget>> = Vec::new();
+    if let Some(parts) = firestore {
+        for entry in &config.firestore_databases {
+            let Some(path) = &entry.rules else {
+                continue;
+            };
+            let database =
+                DatabaseName::new(config.project_id.as_str(), entry.database_id.as_str()).map_err(
+                    |error| {
+                        failure(format!(
+                            "firebase.json names an invalid Firestore database: {error}"
+                        ))
+                    },
+                )?;
+            targets.push(Arc::new(FirestoreTarget {
+                database,
+                path: path.clone(),
+                runtime: parts.rules_runtime.clone(),
+            }));
+        }
+    }
+    Ok(targets)
 }
 
 /// Whether a reported line is routine or a problem.
@@ -52,9 +146,9 @@ pub(crate) enum Level {
     Warn,
 }
 
-/// Where the watcher's log lines go: stdout/stderr and the Emulator UI log
-/// in the suite, a list in tests.
-pub(crate) type Report = Arc<dyn Fn(Level, String) + Send + Sync>;
+/// Where the watcher's log lines go, with the service they are about:
+/// stdout/stderr and the Emulator UI log in the suite, a list in tests.
+pub(crate) type Report = Arc<dyn Fn(&'static str, Level, String) + Send + Sync>;
 
 /// A running watcher; stopping it (or dropping it) ends the notifications.
 pub(crate) struct RulesWatcher {
@@ -65,8 +159,8 @@ pub(crate) struct RulesWatcher {
 /// A watched file as the notification callback matches it: by name inside
 /// its directory, resolved once because platforms report resolved paths
 /// (macOS gives `/private/var/…` for a file configured under `/var/…`).
-struct Target {
-    rules: WatchedRules,
+struct Watched {
+    target: Arc<dyn RulesTarget>,
     name: OsString,
     directory: PathBuf,
 }
@@ -76,29 +170,28 @@ struct Target {
 /// watched is reported and the suite carries on without reloads, as it ran
 /// before files were watched at all.
 pub(crate) fn spawn(
-    files: Vec<WatchedRules>,
-    runtime: RulesRuntime,
+    targets: Vec<Arc<dyn RulesTarget>>,
     logging: &LoggingRuntime,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    if files.is_empty() {
+    let Some(first_service) = targets.first().map(|target| target.service()) else {
         return;
-    }
+    };
     let sink = logging.clone();
-    let report: Report = Arc::new(move |level, message| {
-        let line = format!("firenook firestore: {message}");
+    let report: Report = Arc::new(move |service, level, message| {
+        let line = format!("firenook {service}: {message}");
         match level {
             Level::Info => {
                 println!("{line}");
-                sink.record("INFO", Some("firestore"), message);
+                sink.record("INFO", Some(service), message);
             }
             Level::Warn => {
                 eprintln!("{line}");
-                sink.record("WARN", Some("firestore"), message);
+                sink.record("WARN", Some(service), message);
             }
         }
     });
-    match RulesWatcher::start(files, runtime, Arc::clone(&report)) {
+    match RulesWatcher::start(targets, Arc::clone(&report)) {
         Ok(watcher) => {
             tokio::spawn(async move {
                 // A dropped sender means the suite is gone too.
@@ -107,6 +200,7 @@ pub(crate) fn spawn(
             });
         }
         Err(message) => report(
+            first_service,
             Level::Warn,
             format!("rules files are not watched, so a change needs a restart: {message}"),
         ),
@@ -114,17 +208,16 @@ pub(crate) fn spawn(
 }
 
 impl RulesWatcher {
-    /// Watches the directory of every file in `files`; each debounced burst
-    /// of changes to a file checks it once.
+    /// Watches the directory of every target's file, each directory once;
+    /// each debounced burst of changes to a file checks it once.
     pub(crate) fn start(
-        files: Vec<WatchedRules>,
-        runtime: RulesRuntime,
+        targets: Vec<Arc<dyn RulesTarget>>,
         report: Report,
     ) -> Result<Self, String> {
         let targets = Arc::new(
-            files
+            targets
                 .into_iter()
-                .map(Target::new)
+                .map(Watched::new)
                 .collect::<Result<Vec<_>, String>>()?,
         );
         // Indices of the targets changed since the last check.
@@ -180,7 +273,7 @@ impl RulesWatcher {
                 while wait_for_quiet(&woken, &stop_flag) {
                     let changed = std::mem::take(&mut *lock(&dirty));
                     for index in changed {
-                        check(&targets[index].rules, &runtime, &report);
+                        check(targets[index].target.as_ref(), &report);
                     }
                 }
             })
@@ -197,15 +290,14 @@ impl RulesWatcher {
     }
 }
 
-impl Target {
-    fn new(rules: WatchedRules) -> Result<Self, String> {
-        let name = rules
-            .path
+impl Watched {
+    fn new(target: Arc<dyn RulesTarget>) -> Result<Self, String> {
+        let path = target.path();
+        let name = path
             .file_name()
-            .ok_or_else(|| format!("{} names no file", rules.path.display()))?
+            .ok_or_else(|| format!("{} names no file", path.display()))?
             .to_owned();
-        let parent = rules
-            .path
+        let parent = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
@@ -213,7 +305,7 @@ impl Target {
             .canonicalize()
             .map_err(|error| format!("{}: {error}", parent.display()))?;
         Ok(Self {
-            rules,
+            target,
             name,
             directory,
         })
@@ -248,53 +340,53 @@ fn wait_for_quiet(woken: &mpsc::Receiver<()>, stopped: &AtomicBool) -> bool {
     !stopped.load(Ordering::SeqCst)
 }
 
-/// One pass over one database's file.
-fn check(rules: &WatchedRules, runtime: &RulesRuntime, report: &Report) {
-    let database = &rules.database;
-    let id = database.database_id();
-    let path = rules.path.display();
-    let source = match std::fs::read_to_string(&rules.path) {
+/// One pass over one target's file.
+fn check(target: &dyn RulesTarget, report: &Report) {
+    let service = target.service();
+    let label = target.label();
+    let path = target.path().display();
+    let source = match std::fs::read_to_string(target.path()) {
         Ok(source) => source,
         Err(error) => {
             report(
+                service,
                 Level::Warn,
                 format!(
-                    "database \"{id}\" rules file {path} could not be read; the rules in force are unchanged: {error}"
+                    "{label} file {path} could not be read; the rules in force are unchanged: {error}"
                 ),
             );
-            runtime.set_file_problems(
-                database,
-                Some(LoadError::unreadable(format!(
-                    "{path} could not be read: {error}"
-                ))),
-            );
+            target.set_file_problems(Some(LoadError::unreadable(format!(
+                "{path} could not be read: {error}"
+            ))));
             return;
         }
     };
-    if runtime
-        .current_version(database)
-        .is_some_and(|version| version.hash == source_hash(&source))
+    if target
+        .in_force_hash()
+        .is_some_and(|hash| hash == source_hash(&source))
     {
         // Already in force: the console's save, or a touch.
-        runtime.set_file_problems(database, None);
+        target.set_file_problems(None);
         return;
     }
-    match runtime.install_database_from(database, &source, RulesOrigin::File) {
+    match target.install(&source) {
         Ok(()) => {
             report(
+                service,
                 Level::Info,
-                format!("database \"{id}\" rules reloaded from {path}"),
+                format!("{label} reloaded from {path}"),
             );
-            runtime.set_file_problems(database, None);
+            target.set_file_problems(None);
         }
         Err(error) => {
             report(
+                service,
                 Level::Warn,
                 format!(
-                    "database \"{id}\" rules in {path} did not compile; the rules in force are unchanged: {error}"
+                    "{label} in {path} did not compile; the rules in force are unchanged: {error}"
                 ),
             );
-            runtime.set_file_problems(database, Some(error));
+            target.set_file_problems(Some(error));
         }
     }
 }
@@ -344,12 +436,15 @@ mod tests {
             let lines = Arc::new(Mutex::new(Vec::new()));
             let collected = Arc::clone(&lines);
             let watcher = RulesWatcher::start(
-                vec![WatchedRules {
+                vec![Arc::new(FirestoreTarget {
                     database: database.clone(),
                     path: file.clone(),
-                }],
-                runtime.clone(),
-                Arc::new(move |level, line| lock(&collected).push((level, line))),
+                    runtime: runtime.clone(),
+                })],
+                Arc::new(move |service, level, line| {
+                    assert_eq!(service, "firestore");
+                    lock(&collected).push((level, line));
+                }),
             )
             .expect("watching starts");
             Self {
@@ -474,5 +569,120 @@ mod tests {
         let fixed = rules("true");
         fixture.write_until(&fixed, || fixture.hash() == Some(source_hash(&fixed)));
         assert!(fixture.runtime.file_problems(&fixture.database).is_none());
+    }
+
+    /// A target of another service, recording what the watcher asked of it.
+    struct Recording {
+        path: PathBuf,
+        installed: Mutex<Vec<String>>,
+        problems: Mutex<Vec<Option<String>>>,
+    }
+
+    impl RulesTarget for Recording {
+        fn service(&self) -> &'static str {
+            "storage"
+        }
+
+        fn label(&self) -> String {
+            "rules for gs://demo-bucket".to_owned()
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn in_force_hash(&self) -> Option<String> {
+            lock(&self.installed)
+                .last()
+                .map(|source| source_hash(source))
+        }
+
+        fn install(&self, source: &str) -> Result<(), FileProblem> {
+            lock(&self.installed).push(source.to_owned());
+            Ok(())
+        }
+
+        fn set_file_problems(&self, problems: Option<FileProblem>) {
+            lock(&self.problems).push(problems.map(|problems| problems.to_string()));
+        }
+    }
+
+    #[test]
+    fn one_watcher_serves_targets_of_several_services_in_one_directory() {
+        let directory = std::env::temp_dir().join(format!(
+            "firenook-rules-watch-services-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("directory");
+        let firestore_file = directory.join("firestore.rules");
+        let storage_file = directory.join("storage.rules");
+        std::fs::write(&firestore_file, rules("false")).expect("write");
+        std::fs::write(&storage_file, "rules_version = '2';").expect("write");
+        let database = DatabaseName::new("demo-watch", "(default)").expect("database");
+        let runtime = RulesRuntime::default();
+        runtime
+            .install_database(&database, &rules("false"))
+            .expect("startup rules");
+        let storage = Arc::new(Recording {
+            path: storage_file.clone(),
+            installed: Mutex::new(vec!["rules_version = '2';".to_owned()]),
+            problems: Mutex::new(Vec::new()),
+        });
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let collected = Arc::clone(&lines);
+        let watcher = RulesWatcher::start(
+            vec![
+                Arc::new(FirestoreTarget {
+                    database: database.clone(),
+                    path: firestore_file.clone(),
+                    runtime: runtime.clone(),
+                }),
+                storage.clone(),
+            ],
+            Arc::new(move |service, level, line| lock(&collected).push((service, level, line))),
+        )
+        .expect("watching starts");
+        let changed = "rules_version = '2';\nservice firebase.storage {}\n";
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut next_write = Instant::now();
+        while lock(&storage.installed).last().map(String::as_str) != Some(changed) {
+            assert!(
+                Instant::now() < deadline,
+                "the watcher never acted on the storage file; lines: {:?}",
+                lock(&lines)
+            );
+            if Instant::now() >= next_write {
+                std::fs::write(&storage_file, changed).expect("write");
+                next_write = Instant::now() + Duration::from_secs(4);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        watcher.stop();
+        let expected = format!(
+            "rules for gs://demo-bucket reloaded from {}",
+            storage_file.display()
+        );
+        assert!(
+            lock(&lines)
+                .iter()
+                .any(|(service, level, line)| *service == "storage"
+                    && *level == Level::Info
+                    && *line == expected),
+            "{:?}",
+            lock(&lines)
+        );
+        assert_eq!(lock(&storage.problems).last(), Some(&None));
+        // The Firestore file in the same directory was not touched, so its
+        // rules are only the startup version.
+        assert_eq!(runtime.rules_history(&database).len(), 1);
+        assert!(
+            lock(&lines)
+                .iter()
+                .all(|(service, _, _)| *service == "storage"),
+            "{:?}",
+            lock(&lines)
+        );
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }
