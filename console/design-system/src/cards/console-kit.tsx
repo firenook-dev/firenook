@@ -44,9 +44,18 @@ import {
   createRootRoute,
   createRouter,
 } from '@tanstack/react-router'
-import { type ReactNode, createContext, use, useEffect, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type ReactNode,
+  createContext,
+  use,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { ApiError } from '@/api/client'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import type { Job } from '@/api/generated/Job'
 import { statusQuery } from '@/api/queries'
 import { CodeBlock } from '@/components/console/code-block'
 import { DataTable, type DataTableColumn } from '@/components/console/data-table'
@@ -54,6 +63,7 @@ import { EmptyState, NoMatch, QueryError, connectDialects } from '@/components/c
 import { FacetList } from '@/components/console/facet-list'
 import { FeedList, useFeedPending } from '@/components/console/feed-list'
 import { Completion } from '@/components/console/completions'
+import { DangerConfirmBody } from '@/components/console/danger-confirm'
 import {
   FilterField,
   type FilterFieldSpec,
@@ -72,6 +82,7 @@ import { JsonView } from '@/components/console/json-view'
 import { KeyValueEditor, type KeyValueRow } from '@/components/console/key-value-editor'
 import { KeyValueList } from '@/components/console/key-value-list'
 import { LiveNotice, liveNoticeText } from '@/components/console/live-notice'
+import { LogLine, type LogLineLevel } from '@/components/console/log-line'
 import { MaskedValue } from '@/components/console/masked-value'
 import { MatchCount } from '@/components/console/match-count'
 import { PanelFilter, PanelHeader } from '@/components/console/panel'
@@ -974,7 +985,7 @@ function FilterCard() {
 interface Line {
   id: string
   at: string
-  level: 'INFO' | 'WARN' | 'ERROR'
+  level: LogLineLevel
   source: string
   message: string
 }
@@ -984,51 +995,41 @@ const SOURCES = ['functions', 'auth', 'storage', 'pubsub']
 function lines(from: number, count: number): Line[] {
   return Array.from({ length: count }, (_, offset) => {
     const serial = from + offset
-    const level = serial % 17 === 0 ? 'ERROR' : serial % 7 === 0 ? 'WARN' : 'INFO'
+    const level: LogLineLevel = serial % 17 === 0 ? 'error' : serial % 7 === 0 ? 'warn' : 'info'
     return {
       id: `l${serial}`,
       at: new Date(NOW + serial * 137).toISOString(),
       level,
       source: SOURCES[serial % SOURCES.length] ?? 'functions',
       message:
-        level === 'ERROR'
+        level === 'error'
           ? `TypeError: Cannot read properties of undefined (reading 'uid') at greet (index.js:${serial % 90}:12)`
-          : level === 'WARN'
+          : level === 'warn'
             ? `greet: price list is ${serial % 5} days old; using it anyway`
             : `greet: hello ${NAMES[serial % NAMES.length]} (${serial})`,
-    } as Line
+    }
   })
 }
 
+/** A feed's line as every log in the console draws it: the shared LogLine. */
 function LineRow({ item }: { item: Line }) {
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-3 px-3 font-mono text-[12px]">
-      <span className="w-[86px] shrink-0 text-[11px] text-kumo-subtle tabular-nums">
-        {item.at.slice(11, 23)}
-      </span>
-      <span
-        className={cn(
-          'w-11 shrink-0',
-          item.level === 'ERROR'
-            ? 'text-kumo-danger'
-            : item.level === 'WARN'
-              ? 'text-kumo-warning'
-              : 'text-kumo-subtle',
-        )}
-      >
-        {item.level}
-      </span>
-      <span className="w-20 shrink-0 text-kumo-subtle">{item.source}</span>
-      <span className="min-w-0 truncate">{item.message}</span>
-    </span>
+    <LogLine
+      time={item.at}
+      level={item.level}
+      source={item.source}
+      message={item.message}
+      className="min-w-0 flex-1"
+    />
   )
 }
 
+/** The columns over the lines, on LogLine's own template. */
 const FEED_HEADER = (
-  <div className="flex h-7 items-center gap-3 px-3 font-mono text-[11px] text-kumo-subtle">
-    <span className="w-[86px]">time</span>
-    <span className="w-11">level</span>
-    <span className="w-20">source</span>
+  <div className="grid h-7 grid-cols-[104px_44px_var(--log-source-width,120px)_minmax(0,1fr)] items-center gap-x-2 px-3 font-mono text-[11px] text-kumo-subtle">
+    <span>time</span>
+    <span className="pl-2">level</span>
+    <span>source</span>
     <span>message</span>
   </div>
 )
@@ -1075,7 +1076,11 @@ function Feed({
   return (
     <Frame height={height}>
       {toolbar}
-      <div className="flex min-h-0 flex-1">
+      {/* The source column's width, for the header and every line alike. */}
+      <div
+        className="flex min-h-0 flex-1"
+        style={{ '--log-source-width': '96px' } as CSSProperties}
+      >
         <FeedList<Line>
           ariaLabel="Log lines"
           store={store}
@@ -1894,6 +1899,111 @@ function MaskRow({ label, children }: { label: string; children: ReactNode }) {
 
 // ---- registration --------------------------------------------------------
 
+// ---- danger-confirm ------------------------------------------------------
+
+const DELETED_TRIGGER = {
+  functionId: 'us-central1-onUserDeleted',
+  codebase: 'default',
+  eventType: 'providers/firebase.auth/eventTypes/user.delete',
+  kind: 'auth',
+}
+const OBJECT_TRIGGER = {
+  functionId: 'us-central1-onObjectDeleted',
+  codebase: 'default',
+  eventType: 'google.cloud.storage.object.v1.deleted',
+  kind: 'storage',
+}
+
+/** A bulk delete's job, part way through, with what it skipped and what failed. */
+const DELETE_JOB: Job = {
+  id: 'ds-delete',
+  kind: 'storage.delete',
+  section: 'storage',
+  title: 'Delete every object',
+  total: 1_204,
+  done: 412,
+  skipped: 2,
+  errors: [{ key: 'avatars/u_9f3k2.png', message: 'The rules refused this delete.', detail: null }],
+  errorCount: 3,
+  state: 'running',
+  startedAt: new Date(NOW - 4_000).toISOString(),
+  finishedAt: null,
+}
+
+/** The real confirmation (DangerConfirmBody), at rest in the card instead of over the page. */
+function DangerConfirmCard() {
+  return (
+    <Kit>
+      <Stack>
+        <Section
+          title="What goes, what fires, the way back"
+          note="The trigger line is computed: each function that will run and how often, or that none listens."
+        >
+          <div className="flex flex-wrap items-start gap-6">
+            <DangerConfirmBody
+              title="Delete 3 users"
+              description={
+                <>
+                  <span className="font-mono text-[0.9em] text-kumo-default">
+                    u_9f3k2, u_2fc4c, u_2s5rh
+                  </span>{' '}
+                  are removed from the emulator.
+                </>
+              }
+              line={{ kind: 'functions', functions: [DELETED_TRIGGER], times: 3 }}
+              consequences={['Re-seed or re-import to get them back.']}
+              testId="ds-danger-users"
+            />
+            <DangerConfirmBody
+              title="Purge orders-queue"
+              description="12 tasks waiting in orders-queue are removed."
+              line={{ kind: 'none' }}
+              consequences={['Tasks enqueued from now on are kept.']}
+              progressVerb="purged"
+              testId="ds-danger-purge"
+            />
+          </div>
+        </Section>
+        <Section
+          title="Typed, then running as a job"
+          note="Type-to-confirm for the big ones; progress, skipped and failed items from the job, and Cancel stops it."
+        >
+          <DangerConfirmBody
+            title="Delete every object"
+            description="1,204 objects are removed from demo.appspot.com."
+            line={{ kind: 'functions', functions: [OBJECT_TRIGGER], times: 1_204 }}
+            consequences={['Re-seed or re-import to get them back.']}
+            confirmText="demo.appspot.com"
+            typed="demo.appspot.com"
+            job={DELETE_JOB}
+            testId="ds-danger-job"
+          />
+        </Section>
+        <Section
+          title="When nothing is known, nothing is claimed"
+          note="While Functions start there is no trigger line; while background triggers are paused it says so."
+        >
+          <div className="flex flex-wrap items-start gap-6">
+            <DangerConfirmBody
+              title="Delete 1 document"
+              description="users/u_9f3k2 is removed from the emulator."
+              consequences={['Re-seed or re-import to get it back.']}
+              testId="ds-danger-unknown"
+            />
+            <DangerConfirmBody
+              title="Delete 40 documents"
+              description="Every document in events is removed from the emulator."
+              line={{ kind: 'paused' }}
+              consequences={['Re-seed or re-import to get them back.']}
+              testId="ds-danger-paused"
+            />
+          </div>
+        </Section>
+      </Stack>
+    </Kit>
+  )
+}
+
 defineCards([
   {
     id: 'section-anatomy',
@@ -2048,6 +2158,15 @@ defineCards([
     width: 1100,
     surface: 'canvas',
     render: () => <FeedGapsCard />,
+  },
+  {
+    id: 'danger-confirm',
+    group: 'Patterns',
+    name: 'Destructive confirmation',
+    subtitle: 'What goes, what fires, the way back; type to confirm; progress',
+    width: 1100,
+    surface: 'canvas',
+    render: () => <DangerConfirmCard />,
   },
   {
     id: 'requires-notice',

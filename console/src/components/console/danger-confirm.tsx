@@ -104,12 +104,11 @@ export function DangerConfirm({
   const status = useQuery(statusQuery)
   const job = useJob(jobId)
   const running = pending || job?.state === 'running'
-  const finished = job !== undefined && job.state !== 'running'
   const line = triggerLine(triggers?.answer, triggers?.times ?? 0, status.data?.backgroundTriggers)
   const [typed, setTyped] = useState('')
   const [cancelling, setCancelling] = useState(false)
-  const [showErrors, setShowErrors] = useState(false)
-  const confirmed = confirmText === undefined || typed === confirmText
+  // Each opening starts afresh: nothing typed, no failures unfolded.
+  const [session, setSession] = useState(0)
 
   const close = (next: boolean) => {
     // A running job is stopped with Cancel, not by dismissing the dialog:
@@ -117,8 +116,8 @@ export function DangerConfirm({
     if (!next && running) return
     if (!next) {
       setTyped('')
-      setShowErrors(false)
       setCancelling(false)
+      setSession((count) => count + 1)
     }
     onOpenChange(next)
   }
@@ -139,149 +138,241 @@ export function DangerConfirm({
   return (
     <Dialog.Root open={open} onOpenChange={close}>
       <Dialog size="base" className="p-6">
-        {/* Kumo's Dialog drops a test id; the contents carry it. */}
-        <div className="contents" data-testid={testId}>
-          <div className="mb-3 flex items-start justify-between gap-4">
-            <Dialog.Title className="text-lg font-semibold">{title}</Dialog.Title>
-            <Dialog.Close
-              aria-label="Close"
-              disabled={running}
-              render={
-                <Button
-                  variant="ghost"
-                  shape="square"
-                  icon={<XIcon />}
-                  aria-label="Close"
-                  disabled={running}
-                />
-              }
-            />
-          </div>
-          <Dialog.Description className="text-kumo-subtle">{description}</Dialog.Description>
-          {(line || consequences.length > 0) && (
-            <ul
-              className="mt-3 grid list-disc gap-1 pl-5 text-[14px] text-kumo-subtle"
-              data-testid={`${testId}-consequences`}
-            >
-              {line && <TriggerLineItem line={line} testId={testId} />}
-              {consequences.map((consequence, index) => (
-                <li
-                  // The caller's sentences, fixed while the dialog is open: their order is their identity.
-                  // oxlint-disable-next-line react/no-array-index-key
-                  key={index}
-                >
-                  {consequence}
-                </li>
-              ))}
-            </ul>
-          )}
-          {option && (
-            <div className="mt-4">
-              <Checkbox
-                checked={option.checked}
-                onCheckedChange={(checked) => option.onChange(Boolean(checked))}
-                label={option.label}
-                disabled={running || finished}
-              />
-            </div>
-          )}
-          {confirmText !== undefined && (
-            <div className="mt-4 grid gap-1.5">
-              <Text as="span" size="sm" variant="secondary">
-                Type <span className="font-mono text-[0.9em] text-kumo-default">{confirmText}</span>{' '}
-                to confirm
-              </Text>
-              <Input
-                size="sm"
-                value={typed}
-                onChange={(event) => setTyped(event.target.value)}
-                aria-label={`Type ${confirmText} to confirm`}
-                spellCheck={false}
-                autoComplete="off"
-                disabled={running || finished}
-                className="w-full font-mono"
-                data-testid={`${testId}-type`}
-              />
-            </div>
-          )}
-          {job && (
-            <div className="mt-3 grid gap-1" data-testid={`${testId}-progress`}>
-              <Text variant="secondary" size="sm">
-                {jobProgress(job, progressVerb)}
-                {job.errorCount > 0 && job.errors.length > 0 && (
-                  <>
-                    {' '}
-                    <button
-                      type="button"
-                      className="rounded-sm text-kumo-link hover:underline focus-visible:ring-2 focus-visible:ring-kumo-focus focus-visible:outline-none"
-                      onClick={() => setShowErrors((shown) => !shown)}
-                      aria-expanded={showErrors}
-                      data-testid={`${testId}-why`}
-                    >
-                      {showErrors ? 'Hide why' : 'See why'}
-                    </button>
-                  </>
-                )}
-              </Text>
-              {job.state === 'failed' && job.message && (
-                <Text variant="error" size="sm">
-                  {job.message}
-                </Text>
-              )}
-              {showErrors && (
-                <ul className="grid max-h-40 gap-1 overflow-auto rounded-md bg-kumo-tint p-2 text-[12px]">
-                  {job.errors.map((item, index) => (
-                    <li
-                      // One key can fail twice (a retry), so its position keeps the rows apart.
-                      // oxlint-disable-next-line react/no-array-index-key
-                      key={`${item.key}-${index}`}
-                      className="grid gap-0.5"
-                    >
-                      <span className="truncate font-mono text-kumo-default">{item.key}</span>
-                      <span className="text-kumo-subtle">{item.message}</span>
-                    </li>
-                  ))}
-                  {job.errorCount > job.errors.length && (
-                    <li className="text-kumo-subtle">
-                      and {formatNumber(job.errorCount - job.errors.length)} more like these
-                    </li>
-                  )}
-                </ul>
-              )}
-            </div>
-          )}
-          {error && (
-            <div className="mt-2" data-testid={`${testId}-error`}>
-              <Text variant="error" size="sm">
-                {error}
-              </Text>
-            </div>
-          )}
-          <div className="mt-5 flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => void cancel()}
-              loading={cancelling}
-              data-testid={`${testId}-cancel`}
-            >
-              {finished ? 'Close' : 'Cancel'}
-            </Button>
-            {!finished && (
-              <Button
-                variant="destructive"
-                icon={<TrashIcon />}
-                onClick={onConfirm}
-                loading={running}
-                disabled={!confirmed}
-                data-testid={`${testId}-confirm`}
-              >
-                {title}
-              </Button>
-            )}
-          </div>
-        </div>
+        <DangerConfirmBody
+          key={session}
+          inDialog
+          title={title}
+          description={description}
+          line={line}
+          consequences={consequences}
+          confirmText={confirmText}
+          typed={typed}
+          onTypedChange={setTyped}
+          option={option}
+          job={job}
+          progressVerb={progressVerb}
+          error={error}
+          pending={pending}
+          cancelling={cancelling}
+          onCancel={() => void cancel()}
+          onConfirm={onConfirm}
+          testId={testId}
+        />
       </Dialog>
     </Dialog.Root>
+  )
+}
+
+/**
+ * What the confirmation says and offers, without the dialog around it:
+ * DangerConfirm draws it in its dialog, and a design-system card draws it
+ * at rest in a frame of its own (`inDialog` false) at any point of a job it
+ * is handed — so a card shows the real confirmation, never a copy.
+ */
+export function DangerConfirmBody({
+  inDialog = false,
+  title,
+  description,
+  line,
+  consequences = NO_CONSEQUENCES,
+  confirmText,
+  typed = '',
+  onTypedChange,
+  option,
+  job,
+  progressVerb = 'deleted',
+  error,
+  pending = false,
+  cancelling = false,
+  onCancel,
+  onConfirm,
+  testId = 'danger-confirm',
+}: {
+  /** Inside DangerConfirm's dialog (its title, description and close are the dialog's), or framed on its own. */
+  inDialog?: boolean
+  title: string
+  description: ReactNode
+  /** The trigger line (`triggerLine`), or nothing when the answer is not known. */
+  line?: TriggerLine | undefined
+  consequences?: readonly ReactNode[]
+  confirmText?: string | undefined
+  typed?: string
+  onTypedChange?: (typed: string) => void
+  option?: { label: string; checked: boolean; onChange: (checked: boolean) => void } | undefined
+  /** The job the confirm started, as it stands. */
+  job?: Job | undefined
+  progressVerb?: string
+  error?: string | undefined
+  pending?: boolean
+  cancelling?: boolean
+  onCancel?: () => void
+  onConfirm?: () => void
+  testId?: string
+}) {
+  const [showErrors, setShowErrors] = useState(false)
+  const running = pending || job?.state === 'running'
+  const finished = job !== undefined && job.state !== 'running'
+  const confirmed = confirmText === undefined || typed === confirmText
+  const closeButton = (
+    <Button
+      variant="ghost"
+      shape="square"
+      icon={<XIcon />}
+      aria-label="Close"
+      disabled={running}
+      onClick={inDialog ? undefined : onCancel}
+    />
+  )
+  const contents = (
+    // Kumo's Dialog drops a test id; the contents carry it.
+    <div className="contents" data-testid={testId}>
+      <div className="mb-3 flex items-start justify-between gap-4">
+        {inDialog ? (
+          <Dialog.Title className="text-lg font-semibold">{title}</Dialog.Title>
+        ) : (
+          <h3 className="text-lg font-semibold text-kumo-default">{title}</h3>
+        )}
+        {inDialog ? (
+          <Dialog.Close aria-label="Close" disabled={running} render={closeButton} />
+        ) : (
+          closeButton
+        )}
+      </div>
+      {inDialog ? (
+        <Dialog.Description className="text-kumo-subtle">{description}</Dialog.Description>
+      ) : (
+        <p className="text-[14px] text-kumo-subtle">{description}</p>
+      )}
+      {(line || consequences.length > 0) && (
+        <ul
+          className="mt-3 grid list-disc gap-1 pl-5 text-[14px] text-kumo-subtle"
+          data-testid={`${testId}-consequences`}
+        >
+          {line && <TriggerLineItem line={line} testId={testId} />}
+          {consequences.map((consequence, index) => (
+            <li
+              // The caller's sentences, fixed while the dialog is open: their order is their identity.
+              // oxlint-disable-next-line react/no-array-index-key
+              key={index}
+            >
+              {consequence}
+            </li>
+          ))}
+        </ul>
+      )}
+      {option && (
+        <div className="mt-4">
+          <Checkbox
+            checked={option.checked}
+            onCheckedChange={(checked) => option.onChange(Boolean(checked))}
+            label={option.label}
+            disabled={running || finished}
+          />
+        </div>
+      )}
+      {confirmText !== undefined && (
+        <div className="mt-4 grid gap-1.5">
+          <Text as="span" size="sm" variant="secondary">
+            Type <span className="font-mono text-[0.9em] text-kumo-default">{confirmText}</span> to
+            confirm
+          </Text>
+          <Input
+            size="sm"
+            value={typed}
+            onChange={(event) => onTypedChange?.(event.target.value)}
+            readOnly={onTypedChange === undefined}
+            aria-label={`Type ${confirmText} to confirm`}
+            spellCheck={false}
+            autoComplete="off"
+            disabled={running || finished}
+            className="w-full font-mono"
+            data-testid={`${testId}-type`}
+          />
+        </div>
+      )}
+      {job && (
+        <div className="mt-3 grid gap-1" data-testid={`${testId}-progress`}>
+          <Text variant="secondary" size="sm">
+            {jobProgress(job, progressVerb)}
+            {job.errorCount > 0 && job.errors.length > 0 && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="rounded-sm text-kumo-link hover:underline focus-visible:ring-2 focus-visible:ring-kumo-focus focus-visible:outline-none"
+                  onClick={() => setShowErrors((shown) => !shown)}
+                  aria-expanded={showErrors}
+                  data-testid={`${testId}-why`}
+                >
+                  {showErrors ? 'Hide why' : 'See why'}
+                </button>
+              </>
+            )}
+          </Text>
+          {job.state === 'failed' && job.message && (
+            <Text variant="error" size="sm">
+              {job.message}
+            </Text>
+          )}
+          {showErrors && (
+            <ul className="grid max-h-40 gap-1 overflow-auto rounded-md bg-kumo-tint p-2 text-[12px]">
+              {job.errors.map((item, index) => (
+                <li
+                  // One key can fail twice (a retry), so its position keeps the rows apart.
+                  // oxlint-disable-next-line react/no-array-index-key
+                  key={`${item.key}-${index}`}
+                  className="grid gap-0.5"
+                >
+                  <span className="truncate font-mono text-kumo-default">{item.key}</span>
+                  <span className="text-kumo-subtle">{item.message}</span>
+                </li>
+              ))}
+              {job.errorCount > job.errors.length && (
+                <li className="text-kumo-subtle">
+                  and {formatNumber(job.errorCount - job.errors.length)} more like these
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
+      {error && (
+        <div className="mt-2" data-testid={`${testId}-error`}>
+          <Text variant="error" size="sm">
+            {error}
+          </Text>
+        </div>
+      )}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button
+          variant="secondary"
+          onClick={onCancel}
+          loading={cancelling}
+          data-testid={`${testId}-cancel`}
+        >
+          {finished ? 'Close' : 'Cancel'}
+        </Button>
+        {!finished && (
+          <Button
+            variant="destructive"
+            icon={<TrashIcon />}
+            onClick={onConfirm}
+            loading={running}
+            disabled={!confirmed}
+            data-testid={`${testId}-confirm`}
+          >
+            {title}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+  if (inDialog) return contents
+  // At rest outside a dialog: the dialog's own surface, as a frame.
+  return (
+    <div className="w-[512px] max-w-full rounded-xl bg-kumo-base p-6 shadow-lg ring ring-kumo-line">
+      {contents}
+    </div>
   )
 }
 

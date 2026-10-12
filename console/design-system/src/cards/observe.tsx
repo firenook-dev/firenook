@@ -6,11 +6,12 @@
 // a folder). Each piece is the page's own component under the console's
 // providers, fed what the engine would answer; nothing here fetches, so the
 // live parts (the feed, the jobs) are given their state rather than
-// subscribed. The two dialogs are drawn from the parts they are made of,
-// as the kit's confirmation card does: a modal cannot sit inside a card.
+// subscribed. A modal cannot sit inside a card: the reset confirmation is
+// the real DangerConfirmBody at rest, handed each state of its job, and the
+// save dialog is drawn from the parts it is made of.
 
-import { Button, Checkbox, Radio, Text, TooltipProvider } from '@cloudflare/kumo'
-import { FloppyDiskIcon, TrashIcon, XIcon } from '@phosphor-icons/react'
+import { Button, Radio, TooltipProvider } from '@cloudflare/kumo'
+import { FloppyDiskIcon, XIcon } from '@phosphor-icons/react'
 import { QueryClient, QueryClientProvider, type UseQueryResult } from '@tanstack/react-query'
 import {
   RouterProvider,
@@ -31,7 +32,7 @@ import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngi
 import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { statusQuery } from '@/api/queries'
 import { CopyField } from '@/components/console/copy-button'
-import { jobProgress } from '@/components/console/danger-confirm'
+import { DangerConfirmBody } from '@/components/console/danger-confirm'
 import { FeedList, useFeedPending } from '@/components/console/feed-list'
 import { FilterField } from '@/components/console/filter-field'
 import { MatchCount } from '@/components/console/match-count'
@@ -947,48 +948,29 @@ function DialogFrame({
   )
 }
 
-/** Firestore's reset confirmation (`ResetDialog`'s words), at one point of its job. */
+/** Firestore's reset confirmation (`ResetDialog`'s words) in the real DangerConfirmBody, at one point of its job. */
 function ResetFrame({ job }: { job: Job | undefined }) {
-  const running = job?.state === 'running'
-  const finished = job !== undefined && job.state !== 'running'
   return (
-    <DialogFrame title="Reset Firestore">
-      <p className="text-[14px] text-kumo-subtle">
-        Every document in every database is deleted: 1,616 documents · 2 databases.
-      </p>
-      <ul className="mt-3 grid list-disc gap-1 pl-5 text-[14px] text-kumo-subtle">
-        <li>Functions triggers do not run for these deletions.</li>
-        <li>Listeners and open pages see the documents go.</li>
-        <li>
+    <DangerConfirmBody
+      title="Reset Firestore"
+      description="Every document in every database is deleted: 1,616 documents · 2 databases."
+      consequences={[
+        'Functions triggers do not run for these deletions.',
+        'Listeners and open pages see the documents go.',
+        <>
           Download a snapshot first to get them back.{' '}
           <button type="button" className={LINK_CLASS} disabled={job !== undefined}>
             Download a snapshot
           </button>
-        </li>
-      </ul>
-      <div className="mt-4">
-        <Checkbox
-          checked={false}
-          label="Run Functions triggers for deleted documents"
-          disabled={job !== undefined}
-        />
-      </div>
-      {job && (
-        <div className="mt-3 grid gap-1">
-          <Text variant="secondary" size="sm">
-            {jobProgress(job, 'deleted')}
-          </Text>
-        </div>
-      )}
-      <div className="mt-5 flex justify-end gap-2">
-        <Button variant="secondary">{finished ? 'Close' : 'Cancel'}</Button>
-        {!finished && (
-          <Button variant="destructive" icon={<TrashIcon />} loading={running}>
-            Reset Firestore
-          </Button>
-        )}
-      </div>
-    </DialogFrame>
+        </>,
+      ]}
+      option={{
+        label: 'Run Functions triggers for deleted documents',
+        checked: false,
+        onChange: noop,
+      }}
+      job={job}
+    />
   )
 }
 

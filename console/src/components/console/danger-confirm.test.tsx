@@ -16,7 +16,8 @@ vi.mock('@/api/client', async (importOriginal) => ({
 }))
 vi.mock('@/lib/live/use-live-topic', () => ({ useLiveTopic: () => 'live' }))
 
-const { DangerConfirm, jobProgress, triggerLine } = await import('./danger-confirm')
+const { DangerConfirm, DangerConfirmBody, jobProgress, triggerLine } =
+  await import('./danger-confirm')
 
 afterEach(() => {
   cleanup()
@@ -173,6 +174,46 @@ describe('a destructive confirmation', () => {
     )
     expect(jobProgress(job({ state: 'failed', skipped: 0 }), 'deleted')).toBe(
       'Failed: 412 of 1,204 deleted',
+    )
+  })
+})
+
+describe('the confirmation outside its dialog', () => {
+  it('draws the same words and controls at rest, at any point of a job it is handed', async () => {
+    await renderInConsole(
+      () => (
+        <>
+          <DangerConfirmBody
+            title="Delete 3 users"
+            description="u_9f3k2 and 2 more are removed from the emulator."
+            line={{ kind: 'functions', functions: [onUserDeleted], times: 3 }}
+            consequences={['Re-seed or re-import to get them back.']}
+            testId="at-rest"
+          />
+          <DangerConfirmBody
+            title="Delete every object"
+            description="1,204 objects are removed."
+            confirmText="demo.appspot.com"
+            typed="demo.appspot.com"
+            job={job({ state: 'done', done: 1204, finishedAt: '2026-10-12T06:00:05Z' })}
+            testId="done"
+          />
+        </>
+      ),
+      { status: testStatus() },
+    )
+    const rest = screen.getByTestId('at-rest')
+    expect(rest.textContent).toContain('onUserDeleted runs 3 times.')
+    expect(rest.textContent).toContain('Re-seed or re-import to get them back.')
+    expect(screen.getByTestId('at-rest-confirm').textContent).toBe('Delete 3 users')
+    // Done: the job's own words, Close and no confirm.
+    expect(screen.getByTestId('done-progress').textContent).toContain(
+      'Done: 1,204 of 1,204 deleted · 2 skipped',
+    )
+    expect(screen.getByTestId('done-cancel').textContent).toBe('Close')
+    expect(screen.queryByTestId('done-confirm')).toBeNull()
+    expect(screen.getByLabelText('Type demo.appspot.com to confirm')).toHaveValue(
+      'demo.appspot.com',
     )
   })
 })

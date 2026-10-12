@@ -11,7 +11,6 @@ import {
   CodeIcon,
   IdentificationBadgeIcon,
   ShieldCheckIcon,
-  TrashIcon,
   UserCircleDashedIcon,
   UserIcon,
   XIcon,
@@ -442,137 +441,6 @@ function IdentityPickerCard() {
   )
 }
 
-function DangerBody({
-  title,
-  description,
-  bullets,
-  typed,
-  progress,
-  running = false,
-}: {
-  title: string
-  description: ReactNode
-  bullets: readonly ReactNode[]
-  typed?: string
-  progress?: string
-  running?: boolean
-}) {
-  return (
-    <DialogFrame title={title}>
-      <p className="text-[14px] text-kumo-subtle">{description}</p>
-      {bullets.length > 0 && (
-        <ul className="mt-3 grid list-disc gap-1 pl-5 text-[14px] text-kumo-subtle">
-          {bullets.map((bullet, index) => (
-            // Fixed sample sentences: their order is their identity.
-            // oxlint-disable-next-line react/no-array-index-key
-            <li key={index}>{bullet}</li>
-          ))}
-        </ul>
-      )}
-      {typed !== undefined && (
-        <div className="mt-4 grid gap-1.5">
-          <Text as="span" size="sm" variant="secondary">
-            Type <span className="font-mono text-[0.9em] text-kumo-default">demo.appspot.com</span>{' '}
-            to confirm
-          </Text>
-          <Input
-            size="sm"
-            value={typed}
-            readOnly
-            className="w-full font-mono"
-            aria-label="Type to confirm"
-          />
-        </div>
-      )}
-      {progress && (
-        <div className="mt-3">
-          <Text variant="secondary" size="sm">
-            {progress} <span className="text-kumo-link">See why</span>
-          </Text>
-        </div>
-      )}
-      <div className="mt-5 flex justify-end gap-2">
-        <Button variant="secondary">Cancel</Button>
-        <Button variant="destructive" icon={<TrashIcon />} loading={running}>
-          {title}
-        </Button>
-      </div>
-    </DialogFrame>
-  )
-}
-
-const fn = (name: string) => <span className="font-mono text-[0.9em] text-kumo-link">{name}</span>
-
-function DangerConfirmCard() {
-  return (
-    <Stack>
-      <Section
-        title="What goes, what fires, the way back"
-        note="The trigger line is computed: each function that will run and how often, or that none listens."
-      >
-        <div className="flex flex-wrap items-start gap-6">
-          <DangerBody
-            title="Delete 3 users"
-            description={
-              <>
-                <span className="font-mono text-[0.9em] text-kumo-default">
-                  u_9f3k2, u_2fc4c, u_2s5rh
-                </span>{' '}
-                are removed from the emulator.
-              </>
-            }
-            bullets={[
-              <>{fn('onUserDeleted')} runs 3 times.</>,
-              'Re-seed or re-import to get them back.',
-            ]}
-          />
-          <DangerBody
-            title="Purge orders-queue"
-            description="12 tasks waiting in orders-queue are removed."
-            bullets={['No function listens to this.', 'Tasks enqueued from now on are kept.']}
-          />
-        </div>
-      </Section>
-      <Section
-        title="Typed, then running as a job"
-        note="Type-to-confirm for the big ones; progress, skipped and failed items from the job, and Cancel stops it."
-      >
-        <DangerBody
-          title="Delete every object"
-          description="1,204 objects are removed from demo.appspot.com."
-          bullets={[
-            <>{fn('onObjectDeleted')} runs 1,204 times.</>,
-            'Re-seed or re-import to get them back.',
-          ]}
-          typed="demo.appspot.com"
-          progress="412 of 1,204 deleted · 2 skipped · 3 failed…"
-          running
-        />
-      </Section>
-      <Section
-        title="When nothing is known, nothing is claimed"
-        note="While Functions start there is no trigger line; while background triggers are paused it says so."
-      >
-        <div className="flex flex-wrap items-start gap-6">
-          <DangerBody
-            title="Delete 1 document"
-            description="users/u_9f3k2 is removed from the emulator."
-            bullets={['Re-seed or re-import to get it back.']}
-          />
-          <DangerBody
-            title="Delete 40 documents"
-            description="Every document in events is removed from the emulator."
-            bullets={[
-              'Background triggers are paused; no function runs.',
-              'Re-seed or re-import to get them back.',
-            ]}
-          />
-        </div>
-      </Section>
-    </Stack>
-  )
-}
-
 defineCards([
   {
     id: 'request-composer',
@@ -593,14 +461,5 @@ defineCards([
     width: 880,
     surface: 'canvas',
     render: () => <IdentityPickerCard />,
-  },
-  {
-    id: 'danger-confirm',
-    group: 'Patterns',
-    name: 'Destructive confirmation',
-    subtitle: 'What goes, what fires, the way back; type to confirm; progress',
-    width: 880,
-    surface: 'canvas',
-    render: () => <DangerConfirmCard />,
   },
 ])

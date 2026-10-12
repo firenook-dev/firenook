@@ -74,11 +74,12 @@ import {
   testQueue,
   testRow,
 } from '@/tasks/test-data'
+import { triggersKey } from '@/lib/triggers'
 import { sectionEntry, testStatus } from '@/test/status'
 import { useNow } from '@/lib/clock'
 import { createFeedStore } from '@/lib/live/feed-store'
 import { defineCards } from '../registry'
-import { Section, Stack } from './shared'
+import { Section, Stack, quietLiveChannel } from './shared'
 
 const noop = () => {}
 
@@ -117,6 +118,9 @@ function Kit({
   children: ReactNode
 }) {
   const [client] = useState(() => {
+    // A trigger line holds a live topic: the card leads a channel with
+    // nothing to send, so no view opens a connection.
+    quietLiveChannel()
     const created = new QueryClient({
       defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY, retry: false } },
     })
@@ -530,6 +534,19 @@ function PubsubCard() {
           filterCheckQuery(PUBSUB_PROJECT, EXPR, ORDERS_NAME).queryKey,
           FILTER_CHECK,
         )
+        // The composer's trigger line: who a publish to orders runs.
+        client.setQueryData(triggersKey(PUBSUB_PROJECT, 'pubsub', ORDERS_NAME), {
+          functions: [
+            {
+              functionId: ON_ORDER_PLACED,
+              codebase: 'default',
+              eventType: 'google.cloud.pubsub.topic.v1.messagePublished',
+              kind: 'pubsub',
+              function: { kind: 'functions.function', key: ON_ORDER_PLACED },
+            },
+          ],
+          backgroundEnabled: true,
+        })
       }}
     >
       <Stack>

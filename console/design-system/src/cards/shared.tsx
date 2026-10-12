@@ -1,5 +1,6 @@
 import { Text } from '@cloudflare/kumo'
 import type { ReactNode } from 'react'
+import { LEADER_LOCK, RELAY_CHANNEL, type RelayMessage } from '@/lib/live/leader'
 
 /** A labelled row inside a card: the label sits left, the samples right. */
 export function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -74,4 +75,39 @@ export function Swatch({
       </div>
     </div>
   )
+}
+
+let quiet = false
+
+/**
+ * For a card with no engine whose views subscribe to a live topic (a trigger
+ * line holds `functions.events`): the card takes the live channel's leader
+ * lock before any view subscribes, so the page is a follower that opens no
+ * connection, and it answers the followers as a leader that is live,
+ * accepts every subscription and has nothing to send. Call it from the
+ * card's providers, before their children render.
+ */
+export function quietLiveChannel() {
+  if (quiet || !navigator.locks || typeof BroadcastChannel === 'undefined') return
+  quiet = true
+  void navigator.locks.request(LEADER_LOCK, () => new Promise<void>(() => undefined))
+  const relay = new BroadcastChannel(RELAY_CHANNEL)
+  // A BroadcastChannel reaches this origin's own tabs only; it takes no target origin.
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin
+  const send = (message: RelayMessage) => relay.postMessage(message)
+  relay.addEventListener('message', (event: MessageEvent) => {
+    const message = event.data as RelayMessage
+    if (message.t === 'who') {
+      send({
+        t: 'hello',
+        leader: 'card',
+        instance: 'card-engine',
+        consoleBuild: 'design-system',
+        engineRevision: null,
+      })
+      send({ t: 'status', leader: 'card', status: 'live' })
+      return
+    }
+    if (message.t === 'sub') send({ t: 'accepted', subs: [message.id] })
+  })
 }

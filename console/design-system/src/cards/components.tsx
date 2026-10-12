@@ -198,7 +198,7 @@ function Inputs() {
     <Stack>
       <Section
         title="Text"
-        note="Sizes match Button. The error variant carries its message in the field."
+        note="Sizes match Button. A field with an error carries its message under it."
       >
         <Row label="base">
           <Input label="Collection id" placeholder="users" className="w-64" />
@@ -212,15 +212,19 @@ function Inputs() {
         <Row label="error">
           <Input
             label="Document id"
-            variant="error"
             error="An id cannot contain a slash"
             defaultValue="u/9f3k2"
             className="w-64"
           />
         </Row>
         <Row label="sm">
-          <Input size="sm" placeholder="Search users" className="w-64" />
-          <Input size="sm" placeholder="Filter by email, phone or uid" className="w-72" />
+          <Input size="sm" placeholder="Search users" aria-label="Search users" className="w-64" />
+          <Input
+            size="sm"
+            placeholder="Filter by email, phone or uid"
+            aria-label="Filter users"
+            className="w-72"
+          />
         </Row>
         <Row label="secret">
           <SensitiveInput
@@ -242,14 +246,12 @@ function Inputs() {
         <Row label="closed">
           <Select
             label="Database"
-            hideLabel={false}
             defaultValue="(default)"
             items={{ '(default)': '(default)', analytics: 'analytics', staging: 'staging' }}
             className="w-56"
           />
           <Select
             label="View as"
-            hideLabel={false}
             defaultValue="anonymous"
             items={{ anonymous: 'Anonymous', u_9f3k2: 'ada@example.test', admin: 'Admin SDK' }}
             className="w-56"

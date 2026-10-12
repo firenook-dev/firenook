@@ -1192,6 +1192,19 @@ const COVERAGE: CoverageReport = {
 /** What the card answers for the console API reads a page makes again by itself. */
 const ROUTES: Record<string, () => unknown> = {
   '/console/api/v1/storage/rules/coverage': () => COVERAGE,
+  // Who an object's changes run (the inspector's Activity tab names them).
+  '/console/api/v1/functions/triggers': () => ({
+    functions: [
+      {
+        functionId: 'us-central1-onUpload',
+        codebase: 'default',
+        eventType: 'google.cloud.storage.object.v1.finalized',
+        kind: 'storage',
+        function: { kind: 'functions.function', key: 'us-central1-onUpload' },
+      },
+    ],
+    backgroundEnabled: true,
+  }),
 }
 
 /**
