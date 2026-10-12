@@ -20,6 +20,7 @@ import { Route as PubsubRouteImport } from './routes/pubsub'
 import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as StorageRouteImport } from './routes/storage'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as AuthInboxRouteImport } from './routes/auth_.inbox'
 import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
 
 const IndexRoute = IndexRouteImport.update({
@@ -77,6 +78,11 @@ const TasksRoute = TasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthInboxRoute = AuthInboxRouteImport.update({
+  id: '/auth_/inbox',
+  path: '/auth/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FirestoreRulesRoute = FirestoreRulesRouteImport.update({
   id: '/firestore_/rules',
   path: '/firestore/rules',
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/auth/inbox': typeof AuthInboxRoute
   '/firestore/rules': typeof FirestoreRulesRoute
 }
 export interface FileRoutesByTo {
@@ -109,6 +116,7 @@ export interface FileRoutesByTo {
   '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/auth/inbox': typeof AuthInboxRoute
   '/firestore/rules': typeof FirestoreRulesRoute
 }
 export interface FileRoutesById {
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/auth_/inbox': typeof AuthInboxRoute
   '/firestore_/rules': typeof FirestoreRulesRoute
 }
 export interface FileRouteTypes {
@@ -140,6 +149,7 @@ export interface FileRouteTypes {
     | '/requests'
     | '/storage'
     | '/tasks'
+    | '/auth/inbox'
     | '/firestore/rules'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -154,6 +164,7 @@ export interface FileRouteTypes {
     | '/requests'
     | '/storage'
     | '/tasks'
+    | '/auth/inbox'
     | '/firestore/rules'
   id:
     | '__root__'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '/requests'
     | '/storage'
     | '/tasks'
+    | '/auth_/inbox'
     | '/firestore_/rules'
   fileRoutesById: FileRoutesById
 }
@@ -183,6 +195,7 @@ export interface RootRouteChildren {
   RequestsRoute: typeof RequestsRoute
   StorageRoute: typeof StorageRoute
   TasksRoute: typeof TasksRoute
+  AuthInboxRoute: typeof AuthInboxRoute
   FirestoreRulesRoute: typeof FirestoreRulesRoute
 }
 
@@ -265,6 +278,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth_/inbox': {
+      id: '/auth_/inbox'
+      path: '/auth/inbox'
+      fullPath: '/auth/inbox'
+      preLoaderRoute: typeof AuthInboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/firestore_/rules': {
       id: '/firestore_/rules'
       path: '/firestore/rules'
@@ -287,6 +307,7 @@ const rootRouteChildren: RootRouteChildren = {
   RequestsRoute: RequestsRoute,
   StorageRoute: StorageRoute,
   TasksRoute: TasksRoute,
+  AuthInboxRoute: AuthInboxRoute,
   FirestoreRulesRoute: FirestoreRulesRoute,
 }
 export const routeTree = rootRouteImport

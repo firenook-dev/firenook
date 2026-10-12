@@ -6,6 +6,13 @@
 //   +15550100") and the newest email link ("Open the latest email link ·
 //   Password reset for ada@…"), from the configured project's inbox: the
 //   newest of each read once, then the `auth.inbox` feed after it.
+// - A toast for each new code or link the app causes, wherever you are but
+//   the Inbox ("SMS code for +15550100: 482913 · Copy", "Password reset
+//   link for ada@… · Open · Copy link"), through the console's one toast
+//   policy: never for the console's own sends (it said so already), never
+//   for what a (re)subscription replays, never for codes found in saved
+//   state or links handed back to an Admin SDK caller, and not while the
+//   Inbox's Toasts switch is off.
 // - Engine tokens stay true to their users: wherever a page reads as an
 //   Auth user (Firestore's view as, Storage's "As", a function's "Call
 //   as"), the token `resolveAuthorization` minted carries that user's
@@ -27,14 +34,16 @@ import type { AuthInboxBatch } from '@/api/generated/auth/AuthInboxBatch'
 import type { AuthMessage } from '@/api/generated/auth/AuthMessage'
 import type { AuthMessagePage } from '@/api/generated/auth/AuthMessagePage'
 import { statusQuery } from '@/api/queries'
-import { type LiveChannel, liveChannel } from '@/lib/live/channel'
+import { type LiveChannel, liveChannel, useLiveStatus } from '@/lib/live/channel'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { type PaletteItem, matchesQuery, usePaletteProviders } from '@/lib/palette'
-import { toast } from '@/lib/toasts'
+import { type ToastOptions, toast } from '@/lib/toasts'
 import { getMessages } from './api'
+import { copyWithToast } from './clipboard'
 import { MESSAGE_KIND_LABELS } from './fields'
 import { consoleActionLink } from './links'
 import { readUsersWindow } from './live'
+import { isSms, toastText, useToastsOn } from './messages'
 import { authKeys } from './queries'
 
 // ------------------------------------------------------------------ the newest code and link
@@ -100,6 +109,98 @@ function seedOf(sms: AuthMessagePage, email: AuthMessagePage): Latest {
   return { sms: sms.items[0], email: email.items.find((message) => message.link) }
 }
 
+// ------------------------------------------------------------------ toasts
+
+/** How long after the channel comes back what arrives counts as replayed, ms. */
+export const QUIET_AFTER_RECONNECT_MS = 1_500
+
+/** Where the toasts are not shown: the Inbox itself lists every message as it arrives. */
+export function onInbox(pathname: string): boolean {
+  return /\/auth\/inbox\/?$/.test(pathname)
+}
+
+/**
+ * The toast for one message the feed delivered, or nothing. `highest` is the
+ * newest id this tab already knew of when the batch came (what a replay
+ * repeats), `quiet` whether the channel has just come back.
+ */
+export function messageToast(
+  message: AuthMessage,
+  context: { highest: number; quiet: boolean },
+): ToastOptions | undefined {
+  // A code found in saved state, or a link handed back to the Admin SDK
+  // call that asked for it: nothing was sent that anyone is waiting for.
+  if (message.delivery !== 'sent') return undefined
+  const words = toastText(message)
+  const base = {
+    key: `auth.message.${message.id}`,
+    title: words.title,
+    description: words.description,
+    tone: 'info' as const,
+    // The console's own send already said so where it was made.
+    echo: message.origin !== null,
+    replayed: message.id <= context.highest || context.quiet,
+  }
+  if (isSms(message))
+    return {
+      ...base,
+      action: {
+        label: 'Copy',
+        run: () => void copyWithToast(message.code, `the code ${message.code}`),
+      },
+    }
+  const link = message.link
+  if (!link) return base
+  return {
+    ...base,
+    action: {
+      label: 'Open',
+      run: () => void window.open(consoleActionLink(link), '_blank', 'noopener'),
+    },
+    actions: [{ label: 'Copy link', run: () => void copyWithToast(link, 'the link') }],
+  }
+}
+
+/** The toasts one batch hands to the policy, in order. */
+export function batchToasts(
+  batch: AuthInboxBatch,
+  context: { highest: number; quiet: boolean },
+): ToastOptions[] {
+  const toasts: ToastOptions[] = []
+  for (const item of batch.items) {
+    if (item.kind !== 'issued') continue
+    const shown = messageToast(item.message, context)
+    if (shown) toasts.push(shown)
+  }
+  return toasts
+}
+
+/** The newest message id in a batch, or `highest` when it holds none newer. */
+function newestIn(batch: AuthInboxBatch, highest: number): number {
+  let newest = highest
+  for (const item of batch.items)
+    if (item.kind === 'issued' && item.message.id > newest) newest = item.message.id
+  return newest
+}
+
+/**
+ * Until when what the feed delivers is a replay: for a moment after the
+ * channel comes back (a reconnect, a tab shown again after it gave its
+ * subscriptions back), when the engine sends what was missed meanwhile.
+ */
+function useQuietUntil(): { readonly current: number } {
+  const quiet = useRef(0)
+  useEffect(() => {
+    let previous = useLiveStatus.getState().status
+    return useLiveStatus.subscribe((state) => {
+      if (state.status === 'live' && previous !== 'live')
+        quiet.current = Date.now() + QUIET_AFTER_RECONNECT_MS
+      previous = state.status
+    })
+  }, [])
+  return quiet
+}
+
 /** The newest code and link: read once per engine run, then followed on the feed. */
 function useLatestMessages(project: string, channel: LiveChannel): Latest {
   const sms = useQuery({ ...latestQuery(project, 'sms'), enabled: project !== '' })
@@ -119,9 +220,24 @@ function useLatestMessages(project: string, channel: LiveChannel): Latest {
   useLayoutEffect(() => {
     following.current = seed
   })
+  // The newest message id this tab knows of: a message at or below it is a replay.
+  const highest = useRef(0)
+  const seedHighest = Math.max(seed?.latest.sms?.id ?? 0, seed?.latest.email?.id ?? 0)
+  useLayoutEffect(() => {
+    if (seedHighest > highest.current) highest.current = seedHighest
+  }, [seedHighest])
+  const quietUntil = useQuietUntil()
 
   // A restarted engine has other codes: read its newest again, then follow it.
-  useEffect(() => channel.onEngineRestart(() => setNotBefore(Date.now())), [channel])
+  useEffect(
+    () =>
+      channel.onEngineRestart(() => {
+        setNotBefore(Date.now())
+        // A new run numbers its messages from 1 again.
+        highest.current = 0
+      }),
+    [channel],
+  )
 
   useLiveTopic(
     'auth.inbox',
@@ -130,6 +246,13 @@ function useLatestMessages(project: string, channel: LiveChannel): Latest {
       onMessages: (batch) => {
         const from = following.current
         if (!from) return
+        if (useToastsOn.getState().on && !onInbox(window.location.pathname))
+          for (const shown of batchToasts(batch, {
+            highest: highest.current,
+            quiet: Date.now() < quietUntil.current,
+          }))
+            toast(shown)
+        highest.current = newestIn(batch, highest.current)
         setLive((current) => ({
           after: from.after,
           latest: foldLatest(current?.after === from.after ? current.latest : from.latest, batch),

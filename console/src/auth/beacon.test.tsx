@@ -6,8 +6,24 @@ import type { AuthMessagePage } from '@/api/generated/auth/AuthMessagePage'
 import { tokenKey } from '@/lib/identity'
 import type { LiveChannel, SubscribeOptions, TopicListener } from '@/lib/live/channel'
 import { usePaletteProviders } from '@/lib/palette'
+import { toast } from '@/lib/toasts'
 import { testStatus } from '@/test/status'
-import { Beacon, earlierPosition, foldLatest, latestItems, tokenScopes } from './beacon'
+import {
+  Beacon,
+  batchToasts,
+  earlierPosition,
+  foldLatest,
+  latestItems,
+  messageToast,
+  onInbox,
+  tokenScopes,
+} from './beacon'
+import { useToastsOn } from './messages'
+
+vi.mock('@/lib/toasts', async (original) => ({
+  ...(await original<typeof import('@/lib/toasts')>()),
+  toast: vi.fn(),
+}))
 
 function message(id: number, extra: Partial<AuthMessage> = {}): AuthMessage {
   return {
@@ -87,6 +103,57 @@ describe('the newest code and link', () => {
     expect(earlierPosition('0000000a.7', '0000000a.40')).toBe('0000000a.7')
     // Across an engine restart, the newer run's position is the one that holds.
     expect(earlierPosition('0000000a.40', '0000000b.2')).toBe('0000000b.2')
+  })
+})
+
+describe('a toast for each new code or link', () => {
+  const now = { highest: 4, quiet: false }
+
+  it('is keyed by the message, with Copy for a code and Open and Copy link for a link', () => {
+    const sms = messageToast(message(9), now)
+    expect(sms).toMatchObject({
+      key: 'auth.message.9',
+      title: 'SMS code for +15550100: 482913',
+      echo: false,
+      replayed: false,
+    })
+    expect(sms?.action?.label).toBe('Copy')
+    const link = messageToast(RESET, now)
+    expect(link?.title).toBe('Password reset link for ada@example.test')
+    expect([link?.action?.label, ...(link?.actions ?? []).map((action) => action.label)]).toEqual([
+      'Open',
+      'Copy link',
+    ])
+  })
+
+  it('is an echo for the console’s own sends, and a replay for what the tab already knew or just after a reconnect', () => {
+    expect(messageToast(message(9, { origin: 'write' }), now)?.echo).toBe(true)
+    expect(messageToast(message(3), now)?.replayed).toBe(true)
+    expect(messageToast(message(9), { highest: 4, quiet: true })?.replayed).toBe(true)
+  })
+
+  it('is never offered for a code found in saved state or a link handed back to its caller', () => {
+    expect(messageToast(message(9, { delivery: 'restored', at: null }), now)).toBeUndefined()
+    expect(messageToast({ ...RESET, delivery: 'returned' }, now)).toBeUndefined()
+    expect(
+      batchToasts(
+        {
+          items: [
+            { kind: 'issued', message: message(9) },
+            { kind: 'used', id: 9, usedAt: '2026-10-12T10:01:00Z', usedBy: 3 },
+            { kind: 'issued', message: message(10, { delivery: 'restored' }) },
+          ],
+        },
+        now,
+      ).map((shown) => shown.key),
+    ).toEqual(['auth.message.9'])
+  })
+
+  it('is not shown on the Inbox, which lists every message as it arrives', () => {
+    expect(onInbox('/console/auth/inbox')).toBe(true)
+    expect(onInbox('/console/auth/inbox/')).toBe(true)
+    expect(onInbox('/console/auth')).toBe(false)
+    expect(onInbox('/console/auth/activity')).toBe(false)
   })
 })
 
@@ -236,5 +303,40 @@ describe('the beacon, mounted', () => {
     // Once no token of that tenant is cached, nobody follows its users.
     act(() => client.removeQueries({ queryKey: ['auth', 'demo-auth', 'token', 'acme'] }))
     await waitFor(() => expect(fake.active('auth.users')).toHaveLength(0))
+  })
+
+  it('hands each new message the app caused to the toast policy, except on the Inbox or with toasts off', async () => {
+    const shown = vi.mocked(toast)
+    shown.mockClear()
+    const fake = fakeChannel()
+    mount(fake.channel)
+    await waitFor(() => expect(fake.active('auth.inbox')).toHaveLength(1))
+    const deliver = (id: number) =>
+      act(() =>
+        fake
+          .active('auth.inbox')[0]
+          ?.listener.onEvent(
+            'messages',
+            { items: [{ kind: 'issued', message: message(id, { code: `${id}0000` }) }] },
+            `0000000a.${id}`,
+          ),
+      )
+    deliver(20)
+    expect(shown).toHaveBeenCalledTimes(1)
+    expect(shown.mock.calls[0]?.[0]).toMatchObject({ key: 'auth.message.20', replayed: false })
+    // What the tab already knew of comes again as a replay.
+    deliver(20)
+    expect(shown.mock.calls[1]?.[0]).toMatchObject({ key: 'auth.message.20', replayed: true })
+    window.history.pushState({}, '', '/console/auth/inbox')
+    deliver(21)
+    expect(shown).toHaveBeenCalledTimes(2)
+    window.history.pushState({}, '', '/console/auth')
+    act(() => useToastsOn.getState().set(false))
+    deliver(22)
+    expect(shown).toHaveBeenCalledTimes(2)
+    act(() => useToastsOn.getState().set(true))
+    deliver(23)
+    expect(shown).toHaveBeenCalledTimes(3)
+    window.history.pushState({}, '', '/')
   })
 })
