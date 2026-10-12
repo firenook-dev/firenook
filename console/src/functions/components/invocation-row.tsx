@@ -17,6 +17,7 @@ import { type RowMenuItem, RowMenu } from '@/components/console/row-menu'
 import { DurationText } from '@/compute/duration-text'
 import { KindBadge } from '@/compute/kind-badge'
 import { type ClockFormat, formatClock } from '@/lib/format'
+import { chipStatus } from '../kinds'
 
 /** Who caused an invocation, as the row says it. */
 export const ORIGIN_WORDS: Readonly<Record<InvocationSummary['origin'], string>> = {
@@ -87,7 +88,7 @@ function InvocationRowInner({
       <OutcomeChip
         outcome={invocation.outcome}
         outcomeClass={invocation.outcomeClass}
-        status={invocation.status ?? undefined}
+        status={chipStatus(invocation)}
         callableStatus={invocation.callableStatus ?? undefined}
         startedAt={invocation.startedAt}
         detail={outcomeDetail(invocation)}

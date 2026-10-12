@@ -24,6 +24,7 @@ import {
   UsersIcon,
 } from '@phosphor-icons/react'
 import type { FunctionKind } from '@/api/generated/compute/FunctionKind'
+import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
 
 /** The form the Run tab holds for a kind. */
 export type RunForm = 'invoke' | 'callable' | 'event' | 'schedule' | 'task' | 'blocking'
@@ -99,6 +100,19 @@ export function actionTitle(kind: FunctionKind, name: string): string {
     case 'blocking':
       return `Test ${name}`
   }
+}
+
+/**
+ * The HTTP status an invocation's chip shows as its word: only for a call
+ * to a function's URL, where the status is what the caller got (`200`,
+ * `500`). An event delivery, a callable, a task or a blocking decision says
+ * how it ended in words (Succeeded, `INVALID_ARGUMENT`, Allowed), since the
+ * status there is the protocol's, not the developer's.
+ */
+export function chipStatus(
+  invocation: Pick<InvocationSummary, 'cause' | 'status'>,
+): number | undefined {
+  return invocation.cause.type === 'http' ? (invocation.status ?? undefined) : undefined
 }
 
 /** Kinds that answer on a URL of their own (the engine sets `url` for exactly these). */

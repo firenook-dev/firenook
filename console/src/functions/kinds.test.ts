@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { KIND_WORDS } from '@/compute/kind-badge'
+import { invocation } from './fixtures.test-support'
 import {
   KIND_ICON,
   actionTitle,
   answersOnUrl,
+  chipStatus,
   generationText,
   kindVerb,
   runForm,
@@ -43,5 +45,23 @@ describe('a kind on the Functions page', () => {
     expect(KIND_WORDS.filter(answersOnUrl)).toEqual(['http', 'callable', 'blocking'])
     expect(generationText('gcfv1')).toBe('1st gen')
     expect(generationText('gcfv2')).toBe('2nd gen')
+  })
+
+  it('shows the HTTP status as the word only for a call to a URL', () => {
+    const http = invocation(1, { cause: { type: 'http', method: 'GET', path: '/' }, status: 500 })
+    expect(chipStatus(http)).toBe(500)
+    // An event delivery, a callable, a task or a blocking decision say how it
+    // ended in words: their status is the protocol's.
+    for (const cause of [
+      { type: 'firestore', eventType: 'x', database: '(default)', document: 'a/b', eventId: null },
+      { type: 'callable', uid: null, tenant: null, appCheck: false, streaming: false },
+      { type: 'task', queue: 'q', task: '1', retryCount: 0, executionCount: 0 },
+    ] as const)
+      expect(chipStatus(invocation(2, { cause, status: 200 }))).toBeUndefined()
+    expect(
+      chipStatus(
+        invocation(3, { cause: { type: 'http', method: 'GET', path: '/' }, status: null }),
+      ),
+    ).toBeUndefined()
   })
 })

@@ -272,6 +272,11 @@ export function EventForm({
   const data = 'problem' in input ? undefined : parseJsonText(draft.fields.data ?? '')
 
   const forReal = useMutation({
+    // The answer below is the real thing's from now on, not an earlier test event's.
+    onMutate: () => {
+      setRun(null)
+      setReal(null)
+    },
     mutationFn: async (chosen?: File) => {
       const value = data?.ok ? data.value : undefined
       if (kind === 'firestore') {

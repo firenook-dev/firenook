@@ -209,6 +209,10 @@ export function BlockingForm({
     mutationFn: async () => {
       const email = draft.email.trim()
       if (!email) throw new Error('Give the user an email to sign up with.')
+      // The answer below is this sign-up's from now on, not an earlier test's.
+      setRun(null)
+      setAwaiting(null)
+      const started = Date.now() - 1000
       await nativeFetch('/auth/identitytoolkit.googleapis.com/v1/accounts:signUp?key=console', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -223,7 +227,6 @@ export function BlockingForm({
         if (error instanceof ApiError) return error
         throw error
       })
-      const started = Date.now() - 1000
       setAwaiting(
         () => (invocation: InvocationSummary) =>
           invocation.kind === 'blocking' && Date.parse(invocation.startedAt) >= started,

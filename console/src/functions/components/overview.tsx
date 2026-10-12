@@ -25,6 +25,7 @@ import { KindBadge } from '@/compute/kind-badge'
 import { DurationText } from '@/compute/duration-text'
 import { formatNumber } from '@/lib/format'
 import { type OverviewRow, filterOverview, overviewRows } from '../filters'
+import { chipStatus } from '../kinds'
 import { notLoadedText, statusText, triggerText } from '../trigger-text'
 
 const MEMORY_KEY = 'functions.overview'
@@ -203,7 +204,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
       if (!last) return <span className="font-sans text-[12px] text-kumo-inactive">–</span>
       const chip = invocationChip({
         outcome: last.outcome,
-        status: last.status ?? undefined,
+        status: chipStatus(last),
         callableStatus: last.callableStatus ?? undefined,
       })
       return (

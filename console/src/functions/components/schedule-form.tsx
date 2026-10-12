@@ -19,6 +19,7 @@ import { useNow } from '@/lib/clock'
 import { useLinkTo } from '@/lib/links'
 import { formatClock } from '@/lib/format'
 import { functionKeys, runSchedule } from '../api'
+import { chipStatus } from '../kinds'
 import { lastSegment } from '../trigger-text'
 import { FormRow, RunAnswer, RunError, RunFooter, useNextInvocation } from './run-parts'
 
@@ -127,7 +128,7 @@ export function ScheduleForm({
               <OutcomeChip
                 outcome={last.outcome}
                 outcomeClass={last.outcomeClass}
-                status={last.status ?? undefined}
+                status={chipStatus(last)}
                 callableStatus={last.callableStatus ?? undefined}
                 startedAt={last.startedAt}
               />

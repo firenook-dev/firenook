@@ -26,6 +26,7 @@ import { createFeedStore } from '@/lib/live/feed-store'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { toast } from '@/lib/toasts'
 import { invocationQuery } from '../api'
+import { chipStatus } from '../kinds'
 import { useInvocationLive } from '../live'
 import {
   type SavedKind,
@@ -360,7 +361,7 @@ function InvocationLogs({
   return (
     <section className="grid gap-1" aria-label="Logs" data-testid="run-logs">
       <h4 className="m-0 text-[12px] font-normal text-kumo-subtle">
-        Logs · {count === 0 ? 'none yet' : formatNumber(count)}
+        Logs · {count === 0 ? (running ? 'none yet' : 'none') : formatNumber(count)}
       </h4>
       {count > 0 && (
         <div className="max-h-72 overflow-hidden rounded-md ring ring-kumo-line">
@@ -397,7 +398,15 @@ export function RunAnswer({
   /** The answer itself: a response, a callable's result, an event's outcome. */
   children?: ReactNode
 }) {
-  const shown = finished ?? invocation
+  // The record as the engine keeps it (its live topic patches it until the
+  // call ends), so a head shown as it started still says how it ended when
+  // the form had only the start to show (a schedule run directly).
+  const recorded = useQuery({
+    ...invocationQuery(project, invocation?.id ?? finished?.id ?? ''),
+    enabled: project !== '' && (invocation ?? finished) !== undefined,
+  })
+  const kept = recorded.data?.detail.summary
+  const shown = finished ?? (kept && kept.outcome !== null ? kept : undefined) ?? invocation
   return (
     <section
       className="grid gap-2 border-t border-kumo-line px-5 py-3"
@@ -411,7 +420,7 @@ export function RunAnswer({
               <OutcomeChip
                 outcome={shown.outcome}
                 outcomeClass={shown.outcomeClass}
-                status={shown.status ?? undefined}
+                status={chipStatus(shown)}
                 callableStatus={shown.callableStatus ?? undefined}
                 startedAt={shown.startedAt}
                 detail={shown.error ?? undefined}
@@ -459,10 +468,17 @@ export function RunError({ message, fix }: { message: string; fix?: string | und
   )
 }
 
+/** How many of a function's latest finished invocations a Run form remembers. */
+const RECENT = 50
+
 /**
  * The next finished invocation of `functionId` that `matches` (a write's
  * trigger, a publish's delivery, a task's dispatch), followed on the live
- * tail of `functions.events` while asked for (`matches: null` = not now).
+ * tail of `functions.events` (`matches: null` = not now). The form follows
+ * the function from the moment it opens, and keeps its latest finished
+ * invocations, so one that finishes before the action has said what it
+ * waits for (a sign-up answered by the time its request returns) is found
+ * all the same.
  */
 export function useNextInvocation(
   functionId: string,
@@ -470,15 +486,27 @@ export function useNextInvocation(
 ): InvocationSummary | undefined {
   const [found, setFound] = useState<{ for: unknown; invocation: InvocationSummary } | undefined>()
   const latest = useRef(matches)
+  const recent = useRef<InvocationSummary[]>([])
   useEffect(() => {
     latest.current = matches
-  })
-  useLiveTopic('functions.events', matches ? { function: functionId } : null, {
+    if (!matches) return
+    for (let at = recent.current.length - 1; at >= 0; at -= 1) {
+      const invocation = recent.current[at]
+      if (invocation && matches(invocation)) {
+        setFound({ for: matches, invocation })
+        return
+      }
+    }
+  }, [matches])
+  useLiveTopic('functions.events', functionId ? { function: functionId } : null, {
     onBatch: (batch) => {
+      const finished = batch.items.filter((item) => item.outcome !== null)
+      if (finished.length === 0) return
+      recent.current = [...recent.current, ...finished].slice(-RECENT)
       const test = latest.current
       if (!test) return
-      for (const item of batch.items)
-        if (item.outcome !== null && test(item)) {
+      for (const item of finished)
+        if (test(item)) {
           setFound({ for: test, invocation: item })
           return
         }

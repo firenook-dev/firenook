@@ -33,6 +33,7 @@ import { shellQuote } from '@/components/console/request/as-code'
 import { formatClock, formatNumber, useClockFormat } from '@/lib/format'
 import { createFeedStore } from '@/lib/live/feed-store'
 import { invocationQuery } from '../api'
+import { chipStatus } from '../kinds'
 import { useInvocationLive } from '../live'
 import { useFunctionsAddress } from '../use-functions'
 import { type InvocationActions, causeRefs, refLabel } from './invocation-actions'
@@ -460,7 +461,7 @@ export function InvocationDetail({
               <OutcomeChip
                 outcome={summary.outcome}
                 outcomeClass={summary.outcomeClass}
-                status={summary.status ?? undefined}
+                status={chipStatus(summary)}
                 callableStatus={summary.callableStatus ?? undefined}
                 startedAt={summary.startedAt}
                 testId="invocation-detail-outcome"
