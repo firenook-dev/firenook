@@ -15,7 +15,7 @@ import { inlineSteps } from '@/rules/explain'
 import { ExplanationView } from '@/rules/explanation-view'
 import { linesFromAllows, useOverlay } from '@/rules/overlay'
 import { RulesCompileError } from '@/rules/text'
-import { Verdict } from '@/rules/verdict'
+import { VerdictLine } from '@/rules/verdict'
 import { decodeFields } from '../value'
 import { evaluateRules } from './api'
 import { FieldList } from './field-list'
@@ -293,30 +293,33 @@ export function Playground({
         </div>
       )}
       {run && !failure && (
-        <div className="grid gap-3 px-3 py-3" data-testid="playground-result">
-          <div className="flex items-center gap-2">
-            <Verdict outcome={run.result.outcome} />
-            <span className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle">
-              {describeForm(run.form)}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<FlaskIcon />}
-              className="ml-auto shrink-0"
-              onClick={() =>
-                addTest({
-                  name: describeForm(run.form),
-                  form: run.form,
-                  expected: run.result.outcome === 'allow' ? 'allow' : 'deny',
-                  seed: run.result.resource,
-                })
-              }
-              data-testid="playground-save-test"
-            >
-              Save as a test
-            </Button>
-          </div>
+        <div
+          className="grid grid-cols-[minmax(0,1fr)] gap-3 px-3 py-3"
+          data-testid="playground-result"
+        >
+          <VerdictLine
+            outcome={run.result.outcome}
+            request={describeForm(run.form)}
+            action={
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<FlaskIcon />}
+                className="-my-1 shrink-0"
+                onClick={() =>
+                  addTest({
+                    name: describeForm(run.form),
+                    form: run.form,
+                    expected: run.result.outcome === 'allow' ? 'allow' : 'deny',
+                    seed: run.result.resource,
+                  })
+                }
+                data-testid="playground-save-test"
+              >
+                Save as a test
+              </Button>
+            }
+          />
           <ExplanationView
             result={run.result}
             rules={run.source}

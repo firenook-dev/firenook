@@ -311,6 +311,17 @@ test('the playground tries a request against the draft, and a saved test guards 
     /cm-line-(deny|error)/,
   )
 
+  // A long path: the request wraps and the explanation keeps to the panel,
+  // so nothing (the save button least of all) runs past its right edge.
+  const long = `users/${'u'.repeat(90)}`
+  await page.getByTestId('playground-path').fill(long)
+  await page.getByTestId('playground-run').click()
+  await expect(page.getByTestId('playground-verdict')).toContainText(long)
+  await expect
+    .poll(() => page.getByTestId('playground').evaluate((el) => el.scrollWidth - el.clientWidth))
+    .toBe(0)
+  await page.getByTestId('playground-path').fill('users/u_k65eq')
+
   // The owner herself: allowed, and saved as a test that should allow.
   await page.getByRole('combobox', { name: 'Who is asking' }).click()
   await page.getByRole('option', { name: 'Someone else…' }).click()
