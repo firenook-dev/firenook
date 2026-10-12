@@ -318,42 +318,38 @@ export function DataTable<Row>({
     if (rows.length > 0 && hasPrevious && firstVisible <= LOAD_AHEAD) loadPrevious?.()
   }, [firstVisible, rows.length, hasPrevious, loadPrevious])
 
-  // The row at the top of the view, by key, and how far into it the view
-  // starts: rows that come or go above it leave it where it is.
-  const anchorRow = useRef<{ key: string; delta: number } | null>(null)
+  // Rows that come or go above the row at the top of the view leave it
+  // where it is. That row, and how far into it the view starts, are read
+  // when the rows change, from where the view stands over the rows as they
+  // were drawn: never from the last scroll event, which may not have
+  // reached the page yet (a jump to the top, or Home, and new rows in the
+  // same frame would be thrown back to where the reader was). The view is
+  // held here alone; the browser's own scroll anchoring is off.
   const previous = useRef<{ rows: readonly Row[]; keys: readonly string[]; offset: number }>({
     rows,
     keys,
     offset: rowOffset,
   })
-  const recordAnchor = () => {
-    const element = scrollRef.current
-    if (!element) return
-    const top = element.scrollTop
-    const index = Math.floor(top / ROW_HEIGHT)
-    const key = keys[index]
-    anchorRow.current =
-      top > 0 && key !== undefined ? { key, delta: top - index * ROW_HEIGHT } : null
-  }
   useLayoutEffect(() => {
     const before = previous.current
     if (before.rows === rows) return
     previous.current = { rows, keys, offset: rowOffset }
     const element = scrollRef.current
-    const held = anchorRow.current
-    if (!element || !held) return
+    if (!element) return
+    const top = element.scrollTop
+    const was = Math.floor(top / ROW_HEIGHT)
+    const key = before.keys[was]
+    // At the very top nothing is held: rows that arrive there show.
+    if (top <= 0 || key === undefined) return
     const slid = before.offset !== rowOffset
     // Without key anchoring only a sliding window is corrected: a dropped
     // page must not throw the reader two thousand rows away.
     if (anchor === 'none' && !slid) return
-    const index = keys.indexOf(held.key)
+    const index = keys.indexOf(key)
     if (index === -1) return
-    const target = index * ROW_HEIGHT + held.delta
-    if (Math.abs(element.scrollTop - target) < 1) return
-    if (anchor === 'key' && !slid) {
-      const was = before.keys.indexOf(held.key)
-      if (was !== -1 && index > was) setCounted((count) => count + index - was)
-    }
+    const target = index * ROW_HEIGHT + (top - was * ROW_HEIGHT)
+    if (Math.abs(top - target) < 1) return
+    if (anchor === 'key' && !slid && index > was) setCounted((count) => count + index - was)
     element.scrollTop = target
   }, [rows, keys, rowOffset, anchor])
 
@@ -368,10 +364,6 @@ export function DataTable<Row>({
     if (top < element.scrollTop + head) element.scrollTop = Math.max(0, top - head)
     else if (bottom > element.scrollTop + element.clientHeight)
       element.scrollTop = bottom - element.clientHeight
-    else return
-    // The browser reports the scroll a frame later: rows that change
-    // before then must hold the row revealed, not the one left behind.
-    recordAnchor()
   }
   /** Scrolls a column fully into view beside the pinned ones. */
   const revealColumn = (id: string | undefined) => {
@@ -679,7 +671,7 @@ export function DataTable<Row>({
             paint every value it crossed. ⌘C copies the cursor cell. */}
         <div
           ref={scrollRef}
-          className="group/grid min-h-0 flex-1 overflow-auto select-none"
+          className="group/grid min-h-0 flex-1 overflow-auto select-none [overflow-anchor:none]"
           data-testid={testId ? `${testId}-scroll` : 'data-table-scroll'}
           data-scrolled={scrolledX ? '' : undefined}
           onScroll={(event) => {
@@ -689,7 +681,6 @@ export function DataTable<Row>({
             const nowAtTop = element.scrollTop <= 0
             if (nowAtTop !== atTop) setAtTop(nowAtTop)
             if (nowAtTop && counted > 0) setCounted(0)
-            recordAnchor()
           }}
           onKeyDown={onKeyDown}
         >

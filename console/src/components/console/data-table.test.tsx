@@ -337,6 +337,19 @@ describe('DataTable', () => {
     expect(scroller().scrollTop).toBe(end)
   })
 
+  it('keeps a jump to the top the browser has not reported yet when rows arrive', () => {
+    const { rerender } = render(<Harness rows={users(100, 100)} />)
+    act(() => scrollTo(scroller(), 640))
+    // Scrolled to the top (a page's own scroll, or Home), and new rows in
+    // the same frame, before the scroll event.
+    scroller().scrollTop = 0
+    rerender(<Harness rows={[...users(5, 95), ...users(100, 100)]} />)
+    expect(scroller().scrollTop).toBe(0)
+    act(() => scrollTo(scroller(), scroller().scrollTop))
+    expect(document.querySelector('tr[data-key="u0095"]')).not.toBeNull()
+    expect(screen.queryByTestId('new-above')).toBeNull()
+  })
+
   it('shows rows that arrive at the very top: nothing is held there', () => {
     const { rerender } = render(<Harness rows={users(100, 100)} />)
     rerender(<Harness rows={[...users(5, 95), ...users(100, 100)]} />)
