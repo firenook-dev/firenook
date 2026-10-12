@@ -85,6 +85,25 @@ describe('useLiveTopic', () => {
     expect(fake.active().map((entry) => entry.params)).toEqual([{ database: 'other' }])
   })
 
+  it('starts at the cursor it is given, and a later cursor does not subscribe again', () => {
+    const started: Array<string | undefined> = []
+    const fake = fakeChannel()
+    const channel: LiveChannel = {
+      ...fake.channel,
+      subscribe(topic, params, listener, options) {
+        started.push(options?.after)
+        return fake.channel.subscribe(topic, params, listener)
+      },
+    }
+    const { rerender } = renderHook(
+      ({ after }: { after: string }) =>
+        useLiveTopic('firestore.changes', { database: '(default)' }, {}, channel, { after }),
+      { initialProps: { after: 'e.4' }, wrapper },
+    )
+    rerender({ after: 'e.9' })
+    expect(started).toEqual(['e.4'])
+  })
+
   it("answers this subscription's status: ended or refused, else the channel's", () => {
     const fake = fakeChannel()
     const { result } = renderHook(

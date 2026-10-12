@@ -63,9 +63,27 @@ export interface TopicListener {
   onState?(state: SubscriptionState): void
 }
 
+/** How one subscription starts. */
+export interface SubscribeOptions {
+  /**
+   * The cursor to resume from: a snapshot's `liveCursor`, which the engine
+   * read in the same lock as the state the snapshot holds, so the topic
+   * delivers exactly what changed after that state — nothing the page
+   * already has is missed, and nothing it missed is lost while the GET and
+   * the subscription race. A cursor the engine no longer holds is answered
+   * with `reset`, as any resume is. Feeds (`replay` topics) only.
+   */
+  after?: string | undefined
+}
+
 export interface LiveChannel {
   /** Subscribes (connecting on first use); returns the unsubscribe. */
-  subscribe(topic: string, params: object, listener: TopicListener): () => void
+  subscribe(
+    topic: string,
+    params: object,
+    listener: TopicListener,
+    options?: SubscribeOptions,
+  ): () => void
   /** Called once per engine restart, after every query was invalidated. */
   onEngineRestart(callback: () => void): () => void
   /**
@@ -1036,20 +1054,22 @@ export function createLiveChannel(
   return {
     tab,
     status: store,
-    subscribe(topic, params, listener) {
+    subscribe(topic, params, listener, subscribeOptions) {
       localSerial += 1
+      const after = subscribeOptions?.after
       const local: LocalSub = {
         id: `${tab}.s${localSerial}`,
         topic,
         params: wireParams(params),
         listener,
-        cursor: undefined,
+        cursor: after,
         state: 'pending',
         attempt: 0,
         retry: undefined,
         // A tab opened in the background reads its data now and subscribes
-        // when it is shown.
-        resync: environment.document.visibilityState !== 'visible',
+        // when it is shown; with a cursor of its own it resumes from there
+        // instead, and has nothing to reload.
+        resync: environment.document.visibilityState !== 'visible' && after === undefined,
       }
       locals.set(local.id, local)
       if (engaged) {
@@ -1151,7 +1171,8 @@ function page(): LiveChannelInstance {
 
 /** The page's channel, created on first use. */
 export const liveChannel: LiveChannel = {
-  subscribe: (topic, params, listener) => page().subscribe(topic, params, listener),
+  subscribe: (topic, params, listener, options) =>
+    page().subscribe(topic, params, listener, options),
   onEngineRestart: (callback) => page().onEngineRestart(callback),
   retry: () => page().retry(),
 }
