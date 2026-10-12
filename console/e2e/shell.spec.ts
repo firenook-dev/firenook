@@ -44,7 +44,8 @@ test('one live connection serves every page and every tab of a browser', async (
   await expect.poll(() => subscriptions.added.includes('firestore.changes')).toBe(true)
 
   // Each page takes its topics and gives them back as it is left.
-  await page.getByTestId('nav-page-rules').click()
+  // (Storage has a Rules page too: this is Firestore's.)
+  await page.locator('[data-testid="nav-page-rules"][href="/console/firestore/rules"]').click()
   await expect(page.getByTestId('rules-source')).toBeVisible()
   await expect.poll(() => subscriptions.added.includes('firestore.rules')).toBe(true)
   await expect.poll(() => subscriptions.removed.includes('firestore.changes')).toBe(true)
