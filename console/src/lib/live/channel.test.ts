@@ -422,6 +422,71 @@ describe('reconnecting and restarts', () => {
   })
 })
 
+describe('a page that read its data before it could subscribe', () => {
+  it('opened in the background, it reloads what it shows once its subscription is taken', async () => {
+    const tab = browser.tab({ hidden: true })
+    const channel = open(tab)
+    const waited = record()
+    channel.subscribe('firestore.changes', CHANGES, waited.listener)
+    await settle()
+    tab.document.show()
+    await settle()
+    expect(waited.resets).toEqual([])
+    browser.engine.hello()
+    await settle()
+    expect(waited.resets).toEqual([{ reason: 'gap', missed: null }])
+    // Once: what follows is heard.
+    browser.engine.ev(browser.engine.idOf('firestore.changes'), 'change', 'e.1', { changes: [] })
+    await settle()
+    expect(waited.resets).toHaveLength(1)
+    expect(waited.events).toHaveLength(1)
+  })
+
+  it('a tab that was visible when it subscribed is not reloaded, nor a state topic', async () => {
+    const a = await leaderWith(['firestore.changes', CHANGES])
+    expect(a.recorded[0]?.resets).toEqual([])
+    const tab = browser.tab({ hidden: true })
+    const b = open(tab)
+    const rules = record()
+    b.subscribe('firestore.rules', CHANGES, rules.listener)
+    tab.document.show()
+    await settle()
+    expect(rules.states.at(-1)).toBe('active')
+    // A compare topic says its state on open instead.
+    expect(rules.resets).toEqual([])
+  })
+
+  it('given back without a cursor it reloads when shown again; with one it resumes', async () => {
+    const a = await leaderWith(['firestore.changes', CHANGES], ['logs.entries', {}])
+    const [changes, logs] = a.recorded
+    browser.engine.ev(browser.engine.idOf('firestore.changes'), 'change', 'e.3', { changes: [] })
+    await settle()
+    a.tab.document.hide()
+    await vi.advanceTimersByTimeAsync(DEFAULT_TIMING.releaseMs)
+    await settle()
+    expect(browser.engine.live()).toHaveLength(0)
+    a.tab.document.show()
+    await settle()
+    browser.engine.hello()
+    await settle()
+    const add = browser.engine.posts.at(-1)?.add ?? []
+    expect(add.find((sub) => sub.topic === 'firestore.changes')?.after).toBe('e.3')
+    expect(changes?.resets).toEqual([])
+    expect(logs?.resets).toEqual([{ reason: 'gap', missed: null }])
+  })
+
+  it('ended with an error before it had a cursor, it reloads when it comes back', async () => {
+    const a = await leaderWith(['logs.entries', {}])
+    const [logs] = a.recorded
+    browser.engine.end(browser.engine.idOf('logs.entries'), GONE)
+    await settle()
+    await vi.advanceTimersByTimeAsync(500)
+    await settle()
+    expect(logs?.states.at(-1)).toBe('active')
+    expect(logs?.resets).toEqual([{ reason: 'gap', missed: null }])
+  })
+})
+
 describe('one subscription', () => {
   it('reset and end reach only the subscription they name', async () => {
     const a = await leaderWith(['firestore.changes', CHANGES], ['logs.entries', {}])

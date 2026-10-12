@@ -188,6 +188,14 @@ interface LocalSub {
   state: SubscriptionState
   attempt: number
   retry: ReturnType<typeof setTimeout> | undefined
+  /**
+   * The page read its data while this subscription could not be on the
+   * engine (the tab was hidden when it subscribed, or gave it back since),
+   * and it has no cursor to resume from: whatever changed meanwhile was
+   * never heard, so the page is told to reload what it shows once the
+   * subscription is taken.
+   */
+  resync: boolean
 }
 
 /** A subscription some tab asked the leader for. */
@@ -313,6 +321,20 @@ export function createLiveChannel(
     safely(() => local.listener.onState?.(state))
   }
 
+  /**
+   * The engine took this subscription. One that waited without a cursor
+   * missed whatever happened while it waited, so its page reloads what it
+   * shows, as after a gap; a `compare` topic sends its state on open and
+   * needs nothing more.
+   */
+  function activate(local: LocalSub) {
+    setLocalState(local, 'active')
+    if (!local.resync) return
+    local.resync = false
+    if (local.cursor !== undefined || resumeOf(local.topic) === 'compare') return
+    safely(() => local.listener.onReset('gap', null))
+  }
+
   function offer(local: LocalSub) {
     if (!engaged) return
     const message: Extract<RelayMessage, { t: 'sub' }> = {
@@ -361,6 +383,8 @@ export function createLiveChannel(
     clearTimeout(releaseTimer)
     releaseTimer = undefined
     if (!engaged) return
+    // What has no cursor cannot be replayed when the tab is shown again.
+    for (const local of locals.values()) if (local.cursor === undefined) local.resync = true
     if (election.isLeader()) stopLeading()
     else for (const local of locals.values()) election.send({ t: 'unsub', tab, id: local.id })
     engaged = false
@@ -413,9 +437,10 @@ export function createLiveChannel(
   function deliverLocal(local: LocalSub, kind: 'ev' | 'reset' | 'end', message: unknown) {
     if (kind === 'ev') {
       const envelope = message as LiveEnvelope
+      // Taken before the cursor moves: whether it resumed from one.
+      activate(local)
       if (envelope.cursor) local.cursor = envelope.cursor
       local.attempt = 0
-      setLocalState(local, 'active')
       // `tick` only moves the cursor.
       if (envelope.name === 'tick') return
       safely(() =>
@@ -430,6 +455,8 @@ export function createLiveChannel(
     }
     const end = message as LiveEnd
     if (end.error) {
+      // Back by itself later; without a cursor, what happens until then is missed.
+      if (local.cursor === undefined) local.resync = true
       setLocalState(local, 'ended')
       const error = end.error
       safely(() => local.listener.onEnd(error))
@@ -484,7 +511,9 @@ export function createLiveChannel(
   function acceptLocal(ids: Iterable<string>) {
     for (const id of ids) {
       const local = locals.get(id)
-      if (local && local.state === 'pending') setLocalState(local, 'active')
+      // A subscription given back while the tab hid stays `active`; taken
+      // again, it may still owe its page a reload.
+      if (local && (local.state === 'pending' || local.resync)) activate(local)
     }
   }
 
@@ -1018,6 +1047,9 @@ export function createLiveChannel(
         state: 'pending',
         attempt: 0,
         retry: undefined,
+        // A tab opened in the background reads its data now and subscribes
+        // when it is shown.
+        resync: environment.document.visibilityState !== 'visible',
       }
       locals.set(local.id, local)
       if (engaged) {
