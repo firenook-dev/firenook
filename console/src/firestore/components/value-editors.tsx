@@ -12,9 +12,9 @@ import { type ReactNode, useState } from 'react'
 import { type DraftNode, numberForm } from '../draft'
 import { collectionsQuery, documentIdsQuery } from '../queries'
 import { relativeTime } from '../value'
-import { Anchored, Completion, Completions } from './completions'
+import { Anchored, Completion, Completions } from '@/components/console/completions'
 import { useFieldEditing, useFocusTarget } from './field-context'
-import { StripButton } from './strip-button'
+import { StripButton } from '@/components/console/strip-button'
 import { useWorkbench } from './workbench-context'
 
 export interface EditorProps {

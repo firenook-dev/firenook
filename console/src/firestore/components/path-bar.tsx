@@ -14,10 +14,11 @@ import { FolderPlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { CopyGlyph, useCopied } from '@/components/kit'
+import { useShortcuts } from '@/lib/shortcuts'
 import { useCreateDialog, validateId } from '../create'
 import { EMPTY_QUERY } from '../query'
 import { collectionsQuery, countQueryOptions } from '../queries'
-import { findNode, isPattern, schemaQuery } from '../schema'
+import { findNode, isPattern, workbenchSchemaQuery } from '../schema'
 import { formatNumber } from '../value'
 import { ScopePicker } from './scope-picker'
 import { useWorkbench } from './workbench-context'
@@ -29,20 +30,9 @@ export function PathBar() {
   const inputRef = useRef<HTMLInputElement>(null)
   const { copied, copy } = useCopied()
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null
-      const typing =
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey) {
-        event.preventDefault()
-        setEditing(workbench.path)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench.path])
+  useShortcuts({ id: 'firestore', label: 'Firestore' }, [
+    { key: '/', label: 'Edit the path', run: () => setEditing(workbench.path) },
+  ])
 
   useEffect(() => {
     if (editing !== null) inputRef.current?.select()
@@ -373,7 +363,7 @@ function CollectionCount({ path }: { path: string }) {
     ...countQueryOptions(workbench.ownerScope, path, false, EMPTY_QUERY),
     enabled: !pattern,
   })
-  const schema = useQuery({ ...schemaQuery(workbench.database), enabled: pattern })
+  const schema = useQuery({ ...workbenchSchemaQuery(workbench), enabled: pattern })
   const value = pattern ? findNode(schema.data, path)?.documents : count.data?.count
   if (value === undefined) return null
   return <span className="text-[11px] text-kumo-subtle tabular-nums">{formatNumber(value)}</span>

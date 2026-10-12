@@ -1,9 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixtures'
 import { ENGINE_REVISION, RELEASE_VERSION } from './engine'
 
 const origin = () => {
   const value = process.env.FIRENOOK_CONSOLE_ORIGIN
-  if (!value) throw new Error('the engine global setup did not run')
+  if (!value) throw new Error('the worker engine did not start')
   return value
 }
 const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'
@@ -125,6 +125,74 @@ test('the command palette opens from the keyboard and jumps to a section', async
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/console\/tasks$/)
   await expect(page.getByRole('heading', { name: 'Cloud Tasks', level: 1 })).toBeVisible()
+})
+
+test('? lists every key the page answers to, from the same registry the keys run through', async ({
+  page,
+}) => {
+  const mod = process.platform === 'darwin' ? '⌘' : 'Ctrl+'
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('grid-row').first()).toBeVisible()
+  // A cell under the cursor, so the keys that act on one are live.
+  await page.getByTestId('grid-row').first().locator('td[data-field]').first().click()
+
+  await page.keyboard.press('?')
+  const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
+  await expect(dialog).toBeVisible()
+  const everywhere = dialog.getByRole('region', { name: 'Everywhere' })
+  await expect(everywhere).toContainText('Search the console')
+  await expect(everywhere).toContainText(`${mod}K`)
+  await expect(everywhere).toContainText('Hide or show the schema panel')
+  await expect(everywhere).toContainText('Keyboard shortcuts')
+  const firestore = dialog.getByRole('region', { name: 'This page · Firestore' })
+  await expect(firestore).toContainText('Edit the path')
+  await expect(firestore).toContainText('Filter the documents')
+  await expect(firestore).toContainText('New document')
+  // Only what can be pressed now: nothing is ticked, so there is nothing to delete.
+  await expect(firestore).not.toContainText('Delete the ticked documents')
+  const grid = dialog.getByRole('region', { name: 'Grid' })
+  await expect(grid).toContainText('Move between rows')
+  await expect(grid.getByRole('listitem').filter({ hasText: 'Move between rows' })).toContainText(
+    '↑↓',
+  )
+  await expect(grid).toContainText('Copy the value')
+
+  // The dialog owns its single keys: `f` behind it does not open the filter.
+  await page.keyboard.press('f')
+  await expect(page.getByTestId('query-input')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+
+  // In a field, `?` is a character.
+  await page.keyboard.press('f')
+  const input = page.getByTestId('query-input')
+  await expect(input).toBeFocused()
+  await page.keyboard.press('?')
+  await expect(input).toHaveValue('?')
+  await expect(dialog).toHaveCount(0)
+  await input.fill('')
+  await page.keyboard.press('Escape')
+
+  // Ticked rows add the delete keys to the list.
+  await page.getByTestId('grid-row').first().getByRole('checkbox').click()
+  await page.keyboard.press('?')
+  await expect(dialog.getByRole('region', { name: 'This page · Firestore' })).toContainText(
+    'Delete the ticked documents',
+  )
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+
+  // The palette offers it, and the rules page lists its own keys.
+  await page.goto(`${origin()}/console/firestore/rules`)
+  await expect(page.getByTestId('rules-source')).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('palette-input').fill('keyboard')
+  await page.keyboard.press('Enter')
+  const rules = dialog.getByRole('region', { name: 'This page · Security rules' })
+  await expect(rules).toContainText('Apply the draft')
+  await expect(rules).toContainText(`${mod}↵`)
+  await expect(rules).toContainText('Save to the rules file')
+  await expect(dialog.getByRole('region', { name: 'This page · Firestore' })).toHaveCount(0)
 })
 
 test('the shell never caches and hashed assets are immutable', async ({ request }) => {

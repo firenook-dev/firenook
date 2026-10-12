@@ -24,10 +24,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { statusQuery } from '@/api/queries'
 import { CodeEditor, type CodeMark } from '@/components/code-editor'
 import { Page } from '@/components/shell/page'
+import { identityUsersQuery } from '@/lib/identity'
+import { useShortcuts } from '@/lib/shortcuts'
 import { DatabasePicker } from '../components/database-picker'
 import { DEFAULT_DATABASE } from '../components/workbench-context'
 import { describeDiagnostic, offsetOf } from '../rules'
-import { authUsersQuery } from '../queries'
 import { type RulesImpact, checkQuery, impactQuery, useRulesLive } from './api'
 import { CollectionsPanel } from './collections-panel'
 import { Playground } from './playground'
@@ -155,8 +156,10 @@ function RulesBody({ project }: { project: string }) {
   const impact = useQuery({ ...impactQuery(database, checked), enabled: draftCompiles })
 
   // Completion that knows the data: the fields documents of a collection
-  // carry, and the custom claims the Auth emulator's users have.
-  const users = useQuery(authUsersQuery(project))
+  // carry, and the custom claims the Auth emulator's users have (the first
+  // page of them, from the engine's bounded identity search — never every
+  // account).
+  const users = useQuery(identityUsersQuery(project, ''))
   const completion = useMemo(
     () => ({
       fields: async (pattern: string) =>
@@ -170,21 +173,27 @@ function RulesBody({ project }: { project: string }) {
     [queryClient, project, database, users.data],
   )
 
-  // ⌘↵ applies, ⌘S saves: the two things an edit ends in, from the keys.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey)) return
-      if (event.key === 'Enter') {
-        event.preventDefault()
+  // ⌘↵ applies, ⌘S saves: the two things an edit ends in, from the keys,
+  // and from inside the editor, which is where the keys are pressed. ⌘S is
+  // always the page's here, so the browser never offers to save the page.
+  useShortcuts({ id: 'firestore.rules', label: 'Security rules' }, [
+    {
+      key: 'Mod+Enter',
+      label: 'Apply the draft',
+      allowInInputs: true,
+      run: () => {
         if (draft.edited) draft.apply(false)
-      } else if (event.key.toLowerCase() === 's') {
-        event.preventDefault()
+      },
+    },
+    {
+      key: 'Mod+s',
+      label: 'Save to the rules file',
+      allowInInputs: true,
+      run: () => {
         if (draft.rules.data?.path) draft.apply(true)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [draft])
+      },
+    },
+  ])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="rules-page">

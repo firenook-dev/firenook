@@ -41,6 +41,11 @@ describe('a playground request', () => {
     if (!('request' in signed)) throw new Error(signed.error)
     const claims = claimsOf(signed.request.authorization)
     expect(claims).toMatchObject({ sub: 'u1', email: 'ada@example.test', admin: true, aud: P })
+    // The identity a saved test exports as: verified email, password provider.
+    expect(claims).toMatchObject({
+      email_verified: true,
+      firebase: { sign_in_provider: 'password' },
+    })
   })
 
   it('types the data of a write the way the grid types it', () => {

@@ -24,7 +24,7 @@ import {
   filterSchema,
   isExpanded,
   patternOf,
-  schemaQuery,
+  workbenchSchemaQuery,
   useSchemaTree,
 } from '../schema'
 import { formatNumber } from '../value'
@@ -33,7 +33,7 @@ import { useWorkbench } from './workbench-context'
 
 export function SchemaPanel() {
   const workbench = useWorkbench()
-  const schema = useQuery(schemaQuery(workbench.database))
+  const schema = useQuery(workbenchSchemaQuery(workbench))
   const expanded = useSchemaTree((state) => state.expanded)
   const collapsed = useSchemaTree((state) => state.collapsed)
   const filter = useSchemaTree((state) => state.filter)

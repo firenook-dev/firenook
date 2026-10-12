@@ -8,10 +8,15 @@
 // query line is the thing least worth reading — so the bar takes its
 // place, at its height, and the rows below do not move: a shift-click
 // aimed at the next row still lands on it.
+//
+// The bar itself is the kit's (`components/console/selection-bar.tsx`); this
+// file gives it the documents' count and Firestore's own Copy, Export and
+// Delete.
 
 import { Button, DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
-import { CaretDownIcon, DownloadSimpleIcon, TrashIcon, XIcon } from '@phosphor-icons/react'
+import { CaretDownIcon, DownloadSimpleIcon, TrashIcon } from '@phosphor-icons/react'
 import { useInfiniteQuery, useMutation } from '@tanstack/react-query'
+import { SelectionBar as KitSelectionBar } from '@/components/console/selection-bar'
 import { CopyGlyph, useCopied } from '@/components/kit'
 import { type ExportFormat, renderExport, useExportDialog } from '../export'
 import { isEmptyQuery } from '../query'
@@ -21,6 +26,8 @@ import { formatNumber } from '../value'
 import type { DeleteTarget } from './delete-dialog'
 import { useMatchCount } from './query-line'
 import { useWorkbench } from './workbench-context'
+
+const DOCUMENTS = { one: 'document', other: 'documents' }
 
 export function SelectionBar({ onDelete }: { onDelete: (target: DeleteTarget) => void }) {
   const workbench = useWorkbench()
@@ -46,7 +53,6 @@ export function SelectionBar({ onDelete }: { onDelete: (target: DeleteTarget) =>
   })
 
   const count = everything ? (total?.count ?? checked.size) : checked.size
-  const more = !everything && total !== undefined && total.count > checked.size
   const noun = count === 1 ? 'document' : 'documents'
 
   const copy = useMutation({
@@ -75,95 +81,73 @@ export function SelectionBar({ onDelete }: { onDelete: (target: DeleteTarget) =>
   })
 
   return (
-    <div
-      className="absolute inset-0 z-10 flex items-center gap-2 overflow-x-auto border-b border-kumo-line bg-kumo-base px-3 whitespace-nowrap"
-      role="toolbar"
-      aria-label="Selected documents"
-      data-testid="selection-bar"
-    >
-      <span className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          shape="square"
-          icon={<XIcon />}
-          onClick={clear}
-          aria-label="Clear the selection"
-          data-testid="clear-selection"
-        />
-        <span className="text-[13px] text-kumo-default" data-testid="selection-count">
-          {everything ? 'All ' : ''}
-          <span className="font-mono tabular-nums">{formatNumber(count)}</span> selected
-        </span>
-      </span>
-      {/* Every document, not only the loaded hundred. Named with what it
-          reaches, because a filter is easy to forget while the line that
-          shows it is covered by this bar. */}
-      {more && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() =>
-            selectEverything(
-              (page.data?.pages ?? []).flatMap((item) => item.documents.map((doc) => doc.path)),
-            )
-          }
-          data-testid="select-everything"
-        >
-          Select all {formatNumber(total.count)}
-          {isEmptyQuery(workbench.query) ? '' : ' matching'}
-        </Button>
-      )}
-      <span className="mx-1 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
-      <DropdownMenu>
-        <DropdownMenu.Trigger
-          render={
+    <KitSelectionBar
+      count={count}
+      total={total ? { count: total.count, exact: true } : undefined}
+      everything={everything}
+      filtered={!isEmptyQuery(workbench.query)}
+      noun={DOCUMENTS}
+      onSelectEverything={() =>
+        selectEverything(
+          (page.data?.pages ?? []).flatMap((item) => item.documents.map((doc) => doc.path)),
+        )
+      }
+      onClear={clear}
+      actions={
+        <>
+          <DropdownMenu>
+            <DropdownMenu.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<CopyGlyph copied={tick.copied} />}
+                  loading={copy.isPending}
+                  data-testid="copy-selection"
+                >
+                  Copy
+                  <CaretDownIcon size={12} className="text-kumo-subtle" />
+                </Button>
+              }
+            />
+            <DropdownMenu.Content align="start">
+              <DropdownMenu.Item onClick={() => copy.mutate('json')} data-testid="copy-json">
+                As JSON, keyed by id
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onClick={() => copy.mutate('csv')} data-testid="copy-csv">
+                As CSV
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<DownloadSimpleIcon />}
+            onClick={() => openExport(true)}
+            data-testid="export-open"
+          >
+            Export
+          </Button>
+          <span className="ml-auto shrink-0 pl-3">
             <Button
-              variant="ghost"
+              variant="secondary-destructive"
               size="sm"
-              icon={<CopyGlyph copied={tick.copied} />}
-              loading={copy.isPending}
-              data-testid="copy-selection"
+              icon={<TrashIcon />}
+              onClick={() =>
+                onDelete(
+                  everything
+                    ? { kind: 'everything', count }
+                    : { kind: 'paths', paths: [...checked] },
+                )
+              }
+              aria-label={`Delete ${formatNumber(count)} ${noun}`}
+              data-testid="delete-selected"
             >
-              Copy
-              <CaretDownIcon size={12} className="text-kumo-subtle" />
+              Delete {formatNumber(count)}
             </Button>
-          }
-        />
-        <DropdownMenu.Content align="start">
-          <DropdownMenu.Item onClick={() => copy.mutate('json')} data-testid="copy-json">
-            As JSON, keyed by id
-          </DropdownMenu.Item>
-          <DropdownMenu.Item onClick={() => copy.mutate('csv')} data-testid="copy-csv">
-            As CSV
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu>
-      <Button
-        variant="ghost"
-        size="sm"
-        icon={<DownloadSimpleIcon />}
-        onClick={() => openExport(true)}
-        data-testid="export-open"
-      >
-        Export
-      </Button>
-      <span className="ml-auto shrink-0 pl-3">
-        <Button
-          variant="secondary-destructive"
-          size="sm"
-          icon={<TrashIcon />}
-          onClick={() =>
-            onDelete(
-              everything ? { kind: 'everything', count } : { kind: 'paths', paths: [...checked] },
-            )
-          }
-          aria-label={`Delete ${formatNumber(count)} ${noun}`}
-          data-testid="delete-selected"
-        >
-          Delete {formatNumber(count)}
-        </Button>
-      </span>
-    </div>
+          </span>
+        </>
+      }
+    />
   )
 }

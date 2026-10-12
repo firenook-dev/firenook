@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
+import { SectionFrame } from '@/components/console/section-gate'
 import { RulesPage } from '@/firestore/rules-page/rules-page'
 
 // The security rules of one database, as a page of their own: the editor,
@@ -26,5 +27,15 @@ export type RulesSearch = z.infer<typeof searchSchema>
 
 export const Route = createFileRoute('/firestore_/rules')({
   validateSearch: searchSchema,
-  component: RulesPage,
+  component: RulesRoute,
 })
+
+// The rules belong to the emulator's own project: this page shows no other
+// project's, so the shell's banner offers the fix rather than a switch.
+function RulesRoute() {
+  return (
+    <SectionFrame section="firestore" projectScope={false}>
+      <RulesPage />
+    </SectionFrame>
+  )
+}

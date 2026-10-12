@@ -26,7 +26,7 @@ import {
 import { useState } from 'react'
 import { type DraftNode, emptyNode, retype, toggleRaw } from '../draft'
 import { ACCESSORY, useFieldEditing, useFocusTarget } from './field-context'
-import { StripButton } from './strip-button'
+import { StripButton } from '@/components/console/strip-button'
 import { TypeMenu } from './type-menu'
 import { ValueControls, ValueEditor, valueAreaClass, valueIsRegion } from './value-editors'
 

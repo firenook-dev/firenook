@@ -15,7 +15,7 @@ import { useState } from 'react'
 import { MenuCheck } from '@/components/kit'
 import { EMPTY_QUERY } from '../query'
 import { countQueryOptions } from '../queries'
-import { patternsById, schemaQuery } from '../schema'
+import { patternsById, workbenchSchemaQuery } from '../schema'
 import { formatNumber } from '../value'
 import { useWorkbench } from './workbench-context'
 
@@ -30,7 +30,7 @@ export function ScopePicker() {
   // The group's size is a fact the schema index already holds, so the menu
   // costs no request for it; the one collection is a single count, and
   // nobody is reading it while the menu is shut.
-  const schema = useQuery(schemaQuery(workbench.database))
+  const schema = useQuery(workbenchSchemaQuery(workbench))
   const here = useQuery({
     ...countQueryOptions(workbench.ownerScope, workbench.collectionPath, false, EMPTY_QUERY),
     enabled: open && !workbench.isPattern,

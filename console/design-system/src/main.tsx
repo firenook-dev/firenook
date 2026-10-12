@@ -2,11 +2,11 @@ import { StrictMode, useEffect, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Link, Text } from '@cloudflare/kumo'
 import { cards } from './registry'
-import './cards/brand'
-import './cards/foundations'
-import './cards/components'
-import './cards/patterns'
 import './styles.css'
+
+// Every card file registers itself: a stream adds `cards/<stream>.tsx` and
+// never edits this file.
+import.meta.glob('./cards/*.tsx', { eager: true })
 
 declare global {
   interface Window {
@@ -69,8 +69,13 @@ function CardPage() {
   )
 }
 
+/** The index's order: the card files load alphabetically, the library reads this way. */
+const GROUP_ORDER: readonly string[] = ['Brand', 'Foundations', 'Components', 'Patterns']
+
 function Index() {
-  const groups = Array.from(new Set(cards.map((entry) => entry.group)))
+  const groups = Array.from(new Set(cards.map((entry) => entry.group))).toSorted(
+    (a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b),
+  )
   return (
     <div className="mx-auto grid max-w-3xl gap-8 bg-kumo-canvas px-6 py-8 text-kumo-default">
       <div className="grid gap-1.5">
