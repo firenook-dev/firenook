@@ -472,6 +472,13 @@ const NOTES = new Compartment()
  * complete; rules get nothing from the editor — their marks come from the
  * engine's compiler through `marks`.
  */
+const parseJson = jsonParseLinter()
+
+/** The JSON parse linter, quiet while the editor holds nothing but space. */
+function lintJsonUnlessEmpty(view: EditorView): readonly Diagnostic[] {
+  return view.state.doc.toString().trim() === '' ? [] : parseJson(view)
+}
+
 function languageFor(
   language: CodeEditorProps['language'],
   completion: () => CodeEditorProps['rulesCompletion'],
@@ -501,7 +508,9 @@ function languageFor(
     json(),
     // Read through on each completion, as the rules' callbacks are.
     jsonLanguage.data.of({ autocomplete: jsonKeySource(() => jsonCompletion()?.keys?.() ?? []) }),
-    linter(jsonParseLinter(), { delay: 150 }),
+    // Empty text is no value (a body not sent, no custom claims), not a
+    // mistake: only text that is there is checked.
+    linter(lintJsonUnlessEmpty, { delay: 150 }),
     // The same for JSON: ⌘↵ is a composer's Send, and a request body
     // gained a blank line with every send from the keyboard.
     Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => true }])),

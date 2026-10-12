@@ -62,8 +62,10 @@ function ActivityRowView({
       <span className="flex min-w-36 flex-[3] basis-0 items-center gap-2 overflow-hidden pr-3">
         {call.error ? (
           <>
-            {/* The SDK's name gives way first, then the code, each ending in
-                an ellipsis; the whole of both is in the tooltip. */}
+            {/* The code takes the room it needs and the SDK's name only what
+                is left (its basis is zero), so the name gives way first; a
+                code longer than the cell ends in an ellipsis. The whole of
+                both is in the tooltip. */}
             <span className="flex min-w-0">
               <OutcomeChip
                 word={call.error.code}
@@ -75,7 +77,7 @@ function ActivityRowView({
               />
             </span>
             <span
-              className="hidden min-w-0 shrink-[9] truncate font-mono text-[11px] text-kumo-subtle @2xl:inline"
+              className="hidden min-w-0 flex-1 basis-0 truncate font-mono text-[11px] text-kumo-subtle @2xl:inline"
               data-testid="activity-sdk"
             >
               {sdkCode(call.error.code)}
