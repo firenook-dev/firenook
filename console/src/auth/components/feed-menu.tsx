@@ -181,7 +181,8 @@ export function FeedMenuRow({
   }
   return (
     <div
-      className="group/row flex h-full min-w-0 flex-1 items-center"
+      // A container, so a row's columns give way by the list's width, not the window's.
+      className="group/row @container flex h-full min-w-0 flex-1 items-center"
       onContextMenu={onContextMenu}
       onPointerDown={() => handle.current.press(rowKey)}
     >
