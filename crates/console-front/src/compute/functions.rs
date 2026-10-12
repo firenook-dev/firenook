@@ -34,6 +34,7 @@ use firenook_functions_runtime::monitor::{
     InvocationQuery, InvocationSummary, InvocationTarget, format_timestamp,
 };
 use firenook_pubsub_front::{RunScheduleError, ScheduleControl as _};
+use firenook_tasks_front::{ConsoleTask, EnqueueError};
 use futures_util::stream::{self, Stream, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -980,11 +981,6 @@ async fn enqueue(
             view.name
         )));
     }
-    if request.run_after_seconds.is_some() {
-        return Err(ApiError::invalid(
-            "This queue runs a task at once whatever its schedule time, as the official emulator does, so a delay would do nothing.",
-        ));
-    }
     let Some(tasks) = &state.tasks else {
         return Err(ApiError::unavailable(
             "Cloud Tasks is not running in this suite.",
@@ -992,51 +988,66 @@ async fn enqueue(
     };
     let tasks = tasks.get()?;
     let queue = queue_key(&state.project, &view.region, &view.name);
-    let body = serde_json::to_vec(&json!({ "data": request.payload }))
-        .map_err(|error| ApiError::invalid(format!("The payload is not JSON: {error}.")))?;
-    // The Admin SDK's task: the queue's own function address (the emulator
-    // fills an empty url), the JSON content type and the Base64 body.
-    let task = json!({
-        "task": {
-            "httpRequest": {
-                "url": "",
-                "headers": { "Content-Type": "application/json" },
-                "body": BASE64.encode(body),
-            }
-        }
-    });
-    let path = format!(
-        "/projects/{}/locations/{}/queues/{}/tasks",
-        state.project, view.region, view.name
-    );
-    let (status, answer) = call_native(&tasks.native, Method::POST, &path, &task).await?;
-    if status != StatusCode::OK {
-        let message = native_message(&answer);
-        return Err(match status {
-            StatusCode::CONFLICT => ApiError::conflict(message),
-            StatusCode::PAYLOAD_TOO_LARGE => ApiError::too_large(format!(
-                "Cloud Tasks accepts at most 100 KB per task: {message}"
-            )),
-            StatusCode::NOT_FOUND => ApiError::not_found(message),
-            _ => ApiError::unavailable(format!("Cloud Tasks refused the task: {message}")),
-        });
+    let holds = tasks
+        .runtime
+        .queue_view(&queue)
+        .is_some_and(|held| held.hold_scheduled);
+    if request.run_after_seconds.is_some() && !holds {
+        return Err(ApiError::invalid(
+            "This queue runs a task at once whatever its schedule time, as the official emulator does, so a delay would do nothing.",
+        ));
     }
-    let task_name = serde_json::from_slice::<Value>(&answer)
-        .ok()
-        .and_then(|value| value["task"]["name"].as_str().map(str::to_owned));
+    let data = serde_json::to_string(&request.payload)
+        .map_err(|error| ApiError::invalid(format!("The payload is not JSON: {error}.")))?;
+    // The task the Admin SDK's `TaskQueue.enqueue(payload)` sends, through
+    // the console's one enqueue path (the wire's own preparation and limit).
+    let task = ConsoleTask {
+        data: Some(data),
+        schedule_delay_seconds: request
+            .run_after_seconds
+            .filter(|seconds| *seconds > 0)
+            .map(f64::from),
+        ..ConsoleTask::default()
+    };
+    let enqueued = tasks
+        .enqueue_console(&queue, task)
+        .map_err(|error| enqueue_refused(&error, &view.name))?;
     Ok(Json(FunctionBrokerResult {
         transport: FunctionBrokerTransport::Tasks,
         topic: None,
         message_id: None,
-        target: Some(EntityRef::tasks_queue(
+        target: Some(EntityRef::tasks_task(
             &state.project,
             &view.region,
             &view.name,
+            &enqueued.id.to_string(),
         )),
         queue: Some(queue),
-        task: task_name,
+        task: Some(enqueued.name),
         invocation: None,
     }))
+}
+
+/// Cloud Tasks' refusal of a console task, with what to do about it.
+fn enqueue_refused(error: &EnqueueError, queue: &str) -> ApiError {
+    match error {
+        EnqueueError::UnknownQueue => ApiError::not_found(format!(
+            "Cloud Tasks has no queue {queue} registered."
+        ))
+        .with_fix("The queue registers when its codebase loads; reload it, or look in Cloud Tasks for why it was refused."),
+        EnqueueError::NameReserved => ApiError::conflict(
+            "A task with this name was enqueued before in this run.",
+        )
+        .with_fix("The emulator keeps every task name until it stops; enqueue without a name."),
+        EnqueueError::QueueFull { .. } => ApiError::conflict(format!(
+            "{queue} holds as many pending tasks as the emulator keeps."
+        ))
+        .with_fix("Purge the queue in Cloud Tasks or let it drain."),
+        EnqueueError::TooLarge { .. } => ApiError::too_large(error.to_string())
+            .with_fix("Send less data: the Admin SDK would be refused the same task."),
+        EnqueueError::Invalid(reason) => ApiError::invalid(reason.clone()),
+        EnqueueError::UnknownTask => ApiError::not_found(error.to_string()),
+    }
 }
 
 async fn run(
@@ -2201,16 +2212,35 @@ fn task_queue_of(view: &FunctionView, state: &ComputeState) -> FunctionTaskQueue
         .get("taskQueueTrigger")
         .cloned()
         .unwrap_or(Value::Null);
+    let queue = queue_key(&state.project, &view.region, &view.name);
+    // What the Cloud Tasks emulator holds of it: whether it refused the
+    // queue (and why), and whether it holds scheduled tasks until they are due.
+    let tasks = state.tasks.as_ref().and_then(|tasks| tasks.get().ok());
+    let refused = tasks.as_ref().and_then(|tasks| {
+        tasks
+            .runtime
+            .queues_view(Some(&state.project))
+            .rejected
+            .into_iter()
+            .find(|rejected| rejected.function_id == view.id)
+            .map(|rejected| rejected.reason)
+    });
+    let hold_scheduled = tasks.as_ref().is_some_and(|tasks| {
+        tasks
+            .runtime
+            .queue_view(&queue)
+            .is_some_and(|held| held.hold_scheduled)
+    });
     FunctionTaskQueue {
-        queue: queue_key(&state.project, &view.region, &view.name),
+        queue,
         queue_ref: state
             .tasks
             .is_some()
             .then(|| EntityRef::tasks_queue(&state.project, &view.region, &view.name)),
         retry_config: trigger.get("retryConfig").cloned().unwrap_or(Value::Null),
         rate_limits: trigger.get("rateLimits").cloned().unwrap_or(Value::Null),
-        refused: None,
-        hold_scheduled: false,
+        refused,
+        hold_scheduled,
     }
 }
 
@@ -2253,12 +2283,27 @@ pub(crate) async fn invocation_view(
             }
             refs.push(EntityRef::eventarc_channel(channel));
         }
-        InvocationCause::Task { .. } => {
+        InvocationCause::Task { queue, task, .. } => {
             let function = match state.runtime() {
                 Ok(runtime) => runtime.function(&summary.function_id).await,
                 Err(_) => None,
             };
             if let Some(function) = function {
+                // The attempt's task, by the console's id for it, while
+                // Cloud Tasks still knows the name; the queue always.
+                let id = state
+                    .tasks
+                    .as_ref()
+                    .and_then(|tasks| tasks.get().ok())
+                    .and_then(|tasks| tasks.task_id(queue, task));
+                if let Some(id) = id {
+                    refs.push(EntityRef::tasks_task(
+                        &state.project,
+                        &function.region,
+                        &function.name,
+                        &id,
+                    ));
+                }
                 refs.push(EntityRef::tasks_queue(
                     &state.project,
                     &function.region,

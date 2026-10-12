@@ -62,12 +62,6 @@ fn pubsub(router: Router) -> Late<PubsubConsole> {
     late
 }
 
-fn tasks(router: Router) -> Late<TasksConsole> {
-    let late = Late::pending("Cloud Tasks");
-    late.set(crate::messaging::test_tasks_console(router));
-    late
-}
-
 #[tokio::test]
 async fn while_functions_start_the_snapshot_answers_from_the_monitor() {
     let suite = Suite::starting();
@@ -536,17 +530,40 @@ async fn publish_goes_through_the_pubsub_emulator() {
     suite.stop().await;
 }
 
-#[tokio::test]
-async fn enqueue_goes_through_the_cloud_tasks_emulator() {
-    let (native, seen) = stub(
-        StatusCode::OK,
-        json!({"task": {"name": "/projects/demo-compute/locations/us-central1/queues/resize/tasks/77"}}),
+/// Cloud Tasks with the fixture's `resize` queue registered, as the
+/// Functions inventory registers it. Its tasks dispatch to a closed port:
+/// nothing is called.
+fn tasks_with_resize() -> Late<TasksConsole> {
+    let inventory = firenook_functions_bridge::FunctionsInventory::from_backends_json(
+        &json!({"backends": [{"codebase": "default", "functionTriggers": [{
+            "name": "resize",
+            "region": "us-central1",
+            "platform": "gcfv2",
+            "taskQueueTrigger": {"retryConfig": {"maxAttempts": 3}},
+        }]}]}),
+        0,
+    )
+    .expect("an inventory");
+    let runtime = firenook_tasks_front::TasksRuntime::new(
+        PROJECT,
+        &inventory,
+        "http://127.0.0.1:1",
+        firenook_tasks_front::LogSink::new(|_| {}),
     );
+    let late = Late::pending("Cloud Tasks");
+    late.set(TasksConsole::new(Router::new(), runtime, None));
+    late
+}
+
+#[tokio::test]
+async fn enqueue_goes_through_the_cloud_tasks_console_path_and_names_the_task() {
+    let tasks = tasks_with_resize();
     let suite = Suite::running(Setup {
-        tasks: Some(tasks(native)),
+        tasks: Some(tasks.clone()),
         ..Setup::default()
     })
     .await;
+    let queue = "queue:demo-compute-us-central1-resize";
     let (status, body) = suite
         .post(
             "/functions/us-central1-resize/enqueue",
@@ -555,35 +572,22 @@ async fn enqueue_goes_through_the_cloud_tasks_emulator() {
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["transport"], "tasks");
-    assert_eq!(body["queue"], "queue:demo-compute-us-central1-resize");
-    assert_eq!(
-        body["task"],
-        "/projects/demo-compute/locations/us-central1/queues/resize/tasks/77"
-    );
+    assert_eq!(body["queue"], queue);
+    let name = body["task"].as_str().expect("a task name").to_owned();
+    let console = tasks.get().expect("Cloud Tasks");
+    let id = console.task_id(queue, &name).expect("the console's id");
     assert_eq!(
         body["target"],
-        serde_json::to_value(EntityRef::tasks_queue(
+        serde_json::to_value(EntityRef::tasks_task(
             "demo-compute",
             "us-central1",
-            "resize"
+            "resize",
+            &id
         ))
         .expect("json")
     );
-    let (path, request) = seen.lock().expect("seen")[0].clone();
-    assert_eq!(
-        path,
-        "/projects/demo-compute/locations/us-central1/queues/resize/tasks"
-    );
-    let http = &request["task"]["httpRequest"];
-    assert_eq!(http["url"], "");
-    assert_eq!(http["headers"]["Content-Type"], "application/json");
-    let decoded = BASE64
-        .decode(http["body"].as_str().expect("a body"))
-        .expect("base64");
-    assert_eq!(
-        serde_json::from_slice::<Value>(&decoded).expect("json"),
-        json!({"data": {"image": "a.png"}})
-    );
+
+    // A delay only where the queue holds scheduled tasks.
     let (status, body) = suite
         .post(
             "/functions/us-central1-resize/enqueue",
@@ -591,32 +595,82 @@ async fn enqueue_goes_through_the_cloud_tasks_emulator() {
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (_, detail) = suite.get("/functions/us-central1-resize").await;
+    assert_eq!(detail["taskQueue"]["holdScheduled"], false, "{detail}");
+    assert_eq!(detail["taskQueue"]["refused"], Value::Null, "{detail}");
+    console
+        .runtime
+        .set_hold_scheduled(queue, true)
+        .expect("a queue");
+    let (_, detail) = suite.get("/functions/us-central1-resize").await;
+    assert_eq!(detail["taskQueue"]["holdScheduled"], true, "{detail}");
+    let (status, body) = suite
+        .post(
+            "/functions/us-central1-resize/enqueue",
+            json!({"payload": {}, "runAfterSeconds": 30}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // An attempt of the task links to the task, by the console's id, and its queue.
+    let monitor = suite.monitor();
+    let token = monitor.begin(InvocationStart {
+        function_id: "us-central1-resize".to_owned(),
+        codebase: "default".to_owned(),
+        kind: FunctionKind::Tasks,
+        origin: firenook_functions_runtime::monitor::InvocationOrigin::Emulator,
+        cause: InvocationCause::Task {
+            queue: queue.to_owned(),
+            task: name.rsplit('/').next().expect("a short name").to_owned(),
+            retry_count: 0,
+            execution_count: 0,
+        },
+        summary: String::new(),
+        target: firenook_functions_runtime::monitor::InvocationTarget::Url,
+        method: "POST".to_owned(),
+        path: "/".to_owned(),
+        headers: axum::http::HeaderMap::new(),
+        body: Bytes::new(),
+        replay_of: None,
+        delivery: None,
+    });
+    monitor.finish(&token, InvocationEnd::default());
+    let (_, view) = suite
+        .get(&format!("/functions/invocations/{}", token.id))
+        .await;
+    let refs: Vec<(String, String)> = view["refs"]
+        .as_array()
+        .expect("refs")
+        .iter()
+        .map(|reference| {
+            (
+                reference["kind"].as_str().unwrap_or_default().to_owned(),
+                reference["key"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        refs,
+        [
+            (
+                "functions.function".to_owned(),
+                "us-central1-resize".to_owned()
+            ),
+            (
+                "tasks.task".to_owned(),
+                format!("demo-compute|us-central1|resize|{id}")
+            ),
+            (
+                "tasks.queue".to_owned(),
+                "demo-compute|us-central1|resize".to_owned()
+            ),
+        ]
+    );
+
     let (status, _) = suite
         .post("/functions/us-central1-api/enqueue", json!({"payload": {}}))
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    suite.stop().await;
-
-    let (native, _) = stub(
-        StatusCode::CONFLICT,
-        json!({"error": "A task with the same name already exists"}),
-    );
-    let suite = Suite::running(Setup {
-        tasks: Some(tasks(native)),
-        ..Setup::default()
-    })
-    .await;
-    let (status, body) = suite
-        .post(
-            "/functions/us-central1-resize/enqueue",
-            json!({"payload": {}}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(
-        body["error"]["message"],
-        "A task with the same name already exists"
-    );
     suite.stop().await;
 }
 
