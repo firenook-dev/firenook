@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_PAGES, type PageParam, pageQueryOptions, reversedQuery } from './queries'
 import { EMPTY_QUERY, type WorkbenchQuery } from './query'
-import type { QueryPage } from './rest'
+import { type QueryPage, firestoreScope } from './rest'
 import type { FsDocument } from './value'
 
-const scope = { project: 'demo-p', database: '(default)' }
+const scope = firestoreScope({
+  project: 'demo-p',
+  database: '(default)',
+  identity: { kind: 'owner' },
+})
 const root = 'projects/demo-p/databases/(default)/documents'
 const query: WorkbenchQuery = { ...EMPTY_QUERY, limit: 2 }
 const options = pageQueryOptions(scope, 'users', false, query)

@@ -6,6 +6,7 @@ import './cards/brand'
 import './cards/foundations'
 import './cards/components'
 import './cards/patterns'
+import './cards/console-requests'
 import './styles.css'
 
 declare global {

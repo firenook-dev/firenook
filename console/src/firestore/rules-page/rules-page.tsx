@@ -24,11 +24,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { statusQuery } from '@/api/queries'
 import { CodeEditor, type CodeMark } from '@/components/code-editor'
 import { Page } from '@/components/shell/page'
+import { identityUsersQuery } from '@/lib/identity'
 import { useShortcuts } from '@/lib/shortcuts'
 import { DatabasePicker } from '../components/database-picker'
 import { DEFAULT_DATABASE } from '../components/workbench-context'
 import { describeDiagnostic, offsetOf } from '../rules'
-import { authUsersQuery } from '../queries'
 import { type RulesImpact, checkQuery, impactQuery, useRulesLive } from './api'
 import { CollectionsPanel } from './collections-panel'
 import { Playground } from './playground'
@@ -156,8 +156,10 @@ function RulesBody({ project }: { project: string }) {
   const impact = useQuery({ ...impactQuery(database, checked), enabled: draftCompiles })
 
   // Completion that knows the data: the fields documents of a collection
-  // carry, and the custom claims the Auth emulator's users have.
-  const users = useQuery(authUsersQuery(project))
+  // carry, and the custom claims the Auth emulator's users have (the first
+  // page of them, from the engine's bounded identity search — never every
+  // account).
+  const users = useQuery(identityUsersQuery(project, ''))
   const completion = useMemo(
     () => ({
       fields: async (pattern: string) =>

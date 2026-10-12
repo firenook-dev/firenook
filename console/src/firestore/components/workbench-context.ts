@@ -8,9 +8,9 @@ import { createContext, useContext, useMemo } from 'react'
 import { statusQuery } from '@/api/queries'
 import type { FirestoreSearch } from '@/routes/firestore'
 import { EMPTY_QUERY, QueryParseError, type WorkbenchQuery, parseQuery, printQuery } from '../query'
-import type { FirestoreScope } from '../rest'
+import { type FirestoreScope, firestoreScope } from '../rest'
 import { isPattern } from '../schema'
-import { type ViewAs, authorizationFor, parseViewAs, serializeViewAs } from '../view-as'
+import { type ViewAs, parseViewAs, serializeViewAs } from '../view-as'
 
 export const DEFAULT_DATABASE = '(default)'
 
@@ -91,14 +91,18 @@ export function useWorkbenchState(): Workbench | null {
     // emulator's own cache and its live updates never mix with them.
     const slot = foreign ? `${project}|${database}` : database
     const viewAs = parseViewAs(search.as)
-    const authorization = authorizationFor(viewAs, project)
-    const scope: FirestoreScope = { project, database, authorization, ...(foreign ? { slot } : {}) }
-    const ownerScope: FirestoreScope = {
+    const scope: FirestoreScope = firestoreScope({
       project,
       database,
-      authorization: authorizationFor({ kind: 'owner' }, project),
-      ...(foreign ? { slot } : {}),
-    }
+      identity: viewAs,
+      slot: foreign ? slot : undefined,
+    })
+    const ownerScope: FirestoreScope = firestoreScope({
+      project,
+      database,
+      identity: { kind: 'owner' },
+      slot: foreign ? slot : undefined,
+    })
     const path = normalizePath(search.path ?? '')
     const segments = path ? path.split('/') : []
     const isCollection = segments.length % 2 === 1

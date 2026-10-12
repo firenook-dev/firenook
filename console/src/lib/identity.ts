@@ -3,6 +3,23 @@
 // the denial and the rule line that decided it. Firestore's "view as" was
 // the first to need it; Storage's "As" and compute's "Call as" read the same
 // identities, so it lives here and `firestore/view-as.ts` re-exports it.
+//
+// One token path per kind. The owner and the anonymous client need no
+// token; a custom identity (any uid and claims, no Auth record) is an
+// unsigned token minted here; an Auth user's is the token the Auth emulator
+// itself issues for that account (`POST /auth/tokens`), so it carries the
+// account's real claims, provider and verification, exactly what the app
+// would hold. Every caller goes through `resolveAuthorization`.
+
+import { queryOptions } from '@tanstack/react-query'
+import { ApiError, apiGet, apiSend } from '@/api/client'
+import type { AuthToken } from '@/api/generated/auth/AuthToken'
+import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import type { IdentityUser } from '@/api/generated/IdentityUser'
+import type { Page } from '@/api/generated/Page'
+import { queryClient } from './query'
+
+export type { IdentityUser } from '@/api/generated/IdentityUser'
 
 export type ViewAs =
   | { kind: 'owner' }
@@ -30,11 +47,237 @@ export type ViewAs =
 
 export const OWNER_AUTHORIZATION = 'Bearer owner'
 
-/** The `Authorization` header for `viewAs`; none for an anonymous client. */
-export function authorizationFor(viewAs: ViewAs, project: string): string | undefined {
+/**
+ * The `Authorization` header for the kinds that need no engine: the owner,
+ * none for an anonymous client, and a custom identity's unsigned token. An
+ * Auth user's comes from `resolveAuthorization`.
+ */
+export function authorizationFor(
+  viewAs: Extract<ViewAs, { kind: 'owner' | 'anonymous' | 'custom' }>,
+  project: string,
+): string | undefined {
   if (viewAs.kind === 'owner') return OWNER_AUTHORIZATION
   if (viewAs.kind === 'anonymous') return undefined
   return `Bearer ${mintUnsignedToken(viewAs, project)}`
+}
+
+/** What the picker says of a user whose token the engine could not mint. */
+export const SYNTHETIC_NOTE = 'Not an Auth user: synthetic token'
+
+/** An Auth user's token, as it sits in the query cache. */
+export interface UserToken {
+  authorization: string
+  /** When the token stops being accepted, ms since the epoch. */
+  expiresAt: number
+  /**
+   * The engine could not mint one — no such account, Authentication not
+   * running, or another project than the emulator's — so this is an
+   * unsigned token made here with what the identity says.
+   */
+  synthetic: boolean
+}
+
+/** A token is minted again this long before it expires. */
+const REMINT_BEFORE_MS = 5 * 60_000
+/** A synthetic token is trusted this long: the account may be created meanwhile. */
+const SYNTHETIC_FOR_MS = 30_000
+
+/** Where an Auth user's engine token is cached, so the auth section's topics can drop it. */
+export const tokenKey = (project: string, tenant: string | undefined, uid: string) =>
+  ['auth', project, 'token', tenant ?? '', uid] as const
+
+type UserIdentity = Extract<ViewAs, { kind: 'user' }>
+
+/**
+ * The cache entry for a user's token. Its query function never takes the
+ * query's abort signal: concurrent callers share one mint, and one of them
+ * going away must not cancel it for the others.
+ */
+export const userTokenQuery = (user: UserIdentity, project: string) =>
+  queryOptions({
+    queryKey: tokenKey(project, user.tenant, user.uid),
+    queryFn: () => mintUserToken(user, project),
+    staleTime: (query) => {
+      const token = query.state.data
+      if (!token) return 0
+      const freshUntil = token.synthetic
+        ? Math.min(token.expiresAt - REMINT_BEFORE_MS, query.state.dataUpdatedAt + SYNTHETIC_FOR_MS)
+        : token.expiresAt - REMINT_BEFORE_MS
+      return Math.max(0, freshUntil - query.state.dataUpdatedAt)
+    },
+    gcTime: 60 * 60_000,
+    retry: false,
+  })
+
+/** The engine's status as the shell last saw it, if it has. */
+function knownStatus(): ConsoleStatus | undefined {
+  return queryClient.getQueryData<ConsoleStatus>(['status'])
+}
+
+async function mintUserToken(user: UserIdentity, project: string): Promise<UserToken> {
+  const status = knownStatus()
+  // The engine mints for its own project's accounts only, and only while
+  // Authentication runs; another project's user, or none at all, reads
+  // through a token made here.
+  const otherProject = status !== undefined && status.projectId !== project
+  const authAbsent = status?.sections.find((section) => section.id === 'auth')?.state === 'absent'
+  if (otherProject || authAbsent) return syntheticToken(user, project)
+  try {
+    const token = await apiSend<AuthToken>(
+      'POST',
+      '/auth/tokens',
+      user.tenant ? { uid: user.uid, tenant: user.tenant } : { uid: user.uid },
+    )
+    const expiresAt = Date.parse(token.expiresAt)
+    return {
+      authorization: `Bearer ${token.idToken}`,
+      expiresAt: Number.isNaN(expiresAt) ? Date.now() + 3_600_000 : expiresAt,
+      synthetic: false,
+    }
+  } catch (error) {
+    // No such account (deleted since the link was made, or never there),
+    // or an engine without Authentication: the request still runs, as an
+    // identity with that uid, and says so.
+    if (error instanceof ApiError && error.code === 'not-found')
+      return syntheticToken(user, project)
+    throw error
+  }
+}
+
+function syntheticToken(user: UserIdentity, project: string): UserToken {
+  return {
+    authorization: `Bearer ${mintUnsignedToken(user, project)}`,
+    expiresAt: Date.now() + 3_600_000,
+    synthetic: true,
+  }
+}
+
+/** Resolves with `promise`, or rejects as soon as `signal` aborts (the work itself goes on). */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted)
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', abort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', abort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', abort)
+        reject(error)
+      },
+    )
+  })
+}
+
+/**
+ * The one token path per kind. `user`: the engine's token (`POST
+ * /auth/tokens`), cached under `tokenKey`, minted once for concurrent
+ * callers and again five minutes before it expires; a uid the engine cannot
+ * mint gets a synthetic token (`SYNTHETIC_NOTE`). `owner`, `anonymous`,
+ * `custom`: no request. Compute's "Call as", Storage's "As" and Firestore's
+ * view as all call this, never `mintUnsignedToken`.
+ */
+export async function resolveAuthorization(
+  viewAs: ViewAs,
+  project: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (viewAs.kind !== 'user') return authorizationFor(viewAs, project)
+  const token = await abortable(queryClient.fetchQuery(userTokenQuery(viewAs, project)), signal)
+  return token.authorization
+}
+
+/**
+ * Drops a user's cached engine token, so the next request mints a new one;
+ * false for the kinds that have none to drop.
+ */
+export function forgetToken(viewAs: ViewAs, project: string): boolean {
+  if (viewAs.kind !== 'user') return false
+  queryClient.removeQueries({ queryKey: tokenKey(project, viewAs.tenant, viewAs.uid), exact: true })
+  return true
+}
+
+/**
+ * Sends a request as `viewAs`. An engine-minted token the engine refuses
+ * (`401`: it expired while it sat in the cache, or the machine slept past
+ * it) is dropped, minted again, and the request sent once more.
+ */
+export async function fetchAs(
+  viewAs: ViewAs,
+  project: string,
+  send: (authorization: string | undefined) => Promise<Response>,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const first = await send(await resolveAuthorization(viewAs, project, signal))
+  if (first.status !== 401 || !forgetToken(viewAs, project)) return first
+  return send(await resolveAuthorization(viewAs, project, signal))
+}
+
+/**
+ * The query-key part for requests made as `viewAs`: what decides the
+ * answer, never the token itself. A user is their tenant and uid (the
+ * engine's token carries their claims); `identityOfKey` reads it back.
+ */
+export function identityKey(viewAs: ViewAs): string {
+  if (viewAs.kind === 'owner') return 'owner'
+  if (viewAs.kind === 'user')
+    return (
+      serializeViewAs(
+        viewAs.tenant
+          ? { kind: 'user', uid: viewAs.uid, tenant: viewAs.tenant }
+          : { kind: 'user', uid: viewAs.uid },
+      ) ?? ''
+    )
+  return serializeViewAs(viewAs) ?? ''
+}
+
+/** The identity an `identityKey` names, enough to send requests as it again. */
+export function identityOfKey(key: string): ViewAs {
+  return parseViewAs(key)
+}
+
+/** Users one picker answer holds by default; the engine allows at most 50. */
+export const IDENTITY_PAGE = 20
+
+/**
+ * At most `limit` users matching `text` (an email or uid prefix, then a
+ * name or email substring), from `GET /auth/identities` — every tenant's
+ * when `tenant` is undefined, the project's own for `''`. Never every
+ * account. An error is thrown as the engine's `ApiError`, never turned
+ * into an empty list.
+ */
+export async function searchIdentityUsers(
+  project: string,
+  text: string,
+  options: { tenant?: string | undefined; limit?: number; signal?: AbortSignal } = {},
+): Promise<IdentityUser[]> {
+  const page = await apiGet<Page<IdentityUser>>(
+    '/auth/identities',
+    { q: text, limit: options.limit ?? IDENTITY_PAGE, tenant: options.tenant, project },
+    options.signal,
+  )
+  return page.items
+}
+
+export const identityUsersQuery = (project: string, text: string, tenant?: string) =>
+  queryOptions({
+    queryKey: ['auth', project, 'identities', tenant ?? '*', text] as const,
+    queryFn: ({ signal }) => searchIdentityUsers(project, text, { tenant, signal }),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+/** The `ViewAs` for a user the picker found. */
+export function viewAsOfUser(user: IdentityUser): Extract<ViewAs, { kind: 'user' }> {
+  const viewAs: Extract<ViewAs, { kind: 'user' }> = { kind: 'user', uid: user.uid }
+  if (user.tenant) viewAs.tenant = user.tenant
+  if (user.email) viewAs.email = user.email
+  if (user.claims) viewAs.claims = user.claims
+  return viewAs
 }
 
 /**
