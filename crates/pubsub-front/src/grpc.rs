@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
-use crate::broker::{Broker, LONG_POLL};
+use crate::broker::{Broker, ConsumerKind, LONG_POLL};
 use crate::error::PubsubError;
 use crate::google::iam::v1::iam_policy_server::IamPolicy;
 use crate::google::iam::v1::{
@@ -84,6 +84,8 @@ pub async fn pull_with_wait(
         .map_or(LONG_POLL, |timeout| timeout.min(LONG_POLL));
     let deadline = tokio::time::Instant::now() + wait;
     let mut changes = broker.watch();
+    // Counted as a consumer while it waits; only the console hears of it.
+    let mut waiting = None;
     loop {
         let received = broker.pull(subscription, max_messages)?;
         if !received.is_empty() || return_immediately {
@@ -95,6 +97,7 @@ pub async fn pull_with_wait(
         if remaining.is_zero() {
             return Ok(PullResponse::default());
         }
+        waiting.get_or_insert_with(|| broker.consumer_guard(subscription, ConsumerKind::Waiting));
         if tokio::time::timeout(remaining, changes.changed())
             .await
             .is_err()
@@ -131,7 +134,11 @@ impl Publisher for PubsubRuntime {
         request: Request<PublishRequest>,
     ) -> Result<Response<PublishResponse>, Status> {
         let request = request.into_inner();
-        let (message_ids, published) = self.broker().publish(&request.topic, request.messages)?;
+        let (message_ids, published) = self.refusal(
+            "publish",
+            &request.topic,
+            self.broker().publish(&request.topic, request.messages),
+        )?;
         self.deliver_to_functions(&published);
         Ok(Response::new(PublishResponse { message_ids }))
     }
@@ -220,9 +227,10 @@ impl Subscriber for PubsubRuntime {
         &self,
         request: Request<Subscription>,
     ) -> Result<Response<Subscription>, Status> {
-        Ok(Response::new(
-            self.broker().create_subscription(request.into_inner())?,
-        ))
+        Ok(Response::new(create_subscription(
+            self,
+            request.into_inner(),
+        )?))
     }
 
     async fn get_subscription(
@@ -303,16 +311,19 @@ impl Subscriber for PubsubRuntime {
         let request = request.into_inner();
         #[allow(deprecated)]
         let immediately = request.return_immediately;
-        Ok(Response::new(
-            pull_with_wait(
-                self,
-                &request.subscription,
-                request.max_messages,
-                immediately,
-                timeout,
-            )
-            .await?,
-        ))
+        let pulled = pull_with_wait(
+            self,
+            &request.subscription,
+            request.max_messages,
+            immediately,
+            timeout,
+        )
+        .await;
+        Ok(Response::new(self.refusal(
+            "pull",
+            &request.subscription,
+            pulled,
+        )?))
     }
 
     async fn streaming_pull(
@@ -337,10 +348,17 @@ impl Subscriber for PubsubRuntime {
                 return;
             }
             let subscription = first.subscription.clone();
-            if let Err(error) = stream_subscription_check(broker, &subscription) {
+            if let Err(error) = runtime.refusal(
+                "streaming-pull",
+                &subscription,
+                stream_subscription_check(broker, &subscription),
+            ) {
                 let _ = sender.send(Err(error.into())).await;
                 return;
             }
+            // Counted as a consumer until the stream ends; only the console
+            // hears of it.
+            let _consumer = broker.consumer_guard(&subscription, ConsumerKind::Streaming);
             if let Err(error) = apply_stream_acks(broker, &subscription, &first) {
                 let _ = sender.send(Err(error.into())).await;
                 return;
@@ -471,6 +489,25 @@ impl Subscriber for PubsubRuntime {
         seek(self.broker(), &request.subscription, request.target)?;
         Ok(Response::new(SeekResponse {}))
     }
+}
+
+/// Creates a subscription for an app (gRPC or HTTP/JSON), recording a
+/// refusal that names a missing topic.
+pub(crate) fn create_subscription(
+    runtime: &PubsubRuntime,
+    request: Subscription,
+) -> Result<Subscription, PubsubError> {
+    let topic = request.topic.clone();
+    let dead_letter = request
+        .dead_letter_policy
+        .as_ref()
+        .map(|policy| policy.dead_letter_topic.clone());
+    let result = runtime.broker().create_subscription(request);
+    let resource = match (&result, dead_letter) {
+        (Err(error), Some(dead_letter)) if error.message.starts_with("Dead letter") => dead_letter,
+        _ => topic,
+    };
+    runtime.refusal("create-subscription", &resource, result)
 }
 
 /// Seek to a time or a snapshot; the official order of checks.

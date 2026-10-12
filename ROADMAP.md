@@ -820,9 +820,75 @@ served until every section has landed.
   none then); and an unfinished resumable upload kept its staged bytes for
   ever (it now goes after seven idle days, as production's session URIs
   expire).
-- [ ] Functions.
-- [ ] Extensions.
-- [ ] Eventarc.
+- [x] Functions: every function by codebase with its trigger in plain words,
+  and every way one receives nothing said out loud — ignored, its service
+  not started, paused, removed by a reload, or dropped at load because the
+  emulator cannot deliver its event type. The load that failed and the one
+  still serving, the worker behind each codebase (reported the moment it
+  exits, restarted from the page, with its inspector address under
+  `--inspect-functions`), a TypeScript build that is behind its sources,
+  and an env file changed since the last load. Invoke an HTTP function or
+  a callable as any Auth user with App Check, or paste a curl command into
+  the form; watch a streaming answer arrive; send a test event shaped
+  exactly like the official functions shell's; or do the real thing —
+  write the document, publish the message, enqueue the task through Cloud
+  Tasks, upload the file, sign the user up. Every invocation is kept with
+  its request or event, its answer, its timing and **only its own log
+  lines**: the worker tags each line with the invocation that printed it,
+  which the runtime threw away before. Replay one after a fix, or edit it
+  and replay. Schedules show their next run in the zone the scheduler
+  evaluates them in and run now through it; the environment shows which
+  file set each value, secrets masked until revealed, and sets a missing
+  secret or param in the right file, putting the file back if the codebase
+  then does not load. Pausing background triggers (the console's one
+  switch) says how many events of each service were dropped, counted at
+  the sources. Every invocation links to what caused it — the document,
+  the object, the user, the message, the task, the event, the sign-up that
+  ran a blocking function — and a red badge on Invocations counts failures
+  you have not looked at. Nothing polls: everything rides the console's one
+  live channel, filtered in the engine, and recording is bounded (2,000
+  invocations and 64 MiB, at least 200 of each kind) with budgets on its
+  hot paths (`cargo bench -p firenook-functions-runtime --bench monitor`).
+  Found and fixed on the way: a worker outlived an engine killed outright
+  (SIGKILL, a crash), idling for ever with its codebase loaded; it now
+  ends itself within a second of its runtime going away. And the reload
+  watcher, given a project path through a symlink (macOS's `/var`) with a
+  dot-named directory above it, ignored every change; it now matches the
+  canonical spelling too.
+- [x] Extensions: each instance with its source and whether it starts
+  offline, its configuration and the file each value comes from, the
+  functions it adds and the ones the emulator does not deliver, the APIs it
+  would call that have no emulator, its roles and lifecycle hooks, the
+  events it emits, and its notes rendered safely with their console links
+  kept in the console. Reconfigure writes the file that actually set the
+  value, keeping its comments, and reloads the instance in place, once —
+  and puts the file back if the new values do not load; editing an
+  instance's parameter file in an editor reloads it too. A registry
+  instance can be vendored into the project from the page. An instance
+  dropped for triggers the suite does not emulate now says so.
+- [x] Eventarc: every event on every channel with the trigger it reached or
+  the filter that kept it out, the type nobody listens for with the one you
+  probably meant, publishing a custom event with a preview of who will get
+  it, replaying one with a new id, and who publishes what to whom. Events
+  that could not be read or matched nothing used to vanish without a trace;
+  the last 1,000 are kept.
+- [ ] Firebase Alerts through the Eventarc emulator's native channel, as on
+  the official emulator, and the thirteen test alerts the official UI
+  offered. Waits on recording the oracle (`functions-alerts-v1`); until
+  then an alert function loads, is listed as not delivered with that
+  reason, and there is no Alerts page.
+- [ ] Declared SDK params: resolve defaults into the worker environment the
+  way the official emulator does (it writes them to `.env.local`); record
+  the oracle first. The console already marks unresolved params and sets a
+  value on request.
+- [ ] Extension lifecycle tasks (onInstall/onUpdate/onConfigure): the
+  recorded oracle drops the task-queue functions they run; running them
+  needs a new recording and a deliberate divergence.
+- [ ] Eventarc publishing from function or extension code through the Admin
+  SDK: it asks Google's token endpoint for an access token, which the
+  synthetic credential every worker gets cannot answer, so such a publish
+  fails unless the code brings its own credential. Answer that exchange
+  locally.
 - [ ] Pub/Sub.
 - [ ] Cloud Tasks.
 - [ ] Logs.

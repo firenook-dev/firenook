@@ -66,6 +66,9 @@ pub struct QueueConfig {
     /// `defaultUri`: `None` when the body had no key (`undefined`), so an
     /// empty task URL becomes `undefined` and disappears from the echo.
     pub default_uri: Option<OrderedJson>,
+    /// The dotted keys of the document the registration body set (a value
+    /// other than `null`); every other key holds the emulator's default.
+    pub provided: Vec<String>,
 }
 
 impl QueueConfig {
@@ -77,6 +80,33 @@ impl QueueConfig {
         let field = |section: Option<&OrderedJson>, key: &str, fallback: OrderedJson| {
             OrderedJson::or_default(section.and_then(|section| section.get(key)), fallback)
         };
+        let set = |section: Option<&OrderedJson>, key: &str| {
+            section
+                .and_then(|section| section.get(key))
+                .is_some_and(|value| !value.is_null())
+        };
+        let mut provided = Vec::new();
+        for key in [
+            "maxAttempts",
+            "maxRetrySeconds",
+            "maxBackoffSeconds",
+            "maxDoublings",
+            "minBackoffSeconds",
+        ] {
+            if set(retry, key) {
+                provided.push(format!("retryConfig.{key}"));
+            }
+        }
+        for key in ["maxConcurrentDispatches", "maxDispatchesPerSecond"] {
+            if set(limits, key) {
+                provided.push(format!("rateLimits.{key}"));
+            }
+        }
+        for key in ["timeoutSeconds", "retry", "defaultUri"] {
+            if set(Some(body), key) {
+                provided.push(key.to_owned());
+            }
+        }
         let max_attempts = field(retry, "maxAttempts", integer(3));
         let max_retry_seconds = field(retry, "maxRetrySeconds", OrderedJson::Null);
         let max_backoff_seconds = field(retry, "maxBackoffSeconds", integer(3600));
@@ -127,6 +157,7 @@ impl QueueConfig {
             slots: array_length(&max_concurrent)?,
             max_dispatches_per_second: max_per_second.js_number(),
             default_uri,
+            provided,
         })
     }
 

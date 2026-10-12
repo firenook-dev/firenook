@@ -1,9 +1,18 @@
 #!/usr/bin/env node
 // Firenook Functions worker: one Node process per codebase. The Rust runtime
 // starts it with the codebase's environment, forwards every invocation over
-// loopback HTTP with `x-firenook-target`, `x-firenook-signature` and
-// `x-firenook-service` control headers, and reads this process's stdout for
-// the readiness line and for log lines.
+// loopback HTTP with `x-firenook-target`, `x-firenook-signature`,
+// `x-firenook-service`, `x-firenook-execution` and `x-firenook-function`
+// control headers, and reads this process's stdout for the readiness line
+// and for log lines. Every `x-firenook-*` header is removed before user code
+// runs.
+//
+// Each invocation runs inside an AsyncLocalStorage context, and the console
+// methods are replaced before the user module loads: a call made inside an
+// invocation is written as one FIRENOOK_WORKER_LOG record carrying the
+// invocation id, the function, the call's true level and the stream Node
+// would have written it to; outside an invocation the original methods run
+// untouched.
 //
 // The request handling mirrors firebase-tools 15.22.0
 // `functionsEmulatorRuntime.js` (Express with `trust proxy`, JSON / text /
@@ -11,22 +20,70 @@
 // `event` and `cloudevent` signatures) so the firebase-functions SDK observes
 // the same request objects. Express and body-parser are resolved from the
 // codebase's own firebase-functions dependency tree; nothing is bundled.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
+import util from "node:util";
 
 const sourceDir = process.argv[2] ? path.resolve(process.argv[2]) : process.cwd();
 const codebase = process.argv[3] ?? "default";
 const require = createRequire(path.join(sourceDir, "package.json"));
-const CONTROL_HEADERS = ["x-firenook-target", "x-firenook-signature", "x-firenook-service"];
+// Every header with this prefix is the runtime's, never the handler's.
+const CONTROL_PREFIX = "x-firenook-";
 const BODY_LIMIT = "32mb";
 
 let functionModule;
 let ready = false;
 
-function log(level, message) {
-  process.stdout.write(`FIRENOOK_WORKER_LOG ${JSON.stringify({ level, message: String(message) })}\n`);
+// The runtime stops its workers when it stops. A runtime killed outright
+// (SIGKILL, a crash) cannot, so a worker whose parent is gone ends itself
+// rather than idling on forever.
+const parentPid = process.ppid;
+setInterval(() => {
+  if (process.ppid !== parentPid) process.exit(0);
+}, 1000).unref();
+
+// The invocation the current code runs for: { execution, function }.
+const invocation = new AsyncLocalStorage();
+
+function record(fields) {
+  process.stdout.write(`FIRENOOK_WORKER_LOG ${JSON.stringify({ ...fields, time: Date.now() })}\n`);
+}
+
+function log(level, message, extra = {}) {
+  record({ level, message: String(message), ...extra });
+}
+
+// console.* inside an invocation: one attributed record per call, with the
+// true level and the stream the call would have used.
+const CONSOLE_METHODS = {
+  log: ["INFO", "stdout"],
+  info: ["INFO", "stdout"],
+  debug: ["DEBUG", "stdout"],
+  warn: ["WARN", "stderr"],
+  error: ["ERROR", "stderr"],
+};
+for (const [method, [level, stream]] of Object.entries(CONSOLE_METHODS)) {
+  const original = console[method];
+  console[method] = function attributed(...args) {
+    const store = invocation.getStore();
+    if (!store) return original.apply(this, args);
+    record({ level, message: util.format(...args), function: store.function, execution: store.execution, stream });
+  };
+}
+
+function stripControlHeaders(request) {
+  for (const name of Object.keys(request.headers)) {
+    if (name.startsWith(CONTROL_PREFIX)) delete request.headers[name];
+  }
+  const raw = request.rawHeaders;
+  if (Array.isArray(raw)) {
+    for (let index = raw.length - 2; index >= 0; index -= 2) {
+      if (String(raw[index]).toLowerCase().startsWith(CONTROL_PREFIX)) raw.splice(index, 2);
+    }
+  }
 }
 
 function fatal(message) {
@@ -153,47 +210,11 @@ async function main() {
     const target = request.header("x-firenook-target") || process.env.FUNCTION_TARGET || "";
     const signature = request.header("x-firenook-signature") || process.env.FUNCTION_SIGNATURE_TYPE || "http";
     const service = request.header("x-firenook-service") || process.env.K_SERVICE || target;
-    for (const name of CONTROL_HEADERS) delete request.headers[name];
-    // The environment a handler observes for this invocation, set before any
-    // user code runs (one worker serves every function of the codebase). The
-    // official debug-mode runtime (`--inspect-functions`) serves every
-    // function from one process and leaves these unset.
-    if (process.env.FUNCTION_DEBUG_MODE !== "true") {
-      process.env.FUNCTION_TARGET = target;
-      process.env.FUNCTION_SIGNATURE_TYPE = signature;
-      process.env.K_SERVICE = service;
-    }
-    try {
-      const trigger = resolveTarget(target);
-      if (typeof trigger !== "function") throw new Error(`Failed to find function ${target} in the loaded module`);
-      switch (signature) {
-        case "event":
-        case "cloudevent": {
-          let body;
-          if (isBinaryCloudEvent(request)) {
-            body = extractBinaryCloudEventContext(request);
-            body.data = request.body;
-          } else {
-            body = JSON.parse(request.rawBody ? request.rawBody.toString() : "{}");
-          }
-          await runBackground(trigger, body, signature);
-          response.send({ status: "acknowledged" });
-          break;
-        }
-        default:
-          await trigger(request, response);
-      }
-    } catch (error) {
-      log("ERROR", errorMessage(error));
-      if (!response.headersSent) {
-        // A background handler failure ends the official worker; the runtime
-        // turns this marker into the same dropped-connection answer.
-        if (signature === "event" || signature === "cloudevent") response.set("x-firenook-handler-error", "1");
-        response.status(500).send(error && typeof error === "object" && error.message ? error.message : String(error));
-      } else {
-        response.end();
-      }
-    }
+    const execution = request.header("x-firenook-execution") || undefined;
+    const fn = request.header("x-firenook-function") || target;
+    stripControlHeaders(request);
+    if (!execution) return handle(request, response, target, signature, service, undefined, fn);
+    return invocation.run({ execution, function: fn }, () => handle(request, response, target, signature, service, execution, fn));
   });
   const server = app.listen(0, "127.0.0.1", () => {
     ready = true;
@@ -206,11 +227,60 @@ async function main() {
   });
 }
 
+async function handle(request, response, target, signature, service, execution, fn) {
+  // The environment a handler observes for this invocation, set before any
+  // user code runs (one worker serves every function of the codebase). The
+  // official debug-mode runtime (`--inspect-functions`) serves every
+  // function from one process and leaves these unset.
+  if (process.env.FUNCTION_DEBUG_MODE !== "true") {
+    process.env.FUNCTION_TARGET = target;
+    process.env.FUNCTION_SIGNATURE_TYPE = signature;
+    process.env.K_SERVICE = service;
+  }
+  try {
+    const trigger = resolveTarget(target);
+    if (typeof trigger !== "function") throw new Error(`Failed to find function ${target} in the loaded module`);
+    switch (signature) {
+      case "event":
+      case "cloudevent": {
+        let body;
+        if (isBinaryCloudEvent(request)) {
+          body = extractBinaryCloudEventContext(request);
+          body.data = request.body;
+        } else {
+          body = JSON.parse(request.rawBody ? request.rawBody.toString() : "{}");
+        }
+        await runBackground(trigger, body, signature);
+        response.send({ status: "acknowledged" });
+        break;
+      }
+      default:
+        await trigger(request, response);
+    }
+  } catch (error) {
+    // The invocation's error: the runtime keeps this line as its error.
+    log("ERROR", errorMessage(error), { kind: "function.error", execution, function: fn });
+    if (!response.headersSent) {
+      // A background handler failure ends the official worker; the runtime
+      // turns this marker into the same dropped-connection answer.
+      if (signature === "event" || signature === "cloudevent") response.set("x-firenook-handler-error", "1");
+      response.status(500).send(error && typeof error === "object" && error.message ? error.message : String(error));
+    } else {
+      response.end();
+    }
+  }
+}
+
+function uncaughtFields() {
+  const store = invocation.getStore();
+  return store ? { kind: "worker.uncaught", execution: store.execution, function: store.function } : { kind: "worker.uncaught" };
+}
+
 process.on("uncaughtException", (error) => {
-  log("ERROR", `Uncaught exception: ${errorMessage(error)}`);
+  log("ERROR", `Uncaught exception: ${errorMessage(error)}`, uncaughtFields());
 });
 process.on("unhandledRejection", (reason) => {
-  log("ERROR", `Unhandled rejection: ${errorMessage(reason)}`);
+  log("ERROR", `Unhandled rejection: ${errorMessage(reason)}`, uncaughtFields());
 });
 
 main().catch((error) => {

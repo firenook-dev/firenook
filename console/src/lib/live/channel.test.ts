@@ -173,6 +173,31 @@ describe('one channel per browser', () => {
     expect(browser.engine.posts.at(-1)?.add[0]?.after).toBe('e.9')
   })
 
+  it("a feed started at a snapshot's cursor resumes from it, and a hidden tab has nothing to reload", async () => {
+    const tab = browser.tab({ hidden: true })
+    const channel = open(tab)
+    const feed = record()
+    channel.subscribe('functions.events', { codebase: 'app' }, feed.listener, { after: 'f.41' })
+    await settle()
+    tab.document.show()
+    await settle()
+    browser.engine.hello()
+    await settle()
+    expect(browser.engine.posts.at(-1)?.add).toEqual([
+      expect.objectContaining({ topic: 'functions.events', after: 'f.41' }),
+    ])
+    browser.engine.ev(browser.engine.idOf('functions.events'), 'batch', 'f.42', { items: [] })
+    await settle()
+    // Taken with a cursor: no reset asks the page to reload what it shows.
+    expect(feed.resets).toEqual([])
+    expect(feed.events).toEqual([{ name: 'batch', data: { items: [] }, cursor: 'f.42' }])
+    // From then on the channel resumes from what it received, as for any feed.
+    browser.engine.drop()
+    browser.engine.hello()
+    await settle()
+    expect(browser.engine.posts.at(-1)?.add[0]?.after).toBe('f.42')
+  })
+
   it('a leader hidden 20 s lets go, and a visible follower takes over with its cursors', async () => {
     const a = await leaderWith(['firestore.changes', CHANGES])
     const b = open(browser.tab())

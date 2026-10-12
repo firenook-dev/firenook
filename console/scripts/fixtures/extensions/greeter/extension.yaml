@@ -1,0 +1,102 @@
+# The compute journeys' local extension: an HTTP function that greets and
+# publishes an Eventarc event, a Firestore trigger, and a task-queue
+# lifecycle function the emulator does not deliver (as the official one does
+# not). Params of each kind the console draws: a validated string, two
+# selects, a secret. Synthetic; nothing here calls a real service.
+name: greeter
+version: 0.1.0
+specVersion: v1beta
+displayName: Greeter
+description: Greets visitors by name and announces every greeting on Eventarc.
+license: Apache-2.0
+author:
+  authorName: Firenook fixtures
+  url: https://example.com/greeter
+sourceUrl: https://example.com/greeter/source
+billingRequired: false
+
+apis:
+  - apiName: firestore.googleapis.com
+    reason: Reads visitor profiles.
+  - apiName: translate.googleapis.com
+    reason: Translates the greeting into the visitor's language.
+
+roles:
+  - role: datastore.user
+    reason: Reads visitor profiles.
+
+events:
+  - type: test.greeter.v1.greeted
+    description: A visitor was greeted.
+  - type: test.greeter.v1.failed
+    description: A greeting could not be sent.
+
+lifecycleEvents:
+  onInstall:
+    function: backfill
+    processingMessage: Greeting the visitors who arrived before the install
+
+resources:
+  - name: greet
+    type: firebaseextensions.v1beta.function
+    description: Greets one visitor and publishes test.greeter.v1.greeted.
+    properties:
+      location: ${param:LOCATION}
+      runtime: nodejs22
+      httpsTrigger: {}
+  - name: onProfile
+    type: firebaseextensions.v1beta.function
+    description: Keeps a greeting ready for every profile that is written.
+    properties:
+      location: ${param:LOCATION}
+      runtime: nodejs22
+      eventTrigger:
+        eventType: providers/cloud.firestore/eventTypes/document.write
+        resource: projects/${param:PROJECT_ID}/databases/(default)/documents/profiles/{id}
+  - name: backfill
+    type: firebaseextensions.v1beta.function
+    description: Greets the visitors who arrived before the install.
+    properties:
+      location: ${param:LOCATION}
+      runtime: nodejs22
+      taskQueueTrigger: {}
+
+params:
+  - param: GREETING_TEMPLATE
+    label: Greeting template
+    description: >-
+      What every visitor reads. **{name}** is replaced by the visitor's name,
+      so the template must hold it.
+    type: string
+    default: Hello, {name}!
+    example: Welcome back, {name}.
+    required: true
+    validationRegex: ^.*\{name\}.*$
+    validationErrorMessage: The template must contain {name}.
+  - param: LOCATION
+    label: Location
+    description: Where the functions run.
+    type: select
+    default: us-central1
+    required: true
+    immutable: true
+    options:
+      - value: us-central1
+        label: Iowa (us-central1)
+      - value: europe-west1
+        label: Belgium (europe-west1)
+  - param: MODE
+    label: Mode
+    description: How hard the greeter tries before giving up.
+    type: select
+    default: fast
+    options:
+      - value: fast
+        label: Fast
+      - value: thorough
+        label: Thorough
+  - param: API_TOKEN
+    label: API token
+    description: The token the translation calls send.
+    type: secret
+    required: true

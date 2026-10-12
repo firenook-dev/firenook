@@ -2830,7 +2830,180 @@ routes would send and holding uploads mid-way through `setUploadTransport`.
   `localStorage`; under Vitest's happy-dom `import.meta.url` is not a file
   URL (read a source with `?raw`).
 
-## Functions, Extensions and Eventarc (on the way, `src/functions/`, `src/extensions/`, `src/eventarc/`)
+## Functions, Extensions and Eventarc (built, `src/functions/`, `src/extensions/`, `src/eventarc/`)
+
+Three sections over one engine recorder. Routes: `/functions` (the overview,
+a codebase with `codebase=`, a function's workbench with `function=`, its
+inspector `tab=run|trigger|environment`, an invocation with `invocation=`,
+edit and replay with `prefill=`, `paused`, `q`, `sort`, `source`),
+`/functions/invocations` (`q`, `invocation`, `paused`), `/extensions`
+(`instance`, `view=overview|configuration|functions|events|readme`, `edit`,
+`q`), `/eventarc` (`channel`, `q`, `event`, `new=event`, `prefill`,
+`paused`) and `/eventarc/channels` (`channel`). Each schema lives in the
+section's `search.ts`; the pages read it through `useRouteSearch`, so the
+first route carries the schemas alone. There is no `/eventarc/alerts`: the
+engine does not deliver Firebase Alerts yet, an alert function is
+`ignored` with that reason, and a journey asserts the page is absent.
+
+**Where things are.** Pure logic with Vitest beside it in
+`src/functions/*.ts` (kinds and their verbs, trigger text, the panel tree,
+filters, envelopes, callable, identity headers, blocking, Copy as commands,
+curl paste, the invoke request and stream, run drafts, saved tests);
+pages and forms in `src/functions/components/` (overview, codebase view,
+workbench and its Run / Trigger / Environment tabs, the six run forms on
+`run-parts.tsx`, invocation list, row and detail, `request-view.tsx`,
+`invocation-actions.tsx`). `src/extensions/` and `src/eventarc/` follow
+the same split. UI shared by the three lives in `src/compute/`:
+`KindBadge`, `DurationText`, `EnvChangeDialog` (every env or parameter
+save), `ReplayConfirm` (every replay), the event row, the status words,
+`SecretInput` (a password group with its eye and the kit's `CopyButton`
+inside the field — not Kumo's `SensitiveInput`, whose copy tab rises over
+the field's top edge) and `useSeededPending`. Registry entries in
+`lib/sections/{functions,extensions,eventarc}.ts`; the badges sit on pages,
+never on the section (`functions.load` on Functions, `functions.failed` on
+Invocations), because a section's own badges are marked seen on every one
+of its pages.
+
+**The engine.** `crates/functions-runtime/src/monitor/` (store, cause,
+outcome, structured), `console.rs` (the control handle), `env_files.rs`,
+`watcher.rs`; `crates/extensions/src/control.rs` and `params.rs`;
+`crates/console-front/src/compute/` (routes, topics, rings, filters,
+search); `crates/suite-runtime/src/console_wiring/compute.rs` (the parts,
+the hand-over, the parameter-file watcher, the one Functions log sink).
+Generated types in `src/api/generated/compute/`.
+
+- **The Monitor is the only invocation recorder.** Created by the suite
+  before Functions start (`console_wiring::compute::parts`, handed to the
+  runtime through `FunctionsRuntime::start_with(…, RuntimeOptions {
+  monitor, log_delivery: LogDelivery::Attributed })`) and fed by hooks in
+  `dispatch`, the worker slot, the loads and `publish_events`; the console
+  reads it and registers its topics on it. Never add a second recorder or
+  a delivery journal: extend the Monitor's types. Messaging joins its
+  fanout to it with `by_event_id` / `by_task`; the per-kind floor keeps
+  200 of each kind inside the 2,000-record, 64 MiB bound
+  (`MonitorLimits`). `cargo bench -p firenook-functions-runtime --bench
+  monitor -- --quick` re-times the hot paths after criterion and fails
+  over budget.
+- **One id per invocation.** `Monitor::begin` mints `<nonce>-<seq>`; it is
+  the `x-firenook-execution` header (to the worker, and in the answer only
+  when the request carried `x-firenook-console` or a cause header), every
+  log line's `execution` and the console's `#1,284`. Router search values
+  are parsed as JSON, so an id written by hand into a URL must be quoted
+  (`encodeURIComponent(JSON.stringify(id))`): `40406e-694` unquoted is the
+  number 4.04e-690 and the page refuses it.
+- **Compute owns attribution end to end**: the worker patch
+  (`support/functions-worker.mjs`), the `LogEvent` fields, the single end
+  line, and `monitor/structured.rs` — one parser, which observe calls.
+  Terminal output and the official logging records do not change:
+  `functions_log` prints and records `event.compatible_events()`, and an
+  end line with no counterpart before is `consoleOnly`.
+- **Live is topics, never a section stream.** `functions.events`,
+  `functions.invocation`, `functions.codebase-log`, `eventarc.events` and
+  `extensions.changes` on the one channel, fed by the Monitor's live sink
+  under its lock into the rings (`functions` 10,000 / 8 MiB, `eventarc`
+  4,000 / 4 MiB), resumed by replay; snapshots carry the cursor read in
+  the same lock; patches are idempotent (absolute stats, upsert by id).
+  Bursts become a marker row (50 rows a batch, exact stats). The feed
+  recipe: seed a `createFeedStore` from the page query (newest first, so
+  push reversed), subscribe with `after: page.liveCursor` and
+  `onItems: store.upsert`, and pass `params: null` until the cursor is in.
+  A list opened paused counts only what arrives after its first page
+  (`useSeededPending`), or a reload with `paused=true` says "200 new".
+- **Finishing rules.** Background invocations finish at the response head
+  (the worker answers after the handler settles); HTTP ones at the body's
+  end, and a body the caller dropped is drained by a spawned task so the
+  record still ends; `clientGone` only when the caller started reading and
+  stopped. After a pause and resume the services deliver to both the old
+  and the new trigger key, as on the official emulator; the superseded key
+  answers 204 and is not recorded.
+- **No event body is parsed on the dispatch path.** Senders state the
+  cause in `x-firenook-cause-*` headers (names and percent-encoding in
+  `firenook_functions_bridge::cause`); the cause and summary are
+  classified once, when the started row is serialized.
+- **Every `x-firenook-*` header is a control header**, stripped by prefix
+  in the runtime and the worker (`headers` and `rawHeaders`); user code
+  never sees one, and no response header is added to a request that did
+  not ask for it.
+- **Paused means dropped.** Sources drop events while background triggers
+  are off and count them per service for the shell's banner, the only
+  place the paused state is drawn; compute never invents records for them.
+  A test event sent while paused is recorded `paused` and runs nothing.
+- **Links into other sections are `EntityRef`s the engine builds**
+  (`entity.rs` constructors); filtered Logs go through `linkToLogs`.
+  Compute exports no link builder. Task causes link the task by
+  `task_id(queue, task)` and the queue; Run now goes through messaging's
+  `ScheduleControl::run` and Enqueue through `TasksConsole::enqueue_console`
+  (a reserved name or a full queue is a conflict, said in the form).
+- **"Which functions fire here" has one matcher**: `GET
+  /functions/triggers` (through `useTriggersFor`, `'unknown'` while
+  starting, one reference-counted `functions.events {changesOnly}`
+  subscription per tab) and `POST /functions/match`, both on one matcher
+  in `console.rs` (Firestore's through the bridge's `explain_match`).
+- **Test events are the functions shell's envelopes.** `envelopes.ts` is a
+  port of `packages/cli/src/invoke.mjs` held to it by a parity test that
+  imports the CLI module; change both or neither. 2nd-gen Firestore test
+  events are JSON (the shell's form), real deliveries protobuf, decoded
+  for the detail with `decode_document_event`; the SDK takes both.
+- **Run answers follow the invocation to its end.** `RunAnswer` reads the
+  kept record (patched by `functions.invocation`), so a direct Run now
+  stops saying Running; `useNextInvocation` subscribes to the function's
+  events from mount and keeps the last 50 finished, so "Do it for real"
+  finds an invocation that finished before its request returned. Only an
+  `http` cause shows its status code as the chip's word (`chipStatus`); a
+  callable, a blocking function or a task says Succeeded, the callable
+  status or Allowed.
+- **Never send the engine's inherited environment.** Only the count; a
+  journey sets a sentinel variable and asserts it never reaches the page.
+- **Secrets are revealed, never listed.** `.secret.local` values,
+  extension secrets and sensitive request headers are null with
+  `sensitive: true` in every list and detail; the reveal routes read them
+  at request time; replay reads them inside the engine.
+- **A file change that does not load never stays on disk.** Extension
+  reconfigure and codebase env edits restore every file they wrote when
+  the reload fails. The console's own writes never cause a second reload:
+  self-writes are keyed by the canonical path (the watcher reports
+  `/private/var/…` where the console wrote `/var/…`) and forgotten once
+  the file holds anything else. An env file edited on disk does not reload
+  a codebase — it flags `envChanged` until Reload — while an extension's
+  parameter file edited on disk reloads that instance.
+- **Mutations take JSON and come from the console.** Every mutating compute
+  route takes a `ConsoleJson` body; the foundation's guard covers the
+  mount.
+- **Outcome words and classes** come from the engine; the client never
+  derives a class. `OutcomeChip` is the foundation's.
+- **Invocation logs** are observe's `LogLine` rows through `LogLines`: in
+  an invocation, a 52 px offset column (84 px once a line is a minute in)
+  and no level column while every line is info, so a one-line message
+  gets the row; a codebase's load log keeps the clock column.
+- **Per browser**: run drafts per tab in sessionStorage
+  (`firenook.console.run-drafts`), saved tests in localStorage (50 per
+  function, 1 MB per project, export and import as JSON), the editor that
+  stack frames open in (`firenook.console.editor`: VS Code, Cursor,
+  JetBrains).
+
+**Journeys** (`--project compute`): `e2e/functions*.spec.ts`,
+`extensions.spec.ts`, `eventarc.spec.ts`, helpers in
+`e2e/support/compute.ts` (every compute spec imports it, which sets the
+environment sentinel before the worker's engine starts). The profile
+(`scripts/profiles/compute.mjs`) runs the shared codebase on the offline
+`firebase-functions` install with `FIXTURE_STREAMS: 'compute,auth'`:
+compute's functions in `scripts/fixtures/functions/compute.js` (and
+`compute-eventarc.js`), the blocking ones from `auth.js`, users from
+`SEED_USERS`. `scripts/fixtures/compute.mjs` writes the `jobs`
+(TypeScript) and `broken` codebases and `functions/.secret.local` from
+strings, because `tsc` and oxfmt read every file under `scripts/`; ids are
+unique per project, so jobs' function is `heartbeat`. Never a static
+`functions.yaml` in the shared codebase (it hides every other stream's
+functions). A worker-scoped `engineOptions` needs a file of its own.
+Restore any env file a journey edits and reload the codebase. Journey 11
+(blocking) skips until the Authentication stream's `auth.js` is in.
+
+**Known gaps.** The Admin SDK's Eventarc publish from function or
+extension code asks Google's token endpoint for an access token, which the
+synthetic credential every worker gets cannot answer; the greeter fixture
+passes its own credential. A handler error the SDK catches itself (a
+schedule answering 500 with an empty body) leaves `InvocationSummary.error`
+null.
 
 ## Pub/Sub and Cloud Tasks (on the way, `src/pubsub/`, `src/tasks/`)
 

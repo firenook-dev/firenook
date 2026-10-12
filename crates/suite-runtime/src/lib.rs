@@ -2099,14 +2099,18 @@ impl firenook_auth_front::BlockingResolver for BlockingBridge {
 }
 
 /// Starts the owned Functions runtime with what the console's
-/// `functions_options` hooks put in `console`.
+/// `functions_options` hooks put in `console`: it records into compute's
+/// Monitor, and the Extensions instances it loads are handed to compute's
+/// `ready` hook through the same parts. Terminal output and the official
+/// records stay what they were before lines were attributed
+/// (`console_wiring::compute::functions_log`).
 async fn start_functions_runtime(
     config: &SuiteConfig,
     triggers: TriggerRegistry,
     logging: &LoggingRuntime,
     console: FunctionsConsoleOptions,
 ) -> Result<FunctionsRuntime, SuiteRuntimeError> {
-    let FunctionsConsoleOptions {} = console;
+    let FunctionsConsoleOptions { compute } = console;
     let firebase_json: serde_json::Value = serde_json::from_slice(
         &tokio::fs::read(&config.firebase_json)
             .await
@@ -2114,18 +2118,21 @@ async fn start_functions_runtime(
     )
     .map_err(|error| failure(format!("invalid firebase.json: {error}")))?;
     let codebases: Vec<CodebaseConfig> = codebases_from_config(&firebase_json, &config.project_dir);
-    let sink_logging = logging.clone();
-    let sink = LogSink::new(move |event: LogEvent| {
-        let label = event.label.clone();
-        let line = format!("{label}: {}", event.message);
-        match event.level.as_str() {
-            "ERROR" | "WARN" => eprintln!("firenook {line}"),
-            "DEBUG" => {}
-            _ => println!("firenook {line}"),
-        }
-        sink_logging.record(&event.level, Some("functions"), line);
-    });
+    let sink = console_wiring::compute::functions_log(logging);
     let extensions = load_extensions(config, &sink).await?;
+    let backends = extensions
+        .as_ref()
+        .map(|outcome| {
+            outcome
+                .loaded
+                .iter()
+                .map(|extension| extension.backend.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    if let (Some(parts), Some(outcome)) = (&compute, extensions) {
+        parts.hand_over_extensions(outcome);
+    }
     let host = |port: u16| config.endpoint(port);
     let runtime_config = FunctionsRuntimeConfig {
         project_id: config.project_id.clone(),
@@ -2146,27 +2153,46 @@ async fn start_functions_runtime(
             tasks: host(config.ports.tasks),
         },
         codebases,
-        extensions,
+        extensions: backends,
         inspect: config.inspect_functions.clone(),
     };
-    FunctionsRuntime::start(runtime_config, triggers, sink)
-        .await
-        .map_err(|error| failure(format!("Functions runtime failed to start: {error}")))
+    // A suite without a console records just the same.
+    let monitor = compute.as_ref().map_or_else(
+        || {
+            firenook_functions_runtime::Monitor::new(
+                firenook_functions_runtime::MonitorLimits::default(),
+            )
+        },
+        |parts| parts.monitor().clone(),
+    );
+    FunctionsRuntime::start_with(
+        runtime_config,
+        triggers,
+        sink,
+        firenook_functions_runtime::RuntimeOptions {
+            monitor,
+            log_delivery: firenook_functions_runtime::LogDelivery::Attributed,
+        },
+    )
+    .await
+    .map_err(|error| failure(format!("Functions runtime failed to start: {error}")))
 }
 
-/// The `extensions` instances of `firebase.json` as Functions backends.
+/// The `extensions` instances of `firebase.json` loaded into Functions
+/// backends, with the instances left out for triggers the suite does not
+/// emulate; `None` when firebase.json configures none.
 async fn load_extensions(
     config: &SuiteConfig,
     sink: &LogSink,
-) -> Result<Vec<firenook_functions_runtime::ExtensionBackend>, SuiteRuntimeError> {
+) -> Result<Option<firenook_extensions::LoadOutcome>, SuiteRuntimeError> {
     let extensions_config = extensions_config(config)?;
     if extensions_config.extensions.is_empty() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
-    let loaded = firenook_extensions::load(&extensions_config, sink)
+    let outcome = firenook_extensions::load_outcome(&extensions_config, sink)
         .await
         .map_err(|error| failure(format!("Extensions failed to load: {error}")))?;
-    for extension in &loaded {
+    for extension in &outcome.loaded {
         let origin = match extension.origin {
             firenook_extensions::SourceOrigin::Local => "local".to_owned(),
             firenook_extensions::SourceOrigin::Vendored => "vendored".to_owned(),
@@ -2184,10 +2210,7 @@ async fn load_extensions(
             ),
         ));
     }
-    Ok(loaded
-        .into_iter()
-        .map(|extension| extension.backend)
-        .collect())
+    Ok(Some(outcome))
 }
 
 /// The loader configuration for this suite: `firebase.json` `extensions`

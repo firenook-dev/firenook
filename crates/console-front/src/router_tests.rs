@@ -77,13 +77,13 @@ pub(crate) fn full_services(store: &Store, hosts: AllowedHosts) -> ConsoleServic
         eventarc: native_application("eventarc"),
     });
     let pubsub = Late::pending("Pub/Sub");
-    pubsub.set(PubsubConsole {
-        native: native_application("pubsub"),
-    });
+    pubsub.set(crate::messaging::test_pubsub_console(native_application(
+        "pubsub",
+    )));
     let tasks = Late::pending("Cloud Tasks");
-    tasks.set(TasksConsole {
-        native: native_application("tasks"),
-    });
+    tasks.set(crate::messaging::test_tasks_console(native_application(
+        "tasks",
+    )));
     ConsoleServices {
         firestore: Some(firestore_console(store)),
         auth: Some(auth_console()),

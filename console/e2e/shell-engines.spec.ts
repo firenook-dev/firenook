@@ -87,11 +87,12 @@ dedicated.describe('with engines of their own', () => {
       await expect(dot).toHaveAttribute('data-tone', 'starting')
       await expect(page.getByTestId('nav-functions')).toHaveAttribute('data-state', 'starting')
 
-      await expect(page.getByText('This section is not built yet')).toBeVisible({
-        timeout: 30_000,
-      })
+      // Functions is built: once its codebases load, the page itself fills in.
+      await expect(page.getByTestId('functions-overview')).toBeVisible({ timeout: 30_000 })
       await expect(starting).toHaveCount(0)
-      await expect(dot).toHaveCount(0)
+      // The starting dot goes (the compute project's `broken` codebase still
+      // badges the section, which the collapsed nav shows as a dot of its own).
+      await expect(dot).not.toHaveAttribute('data-tone', 'starting')
       await expect(page.getByTestId('nav-functions')).toHaveAttribute('data-state', 'ready')
       expect(loads).toBe(1)
     },

@@ -314,6 +314,21 @@ describe('FeedList', () => {
     expect(onOpenTarget).toHaveBeenCalledWith(expect.objectContaining({ id: 'l1' }))
   })
 
+  it('paused without a scroll, a newest-first list holds the row on top as rows arrive above it', async () => {
+    const store = createFeedStore<Line>({ max: 100, key: rowKey })
+    render(<Feed store={store} order="newest-first" startPaused />)
+    act(() => store.push(lines(20)))
+    await frame()
+    expect(scroller().scrollTop).toBe(0)
+    expect(shown()[0]).toBe('l19')
+    act(() => store.push(lines(5, 20)))
+    await frame()
+    // Five rows of 28 px came in above: the view moved down by them, so the
+    // row the reader was on is where it was.
+    expect(scroller().scrollTop).toBe(5 * 28)
+    expect(screen.getByTestId('pending')).toHaveTextContent('5')
+  })
+
   it('jumps to the live edge and follows on End', async () => {
     const store = createFeedStore<Line>({ max: 1_000, key: rowKey })
     render(<Feed store={store} startPaused />)

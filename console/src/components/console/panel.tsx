@@ -68,9 +68,9 @@ export function PanelFilter({
       />
       {value && (
         <InputGroup.Addon align="end">
+          {/* No size: the group's sm makes it the compact xs, and a size of its own warns. */}
           <InputGroup.Button
             variant="ghost"
-            size="xs"
             shape="square"
             icon={<XIcon />}
             aria-label="Clear the filter"

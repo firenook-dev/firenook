@@ -66,13 +66,17 @@ export interface TopicListener {
 /** How a new subscription starts. */
 export interface SubscribeOptions {
   /**
-   * The feed position the page's data already reaches (a list's
-   * `liveAfter`, read with its first page): the subscription resumes after
-   * it, so the engine replays only what is newer instead of the whole
-   * ring. Only the first offer uses it; the subscription's own cursor
-   * takes over from its first event. Topics shared across the browser
-   * (`compare`, `none`) join the subscription already held, and keep its
-   * cursor.
+   * The feed position the page's data already reaches: a list's
+   * `liveAfter`, read with its first page, or a snapshot's `liveCursor`,
+   * which the engine read in the same lock as the state the snapshot holds.
+   * The subscription resumes after it, so the engine replays only what is
+   * newer instead of the whole ring, nothing the page already has is sent
+   * again, and nothing it missed is lost while the GET and the subscription
+   * race. A cursor the engine no longer holds is answered with `reset`, as
+   * any resume is. Only the first offer uses it; the subscription's own
+   * cursor takes over from its first event. Feeds (`replay` topics) only:
+   * topics shared across the browser (`compare`, `none`) join the
+   * subscription already held, and keep its cursor.
    */
   after?: string | undefined
 }
@@ -1055,21 +1059,23 @@ export function createLiveChannel(
   return {
     tab,
     status: store,
-    subscribe(topic, params, listener, start) {
+    subscribe(topic, params, listener, subscribeOptions) {
       localSerial += 1
+      // A page that read its data first resumes after what it read.
+      const after = subscribeOptions?.after || undefined
       const local: LocalSub = {
         id: `${tab}.s${localSerial}`,
         topic,
         params: wireParams(params),
         listener,
-        // A page that read its data first resumes after what it read.
-        cursor: start?.after || undefined,
+        cursor: after,
         state: 'pending',
         attempt: 0,
         retry: undefined,
         // A tab opened in the background reads its data now and subscribes
-        // when it is shown.
-        resync: environment.document.visibilityState !== 'visible',
+        // when it is shown; with a cursor of its own it resumes from there
+        // instead, and has nothing to reload.
+        resync: environment.document.visibilityState !== 'visible' && after === undefined,
       }
       locals.set(local.id, local)
       if (engaged) {

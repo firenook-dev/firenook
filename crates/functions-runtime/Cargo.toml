@@ -29,7 +29,12 @@ ts-rs.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+tempfile = "3"
 tower = { version = "0.5.3", features = ["util"] }
+
+[[bench]]
+name = "monitor"
+harness = false
 
 [lints]
 workspace = true

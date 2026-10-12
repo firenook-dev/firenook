@@ -1,0 +1,89 @@
+{
+  "note": "The blocking-function JWT payload, pinned on both sides: console/src/functions/blocking.ts (blockingPayload) and the Auth emulator's generate_blocking_jwt (crates/auth-front/src/blocking.rs). Each case gives the call (target, event, the account in Auth REST shape, the sign-in method, and the fixed time and id) and the payload both must write, field for field.",
+  "cases": [
+    {
+      "name": "a password sign-up",
+      "input": {
+        "target": {
+          "uri": "http://127.0.0.1:5001/demo-x/us-central1/beforeCreate",
+          "projectId": "demo-x"
+        },
+        "event": "beforeCreate",
+        "user": {
+          "localId": "u_new",
+          "email": "ada@example.test",
+          "emailVerified": false,
+          "displayName": "Ada Lovelace",
+          "customAttributes": "{\"plan\":\"pro\"}",
+          "providerUserInfo": [
+            { "providerId": "password", "email": "ada@example.test", "rawId": "ada@example.test" }
+          ],
+          "createdAt": "1760248931000",
+          "lastLoginAt": "1760248931000"
+        },
+        "signInMethod": "password",
+        "iat": 1760248931,
+        "eventId": "q0S5UqTmZtA3Y0bS8mMHNw"
+      },
+      "payload": {
+        "iss": "https://securetoken.google.com/demo-x",
+        "aud": "http://127.0.0.1:5001/demo-x/us-central1/beforeCreate",
+        "iat": 1760248931,
+        "exp": 1760249531,
+        "event_id": "q0S5UqTmZtA3Y0bS8mMHNw",
+        "event_type": "beforeCreate",
+        "user_agent": "NotYetSupportedInFirebaseAuthEmulator",
+        "ip_address": "127.0.0.1",
+        "locale": "en",
+        "user_record": {
+          "uid": "u_new",
+          "email": "ada@example.test",
+          "email_verified": false,
+          "display_name": "Ada Lovelace",
+          "custom_claims": { "plan": "pro" },
+          "provider_data": [
+            { "provider_id": "password", "email": "ada@example.test", "uid": "ada@example.test" }
+          ],
+          "metadata": { "last_sign_in_time": 1760248931000, "creation_time": 1760248931000 }
+        },
+        "sub": "u_new",
+        "sign_in_method": "password"
+      }
+    },
+    {
+      "name": "a tenant's sign-in with no claims",
+      "input": {
+        "target": {
+          "uri": "http://127.0.0.1:5001/demo-x/us-central1/beforeSignIn",
+          "projectId": "demo-x",
+          "tenantId": "tenant-1"
+        },
+        "event": "beforeSignIn",
+        "user": { "localId": "u_9", "email": "grace@example.test", "disabled": true },
+        "iat": 1760250000,
+        "eventId": "AAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "payload": {
+        "iss": "https://securetoken.google.com/demo-x",
+        "aud": "http://127.0.0.1:5001/demo-x/us-central1/beforeSignIn",
+        "iat": 1760250000,
+        "exp": 1760250600,
+        "event_id": "AAAAAAAAAAAAAAAAAAAAAA",
+        "event_type": "beforeSignIn",
+        "user_agent": "NotYetSupportedInFirebaseAuthEmulator",
+        "ip_address": "127.0.0.1",
+        "locale": "en",
+        "user_record": {
+          "uid": "u_9",
+          "email": "grace@example.test",
+          "disabled": true,
+          "custom_claims": {},
+          "tenant_id": "tenant-1",
+          "provider_data": []
+        },
+        "sub": "u_9",
+        "tenant_id": "tenant-1"
+      }
+    }
+  ]
+}

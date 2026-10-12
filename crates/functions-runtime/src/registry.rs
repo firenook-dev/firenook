@@ -172,6 +172,42 @@ impl Registry {
         subscriptions
     }
 
+    /// Every Eventarc subscription, the runtime's own (from definitions)
+    /// first, each with whether it was registered through the Eventarc
+    /// emulator route instead.
+    #[must_use]
+    pub fn all_eventarc_subscriptions(&self) -> Vec<(EventarcSubscription, bool)> {
+        let mut own: Vec<EventarcSubscription> =
+            self.eventarc.values().flatten().cloned().collect();
+        own.sort_by(|left, right| {
+            (&left.channel, &left.event_type, &left.trigger_key).cmp(&(
+                &right.channel,
+                &right.event_type,
+                &right.trigger_key,
+            ))
+        });
+        own.into_iter()
+            .map(|subscription| (subscription, false))
+            .chain(
+                self.external_eventarc
+                    .iter()
+                    .cloned()
+                    .map(|subscription| (subscription, true)),
+            )
+            .collect()
+    }
+
+    /// Whether anything on `channel` listens for `event_type`.
+    #[must_use]
+    pub fn has_eventarc_listener(&self, event_type: &str, channel: &str) -> bool {
+        self.eventarc
+            .get(&format!("{event_type}-{channel}"))
+            .is_some_and(|subscriptions| !subscriptions.is_empty())
+            || self.external_eventarc.iter().any(|subscription| {
+                subscription.event_type == event_type && subscription.channel == channel
+            })
+    }
+
     /// Registers a subscription received on the Eventarc emulator route.
     pub fn add_external_eventarc(
         &mut self,
@@ -592,6 +628,30 @@ impl Registry {
         pending
     }
 
+    /// A disabled record that a later registration of the same definition
+    /// replaced: background triggers were paused (which disabled it) and
+    /// resumed (which registered the definition again under a new key). The
+    /// official emulator keeps such a record, and the services still deliver
+    /// to it beside the new one; it answers 204 and nothing runs, so it is
+    /// not an invocation of the function.
+    #[must_use]
+    pub fn superseded(&self, key: &str) -> bool {
+        let Some(record) = self.get(key) else {
+            return false;
+        };
+        !record.enabled
+            && !record.stale
+            && self.records.iter().any(|candidate| {
+                candidate.enabled
+                    && !candidate.stale
+                    && candidate.key != record.key
+                    && candidate.codebase == record.codebase
+                    && candidate.definition.entry_point() == record.definition.entry_point()
+                    && candidate.definition.json().get("eventTrigger")
+                        == record.definition.json().get("eventTrigger")
+            })
+    }
+
     /// Whether any delivered record is enabled for the given key.
     #[must_use]
     pub fn is_enabled(&self, key: &str) -> Option<bool> {
@@ -650,7 +710,7 @@ fn v2_firestore_bundle(event: &Map<String, Value>) -> Result<Value, String> {
 
 /// Multicast keys an Auth or Storage definition subscribes to
 /// (`addAuthTrigger`, `addStorageTrigger`).
-fn multicast_keys(definition: &Definition, project: &str) -> Vec<String> {
+pub(crate) fn multicast_keys(definition: &Definition, project: &str) -> Vec<String> {
     let Some(event) = definition.event_trigger() else {
         return Vec::new();
     };

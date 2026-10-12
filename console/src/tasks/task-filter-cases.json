@@ -1,0 +1,264 @@
+{
+  "note": "The task filter's golden cases (crates/console-front/src/messaging/tasks/filters.rs, console/src/tasks). Both sides parse and validate every text against these fields and must give exactly this result or this error, message and UTF-16 span included.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "name",
+      "aliases": ["id"],
+      "kind": "exact",
+      "help": "Task name, full or short (a trailing * matches the start)"
+    },
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "Named by the emulator, or enqueued from the console",
+      "values": ["generated", "console"]
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "card",
+      "text": "card",
+      "ok": {
+        "words": [
+          {
+            "text": "card",
+            "negated": false,
+            "from": 0,
+            "to": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "name-order-1",
+      "text": "name:order-1",
+      "ok": {
+        "terms": [
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "order-1",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "name-order",
+      "text": "name:order-*",
+      "ok": {
+        "terms": [
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "order-*",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "name-projects-p-locations-l-queues-q-tasks-x",
+      "text": "name:/projects/p/locations/l/queues/q/tasks/x",
+      "ok": {
+        "terms": [
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "/projects/p/locations/l/queues/q/tasks/x",
+            "negated": false,
+            "from": 0,
+            "to": 45
+          }
+        ]
+      }
+    },
+    {
+      "name": "id-order-1",
+      "text": "id:order-1",
+      "ok": {
+        "terms": [
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "order-1",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-generated",
+      "text": "is:generated",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "generated",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-console",
+      "text": "is:console",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "console",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-generated-2",
+      "text": "-is:generated",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "generated",
+            "negated": true,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "name-a-name-b",
+      "text": "name:a name:b",
+      "ok": {
+        "terms": [
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "a",
+            "negated": false,
+            "from": 0,
+            "to": 6
+          },
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "b",
+            "negated": false,
+            "from": 7,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "name-a",
+      "text": "-name:a",
+      "ok": {
+        "terms": [
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "a",
+            "negated": true,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "card-declined",
+      "text": "\"card declined\"",
+      "ok": {
+        "words": [
+          {
+            "text": "card declined",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-running",
+      "text": "is:running",
+      "error": {
+        "from": 0,
+        "to": 10,
+        "message": "\"is:\" is one of generated, console."
+      }
+    },
+    {
+      "name": "state-pending",
+      "text": "state:pending",
+      "error": {
+        "from": 0,
+        "to": 13,
+        "message": "Unknown filter \"state:\". Use name or is; quote it to search for the text."
+      }
+    },
+    {
+      "name": "name",
+      "text": "name:",
+      "error": {
+        "from": 0,
+        "to": 5,
+        "message": "\"name:\" needs a value."
+      }
+    },
+    {
+      "name": "name-order-is-console-card",
+      "text": "name:order-* -is:console card",
+      "ok": {
+        "terms": [
+          {
+            "key": "name",
+            "op": "eq",
+            "value": "order-*",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          },
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "console",
+            "negated": true,
+            "from": 13,
+            "to": 24
+          }
+        ],
+        "words": [
+          {
+            "text": "card",
+            "negated": false,
+            "from": 25,
+            "to": 29
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -38,7 +38,8 @@ function handlerName(event: string): string {
  * The subscription under both hooks: subscribes while `params` is not null,
  * again when the topic or parameters change (by value, not identity), and
  * answers this subscription's status. `start` is read when a subscription
- * begins; changing it alone never resubscribes.
+ * begins; changing it alone never resubscribes (the channel keeps the
+ * cursors it is sent from then on).
  */
 function useSubscription(
   topic: string,
@@ -82,8 +83,10 @@ function useSubscription(
 
 /**
  * Holds a subscription while mounted. `params: null` means not now. Handlers are read through a ref.
- * `start.after` resumes a new subscription after a feed position the page already read (a list's
- * `liveAfter`), so a feed page that loaded its first page is not sent the whole ring again.
+ * `start.after` resumes a new subscription after a feed position the page already read: a list's
+ * `liveAfter`, so a feed page that loaded its first page is not sent the whole ring again, or a
+ * snapshot's `liveCursor` (pass `params: null` until the snapshot is here), so the topic picks up
+ * exactly where the snapshot ends.
  */
 export function useLiveTopic<K extends TopicName>(
   topic: K,
