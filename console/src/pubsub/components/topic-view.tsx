@@ -4,22 +4,20 @@
 // went quiet decays to zero by itself); below, the tab.
 
 import { Button, Tabs } from '@cloudflare/kumo'
-import { BroadcastIcon, PlusIcon } from '@phosphor-icons/react'
+import { BroadcastIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
 import { ApiError } from '@/api/client'
-import type { PubsubMessageDetail } from '@/api/generated/messaging/PubsubMessageDetail'
-import type { PubsubMessageRow } from '@/api/generated/messaging/PubsubMessageRow'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
 import type { PubsubTopicSummary } from '@/api/generated/messaging/PubsubTopicSummary'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
-import type { RowMenuItem } from '@/components/console/row-menu'
 import { ToolbarRow } from '@/components/console/toolbar'
 import { formatNumber } from '@/lib/format'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useThroughput } from '../live'
 import { shortName } from '../names'
 import { topicQuery } from '../queries'
+import { Composer } from './composer'
+import { JobStrip } from './job-strip'
 import type { MessageTab } from './message-inspector'
 import { type MessagesSearch, MessagesView } from './message-table'
 import { SubscriptionsTable, subscriptionRows } from './subscriptions-table'
@@ -33,6 +31,11 @@ export interface TopicSearch extends MessagesSearch {
   /** A topic's view, or a subscription's (the page's one parameter for both). */
   view?: TopicViewName | SubscriptionViewName | undefined
   tab?: MessageTab | undefined
+  /** `message` opens the composer in the inspector's place. */
+  new?: 'topic' | 'subscription' | 'message' | 'snapshot' | undefined
+  /** With new=message: the message that fills the composer. */
+  prefill?: string | undefined
+  dialog?: 'replay' | 'setup' | 'export' | undefined
 }
 
 /** The topic's tabs, in order; later commits add theirs here. */
@@ -94,11 +97,6 @@ export function TopicView({
   onCreateTopic,
   onLiveStatus,
   onDeleted,
-  messageFooter,
-  messageMenu,
-  messagesEmpty,
-  composer,
-  tabsEnd,
 }: {
   project: string
   /** The topic's full name. */
@@ -111,16 +109,6 @@ export function TopicView({
   onCreateTopic: (id: string) => void
   onLiveStatus: (status: SubscriptionStatus) => void
   onDeleted: () => void
-  /** The message inspector's footer (Code, Publish again). */
-  messageFooter?: ((message: PubsubMessageDetail) => ReactNode) | undefined
-  /** More of a message row's menu (Publish again). */
-  messageMenu?: (row: PubsubMessageRow) => RowMenuItem[]
-  /** The empty message list's action. */
-  messagesEmpty?: ReactNode
-  /** The occupant of the inspector's slot instead of a message (the composer). */
-  composer?: ReactNode
-  /** What else row two holds at its end on the Messages tab (running publish jobs). */
-  tabsEnd?: ReactNode
 }) {
   const detail = useQuery(topicQuery(project, topic))
   const topicId = shortName(topic)
@@ -143,6 +131,11 @@ export function TopicView({
     )
 
   const rows = subscriptionRows(detail.data?.subscriptions ?? [], summary)
+  // Publishing again, edited first: the composer filled with the message.
+  const editAgain = (id: string) =>
+    update({ new: 'message', prefill: id, message: undefined, tab: undefined })
+  const openComposer = () =>
+    update({ new: 'message', prefill: undefined, message: undefined, tab: undefined })
   return (
     <>
       <ToolbarRow variant="line" testId="pubsub-topic-tabs">
@@ -186,10 +179,7 @@ export function TopicView({
             </Button>
           </span>
         ) : (
-          <>
-            {view === 'messages' && tabsEnd}
-            <Throughput project={project} topic={topic} detail={detail.data} summary={summary} />
-          </>
+          <Throughput project={project} topic={topic} detail={detail.data} summary={summary} />
         )}
       </ToolbarRow>
       {detail.isError && !missing ? (
@@ -203,11 +193,36 @@ export function TopicView({
           search={search}
           update={update}
           onLiveStatus={onLiveStatus}
-          {...(messageMenu ? { rowMenuExtra: messageMenu } : {})}
-          empty={messagesEmpty}
+          empty={
+            <Button
+              variant="primary"
+              icon={<PaperPlaneTiltIcon />}
+              onClick={openComposer}
+              data-testid="pubsub-empty-publish"
+            >
+              Publish a message
+            </Button>
+          }
           onOpenSubscription={onOpenSubscription}
-          composer={composer}
-          messageFooter={messageFooter}
+          composer={
+            search.new === 'message' ? (
+              <Composer
+                project={project}
+                topic={topic}
+                detail={detail.data}
+                summary={summary}
+                prefill={search.prefill}
+                onClose={() => update({ new: undefined, prefill: undefined })}
+                onOpenMessage={(id) => update({ new: undefined, prefill: undefined, message: id })}
+              />
+            ) : undefined
+          }
+          onEditAgain={editAgain}
+          above={<JobStrip />}
+          exportOpen={search.dialog === 'export'}
+          onExportOpenChange={(open) =>
+            update({ dialog: open ? 'export' : undefined }, { replace: !open })
+          }
         />
       ) : view === 'subscriptions' ? (
         <SubscriptionsTable

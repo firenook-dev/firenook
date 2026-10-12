@@ -5,6 +5,7 @@
 
 import type { Locator, Page } from '@playwright/test'
 import { expect, test } from './fixtures'
+import { readDownload } from './support/downloads'
 import { dropLive, restoreLive } from './support/live'
 import { cutRings, paintOf } from './support/look'
 import {
@@ -20,7 +21,9 @@ import {
   subscriptionName,
   topicName,
   uniqueId,
+  waitForJob,
 } from './support/messaging'
+import { ownerFetch } from './support/api'
 
 const enc = encodeURIComponent
 
@@ -436,6 +439,243 @@ test('J-PS-21 a refused publish is named, with the topic it probably meant', asy
     await page.keyboard.press('Escape')
     await banner.getByTestId('pubsub-refused-open').click()
     await expect(page).toHaveURL(new RegExp(`topic=${topic}`))
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+/** Writes `text` into the composer's data editor, replacing what is there. */
+async function writeData(page: Page, text: string) {
+  const editor = page.getByTestId('pubsub-composer').locator('.cm-content')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('Backspace')
+  await page.keyboard.insertText(text)
+}
+
+test('J-PS-05 copies with templates: the engine’s preview, a job, and the rows that follow', async ({
+  page,
+  engine,
+}) => {
+  const topic = uniqueId('ps05')
+  try {
+    await createTopic(engine, topic)
+    await openTopics(page, engine.origin, `topic=${topic}`)
+    await page.keyboard.press('n')
+    await expect(page.getByTestId('pubsub-composer')).toBeVisible()
+    await writeData(page, '{"n":"{{i}}"}')
+    await page.getByTestId('composer-repeat').fill('50')
+    // Message 1 as the engine would send it.
+    await expect(page.getByTestId('composer-preview')).toHaveText('Message 1: {"n":"1"}')
+    await page.getByTestId('composer-publish').click()
+    await expect(page.getByTestId('composer-problems')).toContainText(
+      `Published 50 messages to ${topic}`,
+      {
+        timeout: 20_000,
+      },
+    )
+    await expect(page.getByTestId('pubsub-message-count')).toHaveText('50 messages')
+    await expect(page.getByTestId('pubsub-topic-published')).toHaveText('50')
+    const page1 = await consoleCall<{ items: { data: { text: string } }[] }>(
+      engine,
+      'GET',
+      `/pubsub/messages?topic=${enc(topicName(engine, topic))}&limit=100`,
+    )
+    expect(page1.items.map((row) => JSON.parse(row.data.text).n).toSorted((a, b) => a - b)).toEqual(
+      Array.from({ length: 50 }, (_, index) => String(index + 1)),
+    )
+
+    // Scrolled away, what arrives waits above, counted.
+    await page.getByTestId('pubsub-composer-close').click()
+    const scroller = page.getByTestId('pubsub-message-table-scroll')
+    await scroller.evaluate((element) => {
+      element.scrollTop = 400
+    })
+    await publishOverPort(engine, topic, [
+      { data: { n: 'a' } },
+      { data: { n: 'b' } },
+      { data: { n: 'c' } },
+    ])
+    const pill = page.getByTestId('new-above')
+    await expect(pill).toHaveText('3 new · Show')
+    await pill.click()
+    await expect(page.getByTestId('pubsub-message-count')).toHaveText('53 messages')
+    await expect(scroller).toHaveJSProperty('scrollTop', 0)
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-22 an export publishes back from a file', async ({ page, engine }) => {
+  const topic = uniqueId('ps22')
+  try {
+    await createTopic(engine, topic)
+    await openTopics(page, engine.origin, `topic=orders&q=${enc('key:cust-1')}`)
+    await expect(page.getByTestId('pubsub-message-count')).toHaveText(
+      /^\d+ messages · of \d+ kept$/,
+    )
+    const matched = Number(
+      (await page.getByTestId('pubsub-message-count').innerText()).split(' ')[0],
+    )
+    await page.getByTestId('pubsub-export').click()
+    await expect(page.getByTestId('pubsub-export-dialog-scope')).toContainText(
+      'matching key:cust-1',
+    )
+    const download = page.waitForEvent('download')
+    await page.getByTestId('pubsub-export-dialog-confirm').click()
+    const file = await download
+    const text = await readDownload(file)
+    const lines = text.trim().split('\n')
+    expect(lines).toHaveLength(matched)
+    const exported = lines.map(
+      (line) =>
+        JSON.parse(line) as {
+          data: string
+          attributes: Record<string, string>
+          orderingKey: string
+        },
+    )
+    expect(exported.every((line) => line.orderingKey === 'cust-1')).toBe(true)
+
+    await openTopics(page, engine.origin, `topic=${topic}&new=message`)
+    await page.getByTestId('pubsub-publish-file-input').setInputFiles({
+      name: 'orders.ndjson',
+      mimeType: 'application/x-ndjson',
+      buffer: Buffer.from(text),
+    })
+    await expect(page.getByTestId('composer-file')).toContainText(
+      `${matched} messages from orders.ndjson`,
+    )
+    await page.getByTestId('composer-file-publish').click()
+    await expect(page.getByTestId('pubsub-message-count')).toHaveText(`${matched} messages`, {
+      timeout: 20_000,
+    })
+    // The same bytes, attributes and keys, read back the way they were exported.
+    const exportOf = async (id: string) => {
+      const response = await ownerFetch(
+        engine,
+        `/pubsub/messages:export?topic=${enc(topicName(engine, id))}&format=ndjson`,
+      )
+      return (await response.text())
+        .trim()
+        .split('\n')
+        .map((line) => {
+          const entry = JSON.parse(line) as {
+            data: string
+            attributes: Record<string, string>
+            orderingKey: string | null
+          }
+          return JSON.stringify([entry.data, entry.attributes, entry.orderingKey ?? null])
+        })
+        .toSorted()
+    }
+    expect(await exportOf(topic)).toEqual(
+      exported
+        .map((line) => JSON.stringify([line.data, line.attributes, line.orderingKey ?? null]))
+        .toSorted(),
+    )
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-23 an interval job outlives the composer and the tab', async ({ page, engine }) => {
+  const topic = uniqueId('ps23')
+  try {
+    await createTopic(engine, topic)
+    await openTopics(page, engine.origin, `topic=${topic}&new=message`)
+    await writeData(page, '{"tick":"{{i}}"}')
+    await page.getByTestId('composer-repeat').fill('20')
+    await page.getByRole('combobox', { name: 'How often' }).click()
+    await page.getByRole('option', { name: 'every 100 ms' }).click()
+    await page.getByTestId('composer-publish').click()
+    await expect(page.getByTestId('composer-job-progress')).toContainText('of 20 · every 100 ms')
+    await page.getByTestId('pubsub-composer-close').click()
+
+    const strip = page.getByTestId('pubsub-job')
+    await expect(strip).toContainText(`Publishing 20 messages to ${topic}`)
+    await expect(page.getByTestId('nav-badge-pubsub')).toBeVisible()
+    const jobId = await strip.getAttribute('data-job')
+    await page.reload()
+    await expect(strip).toContainText(`Publishing 20 messages to ${topic}`)
+    await strip.getByTestId('pubsub-job-stop').click()
+    await expect(strip).toHaveCount(0)
+    const stopped = await waitForJob(engine, jobId ?? '')
+    expect(stopped.state).toBe('cancelled')
+    expect(stopped.done).toBeGreaterThan(0)
+    expect(stopped.done).toBeLessThan(20)
+    await expect(page.getByTestId('pubsub-message-count')).toHaveText(
+      `${stopped.done} ${stopped.done === 1 ? 'message' : 'messages'}`,
+    )
+    await expect(page.getByTestId('pubsub-topic-published')).toHaveText(String(stopped.done))
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-16b the palette opens the composer on a topic', async ({ page, engine }) => {
+  await openTopics(page, engine.origin, 'topic=orders')
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByTestId('palette-input').fill('publish')
+  await page.getByRole('option', { name: 'Publish to orders' }).click()
+  await expect(page).toHaveURL(/new=message/)
+  await expect(page.getByTestId('pubsub-composer')).toBeVisible()
+})
+
+test('PS-14/16 a message is published again, as it is or edited, and copied as code', async ({
+  page,
+  engine,
+}) => {
+  const topic = uniqueId('ps14b')
+  try {
+    await createTopic(engine, topic)
+    const [first] = (
+      await publishOverPort(engine, topic, [
+        { data: { orderId: 'o_1' }, attributes: { region: 'eu' }, orderingKey: 'cust-1' },
+        { data: { orderId: 'o_2' } },
+        { data: { orderId: 'o_3' } },
+      ])
+    ).messageIds
+    await openTopics(page, engine.origin, `topic=${topic}`)
+    const rows = page.getByTestId('pubsub-message-table').getByTestId('data-row')
+    await expect(rows).toHaveCount(3)
+
+    // The inspector's Code: this message's bytes, attributes and key, at the engine's address.
+    await page.getByTestId('pubsub-message-table').locator(`tr[data-key="${first}"]`).click()
+    await expect(page.getByTestId('pubsub-message-inspector')).toBeVisible()
+    await page.getByTestId('message-code').click()
+    const code = page.getByTestId('message-code-popover')
+    await expect(code).toContainText(
+      `process.env.PUBSUB_EMULATOR_HOST ??= "${portUrl(engine, 'pubsub').replace('http://', '')}"`,
+    )
+    await expect(code).toContainText('orderId: "o_1"')
+    await expect(code).toContainText('region: "eu"')
+    await expect(code).toContainText('orderingKey: "cust-1"')
+    await page.keyboard.press('Escape')
+
+    // `r` asks first, then publishes the cursor row again.
+    await page.keyboard.press('r')
+    await expect(page.getByTestId('publish-again')).toContainText('Publish again')
+    await page.getByTestId('publish-again-confirm').click()
+    await expect(rows).toHaveCount(4, { timeout: 10_000 })
+
+    // Two ticked rows, again, from the selection bar.
+    await rows.nth(1).locator('td[data-check] [role="checkbox"]').click()
+    await rows.nth(2).locator('td[data-check] [role="checkbox"]').click()
+    await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+    await page.getByTestId('pubsub-selection-again').click()
+    await page.getByTestId('publish-again-confirm').click()
+    await expect(rows).toHaveCount(6, { timeout: 10_000 })
+    await expect(page.getByTestId('pubsub-selection')).toHaveCount(0)
+
+    // Shift+R: the composer, filled with the message, attributes and key.
+    await page.getByTestId('pubsub-message-table').locator(`tr[data-key="${first}"]`).click()
+    await page.keyboard.press('Shift+R')
+    await expect(page).toHaveURL(new RegExp(`prefill=%22?${first}`))
+    await expect(page.getByTestId('composer-ordering-key')).toHaveValue('cust-1')
+    await expect(page.getByTestId('pubsub-composer').locator('.cm-content')).toContainText(
+      '"orderId": "o_1"',
+    )
   } finally {
     await deleteTopic(engine, topic)
   }

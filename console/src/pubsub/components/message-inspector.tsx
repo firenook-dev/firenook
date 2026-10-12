@@ -14,7 +14,6 @@ import type { ReactNode } from 'react'
 import { ApiError } from '@/api/client'
 import type { PubsubDeliveryRow } from '@/api/generated/messaging/PubsubDeliveryRow'
 import type { PubsubMessageAtSubscription } from '@/api/generated/messaging/PubsubMessageAtSubscription'
-import type { PubsubMessageDetail } from '@/api/generated/messaging/PubsubMessageDetail'
 import type { PubsubPushStreak } from '@/api/generated/messaging/PubsubPushStreak'
 import { EmptyState } from '@/components/console/empty-state'
 import { EntityLink } from '@/components/console/entity-link'
@@ -30,6 +29,7 @@ import { linkToLogs } from '@/lib/sections/logs'
 import { sectionById } from '@/lib/services'
 import { shortName } from '../names'
 import { messageQuery } from '../queries'
+import { MessageFooter } from './message-footer'
 import { atSubscriptionText, deliveryDetail, functionMark, subscriptionTone } from '../states'
 
 export type MessageTab = 'data' | 'attributes' | 'deliveries'
@@ -180,7 +180,7 @@ export function MessageInspector({
   onNext,
   onOpenSubscription,
   top,
-  footer,
+  onEditAgain,
 }: {
   project: string
   topic: string
@@ -192,8 +192,9 @@ export function MessageInspector({
   onNext?: (() => void) | undefined
   onOpenSubscription: (name: string) => void
   /** What the message is at the subscription in view (backlog, pull), above the tabs' content. */
-  top?: (message: PubsubMessageDetail) => ReactNode
-  footer?: (message: PubsubMessageDetail) => ReactNode
+  top?: ReactNode
+  /** Opens the composer filled with this message; with it, the footer offers Code and Publish again. */
+  onEditAgain?: ((id: string) => void) | undefined
 }) {
   const query = useQuery(messageQuery(project, topic, id))
   const message = query.data
@@ -240,7 +241,11 @@ export function MessageInspector({
             }
           : undefined
       }
-      footer={message ? footer?.(message) : undefined}
+      footer={
+        message && onEditAgain ? (
+          <MessageFooter message={message} onEditAgain={() => onEditAgain(message.id)} />
+        ) : undefined
+      }
       testId="pubsub-message-inspector"
     >
       {gone ? (
@@ -262,7 +267,7 @@ export function MessageInspector({
         ) : null
       ) : (
         <>
-          {top?.(message)}
+          {top}
           {shown === 'data' && (
             <PayloadView
               base64={message.dataBase64}

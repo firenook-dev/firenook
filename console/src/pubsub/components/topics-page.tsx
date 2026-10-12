@@ -7,7 +7,13 @@
 // `pubsub.topic` for its messages.
 
 import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
-import { BroadcastIcon, CaretDownIcon, PlusIcon, TrayArrowDownIcon } from '@phosphor-icons/react'
+import {
+  BroadcastIcon,
+  CaretDownIcon,
+  PaperPlaneTiltIcon,
+  PlusIcon,
+  TrayArrowDownIcon,
+} from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { statusQuery } from '@/api/queries'
@@ -138,6 +144,16 @@ export function TopicsPage() {
     update({ ...SCOPED, project: next === configured ? undefined : next })
   const createTopic = (id?: string) => update({ new: 'topic', prefill: id || undefined })
   const createSubscription = () => update({ new: 'subscription' })
+  // The composer is the Messages tab's inspector: it opens there.
+  const compose = () =>
+    update({
+      new: 'message',
+      prefill: undefined,
+      message: undefined,
+      tab: undefined,
+      view: undefined,
+    })
+  const onTopic = topic !== undefined && subscription === undefined
 
   useShortcuts({ id: 'pubsub-topics', label: 'Pub/Sub topics' }, [
     {
@@ -146,11 +162,18 @@ export function TopicsPage() {
       when: () => !topic && !subscription,
       run: () => createTopic(),
     },
+    {
+      key: 'n',
+      label: 'Publish a message',
+      when: () => onTopic,
+      run: compose,
+    },
   ])
   usePubsubPalette({
     topic: subscription ? undefined : topic,
     onCreateTopic: () => createTopic(),
     onCreateSubscription: createSubscription,
+    onPublish: compose,
   })
 
   // The tree's lit row: the subscription or topic in view; a function's row
@@ -195,6 +218,31 @@ export function TopicsPage() {
             onTopic={() => createTopic()}
             onSubscription={createSubscription}
           />
+          {onTopic && (
+            <Tooltip
+              content={
+                <span className="flex items-center gap-1.5">
+                  Publish a message to {shortName(topic)}
+                  <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
+                    n
+                  </kbd>
+                </span>
+              }
+              render={
+                <Button
+                  // Open, the composer has its own Publish: this one is then the pressed toggle.
+                  variant={search.new === 'message' ? 'secondary' : 'primary'}
+                  size="sm"
+                  icon={<PaperPlaneTiltIcon />}
+                  aria-pressed={search.new === 'message'}
+                  onClick={compose}
+                  data-testid="pubsub-publish"
+                >
+                  Publish
+                </Button>
+              }
+            />
+          )}
         </ToolbarRow>
       </SectionToolbar>
       <SectionBody testId="pubsub-body">
@@ -331,17 +379,19 @@ function usePubsubPalette({
   topic,
   onCreateTopic,
   onCreateSubscription,
+  onPublish,
 }: {
   topic: string | undefined
   onCreateTopic: () => void
   onCreateSubscription: () => void
+  onPublish: () => void
 }) {
   const register = usePaletteProviders((state) => state.register)
   const unregister = usePaletteProviders((state) => state.unregister)
   // The provider reads the page as it is when ⌘K asks, not as it was when registered.
-  const actions = useRef({ topic, onCreateTopic, onCreateSubscription })
+  const actions = useRef({ topic, onCreateTopic, onCreateSubscription, onPublish })
   useLayoutEffect(() => {
-    actions.current = { topic, onCreateTopic, onCreateSubscription }
+    actions.current = { topic, onCreateTopic, onCreateSubscription, onPublish }
   })
   useEffect(() => {
     register('pubsub-topics', (query) => {
@@ -349,6 +399,7 @@ function usePubsubPalette({
         topic: current,
         onCreateTopic: newTopic,
         onCreateSubscription: newSubscription,
+        onPublish: publish,
       } = actions.current
       const items: PaletteItem[] = [
         {
@@ -360,6 +411,13 @@ function usePubsubPalette({
         },
         ...(current
           ? [
+              {
+                id: 'pubsub.page.publish',
+                title: `Publish to ${shortName(current)}`,
+                keywords: 'message send pubsub',
+                icon: <PaperPlaneTiltIcon size={16} />,
+                run: publish,
+              },
               {
                 id: 'pubsub.page.new-subscription',
                 title: `New subscription on ${shortName(current)}`,

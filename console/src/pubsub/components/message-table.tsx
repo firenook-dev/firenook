@@ -13,14 +13,17 @@
 // a subscriber acks, a function finishes — and those rows are patched in
 // place through `POST /pubsub/messages:batchGet`, wherever the reader is.
 
-import { Tooltip, cn } from '@cloudflare/kumo'
+import { Button, Tooltip, cn } from '@cloudflare/kumo'
 import {
   CheckIcon,
   CopyIcon,
   DotsThreeIcon,
+  DownloadSimpleIcon,
   type Icon,
   LightningIcon,
   MinusIcon,
+  PaperPlaneTiltIcon,
+  PencilSimpleIcon,
   QuestionIcon,
   SidebarSimpleIcon,
   TrayIcon,
@@ -28,6 +31,7 @@ import {
 } from '@phosphor-icons/react'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import type { BulkTarget } from '@/api/generated/BulkTarget'
 import type { PubsubDeliverySummary } from '@/api/generated/messaging/PubsubDeliverySummary'
 import type { PubsubMessageDetail } from '@/api/generated/messaging/PubsubMessageDetail'
 import type { PubsubMessageRow } from '@/api/generated/messaging/PubsubMessageRow'
@@ -38,9 +42,11 @@ import {
   useHiddenColumnCount,
 } from '@/components/console/data-table'
 import { EmptyState, NoMatch, QueryError } from '@/components/console/empty-state'
+import { ExportDialog } from '@/components/console/export-dialog'
 import { FilterField } from '@/components/console/filter-field'
 import { MatchCount } from '@/components/console/match-count'
 import { RelativeTime } from '@/components/console/relative-time'
+import { SelectionBar } from '@/components/console/selection-bar'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { TableFooter } from '@/components/console/table-footer'
 import { ToolbarRow } from '@/components/console/toolbar'
@@ -48,6 +54,7 @@ import type { CursorPages } from '@/components/console/use-cursor-rows'
 import { FLASH_MS, useCursorRows } from '@/components/console/use-cursor-rows'
 import { checkFilter } from '@/lib/filter'
 import { formatNumber } from '@/lib/format'
+import { useShortcuts } from '@/lib/shortcuts'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { toast } from '@/lib/toasts'
 import { compareIds, dedupeRows, idsAbove } from '@/messaging/rows'
@@ -55,10 +62,12 @@ import { MESSAGE_FIELDS, MESSAGE_FILTER_PLACEHOLDER, messageFields } from '../fi
 import { useTopicLive } from '../live'
 import { shortName } from '../names'
 import { previewText } from '../payload'
+import { messagesExportUrl } from '../api'
 import { messageList, messageQuery } from '../queries'
 import { type MarkShape, evictedText, functionMark, subscriptionMark } from '../states'
 import { AttributesFilterField, filterCheckText, useFilterCheck } from './attributes-filter-field'
 import { type MessageTab, MessageInspector } from './message-inspector'
+import { type AgainRequest, PublishAgainDialog } from './publish-again-dialog'
 
 /** What the page's table needs from its search parameters, and how it writes them. */
 export interface MessagesSearch {
@@ -69,6 +78,9 @@ export interface MessagesSearch {
 }
 
 const NOUN = { one: 'message', other: 'messages' }
+
+/** The most ticked messages Copy reads one by one; Export takes any number. */
+const COPY_LIMIT = 100
 
 /** The 7 px circle a subscription mark is drawn as. */
 const MARK: Record<Exclude<MarkShape, 'none'>, string> = {
@@ -236,8 +248,10 @@ export function MessagesView({
   onLiveStatus,
   onOpenSubscription,
   composer,
-  messageFooter,
-  rowMenuExtra,
+  onEditAgain,
+  above,
+  exportOpen = false,
+  onExportOpenChange,
   empty,
 }: {
   project: string
@@ -250,10 +264,16 @@ export function MessagesView({
   onOpenSubscription: (name: string) => void
   /** The occupant of the inspector's slot instead of a message (the composer). */
   composer?: ReactNode
-  /** The message inspector's footer (Code, Publish again). */
-  messageFooter?: ((message: PubsubMessageDetail) => ReactNode) | undefined
-  /** More of a row's menu (Publish again), ahead of the copies. */
-  rowMenuExtra?: ((row: PubsubMessageRow) => RowMenuItem[]) | undefined
+  /**
+   * Opens the composer filled with a message (Shift+R, "Edit and publish…").
+   * With it, rows can also be published again as they are (`r`, ticked rows).
+   */
+  onEditAgain?: ((id: string) => void) | undefined
+  /** Lines between the filter and the table: the running publish jobs. */
+  above?: ReactNode
+  /** The export dialog (`dialog=export`), for what the filters match or the ticked rows. */
+  exportOpen?: boolean
+  onExportOpenChange?: ((open: boolean) => void) | undefined
   /** The empty state's action (Publish), when the topic has nothing yet. */
   empty?: ReactNode
 }) {
@@ -322,22 +342,22 @@ export function MessagesView({
       return
     }
     if (head === undefined) return
-    const above = idsAbove(rows, (row) => row.id, before.id)
+    const newer = idsAbove(rows, (row) => row.id, before.id)
     lastHead.current = {
       key: listKey,
       id: before.id === undefined || compareIds(head, before.id) > 0 ? head : before.id,
     }
-    if (above.length === 0) return
+    if (newer.length === 0) return
     setCreated((current) => {
       const next = new Map(current)
-      for (const id of above) next.set(id, 'created')
+      for (const id of newer) next.set(id, 'created')
       return next
     })
     const timer = setTimeout(
       () =>
         setCreated((current) => {
           const next = new Map(current)
-          for (const id of above) next.delete(id)
+          for (const id of newer) next.delete(id)
           return next
         }),
       FLASH_MS,
@@ -410,30 +430,92 @@ export function MessagesView({
   const hidden = useHiddenColumnCount('pubsub.messages', MESSAGE_COLUMNS)
   const exprLine = filterCheckText(exprCheck.check, false)
 
+  // Ticked rows: for a list, a selection belongs to one filter of one topic.
+  const [selection, setSelection] = useState<{
+    key: string
+    checked: ReadonlySet<string>
+    everything: boolean
+  }>({ key: listKey, checked: new Set(), everything: false })
+  const ticked =
+    selection.key === listKey
+      ? selection
+      : { key: listKey, checked: new Set<string>(), everything: false }
+  const clearSelection = () => setSelection({ key: listKey, checked: new Set(), everything: false })
+  const selecting = ticked.checked.size > 0 || ticked.everything
+  const tickedCount = ticked.everything
+    ? (cursor.total?.count ?? ticked.checked.size)
+    : ticked.checked.size
+  const queryTarget: BulkTarget = {
+    by: 'query',
+    q: q ?? '',
+    scope: { topic, ...(expr ? { expr } : {}) },
+  }
+  const selectedTarget: BulkTarget = ticked.everything
+    ? queryTarget
+    : { by: 'keys', keys: [...ticked.checked] }
+
+  // Whether the export is of the ticked rows rather than what the filters match.
+  const [exportSelected, setExportSelected] = useState(false)
+
+  // Publishing again, as they are: one message from its row, or the ticked ones.
+  const [again, setAgain] = useState<AgainRequest | null>(null)
+  const againOne = (id: string) => setAgain({ target: { by: 'keys', keys: [id] }, count: 1 })
+
+  // The table's cursor row, for the row keys.
+  const [cursorId, setCursorId] = useState<string | undefined>(undefined)
+  const cursorRow = rows.find((row) => row.id === cursorId)
+  useShortcuts(
+    { id: 'pubsub-messages', label: 'Messages' },
+    onEditAgain
+      ? [
+          {
+            key: 'r',
+            label: 'Publish the message again',
+            when: () => cursorRow !== undefined,
+            run: () => {
+              if (cursorRow) againOne(cursorRow.id)
+            },
+          },
+          {
+            key: 'Shift+R',
+            label: 'Edit the message, then publish it',
+            when: () => cursorRow !== undefined,
+            run: () => {
+              if (cursorRow) onEditAgain(cursorRow.id)
+            },
+          },
+        ]
+      : [],
+  )
+
   const copyAsJson = async (row: PubsubMessageRow) => {
     try {
       const message = await queryClient.fetchQuery(messageQuery(project, topic, row.id))
-      let data: unknown = message.dataBase64
-      if (message.dataText !== null)
-        data = message.dataJson ? (JSON.parse(message.dataText) as unknown) : message.dataText
-      const text = JSON.stringify(
-        {
-          id: message.id,
-          publishTime: message.publishTime,
-          data,
-          ...(message.dataText === null ? { encoding: 'base64' } : {}),
-          attributes: message.attributes,
-          orderingKey: message.orderingKey,
-        },
-        null,
-        2,
-      )
+      const text = JSON.stringify(messageJson(message), null, 2)
       await navigator.clipboard.writeText(text)
       toast({ key: 'pubsub-copy', title: `Copied message ${row.id} as JSON` })
     } catch {
       toast({ key: 'pubsub-copy', title: 'Could not copy the message', tone: 'danger' })
     }
   }
+  const copySelected = async () => {
+    try {
+      const messages = await Promise.all(
+        Array.from(ticked.checked, (id) =>
+          queryClient.fetchQuery(messageQuery(project, topic, id)),
+        ),
+      )
+      const text = JSON.stringify(messages.map(messageJson), null, 2)
+      await navigator.clipboard.writeText(text)
+      toast({
+        key: 'pubsub-copy',
+        title: `Copied ${formatNumber(messages.length)} ${messages.length === 1 ? 'message' : 'messages'} as JSON`,
+      })
+    } catch {
+      toast({ key: 'pubsub-copy', title: 'Could not copy the messages', tone: 'danger' })
+    }
+  }
+
   const rowMenu = (row: PubsubMessageRow): RowMenuItem[] => [
     {
       id: 'open',
@@ -442,7 +524,24 @@ export function MessagesView({
       shortcut: 'Enter',
       run: () => update({ message: row.id }),
     },
-    ...(rowMenuExtra?.(row) ?? []),
+    ...(onEditAgain
+      ? [
+          {
+            id: 'again',
+            label: 'Publish again…',
+            icon: PaperPlaneTiltIcon,
+            shortcut: 'r',
+            run: () => againOne(row.id),
+          },
+          {
+            id: 'edit-again',
+            label: 'Edit and publish…',
+            icon: PencilSimpleIcon,
+            shortcut: 'Shift+R',
+            run: () => onEditAgain(row.id),
+          },
+        ]
+      : []),
     {
       id: 'copy-id',
       label: 'Copy id',
@@ -491,6 +590,72 @@ export function MessagesView({
       <ToolbarRow
         variant="line"
         testId="pubsub-filter-line"
+        overlay={
+          selecting ? (
+            <SelectionBar
+              count={tickedCount}
+              total={cursor.total}
+              everything={ticked.everything}
+              filtered={filtered}
+              noun={NOUN}
+              onSelectEverything={() =>
+                setSelection({ key: listKey, checked: ticked.checked, everything: true })
+              }
+              onClear={clearSelection}
+              testId="pubsub-selection"
+              actions={
+                <>
+                  {onEditAgain && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<PaperPlaneTiltIcon />}
+                      onClick={() => setAgain({ target: selectedTarget, count: tickedCount })}
+                      data-testid="pubsub-selection-again"
+                    >
+                      Publish again {formatNumber(tickedCount)}
+                    </Button>
+                  )}
+                  <Tooltip
+                    content={
+                      ticked.everything || ticked.checked.size > COPY_LIMIT
+                        ? `Copy takes up to ${COPY_LIMIT}; export the rest`
+                        : 'Their data, attributes and keys, as a JSON array'
+                    }
+                    render={
+                      <span className="inline-flex">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={<CopyIcon />}
+                          disabled={ticked.everything || ticked.checked.size > COPY_LIMIT}
+                          onClick={() => void copySelected()}
+                          data-testid="pubsub-selection-copy"
+                        >
+                          Copy {formatNumber(tickedCount)} as JSON
+                        </Button>
+                      </span>
+                    }
+                  />
+                  {onExportOpenChange && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<DownloadSimpleIcon />}
+                      onClick={() => {
+                        setExportSelected(true)
+                        onExportOpenChange(true)
+                      }}
+                      data-testid="pubsub-selection-export"
+                    >
+                      Export {formatNumber(tickedCount)}…
+                    </Button>
+                  )}
+                </>
+              }
+            />
+          ) : undefined
+        }
         below={
           exprLine ? (
             <p
@@ -532,6 +697,7 @@ export function MessagesView({
           testId="pubsub-message-count"
         />
       </ToolbarRow>
+      {above}
       <div className="relative flex min-h-0 flex-1" data-testid="pubsub-messages">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {query.isError && rows.length === 0 ? (
@@ -546,8 +712,15 @@ export function MessagesView({
               openKey={search.message}
               onOpen={(row) => update({ message: row.id })}
               onCursorChange={(row) => {
+                setCursorId(row.id)
                 if (search.message !== undefined && search.message !== row.id)
                   update({ message: row.id }, { replace: true })
+              }}
+              selection={{
+                checked: ticked.checked,
+                everything: ticked.everything,
+                onChange: (checked, everything) =>
+                  setSelection({ key: listKey, checked, everything }),
               }}
               rowClick="open"
               flashes={flashes}
@@ -576,6 +749,22 @@ export function MessagesView({
                     hiddenColumns={hidden.hidden}
                     onShowAll={hidden.showAll}
                     noun={NOUN}
+                    actions={
+                      onExportOpenChange && !selecting ? (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          icon={<DownloadSimpleIcon />}
+                          onClick={() => {
+                            setExportSelected(false)
+                            onExportOpenChange(true)
+                          }}
+                          data-testid="pubsub-export"
+                        >
+                          Export
+                        </Button>
+                      ) : undefined
+                    }
                     testId="pubsub-messages-footer"
                   />
                 ) : undefined
@@ -596,10 +785,68 @@ export function MessagesView({
               onPrev={stepTo(-1)}
               onNext={stepTo(1)}
               onOpenSubscription={onOpenSubscription}
-              {...(messageFooter ? { footer: messageFooter } : {})}
+              {...(onEditAgain ? { onEditAgain } : {})}
             />
           ))}
       </div>
+      {onEditAgain && (
+        <PublishAgainDialog
+          request={again}
+          topic={topic}
+          onOpenChange={(open) => {
+            if (!open) setAgain(null)
+          }}
+          onStarted={clearSelection}
+        />
+      )}
+      {onExportOpenChange && (
+        <ExportDialog
+          open={exportOpen}
+          onOpenChange={(open) => {
+            if (!open) setExportSelected(false)
+            onExportOpenChange(open)
+          }}
+          title={`Export messages of ${topicId}`}
+          scope={
+            <span data-testid="pubsub-export-scope">
+              {exportSelected && !ticked.everything
+                ? `The ${formatNumber(ticked.checked.size)} ticked ${ticked.checked.size === 1 ? 'message' : 'messages'} of ${topicId}`
+                : `${cursor.total ? `${formatNumber(cursor.total.count)}${cursor.total.exact ? '' : '+'} ` : ''}messages of ${topicId}${filtered ? ` matching ${[q, expr].filter(Boolean).join(' and ')}` : ' the console keeps'}`}
+              , each as its id, publish time, data (base64), attributes and ordering key. A file
+              published back from the composer publishes them again.
+            </span>
+          }
+          formats={['ndjson', 'json']}
+          filename={(format) =>
+            `${topicId}-${new Date().toISOString().slice(0, 10)}.${format === 'json' ? 'json' : 'ndjson'}`
+          }
+          href={(format) =>
+            messagesExportUrl({
+              topic,
+              ...(q ? { q } : {}),
+              ...(expr ? { expr } : {}),
+              format: format === 'json' ? 'json' : 'ndjson',
+              ...(exportSelected && !ticked.everything ? { ids: [...ticked.checked] } : {}),
+            })
+          }
+          testId="pubsub-export-dialog"
+        />
+      )}
     </>
   )
+}
+
+/** A message as its JSON for the clipboard: the data as what it is, base64 only when it is bytes. */
+export function messageJson(message: PubsubMessageDetail) {
+  let data: unknown = message.dataBase64
+  if (message.dataText !== null)
+    data = message.dataJson ? (JSON.parse(message.dataText) as unknown) : message.dataText
+  return {
+    id: message.id,
+    publishTime: message.publishTime,
+    data,
+    ...(message.dataText === null ? { encoding: 'base64' } : {}),
+    attributes: message.attributes,
+    orderingKey: message.orderingKey,
+  }
 }
