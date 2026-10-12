@@ -114,6 +114,15 @@ describe('task keys (U-15)', () => {
       tasks: ['4'],
     })
   })
+
+  it('read a task detail again when its row changed', () => {
+    expect(live.splitTaskKeys(['row:0.9', 'row:1.12', 'task:3'])).toEqual({
+      rows: ['0.9', '1.12'],
+      tasks: ['9', '12', '3'],
+    })
+    expect(live.rowTaskId('1.12')).toBe('12')
+    expect(live.rowTaskId('nonsense')).toBeUndefined()
+  })
 })
 
 let client: QueryClient

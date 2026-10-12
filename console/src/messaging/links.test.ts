@@ -128,7 +128,8 @@ describe('where Cloud Tasks things open (U-19)', () => {
 describe('the registries', () => {
   it('stay behind their placeholders until their journeys pass', () => {
     expect(pubsub.built).toBe(false)
-    expect(tasks.built).toBe(false)
+    // Cloud Tasks' journeys (e2e/tasks.spec.ts) pass.
+    expect(tasks.built).toBe(true)
   })
 
   it('label every kind they route, and route every kind they label', () => {
