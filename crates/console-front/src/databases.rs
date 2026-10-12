@@ -58,6 +58,11 @@ impl DatabaseCatalog {
         }
     }
 
+    /// The ids `firebase.json` declares.
+    pub(crate) fn declared(&self) -> &[String] {
+        &self.declared
+    }
+
     /// The databases now: every declared one and every one holding a
     /// document, `(default)` first and the rest in id order.
     #[must_use]

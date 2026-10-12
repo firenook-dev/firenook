@@ -1,5 +1,5 @@
 use axum::body::{Body, to_bytes};
-use axum::http::{Method, Request};
+use axum::http::{Method, Request, StatusCode};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use firenook_core_store::Write;
 use firenook_query_engine::QueryPolicy;

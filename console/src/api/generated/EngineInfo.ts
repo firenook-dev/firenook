@@ -19,4 +19,10 @@ version: string | null,
  * The engine source commit this binary was built from, when the
  * distribution recorded one.
  */
-revision: string | null, };
+revision: string | null, 
+/**
+ * A hash of the console application this engine serves (its
+ * `index.html`). With `revision` it tells a page that sees a new
+ * instance whether the engine restarted or was updated.
+ */
+consoleBuild: string, };

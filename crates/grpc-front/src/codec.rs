@@ -84,7 +84,9 @@ pub(crate) fn decode_parent(resource: &str) -> Result<(DatabaseName, Option<Stri
     Ok((database, (!path.is_empty()).then(|| path.join("/"))))
 }
 
-pub(crate) fn decode_document(document: proto::Document) -> Result<(DocumentKey, Fields), Status> {
+/// Reads a Firestore v1 document message back into its key and fields,
+/// validating the name and every value as a write would.
+pub fn decode_document(document: proto::Document) -> Result<(DocumentKey, Fields), Status> {
     let key = decode_document_name(&document.name)?;
     let fields = decode_fields(document.fields)?;
     Ok((key, fields))

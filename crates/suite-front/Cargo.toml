@@ -18,6 +18,7 @@ sha2.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 tower-http.workspace = true
+ts-rs.workspace = true
 
 [dev-dependencies]
 firenook-core-store = { path = "../core-store" }

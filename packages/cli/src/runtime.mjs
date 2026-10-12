@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assetPaths } from './assets.mjs';
 import { binaryPath, manifest, release } from './binary.mjs';
-import { SERVICES, connectHost, loadProject } from './options.mjs';
+import { SERVICES, connectHost, launchContext, loadProject } from './options.mjs';
 import { nativeEnvironment, requestNativeStop } from './processes.mjs';
 
 export async function diagnose(options, cwd = process.cwd()) {
@@ -42,8 +42,9 @@ export function vendorExtensions(binary, project, instances = []) {
 
 // Builds the native suite invocation. `mode` is 'start' or 'exec': like the
 // official CLI, exec keeps the Emulator UI off unless --ui is given or
-// firebase.json enables it explicitly.
-export function prepareLaunch(diagnostic, options, mode = 'start') {
+// firebase.json enables it explicitly. `typed` is the command's arguments as
+// the developer typed them, which the console reprints in its fixes.
+export function prepareLaunch(diagnostic, options, mode = 'start', typed = []) {
   const p = diagnostic.project;
   const parent = join(p.directory, '.firenook', 'runs');
   mkdirSync(parent, {recursive:true});
@@ -75,7 +76,15 @@ export function prepareLaunch(diagnostic, options, mode = 'start') {
   if (p.exported) args.push('--export-on-exit', p.exported);
   if (options['resume-state']) args.push('--resume-state');
   if (options['no-diagnostics']) args.push('--no-diagnostics');
+  // The console answers only the names it is reached by (loopback and
+  // --host by default); a proxy or cloud name is added here.
+  if (options['allowed-hosts']) args.push('--allowed-hosts', options['allowed-hosts']);
   if (options.durability) args.push('--durability', options.durability);
+  // Why each absent service is absent, so the console's sections can say so
+  // and show the fix (a firebase.json snippet, or this command with the
+  // service added to --only).
+  const context = launchContext(p, {command:`firenook emulators:${mode === 'exec' ? 'exec' : 'start'}`, args:typed});
+  args.push('--launch-context', JSON.stringify(context));
   const host = connectHost(p.host);
   // The engine cannot know its own release: this wrapper's version is set by
   // the packaging checkout, while the binary is built from the pinned engine

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { assets, verifyAsset } from '../packages/cli/src/assets.mjs';
 import { manifest, platformKey, release, sha256, verifyBinary } from '../packages/cli/src/binary.mjs';
-import { canonical, inspectProject, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
+import { canonical, inspectProject, launchContext, loadProject, parseOptions } from '../packages/cli/src/options.mjs';
 import { prepareLaunch, supervise } from '../packages/cli/src/runtime.mjs';
 
 function project() {
@@ -29,13 +29,13 @@ function binaryPackage() {
   return {dir,receipt};
 }
 // A launch through prepareLaunch with the banner captured instead of printed.
-function launchFor(dir, options, mode = 'start') {
+function launchFor(dir, options, mode = 'start', typed = []) {
   const lines = [];
   const original = console.error;
   console.error = (...args) => lines.push(args.join(' '));
   try {
     const diagnostic = {project:loadProject(options, dir), binary:'/fake', files:{ui:'/ui'}};
-    return {...prepareLaunch(diagnostic, options, mode), stderr:lines.join('\n')};
+    return {...prepareLaunch(diagnostic, options, mode, typed), stderr:lines.join('\n')};
   } finally { console.error = original; }
 }
 const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
@@ -77,6 +77,8 @@ test('options preserve argv; no ignored flags, duplicate options or shell interp
   assert.deepEqual(parsed.command,['echo','hello;touch nope']);
   assert.deepEqual(parsed.positionals,[]);
   assert.equal(parseOptions(['--no-diagnostics']).options['no-diagnostics'], true);
+  assert.equal(parseOptions(['--allowed-hosts', 'console.example.test']).options['allowed-hosts'], 'console.example.test');
+  assert.throws(() => parseOptions(['--allowed-hosts']));
   assert.throws(() => parseOptions(['--no-diagnostics=false']));
   for (const args of [['--wat'],['-x'],['--project'],['--project=a','--project=b'],['--resume-state=false'],['--durability','eventually'],['--log-verbosity','LOUD'],['-r','--shallow'],['--functions','--no-functions']]) assert.throws(()=>parseOptions(args));
   assert.equal(parseOptions(['--durability=per-commit']).options.durability, 'per-commit');
@@ -292,6 +294,9 @@ test('state and credential isolation stay outside original config and seed', () 
   assert.ok(!launch.args.includes('--firestore-memory'));
   assert.ok(!launch.args.includes('--no-diagnostics'));
   assert.ok(prepareLaunch(diagnostic, {...options, 'no-diagnostics': true}).args.includes('--no-diagnostics'));
+  assert.ok(!launch.args.includes('--allowed-hosts'));
+  const named = prepareLaunch(diagnostic, {...options, 'allowed-hosts': 'console.example.test,dev.example.test'}).args;
+  assert.equal(named[named.indexOf('--allowed-hosts') + 1], 'console.example.test,dev.example.test');
   assert.ok(!launch.args.includes('--durability'));
   const perCommit = prepareLaunch(diagnostic, {...options, durability: 'per-commit'}).args;
   assert.equal(perCommit[perCommit.indexOf('--durability') + 1], 'per-commit');
@@ -312,6 +317,49 @@ test('the engine is told the release it ships as, since it cannot know it itself
   const receipt = JSON.parse(readFileSync(join(launch.run,'launch.json'),'utf8'));
   assert.equal(receipt.version,launch.env.FIRENOOK_RELEASE_VERSION);
   assert.equal(receipt.engineRevision,launch.env.FIRENOOK_ENGINE_REVISION);
+});
+test('the launch context says why each service is absent, from what the launcher already decided', () => {
+  const {dir,options,save} = project();
+  // Storage and Pub/Sub are not configured; Realtime Database is, but is not emulated.
+  save({firestore:{rules:'firestore.rules'}, functions:{source:'functions'}, emulators:{firestore:{}, auth:{}, functions:{}, database:{}}});
+  const typed = ['--only','firestore','--project','demo-fixture','--import','./seed data'];
+  const only = {...options, only:'firestore'};
+  const context = launchContext(loadProject(only,dir), {command:'firenook emulators:start', args:typed});
+  assert.deepEqual(context, {
+    services:{auth:'excluded-by-only', storage:'not-configured', functions:'excluded-by-only', pubsub:'not-configured'},
+    skipped:['database'],
+    command:'firenook emulators:start',
+    args:typed,
+  });
+  // Every configured service started: no reasons, and the arguments are kept as typed.
+  const everything = launchContext(loadProject(options,dir));
+  assert.deepEqual(everything.services, {storage:'not-configured', pubsub:'not-configured'});
+  assert.deepEqual(everything.args, []);
+});
+test('the engine receives the launch context, with the command and its arguments as typed', () => {
+  const {dir,options} = project();
+  const typed = ['--only','firestore,auth','--project','demo-fixture'];
+  const start = launchFor(dir, {...options, only:'firestore,auth'}, 'start', typed);
+  const context = JSON.parse(flagValue(start.args,'--launch-context'));
+  assert.deepEqual(context.services, {storage:'excluded-by-only', functions:'excluded-by-only', pubsub:'excluded-by-only'});
+  assert.equal(context.command,'firenook emulators:start');
+  assert.deepEqual(context.args, typed);
+  assert.deepEqual(context.skipped, []);
+  const exec = launchFor(dir, options, 'exec', ['--','npm','test']);
+  const execContext = JSON.parse(flagValue(exec.args,'--launch-context'));
+  assert.equal(execContext.command,'firenook emulators:exec');
+  assert.deepEqual(execContext.services, {});
+  assert.deepEqual(execContext.args, ['--','npm','test']);
+});
+test('start and exec accept --allowed-hosts', () => {
+  const cli = fileURLToPath(new URL('../packages/cli/bin/firenook.mjs',import.meta.url));
+  const {dir} = project();
+  const run = (...args) => spawnSync(process.execPath,[cli,...args],{encoding:'utf8',cwd:dir});
+  for (const action of ['emulators:start','emulators:exec']) {
+    const refused = run(action,'--allowed-hosts','console.example.test','--recursive');
+    assert.equal(refused.status,1);
+    assert.match(refused.stderr,new RegExp(`--recursive is not an option of firenook ${action}`), refused.stderr);
+  }
 });
 test('asset verification refuses corrupt data without changing it', async () => {
   const dir = mkdtempSync(join(tmpdir(),'firenook-asset-test-'));

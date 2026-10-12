@@ -1,0 +1,1911 @@
+{
+  "note": "The filter grammar's golden cases (crates/console-front/src/filter.rs, console/src/lib/filter.ts). Both sides parse and validate every text against these fields and must give exactly this result or this error, message and UTF-16 span included. A grammar change edits this file first. A case's regex overrides the file's (regex items are items only in a field set that opts in).",
+  "regex": false,
+  "fields": [
+    {
+      "key": "provider",
+      "aliases": ["p"],
+      "kind": "enum",
+      "help": "Sign-in provider",
+      "values": ["password", "google.com", "phone", "anonymous"],
+      "valueAliases": {
+        "google": "google.com"
+      }
+    },
+    {
+      "key": "data",
+      "kind": "path",
+      "help": "A field of the payload",
+      "prefixes": ["data.", "labels."]
+    },
+    {
+      "key": "meta",
+      "kind": "path",
+      "help": "Custom metadata",
+      "prefixes": ["meta."]
+    },
+    {
+      "key": "email",
+      "kind": "text",
+      "help": "Email address"
+    },
+    {
+      "key": "uid",
+      "kind": "exact",
+      "help": "User id"
+    },
+    {
+      "key": "claim",
+      "kind": "exact",
+      "help": "Custom claim, as key=value"
+    },
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "Account state",
+      "values": ["disabled", "anonymous", "verified"]
+    },
+    {
+      "key": "created",
+      "aliases": ["createdat"],
+      "kind": "time",
+      "help": "When it was created"
+    },
+    {
+      "key": "size",
+      "kind": "bytes",
+      "help": "Size"
+    },
+    {
+      "key": "took",
+      "aliases": ["duration"],
+      "kind": "duration",
+      "help": "How long it took"
+    },
+    {
+      "key": "level",
+      "kind": "enum",
+      "help": "Log level",
+      "values": ["debug", "info", "warn", "error"],
+      "valueAliases": {
+        "warning": "warn",
+        "err": "error"
+      }
+    },
+    {
+      "key": "count",
+      "kind": "number",
+      "help": "How many"
+    },
+    {
+      "key": "verified",
+      "kind": "bool",
+      "help": "Email verified"
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {},
+      "note": "Nothing to filter by."
+    },
+    {
+      "name": "only-whitespace",
+      "text": " \t ",
+      "ok": {}
+    },
+    {
+      "name": "one-word",
+      "text": "ada",
+      "ok": {
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 0,
+            "to": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "two-words",
+      "text": "ada lovelace",
+      "ok": {
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 0,
+            "to": 3
+          },
+          {
+            "text": "lovelace",
+            "negated": false,
+            "from": 4,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "spec-example",
+      "text": "provider:google.com ada",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "google.com",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ],
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 20,
+            "to": 23
+          }
+        ]
+      }
+    },
+    {
+      "name": "roadmap-example",
+      "text": "provider:google -is:disabled ada",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "google.com",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          },
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "disabled",
+            "negated": true,
+            "from": 16,
+            "to": 28
+          }
+        ],
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 29,
+            "to": 32
+          }
+        ]
+      },
+      "note": "The ROADMAP's example; it can never drift again."
+    },
+    {
+      "name": "roadmap-logs-example",
+      "text": "level=error data.userId:u_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          },
+          {
+            "key": "data.userId",
+            "op": "eq",
+            "value": "u_1",
+            "negated": false,
+            "from": 12,
+            "to": 27
+          }
+        ]
+      },
+      "note": "The ROADMAP's Logs example."
+    },
+    {
+      "name": "path-and-range-example",
+      "text": "data.userId=u_1 labels.attempt:>2",
+      "ok": {
+        "terms": [
+          {
+            "key": "data.userId",
+            "op": "eq",
+            "value": "u_1",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          },
+          {
+            "key": "labels.attempt",
+            "op": "gt",
+            "value": "2",
+            "negated": false,
+            "from": 16,
+            "to": 33
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-key",
+      "text": "foo:bar",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "Unknown filter \"foo:\". Use provider, email, uid, claim, is, created, size, took, level, count, verified, data.… or meta.…; quote it to search for the text."
+      },
+      "note": "An unknown key is an error, never text."
+    },
+    {
+      "name": "unknown-key-after-a-word",
+      "text": "ada foo:bar",
+      "error": {
+        "from": 4,
+        "to": 11,
+        "message": "Unknown filter \"foo:\". Use provider, email, uid, claim, is, created, size, took, level, count, verified, data.… or meta.…; quote it to search for the text."
+      }
+    },
+    {
+      "name": "unknown-key-with-equals",
+      "text": "foo=bar",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "Unknown filter \"foo:\". Use provider, email, uid, claim, is, created, size, took, level, count, verified, data.… or meta.…; quote it to search for the text."
+      }
+    },
+    {
+      "name": "a-url-is-a-term",
+      "text": "http://example.test",
+      "error": {
+        "from": 0,
+        "to": 19,
+        "message": "Unknown filter \"http:\". Use provider, email, uid, claim, is, created, size, took, level, count, verified, data.… or meta.…; quote it to search for the text."
+      },
+      "note": "Quote a URL to search for it."
+    },
+    {
+      "name": "a-quoted-url-is-text",
+      "text": "\"http://example.test\"",
+      "ok": {
+        "words": [
+          {
+            "text": "http://example.test",
+            "negated": false,
+            "from": 0,
+            "to": 21
+          }
+        ]
+      }
+    },
+    {
+      "name": "quoted-key-is-text",
+      "text": "\"foo:bar\"",
+      "ok": {
+        "words": [
+          {
+            "text": "foo:bar",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      },
+      "note": "A quoted phrase is how to search for a colon."
+    },
+    {
+      "name": "op-greater",
+      "text": "created:>2026-10-01",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "gt",
+            "value": "2026-10-01",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ]
+      }
+    },
+    {
+      "name": "op-greater-or-equal",
+      "text": "created:>=2026-10-01",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "ge",
+            "value": "2026-10-01",
+            "negated": false,
+            "from": 0,
+            "to": 20
+          }
+        ]
+      }
+    },
+    {
+      "name": "op-less",
+      "text": "created:<2026-10-08",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "lt",
+            "value": "2026-10-08",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          }
+        ]
+      }
+    },
+    {
+      "name": "op-less-or-equal",
+      "text": "created:<=2026-10-08",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "le",
+            "value": "2026-10-08",
+            "negated": false,
+            "from": 0,
+            "to": 20
+          }
+        ]
+      }
+    },
+    {
+      "name": "range-on-one-key",
+      "text": "created:>2026-10-01 created:<2026-10-08",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "gt",
+            "value": "2026-10-01",
+            "negated": false,
+            "from": 0,
+            "to": 19
+          },
+          {
+            "key": "created",
+            "op": "lt",
+            "value": "2026-10-08",
+            "negated": false,
+            "from": 20,
+            "to": 39
+          }
+        ]
+      },
+      "note": "Ranges on one key AND."
+    },
+    {
+      "name": "equals-with-op",
+      "text": "created=>-2h",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "gt",
+            "value": "-2h",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      },
+      "note": "= is a synonym of :, operators follow either."
+    },
+    {
+      "name": "bytes-greater",
+      "text": "size:>10KB",
+      "ok": {
+        "terms": [
+          {
+            "key": "size",
+            "op": "gt",
+            "value": "10KB",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "bytes-at-most",
+      "text": "size:<=2MB",
+      "ok": {
+        "terms": [
+          {
+            "key": "size",
+            "op": "le",
+            "value": "2MB",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "duration-greater",
+      "text": "took:>250ms",
+      "ok": {
+        "terms": [
+          {
+            "key": "took",
+            "op": "gt",
+            "value": "250ms",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "duration-less",
+      "text": "took:<1.5m",
+      "ok": {
+        "terms": [
+          {
+            "key": "took",
+            "op": "lt",
+            "value": "1.5m",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "number-at-least",
+      "text": "count:>=42",
+      "ok": {
+        "terms": [
+          {
+            "key": "count",
+            "op": "ge",
+            "value": "42",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "number-negative",
+      "text": "count:<-5",
+      "ok": {
+        "terms": [
+          {
+            "key": "count",
+            "op": "lt",
+            "value": "-5",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "number-decimal",
+      "text": "count:2.5",
+      "ok": {
+        "terms": [
+          {
+            "key": "count",
+            "op": "eq",
+            "value": "2.5",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "number-invalid",
+      "text": "count:many",
+      "error": {
+        "from": 0,
+        "to": 10,
+        "message": "\"count:\" needs a number, like 42 or 2.5."
+      }
+    },
+    {
+      "name": "number-empty-after-op",
+      "text": "count:>=",
+      "error": {
+        "from": 0,
+        "to": 8,
+        "message": "\"count:\" needs a number, like 42 or 2.5."
+      }
+    },
+    {
+      "name": "text",
+      "text": "email:ada@example.test",
+      "ok": {
+        "terms": [
+          {
+            "key": "email",
+            "op": "eq",
+            "value": "ada@example.test",
+            "negated": false,
+            "from": 0,
+            "to": 22
+          }
+        ]
+      }
+    },
+    {
+      "name": "text-keeps-case",
+      "text": "email:ADA",
+      "ok": {
+        "terms": [
+          {
+            "key": "email",
+            "op": "eq",
+            "value": "ADA",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "text-value-with-colon",
+      "text": "email:a:b",
+      "ok": {
+        "terms": [
+          {
+            "key": "email",
+            "op": "eq",
+            "value": "a:b",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "text-empty",
+      "text": "email:",
+      "error": {
+        "from": 0,
+        "to": 6,
+        "message": "\"email:\" needs a value."
+      }
+    },
+    {
+      "name": "exact",
+      "text": "uid:u_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "uid",
+            "op": "eq",
+            "value": "u_1",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact-prefix",
+      "text": "uid:u_*",
+      "ok": {
+        "terms": [
+          {
+            "key": "uid",
+            "op": "eq",
+            "value": "u_*",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      },
+      "note": "A trailing * means starts with; the section reads it."
+    },
+    {
+      "name": "exact-empty",
+      "text": "uid:",
+      "error": {
+        "from": 0,
+        "to": 4,
+        "message": "\"uid:\" needs a value."
+      }
+    },
+    {
+      "name": "exact-value-starting-with-equals",
+      "text": "uid:=x",
+      "ok": {
+        "terms": [
+          {
+            "key": "uid",
+            "op": "eq",
+            "value": "=x",
+            "negated": false,
+            "from": 0,
+            "to": 6
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim-key-value",
+      "text": "claim:role=admin",
+      "ok": {
+        "terms": [
+          {
+            "key": "claim",
+            "op": "eq",
+            "value": "role=admin",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      },
+      "note": "Auth's claim:key=value is an exact field; the grammar has no special case for it."
+    },
+    {
+      "name": "enum",
+      "text": "is:disabled",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "disabled",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum-value-case",
+      "text": "is:Verified",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "verified",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum-value-alias",
+      "text": "provider:google",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "google.com",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum-value-alias-case",
+      "text": "provider:Google",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "google.com",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum-second-alias",
+      "text": "level:ERR",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum-alias-word",
+      "text": "level:warning",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "warn",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "enum-unknown-value",
+      "text": "provider:github.com",
+      "error": {
+        "from": 0,
+        "to": 19,
+        "message": "\"provider:\" is one of password, google.com (google), phone, anonymous."
+      }
+    },
+    {
+      "name": "enum-unknown-value-with-aliases",
+      "text": "level:fatal",
+      "error": {
+        "from": 0,
+        "to": 11,
+        "message": "\"level:\" is one of debug, info, warn (warning), error (err)."
+      }
+    },
+    {
+      "name": "enum-empty",
+      "text": "provider:",
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "\"provider:\" is one of password, google.com (google), phone, anonymous."
+      }
+    },
+    {
+      "name": "key-alias",
+      "text": "p:password",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "password",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "key-case",
+      "text": "Provider:phone",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "phone",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "key-alias-case",
+      "text": "createdAt:-1h",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "eq",
+            "value": "-1h",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "duration-key-alias",
+      "text": "duration:>2s",
+      "ok": {
+        "terms": [
+          {
+            "key": "took",
+            "op": "gt",
+            "value": "2s",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "equals-enum",
+      "text": "level=error",
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "equals-exact",
+      "text": "uid=u_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "uid",
+            "op": "eq",
+            "value": "u_1",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "bool-yes",
+      "text": "verified:yes",
+      "ok": {
+        "terms": [
+          {
+            "key": "verified",
+            "op": "eq",
+            "value": "true",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "bool-false-case",
+      "text": "verified:FALSE",
+      "ok": {
+        "terms": [
+          {
+            "key": "verified",
+            "op": "eq",
+            "value": "false",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "bool-invalid",
+      "text": "verified:maybe",
+      "error": {
+        "from": 0,
+        "to": 14,
+        "message": "\"verified:\" is true or false."
+      }
+    },
+    {
+      "name": "time-today",
+      "text": "created:today",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "eq",
+            "value": "today",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-now",
+      "text": "created:now",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "eq",
+            "value": "now",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-minutes-ago",
+      "text": "created:-15m",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "eq",
+            "value": "-15m",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-days-ago",
+      "text": "created:-7d",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "eq",
+            "value": "-7d",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-rfc3339",
+      "text": "created:2026-10-01T12:00:00Z",
+      "ok": {
+        "terms": [
+          {
+            "key": "created",
+            "op": "eq",
+            "value": "2026-10-01T12:00:00Z",
+            "negated": false,
+            "from": 0,
+            "to": 28
+          }
+        ]
+      }
+    },
+    {
+      "name": "time-not-a-date",
+      "text": "created:2026-13-01",
+      "error": {
+        "from": 0,
+        "to": 18,
+        "message": "\"created:\" needs a time, like 2026-10-01, -2h or today."
+      }
+    },
+    {
+      "name": "time-word",
+      "text": "created:yesterday",
+      "error": {
+        "from": 0,
+        "to": 17,
+        "message": "\"created:\" needs a time, like 2026-10-01, -2h or today."
+      }
+    },
+    {
+      "name": "time-empty",
+      "text": "created:",
+      "error": {
+        "from": 0,
+        "to": 8,
+        "message": "\"created:\" needs a time, like 2026-10-01, -2h or today."
+      }
+    },
+    {
+      "name": "bytes-plain",
+      "text": "size:512",
+      "ok": {
+        "terms": [
+          {
+            "key": "size",
+            "op": "eq",
+            "value": "512",
+            "negated": false,
+            "from": 0,
+            "to": 8
+          }
+        ]
+      }
+    },
+    {
+      "name": "bytes-decimal-lowercase",
+      "text": "size:1.5mb",
+      "ok": {
+        "terms": [
+          {
+            "key": "size",
+            "op": "eq",
+            "value": "1.5mb",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "bytes-invalid",
+      "text": "size:big",
+      "error": {
+        "from": 0,
+        "to": 8,
+        "message": "\"size:\" needs a size, like 512, 10KB or 2MB."
+      }
+    },
+    {
+      "name": "duration-seconds",
+      "text": "took:2s",
+      "ok": {
+        "terms": [
+          {
+            "key": "took",
+            "op": "eq",
+            "value": "2s",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "duration-without-unit",
+      "text": "took:2",
+      "error": {
+        "from": 0,
+        "to": 6,
+        "message": "\"took:\" needs a duration, like 250ms, 2s or 1.5m."
+      }
+    },
+    {
+      "name": "op-on-text",
+      "text": "email:>ada",
+      "error": {
+        "from": 0,
+        "to": 10,
+        "message": "\">\" works on times, numbers, sizes and durations only."
+      }
+    },
+    {
+      "name": "op-on-enum",
+      "text": "is:>=disabled",
+      "error": {
+        "from": 0,
+        "to": 13,
+        "message": "\">=\" works on times, numbers, sizes and durations only."
+      }
+    },
+    {
+      "name": "op-less-on-enum",
+      "text": "provider:<phone",
+      "error": {
+        "from": 0,
+        "to": 15,
+        "message": "\"<\" works on times, numbers, sizes and durations only."
+      }
+    },
+    {
+      "name": "negated-word",
+      "text": "-ada",
+      "ok": {
+        "words": [
+          {
+            "text": "ada",
+            "negated": true,
+            "from": 0,
+            "to": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "negated-term",
+      "text": "-provider:password",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "password",
+            "negated": true,
+            "from": 0,
+            "to": 18
+          }
+        ]
+      }
+    },
+    {
+      "name": "repeated-negation",
+      "text": "-provider:password -provider:phone",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "password",
+            "negated": true,
+            "from": 0,
+            "to": 18
+          },
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "phone",
+            "negated": true,
+            "from": 19,
+            "to": 34
+          }
+        ]
+      },
+      "note": "Each negated term excludes on its own."
+    },
+    {
+      "name": "repeated-key",
+      "text": "provider:password provider:phone",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "password",
+            "negated": false,
+            "from": 0,
+            "to": 17
+          },
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "phone",
+            "negated": false,
+            "from": 18,
+            "to": 32
+          }
+        ]
+      },
+      "note": "A repeated enum key is ORed by the section."
+    },
+    {
+      "name": "lone-dash",
+      "text": "-",
+      "ok": {
+        "words": [
+          {
+            "text": "-",
+            "negated": false,
+            "from": 0,
+            "to": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "dash-then-word",
+      "text": "- ada",
+      "ok": {
+        "words": [
+          {
+            "text": "-",
+            "negated": false,
+            "from": 0,
+            "to": 1
+          },
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 2,
+            "to": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "double-dash",
+      "text": "--ada",
+      "ok": {
+        "words": [
+          {
+            "text": "-ada",
+            "negated": true,
+            "from": 0,
+            "to": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "negated-phrase",
+      "text": "-\"exact phrase\"",
+      "ok": {
+        "words": [
+          {
+            "text": "exact phrase",
+            "negated": true,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "phrase-and-word",
+      "text": "\"ada lovelace\" x",
+      "ok": {
+        "words": [
+          {
+            "text": "ada lovelace",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          },
+          {
+            "text": "x",
+            "negated": false,
+            "from": 15,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "phrase-value",
+      "text": "email:\"ada lovelace\"",
+      "ok": {
+        "terms": [
+          {
+            "key": "email",
+            "op": "eq",
+            "value": "ada lovelace",
+            "negated": false,
+            "from": 0,
+            "to": 20
+          }
+        ]
+      }
+    },
+    {
+      "name": "phrase-escaped-quote",
+      "text": "\"say \\\"hi\\\"\"",
+      "ok": {
+        "words": [
+          {
+            "text": "say \"hi\"",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "phrase-escaped-backslash",
+      "text": "\"back\\\\slash\"",
+      "ok": {
+        "words": [
+          {
+            "text": "back\\slash",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      }
+    },
+    {
+      "name": "phrase-other-backslash-kept",
+      "text": "\"keep \\n as is\"",
+      "ok": {
+        "words": [
+          {
+            "text": "keep \\n as is",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-phrase",
+      "text": "\"\"",
+      "ok": {
+        "words": [
+          {
+            "text": "",
+            "negated": false,
+            "from": 0,
+            "to": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "unclosed-quote",
+      "text": "\"unclosed",
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "This quote is not closed."
+      }
+    },
+    {
+      "name": "unclosed-quote-after-a-word",
+      "text": "ada \"unclosed phrase",
+      "error": {
+        "from": 4,
+        "to": 20,
+        "message": "This quote is not closed."
+      }
+    },
+    {
+      "name": "escaped-quote-does-not-close",
+      "text": "\"abc\\\"",
+      "error": {
+        "from": 0,
+        "to": 6,
+        "message": "This quote is not closed."
+      }
+    },
+    {
+      "name": "glued-after-phrase",
+      "text": "\"glued\"text",
+      "error": {
+        "from": 0,
+        "to": 11,
+        "message": "Put a space after the closing quote."
+      }
+    },
+    {
+      "name": "quote-inside-a-word",
+      "text": "ab\"c",
+      "error": {
+        "from": 2,
+        "to": 3,
+        "message": "Put a space before this quote, or quote the whole text."
+      }
+    },
+    {
+      "name": "quote-inside-a-value",
+      "text": "email:ab\"c",
+      "error": {
+        "from": 8,
+        "to": 9,
+        "message": "Put a space before this quote, or quote the whole text."
+      }
+    },
+    {
+      "name": "unicode-offsets",
+      "text": "火🔥 provider:phone",
+      "ok": {
+        "terms": [
+          {
+            "key": "provider",
+            "op": "eq",
+            "value": "phone",
+            "negated": false,
+            "from": 4,
+            "to": 18
+          }
+        ],
+        "words": [
+          {
+            "text": "火🔥",
+            "negated": false,
+            "from": 0,
+            "to": 3
+          }
+        ]
+      },
+      "note": "UTF-16 offsets: 火 is one unit, 🔥 is two."
+    },
+    {
+      "name": "unicode-in-a-phrase-value",
+      "text": "email:\"火🔥\" ada",
+      "ok": {
+        "terms": [
+          {
+            "key": "email",
+            "op": "eq",
+            "value": "火🔥",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ],
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 12,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "unicode-negated",
+      "text": "-🔥",
+      "ok": {
+        "words": [
+          {
+            "text": "🔥",
+            "negated": true,
+            "from": 0,
+            "to": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "unicode-unclosed",
+      "text": "\"🔥",
+      "error": {
+        "from": 0,
+        "to": 3,
+        "message": "This quote is not closed."
+      }
+    },
+    {
+      "name": "path-data",
+      "text": "data.userId:u_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "data.userId",
+            "op": "eq",
+            "value": "u_1",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "path-labels-equals",
+      "text": "labels.execution_id=abc",
+      "ok": {
+        "terms": [
+          {
+            "key": "labels.execution_id",
+            "op": "eq",
+            "value": "abc",
+            "negated": false,
+            "from": 0,
+            "to": 23
+          }
+        ]
+      }
+    },
+    {
+      "name": "path-meta",
+      "text": "meta.owner:ada",
+      "ok": {
+        "terms": [
+          {
+            "key": "meta.owner",
+            "op": "eq",
+            "value": "ada",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "path-suffix-case-kept",
+      "text": "DATA.userId:u_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "data.userId",
+            "op": "eq",
+            "value": "u_1",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      },
+      "note": "The prefix is matched case-insensitively; the suffix keeps its case."
+    },
+    {
+      "name": "path-suffix-case-kept-meta",
+      "text": "META.ownerUid:u_1",
+      "ok": {
+        "terms": [
+          {
+            "key": "meta.ownerUid",
+            "op": "eq",
+            "value": "u_1",
+            "negated": false,
+            "from": 0,
+            "to": 17
+          }
+        ]
+      }
+    },
+    {
+      "name": "path-nested",
+      "text": "data.items.0:x",
+      "ok": {
+        "terms": [
+          {
+            "key": "data.items.0",
+            "op": "eq",
+            "value": "x",
+            "negated": false,
+            "from": 0,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "path-ordered",
+      "text": "data.n:>=10",
+      "ok": {
+        "terms": [
+          {
+            "key": "data.n",
+            "op": "ge",
+            "value": "10",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "path-bare-prefix",
+      "text": "data.:x",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "\"data.\" needs a field name after it, like data.userId:u_1."
+      }
+    },
+    {
+      "name": "path-bare-second-prefix",
+      "text": "labels.:x",
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "\"labels.\" needs a field name after it, like labels.userId:u_1."
+      }
+    },
+    {
+      "name": "path-help-key",
+      "text": "data:x",
+      "error": {
+        "from": 0,
+        "to": 6,
+        "message": "\"data.\" needs a field name after it, like data.userId:u_1."
+      }
+    },
+    {
+      "name": "path-empty-value",
+      "text": "data.userId:",
+      "error": {
+        "from": 0,
+        "to": 12,
+        "message": "\"data.userId:\" needs a value."
+      }
+    },
+    {
+      "name": "regex",
+      "text": "/re/",
+      "regex": true,
+      "ok": {
+        "regexes": [
+          {
+            "pattern": "re",
+            "caseInsensitive": false,
+            "negated": false,
+            "from": 0,
+            "to": 4
+          }
+        ]
+      },
+      "note": "Regex items only in a field set that opts in."
+    },
+    {
+      "name": "regex-negated-case-insensitive",
+      "text": "-/re/i",
+      "regex": true,
+      "ok": {
+        "regexes": [
+          {
+            "pattern": "re",
+            "caseInsensitive": true,
+            "negated": true,
+            "from": 0,
+            "to": 6
+          }
+        ]
+      }
+    },
+    {
+      "name": "regex-escaped-slash",
+      "text": "/a\\/b/ ada",
+      "regex": true,
+      "ok": {
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 7,
+            "to": 10
+          }
+        ],
+        "regexes": [
+          {
+            "pattern": "a\\/b",
+            "caseInsensitive": false,
+            "negated": false,
+            "from": 0,
+            "to": 6
+          }
+        ]
+      }
+    },
+    {
+      "name": "regex-beside-a-term",
+      "text": "level:error /time(out|d)/i",
+      "regex": true,
+      "ok": {
+        "terms": [
+          {
+            "key": "level",
+            "op": "eq",
+            "value": "error",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ],
+        "regexes": [
+          {
+            "pattern": "time(out|d)",
+            "caseInsensitive": true,
+            "negated": false,
+            "from": 12,
+            "to": 26
+          }
+        ]
+      }
+    },
+    {
+      "name": "regex-unclosed",
+      "text": "/unclosed",
+      "regex": true,
+      "error": {
+        "from": 0,
+        "to": 9,
+        "message": "A \"/\" starts a regex in this filter; quote the text to search for a path, like \"/api/users\"."
+      }
+    },
+    {
+      "name": "regex-path-needs-quotes",
+      "text": "/api/users",
+      "regex": true,
+      "error": {
+        "from": 0,
+        "to": 10,
+        "message": "A \"/\" starts a regex in this filter; quote the text to search for a path, like \"/api/users\"."
+      }
+    },
+    {
+      "name": "regex-empty",
+      "text": "//",
+      "regex": true,
+      "error": {
+        "from": 0,
+        "to": 2,
+        "message": "A \"/\" starts a regex in this filter; quote the text to search for a path, like \"/api/users\"."
+      }
+    },
+    {
+      "name": "regex-glued",
+      "text": "/re/x",
+      "regex": true,
+      "error": {
+        "from": 0,
+        "to": 5,
+        "message": "A \"/\" starts a regex in this filter; quote the text to search for a path, like \"/api/users\"."
+      }
+    },
+    {
+      "name": "regex-quoted-path",
+      "text": "\"/api/users\"",
+      "regex": true,
+      "ok": {
+        "words": [
+          {
+            "text": "/api/users",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "regex-not-in-a-value",
+      "text": "email:/x/",
+      "regex": true,
+      "ok": {
+        "terms": [
+          {
+            "key": "email",
+            "op": "eq",
+            "value": "/x/",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "slash-word-without-regex",
+      "text": "/avatars/",
+      "ok": {
+        "words": [
+          {
+            "text": "/avatars/",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          }
+        ]
+      },
+      "note": "Paths start with a slash, so without regex items it is a word."
+    },
+    {
+      "name": "negated-slash-word",
+      "text": "-/avatars/",
+      "ok": {
+        "words": [
+          {
+            "text": "/avatars/",
+            "negated": true,
+            "from": 0,
+            "to": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "leading-digit-is-a-word",
+      "text": "12:30",
+      "ok": {
+        "words": [
+          {
+            "text": "12:30",
+            "negated": false,
+            "from": 0,
+            "to": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-dashed-key",
+      "text": "a-b:c",
+      "error": {
+        "from": 0,
+        "to": 5,
+        "message": "Unknown filter \"a-b:\". Use provider, email, uid, claim, is, created, size, took, level, count, verified, data.… or meta.…; quote it to search for the text."
+      }
+    },
+    {
+      "name": "extra-whitespace",
+      "text": "  ada   lovelace  ",
+      "ok": {
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 2,
+            "to": 5
+          },
+          {
+            "text": "lovelace",
+            "negated": false,
+            "from": 8,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "tab-and-newline",
+      "text": "ada\tlovelace\nx",
+      "ok": {
+        "words": [
+          {
+            "text": "ada",
+            "negated": false,
+            "from": 0,
+            "to": 3
+          },
+          {
+            "text": "lovelace",
+            "negated": false,
+            "from": 4,
+            "to": 12
+          },
+          {
+            "text": "x",
+            "negated": false,
+            "from": 13,
+            "to": 14
+          }
+        ]
+      }
+    },
+    {
+      "name": "nbsp-is-not-a-separator",
+      "text": "a b",
+      "ok": {
+        "words": [
+          {
+            "text": "a b",
+            "negated": false,
+            "from": 0,
+            "to": 3
+          }
+        ]
+      },
+      "note": "Only ASCII whitespace separates items."
+    }
+  ]
+}
