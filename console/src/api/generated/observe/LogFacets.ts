@@ -21,4 +21,14 @@ levels: Array<LogFacetCount>, services: Array<LogFacetCount>, functions: Array<L
 /**
  * Engine internals the filter leaves out (0 when it asks for them).
  */
-internalHidden: number, };
+internalHidden: number, 
+/**
+ * Lines the engine has logged since it started, kept or not: more
+ * than `kept` once the oldest have left.
+ */
+logged: number, 
+/**
+ * When Functions last reloaded (RFC 3339), which `from=reload` reads;
+ * remembered after its line has left the log. `null` before the first.
+ */
+lastReload: string | null, };

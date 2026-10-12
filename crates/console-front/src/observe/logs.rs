@@ -97,6 +97,13 @@ pub(crate) struct LogFacets {
     /// Engine internals the filter leaves out (0 when it asks for them).
     #[ts(type = "number")]
     pub(crate) internal_hidden: u64,
+    /// Lines the engine has logged since it started, kept or not: more
+    /// than `kept` once the oldest have left.
+    #[ts(type = "number")]
+    pub(crate) logged: u64,
+    /// When Functions last reloaded (RFC 3339), which `from=reload` reads;
+    /// remembered after its line has left the log. `null` before the first.
+    pub(crate) last_reload: Option<String>,
 }
 
 /// One value of a facet and how many lines carry it.
@@ -402,11 +409,13 @@ async fn facets(
 ) -> Result<axum::Json<LogFacets>, ApiError> {
     let log = api.log()?.clone();
     let filter = params.compile(&log)?;
+    let logged = log.totals().entries;
+    let last_reload = log.last_reload().map(|(_, time)| format_millis(time));
     let facets = blocking("the log query", move || Ok(log.facets(&filter))).await?;
-    Ok(axum::Json(log_facets(facets)))
+    Ok(axum::Json(log_facets(facets, logged, last_reload)))
 }
 
-fn log_facets(facets: Facets) -> LogFacets {
+fn log_facets(facets: Facets, logged: u64, last_reload: Option<String>) -> LogFacets {
     let counts = |counts: Vec<(String, u64)>| {
         counts
             .into_iter()
@@ -430,6 +439,8 @@ fn log_facets(facets: Facets) -> LogFacets {
         codebases: counts(facets.codebases),
         kinds: counts(facets.kinds),
         internal_hidden: facets.internal_hidden,
+        logged,
+        last_reload,
     }
 }
 

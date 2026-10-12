@@ -325,6 +325,8 @@ async fn facets_and_the_histogram_answer_for_the_filter() {
     );
     assert_eq!(facets["services"], json!([{ "value": "hub", "count": 5 }]));
     assert_eq!(facets["internalHidden"], 0);
+    assert_eq!(facets["logged"], 10);
+    assert_eq!(facets["lastReload"], Value::Null);
     let (status, histogram) = json(&router, "/logs/histogram?buckets=5").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(histogram["buckets"].as_array().expect("buckets").len(), 5);
@@ -341,6 +343,29 @@ async fn facets_and_the_histogram_answer_for_the_filter() {
         .sum();
     assert_eq!(total, 10);
     assert!(histogram["bucketMs"].as_u64().expect("bucket") >= 1);
+}
+
+#[tokio::test]
+async fn the_facets_say_what_left_the_log_and_when_functions_reloaded() {
+    let log = log();
+    let router = api(&log);
+    log.accept(LogInput {
+        kind: Some(kinds::FUNCTIONS_RELOADED),
+        ..line(LogLevel::Info, "functions", "Functions reloaded")
+    });
+    for index in 0..CONSOLE_LOG_ENTRIES + 5 {
+        log.accept(line(LogLevel::Info, "hub", &format!("line {index}")));
+    }
+    let (status, facets) = json(&router, "/logs/facets").await;
+    assert_eq!(status, StatusCode::OK);
+    let logged = u64::try_from(CONSOLE_LOG_ENTRIES).expect("fits") + 6;
+    assert_eq!(facets["logged"], logged);
+    assert!(facets["kept"].as_u64().expect("kept") < logged, "{facets}");
+    let reload = facets["lastReload"].as_str().expect("a reload time");
+    assert!(
+        OffsetDateTime::parse(reload, &time::format_description::well_known::Rfc3339).is_ok(),
+        "{reload}"
+    );
 }
 
 #[tokio::test]
