@@ -1076,7 +1076,36 @@ fn background_events_are_decoded_for_reading() {
         .expect("decoded");
     assert_eq!(event["type"], "google.cloud.firestore.document.v1.created");
     assert_eq!(event["document"], "orders/o_1");
+    // A body that is not a document event is shown as it arrived, with why.
     assert_eq!(event["data"]["protobuf"], "CgQKAg==");
+    assert!(
+        event["data"]["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("not a Firestore document event")),
+        "{event}"
+    );
+    // A real one reads as the REST documents the bridge encoded.
+    let real = monitor.begin(start(
+        "us-central1-onOrder",
+        FunctionKind::Firestore,
+        Bytes::from_static(
+            b"CjgKNnByb2plY3RzL2RlbW8vZGF0YWJhc2VzLyhkZWZhdWx0KS9kb2N1bWVudHMvb3JkZXJzL29fMQ==",
+        ),
+        headers(&[
+            ("content-type", "application/protobuf"),
+            ("ce-type", "google.cloud.firestore.document.v1.created"),
+        ]),
+    ));
+    let event = monitor
+        .invocation(&real.id)
+        .expect("kept")
+        .event
+        .expect("decoded");
+    assert_eq!(
+        event["data"]["value"]["name"],
+        "projects/demo/databases/(default)/documents/orders/o_1"
+    );
+    assert_eq!(event["data"]["oldValue"], serde_json::Value::Null);
 }
 
 #[test]

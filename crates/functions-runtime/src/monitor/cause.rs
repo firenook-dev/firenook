@@ -19,22 +19,17 @@ use crate::manifest::Definition;
 pub const BODY_PARSE_LIMIT: usize = 64 * 1024;
 
 /// The sender's cause headers (every `x-firenook-*` header is a control
-/// header, stripped before user code sees the request).
+/// header, stripped before user code sees the request). The names are the
+/// bridge's, which every sender writes through; values are percent-encoded
+/// with `firenook_functions_bridge::cause::encode` and read back with
+/// [`cause_header`].
 pub mod headers {
-    pub const DOCUMENT: &str = "x-firenook-cause-document";
-    pub const DATABASE: &str = "x-firenook-cause-database";
-    pub const CHANGE: &str = "x-firenook-cause-change";
-    pub const TOPIC: &str = "x-firenook-cause-topic";
-    pub const MESSAGE: &str = "x-firenook-cause-message";
-    pub const UID: &str = "x-firenook-cause-uid";
-    pub const EMAIL: &str = "x-firenook-cause-email";
-    pub const TENANT: &str = "x-firenook-cause-tenant";
-    pub const BUCKET: &str = "x-firenook-cause-bucket";
-    pub const OBJECT: &str = "x-firenook-cause-object";
-    pub const AUTH_CALL: &str = "x-firenook-cause-auth-call";
-    pub const EVENT_ID: &str = "x-firenook-event-id";
+    pub use firenook_functions_bridge::cause::{
+        AUTH_CALL, BUCKET, CHANGE, DATABASE, DOCUMENT, EMAIL, EVENT_ID, MESSAGE, OBJECT, TENANT,
+        TOPIC, UID,
+    };
     /// The prefix every cause header starts with.
-    pub const CAUSE_PREFIX: &str = "x-firenook-cause-";
+    pub const CAUSE_PREFIX: &str = firenook_functions_bridge::cause::PREFIX;
     pub const TASK_QUEUE: &str = "x-cloudtasks-queuename";
     pub const TASK_NAME: &str = "x-cloudtasks-taskname";
     pub const TASK_RETRY: &str = "x-cloudtasks-taskretrycount";
@@ -127,9 +122,7 @@ pub struct CauseInput<'a> {
 /// `CloudEvent`'s `ce-id`. One header lookup each.
 #[must_use]
 pub fn event_id(headers: &HeaderMap) -> Option<String> {
-    header(headers, headers::EVENT_ID)
-        .or_else(|| header(headers, "ce-id"))
-        .map(str::to_owned)
+    cause_header(headers, headers::EVENT_ID).or_else(|| header(headers, "ce-id").map(str::to_owned))
 }
 
 /// A Cloud Tasks attempt's `(queue, task, retry count, execution count)`.
@@ -153,8 +146,7 @@ pub fn task_attempt(headers: &HeaderMap) -> Option<(String, String, u32, u32)> {
 /// Classifies an invocation's cause and writes its summary line.
 #[must_use]
 pub fn classify(input: &CauseInput<'_>) -> (InvocationCause, String) {
-    let found = header(input.headers, headers::EVENT_ID).or_else(|| header(input.headers, "ce-id"));
-    let event_id = found.map(str::to_owned);
+    let event_id = event_id(input.headers);
     if let Some((queue, task, retry_count, execution_count)) = task_attempt(input.headers) {
         let summary = format!("task {} · attempt {}", short_task(&task), retry_count + 1);
         return (
@@ -236,6 +228,14 @@ pub fn publisher_of(source: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// A sender's cause header, decoded (`%XX` back to the bytes the sender
+/// wrote: a document path, an object name or an email with spaces or
+/// non-ASCII characters arrive encoded).
+#[must_use]
+pub fn cause_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    header(headers, name).map(firenook_functions_bridge::cause::decode)
 }
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -374,14 +374,12 @@ fn firestore(
         .map(str::to_owned)
         .or_else(|| definition_event_type(input.definition))
         .unwrap_or_default();
-    let mut database = header(input.headers, headers::DATABASE)
-        .or_else(|| header(input.headers, "ce-database"))
-        .map(str::to_owned);
-    let mut document = header(input.headers, headers::DOCUMENT)
-        .or_else(|| header(input.headers, "ce-document"))
-        .map(str::to_owned);
+    let mut database = cause_header(input.headers, headers::DATABASE)
+        .or_else(|| header(input.headers, "ce-database").map(str::to_owned));
+    let mut document = cause_header(input.headers, headers::DOCUMENT)
+        .or_else(|| header(input.headers, "ce-document").map(str::to_owned));
     let mut event_id = event_id;
-    let mut change = header(input.headers, headers::CHANGE).map(str::to_owned);
+    let mut change = cause_header(input.headers, headers::CHANGE);
     if document.is_none()
         && let Some(body) = body()
     {
@@ -454,8 +452,8 @@ fn storage(
     body: impl Fn() -> Option<Value>,
 ) -> (InvocationCause, String) {
     let mut event_type = definition_event_type(input.definition).unwrap_or_default();
-    let mut bucket = header(input.headers, headers::BUCKET).map(str::to_owned);
-    let mut object = header(input.headers, headers::OBJECT).map(str::to_owned);
+    let mut bucket = cause_header(input.headers, headers::BUCKET);
+    let mut object = cause_header(input.headers, headers::OBJECT);
     let mut event_id = event_id;
     if (bucket.is_none() || object.is_none())
         && let Some(body) = body()
@@ -491,9 +489,9 @@ fn auth(
     body: impl Fn() -> Option<Value>,
 ) -> (InvocationCause, String) {
     let mut event_type = definition_event_type(input.definition).unwrap_or_default();
-    let mut uid = header(input.headers, headers::UID).map(str::to_owned);
-    let mut email = header(input.headers, headers::EMAIL).map(str::to_owned);
-    let tenant = header(input.headers, headers::TENANT).map(str::to_owned);
+    let mut uid = cause_header(input.headers, headers::UID);
+    let mut email = cause_header(input.headers, headers::EMAIL);
+    let tenant = cause_header(input.headers, headers::TENANT);
     let mut event_id = event_id;
     if uid.is_none()
         && let Some(body) = body()
@@ -561,8 +559,8 @@ fn pubsub(
     event_id: Option<String>,
     body: impl Fn() -> Option<Value>,
 ) -> (InvocationCause, String) {
-    let mut topic = header(input.headers, headers::TOPIC).map(str::to_owned);
-    let mut message_id = header(input.headers, headers::MESSAGE).map(str::to_owned);
+    let mut topic = cause_header(input.headers, headers::TOPIC);
+    let mut message_id = cause_header(input.headers, headers::MESSAGE);
     let mut event_id = event_id;
     if (topic.is_none() || message_id.is_none())
         && let Some(body) = body()
@@ -612,7 +610,7 @@ fn schedule(
     event_id: Option<String>,
     body: impl Fn() -> Option<Value>,
 ) -> (InvocationCause, String) {
-    let mut topic = header(input.headers, headers::TOPIC).map(str::to_owned);
+    let mut topic = cause_header(input.headers, headers::TOPIC);
     let mut event_id = event_id;
     if (topic.is_none() || event_id.is_none())
         && let Some(body) = body()
@@ -692,7 +690,7 @@ fn eventarc(
 }
 
 fn blocking(input: &CauseInput<'_>, body: impl Fn() -> Option<Value>) -> (InvocationCause, String) {
-    let auth_call = header(input.headers, headers::AUTH_CALL).map(str::to_owned);
+    let auth_call = cause_header(input.headers, headers::AUTH_CALL);
     let mut event_type = input
         .definition
         .blocking_trigger()
@@ -700,9 +698,9 @@ fn blocking(input: &CauseInput<'_>, body: impl Fn() -> Option<Value>) -> (Invoca
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let mut uid = header(input.headers, headers::UID).map(str::to_owned);
-    let mut email = header(input.headers, headers::EMAIL).map(str::to_owned);
-    let mut tenant = header(input.headers, headers::TENANT).map(str::to_owned);
+    let mut uid = cause_header(input.headers, headers::UID);
+    let mut email = cause_header(input.headers, headers::EMAIL);
+    let mut tenant = cause_header(input.headers, headers::TENANT);
     if uid.is_none()
         && let Some(claims) = body()
             .as_ref()
@@ -967,6 +965,21 @@ mod tests {
         ]);
         let (_, summary) = run(&v2, "POST", "/", &headers_only, b"");
         assert_eq!(summary, "gs://b/uploads/a.png finalized");
+        // Senders percent-encode what is not visible ASCII.
+        let encoded = firenook_functions_bridge::cause::encode("photos/été 1.png");
+        assert_eq!(encoded, "photos/%C3%A9t%C3%A9%201.png");
+        let (cause, summary) = run(
+            &v2,
+            "POST",
+            "/",
+            &headers(&[(headers::BUCKET, "b"), (headers::OBJECT, &encoded)]),
+            b"",
+        );
+        assert_eq!(summary, "gs://b/photos/été 1.png finalized");
+        assert!(
+            matches!(&cause, InvocationCause::Storage { object, .. } if object == "photos/été 1.png"),
+            "{cause:?}"
+        );
         let body = json!({"specversion": "1.0", "id": "s-2", "type": "google.cloud.storage.object.v1.deleted",
             "source": "//storage.googleapis.com/projects/_/buckets/b", "data": {"bucket": "b", "name": "x.txt"}});
         let (cause, summary) = run(

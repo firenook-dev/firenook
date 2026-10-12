@@ -1876,8 +1876,9 @@ fn shown_headers(headers: &HeaderMap) -> Vec<FunctionHeader> {
 }
 
 /// The request's event, decoded for reading: a JSON envelope or structured
-/// `CloudEvent` as it is, a binary `CloudEvent` as its attributes and data.
-/// HTTP kinds have none.
+/// `CloudEvent` as it is, a binary `CloudEvent` as its attributes and data
+/// (a second-generation Firestore event's protobuf as `{value, oldValue}`
+/// REST documents). HTTP kinds have none.
 fn decoded_event(record: &InvocationRecord, request: &RequestRecord) -> Option<Value> {
     if matches!(
         record.summary.kind,
@@ -1905,11 +1906,19 @@ fn decoded_event(record: &InvocationRecord, request: &RequestRecord) -> Option<V
         .is_some_and(|value| value.contains("protobuf"))
     {
         // A second-generation Firestore event: the Base64 `DocumentEventData`
-        // exactly as the Firestore emulator sent it.
-        Some(serde_json::json!({
-            "encoding": "base64",
-            "protobuf": String::from_utf8_lossy(&request.body),
-        }))
+        // the Firestore emulator sent, read back into REST documents by the
+        // bridge that wrote it (computed on request, never stored). A body
+        // that does not decode is shown as it arrived, with why.
+        Some(
+            match firenook_functions_bridge::decode_document_event(&request.body) {
+                Ok(documents) => documents,
+                Err(error) => serde_json::json!({
+                    "encoding": "base64",
+                    "protobuf": String::from_utf8_lossy(&request.body),
+                    "error": error.to_string(),
+                }),
+            },
+        )
     } else {
         serde_json::from_slice::<Value>(&request.body).ok()
     };

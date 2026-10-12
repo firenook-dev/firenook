@@ -14,6 +14,7 @@ use std::sync::Arc;
 use axum::body::{Body, Bytes};
 use axum::extract::Request;
 use axum::http::{HeaderName, HeaderValue, Method};
+use firenook_functions_bridge::{ChangeShape, MatchReason, explain_match};
 use futures_util::StreamExt as _;
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
@@ -1735,27 +1736,6 @@ fn firestore_word(change: FirestoreChange) -> &'static str {
     }
 }
 
-/// Whether a Firestore event type fires for a change (`write` and
-/// `written` fire for all three).
-fn firestore_fires(event_type: &str, change: FirestoreChange) -> bool {
-    let base = event_type
-        .strip_suffix(".withAuthContext")
-        .unwrap_or(event_type);
-    let written = base.ends_with("document.write") || base.ends_with(".written");
-    written
-        || match change {
-            FirestoreChange::Created => {
-                base.ends_with("document.create") || base.ends_with(".created")
-            }
-            FirestoreChange::Updated => {
-                base.ends_with("document.update") || base.ends_with(".updated")
-            }
-            FirestoreChange::Deleted => {
-                base.ends_with("document.delete") || base.ends_with(".deleted")
-            }
-        }
-}
-
 /// The change words a Firestore event type listens for.
 fn firestore_listens(event_type: &str) -> &'static str {
     let base = event_type
@@ -1772,27 +1752,6 @@ fn firestore_listens(event_type: &str) -> &'static str {
     }
 }
 
-/// The document pattern matching of the Firestore emulator's triggers:
-/// `{name}` matches one segment, `{name=**}` one or more.
-fn path_matches(pattern: &str, path: &str) -> bool {
-    fn segments(pattern: &[&str], path: &[&str]) -> bool {
-        let Some((head, tail)) = pattern.split_first() else {
-            return path.is_empty();
-        };
-        if head.starts_with('{') && head.ends_with("=**}") {
-            return (1..=path.len()).any(|consumed| segments(tail, &path[consumed..]));
-        }
-        let Some((value, remaining)) = path.split_first() else {
-            return false;
-        };
-        let wildcard = head.starts_with('{') && head.ends_with('}');
-        (wildcard || head == value) && segments(tail, remaining)
-    }
-    let pattern: Vec<&str> = pattern.split('/').collect();
-    let path: Vec<&str> = path.split('/').collect();
-    segments(&pattern, &path)
-}
-
 fn firestore_verdict(
     record: &Record,
     triggers: &BTreeMap<String, firenook_functions_bridge::Trigger>,
@@ -1802,28 +1761,24 @@ fn firestore_verdict(
 ) -> Option<Verdict> {
     let trigger = triggers.get(&record.key)?;
     let event_type = trigger.event_type.clone();
-    let (fires, reason) = if trigger.database != database {
-        (
-            false,
-            format!("listens on {}, not {database}", trigger.database),
-        )
-    } else if !firestore_fires(&event_type, change) {
-        (
-            false,
-            format!(
-                "listens for {}, not {} ones",
-                firestore_listens(&event_type),
-                firestore_word(change)
-            ),
-        )
-    } else if !path_matches(&trigger.document_pattern, path) {
-        (
-            false,
-            format!("{} does not match {path}", trigger.document_pattern),
-        )
-    } else {
-        (true, format!("matches {}", trigger.document_pattern))
+    let shape = match change {
+        FirestoreChange::Created => ChangeShape::Created,
+        FirestoreChange::Updated => ChangeShape::Updated,
+        FirestoreChange::Deleted => ChangeShape::Deleted,
     };
+    // The bridge's own matcher: what the console says is what it delivers.
+    let explanation = explain_match(trigger, database, path, shape);
+    let reason = match explanation.reason {
+        MatchReason::Fires => format!("matches {}", trigger.document_pattern),
+        MatchReason::OtherDatabase(listens) => format!("listens on {listens}, not {database}"),
+        MatchReason::OtherEvent(listens) => format!(
+            "listens for {}, not {} ones",
+            firestore_listens(&listens),
+            firestore_word(change)
+        ),
+        MatchReason::PathDoesNotMatch(pattern) => format!("{pattern} does not match {path}"),
+    };
+    let fires = explanation.fires;
     Some(Verdict {
         fires,
         reason,
@@ -2119,25 +2074,68 @@ mod tests {
         assert_eq!(generation_of("us-central1-api", "us-central1-api"), None);
     }
 
+    fn firestore_record(key: &str) -> Record {
+        let definition = Definition::from_json(
+            serde_json::json!({"name": "onOrder", "region": "us-central1", "platform": "gcfv2",
+                "eventTrigger": {"eventType": "google.cloud.firestore.document.v1.created"}})
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+        );
+        Record {
+            key: key.to_owned(),
+            definition,
+            codebase: "default".to_owned(),
+            extension_instance: None,
+            enabled: true,
+            stale: false,
+            ignored: None,
+            url: None,
+        }
+    }
+
     #[test]
-    fn firestore_patterns_and_changes() {
-        assert!(path_matches("orders/{id}", "orders/o_1"));
-        assert!(!path_matches("orders/{id}", "orders/o_1/items/i"));
-        assert!(path_matches("orders/{rest=**}", "orders/o_1/items/i"));
-        assert!(!path_matches("orders/{rest=**}", "orders"));
-        assert!(path_matches("orders/fixed", "orders/fixed"));
-        assert!(firestore_fires(
-            "providers/cloud.firestore/eventTypes/document.write",
-            FirestoreChange::Deleted
-        ));
-        assert!(firestore_fires(
-            "google.cloud.firestore.document.v1.created.withAuthContext",
-            FirestoreChange::Created
-        ));
-        assert!(!firestore_fires(
-            "google.cloud.firestore.document.v1.created",
-            FirestoreChange::Updated
-        ));
+    fn firestore_verdicts_are_the_bridges_matches_in_words() {
+        let key = "us-central1-onOrder-0";
+        let trigger = firenook_functions_bridge::Trigger {
+            project: "demo".to_owned(),
+            key: key.to_owned(),
+            generation: firenook_functions_bridge::TriggerGeneration::V2,
+            event_type: "google.cloud.firestore.document.v1.created".to_owned(),
+            database: "(default)".to_owned(),
+            document_pattern: "orders/{orderId}".to_owned(),
+        };
+        let triggers = BTreeMap::from([(key.to_owned(), trigger)]);
+        let record = firestore_record(key);
+        let verdict = |database: &str, path: &str, change| {
+            firestore_verdict(&record, &triggers, database, path, change).expect("a trigger")
+        };
+        let fires = verdict("(default)", "orders/o_1", FirestoreChange::Created);
+        assert!(fires.fires);
+        assert_eq!(fires.reason, "matches orders/{orderId}");
+        let other = verdict("other", "orders/o_1", FirestoreChange::Created);
+        assert!(!other.fires);
+        assert_eq!(other.reason, "listens on (default), not other");
+        let event = verdict("(default)", "orders/o_1", FirestoreChange::Updated);
+        assert_eq!(
+            event.reason,
+            "listens for created documents, not updated ones"
+        );
+        let path = verdict("(default)", "orders/o_1/items/i", FirestoreChange::Created);
+        assert_eq!(
+            path.reason,
+            "orders/{orderId} does not match orders/o_1/items/i"
+        );
+        assert!(
+            firestore_verdict(
+                &record,
+                &BTreeMap::new(),
+                "(default)",
+                "orders/o_1",
+                FirestoreChange::Created
+            )
+            .is_none()
+        );
     }
 
     #[test]
