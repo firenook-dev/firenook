@@ -12,25 +12,41 @@
 // display name (`GET /auth/tenants?q=`), at most 50 are listed, and the last
 // row says how many more there are to narrow to. The list is read again
 // each time it opens, so a tenant created since the page loaded is in it;
-// opening never creates one.
+// opening never creates one. Its last two rows lead to Settings: New
+// tenant… and Manage tenants….
 
-import { Combobox, Select, cn } from '@cloudflare/kumo'
+import { Button, Combobox, Select, cn } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
 import { formatCount } from '@/lib/format'
 import { tenantPickerQuery } from '../queries'
-import { type AuthPage, type TenantScope, tenantKey } from '../tenant-scope'
+import type { AuthPage, TenantScope } from '../tenant-scope'
 
 /** Above this many tenants the picker searches the engine instead of listing them all. */
 export const SEARCH_ABOVE = 20
 
 const USERS = { one: 'user', other: 'users' }
 
-/** The picker's value for each scope: `'*'` every tenant, `''` the project's users, else the id. */
-const ALL = '*'
-const PROJECT = ''
+/**
+ * The picker's value for each scope: the tenant's id, or a word no tenant id
+ * can be (they hold no NUL) for every tenant and for the project's users. A
+ * select reads an empty value as no value at all, so `''` is never one.
+ */
+const ALL = '\u0000all'
+const PROJECT = '\u0000project'
+
+/** A scope as the picker's value. */
+export function pickerValue(scope: TenantScope): string {
+  if (scope.kind === 'all') return ALL
+  if (scope.kind === 'project') return PROJECT
+  return scope.tenant
+}
+/** The two rows that lead to Settings; tenant ids never hold a NUL. */
+const NEW = '\u0000new'
+const MANAGE = '\u0000manage'
 
 /** How a scope reads in the closed box and as a list row. */
 export function scopeLabel(scope: TenantScope): { text: string; data: boolean } {
@@ -119,10 +135,27 @@ export function TenantPicker({
 }) {
   const first = useQuery({ ...tenantPickerQuery(project), enabled: project !== '' })
   const many = (first.data?.total?.count ?? 0) > SEARCH_ABOVE
+  const navigate = useNavigate()
+  const { project: shown } = useConsoleProjectParam()
+  const toSettings = (search: Record<string, string>) =>
+    void navigate({
+      to: '/auth/settings',
+      search: { ...search, ...(shown ? { project: shown } : {}) } as never,
+    })
+  const settings = {
+    onNew: () => toSettings({ new: 'tenant' }),
+    onManage: () => toSettings({ section: 'tenants' }),
+  }
   return (
     <div className={cn('min-w-0', className)} data-testid={testId}>
       {many ? (
-        <TenantSearch project={project} page={page} value={value} onChange={onChange} />
+        <TenantSearch
+          project={project}
+          page={page}
+          value={value}
+          onChange={onChange}
+          {...settings}
+        />
       ) : (
         <TenantSelect
           page={page}
@@ -130,10 +163,22 @@ export function TenantPicker({
           onChange={onChange}
           answer={first.data}
           onOpen={() => void first.refetch()}
+          {...settings}
         />
       )}
     </div>
   )
+}
+
+/** The `project` param the page's address carries, kept on the way to Settings. */
+function useConsoleProjectParam(): { project: string | undefined } {
+  const requested = useRouterState({
+    select: (state) => {
+      const value = (state.location.search as Record<string, unknown>).project
+      return typeof value === 'string' && value !== '' ? value : undefined
+    },
+  })
+  return { project: requested }
 }
 
 function BoxValue({ scope }: { scope: TenantScope }) {
@@ -173,19 +218,28 @@ function TenantSelect({
   onChange,
   answer,
   onOpen,
+  onNew,
+  onManage,
 }: {
   page: AuthPage
   value: TenantScope
   onChange: (scope: TenantScope) => void
   answer: AuthTenantPage | undefined
   onOpen: () => void
+  onNew: () => void
+  onManage: () => void
 }) {
   const items = tenantItems(page, answer, value)
   return (
     <Select
       size="xs"
-      value={tenantKey(value)}
-      onValueChange={(next) => onChange(scopeOf(String(next)))}
+      value={pickerValue(value)}
+      onValueChange={(next) => {
+        const picked = String(next)
+        if (picked === NEW) onNew()
+        else if (picked === MANAGE) onManage()
+        else onChange(scopeOf(picked))
+      }}
       onOpenChange={(open) => {
         if (open) onOpen()
       }}
@@ -198,6 +252,15 @@ function TenantSelect({
           <ItemText item={item} />
         </Select.Option>
       ))}
+      <Select.Separator />
+      <Select.Option value={NEW}>
+        <span className="text-[12px]">New tenant…</span>
+      </Select.Option>
+      {page !== 'settings' && (
+        <Select.Option value={MANAGE}>
+          <span className="text-[12px]">Manage tenants…</span>
+        </Select.Option>
+      )}
     </Select>
   )
 }
@@ -208,11 +271,15 @@ function TenantSearch({
   page,
   value,
   onChange,
+  onNew,
+  onManage,
 }: {
   project: string
   page: AuthPage
   value: TenantScope
   onChange: (scope: TenantScope) => void
+  onNew: () => void
+  onManage: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
@@ -228,7 +295,7 @@ function TenantSearch({
   })
   const items = tenantItems(page, found.data, value)
   const more = moreText(found.data)
-  const selected = items.find((item) => item.value === tenantKey(value)) ?? null
+  const selected = items.find((item) => item.value === pickerValue(value)) ?? null
   return (
     <Combobox
       size="xs"
@@ -272,6 +339,16 @@ function TenantSearch({
             {more}
           </div>
         )}
+        <div className="flex items-center gap-1 border-t border-kumo-line p-1">
+          <Button variant="ghost" size="xs" onClick={onNew}>
+            New tenant…
+          </Button>
+          {page !== 'settings' && (
+            <Button variant="ghost" size="xs" onClick={onManage}>
+              Manage tenants…
+            </Button>
+          )}
+        </div>
       </Combobox.Content>
     </Combobox>
   )

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
-import { moreText, scopeLabel, tenantItems } from './tenant-picker'
+import { moreText, pickerValue, scopeLabel, tenantItems } from './tenant-picker'
 
 function tenant(tenantId: string, extra: Partial<AuthTenant> = {}): AuthTenant {
   return {
@@ -42,12 +42,19 @@ describe('the tenant picker', () => {
       tenant('globex', { users: 1 }),
     ])
     const feed = tenantItems('inbox', answer, { kind: 'all' })
-    expect(feed.map((item) => item.value)).toEqual(['*', '', 'acme', 'globex'])
+    expect(feed.map((item) => item.value)).toEqual([
+      pickerValue({ kind: 'all' }),
+      pickerValue({ kind: 'project' }),
+      'acme',
+      'globex',
+    ])
+    // A select reads an empty value as none: no scope is ever one.
+    expect(feed.every((item) => item.value !== '')).toBe(true)
     expect(feed[1]).toMatchObject({ title: 'No tenant — project users', detail: '40 users' })
     expect(feed[2]).toMatchObject({ title: 'Acme Corp', id: 'acme', detail: '5 users' })
     expect(feed[3]).toMatchObject({ title: 'globex', id: undefined, detail: '1 user' })
     expect(tenantItems('users', answer, { kind: 'project' }).map((item) => item.value)).toEqual([
-      '',
+      pickerValue({ kind: 'project' }),
       'acme',
       'globex',
     ])
@@ -55,7 +62,7 @@ describe('the tenant picker', () => {
 
   it('keeps the tenant in scope in the list even when the engine no longer lists it', () => {
     const items = tenantItems('settings', page([]), { kind: 'tenant', tenant: 'gone' })
-    expect(items.map((item) => item.value)).toEqual(['', 'gone'])
+    expect(items.map((item) => item.value)).toEqual([pickerValue({ kind: 'project' }), 'gone'])
   })
 
   it('says how many more tenants there are to narrow to', () => {

@@ -59,7 +59,7 @@ function MessageRowView({
       <span className="min-w-20 flex-[2] basis-0 truncate pr-3 text-[12px] text-kumo-default">
         {messageLabel(message)}
       </span>
-      <span className="flex w-32 shrink-0 items-center gap-1 pr-3">
+      <span className="flex w-28 shrink-0 items-center gap-1 pr-3">
         {sms ? (
           <>
             <span
@@ -81,17 +81,25 @@ function MessageRowView({
           </>
         ) : null}
       </span>
-      <span className="flex shrink-0 items-center justify-end gap-2 pr-1">
+      {/* Slots of fixed width, so every row's columns start where the
+          rows above them do, whatever chips a row carries. */}
+      <span className="flex w-20 shrink-0 justify-end pr-2">
         {chip && (
           <span className={QUIET_CHIP} data-testid="message-status">
             {chip}
           </span>
         )}
-        {showTenant && message.tenant && (
-          <span className={`${QUIET_CHIP} max-w-32 truncate`} data-testid="message-tenant">
-            {message.tenant}
-          </span>
-        )}
+      </span>
+      {showTenant && (
+        <span className="hidden w-28 shrink-0 justify-end pr-2 @3xl:flex">
+          {message.tenant && (
+            <span className={`${QUIET_CHIP} max-w-full truncate`} data-testid="message-tenant">
+              {message.tenant}
+            </span>
+          )}
+        </span>
+      )}
+      <span className="flex shrink-0 justify-end pr-1">
         <FeedTime iso={message.at} className="text-right" />
       </span>
     </FeedMenuRow>

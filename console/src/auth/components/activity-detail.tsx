@@ -56,6 +56,7 @@ import { explainAuthError } from '../errors'
 import { messageRef, userRef } from '../links'
 import { callLabel } from '../operations'
 import { activityEntryQuery } from '../queries'
+import { SettingsLink } from './settings-link'
 
 /** The Auth emulator's own address, as an app would call it: for curl. */
 export function useAuthBase(): string | undefined {
@@ -286,16 +287,22 @@ function WhatWentWrong({
             {error.message}
           </p>
         )}
-        {explained.explanation?.user && (call.uid || call.identifier) && (
-          <div>
-            <Button
-              variant="secondary"
-              size="xs"
-              onClick={() => onOpenUser(call)}
-              data-testid="call-open-user"
-            >
-              Open user
-            </Button>
+        {((explained.explanation?.user && (call.uid || call.identifier)) ||
+          explained.explanation?.settings) && (
+          <div className="flex items-center gap-2">
+            {explained.explanation?.user && (call.uid || call.identifier) && (
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={() => onOpenUser(call)}
+                data-testid="call-open-user"
+              >
+                Open user
+              </Button>
+            )}
+            {explained.explanation?.settings && (
+              <SettingsLink tenant={call.tenant} testId="call-settings" />
+            )}
           </div>
         )}
       </div>

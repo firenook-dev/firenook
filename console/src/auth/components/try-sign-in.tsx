@@ -58,6 +58,7 @@ import {
 } from '../sign-in'
 import type { TenantScope } from '../tenant-scope'
 import { QUIET_CHIP } from './message-row'
+import { SettingsLink } from './settings-link'
 
 /** Where the continue URL of the last sign-in link is remembered, per tenant. */
 const CONTINUE_KEY = 'firenook.console.auth.continue-url'
@@ -711,7 +712,12 @@ function Result({
             <p className="m-0 text-[12px] text-kumo-subtle">{explained.explanation.fix}</p>
           )}
           <Chips chips={chips} />
-          <div>{openEntry}</div>
+          <div className="flex items-center gap-2">
+            {explained.explanation?.settings && (
+              <SettingsLink tenant={summary?.tenant} testId="try-settings" />
+            )}
+            {openEntry}
+          </div>
         </div>
       </InspectorSection>
     )

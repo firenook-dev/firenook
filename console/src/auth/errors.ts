@@ -139,8 +139,9 @@ function missing(field: string, sentBy: string): Explanation {
 
 export const EXPLANATIONS: Readonly<Record<(typeof ENGINE_CODES)[number], Explanation>> = {
   ADMIN_ONLY_OPERATION: {
-    what: 'This tenant does not let clients create or delete accounts themselves; only the Admin SDK may.',
-    fix: 'Create the account with the Admin SDK (createUser), or allow it in the tenant’s settings.',
+    what: 'Anonymous sign-in is turned off for this tenant, so only the Admin SDK may create the account.',
+    fix: 'Turn on Anonymous sign-in in the tenant’s settings, or create the account with the Admin SDK.',
+    settings: true,
   },
   BLOCKING_FUNCTION_ERROR_RESPONSE: {
     what: 'A blocking function (beforeCreate or beforeSignIn) refused the sign-in or failed; its own message is under What it caused.',
@@ -347,7 +348,7 @@ export const EXPLANATIONS: Readonly<Record<(typeof ENGINE_CODES)[number], Explan
   },
   OOB_REQ_TYPE_UNSPECIFIED: missing('requestType', 'the SDK'),
   OPERATION_NOT_ALLOWED: {
-    what: 'This sign-in method is turned off for this tenant.',
+    what: 'This sign-in method (password sign-up, email link, or SMS multi-factor) is turned off for this tenant.',
     fix: 'Turn it on in the tenant’s settings.',
     settings: true,
   },
