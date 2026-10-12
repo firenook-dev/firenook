@@ -359,6 +359,26 @@ test('J-PS-19 one type scale, and toolbar groups that never overlap', async ({ p
   await page.getByTestId('panel-toggle').click()
 })
 
+/**
+ * Waits until every colour transition the page is running has finished: a
+ * hover's ink fades in and out, so its colour is read once it has settled,
+ * not after a guessed time. Endless animations (a breathing dot) are left.
+ */
+const transitionsDone = (control: Locator) =>
+  control.evaluate((el) => {
+    // This file is typed for Node; the page's animations as far as they are used.
+    const running = (
+      el.ownerDocument as unknown as {
+        getAnimations(): { constructor: { name: string }; finished: Promise<unknown> }[]
+      }
+    ).getAnimations()
+    return Promise.all(
+      running
+        .filter((animation) => animation.constructor.name === 'CSSTransition')
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ).then(() => undefined)
+  })
+
 for (const scheme of ['light', 'dark'] as const)
   test(`J-PS-20 every control hovers a visible step, and no ring is cut (${scheme})`, async ({
     page,
@@ -370,10 +390,10 @@ for (const scheme of ['light', 'dark'] as const)
     const steps: Record<string, number> = {}
     const measure = async (name: string, control: Locator) => {
       await page.mouse.move(700, 895)
-      await page.waitForTimeout(120)
+      await transitionsDone(control)
       const rest = await paintOf(control)
       await control.hover()
-      await page.waitForTimeout(160)
+      await transitionsDone(control)
       steps[name] = toward * ((await paintOf(control)) - rest)
     }
     await openTopics(page, engine.origin)

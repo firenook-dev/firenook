@@ -253,7 +253,25 @@ test('J-TK-05 pause holds tasks; Run now sends one past the pause; resume drains
   const table = page.getByTestId('task-table')
   await expect(table.getByTestId('data-row')).toHaveCount(3)
   await expect(rowOf(table, 't-b').getByTestId('task-state')).toHaveText('pending · #2')
-  await page.waitForTimeout(1_500)
+  // One dispatcher serves every queue: a task of another queue enqueued
+  // after these has run to the end, so the dispatcher has had its turns,
+  // and the paused queue sent nothing.
+  const other = await registerQueue(engine, uniqueId('tk05b'))
+  expect((await enqueueOverPort(engine, other, { orderId: 'meanwhile' })).status).toBe(200)
+  await expect
+    .poll(async () => (await historyOf(engine, other)).map((row) => row.outcome), {
+      timeout: 15_000,
+    })
+    .toEqual(['succeeded'])
+  expect(
+    (
+      await consoleCall<PageView<unknown>>(
+        engine,
+        'GET',
+        `/tasks/tasks?queue=${enc(queue.key)}&limit=1`,
+      )
+    ).total,
+  ).toEqual({ count: 3, exact: true })
   await expect(table.getByTestId('data-row')).toHaveCount(3)
 
   // r on the cursor row asks first; Enter confirms.
