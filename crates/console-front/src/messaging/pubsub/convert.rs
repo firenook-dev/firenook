@@ -9,7 +9,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use firenook_functions_runtime::Monitor;
 use firenook_functions_runtime::monitor::{
-    FunctionKind, InvocationOutcomeClass, InvocationSummary,
+    FunctionKind, FunctionLogLevel, InvocationOutcomeClass, InvocationSummary, MonitorView,
 };
 use firenook_pubsub_front::broker::inspect::{
     BacklogRow, BacklogState, HistoryRow, MessageAtSubscription, MessageView, PayloadEncoding,
@@ -360,16 +360,31 @@ impl<'a> Join<'a> {
             };
         };
         let ids: Vec<&str> = event_ids.into_iter().collect();
-        monitor.snapshot(|view| Self {
-            functions: true,
-            invocations: ids
+        monitor.snapshot(|view| {
+            let mut invocations: HashMap<String, InvocationSummary> = ids
                 .iter()
                 .filter_map(|id| view.by_event_id(id).map(|found| ((*id).to_owned(), found)))
-                .collect(),
-            kept_pubsub: view.kept_after(FunctionKind::Pubsub),
-            kept_schedule: view.kept_after(FunctionKind::Schedule),
-            depth,
-            targets,
+                .collect();
+            let mut reads = ERROR_LINE_READS;
+            for invocation in invocations.values_mut() {
+                if reads == 0 {
+                    break;
+                }
+                if invocation.outcome_class == InvocationOutcomeClass::Failed
+                    && invocation.error.is_none()
+                {
+                    reads -= 1;
+                    invocation.error = logged_error(view, &invocation.id);
+                }
+            }
+            Self {
+                functions: true,
+                invocations,
+                kept_pubsub: view.kept_after(FunctionKind::Pubsub),
+                kept_schedule: view.kept_after(FunctionKind::Schedule),
+                depth,
+                targets,
+            }
         })
     }
 
@@ -457,6 +472,29 @@ impl<'a> Join<'a> {
         }
         marks
     }
+}
+
+/// Failed invocations without an error whose lines one join reads at most:
+/// each is a copy of that invocation's kept lines under compute's lock.
+const ERROR_LINE_READS: usize = 100;
+
+/// The first line an invocation logged at error level, for one that failed
+/// without a handler error: the SDK catches what an `onSchedule` handler
+/// throws, logs its message and answers 500 with no body, so this line is
+/// the only place the reason is.
+fn logged_error(view: &MonitorView<'_>, id: &str) -> Option<String> {
+    let progress = view.invocation_since(id, 0, u64::MAX)?;
+    progress
+        .lines
+        .iter()
+        .filter(|line| line.level == FunctionLogLevel::Error)
+        .find_map(|line| {
+            line.message
+                .lines()
+                .map(str::trim_end)
+                .find(|text| !text.is_empty())
+        })
+        .map(str::to_owned)
 }
 
 /// The event ids of a fanout, for [`Join::read`].
