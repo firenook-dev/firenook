@@ -925,14 +925,16 @@ impl ProjectState {
     /// `queryUsers`: every account after `start_token`, sorted by localId.
     ///
     /// The map is keyed by `localId`, so its order is already the sort; the
-    /// accounts are cloned once, in order, and never re-sorted.
+    /// accounts are cloned once, in order, and never re-sorted. A
+    /// descending answer is read forwards and turned round: im 15.1's
+    /// iterators lose entries when run backwards across a node.
     #[must_use]
     pub fn query_users(&self, order: QueryOrder, start_token: Option<&str>) -> Vec<UserRecord> {
-        let after = self.users_after(start_token);
-        match order {
-            QueryOrder::Asc => after.cloned().collect(),
-            QueryOrder::Desc => after.rev().cloned().collect(),
+        let mut users: Vec<UserRecord> = self.users_after(start_token).cloned().collect();
+        if order == QueryOrder::Desc {
+            users.reverse();
         }
+        users
     }
 
     /// One `batchGet` page: at most `max_results` accounts after
@@ -966,7 +968,7 @@ impl ProjectState {
     fn users_after<'a>(
         &'a self,
         start_token: Option<&'a str>,
-    ) -> impl DoubleEndedIterator<Item = &'a UserRecord> {
+    ) -> impl Iterator<Item = &'a UserRecord> {
         let lower = start_token.map_or(Bound::Unbounded, Bound::Excluded);
         self.users
             .range::<_, str>((lower, Bound::Unbounded))

@@ -812,62 +812,91 @@ fn compare(sort: UserSort, left: &Position, right: &Position) -> Ordering {
     }
 }
 
+/// The entries of an `im` ordered set from the largest down, strictly below
+/// `below` (from the top when `None`).
+///
+/// im 15.1's B-tree iterators lose entries when `next_back` steps back
+/// across a node (`iter().rev()` and `range(..).rev()` both skip whole
+/// runs once a set outgrows one node), while a fresh range's first
+/// `next_back` is right. So each step asks a fresh range below the entry
+/// it last gave: O(log n) a step, and every entry once, in order.
+fn descending<T: Ord + Clone>(set: &OrdSet<T>, below: Option<T>) -> impl Iterator<Item = &T> {
+    let first = match below {
+        None => set.get_max(),
+        Some(bound) => set
+            .range((Bound::Unbounded, Bound::Excluded(bound)))
+            .next_back(),
+    };
+    std::iter::successors(first, move |last| {
+        set.range((Bound::Unbounded, Bound::Excluded((*last).clone())))
+            .next_back()
+    })
+}
+
+/// The slots of a uid map from the largest uid down, strictly below
+/// `below` (from the top when `None`); see [`descending`] for why.
+fn descending_uids(
+    uids: &OrdMap<Arc<str>, u32>,
+    below: Option<Arc<str>>,
+) -> impl Iterator<Item = u32> + '_ {
+    let first = match below {
+        None => uids.get_max().map(|(uid, slot)| (uid, slot)),
+        Some(bound) => uids
+            .range::<_, str>((Bound::Unbounded, Bound::Excluded(&*bound)))
+            .next_back(),
+    };
+    std::iter::successors(first, move |(last, _)| {
+        uids.range::<_, str>((Bound::Unbounded, Bound::Excluded(&***last)))
+            .next_back()
+    })
+    .map(|(_, slot)| *slot)
+}
+
 /// Slots of one column in page order (`forward`) or its reverse, after (or
-/// before) `from`, or from the edge.
+/// before) `from`, or from the edge. Every walk downwards in key order goes
+/// through [`descending`], never an im iterator run backwards.
 fn walk_column<'a, K: Ord + Clone>(
     values: &'a OrdSet<(K, u32)>,
     nulls: &'a OrdSet<u32>,
-    descending: bool,
+    descending_values: bool,
     from: Option<(Option<K>, u32)>,
     forward: bool,
 ) -> Box<dyn Iterator<Item = u32> + 'a> {
     let slot = |entry: &(K, u32)| entry.1;
     let nulls_all = || nulls.iter().copied();
-    match (forward, from, descending) {
+    let down = |below: Option<(K, u32)>| descending(values, below).map(slot);
+    match (forward, from, descending_values) {
         (true, None, false) => Box::new(values.iter().map(slot).chain(nulls_all())),
-        (true, None, true) => Box::new(values.iter().rev().map(slot).chain(nulls_all())),
+        (true, None, true) => Box::new(down(None).chain(nulls_all())),
         (true, Some((Some(key), at)), false) => Box::new(
             values
                 .range((Bound::Excluded((key, at)), Bound::Unbounded))
                 .map(slot)
                 .chain(nulls_all()),
         ),
-        (true, Some((Some(key), at)), true) => Box::new(
-            values
-                .range((Bound::Unbounded, Bound::Excluded((key, at))))
-                .rev()
-                .map(slot)
-                .chain(nulls_all()),
-        ),
+        (true, Some((Some(key), at)), true) => Box::new(down(Some((key, at))).chain(nulls_all())),
         (true, Some((None, at)), _) => Box::new(
             nulls
                 .range((Bound::Excluded(at), Bound::Unbounded))
                 .copied(),
         ),
-        (false, None, false) => Box::new(nulls_all().rev().chain(values.iter().rev().map(slot))),
-        (false, None, true) => Box::new(nulls_all().rev().chain(values.iter().map(slot))),
-        (false, Some((Some(key), at)), false) => Box::new(
-            values
-                .range((Bound::Unbounded, Bound::Excluded((key, at))))
-                .rev()
-                .map(slot),
+        (false, None, false) => Box::new(descending(nulls, None).copied().chain(down(None))),
+        (false, None, true) => Box::new(
+            descending(nulls, None)
+                .copied()
+                .chain(values.iter().map(slot)),
         ),
+        (false, Some((Some(key), at)), false) => Box::new(down(Some((key, at)))),
         (false, Some((Some(key), at)), true) => Box::new(
             values
                 .range((Bound::Excluded((key, at)), Bound::Unbounded))
                 .map(slot),
         ),
-        (false, Some((None, at)), false) => Box::new(
-            nulls
-                .range((Bound::Unbounded, Bound::Excluded(at)))
-                .rev()
-                .copied()
-                .chain(values.iter().rev().map(slot)),
-        ),
+        (false, Some((None, at)), false) => {
+            Box::new(descending(nulls, Some(at)).copied().chain(down(None)))
+        }
         (false, Some((None, at)), true) => Box::new(
-            nulls
-                .range((Bound::Unbounded, Bound::Excluded(at)))
-                .rev()
+            descending(nulls, Some(at))
                 .copied()
                 .chain(values.iter().map(slot)),
         ),
@@ -1393,14 +1422,9 @@ impl IndexSnapshot {
                 let uids = &data.by_uid;
                 match (forward != descending, after) {
                     (true, None) => Box::new(uids.iter().map(slot)),
-                    (false, None) => Box::new(uids.iter().rev().map(slot)),
+                    (false, below) => Box::new(descending_uids(uids, below)),
                     (true, Some(uid)) => Box::new(
                         uids.range::<_, str>((Bound::Excluded(&*uid), Bound::Unbounded))
-                            .map(slot),
-                    ),
-                    (false, Some(uid)) => Box::new(
-                        uids.range::<_, str>((Bound::Unbounded, Bound::Excluded(&*uid)))
-                            .rev()
                             .map(slot),
                     ),
                 }

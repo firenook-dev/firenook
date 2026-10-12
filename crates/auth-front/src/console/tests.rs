@@ -705,6 +705,59 @@ fn every_sort_pages_both_ways_with_nulls_last_and_ties_by_slot() {
     }
 }
 
+/// Enough users that every ordered set spans many of im's B-tree nodes (64
+/// entries each), with long runs of ties: im 15.1 loses whole runs when its
+/// iterators step backwards across a node, so every downward walk — a
+/// descending order read down, an ascending one read up — must still give
+/// every user once, in order, at the table's page size.
+#[test]
+fn every_order_pages_through_a_large_index_without_losing_a_user() {
+    let runtime = test_runtime();
+    let mut random = Lcg::new(29);
+    let users: Vec<(String, UserRecord)> = (0..3_000)
+        .map(|index| {
+            // Runs of 23 accounts made in the same millisecond, as an import makes them.
+            let mut user = json!({ "createdAt": (1_000 + index / 23).to_string() });
+            if random.chance(80) {
+                user["lastLoginAt"] = json!((9_000 + random.below(40)).to_string());
+            }
+            if random.chance(70) {
+                user["email"] = json!(format!(
+                    "{}{index}@example.test",
+                    random.pick(&["ada", "bea", "cy"])
+                ));
+            }
+            if random.chance(60) {
+                user["displayName"] = json!(*random.pick(&["Ada", "Bea", "Cy"]));
+            }
+            if random.chance(40) {
+                user["phoneNumber"] = json!(format!("+1555{:07}", random.below(400)));
+            }
+            (format!("user-{index:04}"), record(&user))
+        })
+        .collect();
+    with_state(&runtime, None, |state| {
+        for (uid, user) in &users {
+            create(state, uid, &JsonValue::Object(user.clone()));
+        }
+    });
+    let view = view(&runtime, None);
+    for column in UserColumn::ALL {
+        for direction in [SortDirection::Asc, SortDirection::Desc] {
+            let order = UserSort { column, direction }.to_string();
+            let expected = expected_order(&users, column, direction);
+            let (down, up) = read_both_ways(&view, &UserFilter::default(), &order, 100, false);
+            assert_eq!(
+                down.len(),
+                users.len(),
+                "{order} downwards reaches every user"
+            );
+            assert_eq!(down, expected, "{order} downwards");
+            assert_eq!(up, expected, "{order} upwards");
+        }
+    }
+}
+
 #[test]
 fn cursors_continue_after_inserts_and_refuse_another_sort() {
     let runtime = test_runtime();

@@ -1016,10 +1016,22 @@ fn ranged_batch_get_pages_equal_the_clone_and_sort_answer() {
     let mut random = Lcg::new(17);
     for state_index in 0..200 {
         let mut project = state::ProjectState::default();
-        let users = random.below(40);
+        // Every 50th state is three levels of im's B-tree deep (past about
+        // 2,100 accounts), its ids made in order as an import makes them:
+        // the shape in which im's iterators lose entries when run backwards.
+        let large = state_index % 50 == 0;
+        let users = if large {
+            2_500 + random.below(1_500)
+        } else {
+            random.below(40)
+        };
         let mut ids = Vec::new();
-        for _ in 0..users {
-            let local_id = random_local_id(&mut random);
+        for index in 0..users {
+            let local_id = if large {
+                format!("sample-{index:05}")
+            } else {
+                random_local_id(&mut random)
+            };
             let mut props = UserRecord::new();
             if random.chance(50) {
                 props.insert(
