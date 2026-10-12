@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { checkFilter } from '@/lib/filter'
 import { LOG_FIELDS } from './fields'
 import { fromLegacyQuery, legacyItems } from './legacy'
+import { logsSearchSchema } from './search'
 
 /** The rewrite, checked to be a filter ours reads. */
 function rewritten(text: string): string | undefined {
@@ -56,5 +57,18 @@ describe('a Google Emulator UI query', () => {
     expect(rewritten('level="error" payload.orderId:"o_1" -burst')).toBe(
       'level:error payload.orderId:"o_1" -burst',
     )
+  })
+
+  it('is the only query read: an fn=, exec= or function= param is not a filter', () => {
+    const read = logsSearchSchema.parse({
+      fn: 'us-central1-hello',
+      exec: 'a1b2c3-4',
+      function: 'us-central1-hello',
+      q: 'level:error',
+    })
+    expect(Object.entries(read).filter(([, value]) => value !== undefined)).toEqual([
+      ['q', 'level:error'],
+    ])
+    expect(fromLegacyQuery('fn=us-central1-hello')).toBeUndefined()
   })
 })

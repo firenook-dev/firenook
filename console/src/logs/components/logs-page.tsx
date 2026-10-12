@@ -46,10 +46,15 @@ import { useConsoleProject } from '@/lib/project'
 import { useRouteSearch } from '@/lib/search-params'
 import { toast } from '@/lib/toasts'
 import { isProblemLine } from '@/observe/kinds'
-import { LEVEL_SERIES, bucketSentence, bucketSpan, levelBuckets } from '@/observe/level-bars'
+import {
+  LEVEL_SERIES,
+  bucketSentence,
+  bucketSpan,
+  bucketTotal,
+  levelBuckets,
+} from '@/observe/level-bars'
 import { type SourceToken, sourceTokenText } from '@/observe/source-chip'
 import { engineQuery } from '@/overview/api'
-import type { LogsSearch } from '@/routes/logs'
 import {
   type LogsView,
   LogsRequestError,
@@ -66,6 +71,7 @@ import { useLogsPalette } from '../palette'
 import { type SavedFilter, useLogsPrefs, useSavedFilters } from '../prefs'
 import { aroundWindow, bucketWindow } from '../range'
 import { type LogItem, itemKey } from '../rows'
+import type { LogsSearch } from '../search'
 import { useLogsShortcuts } from '../shortcuts'
 import { type ClearedAt, clearedKey, readCleared, useLogsUi, writeCleared } from '../store'
 import {
@@ -595,7 +601,16 @@ export function LogsPage() {
             kept={facets.data?.kept}
             onChange={setWindow}
           />
-          <div className="mx-2 flex min-w-0 flex-1 items-center">
+          <div
+            className="mx-2 flex min-w-0 flex-1 items-center"
+            // The lines the strip draws, for a check against the engine's histogram.
+            data-total={
+              histogramData
+                ? histogramData.buckets.reduce((sum, bucket) => sum + bucketTotal(bucket), 0)
+                : undefined
+            }
+            data-testid="logs-volume-total"
+          >
             {histogramData && (
               <MiniBars
                 buckets={buckets}

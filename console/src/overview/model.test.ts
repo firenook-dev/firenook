@@ -343,9 +343,14 @@ describe('recent problems', () => {
     expect(problemLink({ refs: [] }, status)).toBeUndefined()
   })
 
-  it('open nothing in Logs until Logs is built', () => {
-    expect(logsEntryLink('ab.1', status)).toBeNull()
-    expect(logsProblemsLink(status)).toBeNull()
+  it('open their line in Logs, and every problem, while Logs runs', () => {
+    expect(logsEntryLink('ab.1', status)).toEqual({ to: '/logs', search: { entry: 'ab.1' } })
+    expect(logsProblemsLink(status)).toEqual({ to: '/logs', search: { q: 'is:problem' } })
+    const absent = testStatus({
+      sections: [sectionEntry('firestore'), sectionEntry('logs', { state: 'absent' })],
+    })
+    expect(logsEntryLink('ab.1', absent)).toBeNull()
+    expect(logsProblemsLink(absent)).toBeNull()
   })
 
   it('send each card’s Connect to the snippet its app is written with', () => {

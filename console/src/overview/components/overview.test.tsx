@@ -162,8 +162,9 @@ describe('recent problems', () => {
     expect(screen.getByTestId('overview-problems-empty')).toHaveTextContent(
       'No errors, failures or denials since the engine started.',
     )
+    // With Logs built the bars are a control: a bar opens that minute's problems.
     expect(
-      screen.getByRole('img', { name: 'Warnings and errors per minute, last hour' }),
+      screen.getByRole('group', { name: 'Warnings and errors per minute, last hour' }),
     ).toBeInTheDocument()
   })
 
@@ -219,9 +220,15 @@ describe('recent problems', () => {
       '2 problems since the engine started',
     )
     expect(screen.queryByTestId('overview-live-notice')).not.toBeInTheDocument()
-    // Logs is not built yet: no row and no "Open logs" pretends to open it.
-    expect(screen.queryByTestId('overview-problem-open')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('overview-open-logs')).not.toBeInTheDocument()
+    // Each row opens its line in Logs; "Open logs" opens every problem.
+    const opens = screen.getAllByTestId('overview-problem-open')
+    expect(opens).toHaveLength(2)
+    expect(opens[0]).toHaveAttribute('href', expect.stringContaining('/logs?entry=e1.9'))
+    expect(opens[1]).toHaveAttribute('href', expect.stringContaining('/logs?entry=e1.8'))
+    expect(screen.getByTestId('overview-open-logs')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/logs?q=is%3Aproblem'),
+    )
   })
 })
 

@@ -114,8 +114,8 @@ describe('the Logs registry entry', () => {
     })
   })
 
-  it('stays behind its placeholder until its journeys pass', () => {
-    expect(logs.built).toBe(false)
+  it('is built: its journeys pass against a real engine (e2e/logs.spec.ts)', () => {
+    expect(logs.built).toBe(true)
     expect(logs.pages).toBeUndefined()
     expect(logs.projectScope).toBeUndefined()
   })

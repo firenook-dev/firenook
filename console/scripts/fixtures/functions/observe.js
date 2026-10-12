@@ -26,3 +26,7 @@ exports.debugs = onRequest((req, res) => {
 exports.onCartDeleted = onDocumentDeleted('carts/{id}', (event) => {
   logger.info('cart deleted', { id: event.params.id })
 })
+// Never answers, so the engine stops waiting after its one-second timeout
+// and logs the failure itself: an error line, two lines long, whatever the
+// engine knows about the invocation that printed it.
+exports.stalls = onRequest({ timeoutSeconds: 1 }, () => {})

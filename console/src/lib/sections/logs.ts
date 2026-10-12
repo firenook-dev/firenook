@@ -93,7 +93,7 @@ export const logs: ConsoleSection = {
   services: ['logging'],
   area: 'observe',
   icon: ScrollIcon,
-  built: false,
+  built: true,
   summary:
     "Every service's log in one stream: filters with counts, structured payloads, each function invocation as a group, and links into the section a line is about.",
   badges: ['logs.errors'],
