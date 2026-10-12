@@ -8,6 +8,7 @@ import './cards/components'
 import './cards/patterns'
 import './cards/console-requests'
 import './cards/outcome-chip'
+import './cards/log-line'
 import './styles.css'
 
 declare global {
