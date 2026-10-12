@@ -117,6 +117,16 @@ export function FilesWorkbench() {
     sending.map((item) => [item.name, item.size > 0 ? item.loaded / item.size : 0]),
   )
 
+  // A link that names the default bucket (an entity link, a pasted URL)
+  // lands before the buckets are known, so the route's middleware could not
+  // drop it: once they are, the address loses it, as defaults do.
+  const namesDefault =
+    files.search.bucket !== undefined && files.search.bucket === files.buckets.defaultBucket
+  const { update } = files
+  useEffect(() => {
+    if (namesDefault) update({ bucket: undefined }, { replace: true })
+  }, [namesDefault, update])
+
   // The ticks belong to one listing: another folder, filter, order or identity drops them.
   const selectionScope = `${files.bucket}|${files.prefix}|${files.flat}|${files.q}|${files.sort}|${files.search.as ?? ''}`
   useEffect(() => resetFileSelection(selectionScope), [selectionScope])

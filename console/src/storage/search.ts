@@ -9,7 +9,8 @@
 // carries only what makes the view different.
 
 import { z } from 'zod'
-import { useRouteSearch, zFlag } from '@/lib/search-params'
+import { useNavigate, useSearch } from '@tanstack/react-router'
+import { mergeSearch, zFlag } from '@/lib/search-params'
 import { normalizeFolder } from './paths'
 
 /** The columns a listing sorts by (`GET /storage/objects/meta` `sortable`). */
@@ -58,9 +59,28 @@ export type FilesSearch = z.infer<typeof filesSearch>
 /** What the address leaves out. */
 export const FILES_DEFAULTS = { tab: 'details', layout: 'list', sort: 'name:asc' } as const
 
-/** The Files page's search params and their patch-style updater. */
-export function useFilesSearch() {
-  return useRouteSearch<FilesSearch>('/storage', '/storage')
+/**
+ * The Files page's search params and their patch-style updater. Every view
+ * of the page is one route, so a change of view never asks the router to
+ * restore scroll positions: the router restores the list's offset from the
+ * view before, and a keyboard move whose scroll event had not been
+ * reported yet (Home with a file open, which also opens the first file)
+ * was thrown back to where the reader had been. The list keeps its own
+ * place, and a new listing starts at its top.
+ */
+export function useFilesSearch(): {
+  search: FilesSearch
+  update: (patch: Partial<FilesSearch>, options?: { replace?: boolean }) => void
+} {
+  const search = useSearch({ from: '/storage' })
+  const navigate = useNavigate({ from: '/storage' })
+  const update = (patch: Partial<FilesSearch>, options?: { replace?: boolean }) =>
+    void navigate({
+      search: (previous) => mergeSearch(previous, patch) as FilesSearch,
+      replace: options?.replace ?? false,
+      resetScroll: false,
+    })
+  return { search, update }
 }
 
 /**
