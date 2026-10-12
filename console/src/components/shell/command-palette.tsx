@@ -82,17 +82,25 @@ function useEngineSearch(text: string, enabled: boolean) {
   return { text: settled, results: wanted ? query.data : undefined, error: query.error }
 }
 
+/** One identity for a thing, whichever source names it (`PaletteItem.ref`, a search hit). */
+export function refId(ref: { kind: string; key: string }): string {
+  return `${ref.kind} ${ref.key}`
+}
+
 /**
  * ⌘K's engine groups: one per kind of hit, labelled by the target
  * section's `searchLabels`; hits of a section that is not built, or that
- * open nowhere, are dropped; each section's last group ends with "Search
- * <section> for “text”" where the section has a filter to search with.
+ * open nowhere, are dropped, and so are hits the page on screen already
+ * offers (`offered`, by `refId`); each section's last group ends with
+ * "Search <section> for “text”" where the section has a filter to search
+ * with, even when the page offered every hit.
  */
 export function engineGroups(
   results: SearchResults | null | undefined,
   text: string,
   status: ConsoleStatus | undefined,
   go: (link: SectionLink) => () => void,
+  offered: ReadonlySet<string> = new Set(),
 ): PaletteGroup[] {
   if (!results) return []
   const groups: PaletteGroup[] = []
@@ -100,9 +108,12 @@ export function engineGroups(
     const section = sectionById(group.section)
     if (!section?.built) continue
     const byKind = new Map<string, PaletteItem[]>()
+    let found = 0
     for (const hit of group.hits) {
       const link = linkTo(hit, status)
       if (!link) continue
+      found += 1
+      if (offered.has(refId(hit))) continue
       const items = byKind.get(hit.kind) ?? []
       items.push({
         id: `hit:${hit.kind}:${hit.key}`,
@@ -113,31 +124,44 @@ export function engineGroups(
       })
       byKind.set(hit.kind, items)
     }
+    if (found === 0) continue
+    const searchLink =
+      section.searchLink === null
+        ? undefined
+        : (section.searchLink?.(text) ?? { to: section.to, search: { q: text } })
+    const searchRow: PaletteItem | undefined = searchLink && {
+      id: `search:${section.id}`,
+      title: `Search ${section.label} for “${text}”`,
+      icon: <MagnifyingGlassIcon size={16} />,
+      run: go(searchLink),
+    }
     const kinds = [...byKind]
+    // Every hit was on the page already: the search row still offers the rest.
+    if (kinds.length === 0 && searchRow) groups.push({ label: section.label, items: [searchRow] })
     kinds.forEach(([kind, items], index) => {
       const last = index === kinds.length - 1
-      const searchLink =
-        section.searchLink === null
-          ? undefined
-          : (section.searchLink?.(text) ?? { to: section.to, search: { q: text } })
       groups.push({
         label: section.searchLabels?.[kind] ?? section.label,
-        items:
-          last && searchLink
-            ? [
-                ...items,
-                {
-                  id: `search:${section.id}`,
-                  title: `Search ${section.label} for “${text}”`,
-                  icon: <MagnifyingGlassIcon size={16} />,
-                  run: go(searchLink),
-                },
-              ]
-            : items,
+        items: last && searchRow ? [...items, searchRow] : items,
       })
     })
   }
   return groups
+}
+
+/**
+ * One group per label, in the order labels first appear: the page's
+ * "Collections" and the engine's are one list, and no two groups share a
+ * name (or a React key).
+ */
+export function mergeGroups(groups: readonly PaletteGroup[]): PaletteGroup[] {
+  const byLabel = new Map<string, PaletteGroup>()
+  for (const group of groups) {
+    const known = byLabel.get(group.label)
+    if (known) known.items = [...known.items, ...group.items]
+    else byLabel.set(group.label, { label: group.label, items: group.items })
+  }
+  return [...byLabel.values()].filter((group) => group.items.length > 0)
 }
 
 export function CommandPalette() {
@@ -333,19 +357,24 @@ export function CommandPalette() {
   const groups = useMemo<PaletteGroup[]>(() => {
     const contributed = Object.values(providers).flatMap((provider) => provider(search))
     const filter = (items: PaletteItem[]) => items.filter((item) => matchesQuery(item, search))
+    const offered = new Set(
+      contributed.flatMap((group) =>
+        group.items.flatMap((item) => (item.ref ? [refId(item.ref)] : [])),
+      ),
+    )
     // What is typed has moved on since the engine answered: its hits wait.
     const found =
       engine.text === search.trim()
-        ? engineGroups(engine.results, engine.text, status.data, go)
+        ? engineGroups(engine.results, engine.text, status.data, go, offered)
         : []
-    return [
+    return mergeGroups([
       ...contributed,
       ...found,
       { label: 'Sections', items: filter(sections) },
       { label: 'Actions', items: filter(actions) },
       { label: 'Suite', items: filter(suite) },
       { label: 'Layout', items: filter(layout) },
-    ].filter((group) => group.items.length > 0)
+    ])
   }, [
     providers,
     search,
