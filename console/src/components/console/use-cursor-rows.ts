@@ -15,8 +15,10 @@
 // for 120 ms and read again in one `:batchGet` with the window's filter,
 // order and page starts. A key whose row is loaded is patched where it is; a
 // key the engine says is gone (deleted, or no longer matching) leaves; a new
-// key the engine places in a loaded page refetches that page alone; a new key
-// outside the window is left for the scroll to find. More than 1,000 keys in
+// key the engine places in a loaded page refetches that page alone (with the
+// rows just above the next loaded page, when one follows, so rows pushed past
+// the page size stay in the window); a new key outside the window is left for
+// the scroll to find. More than 1,000 keys in
 // one window, a `reset`, an `end` or an engine restart start again from page
 // one. Nothing is patched while a page is being fetched — a page that left
 // before the change and lands after it would undo the patch — so the batch
@@ -331,14 +333,49 @@ export function useCursorRows<T>(
     }
   }
 
-  /** Reads one loaded page again and puts it in its place; its new rows flash. */
+  /**
+   * Reads one loaded page again and puts it in its place; its new rows
+   * flash. A page is the rows from its own start up to where the next
+   * loaded page starts, which a page read from its start alone may not
+   * reach: rows created in it push its last rows past the page size, and
+   * those are in no other loaded page. So when another page follows, the
+   * rows just above that page are read too (`before` its start) and the two
+   * reads joined; rows past the next page's start (some were deleted) are
+   * left to it. A range too long for both reads to meet starts the window
+   * again from page one.
+   */
   const refetchPage = async (index: number, signal: AbortSignal) => {
     const { options: opts } = latest.current
     const before = queryClient.getQueryData<CursorPages<T>>(opts.queryKey)
     const param = before?.pageParams[index]
     if (!before || param === undefined) return
-    const page = await opts.fetchPage(param, signal)
+    const head = await opts.fetchPage(param, signal)
     if (signal.aborted) return
+    const following = before.pages[index + 1]
+    let page = head
+    if (following && following.items.length > 0) {
+      const keys = head.items.map(opts.rowKey)
+      const first = following.items[0] as T
+      const into = keys.indexOf(opts.rowKey(first))
+      if (into !== -1) page = { ...head, items: head.items.slice(0, into) }
+      else if (head.nextCursor !== null && following.prevCursor !== null) {
+        const tail = await opts.fetchPage({ before: following.prevCursor }, signal)
+        if (signal.aborted) return
+        const last = keys.at(-1)
+        const join = tail.items.findIndex((row) => opts.rowKey(row) === last)
+        if (join === -1 && tail.prevCursor !== null && keys.length > 0) {
+          reset()
+          return
+        }
+        const seen = new Set(keys)
+        page = {
+          ...head,
+          items: [...head.items, ...tail.items.filter((row) => !seen.has(opts.rowKey(row)))],
+        }
+      }
+      // The page still ends where the next one starts.
+      page = { ...page, nextCursor: before.pages[index]?.nextCursor ?? page.nextCursor }
+    }
     const now = queryClient.getQueryData<CursorPages<T>>(opts.queryKey)
     if (!now || paramKey(now.pageParams[index]) !== paramKey(param)) return
     const known = new Set(now.pages[index]?.items.map(opts.rowKey) ?? [])

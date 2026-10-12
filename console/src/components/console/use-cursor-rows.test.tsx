@@ -187,7 +187,7 @@ function fakeEngine(count: number, size = 100) {
   return { all, fetchPage, batchGet }
 }
 
-function mount(engine: ReturnType<typeof fakeEngine>) {
+function mount(engine: Pick<ReturnType<typeof fakeEngine>, 'fetchPage' | 'batchGet'>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -286,4 +286,105 @@ describe('useCursorRows', () => {
     expect(engine.batchGet).not.toHaveBeenCalled()
     expect(engine.fetchPage.mock.calls.slice(calls).map((call) => call[0])).toEqual([{}])
   })
+
+  it('keeps every row of a page whose created rows push others past the page size', async () => {
+    const engine = keyedEngine(250)
+    const { result } = mount(engine)
+    await waitFor(() => expect(result.current.rows).toHaveLength(100))
+    act(() => result.current.loadMore())
+    await waitFor(() => expect(result.current.rows).toHaveLength(200))
+    act(() => result.current.loadMore())
+    await waitFor(() => expect(result.current.rows).toHaveLength(250))
+    const fetched = engine.fetchPage.mock.calls.length
+    // Forty-one rows that sort into the first page.
+    const created = Array.from(
+      { length: 41 },
+      (_, index) => `r00000-${String(index).padStart(2, '0')}`,
+    )
+    engine.add(created)
+    act(() => result.current.applyKeys(created))
+    await waitFor(() => expect(result.current.rows).toHaveLength(291))
+    const ids = result.current.rows.map(rowKey)
+    expect(new Set(ids).size).toBe(291)
+    expect(ids).toEqual(engine.ids())
+    // The first page from its start, and the rows just above the second.
+    expect(engine.fetchPage.mock.calls.slice(fetched).map((call) => call[0])).toEqual([
+      {},
+      { before: 'r00100' },
+    ])
+    expect(result.current.hasMore).toBe(false)
+    expect(result.current.flashes.get('r00000-40')).toBe('created')
+  })
+
+  it('leaves to the next page the rows a page read again reaches into', async () => {
+    const engine = keyedEngine(250)
+    const { result } = mount(engine)
+    await waitFor(() => expect(result.current.rows).toHaveLength(100))
+    act(() => result.current.loadMore())
+    await waitFor(() => expect(result.current.rows).toHaveLength(200))
+    // Three rows of the first page go and one arrives, in one batch.
+    engine.remove(['r00010', 'r00011', 'r00012'])
+    engine.add(['r00050-a'])
+    act(() => result.current.applyKeys(['r00010', 'r00011', 'r00012', 'r00050-a']))
+    await waitFor(() => expect(result.current.rows.some((row) => row.id === 'r00050-a')).toBe(true))
+    const ids = result.current.rows.map(rowKey)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toEqual(engine.ids().slice(0, ids.length))
+    expect(ids).toHaveLength(198)
+  })
 })
+
+/** One page of a sorted list, its cursors the keys at its edges. */
+const pageOf = (rows: Row[], from: number, to: number): Page<Row> => {
+  const items = rows.slice(from, to)
+  return {
+    items,
+    nextCursor: to < rows.length ? (items.at(-1)?.id ?? null) : null,
+    prevCursor: from > 0 ? (items[0]?.id ?? null) : null,
+    total: { count: rows.length, exact: true },
+    scanned: null,
+  }
+}
+
+/** An engine list in memory with key cursors, as the engines write them: a page after a key or before one. */
+function keyedEngine(count: number, size = 100) {
+  let all: Row[] = Array.from({ length: count }, (_, index) => ({
+    id: `r${String(index).padStart(5, '0')}`,
+    value: index,
+  }))
+  const sorted = () => all.toSorted((left, right) => (left.id < right.id ? -1 : 1))
+  const fetchPage = vi.fn(async (param: CursorPageParam): Promise<Page<Row>> => {
+    const rows = sorted()
+    if (param.before !== undefined) {
+      const end = rows.filter((row) => row.id < (param.before as string)).length
+      return pageOf(rows, Math.max(0, end - size), end)
+    }
+    const start =
+      param.cursor === undefined
+        ? 0
+        : rows.filter((row) => row.id <= (param.cursor as string)).length
+    return pageOf(rows, start, start + size)
+  })
+  const batchGet = vi.fn(async (request: BatchGetRequest): Promise<BatchGetResponse<Row>> => ({
+    items: request.keys.map((key) => {
+      const row = all.find((candidate) => candidate.id === key) ?? null
+      let at: number | null = null
+      if (row && (request.windowEnd === undefined || key <= request.windowEnd))
+        request.pageStarts.forEach((start, position) => {
+          if (start === null || key >= start) at = position
+        })
+      return { key, row, page: row ? at : null }
+    }),
+  }))
+  return {
+    fetchPage,
+    batchGet,
+    add: (ids: readonly string[]) => {
+      all = [...all, ...ids.map((id) => ({ id, value: -1 }))]
+    },
+    remove: (ids: readonly string[]) => {
+      all = all.filter((row) => !ids.includes(row.id))
+    },
+    ids: () => sorted().map(rowKey),
+  }
+}
