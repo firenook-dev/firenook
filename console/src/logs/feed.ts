@@ -265,35 +265,47 @@ export class LogFeed {
   }
 
   private rowsOf(entries: readonly LogEntry[], cleared: ClearedAt | undefined) {
-    const kept = cleared
-      ? entries.filter((entry) => isAfter(entry.cursor, cleared.cursor))
-      : entries
+    const kept = this.keptOf(entries, cleared)
     return { rows: groupLines(kept).rows, crossed: kept.length < entries.length }
   }
 
+  /** The lines a cleared view still shows: those logged after it was cleared. */
+  private keptOf(entries: readonly LogEntry[], cleared: ClearedAt | undefined) {
+    return cleared ? entries.filter((entry) => isAfter(entry.cursor, cleared.cursor)) : entries
+  }
+
   private showTail(page: LogPage, request: FeedOpen) {
-    const { rows, crossed } = this.rowsOf(page.items, request.cleared)
+    const kept = this.keptOf(page.items, request.cleared)
+    const crossed = kept.length < page.items.length
+    let shown = 0
     let focus: LogFeedState['focus']
     this.unfrozen(() => {
       // Above the newest page, when what arrived while paused reaches further back than it.
       if (request.missed !== undefined && page.older !== null) this.pausedMarker(request.missed)
-      if (request.since !== undefined) {
-        const split = rows.findIndex(
-          (row) => row.kind === 'line' && isAfter(row.entry.cursor, request.since ?? ''),
-        )
-        const at = split === -1 ? rows.length : split
-        this.store.push(rows.slice(0, at))
-        this.store.marker({ kind: 'marker', key: 'since', text: 'New since your last visit' })
-        this.store.push(rows.slice(at))
-        const after = rows.length - at
-        focus = { key: '\u0000marker:since', align: 'start', pause: after > SINCE_IN_VIEW }
-      } else this.store.push(rows)
+      const since = request.since
+      if (since === undefined) {
+        const rows = groupLines(kept).rows
+        shown = rows.length
+        this.store.push(rows)
+        return
+      }
+      // Grouped on each side of the marker: a line repeated across it is
+      // two rows, so the marker sits right above the first new line.
+      const split = kept.findIndex((entry) => isAfter(entry.cursor, since))
+      const at = split === -1 ? kept.length : split
+      const before = groupLines(kept.slice(0, at)).rows
+      const after = groupLines(kept.slice(at)).rows
+      shown = before.length + after.length
+      this.store.push(before)
+      this.store.marker({ kind: 'marker', key: 'since', text: 'New since your last visit' })
+      this.store.push(after)
+      focus = { key: '\u0000marker:since', align: 'start', pause: after.length > SINCE_IN_VIEW }
     })
     const edge = request.cleared && (crossed || page.older === null) ? 'cleared' : undefined
     if (edge) this.store.prepend([edgeItem(edge)])
     // Where the log begins says something only above lines: with none, the
     // page says why nothing matches instead.
-    else if (page.older === null && rows.length > 0) this.store.prepend([edgeItem('start')])
+    else if (page.older === null && shown > 0) this.store.prepend([edgeItem('start')])
     this.cursor = page.tail
     this.set({
       phase: 'ready',
@@ -380,10 +392,7 @@ export class LogFeed {
   }
 
   private ingest(entries: readonly LogEntry[]) {
-    const cleared = this.snapshot.cleared
-    const lines = cleared
-      ? entries.filter((entry) => isAfter(entry.cursor, cleared.cursor))
-      : entries
+    const lines = this.keptOf(entries, this.snapshot.cleared)
     if (lines.length === 0) return
     this.noteRate(lines.length)
     if (this.paused) {

@@ -352,6 +352,22 @@ describe('the Logs feed', () => {
     expect(feed.getState().focus).toMatchObject({ key: '\u0000marker:since', pause: false })
   })
 
+  it('never groups a line repeated across "New since your last visit"', async () => {
+    const again = (seq: number) => entry(seq, { level: 'error', message: 'timed out' })
+    const { feed, live } = setup(() => page([entry(1), again(2), again(3)], { older: 'x' }))
+    feed.open({ ...OPEN, since: `${EPOCH}.2` })
+    await settle()
+    expect(rows(feed)).toEqual([
+      'line 1',
+      'timed out',
+      'marker New since your last visit',
+      'timed out',
+    ])
+    // Lines that arrive after it still group with the new side only.
+    live.send([again(4)])
+    expect(rows(feed).slice(-2)).toEqual(['marker New since your last visit', '×2 timed out'])
+  })
+
   it('keeps a cleared view: older lines are left out, and the edge says so', async () => {
     const { feed, live } = setup(() => page(range(1, 5), { older: 'x' }))
     feed.open({ ...OPEN, cleared: { cursor: `${EPOCH}.3`, at: '2026-10-12T04:00:00Z' } })
