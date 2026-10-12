@@ -129,4 +129,30 @@ describe("another section's outcome", () => {
     expect(drawn('auth')).toMatchObject({ word: 'auth/user-not-found', mono: true })
     expect(drawn('skipped')).toMatchObject({ word: 'skipped', tone: 'neutral' })
   })
+
+  it('keeps its width beside a truncating neighbour, unless it is let shrink', () => {
+    render(
+      <>
+        <OutcomeChip word="ok" tone="success" mono detail="ok" testId="fixed" />
+        <OutcomeChip
+          word="BLOCKING_FUNCTION_ERROR_RESPONSE"
+          tone="danger"
+          mono
+          shrink
+          detail="BLOCKING_FUNCTION_ERROR_RESPONSE · auth/internal-error"
+          testId="shrinks"
+        />
+      </>,
+    )
+    const fixed = screen.getByTestId('fixed')
+    expect(fixed.className.split(' ')).toContain('shrink-0')
+    expect(fixed.parentElement?.className.split(' ')).toContain('shrink-0')
+    const shrinks = screen.getByTestId('shrinks')
+    expect(shrinks.className.split(' ')).toEqual(expect.arrayContaining(['min-w-0', 'shrink']))
+    expect(shrinks.parentElement?.className.split(' ')).toEqual(
+      expect.arrayContaining(['min-w-0', 'shrink']),
+    )
+    // The whole word is still there, for the ellipsis and the tooltip.
+    expect(shrinks.textContent).toBe('BLOCKING_FUNCTION_ERROR_RESPONSE')
+  })
 })

@@ -1,7 +1,9 @@
 // A status as a dot and a word, the vocabulary every list shares: allowed or
 // denied, delivered or failed, running or stopped. 12 px, the word in the
 // tone's text colour except for success and neutral, which stay quiet so
-// the eye goes to what needs it.
+// the eye goes to what needs it. It keeps its width unless the caller lets
+// it shrink (`className="min-w-0 shrink"`): the word then ends in an
+// ellipsis rather than being cut mid-letter.
 
 import { cn } from '@cloudflare/kumo'
 
@@ -59,7 +61,9 @@ export function StatusDot({
         )}
         <span className={cn('relative inline-flex size-1.5 rounded-full', DOT[tone])} />
       </span>
-      {label}
+      {/* The word ends in an ellipsis when a caller lets the dot shrink
+          (`min-w-0 shrink`); the dot itself never does. */}
+      <span className="min-w-0 truncate">{label}</span>
     </span>
   )
 }

@@ -28,4 +28,22 @@ describe('a status dot', () => {
     render(<StatusDot tone="success" label="Done" testId="done" />)
     expect(screen.getByTestId('done').querySelector('[data-part="pulse"]')).toBeNull()
   })
+
+  it('keeps its width, and ends its word in an ellipsis only when let shrink', () => {
+    render(<StatusDot tone="danger" label="INVALID_LOGIN_CREDENTIALS" testId="fixed" />)
+    const fixed = screen.getByTestId('fixed')
+    expect(fixed.className).toContain('shrink-0')
+    expect(screen.getByText('INVALID_LOGIN_CREDENTIALS').className).toContain('truncate')
+    render(
+      <StatusDot
+        tone="danger"
+        label="BLOCKING_FUNCTION_ERROR_RESPONSE"
+        className="min-w-0 shrink"
+        testId="shrinks"
+      />,
+    )
+    const shrinks = screen.getByTestId('shrinks')
+    expect(shrinks.className).toContain('min-w-0')
+    expect(shrinks.className.split(' ')).not.toContain('shrink-0')
+  })
 })

@@ -112,6 +112,8 @@ interface InvocationProps {
   startedAt?: string | undefined
   /** One sentence for the tooltip: the reason behind the word. */
   detail?: string | undefined
+  /** May give way in a tight row: the word ends in an ellipsis (put the whole of it in `detail`). */
+  shrink?: boolean | undefined
   testId?: string | undefined
 }
 
@@ -124,6 +126,8 @@ interface PlainProps {
   /** It is still on its way (running, delivering): the dot breathes. */
   pulse?: boolean | undefined
   detail?: string | undefined
+  /** May give way in a tight row: the word ends in an ellipsis (put the whole of it in `detail`). */
+  shrink?: boolean | undefined
   testId?: string | undefined
 }
 
@@ -140,12 +144,16 @@ export function OutcomeChip(props: OutcomeChipProps) {
     ? invocationChip(props)
     : { word: props.word, tone: props.tone, mono: props.mono ?? false }
   const pulse = !isInvocation(props) && props.pulse === true
+  const shrink = props.shrink === true
+  const className = [chip.mono ? 'font-mono' : '', shrink ? 'min-w-0 shrink' : '']
+    .filter(Boolean)
+    .join(' ')
   const dot = (
     <StatusDot
       tone={chip.tone}
       label={chip.word}
       pulse={pulse}
-      {...(chip.mono ? { className: 'font-mono' } : {})}
+      {...(className ? { className } : {})}
       {...(props.testId === undefined ? {} : { testId: props.testId })}
     />
   )
@@ -153,6 +161,7 @@ export function OutcomeChip(props: OutcomeChipProps) {
     <WithDetail
       detail={props.detail}
       outcome={isInvocation(props) ? props.outcomeClass : undefined}
+      shrink={shrink}
     >
       {dot}
     </WithDetail>
@@ -202,14 +211,20 @@ function RunningChip({
 function WithDetail({
   detail,
   outcome,
+  shrink = false,
   children,
 }: {
   detail: string | undefined
   outcome: OutcomeClass | undefined
+  /** Whether the chip may give way to its row; otherwise it keeps its width beside a truncating sibling. */
+  shrink?: boolean
   children: ReactNode
 }) {
   const marked = (
-    <span className="inline-flex min-w-0 items-center" data-outcome={outcome}>
+    <span
+      className={`inline-flex items-center ${shrink ? 'min-w-0 shrink' : 'shrink-0'}`}
+      data-outcome={outcome}
+    >
       {children}
     </span>
   )
