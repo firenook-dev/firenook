@@ -79,6 +79,8 @@ jobs:
       - name: Install Chromium for Playwright
         working-directory: console
         run: npx playwright install --with-deps chromium
+      - name: Install the pinned Functions SDK the journeys' Functions fixture links in
+        run: npm run e2e:sdk --prefix console
       - name: Run the console browser journey against the real engine
         working-directory: console
         run: npm run test:e2e

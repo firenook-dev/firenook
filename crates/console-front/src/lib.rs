@@ -68,8 +68,7 @@ pub use explain::{
 };
 pub use filter::FieldSpecInfo;
 pub use firestore::{
-    ChangeBatch, ChangeFeed, ChangeHello, ChangeKind, ChangedCollection, DocumentChange,
-    FirestoreConsole,
+    ChangeBatch, ChangeFeed, ChangeKind, ChangedCollection, DocumentChange, FirestoreConsole,
 };
 pub use foreign::{ForeignProject, ForeignProjects};
 pub use guard::{
@@ -759,7 +758,6 @@ mod tests {
     pub(crate) fn export_all_bindings(config: &ts_rs::Config) {
         ConsoleStatus::export_all(config).expect("TypeScript bindings written");
         ChangeBatch::export_all(config).expect("TypeScript bindings written");
-        ChangeHello::export_all(config).expect("TypeScript bindings written");
         SchemaSnapshot::export_all(config).expect("TypeScript bindings written");
         SubcollectionsSnapshot::export_all(config).expect("TypeScript bindings written");
         DatabaseList::export_all(config).expect("TypeScript bindings written");

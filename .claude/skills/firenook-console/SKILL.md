@@ -30,6 +30,15 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 3. Ephemeral UI state: `src/lib/store.ts` (Zustand): palette, socket status,
    selection sets. Layout choices that should survive a reload live in
    `src/lib/layout.ts` (localStorage per browser).
+4. Mutable things outside React (a feed's ring, a request history) reach a
+   component through `useSyncExternalStore` with an **immutable snapshot**
+   (`FeedStore.snapshot()`, one object per change), never by calling their
+   methods while rendering. The React compiler compiles every component and
+   hook, in the build and in Vitest alike, and keeps a call's answer for as
+   long as its arguments are the same objects: `store.size()` read during a
+   render stays at its first answer, because the store is always the same
+   store. A function that must read such an object while it renders opts
+   out with `'use no memo'` and says why (`FeedList`, `useFeedPending`).
 
 ## The shell (`src/components/shell/`)
 
@@ -137,12 +146,543 @@ holds, with no deadline of its own, so one connection can hold the whole
 suite: the engine prints that it is stopping and never exits, the ports stay
 taken, and the launcher cannot restart it. Two rules keep that from
 happening. A handler that holds a response open ends it on the signal — the
-change feed does this with `take_until`, and so do the logging and Requests
+live hub does this with `take_until`, and so do the logging and Requests
 sockets; and `serve_until_shutdown` gives the drain `DRAIN_GRACE` and then
 closes whatever is still connected, which is what catches a client that
 stopped partway through a request. Add a streaming endpoint and it needs the
 first rule; the second is already there for everything. `transport_tests.rs`
 holds the reproduction beside the fix for both the HTTP and the gRPC side.
+
+## Building a section
+
+Every section after Firestore is built on one foundation: one registry file,
+one gate, one page anatomy, one live channel, one list contract, one kit.
+This chapter is that contract. The tables in it are written once, here; a
+section that needs a row that is not in one amends the table first (a
+foundation follow-up), never binds, names or emits around it.
+
+### Where things go
+
+| Section id (route `/<id>`) | Label | Area | Stream | Engine (`crates/console-front/src/`) | Client (`console/src/`) |
+| --- | --- | --- | --- | --- | --- |
+| `firestore` | Firestore | data | (built) | `firestore.rs`, `rules.rs`, … (flat) | `firestore/` |
+| `auth` | Authentication | data | auth | `auth/` | `auth/` |
+| `storage` | Storage | data | storage | `storage/` | `storage/` |
+| `functions` | Functions | compute | compute | `compute/` | `functions/` |
+| `extensions` | Extensions | compute | compute | `compute/` | `extensions/` |
+| `eventarc` | Eventarc | messaging | compute | `compute/` | `eventarc/` |
+| `pubsub` | Pub/Sub | messaging | messaging | `messaging/` | `pubsub/` |
+| `tasks` | Cloud Tasks | messaging | messaging | `messaging/` | `tasks/` |
+| `logs` | Logs | observe | observe | `observe/` | `logs/` |
+| — (`/`) | Overview | — | observe | `observe/` | `overview/` |
+
+- **Engine: one directory per stream** (`src/auth/mod.rs` plus files inside
+  it). `lib.rs` already declares the five `mod` lines, so a stream never
+  edits it; a flat `src/auth.rs` would. The suite side is
+  `crates/suite-runtime/src/console_wiring/<stream>.rs`, whose lifecycle
+  hooks (`HookContext`) are already called at their sites.
+- **Client: one directory per section id**, the route's first segment.
+  Code two sections of one stream share lives in `src/compute/`,
+  `src/messaging/` or `src/observe/`, never in a sibling section's
+  directory. Generated types go under `api/generated/<stream>/`
+  (`#[ts(export_to = "<stream>/")]`, a service-family name such as
+  `AuthUserRow`; `generated_names.rs` fails on a name exported twice).
+- **Shared code lives only in `src/lib/`, `src/components/console/` and
+  `src/components/kit/`**, owned by the foundation. Need a change there? Ask
+  for it; never copy the piece into a section.
+- The id is one string everywhere: route segment, `ConsoleStatus.sections[].id`,
+  registry file name, first element of every query key (Firestore keeps
+  `'fs'`), topic prefix (`auth.users`), badge prefix (`auth.inbox`), entity
+  kind prefix (`auth.user`) and API prefix (`/console/api/v1/auth/…`).
+- Routes: first page `src/routes/<id>.tsx`; sibling pages
+  `src/routes/<id>_.<page>.tsx` (route id `'/<id>_/<page>'`, path
+  `/<id>/<page>`); an entity is a search param, never a nested route.
+
+### The registry (`src/lib/sections/<id>.ts`)
+
+One file per section, assembled by `lib/services.ts` in the order of
+`lib/section-order.json` (the engine reads the same file). It is in the first
+route, so it holds icons, types and pure string helpers only — never a
+component import beyond `shellMount`'s lazy one.
+
+- `built` — `false` keeps the route's honest `SectionPlaceholder` until the
+  section's journeys pass. Never flip it before.
+- `pages` (sub-items, each with its own `badges`), `badges` (ids from the
+  badge table), `actions` (⌘K rows; `?new=` and `?dialog=` open dialogs).
+- `routes` — `kind → (key) => SectionLink`: serves engine search hits and
+  every `EntityRef` another section's payload carries (`linkTo(ref)`,
+  `useLinkTo`). Keys split at the first `|` (the first three for
+  `tasks.task`). `searchLabels` names ⌘K's groups.
+- `searchLink` — where "Search <section> for “text”" goes (absent: `?q=`;
+  `null`: no such row, as for Firestore, whose `q` is an SDK chain).
+- `badgeLink` — where the nav item leads while a counter badge is up
+  (`seen.cursor` opens at what is new). `shellMount` — a lazy component the
+  shell mounts while the section is ready (a background watcher, a beacon).
+- `projectScope` — the section's API and topics take `project`, so
+  `?project=` (an app writing to another project id) can show that data.
+  `useConsoleProject()` reads it.
+
+### The gate (`components/console/section-gate.tsx`)
+
+Every section route renders `SectionFrame section="<id>"`: the shell banners,
+then `SectionGate`, which reads `ConsoleStatus.sections`:
+
+- **absent** → `ServiceNotRunning` with the engine's `detail` and `fixes`
+  (the firebase.json lines, `firenook init --adopt`, the developer's own
+  command line reprinted with the name added), each a copyable `CodeBlock`;
+- **starting** → `ServiceStarting` with what it waits for; the page fills in
+  by itself when the `shell` topic says ready (no reload);
+- **ready** → the page, and the section's and the open page's badges are
+  marked seen while it is mounted and visible.
+
+A feature that needs another section says so with `RequiresNotice`
+(absent: why and How to start it; starting: works as soon as it is up).
+Never present a section, or a feature of one, as working before its
+journeys pass.
+
+### Page anatomy
+
+```
+SectionFrame → SectionPage (h-full flex-col overflow-hidden; sr-only h1)
+├── SectionPanel (optional; portal into the shell's 264 px column)
+│   ├── PanelHeader: PanelToggle(where="panel") · ScopeSelect
+│   ├── PanelFilter
+│   └── PanelTree (virtualized; no footer, ever)
+├── SectionToolbar
+│   ├── ToolbarRow (row one): PanelToggle(where="toolbar") · scope/path field
+│   │     │ ToolbarDivider │ LiveNotice · identity │ ToolbarDivider │ primary action
+│   └── ToolbarRow variant="line" (row two): FilterField · MatchCount · row actions · PauseButton (feeds)
+│         └── SelectionBar laid over row two while rows are ticked (never swapped in)
+├── SectionBanner* / RequiresNotice (only when true, one line each)
+└── SectionBody (relative flex min-h-0 flex-1)
+    ├── DataTable | FeedList | editor (flex-1) └── TableFooter
+    └── Inspector (absolute below xl, in the flow from xl; width per widthKey)
+```
+
+| Piece | Classes (the kit applies them; never re-derive) |
+| --- | --- |
+| Row one | `flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3` (38.5 px at the 14 px root, Firestore's) |
+| Row two | outer `grid shrink-0 border-b border-kumo-line bg-kumo-base`, inner `box-content flex min-h-8 items-center gap-2 overflow-x-auto px-3 py-1.5` |
+| Field | `flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus hover:not-focus-within:ink`; `ring ring-kumo-danger` at rest when invalid |
+| Divider | `mx-1.5 h-5 w-px shrink-0 bg-kumo-line` |
+
+**The inspector** (`Inspector`, `InspectorTitle`, `InspectorSection`,
+`InspectorFooter`): header 44 px with the title (an entity's key in the data
+face, 12 px mono, copyable; an English title is `PanelTitle`), meta, icon
+actions in tooltips, previous/next with the row's `noun`, close. It follows
+the table's cursor (`DataTable` moves its cursor to a changed `openKey`;
+`onCursorChange` is how an open inspector follows ↑ ↓). Tabs are
+`Label · N`; facts are `KeyValueList`; payloads `JsonTree`/`JsonView`/
+`PayloadView`; an empty section is its heading alone (`Sessions · none`).
+Footer: tools left, destructive as a ghost button with red children, primary
+right; below 350 px the least important control gives up its word
+(`useInspectorRoom().labels`), by width, never by rule. Escape closes it
+before it clears a selection. One `widthKey` per inspector (`auth.user`).
+
+Empty, loading and error: `EmptyState` (with `connect: { service }`, the
+connection snippet for this engine, and the project the app writes to when
+the engine has seen it use another), `NoMatch`, `QueryError` (the engine's
+message as the title, its fix under it, Retry), `TableSkeleton` and
+`DataTable loading` (both after 150 ms, so a fast answer never flashes).
+
+### The live channel
+
+- **Never `new EventSource` in a section.** The lint rule
+  (`no-restricted-globals`, off only in `src/lib/live/**`) and the engine's
+  `only_live_streams` test enforce it. Over plain http a browser allows six
+  connections to the console's address, shared by every tab and request; one
+  stream per page, then one per tab, queued the console's own requests
+  behind its streams. One visible **leader tab** holds the browser's only
+  `GET /console/api/v1/live`; other tabs ride it over a `BroadcastChannel`;
+  a tab opened in the background takes nothing until it is shown, and a tab
+  hidden for 20 s gives its subscriptions back (`releaseMs`; journeys
+  shorten it with `localStorage['firenook.console.live-timing']`).
+- Subscribe with `useLiveTopic(topic, params, handlers)` (handlers by ref;
+  `params: null` = not now) or, for keys to invalidate,
+  `useInvalidateOn(topic, params, { keys, resetKeys })` (a leading and a
+  trailing edge per key). Declare a topic in `src/<id>/live.ts`: augment
+  `TopicMap` (`declare module '@/lib/live/topics'`) and call
+  `declareTopic('<topic>', 'replay' | 'compare' | 'none')`.
+- **Resume kinds.** `replay` — the subscriber resumes from its cursor and
+  gets what it missed (`tick` moves the cursor alone); a cursor that left the
+  ring gets `reset gap` with `missed`. `compare` — a state topic sends its
+  snapshot on open and shares one engine subscription per parameters across
+  the browser. `none` — invalidation only. A subscription that waited without
+  a cursor (opened in a background tab, given back while hidden, ended before
+  it had one) is told `reset gap` once it is taken, so its page reloads what
+  it shows.
+- **Payloads are keys, not entities** (ids, paths, counters), except feeds,
+  whose content is the point. The engine coalesces per subscriber, at most
+  one event per subscription per 100 ms, deduplicating keys; past 1,000
+  keys in a window it sends `reset`. A feed topic takes `q` (the shared
+  grammar) and the engine filters replay and live tail; the client never
+  filters a feed. Feeds batch under `items` (≤ 1,000 a window) through
+  `replay_topic` + `ReplayOptions { filter, shape, max_items, max_bytes }`.
+- Bounds (§6.6 of the foundation spec): 64 connections per engine (the 65th
+  is `429`, "too many console tabs"), 128 subscriptions per connection, an
+  outgoing queue of 256 events and 8 MiB (overflow → `reset lagged`), rings
+  10,000 entries / 8 MiB by default and 64 MiB together (`RingBudget`). Every
+  stream ends on the stop signal (`stopping`, then the end).
+- A restart (a new engine instance) invalidates every query, clears
+  selections and toasts "The engine restarted"; a new instance of another
+  build (`consoleBuild`/`engineRevision`) changes nothing and the shell asks
+  for a reload instead. `LiveNotice` (`onRetry={() => liveChannel.retry()}`)
+  is for one subscription the engine ended or refused; the channel's own
+  state is the engine badge's, said nowhere else.
+
+### Lists
+
+- The engine pages: `Page { items, nextCursor, prevCursor, total, scanned }`,
+  opaque cursors both ways (`PageQuery { cursor, before, limit, q, sort }`),
+  100 by default, 500 at most. `ListMeta` says which columns sort (only where
+  an index answers) and the filter's `fields`. An unindexed filter scans at
+  most a `ScanBudget` (200,000 items or 30 ms) per request and keeps the
+  sorted keys in the `ResultCache` (LRU 8, dropped when the revision moves),
+  so later pages and live refreshes slice instead of scanning;
+  `Total.exact: false` and `scanned` say how far it got (`MatchCount`).
+- The client: `cursorPagesOptions(key, fetchPage)` + `useInfiniteQuery` +
+  `useCursorRows(query, { queryKey, fetchPage, rowKey, batchGet, q, sort })`
+  → `DataTable` (`rows`, `rowOffset`, `hasMore`/`loadMore`,
+  `hasPrevious`/`loadPrevious`, `total`, `flashes`). Live keys go to
+  `rows.applyKeys` (patched in place through `POST …:batchGet`, ≤ 1 request
+  per 120 ms; only the page a created row falls in is read again); `reset`
+  and `end` → `rows.reset()`. **Never refetch every page.** The window holds
+  at most 20 pages; scrolled back, a dropped page is read again.
+- Footer: `TableFooter` + `useHiddenColumnCount(memoryKey, columns)`.
+  Selection: `<ToolbarRow variant="line" overlay={selecting && <SelectionBar …/>}>`.
+  Feeds: `FeedList` over `createFeedStore` (a ring, one notification a frame;
+  `useFeed(store)` hands out its `FeedSnapshot` — size, version, dropped,
+  pending), `useFeedPending` for `PauseButton`. A second table on one page:
+  `keyboard="focus"`.
+
+### Shared engine services
+
+- **Jobs** (`JobRegistry`): bulk work answers `202` with a `Job` at once
+  (`accepted(job)`); `JobHandle` reports `progress`, `skipped`,
+  `failed_item_with` (first 20 kept, the count exact) and checks
+  `cancelled()` between batches. 4 running per section, 1 for `suite.*`;
+  the next is `409 conflict`. Targets are `BulkTarget` (`keys` or
+  `Query { q, scope }`). Progress rides the `jobs` topic only; the
+  `<section>.jobs` badge is automatic; `useJob`, `useJobs`, `cancelJob`.
+- **Streamed answers and files**: `ndjson_response(items, shutdown)` flushes
+  per item and ends on stop; `attachment(filename)` for downloads (unicode
+  names encoded); `lib/download.ts` on the client.
+- **Links between sections**: `EntityRef { kind, key, label? }`, built only
+  through `entity.rs`'s constructors; rendered with `EntityLink` (plain text
+  while the target section is absent or not built).
+- **The guard** (`guard.rs`, on the whole mount): a change is JSON, or
+  carries `x-firenook-console` (`[a-z0-9-]{1,16}`) for a binary body — a
+  bodiless POST is a simple request any page can send; `Sec-Fetch-Site`
+  must be same-origin; `/live` and WebSocket upgrades check `Origin`; the
+  `Host` must be allowed (`--allowed-hosts`).
+- **Native mounts** (a service under `/console/api/v1/<id>/native`) are
+  `forwarded()`: sandboxed (`Content-Security-Policy: sandbox`, `nosniff`),
+  because a service's HTML is otherwise a document on the console's origin;
+  a link to what a service serves for an app goes to its own port
+  (`serviceAddress`).
+- **Section hooks**: `Section::summary` (the Overview's figures) and
+  `Section::clear` (`POST /suite/clear`); suite controls (`/suite/background`,
+  `/suite/destinations`, `/suite/export`); `ForeignProjects` and
+  `projectScope`.
+- **Late services**: a service that starts after the console is a `Late<T>`
+  (`get()` answers `ApiError::starting` with its label until `set`);
+  `late_native` serves a native mount the same way; a topic waits for it.
+
+### Errors, paging, filters, search, badges
+
+- **One error shape**: `{ error: { code, message, fix? } }` from `ApiError`
+  (`api_error.rs`); codes are kebab-case (`not-found`, `invalid-argument`,
+  `permission-denied`, `resource-exhausted`, `unsupported-media-type`,
+  `conflict`, `starting`, …). The client's `ApiError` reads `code` and `fix`
+  and maps Google-style bodies too. `ConsoleJson` for bodies (413/415/400
+  with the serde message).
+- **One filter grammar**: `filter.rs` ⇄ `lib/filter.ts`, held to
+  `src/lib/filter-cases.json` by both (`filter::golden::run`,
+  `runGoldenCases`). **A grammar change edits the golden file first.**
+  Messages and UTF-16 spans are exact; a section's own fields keep a cases
+  file of their own beside its code, run with
+  `describe('…', () => runGoldenCases(cases))`. `FilterField` takes
+  `ListMeta.fields` plus `suggest` functions.
+- **Search**: a section adds a `SearchSource` (exact and prefix hits from its
+  own indexes, substrings within a budget, a cancel flag; 5 hits a section by
+  default; never a
+  walk the page itself would not start). Page providers that list entities
+  set `PaletteItem.ref` so ⌘K shows a thing once.
+- **Badges**: a `BadgeHandle` per badge (`set`, `add`, `add_at` with a
+  cursor), O(1), coalesced to ≤ 4 a second on the `shell` topic.
+  `useLocalBadge` for a tab's own (uploads).
+
+### Keyboard (one registry)
+
+`useShortcuts({ id, label }, shortcuts)` registers a scope; the shell's one
+listener dispatches, the most recently mounted scope first; `?` lists what
+can be pressed now. Single keys stand aside in fields, menus, dialogs and
+while an editor is open (`useEditing`). The reserved keys — no stream binds a
+key outside this table:
+
+| Key | Scope | Does |
+| --- | --- | --- |
+| ⌘K / Ctrl+K | shell | Palette |
+| `[` | shell | Collapse / expand the sidebar |
+| `t` | shell | Hide / show the section panel |
+| `?` | shell | Keyboard shortcuts |
+| `/`, `f` | page | Focus the page's filter field (Firestore: `/` edits the path, `f` the query) |
+| `n` | page | The page's primary create action (`?new=…`) |
+| Escape | page | Close the overlay → the inspector → clear the selection → blur the field |
+| ↑ ↓ / ← → | table | Row / cell cursor; an open inspector follows |
+| Home / End, PgUp / PgDn | table | First / last loaded row; one viewport |
+| Enter / Space | table | Open the cursor row / tick it |
+| ⌘A / ⌘C | table | Tick every loaded row / copy the cursor cell's copy value |
+| Delete / Backspace | table | Delete the ticked rows (through `DangerConfirm`) |
+| Shift+F10, ContextMenu | table | The cursor row's `RowMenu` |
+| ↑ ↓ (`j` `k`), Enter | feed | Move / open the selected row |
+| End / Home | feed | The live edge (and follow) / the oldest kept row |
+| → / ← | feed | Expand / collapse the selected row |
+| `p` | feed | Pause / resume (`PauseButton`) |
+| `e` | feed | Errors only (Logs `level:error`, Activity `is:error`, Invocations `outcome:failed`, Eventarc `delivery:failed`) |
+| `c` / Shift+C | feed | Copy the row's primary value / the row as JSON |
+| `r` / Shift+R | row | Run again / edit, then run again |
+| `o` / `l` | row | Open the row's target / open in Logs |
+| `i` | Functions | The Run tab |
+| `g` | Firestore, Storage | Scope flip (collection group; flat listing) |
+| `e` | Firestore | Explain |
+| `v`, `u` / Shift+U, ⌘L, Shift+Space, F2, ⌥⌘C | Storage | Layout; upload files / a folder; path field; Quick Look; rename; copy the path |
+| F8 / Shift+F8 | rules pages | Next / previous problem |
+| `w`, `x` | Logs | Warnings and errors; clear the view |
+| `a` | Auth Inbox | Apply the selected code or link |
+| `a` / `x` / `e` | Pub/Sub Pull, on a received row | Ack / nack / extend |
+| ⌘↵ / ⌘S | editors, composers | Send or apply / save |
+
+### Vocabulary
+
+**Search params** (zod `validateSearch`, read through `useRouteSearch`;
+defaults never in the URL):
+
+| Param | Meaning |
+| --- | --- |
+| `q` | The page's filter in the shared grammar (Firestore's is its SDK chain) |
+| `sort` | `<column>:asc\|desc`, server-side order (`zSort`, `parseSort`, `printSort`) |
+| entity noun | The item open in the inspector by its key: `user`, `object`, `function`, `invocation`, `instance`, `event`, `message`, `task`, `entry`, `schedule`, `decision`, `queue`, `topic`, `subscription`, `schema` (Firestore: `doc`) — never abbreviated |
+| `tab` | Only the inspector's tab |
+| `view` | The main area's tab of a scope |
+| `layout` | A display mode (Storage list / grid) |
+| `panel` | A side panel of tools (rules pages, Auth try/inspect) |
+| `state`, `outcome` | A single-choice switch with counts, named after its field |
+| `db`, `bucket`, `codebase`, `channel`, `queue`, `location`, `topic`, `tenant` | The scope picker's value |
+| `path` | A path inside the scope |
+| `as` | The identity requests run as (`serializeViewAs` / `parseViewAs`) |
+| `new`, `dialog`, `prefill` | Open the create dialog / another dialog / fill it from an item |
+| `source` | Compute's test-event source |
+| `paused` | `true` when a feed is paused (`zFlag`; never `live=false`) |
+| `project` | Another project the app used (`projectScope` sections only) |
+| `from`, `to` | A time window (RFC 3339 or relative, `-15m`) |
+
+**Topics** (`<section>.<noun>`; `tick`, `reset`, `end` reserved):
+
+| Topic | Params | Events | Resume |
+| --- | --- | --- | --- |
+| `shell` | `{}` | `status`, `badges` | compare |
+| `jobs` | `{ section? }` | `job` | replay |
+| `firestore.changes` | `{ database?, scope? }` | `change` | replay (path-only ring) |
+| `firestore.rules` | `{ database? }` | `rules`, `file` | compare |
+| `auth.users` | `{ project?, tenant? }` | `changed`, `cleared` | none |
+| `auth.activity` | `{ project?, tenant?, q?, console? }` | `calls` | replay |
+| `auth.inbox` | `{ project?, tenant?, q? }` | `messages` | replay |
+| `auth.config`, `auth.hooks` | `{ project? }` | `changed` | none |
+| `storage.objects` | `{ bucket, prefix? }` | `changed`, `index` | replay |
+| `storage.rules` | `{ bucket? }` | `rules`, `file` | compare |
+| `storage.decisions` | `{ bucket?, name?, q? }` | `decisions` | replay |
+| `functions.events` | `{ function?, codebase?, q?, changesOnly? }` | `batch` | replay |
+| `functions.invocation` | `{ id }` | `snapshot`, `log`, `chunk`, `finished` | replay |
+| `functions.codebase-log` | `{ codebase }` | `lines` | replay |
+| `eventarc.events` | `{ channel?, q? }` | `batch` | replay |
+| `extensions.changes` | `{}` | `changed` | none |
+| `pubsub.counters` | `{ project?, throughput? }` | `counters`, `resources`, `rejected` | compare |
+| `pubsub.topic` | `{ project?, topic, subscription? }` | `published`, `stale` | none |
+| `pubsub.push` | `{ project?, subscription }` | `attempts` | replay |
+| `pubsub.deliveries` | `{ project?, topic }` | `changed` | none |
+| `pubsub.schedules` | `{ project? }` | `schedules` | compare |
+| `tasks.counters` | `{ project? }` | `counters`, `queues` | compare |
+| `tasks.queue` | `{ project?, queue }` | `stale`, `finished` | none |
+| `tasks.attempts` | `{ project?, queue?, task? }` | `attempts` | replay |
+| `logs.entries` | `{ q?, from?, to? }` | `entries` | replay |
+| `overview` | `{}` | `snapshot` | compare |
+
+**Badges** (no badge outside this table):
+
+| Id | Kind | Tone | Shown on |
+| --- | --- | --- | --- |
+| `firestore.rules` | gauge | danger | Firestore › Rules |
+| `firestore.denials` | counter | neutral | Firestore › Rules |
+| `auth.inbox` | counter | neutral | Authentication › Inbox |
+| `storage.rules` | gauge | danger | Storage › Rules |
+| `<section>.jobs` | gauge | neutral | the section's item (automatic) |
+| `storage.uploads` | local | neutral | Storage (this tab) |
+| `functions.failed` | counter | danger | Functions › Invocations |
+| `functions.load` | gauge | danger | Functions |
+| `pubsub.rejected`, `pubsub.dead-lettered` | counter | attention | Pub/Sub › Topics |
+| `tasks.failed` | counter | danger | Cloud Tasks |
+| `logs.errors` | counter | attention | Logs |
+| `shell.foreign` | gauge | danger | the shell banner and the engine badge's dot |
+
+**Entity kinds** (`EntityRef`, keys split at the first `|`):
+`firestore.collection` `<db>|<pattern>` · `firestore.document` `<db>|<path>` ·
+`firestore.decision` `<db>|<requestId>` · `auth.user` `<tenant>|<uid>` ·
+`auth.call` · `auth.message` · `storage.object` `<bucket>|<name>` ·
+`storage.folder` `<bucket>|<prefix>` · `storage.decision` `<bucket or *>|<id>` ·
+`functions.function` · `functions.invocation` · `functions.codebase` ·
+`extensions.instance` · `eventarc.event` · `eventarc.channel` · `pubsub.topic`,
+`pubsub.subscription`, `pubsub.schema` (full resource names) ·
+`pubsub.message` `<topic>|<id>` · `pubsub.schedule` `<function id>` ·
+`tasks.queue` `<project>|<location>|<queue>` ·
+`tasks.task` `<project>|<location>|<queue>|<id>` · `logs.entry` `<cursor>`.
+Filtered Logs links are `linkToLogs({ function?, execution?, instance?,
+service?, level?, from?, to?, entry?, since? })`, never hand-spelled.
+
+**Headers** — one `x-firenook-*` family: `x-firenook-console` (every console
+request; Auth's `write`/`try`/`replay`), `x-firenook-cause-<kind>` (what made a
+function run), `x-firenook-activity` and `x-firenook-execution` (answers, only
+to a request that asked), Storage's `x-firenook-metadata`/`-keep-tokens`,
+Firestore's `x-firenook-preview`. All are stripped before user code.
+
+**Toasts and long requests** — `toast()` from `lib/toasts.ts`: three at most
+(the oldest goes), the same `key` replaces in place, a replayed event or the
+console's own echo is not toasted; the stack floats above the page's footer
+band. A tab runs at most three long requests besides the one `/live`
+(`lib/long-requests.ts`; uploads, an invoke stream, a composer's streamed
+answer take a slot).
+
+### Names
+
+The only spellings: `useLiveTopic`, `useInvalidateOn`, `useCursorRows`,
+`IdentityPicker`, `SectionBanner`, `ShellBanners`, `FilterField`,
+`MatchCount`, `ToolbarDivider`, `LiveNotice`, `RequiresNotice`, `PauseButton`,
+`MaskedValue`, `RowMenu`, `FacetList`, `CodeBlock`, `EntityLink`,
+`DangerConfirm`, `ExportDialog`, `OutcomeChip`, `LogLine`, `MiniBars`,
+`JobsWatch`, `routes`, `badgeLink`, `shellMount`, `linkTo`, `linkToLogs`,
+`resolveAuthorization`, `identityKey`, `useTriggersFor`, `useLocalBadge`,
+`useJobs`, `toast`, `connectSnippet`, `ApiError`, `api_error.rs`,
+`ConsoleJson`, `EntityRef`, `Job`, `BulkTarget`, `JobRegistry`,
+`SearchSource`, `ReplayOptions`, `replay_topic`, `ComputeParts`,
+`ForeignProjects`, `HookContext`, `Section::summary`, `Section::clear`. A
+second name for one of these is sent back in review.
+
+### The kit
+
+Import each module by its path (`@/components/console/data-table`), never a
+barrel, so a route chunk carries only what it uses. The shell imports only
+`components/kit` and `lib/*`; everything in `components/console/` loads in
+route chunks. Identity: requests run as a `ViewAs` through
+`resolveAuthorization`/`fetchAs` (the engine mints a user's token; never
+`mintUnsignedToken` directly); `IdentityPicker` picks it. Requests:
+`components/console/request/` (`sendComposed` streams, `requestAsCode`,
+`useRequestHistory`, `ResponseView`, `CodePopover`). Every piece has a
+design-system card (`console/design-system/src/cards/`, one file per
+stream, loaded by glob).
+
+### End-to-end
+
+- `scripts/synthetic-engine.mjs` `startEngine({ profile, project, only, wait,
+  seed, fixtureEnv, env, launchContext, args, uiPort })` — a real engine on
+  free ports (held until spawn) with the launch context the npm CLI would
+  pass; `npm run engine -- --profile <name>` runs one for development.
+- **Profiles** (`scripts/profiles/<name>.mjs`: data, auth, storage, compute,
+  messaging, observe, all) say what runs, which **fixtures** write the
+  project (`scripts/fixtures/<name>.mjs`) and which **seeders** fill it
+  (`scripts/seed/<name>.mjs`; people come from `SEED_USERS`).
+  `FIRENOOK_SEED_SCALE=large` asks for the perf datasets.
+- One Functions codebase (`scripts/fixtures/functions/`): `index.js` plus a
+  file per stream, chosen by `FIXTURE_STREAMS`. The fixture writes the
+  profile's `fixtureEnv` to `.env` and to `fixture-env.json`, and the codebase
+  reads the JSON first, because the emulator gives `.env` to running
+  functions but not to the discovery that lists them. The SDK is installed
+  offline: `npm run e2e:sdk` once (CI runs it).
+- One Playwright project per stream, each with a worker engine of its
+  profile (`e2e/fixtures.ts`): import `test`/`expect` from `./fixtures`; a
+  journey that stops, restarts or slows an engine takes `dedicated` and
+  `dedicatedEngine()`, in a spec file that sets `workerEngine: false` at its
+  top level so the host runs one engine at a time. Helpers live in
+  `e2e/support/` (`look`, `clipboard`, `downloads`, `live` — `dropLive`
+  drops the channel through its own release path, since `page.route` leaves
+  an open `EventSource` alone — `api`, `shell`). Run one project:
+  `npx playwright test --project <name>`; perf journeys:
+  `FIRENOOK_PERF=1 FIRENOOK_SEED_SCALE=large npx playwright test --project shell --grep @perf`.
+- The kit's own primitives are measured on the **kit harness**
+  (`e2e/kit-harness/`: FeedList as Logs draws it, JsonView as an inspector
+  does). `e2e/support/kit.ts` builds it with the console's plugins in
+  production mode (`buildKitHarness`) and serves it under the engine's
+  `/console/__kit/` (`openKitHarness`), so it takes the console's fonts; the
+  page answers through `window.__kit` (types in `kit-harness/runs.ts`, the
+  one file both TypeScript projects check). A stream measures its own page
+  at load in its own spec; the harness is for what a page is built from.
+
+### Who edits what
+
+| Files | Owner and rule |
+| --- | --- |
+| `crates/console-front/src/{lib.rs, section.rs, live/*, paging.rs, filter.rs, search.rs, jobs.rs, suite.rs, entity.rs, api_error.rs, http.rs, guard.rs, json.rs}` | Foundation only; streams ask for follow-ups |
+| `crates/console-front/src/{firestore.rs, rules.rs}` | Only the scheduled isolated commits (observe's `announce_rebuilt` and `summary`/`clear` in `observe/firestore_data.rs`; auth's claim reads) |
+| `crates/console-front/src/<stream>/` | That stream only |
+| `crates/suite-runtime/src/lib.rs`, `project_scope.rs` | Foundation only (the hooks are pre-placed: streams edit `console_wiring/<stream>.rs`) |
+| `crates/functions-bridge` | Foundation; compute#1 (`explain_match`, cause headers, `note_dropped`); observe's maintenance-commit rule |
+| `crates/rules-engine` | Storage in `analysis.rs`, auth in `claim_reads.rs`, `lib.rs` re-exports only |
+| Service crates | Their stream; another stream's one-liners only through compute#1 |
+| `console/src/{lib/*, components/console/*, components/kit/*, components/shell/*}` | Foundation only, except the isolated shared-component commits and compute's `lib/triggers.ts` |
+| `console/src/lib/sections/<id>.ts` | That section (Firestore's and Logs' as scheduled) |
+| `console/src/firestore/**` | In order only: foundation → storage #11 → auth #20 → compute #16 → observe |
+| `routeTree.gen.ts`, `api/generated/**` | Never hand-merged; regenerate (`npm run build`, `cargo test -p firenook-console-front`) |
+| `scripts/synthetic-engine.mjs`, `e2e/fixtures.ts`, `e2e/engine.ts`, `playwright.config.ts`, `scripts/fixtures/functions/index.js` | Foundation only |
+| Profiles, fixtures, seeders, `e2e/support/<stream>.ts`, `design-system/src/cards/<stream>.tsx`, `scripts/fixtures/functions/<stream>.js` | One file per stream |
+| This file | Per-stream headings below; the shared tables here are the foundation's |
+| `ROADMAP.md` | Each stream replaces only its own line |
+| `Cargo.lock`, `console/package-lock.json` | Foundation; streams add `workspace = true` lines only |
+
+### Merging
+
+`routeTree.gen.ts` is regenerated, never merged (take either side, run
+`npm run build`); generated types are regenerated by the crate tests, never
+merged; after a merge that touches `package-lock.json`, `npm ci`. Each
+stream edits its own engine module, wiring file, registry file, profile,
+fixture, seeder, cards file and heading in this skill, so a merge meets the
+shared files only where a follow-up was asked for.
+
+### What building the foundation taught
+
+- HTTP/1.1 allows six connections per origin; that is why the channel exists,
+  and why one per *tab* was not enough: background tabs held theirs.
+- `page.route` does not close an `EventSource` that is already open, so
+  journeys drop the channel through the product's release path
+  (`dropLive`), never a hook.
+- A POST without a body is a simple request any page on the web can send:
+  console changes take JSON and the guard enforces it. WebSockets bypass
+  CORS, so an upgrade checks `Origin`. A mounted service's HTML is a document
+  on the console's origin unless it is sandboxed.
+- `include_str!` reads the shared golden file and the section order, so Rust
+  and the browser cannot drift apart.
+- A `watch` is the right channel for state (status, badges), a `broadcast`
+  for events, a `ReplayRing` for feeds; a global revision is not a per-scope
+  cursor.
+- `tokio::time::timeout` around `spawn_blocking` abandons the wait, not the
+  work.
+- The Auth emulator's `accounts:query` cannot be bounded (`501` for `limit`),
+  so pickers use `/auth/identities`.
+- Kumo's menu button paints its hover ground as an absolute `::before` over
+  the row: anything inside the row that must take the pointer (a badge's
+  tooltip) is positioned to sit above it.
+- Kumo's `Sidebar` turns into its mobile, off-canvas form below its
+  breakpoint, also inside a contained preview; a card that draws the nav is
+  wider than that.
+- A worker-scoped Playwright option cannot change inside a `describe`; it
+  forces a new worker and is refused. Set it at a spec file's top level.
+- A frame-time measurement from a scroll driven by a round trip per step
+  measures the round trips: drive the scroll inside the page
+  (`requestAnimationFrame`) and measure after the engine's first schema walk.
+- Tests of uncompiled code passed while every production `FeedList` drew
+  nothing that arrived after it mounted: the compiler had cached
+  `store.size()` by the store's identity. Vitest now compiles with the React
+  compiler, and the kit's perf journeys run a production build of the kit.
+- `toLocaleString('en-US')` builds a number formatter per call (about 20 µs);
+  a tree of a hundred shut rows paid 11 ms for it. `formatNumber` keeps one.
 
 ## Commands
 
@@ -150,7 +690,12 @@ holds the reproduction beside the fix for both the HTTP and the gRPC side.
 npm run dev --prefix console          # Vite with HMR, proxies /console/api to FIRENOOK_UI_ORIGIN (default http://127.0.0.1:4000)
 npm run build --prefix console        # writes console/dist; debug engine builds read it from disk at runtime
 npm run check|lint|format:check|test|budget --prefix console
-npm run test:e2e --prefix console     # Playwright against target/debug/firenook and a synthetic project (e2e/engine.ts)
+npm run engine --prefix console -- --profile all   # a synthetic engine with every service, fixture and seeder
+npm run seed --prefix console -- <ui-origin> <project>   # the Firestore seed into a running engine
+npm run e2e:sdk --prefix console      # the offline Functions SDK the fixture codebase links (once)
+npm run test:e2e --prefix console     # every Playwright project, each against real engines (FIRENOOK_BINARY)
+npx playwright test --project data    # one project, from console/ (data, auth, storage, compute, messaging, observe, shell)
+npm run design-system --prefix console  # every design-system card, captured to console/.design-system
 cargo test -p firenook-console-front  # crate tests + TypeScript bindings export
 ```
 
@@ -639,7 +1184,7 @@ the ratio that made `projects` look like a sibling of `limits`. Firestore
 documents nest, so the column wins.
 
 **The panel's width is the real constraint, so it drags.**
-`inspector-width.ts` is a small store with the same localStorage pattern as
+`components/console/inspector-width.ts` is a small store with the same localStorage pattern as
 `lib/layout.ts`: `setWidth` during the drag, `remember` at the end, so a
 drag is not sixty storage writes. It is clamped to leave the grid 360 px —
 the grid is the other half of the screen — and the panel's own left edge is
@@ -718,7 +1263,7 @@ that is not a pointer still sees one control rather than two.
 controls in this panel have now been moved for the same reason — a control
 drawn only on hover is a control nobody finds. The reference field opened
 its completions on focus from the start, and the **timestamp** now opens
-its picker the same way (`Anchored` in `completions.tsx`, which
+its picker the same way (`Anchored` in `components/console/completions.tsx`, which
 `Completions` is also built on). The calendar button is gone from the
 strip. Rules learned doing it:
 
@@ -1039,7 +1584,8 @@ size, which nobody asked for, so the snippet fetched a hundred documents
 of a collection the grid pages through whole. Its import line was a fixed
 list (`collectionGroup`, `doc`, `orderBy`, `where`, `GeoPoint` whether used
 or not), and no journey had ever opened it. `CodeBlock` now lives in
-`code-block.tsx`, for the inspector's document alone.
+`components/console/code-block.tsx`; the inspector's document uses it, and
+so do the gate, the empty states and the shell banners.
 
 Rules that fall out:
 
@@ -1163,7 +1709,7 @@ fields). Each rule below fixed something that was seen, not supposed.
 - **The id can be frozen or not** from its own header menu
   (`IdHeaderMenu`, `id-header` — not `column-id`, which a field named `id` would also be —: "Freeze column" / "Unfreeze column"),
   frozen by default and remembered per shape in `useIdFreeze`
-  (`column-widths.ts`, localStorage `firenook.console.unfrozen-ids`).
+  (`components/console/column-widths.ts`, localStorage `firenook.console.unfrozen-ids`).
   Unfrozen, the id scrolls with the fields and only the check column stays,
   carrying the edge; `pinned` (what `reveal` and the editor's bounds keep
   clear) is then the check column alone.
@@ -1364,16 +1910,22 @@ behind a confirmation that names the trigger behaviour. And it belongs
 **per document, in the inspector**, not as one global list: the question
 is almost always "what happened to *this*?".
 
-**What is left in its place:** `LiveDot` is a state chip, not a button,
-and it shows **only when the channel has dropped** (amber "Reconnecting",
-red "Offline", with a tooltip saying the grid may be out of date). The grid
-is kept current by that channel, so a dropped channel is a grid that looks
+**What is left in its place:** the console has **one live connection per
+browser** (`src/lib/live`), so a dropped channel is said **once, by the
+engine badge in the top bar** (amber "reconnecting", red "engine stopped"
+the moment the engine says it is stopping, amber "too many console tabs"),
+with a tooltip saying what is on screen may be out of date. The grid is
+kept current by that channel, so a dropped channel is a grid that looks
 fresh and is not — the one thing a dev tool must not do quietly. While it
 is up there is nothing to say: a green "Live" in every toolbar was the
-normal case announced beside the engine's own green dot in the bar above,
-and a word that is always there is not read on the day it changes. A
-journey aborts `/firestore/changes` with `page.route` to see it, then
-unroutes and sees it go. The count beside it went with the panel it used
+normal case announced beside the engine's own green dot. The toolbar keeps
+a `LiveDot` chip only for this page's own subscription, when the engine
+ended or refused it. A journey drops the channel with `dropLive`
+(`e2e/support/live.ts`: the product's own release path — the tab hidden
+until it lets the connection go, the live routes refused, the tab shown
+again), sees the badge say so, writes a document meanwhile, and after
+`restoreLive` sees the row catch up without a reload: `firestore.changes`
+replays what was missed. The count beside it went with the panel it used
 to open: a number nobody can look into is trivia, and it was counting
 writes since the tab opened while the panel counted what the engine still
 held, both under the word "change".
@@ -1483,13 +2035,16 @@ document read with `withSecurityRulesDisabled`, `assertSucceeds` /
 **History and the file.** `GET /rules/history` (startup, console, file,
 reload); the dialog diffs any version — and the file on disk when it
 differs — against the editor (`diff.ts`), "Put in the editor" makes it the
-draft. `GET /rules/live` (SSE) tells the page when what governs the
-database changed, so a file saved in an editor shows up without a reload;
+draft. The live channel's `firestore.rules` topic tells the page when what
+governs the database changed (`rules`, cursor = the hash in force) and the
+file's status on every subscription (`file`), so a file saved in an editor
+shows up without a reload and a file that broke while the tab was away is
+said when it comes back;
 the engine watches each configured rules file (1 s debounce, a broken file
 keeps the rules in force and reports `fileProblems`). No polling anywhere.
 
 **Engine contract**: `crates/console-front/src/rules.rs` (read, apply,
-check, history, live) and `rules_eval.rs` (evaluate, decision detail,
+check, history, the `firestore.rules` topic) and `rules_eval.rs` (evaluate, decision detail,
 impact); generated types in `src/api/generated/`. A Rust doc comment that
 contains `*/` — a pattern like `users/*/orders` — closes the generated
 TypeScript comment and breaks the console build; spell it out.
@@ -1509,14 +2064,28 @@ indenting: paste instead (`pasteRules`).
   official Requests websocket at `/console/api/v1/firestore/requests`,
   which the rules page reads as its decisions. Never reach the service
   ports from the browser.
-- Live: `GET /console/api/v1/firestore/changes?database=` is an SSE stream
-  from the store's commit observer (`ChangeFeed` in
-  `crates/console-front/src/firestore.rs`); `src/firestore/live.ts`
-  invalidates TanStack Query scopes and flashes rows. Payloads are paths
-  only, never documents.
-- Identity: `Authorization: Bearer owner` bypasses rules; "view as" mints
-  an unsigned `alg: none` emulator token for an Auth user
-  (`src/firestore/view-as.ts`), so rules run exactly as for the app.
+- Live: the `firestore.changes` topic on the console's one live channel
+  (`useLiveTopic`, `src/lib/live`), fed by the store's commit observer
+  (`ChangeFeed` in `crates/console-front/src/firestore.rs`, a ring of
+  path-only batches, so a dropped connection or a hidden tab gets the
+  commits it missed replayed). `src/firestore/live.ts` patches updated rows
+  of loaded pages in place through `documents:batchGet` read as the page's
+  identity, refetches the window (at most 20 pages, `maxPages`) for creates,
+  deletes and truncated commits, invalidates the other scopes and flashes
+  rows. Payloads are paths only, never documents. No route of its own
+  streams: `only_live_streams` (console-front) fails if one does, and the
+  `EventSource` global is a lint error outside `src/lib/live`.
+- Identity: `Authorization: Bearer owner` bypasses rules; "view as" is the
+  kit's `IdentityPicker` (`components/console/identity-picker.tsx`, test id
+  `view-as`) over `lib/identity.ts`: an Auth user reads with the token the
+  Auth emulator itself issues for the account (`POST /auth/tokens`, cached
+  under `['auth', project, 'token', tenant, uid]`, minted again five minutes
+  before it expires and once more on a 401), found through the bounded
+  `GET /auth/identities` search, never every account; a custom identity (any
+  uid and claims) and a uid the engine cannot mint read with an unsigned
+  `alg: none` token made in the browser. `FirestoreScope` carries `identity`
+  and `authorize(signal)`; query keys hold `identityKey(identity)`, never a
+  token, so rules run exactly as for the app.
 - View state is the URL (`path`, `q`, `group`, `as`, `doc`, `tab`);
   selection and focus are Zustand; queries are keyed
   `['fs', db, kind, scope, ...]` so the channel can target them.
@@ -1524,9 +2093,9 @@ indenting: paste instead (`pasteRules`).
   and printed by `src/firestore/query.ts`; cursors are exact because
   `__name__` is always the last order.
 - Seed a synthetic project for development: `npm run seed -- <ui-origin>
-  <project>` (`scripts/seed-firestore.mjs`; the e2e global setup uses it;
-  the synthetic engine's rules deny listing `users` to clients so "view as"
-  has denials to show).
+  <project>` (`scripts/seed/firestore.mjs`; the `data` profile's seeder runs
+  it for every engine the journeys start; the fixture's rules deny listing
+  `users` to clients so "view as" has denials to show).
 - Creating: every path into the create dialog is a `CreateRequest` on the
   `useCreateDialog` store (`src/firestore/create.ts`): `document` (with an
   optional `template` to duplicate or `id` for a missing ancestor),
@@ -1564,7 +2133,7 @@ indenting: paste instead (`pasteRules`).
   own width, or the header's needs when those are greater, capped at
   `MAX_HEADER_WIDTH`; a dragged width (`ColumnResizer` on every header,
   double-click resets, arrows step 16 px) is kept per *shape* of collection
-  in `useColumnWidths` (`column-widths.ts`, localStorage
+  in `useColumnWidths` (`components/console/column-widths.ts`, localStorage
   `firenook.console.column-widths`, `__name__` for the id column). Reference
   cells and reference fields *peek* (`selectDocument`) rather than
   navigate; the inspector shows "open in grid" when the document is outside
@@ -1894,6 +2463,16 @@ Paths join on `\u0000`, so a key called `a.b` is never confused with `b`
 inside `a`. Container marks stop at the end of their first line: a
 geopoint is four lines of JSON and underlining all four to say one thing
 reads as damage.
+
+## Authentication (on the way, `src/auth/`)
+
+## Storage (on the way, `src/storage/`)
+
+## Functions, Extensions and Eventarc (on the way, `src/functions/`, `src/extensions/`, `src/eventarc/`)
+
+## Pub/Sub and Cloud Tasks (on the way, `src/pubsub/`, `src/tasks/`)
+
+## Logs and the overview (on the way, `src/logs/`, `src/overview/`)
 
 ## Repository rules that apply here too
 

@@ -5,10 +5,22 @@ interface ConsoleUiState {
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
   togglePalette: () => void
+  /** The keyboard shortcuts dialog (`?`). */
+  shortcutsOpen: boolean
+  setShortcutsOpen: (open: boolean) => void
+  toggleShortcuts: () => void
+  /** The engine badge's popover (data facts, Export now); ⌘K's "Export now…" opens it. */
+  enginePopoverOpen: boolean
+  setEnginePopoverOpen: (open: boolean) => void
 }
 
 export const useConsoleUi = create<ConsoleUiState>((set) => ({
   paletteOpen: false,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   togglePalette: () => set((state) => ({ paletteOpen: !state.paletteOpen })),
+  shortcutsOpen: false,
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  toggleShortcuts: () => set((state) => ({ shortcutsOpen: !state.shortcutsOpen })),
+  enginePopoverOpen: false,
+  setEnginePopoverOpen: (enginePopoverOpen) => set({ enginePopoverOpen }),
 }))

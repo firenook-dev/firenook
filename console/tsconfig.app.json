@@ -27,5 +27,5 @@
     "erasableSyntaxOnly": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "design-system/src"]
+  "include": ["src", "design-system/src", "e2e/kit-harness"]
 }

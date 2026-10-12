@@ -1,18 +1,87 @@
 // The Firestore REST protocol over the console's same-origin mount. The
 // engine evaluates rules on every call exactly as it does for an app, so the
-// authorization the workbench sends decides what it sees: the owner token
-// bypasses rules, an unsigned user token views as that user, nothing views
-// as an anonymous client.
+// identity the workbench reads as decides what it sees: the owner bypasses
+// rules, an Auth user reads with the token the Auth emulator issues for
+// the account, a custom identity with an unsigned token made here, and an
+// anonymous client sends nothing.
 
 import { API_BASE, ApiError } from '@/api/client'
+import { type ViewAs, forgetToken, resolveAuthorization } from '@/lib/identity'
 import type { StructuredQuery } from './query'
 import { type FsDocument, type RestDocument, type RestValue, decodeDocument } from './value'
 
 export interface FirestoreScope {
   project: string
   database: string
-  /** The `Authorization` header value, or none for an anonymous client. */
-  authorization?: string | undefined
+  /** Who every request runs as; its part of a query key is `identityKey(identity)`, never a token. */
+  identity: ViewAs
+  /**
+   * The `Authorization` header value for `identity`, or none for an
+   * anonymous client: resolved per request, so an Auth user's engine token
+   * is minted once, cached, and minted again before it expires.
+   */
+  authorize: (signal?: AbortSignal) => Promise<string | undefined>
+  /**
+   * The database slot of this scope's query keys when it is not the
+   * database id: `<project>|<database>` for another project the app used
+   * (`?project=`), so its cache entries never mix with the emulator's own.
+   */
+  slot?: string | undefined
+}
+
+/** The database slot of a scope's query keys (`['fs', slot, …]`). */
+export function keySlot(scope: FirestoreScope): string {
+  return scope.slot ?? scope.database
+}
+
+/** A scope whose requests run as `identity` through the one token path (`resolveAuthorization`). */
+export function firestoreScope(options: {
+  project: string
+  database: string
+  identity: ViewAs
+  slot?: string | undefined
+}): FirestoreScope {
+  const { project, identity } = options
+  return {
+    project,
+    database: options.database,
+    identity,
+    authorize: (signal) => resolveAuthorization(identity, project, signal),
+    ...(options.slot === undefined ? {} : { slot: options.slot }),
+  }
+}
+
+/** The same project, database and key slot, as another identity. */
+export function withIdentity(scope: FirestoreScope, identity: ViewAs): FirestoreScope {
+  return firestoreScope({
+    project: scope.project,
+    database: scope.database,
+    identity,
+    slot: scope.slot,
+  })
+}
+
+/**
+ * `fetch` as the scope's identity. A token the engine refuses (401: an
+ * Auth user's token that expired while it sat in the cache) is minted
+ * again and the request sent once more.
+ */
+async function authorizedFetch(
+  scope: FirestoreScope,
+  url: string,
+  init: RequestInit,
+  headers: Record<string, string>,
+): Promise<Response> {
+  const attempt = async () => {
+    const authorization = await scope.authorize(init.signal ?? undefined)
+    return fetch(url, {
+      ...init,
+      headers: authorization ? { ...headers, authorization } : headers,
+    })
+  }
+  const first = await attempt()
+  if (first.status !== 401 || !forgetToken(scope.identity, scope.project)) return first
+  return attempt()
 }
 
 export interface QueryPage {
@@ -47,9 +116,8 @@ async function call<T>(scope: FirestoreScope, path: string, init: RequestInit = 
     accept: 'application/json',
     ...(init.headers as Record<string, string> | undefined),
   }
-  if (scope.authorization) headers.authorization = scope.authorization
   if (init.body) headers['content-type'] = 'application/json'
-  const response = await fetch(`${firestoreBase(scope)}${path}`, { ...init, headers })
+  const response = await authorizedFetch(scope, `${firestoreBase(scope)}${path}`, init, headers)
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`
     try {
@@ -295,11 +363,11 @@ export async function deletePath(
   path: string,
   recursive: boolean,
 ): Promise<number> {
-  const headers: Record<string, string> = {}
-  if (scope.authorization) headers.authorization = scope.authorization
-  const response = await fetch(
+  const response = await authorizedFetch(
+    scope,
     `${API_BASE}/firestore/emulator/v1/${documentRoot(scope)}/${path}?mode=${recursive ? 'recursive' : 'shallow'}`,
-    { method: 'DELETE', headers },
+    { method: 'DELETE' },
+    {},
   )
   if (!response.ok)
     throw new FirestoreError(response.status, `${response.status} ${response.statusText}`)

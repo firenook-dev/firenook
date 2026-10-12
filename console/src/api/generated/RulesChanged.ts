@@ -2,7 +2,7 @@
 import type { RulesOrigin } from "./RulesOrigin";
 
 /**
- * What governs a database changed (`event: rules` on `/rules/live`).
+ * What governs a database changed (`rules` on the `firestore.rules` topic).
  */
 export type RulesChanged = { database: string, 
 /**

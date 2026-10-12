@@ -16,6 +16,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { API_BASE } from '@/api/client'
+import { backoffDelay } from '@/lib/live/channel'
 import type { FsValue } from '../value'
 
 export type DecisionOutcome = 'allow' | 'deny' | 'error'
@@ -292,7 +293,12 @@ export function filterDecisions(
 const LIMIT = 500
 
 interface DecisionsState {
-  status: 'idle' | 'connecting' | 'live' | 'unavailable'
+  /**
+   * `reconnecting`: the feed was live on this page and closed; it comes back
+   * by itself. `unavailable`: it never opened (an engine that records no
+   * decisions); it keeps trying, more slowly.
+   */
+  status: 'idle' | 'connecting' | 'live' | 'reconnecting' | 'unavailable'
   decisions: RulesDecision[]
   detail: string | undefined
   push: (decision: RulesDecision) => void
@@ -316,43 +322,64 @@ export const useDecisions = create<DecisionsState>((set) => ({
   clear: () => set({ decisions: [] }),
 }))
 
-/** Holds the feed open while the caller is mounted. */
+/**
+ * Holds the feed open while the caller is mounted, and opens it again after
+ * any close but its own, with the live channel's backoff (0.5 s doubling to
+ * 10 s). A reconnect replays what the engine still holds, and the store
+ * drops a decision it already lists, so nothing shows twice.
+ */
 export function useDecisionsFeed() {
   useEffect(() => {
-    const store = useDecisions.getState()
-    store.setStatus('connecting')
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const socket = new WebSocket(
-      `${protocol}://${window.location.host}${API_BASE}/firestore/requests`,
-    )
-    socket.addEventListener('open', () => useDecisions.getState().setStatus('live'))
-    socket.addEventListener('message', (message) => {
-      // The engine sends history as one array, then each event alone.
-      const text = String(message.data)
-      let batch: unknown
-      try {
-        batch = JSON.parse(text)
-      } catch {
-        return
-      }
-      const frames = Array.isArray(batch) ? batch.map((item) => JSON.stringify(item)) : [text]
-      // History arrives oldest first; each is pushed to the front.
-      for (const frame of frames) {
-        const decision = decodeDecision(frame)
-        if (decision) useDecisions.getState().push(decision)
-      }
-    })
-    socket.addEventListener('error', () =>
-      useDecisions.getState().setStatus('unavailable', 'The decisions feed refused the connection'),
-    )
-    socket.addEventListener('close', (event) => {
-      if (event.code !== 1000)
-        useDecisions
-          .getState()
-          .setStatus('unavailable', event.reason || 'The decisions feed closed')
-    })
+    let socket: WebSocket | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let attempt = 0
+    let opened = false
+    let stopped = false
+    const connect = () => {
+      timer = undefined
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const current = new WebSocket(
+        `${protocol}://${window.location.host}${API_BASE}/firestore/requests`,
+      )
+      socket = current
+      current.addEventListener('open', () => {
+        attempt = 0
+        opened = true
+        useDecisions.getState().setStatus('live')
+      })
+      current.addEventListener('message', (message) => {
+        // The engine sends history as one array, then each event alone.
+        const text = String(message.data)
+        let batch: unknown
+        try {
+          batch = JSON.parse(text)
+        } catch {
+          return
+        }
+        const frames = Array.isArray(batch) ? batch.map((item) => JSON.stringify(item)) : [text]
+        // History arrives oldest first; each is pushed to the front.
+        for (const frame of frames) {
+          const decision = decodeDecision(frame)
+          if (decision) useDecisions.getState().push(decision)
+        }
+      })
+      current.addEventListener('close', (event) => {
+        if (stopped || socket !== current) return
+        if (opened) useDecisions.getState().setStatus('reconnecting')
+        else
+          useDecisions
+            .getState()
+            .setStatus('unavailable', event.reason || 'The decisions feed refused the connection')
+        timer = setTimeout(connect, backoffDelay(attempt, Math.random))
+        attempt += 1
+      })
+    }
+    useDecisions.getState().setStatus('connecting')
+    connect()
     return () => {
-      socket.close(1000)
+      stopped = true
+      clearTimeout(timer)
+      socket?.close(1000)
       useDecisions.getState().setStatus('idle')
     }
   }, [])

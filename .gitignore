@@ -16,6 +16,8 @@
 !.env.sample
 .firenook/
 *.log
+# Golden debug-log captures the suite-front tests compare against.
+!crates/suite-front/tests/golden/*.log
 .DS_Store
 *.swp
 *.tmp

@@ -28,7 +28,7 @@ import { type DraftNode, type NodeProblem, emptyNode, nodesFromJson, nodesToJson
 import { tidyJson } from '../json-text'
 import { typeMarks } from '../json-marks'
 import { type FirestoreValueType, VALUE_TYPES } from '../value'
-import { Completion, Completions } from './completions'
+import { Completion, Completions } from '@/components/console/completions'
 import { type FieldEditing, FieldEditingProvider, type KnownField } from './field-context'
 import { COLUMNS, FieldRows } from './field-row'
 

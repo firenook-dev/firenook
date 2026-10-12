@@ -8,15 +8,20 @@ import { createContext, useContext, useMemo } from 'react'
 import { statusQuery } from '@/api/queries'
 import type { FirestoreSearch } from '@/routes/firestore'
 import { EMPTY_QUERY, QueryParseError, type WorkbenchQuery, parseQuery, printQuery } from '../query'
-import type { FirestoreScope } from '../rest'
+import { type FirestoreScope, firestoreScope } from '../rest'
 import { isPattern } from '../schema'
-import { type ViewAs, authorizationFor, parseViewAs, serializeViewAs } from '../view-as'
+import { type ViewAs, parseViewAs, serializeViewAs } from '../view-as'
 
 export const DEFAULT_DATABASE = '(default)'
 
 export interface Workbench {
+  /** The project shown: the emulator's own, or `?project=` (another project the app used). */
   project: string
   database: string
+  /** Whether `project` is another project than the emulator's own. */
+  foreign: boolean
+  /** The database slot of this workbench's query keys (`keySlot(scope)`). */
+  slot: string
   scope: FirestoreScope
   /** The owner scope, for counts and structure the identity must not hide. */
   ownerScope: FirestoreScope
@@ -73,19 +78,31 @@ export function useWorkbenchState(): Workbench | null {
   const search = useSearch({ from: '/firestore' })
   const router = useNavigate({ from: '/firestore' })
   const status = useQuery(statusQuery)
-  const project = status.data?.projectId
+  const configured = status.data?.projectId
+  // An app pointed at another project id writes there; "Show my-prod" in
+  // the shell's banner opens that project's data here with `?project=`.
+  const project = search.project || configured
 
   return useMemo(() => {
     if (!project) return null
     const database = search.db ?? DEFAULT_DATABASE
+    const foreign = project !== configured
+    // Another project's entries live under their own key slot, so the
+    // emulator's own cache and its live updates never mix with them.
+    const slot = foreign ? `${project}|${database}` : database
     const viewAs = parseViewAs(search.as)
-    const authorization = authorizationFor(viewAs, project)
-    const scope: FirestoreScope = { project, database, authorization }
-    const ownerScope: FirestoreScope = {
+    const scope: FirestoreScope = firestoreScope({
       project,
       database,
-      authorization: authorizationFor({ kind: 'owner' }, project),
-    }
+      identity: viewAs,
+      slot: foreign ? slot : undefined,
+    })
+    const ownerScope: FirestoreScope = firestoreScope({
+      project,
+      database,
+      identity: { kind: 'owner' },
+      slot: foreign ? slot : undefined,
+    })
     const path = normalizePath(search.path ?? '')
     const segments = path ? path.split('/') : []
     const isCollection = segments.length % 2 === 1
@@ -114,6 +131,8 @@ export function useWorkbenchState(): Workbench | null {
     return {
       project,
       database,
+      foreign,
+      slot,
       scope,
       ownerScope,
       viewAs,
@@ -165,5 +184,5 @@ export function useWorkbenchState(): Workbench | null {
           q: undefined,
         }),
     }
-  }, [project, search, router])
+  }, [project, configured, search, router])
 }

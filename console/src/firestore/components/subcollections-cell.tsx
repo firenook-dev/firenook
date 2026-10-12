@@ -11,7 +11,7 @@ import { DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import { DotsThreeIcon, FolderIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import type { SchemaNode } from '../schema'
-import { subcollectionsQuery } from '../subcollections'
+import { workbenchSubcollectionsQuery } from '../subcollections'
 import { formatNumber } from '../value'
 import { useWorkbench } from './workbench-context'
 
@@ -33,7 +33,7 @@ export function SubcollectionsCell({
   known: readonly SchemaNode[]
 }) {
   const workbench = useWorkbench()
-  const subcollections = useQuery(subcollectionsQuery(workbench.database, path))
+  const subcollections = useQuery(workbenchSubcollectionsQuery(workbench, path))
   const found = subcollections.data ?? []
   if (found.length === 0) return null
   // The schema's order first, so chips line up down the column.

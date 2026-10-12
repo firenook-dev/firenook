@@ -1,11 +1,10 @@
 // The rules page's conversation with the engine: checking a draft without
 // installing it, evaluating requests against it, opening a recorded
 // decision, asking what a draft would change, the version history, and the
-// live channel that says when the rules in force move.
+// live topic that says when the rules in force move.
 
 import { queryOptions } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
 import { API_BASE, ApiError } from '@/api/client'
 import type { DecisionDetail } from '@/api/generated/DecisionDetail'
 import type { EvaluateRequest } from '@/api/generated/EvaluateRequest'
@@ -13,8 +12,10 @@ import type { RulesCheck } from '@/api/generated/RulesCheck'
 import type { RulesEvaluation } from '@/api/generated/RulesEvaluation'
 import type { RulesImpact } from '@/api/generated/RulesImpact'
 import type { RulesVersion } from '@/api/generated/RulesVersion'
+import type { SubscriptionStatus } from '@/lib/live/channel'
+import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { FS } from '../queries'
-import { RulesCompileError, type RulesDiagnostic, rulesQuery } from '../rules'
+import { RulesCompileError, type RulesDiagnostic, type RulesDocument, rulesQuery } from '../rules'
 
 export type {
   DecisionDetail,
@@ -124,25 +125,37 @@ export const historyQuery = (database: string) =>
   })
 
 /**
- * Holds the rules' live channel open while mounted: when what governs the
- * database changes — saved elsewhere, the file edited in an editor, a test
- * suite's hot reload — the page refetches what it shows. No polling.
+ * Holds the `firestore.rules` subscription while mounted: when what governs
+ * the database changes — saved elsewhere, the file edited in an editor, a
+ * test suite's hot reload — the page refetches what it shows. The topic
+ * tells the file's status on every subscription; it refetches only when
+ * that differs from what the page holds, so opening the page costs nothing
+ * more. No polling.
  */
-export function useRulesLive(database: string) {
+export function useRulesLive(database: string): SubscriptionStatus {
   const queryClient = useQueryClient()
-  useEffect(() => {
-    const source = new EventSource(
-      `${API_BASE}/firestore/rules/live?database=${encodeURIComponent(database)}`,
-    )
-    const refresh = () => {
-      void queryClient.invalidateQueries({ queryKey: rulesQuery(database).queryKey })
-      void queryClient.invalidateQueries({ queryKey: [FS, database, 'rules-history'] })
-      void queryClient.invalidateQueries({ queryKey: [FS, database, 'rules-coverage'] })
-    }
-    source.addEventListener('rules', refresh)
-    source.addEventListener('file', () =>
-      queryClient.invalidateQueries({ queryKey: rulesQuery(database).queryKey }),
-    )
-    return () => source.close()
-  }, [database, queryClient])
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: rulesQuery(database).queryKey })
+    void queryClient.invalidateQueries({ queryKey: [FS, database, 'rules-history'] })
+    void queryClient.invalidateQueries({ queryKey: [FS, database, 'rules-coverage'] })
+  }
+  const shown = () => queryClient.getQueryData<RulesDocument>(rulesQuery(database).queryKey)
+  return useLiveTopic(
+    'firestore.rules',
+    { database },
+    {
+      onRules: (changed) => {
+        // After the page's own apply, its refetch may already hold this hash.
+        if (shown()?.hash !== changed.hash)
+          void queryClient.invalidateQueries({ queryKey: rulesQuery(database).queryKey })
+        void queryClient.invalidateQueries({ queryKey: [FS, database, 'rules-history'] })
+        void queryClient.invalidateQueries({ queryKey: [FS, database, 'rules-coverage'] })
+      },
+      onFile: (status) => {
+        if (JSON.stringify(shown()?.fileProblems ?? null) !== JSON.stringify(status.problems))
+          void queryClient.invalidateQueries({ queryKey: rulesQuery(database).queryKey })
+      },
+      onReset: refresh,
+    },
+  )
 }

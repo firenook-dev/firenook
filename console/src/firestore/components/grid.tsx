@@ -27,16 +27,13 @@ import {
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
-import { shapeKey, useColumnWidths, useIdFreeze } from '../column-widths'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ColumnResizer } from '@/components/console/column-resizer'
+import { useColumnWidths, useIdFreeze } from '@/components/console/column-widths'
+import { EmptyState } from '@/components/console/empty-state'
+import { CHECK_WIDTH, PIN_EDGE, PIN_HEAD, ROW_HEIGHT } from '@/components/console/table-pins'
+import { Kbd } from '@/components/kit'
+import { describeKey, useShortcuts } from '@/lib/shortcuts'
 import { arrangeColumns, foldRare, inferColumns } from '../columns'
 import { useCreateDialog } from '../create'
 import { copyText } from '../draft'
@@ -53,33 +50,29 @@ import {
 } from '../queries'
 import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
-import { childrenOf, describeChildren, schemaQuery } from '../schema'
+import { childrenOf, describeChildren, patternOf, workbenchSchemaQuery } from '../schema'
 import { useSelection } from '../selection'
 import { type FsDocument, formatNumber, isPartial } from '../value'
 import { CellEditor } from './cell-editor'
-import { ColumnResizer } from './column-resizer'
-import {
-  CHECK_WIDTH,
-  FOLDED_COLUMN,
-  type GridColumn,
-  GridRow,
-  ID_COLUMN,
-  PIN_EDGE,
-  PIN_HEAD,
-  type RowActions,
-} from './grid-row'
+import { FOLDED_COLUMN, type GridColumn, GridRow, ID_COLUMN, type RowActions } from './grid-row'
 import { FoldedHeader, HeaderMenu, IdHeaderMenu } from './header-menu'
 import { subcollectionsWidth } from './subcollections-cell'
 import { DEFAULT_DATABASE, useWorkbench } from './workbench-context'
 
 /**
- * A row's height, px, and the virtualizer's estimate of it — which have to
- * be the same number. They were not: rows were `h-9`, which is 2.25 rem
- * and so 31.5 px on this console's 14 px root, while the virtualizer
- * placed them at 36, and every spacer and every scroll-to-row was worked
- * out on a height no row had.
+ * Which collections share a set of column widths: per *shape* of collection
+ * rather than per collection, since `users/u1/orders` and `users/u2/orders`
+ * are the same columns under different parents. A collection group is its
+ * own shape, because its first column is a whole path.
  */
-const ROW_HEIGHT = 32
+function shapeKey(
+  project: string,
+  database: string,
+  collectionPath: string,
+  group: boolean,
+): string {
+  return `${project}|${database}|${group ? `group:${collectionPath}` : patternOf(collectionPath)}`
+}
 const ID_WIDTH = 220
 /** A group shows whole paths in the first column, so it gets more room. */
 const PATH_WIDTH = 340
@@ -123,7 +116,7 @@ export function Grid() {
 
   // The schema says which subcollections these documents can have; that
   // decides whether the grid has a subcollections column and how wide.
-  const schema = useQuery(schemaQuery(workbench.database))
+  const schema = useQuery(workbenchSchemaQuery(workbench))
   const known = useMemo(
     () => childrenOf(schema.data, workbench.collectionPath),
     [schema.data, workbench.collectionPath],
@@ -141,7 +134,7 @@ export function Grid() {
   // order is held per collection, not per query, so sorting by a column —
   // which loads a different first page — leaves every column where it was.
   const inferred = useMemo(() => inferColumns(documents), [documents])
-  const scope = `${workbench.database}|${workbench.collectionPath}|${workbench.group}`
+  const scope = `${workbench.slot}|${workbench.collectionPath}|${workbench.group}`
   const [remembered, setRemembered] = useState({ scope: '', order: NO_ORDER })
   const previous = remembered.scope === scope ? remembered.order : NO_ORDER
   const arranged = useMemo(() => arrangeColumns(inferred, previous), [inferred, previous])
@@ -328,70 +321,116 @@ export function Grid() {
   })
 
   // Keyboard: arrows move the cell cursor, Enter edits the cell it is on —
-  // or opens the document from its id — and Escape closes. An effect event,
-  // so the listener is added once rather than on every frame of a scroll.
-  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (useSelection.getState().editing) return
-    const target = event.target as HTMLElement | null
-    if (
-      target &&
-      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-    )
-      return
-    if (documents.length === 0) return
+  // or opens the document from its id — and Escape closes. The keys go
+  // through the console's registry, which keeps them from a field that has
+  // the keys and from an edit in progress, and reads the newest of these
+  // handlers on each press, so a scroll frame registers nothing.
+  const current = () => documents.find((document) => document.path === focused)
+  const moveRow = (step: 1 | -1) => {
     const index = documents.findIndex((document) => document.path === focused)
-    const current = documents[index]
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault()
-      const next = Math.min(
-        documents.length - 1,
-        Math.max(0, index === -1 ? 0 : index + (event.key === 'ArrowDown' ? 1 : -1)),
-      )
-      const document = documents[next]
-      if (!document) return
-      focus(document.path, cursorField)
-      virtualizer.scrollToIndex(next, { align: 'auto' })
-      if (workbench.selectedDocument) workbench.selectDocument(document.path)
-    } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && current) {
-      // The id is the row's own cell, left of the first field.
-      event.preventDefault()
-      const keys = gridColumns.map((column) => column.key)
-      const at = cursorField === undefined ? -1 : keys.indexOf(cursorField)
-      const next = event.key === 'ArrowRight' ? Math.min(keys.length - 1, at + 1) : at - 1
-      const field = next < 0 ? undefined : keys[next]
-      focus(current.path, field)
-      if (field !== undefined) reveal(field)
-    } else if ((event.key === 'Enter' || event.key === 'F2') && current) {
-      event.preventDefault()
-      if (cursorField !== undefined && cursorField !== FOLDED_COLUMN)
-        actions.current?.edit(current, cursorField)
-      else if (event.key === 'Enter') workbench.selectDocument(current.path)
-    } else if (event.key === ' ' && focused) {
-      event.preventDefault()
-      toggle(focused)
-    } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
-      event.preventDefault()
-      setChecked(documents.map((document) => document.path))
-    } else if (
-      (event.metaKey || event.ctrlKey) &&
-      event.key.toLowerCase() === 'c' &&
-      current &&
-      cursorField !== FOLDED_COLUMN &&
+    const next = Math.min(documents.length - 1, Math.max(0, index === -1 ? 0 : index + step))
+    const document = documents[next]
+    if (!document) return
+    focus(document.path, cursorField)
+    virtualizer.scrollToIndex(next, { align: 'auto' })
+    if (workbench.selectedDocument) workbench.selectDocument(document.path)
+  }
+  const moveField = (step: 1 | -1) => {
+    const row = current()
+    if (!row) return
+    // The id is the row's own cell, left of the first field.
+    const keys = gridColumns.map((column) => column.key)
+    const at = cursorField === undefined ? -1 : keys.indexOf(cursorField)
+    const next = step === 1 ? Math.min(keys.length - 1, at + 1) : at - 1
+    const field = next < 0 ? undefined : keys[next]
+    focus(row.path, field)
+    if (field !== undefined) reveal(field)
+  }
+  const open = (row: FsDocument | undefined, key: 'Enter' | 'F2') => {
+    if (!row) return
+    if (cursorField !== undefined && cursorField !== FOLDED_COLUMN)
+      actions.current?.edit(row, cursorField)
+    else if (key === 'Enter') workbench.selectDocument(row.path)
+  }
+  const loaded = () => documents.length > 0
+  const onRow = () => loaded() && current() !== undefined
+  useShortcuts({ id: 'firestore', label: 'Firestore' }, [
+    {
+      key: 'ArrowUp',
+      label: 'Move between rows',
+      group: 'Grid',
+      when: loaded,
+      run: () => moveRow(-1),
+    },
+    {
+      key: 'ArrowDown',
+      label: 'Move between rows',
+      group: 'Grid',
+      when: loaded,
+      run: () => moveRow(1),
+    },
+    {
+      key: 'ArrowLeft',
+      label: 'Move between fields',
+      group: 'Grid',
+      when: onRow,
+      run: () => moveField(-1),
+    },
+    {
+      key: 'ArrowRight',
+      label: 'Move between fields',
+      group: 'Grid',
+      when: onRow,
+      run: () => moveField(1),
+    },
+    {
+      key: 'Enter',
+      label: 'Edit the value, or open the document from its id',
+      group: 'Grid',
+      when: onRow,
+      run: () => open(current(), 'Enter'),
+    },
+    {
+      key: 'F2',
+      label: 'Edit the value',
+      group: 'Grid',
+      when: onRow,
+      run: () => open(current(), 'F2'),
+    },
+    {
+      key: 'Space',
+      label: 'Tick the row',
+      group: 'Grid',
+      when: () => loaded() && focused !== undefined,
+      run: () => {
+        if (focused) toggle(focused)
+      },
+    },
+    {
+      key: 'Mod+a',
+      label: 'Tick every loaded row',
+      group: 'Grid',
+      when: loaded,
+      run: () => setChecked(documents.map((document) => document.path)),
+    },
+    {
+      key: 'Mod+c',
+      label: 'Copy the value',
+      group: 'Grid',
       // Text somebody selected on purpose is what they meant to copy.
-      !window.getSelection()?.toString()
-    ) {
-      event.preventDefault()
-      void copy(current, cursorField)
-    }
-  })
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => onKeyDown(event)
-    window.addEventListener('keydown', listener)
-    return () => window.removeEventListener('keydown', listener)
-  }, [])
+      when: () => onRow() && cursorField !== FOLDED_COLUMN && !window.getSelection()?.toString(),
+      run: () => {
+        const row = current()
+        if (row) void copy(row, cursorField)
+      },
+    },
+  ])
 
-  // Fetch the next page as the last rows come into view.
+  // Fetch the next page as the last rows come into view, and — once the
+  // window has let its oldest pages go (it holds at most 20) — the page
+  // before as the first rows do.
   const items = virtualizer.getVirtualItems()
+  const firstVisible = items[0]?.index ?? 0
   const lastVisible = items.at(-1)?.index ?? -1
   useEffect(() => {
     if (
@@ -402,6 +441,37 @@ export function Grid() {
     )
       void page.fetchNextPage()
   }, [lastVisible, documents.length, page])
+  useEffect(() => {
+    if (
+      firstVisible <= 20 &&
+      page.hasPreviousPage &&
+      !page.isFetchingPreviousPage &&
+      documents.length > 0
+    )
+      void page.fetchPreviousPage()
+  }, [firstVisible, documents.length, page])
+
+  // Rows that came or went above the ones on screen leave those rows where
+  // they are: a page dropped from the front of the window, a page read back
+  // in, a document created or deleted above. At the very top nothing is
+  // held, so what arrives there is seen.
+  const anchor = useRef<readonly FsDocument[]>(documents)
+  useLayoutEffect(() => {
+    const before = anchor.current
+    anchor.current = documents
+    const element = scrollRef.current
+    const previousFirst = before[0]?.path
+    const first = documents[0]?.path
+    if (!element || element.scrollTop === 0 || !previousFirst || !first || previousFirst === first)
+      return
+    const added = documents.findIndex((document) => document.path === previousFirst)
+    if (added > 0) {
+      element.scrollTop += added * ROW_HEIGHT
+      return
+    }
+    const removed = before.findIndex((document) => document.path === first)
+    if (removed > 0) element.scrollTop = Math.max(0, element.scrollTop - removed * ROW_HEIGHT)
+  }, [documents])
 
   // The cell being edited, found in the page each render: a live change can
   // replace the document under it, and a delete can take it away.
@@ -448,6 +518,38 @@ export function Grid() {
         <Text variant="secondary">Loading {workbench.collectionPath}…</Text>
       </div>
     )
+  if (documents.length === 0 && !workbench.queryText && !workbench.isPattern)
+    // Nothing here yet: how the app writes here first (the connection
+    // snippet with this engine's host, port and project, and the project
+    // the app is using when the engine has seen it write elsewhere), then
+    // the console's own ways in.
+    return (
+      <EmptyState
+        icon={DatabaseIcon}
+        title={`No documents in ${workbench.collectionPath}`}
+        description="A collection exists once it has a document. Write one from your app, add one here, or import JSON."
+        connect={{ service: 'firestore', project: workbench.project }}
+        actions={
+          <>
+            <Button
+              variant="primary"
+              icon={<PlusIcon />}
+              onClick={() => openCreate({ kind: 'document', collection: workbench.collectionPath })}
+              data-testid="empty-add-document"
+            >
+              Add document
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => openCreate({ kind: 'import', collection: workbench.collectionPath })}
+            >
+              Import JSON
+            </Button>
+          </>
+        }
+        testId="empty-collection"
+      />
+    )
   if (documents.length === 0)
     return (
       <div className="min-h-0 flex-1 overflow-auto">
@@ -456,40 +558,12 @@ export function Grid() {
           title={
             workbench.queryText
               ? 'No documents match this query'
-              : workbench.isPattern
-                ? `No documents at ${workbench.collectionPath}`
-                : `No documents in ${workbench.collectionPath}`
+              : `No documents at ${workbench.collectionPath}`
           }
           description={
             workbench.queryText
               ? 'Loosen a clause, or check the field names and types against the collection.'
-              : workbench.isPattern
-                ? 'The collections matching this pattern hold only subcollections; the schema tree shows what is below.'
-                : 'A collection exists once it has a document. Write one from your app, add one here, or import JSON.'
-          }
-          contents={
-            workbench.queryText || workbench.isPattern ? undefined : (
-              <div className="flex gap-2">
-                <Button
-                  variant="primary"
-                  icon={<PlusIcon />}
-                  onClick={() =>
-                    openCreate({ kind: 'document', collection: workbench.collectionPath })
-                  }
-                  data-testid="empty-add-document"
-                >
-                  Add document
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    openCreate({ kind: 'import', collection: workbench.collectionPath })
-                  }
-                >
-                  Import JSON
-                </Button>
-              </div>
-            )
+              : 'The collections matching this pattern hold only subcollections; the schema tree shows what is below.'
           }
         />
       </div>
@@ -796,7 +870,10 @@ function QueryFailure({ error }: { error: Error }) {
                     search: {
                       db: workbench.database === DEFAULT_DATABASE ? undefined : workbench.database,
                       path: workbench.collectionPath || undefined,
-                      uid: workbench.viewAs.kind === 'user' ? workbench.viewAs.uid : undefined,
+                      uid:
+                        workbench.viewAs.kind === 'user' || workbench.viewAs.kind === 'custom'
+                          ? workbench.viewAs.uid
+                          : undefined,
                       denied: true,
                       pick: true,
                     },
@@ -823,7 +900,9 @@ function describe(workbench: ReturnType<typeof useWorkbench>): string {
     ? 'an anonymous client'
     : viewAs.kind === 'user'
       ? (viewAs.email ?? viewAs.uid)
-      : 'admin'
+      : viewAs.kind === 'custom'
+        ? `${viewAs.email ?? viewAs.uid}, a custom identity`
+        : 'admin'
 }
 
 /**
@@ -849,18 +928,15 @@ function RootLanding() {
   const openCreate = useCreateDialog((state) => state.open)
   const recents = useRecents((state) => state.items)
   const collections = useQuery(collectionsQuery(workbench.ownerScope, ''))
-  const schema = useQuery(schemaQuery(workbench.database))
+  const schema = useQuery(workbenchSchemaQuery(workbench))
   const shapes = new Map((schema.data?.collections ?? []).map((node) => [node.id, node]))
   const anyNested = [...shapes.values()].some((node) => node.children.length > 0)
   return (
     <div className="grid content-start gap-4 overflow-auto px-5 py-4">
       <Text variant="secondary">
         Root collections in <span className="font-mono text-[0.9em]">{workbench.database}</span>.
-        Pick one, press{' '}
-        <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">/</kbd>{' '}
-        and type a path, or{' '}
-        <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px]">⌘K</kbd>{' '}
-        to search.
+        Pick one, press <Kbd className="text-inherit">/</Kbd> and type a path, or{' '}
+        <Kbd className="text-inherit">{describeKey('Mod+k')}</Kbd> to search.
       </Text>
       {recents.length > 0 && (
         <div className="@container grid gap-1.5" data-testid="recents">
