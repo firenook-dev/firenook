@@ -8,7 +8,7 @@
 // refused and the engine badge says so; `restoreLive` lets the next retry
 // through, and the channel resumes every subscription from its cursor.
 
-import type { Page, Request } from '@playwright/test'
+import type { BrowserContext, Page, Request } from '@playwright/test'
 
 /** The key the channel reads its timings from (`TIMING_KEY` in `src/lib/live/channel.ts`). */
 const TIMING_KEY = 'firenook.console.live-timing'
@@ -28,7 +28,8 @@ export function isLiveStream(request: Request): boolean {
   return request.method() === 'GET' && url.pathname.endsWith('/console/api/v1/live') && !url.search
 }
 
-async function setVisibility(page: Page, state: 'hidden' | 'visible') {
+/** Says to the page that its tab was hidden or shown, as the browser would. */
+export async function setVisibility(page: Page, state: 'hidden' | 'visible'): Promise<void> {
   await page.locator('html').evaluate((root, visibility) => {
     const shown = root.ownerDocument
     Object.defineProperty(shown, 'visibilityState', { configurable: true, get: () => visibility })
@@ -61,28 +62,60 @@ export async function restoreLive(page: Page): Promise<void> {
   await page.unroute(LIVE_ROUTE)
 }
 
-/** Counts the page's live streams: how many were opened, and how many are open now. */
-export function liveRequests(page: Page) {
+/**
+ * A page loaded hidden, as a tab opened in the background is: what the
+ * document says before any of the page's scripts run. `setVisibility`
+ * shows it later.
+ */
+export async function loadHidden(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    // The browser's document; this file is typed for Node, not the DOM.
+    const shown = (globalThis as unknown as { document: object }).document
+    Object.defineProperty(shown, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    Object.defineProperty(shown, 'hidden', { configurable: true, get: () => true })
+  })
+}
+
+/**
+ * Counts the live streams of a page, or of every page of a browser
+ * context: how many were opened, how many are open now, and the most that
+ * were ever open at once.
+ */
+export function liveRequests(target: Page | BrowserContext) {
+  const events = target as Pick<Page, 'on' | 'off'>
   const open = new Set<Request>()
   let opened = 0
+  let most = 0
   const onRequest = (request: Request) => {
     if (!isLiveStream(request)) return
     opened += 1
     open.add(request)
+    most = Math.max(most, open.size)
   }
   const onDone = (request: Request) => {
     open.delete(request)
   }
-  page.on('request', onRequest)
-  page.on('requestfinished', onDone)
-  page.on('requestfailed', onDone)
+  // A closed page's requests end without an event: they are not open.
+  const living = () =>
+    [...open].filter((request) => {
+      try {
+        return !request.frame().page().isClosed()
+      } catch {
+        // A request with no frame (a worker's) is no page's live stream.
+        return false
+      }
+    })
+  events.on('request', onRequest)
+  events.on('requestfinished', onDone)
+  events.on('requestfailed', onDone)
   return {
-    open: () => open.size,
+    open: () => living().length,
     opened: () => opened,
+    most: () => most,
     dispose() {
-      page.off('request', onRequest)
-      page.off('requestfinished', onDone)
-      page.off('requestfailed', onDone)
+      events.off('request', onRequest)
+      events.off('requestfinished', onDone)
+      events.off('requestfailed', onDone)
     },
   }
 }

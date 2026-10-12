@@ -22,7 +22,7 @@ export interface Engine {
   stop(): Promise<void>
 }
 
-/** What a describe block may change about its worker's engine (a new worker starts for it). */
+/** What a spec file may change about its worker's engine (a new worker starts for it). */
 export interface EngineOptions {
   only?: string
   args?: string[]
@@ -39,17 +39,41 @@ function engineOf(started: StartedEngine): Engine {
   }
 }
 
+/**
+ * What a worker without an engine of its own hands its tests: every use is
+ * a mistake the message names, never a request to a port nothing holds.
+ */
+const NO_ENGINE = new Proxy({} as Engine, {
+  get(_target, key) {
+    // Asked of every value by whatever checks for a promise or prints one.
+    if (key === 'then' || typeof key === 'symbol') return undefined
+    throw new Error(
+      `This spec file runs without a worker engine (workerEngine: false), so engine.${String(key)} does not exist; use dedicatedEngine().`,
+    )
+  },
+})
+
 // oxlint-disable-next-line typescript/no-empty-object-type -- no test-scoped fixtures here
 export const test = base.extend<
   {},
-  { profile: EngineProfile; engineOptions: EngineOptions; engine: Engine }
+  { profile: EngineProfile; engineOptions: EngineOptions; workerEngine: boolean; engine: Engine }
 >({
   profile: ['data', { option: true, scope: 'worker' }],
-  // A describe block that needs another suite:
+  // A spec file that needs another suite says so at its top level (a
+  // worker-scoped option cannot change inside a describe block):
   // test.use({ engineOptions: { only: 'functions,firestore' } })
   engineOptions: [{}, { option: true, scope: 'worker' }],
+  // A spec file whose journeys each start, stop and restart engines of
+  // their own (`dedicatedEngine`) says `workerEngine: false` at its top
+  // level, so the worker holds no engine beside them: one engine at a
+  // time on the host.
+  workerEngine: [true, { option: true, scope: 'worker' }],
   engine: [
-    async ({ profile, engineOptions }, use) => {
+    async ({ profile, engineOptions, workerEngine }, use) => {
+      if (!workerEngine) {
+        await use(NO_ENGINE)
+        return
+      }
       const started = await startEngine({ profile, ...engineOptions, env: RELEASE_ENV })
       // The specs read these through their `origin()` and `project()` helpers.
       process.env.FIRENOOK_CONSOLE_ORIGIN = started.origin
