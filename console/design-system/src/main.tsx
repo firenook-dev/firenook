@@ -9,6 +9,7 @@ import './cards/patterns'
 import './cards/console-requests'
 import './cards/outcome-chip'
 import './cards/log-line'
+import './cards/mini-bars'
 import './styles.css'
 
 declare global {
