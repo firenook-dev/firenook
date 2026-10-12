@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { codebase, invocation, summary } from '../fixtures.test-support'
 import { exitWords, workerDown } from './codebase-banners'
 import { diffText, workerWord } from './codebase-view'
-import { byFile, envFileName } from './env-change-dialog'
+import { SECRET_KEPT, byFile, changedFiles, envFileName } from './env-change-dialog'
 import { envKeyProblem } from './environment-tab'
 import { problemChips } from './function-toolbar'
 import { noInvocationsText } from './function-workbench'
@@ -60,6 +60,36 @@ describe('the Functions page pieces', () => {
       ['.env', ['A', 'B']],
       ['.secret.local', ['S']],
     ])
+    // As the shared save dialog lists them: under the codebase's directory,
+    // a secret's present value never held, a removal said as one.
+    expect(
+      changedFiles(
+        [
+          { file: 'env', fileName: '.env', key: 'A', before: '1', after: null, secret: false },
+          {
+            file: 'secretLocal',
+            fileName: '.secret.local',
+            key: 'S',
+            before: SECRET_KEPT,
+            after: 'x',
+            secret: true,
+          },
+        ],
+        'functions',
+      ),
+    ).toEqual([
+      { file: 'functions/.env', changes: [{ key: 'A', before: '1', after: null, secret: false }] },
+      {
+        file: 'functions/.secret.local',
+        changes: [{ key: 'S', before: null, after: 'x', secret: true }],
+      },
+    ])
+    expect(
+      changedFiles(
+        lines.flatMap(([, changes]) => changes),
+        undefined,
+      )[0]?.file,
+    ).toBe('.env')
     expect(envKeyProblem('GREETING')).toBeUndefined()
     expect(envKeyProblem('1BAD')).toMatch(/letters, digits/)
     expect(envKeyProblem('FIREBASE_CONFIG')).toMatch(/set by the emulator/)

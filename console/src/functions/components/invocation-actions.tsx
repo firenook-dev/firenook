@@ -29,7 +29,8 @@ import { toast } from '@/lib/toasts'
 import { getInvocation } from '../api'
 import { replayInvocation } from '../invoke-stream'
 import { copyText } from '../use-functions'
-import { ReplayConfirm } from './replay-confirm'
+import { ReplayConfirm } from '@/compute/replay-confirm'
+import { formatNumber } from '@/lib/format'
 
 /**
  * A ref as words when the engine gave it no label: `orders/o1` for a
@@ -263,9 +264,10 @@ export function useInvocationActions({
         onOpenChange={(open) => {
           if (!open) setAsking(null)
         }}
-        seq={asking?.seq ?? 0}
+        title={`Replay #${formatNumber(asking?.seq ?? 0)}?`}
+        description="The handler runs again with the same request, against the code loaded now; whatever it writes is written again."
         pending={replaying}
-        onReplay={() => asking && replay(asking)}
+        onConfirm={() => asking && replay(asking)}
       />
     ),
   }

@@ -1,19 +1,17 @@
 // The one confirmation every change to a codebase's environment goes
 // through — edit a variable, add one, set a declared param, add a missing
 // secret: the values that change, per file, old → new (secrets masked),
-// the files written, and that the codebase reloads. Save writes the files
-// atomically and reloads; a reload that fails puts every file back, and the
-// dialog says so with the load error, so a change that does not load never
-// stays on disk.
+// and that the codebase reloads. It is the dialog Extensions' configuration
+// uses (`src/compute/env-change-dialog.tsx`), so a save says the same thing
+// wherever it is made. Save writes the files atomically and reloads; a
+// reload that fails puts every file back, and the dialog says so with the
+// load error, so a change that does not load never stays on disk.
 
-import { Button, Dialog, Text } from '@cloudflare/kumo'
-import { ArrowRightIcon, FloppyDiskIcon, XIcon } from '@phosphor-icons/react'
 import { useMutation } from '@tanstack/react-query'
-import { useState } from 'react'
 import { ApiError } from '@/api/client'
 import type { FunctionEnvEditResult } from '@/api/generated/compute/FunctionEnvEditResult'
 import type { FunctionEnvFile } from '@/api/generated/compute/FunctionEnvFile'
-import { maskedText } from '@/components/console/masked-value'
+import { EnvChangeDialog as ChangeDialog, type EnvFileChange } from '@/compute/env-change-dialog'
 import { toast } from '@/lib/toasts'
 import { editEnv } from '../api'
 
@@ -55,36 +53,47 @@ export function byFile(lines: readonly EnvChangeLine[]): [string, EnvChangeLine[
   return [...groups]
 }
 
-/** A secret's present value, which the console never held: shown as dots of no length. */
+/** A secret's present value, which the console never held. */
 export const SECRET_KEPT = '\u0000kept'
 
-function shown(line: EnvChangeLine, value: string | null): string {
-  if (value === null) return 'not set'
-  if (!line.secret) return value
-  return maskedText(value === SECRET_KEPT ? undefined : value.length)
+/** The lines as the shared dialog lists them: per file, under the codebase's directory. */
+export function changedFiles(
+  lines: readonly EnvChangeLine[],
+  directory: string | undefined,
+): EnvFileChange[] {
+  return byFile(lines).map(([fileName, changes]) => ({
+    file: directory ? `${directory}/${fileName}` : fileName,
+    changes: changes.map((line) => ({
+      key: line.key,
+      before: line.before === SECRET_KEPT ? null : line.before,
+      after: line.after,
+      secret: line.secret,
+    })),
+  }))
 }
 
 export function EnvChangeDialog({
   open,
   onOpenChange,
   codebase,
+  directory,
   lines,
   onSaved,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   codebase: string
+  /** The codebase's source directory, relative to the project (`functions`). */
+  directory?: string | undefined
   lines: readonly EnvChangeLine[]
   onSaved?: ((result: FunctionEnvEditResult) => void) | undefined
 }) {
-  const [failure, setFailure] = useState<{ message: string; fix?: string | undefined } | null>(null)
   const save = useMutation({
     mutationFn: () =>
       editEnv(codebase, {
         changes: lines.map((line) => ({ file: line.file, key: line.key, value: line.after })),
       }),
     onSuccess: (result) => {
-      setFailure(null)
       onOpenChange(false)
       onSaved?.(result)
       toast({
@@ -94,113 +103,29 @@ export function EnvChangeDialog({
         tone: 'success',
       })
     },
-    onError: (error) =>
-      setFailure(
-        error instanceof ApiError
-          ? { message: error.message, fix: error.fix }
-          : { message: 'The change could not be saved.' },
-      ),
   })
-  const close = (next: boolean) => {
-    if (!next && save.isPending) return
-    if (!next) setFailure(null)
-    onOpenChange(next)
-  }
-  const groups = byFile(lines)
+  const error = save.error
+    ? save.error instanceof ApiError
+      ? { message: save.error.message, fix: save.error.fix }
+      : { message: 'The change could not be saved.' }
+    : undefined
   return (
-    <Dialog.Root open={open} onOpenChange={close}>
-      <Dialog className="p-6 sm:w-[720px]">
-        <div className="contents" data-testid="env-change-dialog">
-          <div className="mb-3 flex items-start justify-between gap-4">
-            <Dialog.Title className="text-lg font-semibold">
-              {lines.length === 1
-                ? 'Save this change and reload'
-                : `Save ${lines.length} changes and reload`}
-            </Dialog.Title>
-            <Dialog.Close
-              aria-label="Close"
-              render={<Button variant="ghost" shape="square" icon={<XIcon />} aria-label="Close" />}
-            />
-          </div>
-          <Dialog.Description className="text-kumo-subtle">
-            {codebase} reloads with these values; calls in flight to its worker are dropped. If it
-            does not load, your files are put back.
-          </Dialog.Description>
-          <div className="mt-4 grid gap-3" data-testid="env-change-files">
-            {groups.map(([fileName, changes]) => (
-              <div key={fileName} className="grid gap-1 rounded-lg p-3 ring ring-kumo-line">
-                <span
-                  className="font-mono text-[12px] text-kumo-subtle"
-                  data-testid="env-change-file"
-                >
-                  {fileName}
-                </span>
-                {changes.map((line) => (
-                  <div
-                    key={line.key}
-                    className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)_auto_minmax(0,1fr)] items-baseline gap-2 font-mono text-[12px]"
-                    data-testid="env-change-line"
-                  >
-                    <span className="text-kumo-default">{line.key}</span>
-                    <span
-                      className={
-                        line.before === null
-                          ? 'truncate font-sans text-[13px] text-kumo-inactive'
-                          : 'truncate text-kumo-subtle line-through decoration-kumo-hairline'
-                      }
-                    >
-                      {shown(line, line.before)}
-                    </span>
-                    <ArrowRightIcon
-                      size={12}
-                      className="self-center text-kumo-subtle"
-                      aria-hidden
-                    />
-                    <span
-                      className={
-                        line.after === null
-                          ? 'truncate font-sans text-[13px] text-kumo-inactive'
-                          : 'truncate text-kumo-default'
-                      }
-                    >
-                      {line.after === null ? 'removed' : shown(line, line.after)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-          {failure && (
-            <div
-              className="mt-3 grid gap-1 rounded-lg bg-kumo-danger-tint px-3 py-2"
-              data-testid="env-change-error"
-            >
-              <Text variant="error" size="sm">
-                {failure.message}
-              </Text>
-              {failure.fix && (
-                <pre className="max-h-40 overflow-auto font-mono text-[12px] whitespace-pre-wrap text-kumo-default">
-                  {failure.fix}
-                </pre>
-              )}
-            </div>
-          )}
-          <div className="mt-5 flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => close(false)} disabled={save.isPending}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              icon={<FloppyDiskIcon />}
-              loading={save.isPending}
-              onClick={() => save.mutate()}
-              data-testid="env-change-save"
-            >
-              Save and reload
-            </Button>
-          </div>
-        </div>
-      </Dialog>
-    </Dialog.Root>
+    <ChangeDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) save.reset()
+        onOpenChange(next)
+      }}
+      title={
+        lines.length === 1
+          ? 'Save this change and reload'
+          : `Save ${lines.length} changes and reload`
+      }
+      files={changedFiles(lines, directory)}
+      note={`${codebase} reloads with these values; calls in flight to its worker are dropped.`}
+      pending={save.isPending}
+      error={error}
+      onConfirm={() => save.mutate()}
+    />
   )
 }

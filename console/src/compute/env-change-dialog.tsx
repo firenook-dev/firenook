@@ -14,7 +14,8 @@ export interface EnvChange {
   key: string
   /** The value now, or null when the file does not set it (or it is a secret). */
   before: string | null
-  after: string
+  /** The value it will have, or null when the save removes the key. */
+  after: string | null
   secret: boolean
 }
 
@@ -129,9 +130,18 @@ export function EnvChangeDialog({
                           className="shrink-0 self-center text-kumo-subtle"
                           aria-label="becomes"
                         />
-                        <span className="break-all text-kumo-default" data-part="after">
-                          {change.secret ? MASK : change.after === '' ? '""' : change.after}
-                        </span>
+                        {change.after === null ? (
+                          <span
+                            className="font-sans text-[12px] text-kumo-subtle"
+                            data-part="after"
+                          >
+                            removed
+                          </span>
+                        ) : (
+                          <span className="break-all text-kumo-default" data-part="after">
+                            {change.secret ? MASK : change.after === '' ? '""' : change.after}
+                          </span>
+                        )}
                       </span>
                     </li>
                   ))}

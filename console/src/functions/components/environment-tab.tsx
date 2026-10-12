@@ -14,6 +14,7 @@
 
 import { Button, Input, SensitiveInput, Select, Text } from '@cloudflare/kumo'
 import { PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react'
+import { useQuery } from '@tanstack/react-query'
 import { type KeyboardEvent, useState } from 'react'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { FunctionEnvFile } from '@/api/generated/compute/FunctionEnvFile'
@@ -25,7 +26,7 @@ import { MaskedValue } from '@/components/console/masked-value'
 import { StatusDot } from '@/components/kit'
 import { formatNumber } from '@/lib/format'
 import { matchesKey } from '@/lib/shortcuts'
-import { revealSecret } from '../api'
+import { functionsSnapshotQuery, revealSecret } from '../api'
 import { type EnvChangeLine, EnvChangeDialog, SECRET_KEPT, envFileName } from './env-change-dialog'
 
 /** The dotenv dialect's key rule (the engine refuses the rest with its own words). */
@@ -72,6 +73,10 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
   const extension = environment.variables.filter((variable) => variable.source === 'extensionParam')
   const params = detail.params.filter((param) => !param.secret)
   const editable = environment.editable
+  // Where the codebase lives, so the save names the files it writes in full.
+  const snapshot = useQuery({ ...functionsSnapshotQuery(project), enabled: project !== '' })
+  const directory = snapshot.data?.codebases.find((entry) => entry.codebase.id === codebase)
+    ?.codebase.directory
 
   const stage = () => {
     if (!editing) return
@@ -436,6 +441,7 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
           if (!open) setStaged(null)
         }}
         codebase={codebase}
+        directory={directory}
         lines={staged ?? []}
         onSaved={() => setEditing(null)}
       />
