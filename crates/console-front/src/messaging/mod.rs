@@ -37,8 +37,22 @@ pub struct TasksConsole {
 /// The Pub/Sub section.
 pub(crate) struct PubsubSection(pub(crate) Late<PubsubConsole>);
 
+impl PubsubSection {
+    /// The section over the one `Late` for the Pub/Sub runtime.
+    pub(crate) const fn new(late: Late<PubsubConsole>) -> Self {
+        Self(late)
+    }
+}
+
 /// The Cloud Tasks section.
 pub(crate) struct TasksSection(pub(crate) Late<TasksConsole>);
+
+impl TasksSection {
+    /// The section over the one `Late` for the Cloud Tasks runtime.
+    pub(crate) const fn new(late: Late<TasksConsole>) -> Self {
+        Self(late)
+    }
+}
 
 impl Section for PubsubSection {
     fn statuses(&self) -> Vec<SectionStatus> {
@@ -97,3 +111,17 @@ impl Section for TasksSection {
 /// The messaging stream's TypeScript bindings, into `generated/messaging/`.
 #[cfg(test)]
 pub(crate) fn export_bindings(_config: &ts_rs::Config) {}
+
+/// A Pub/Sub console whose native application is `native`, for the
+/// crate's tests.
+#[cfg(test)]
+pub(crate) fn test_pubsub_console(native: Router) -> PubsubConsole {
+    PubsubConsole { native }
+}
+
+/// A Cloud Tasks console whose native application is `native`, for the
+/// crate's tests.
+#[cfg(test)]
+pub(crate) fn test_tasks_console(native: Router) -> TasksConsole {
+    TasksConsole { native }
+}
