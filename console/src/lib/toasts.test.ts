@@ -42,6 +42,41 @@ describe('the toast policy', () => {
     expect(titles()).toEqual(['Exporting… 80%', 'A', 'B'])
   })
 
+  it('rewrites a replaced toast, since Kumo only bumps one whose id is still showing', () => {
+    // Kumo's own `add` with an id on screen restarts its timer and keeps
+    // everything it said: a job's "done" would go on reading "0 of 1" with
+    // Cancel. The replacement's words, tone and actions go through `update`.
+    const update = vi.fn()
+    const sink: ToastSink = { add: vi.fn(), close: vi.fn(), update }
+    const toast = createToastPolicy(sink)
+    const cancel = vi.fn()
+    toast({
+      key: 'job:j1',
+      title: 'Prepare a snapshot',
+      description: '0 of 1',
+      tone: 'info',
+      action: { label: 'Cancel', run: cancel },
+    })
+    expect(update).not.toHaveBeenCalled()
+    toast({
+      key: 'job:j1',
+      title: 'Prepare a snapshot: done',
+      description: '1 of 1',
+      tone: 'success',
+    })
+    expect(update).toHaveBeenCalledTimes(1)
+    const [id, content] = update.mock.calls[0] ?? []
+    expect(id).toBe(vi.mocked(sink.add).mock.calls[0]?.[0].id)
+    expect(content).toEqual({
+      title: 'Prepare a snapshot: done',
+      description: '1 of 1',
+      variant: 'success',
+      actions: undefined,
+    })
+    // And still bumped through `add`, under the same id.
+    expect(vi.mocked(sink.add).mock.calls[1]?.[0].id).toBe(id)
+  })
+
   it('never shows a replayed event or the console echoing its own change', () => {
     const { sink } = fakeSink()
     const toast = createToastPolicy(sink)
