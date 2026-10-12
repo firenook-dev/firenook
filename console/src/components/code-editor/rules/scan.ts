@@ -1,4 +1,5 @@
-// The Firestore rules tokenizer, one token at a time.
+// The security rules tokenizer, one token at a time (Firestore's and
+// Storage's rules are one language).
 //
 // Two readers drive it: the editor's `StreamLanguage`, which paints the
 // text line by line as CodeMirror asks, and `lex`, which reads a whole
@@ -147,13 +148,17 @@ export const GLOBAL_FUNCTIONS: ReadonlySet<string> = new Set([
   'path',
 ])
 
-/** The namespaces whose functions are called with a prefix, as `math.abs(x)`. */
+/**
+ * The namespaces whose functions are called with a prefix, as `math.abs(x)`;
+ * `firestore` is Storage's (`firestore.get(…)`), painted the same in either.
+ */
 export const NAMESPACES: ReadonlySet<string> = new Set([
   'math',
   'timestamp',
   'duration',
   'latlng',
   'hashing',
+  'firestore',
 ])
 
 const SPACE = /\s/

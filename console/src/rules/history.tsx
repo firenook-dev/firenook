@@ -39,12 +39,22 @@ export function HistoryButton<K extends QueryKey>({
   draft,
   history,
   origins,
+  open: controlled,
+  onOpenChange,
 }: {
   draft: RulesDraft
   history: HistoryQuery<K>
   origins: OriginLabels
+  /** Open from elsewhere too (⌘K): the page holds whether the dialog is open. */
+  open?: boolean | undefined
+  onOpenChange?: ((open: boolean) => void) | undefined
 }) {
-  const [open, setOpen] = useState(false)
+  const [own, setOwn] = useState(false)
+  const open = controlled ?? own
+  const setOpen = (next: boolean) => {
+    setOwn(next)
+    onOpenChange?.(next)
+  }
   return (
     <>
       <Tooltip

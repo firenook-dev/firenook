@@ -52,13 +52,16 @@ export interface CodeEditorProps {
   language?: 'json' | 'rules' | undefined
   /**
    * For rules: what completion can offer beyond the language itself —
-   * the fields documents of a collection carry, the custom claims users
-   * have.
+   * which service's rules they are (Storage's name other things), the
+   * fields documents of a collection carry, the custom claims users have,
+   * the custom metadata keys files under a folder carry.
    */
   rulesCompletion?:
     | {
+        dialect?: 'firestore' | 'storage' | undefined
         fields?: (pattern: string) => readonly string[] | Promise<readonly string[]>
         claims?: () => readonly string[]
+        metadataKeys?: (prefix: string) => readonly string[] | Promise<readonly string[]>
       }
     | undefined
   /**
