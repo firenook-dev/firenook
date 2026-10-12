@@ -23,7 +23,9 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
-use firenook_functions_bridge::{DispatchQueue, DispatchRequest, TriggerRegistry};
+use firenook_functions_bridge::{
+    DispatchQueue, DispatchRequest, DroppedService, TriggerRegistry, cause,
+};
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
@@ -2028,6 +2030,7 @@ enum StorageEvent {
 impl StorageState {
     fn dispatch(&self, event: StorageEvent, object: &StoredObject) {
         if !self.background.background_enabled() {
+            self.background.note_dropped(DroppedService::Storage);
             return;
         }
         let (legacy, cloud) = match event {
@@ -2050,11 +2053,30 @@ impl StorageState {
             "//storage.googleapis.com/projects/_/buckets/{}/objects/{}",
             object.bucket, object.name
         );
-        for (generation, body, content_type) in [
+        let legacy_id = decimal_id(&stable_id(&[
+            &self.config.project,
+            &object.bucket,
+            &object.name,
+            legacy,
+            &object.generation.to_string(),
+            &object.metageneration.to_string(),
+        ]));
+        let cloud_id = uuid_shaped(&Sha256::digest(
+            stable_id(&[
+                &self.config.project,
+                &object.bucket,
+                &object.name,
+                cloud,
+                &object.generation.to_string(),
+                &object.metageneration.to_string(),
+            ])
+            .as_bytes(),
+        ));
+        for (generation, body, content_type, body_id) in [
             (
                 "v1",
                 json!({
-                    "eventId": decimal_id(&stable_id(&[&self.config.project, &object.bucket, &object.name, legacy, &object.generation.to_string(), &object.metageneration.to_string()])),
+                    "eventId": legacy_id,
                     "timestamp": timestamp,
                     "eventType": legacy,
                     "resource": {
@@ -2065,18 +2087,20 @@ impl StorageState {
                     "data": data
                 }),
                 "application/json",
+                &legacy_id,
             ),
             (
                 "v2",
                 json!({
                     "specversion": "1.0",
-                    "id": uuid_shaped(&Sha256::digest(stable_id(&[&self.config.project, &object.bucket, &object.name, cloud, &object.generation.to_string(), &object.metageneration.to_string()]).as_bytes())),
+                    "id": cloud_id,
                     "type": cloud,
                     "source": source,
                     "time": timestamp,
                     "data": data
                 }),
                 "application/cloudevents+json; charset=UTF-8",
+                &cloud_id,
             ),
         ] {
             let event_id = stable_id(&[
@@ -2093,7 +2117,14 @@ impl StorageState {
                     "/functions/projects/{}/trigger_multicast",
                     self.config.project
                 ),
-                headers: BTreeMap::from([("content-type".to_owned(), content_type.to_owned())]),
+                // What caused it, for the Functions runtime's record of
+                // each invocation the multicast starts.
+                headers: BTreeMap::from([
+                    ("content-type".to_owned(), content_type.to_owned()),
+                    (cause::BUCKET.to_owned(), cause::encode(&object.bucket)),
+                    (cause::OBJECT.to_owned(), cause::encode(&object.name)),
+                    (cause::EVENT_ID.to_owned(), cause::encode(body_id)),
+                ]),
                 body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
                 event_id,
             });
@@ -2885,6 +2916,71 @@ mod tests {
             .await
             .expect("alias copy");
         assert_eq!(alias.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn object_events_name_their_object_and_paused_ones_are_counted() {
+        use firenook_functions_bridge::{DroppedService, cause};
+        let root = test_root("event-cause");
+        let registry = TriggerRegistry::default();
+        let (observer, mut dispatches) = TriggerObserver::channel(registry.clone());
+        let runtime = StorageRuntime::start(
+            StorageConfig {
+                project: PROJECT.to_owned(),
+                durability: StorageDurability::default(),
+                origin: "http://127.0.0.1:21002".to_owned(),
+                data_dir: root.clone(),
+                rules: None,
+            },
+            observer.queue(),
+            registry.clone(),
+        )
+        .await
+        .expect("Storage runtime");
+        let upload = |name: &'static str| {
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/v0/b/{DEFAULT_BUCKET}/o?name={name}"))
+                .header(header::CONTENT_TYPE, "text/plain")
+                .body(Body::from("event cause"))
+                .expect("upload")
+        };
+        let response = runtime
+            .application()
+            .oneshot(upload("users%2Fada%20lovelace%2F%E7%81%AB.txt"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        for id_field in ["eventId", "id"] {
+            let dispatch = dispatches.try_recv().expect("storage dispatch");
+            let event: JsonValue = serde_json::from_slice(&dispatch.body).expect("event");
+            assert_eq!(dispatch.headers[cause::BUCKET], DEFAULT_BUCKET);
+            assert_eq!(
+                dispatch.headers[cause::OBJECT],
+                "users/ada%20lovelace/%E7%81%AB.txt"
+            );
+            assert_eq!(
+                cause::decode(&dispatch.headers[cause::OBJECT]),
+                "users/ada lovelace/火.txt"
+            );
+            assert_eq!(dispatch.headers[cause::EVENT_ID], event[id_field]);
+        }
+
+        registry.set_background_enabled(false);
+        let response = runtime
+            .application()
+            .oneshot(upload("paused.txt"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            dispatches.try_recv().is_err(),
+            "nothing is sent while paused"
+        );
+        // One event, though it would have been sent in two envelopes.
+        assert_eq!(registry.dropped().counts, [(DroppedService::Storage, 1)]);
+        runtime.shutdown().await.expect("shutdown");
+        std::fs::remove_dir_all(root).expect("remove test storage");
     }
 
     #[tokio::test]

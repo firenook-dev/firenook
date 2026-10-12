@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
+use firenook_functions_bridge::{
+    DispatchQueue, DroppedService, FunctionsInventory, TriggerRegistry,
+};
 
 use crate::broker::{Broker, Published, PushJob};
 use crate::functions::{ScheduleDefinition, Target, build_dispatch, discover, topic_resource};
@@ -210,6 +212,10 @@ impl PubsubRuntime {
             ));
         }
         if !self.inner.background.background_enabled() {
+            self.inner.background.note_dropped_many(
+                DroppedService::Pubsub,
+                u64::try_from(published.messages.len()).unwrap_or(u64::MAX),
+            );
             return;
         }
         for message in &published.messages {
@@ -224,6 +230,7 @@ impl PubsubRuntime {
 
     pub(crate) fn publish_scheduled(&self, schedule: &ScheduleDefinition) {
         if !self.inner.background.background_enabled() {
+            self.inner.background.note_dropped(DroppedService::Schedule);
             return;
         }
         let topic = topic_resource(&schedule.project, &schedule.topic);

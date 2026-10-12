@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use firenook_functions_bridge::{DispatchRequest, FunctionDefinition, FunctionsInventory};
+use firenook_functions_bridge::{DispatchRequest, FunctionDefinition, FunctionsInventory, cause};
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 use time::OffsetDateTime;
@@ -125,7 +125,7 @@ pub fn build_dispatch(
                 "/functions/projects/{project}/triggers/{}-{generation}",
                 function.id
             ),
-            headers: BTreeMap::from([("content-type".to_owned(), "application/json".to_owned())]),
+            headers: with_cause("application/json", topic_name, message_id, &event_id),
             body,
             event_id,
         };
@@ -159,13 +159,32 @@ pub fn build_dispatch(
             "/functions/projects/{project}/triggers/{}-{generation}",
             function.id
         ),
-        headers: BTreeMap::from([(
-            "content-type".to_owned(),
-            "application/cloudevents+json; charset=UTF-8".to_owned(),
-        )]),
+        headers: with_cause(
+            "application/cloudevents+json; charset=UTF-8",
+            topic_name,
+            message_id,
+            &event_id,
+        ),
         body,
         event_id,
     }
+}
+
+/// A dispatch's headers: its content type and what caused it (the topic's
+/// full name, the message id and the event id the body carries), which the
+/// Functions runtime records instead of parsing the body.
+fn with_cause(
+    content_type: &str,
+    topic_name: &str,
+    message_id: &str,
+    event_id: &str,
+) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("content-type".to_owned(), content_type.to_owned()),
+        (cause::TOPIC.to_owned(), cause::encode(topic_name)),
+        (cause::MESSAGE.to_owned(), cause::encode(message_id)),
+        (cause::EVENT_ID.to_owned(), cause::encode(event_id)),
+    ])
 }
 
 fn stable_event_id(project: &str, topic: &str, function: &str, message_id: &str) -> String {
