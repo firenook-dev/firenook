@@ -9,6 +9,8 @@ import { FlaskIcon, PlayIcon, UserIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { CodeEditor } from '@/components/code-editor'
+import { JsonField } from '@/components/console/json-field'
+import { useClaimKeys } from '@/lib/claim-keys'
 import { identityUsersQuery } from '@/lib/identity'
 import type { RulesMethod } from '@/api/generated/RulesMethod'
 import { inlineSteps } from '@/rules/explain'
@@ -54,6 +56,7 @@ export function Playground({
   // the first page of the engine's bounded identity search; anyone else is
   // "Someone else…" with a uid typed in.
   const users = useQuery(identityUsersQuery(project, '', ''))
+  const claimKeys = useClaimKeys(project)
   const [running, setRunning] = useState(false)
   const problem = pathProblem(form.method, form.path, form.group)
 
@@ -218,17 +221,20 @@ export function Playground({
                   />
                 </InputGroup>
               )}
-              <InputGroup size="sm">
-                <InputGroup.Input
-                  value={who.claims}
-                  onChange={(event) => setForm({ who: { ...who, claims: event.target.value } })}
-                  placeholder='Custom claims, such as {"admin": true}'
-                  aria-label="Custom claims"
-                  spellCheck={false}
-                  className="font-mono"
-                  data-testid="playground-claims"
-                />
-              </InputGroup>
+              {/* The token's custom claims, as JSON; the keys other users
+                  carry are offered as they are typed. */}
+              <Text as="span" size="xs" variant="secondary">
+                Custom claims, such as {'{"admin": true}'}
+              </Text>
+              <JsonField
+                value={who.claims}
+                onChange={(claims) => setForm({ who: { ...who, claims } })}
+                minLines={2}
+                maxLines={6}
+                completeKeys={claimKeys.now}
+                ariaLabel="Custom claims"
+                testId="playground-claims"
+              />
             </div>
           )}
         </Field>

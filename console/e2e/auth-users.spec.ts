@@ -462,6 +462,20 @@ test('U7 the claims editor checks as Firebase does and shows where rules read ea
     await expect(page.getByTestId('inspector').getByLabel('secret value')).toHaveValue(
       'only admins read this',
     )
+
+    // "Read by your rules · line N" opens the rules page at that line, which
+    // is revealed and marked once and then leaves the address.
+    await page.goto(users(engine, { user: user.localId, tab: 'claims' }))
+    await inspector(page)
+      .getByTestId('claim-read')
+      .filter({ hasText: 'admin' })
+      .getByTestId('claim-read-line')
+      .click()
+    await expect(page).toHaveURL(/\/console\/firestore\/rules/)
+    const ruleLines = page.getByTestId('rules-source').locator('.cm-line')
+    await expect(ruleLines.nth(rule.line - 1)).toHaveClass(/cm-line-focus/)
+    await expect(page.locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText(String(rule.line))
+    await expect(page).not.toHaveURL(/line=/)
   } finally {
     await deleteAccounts(engine, [user.localId])
     await rule.restore()

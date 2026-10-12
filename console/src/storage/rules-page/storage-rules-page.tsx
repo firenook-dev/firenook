@@ -31,8 +31,8 @@ import { QueryError, useDelayedFlag } from '@/components/console/empty-state'
 import { ScopeSelect } from '@/components/console/scope-select'
 import { SectionBanner } from '@/components/console/section-banner'
 import { Page } from '@/components/shell/page'
+import { useClaimKeys } from '@/lib/claim-keys'
 import { formatCount } from '@/lib/format'
-import { identityUsersQuery } from '@/lib/identity'
 import { useShortcuts } from '@/lib/shortcuts'
 import {
   FileProblemsBanner,
@@ -232,19 +232,17 @@ function StorageRulesBody({
   }
 
   // Completion that knows the bucket: custom metadata keys its files carry
-  // under a folder, and the custom claims the Auth emulator's users have
-  // (the first page of the engine's bounded identity search).
-  const users = useQuery(identityUsersQuery(project, ''))
+  // under a folder, and the custom claim keys the Auth emulator's users
+  // carry (the engine's claim index, asked when completion opens).
+  const claimKeys = useClaimKeys(project)
   const completion = useMemo(
     () => ({
       dialect: 'storage' as const,
       metadataKeys: async (prefix: string) =>
         (await queryClient.fetchQuery(profileQuery(project, bucket, prefix))).metadataKeys,
-      claims: () => [
-        ...new Set((users.data ?? []).flatMap((user) => Object.keys(user.claims ?? {}))),
-      ],
+      claims: claimKeys.fresh,
     }),
-    [queryClient, project, bucket, users.data],
+    [queryClient, project, bucket, claimKeys],
   )
 
   const rulesFile = fileName(document?.path) ?? 'storage.rules'

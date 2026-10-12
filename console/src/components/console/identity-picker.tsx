@@ -25,6 +25,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { ApiError } from '@/api/client'
 import { statusQuery } from '@/api/queries'
 import { MenuCheck } from '@/components/kit'
+import { useClaimKeys } from '@/lib/claim-keys'
 import {
   IDENTITY_PAGE,
   type IdentityUser,
@@ -340,6 +341,7 @@ export function IdentityPicker({
             <div className="contents" data-testid={`${testId}-custom-dialog`}>
               <CustomIdentityForm
                 key={customSession}
+                project={project}
                 initial={value.kind === 'custom' || value.kind === 'user' ? value : undefined}
                 onCancel={() => setCustomOpen(false)}
                 onUse={(custom) => {
@@ -412,11 +414,13 @@ function providerOf(initial: Extract<ViewAs, { kind: 'custom' | 'user' }> | unde
 }
 
 function CustomIdentityForm({
+  project,
   initial,
   onCancel,
   onUse,
   testId,
 }: {
+  project: string
   /** A custom identity to edit, or a user to start a variation from. */
   initial: Extract<ViewAs, { kind: 'custom' | 'user' }> | undefined
   onCancel: () => void
@@ -430,6 +434,8 @@ function CustomIdentityForm({
     initial?.kind === 'custom' ? (initial.emailVerified ?? false) : Boolean(initial?.email),
   )
   const [claims, setClaims] = useState(() => JSON.stringify(initial?.claims ?? {}, null, 2))
+  // The claim keys the project's users carry, offered as a key is typed.
+  const claimKeys = useClaimKeys(project)
   // The field says what is wrong with text that is not JSON, under itself,
   // with the line and column; the form adds only what the field cannot know.
   const [read, setRead] = useState<JsonParse | undefined>(undefined)
@@ -528,6 +534,7 @@ function CustomIdentityForm({
             onParsed={setRead}
             minLines={4}
             maxLines={10}
+            completeKeys={claimKeys.now}
             ariaLabel="Claims"
             testId={`${testId}-claims`}
           />

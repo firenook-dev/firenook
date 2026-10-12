@@ -37,7 +37,8 @@ export type SectionId =
 /** Where something opens: a route and its search params. */
 export interface SectionLink {
   to: string
-  search?: Record<string, string | boolean | undefined>
+  /** The page's search params, as its schema reads them (a rules page's `line` is a number). */
+  search?: Record<string, string | number | boolean | undefined>
 }
 
 export interface SectionPage {

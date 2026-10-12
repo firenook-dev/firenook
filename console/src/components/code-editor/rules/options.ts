@@ -13,8 +13,12 @@ export interface RulesLanguageOptions {
   // "users/*/orders" (top-level names plus dotted nested map keys, e.g.
   // "address.city"). May be async.
   fields?: (pattern: string) => readonly string[] | Promise<readonly string[]>
-  /** Custom claim names seen on Auth users, beyond the standard token fields. */
-  claims?: () => readonly string[]
+  /**
+   * Custom claim names Auth users carry, beyond the standard token fields
+   * (the engine's claim index). Asked each time the token's members are
+   * completed. May be async.
+   */
+  claims?: () => readonly string[] | Promise<readonly string[]>
   /**
    * Storage: custom metadata keys seen on files under a folder (`users/`,
    * `''` for the whole bucket), the folder being the literal start of the

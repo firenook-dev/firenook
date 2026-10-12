@@ -190,6 +190,26 @@ describe('members', () => {
     ])
   })
 
+  it('asks for the custom claims each time, and waits for an answer that is on its way', async () => {
+    let asked = 0
+    const token = await complete(ORDERS(`request.auth.token.${CARET}`), {
+      options: {
+        claims: async () => {
+          asked += 1
+          return ['tier']
+        },
+      },
+    })
+    expect(asked).toBe(1)
+    expect(option(token, 'tier').detail).toBe('custom claim')
+    // A source that fails leaves the standard claims.
+    const failed = await complete(ORDERS(`request.auth.token.${CARET}`), {
+      options: { claims: () => Promise.reject(new Error('Auth is not running')) },
+    })
+    expect(labels(failed)).toContain('email')
+    expect(labels(failed)).not.toContain('tier')
+  })
+
   it('lists the query', async () => {
     expect(labels(await complete(ORDERS(`request.query.${CARET}`)))).toEqual([
       'limit',

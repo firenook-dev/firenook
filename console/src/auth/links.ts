@@ -117,8 +117,8 @@ export type RulesTarget =
  */
 export function rulesLineLink(target: RulesTarget, line: number): SectionLink {
   if (target.service === 'firestore')
-    return { to: '/firestore/rules', search: { db: dbParam(target.database), line: String(line) } }
-  return { to: '/storage/rules', search: { bucket: target.bucket, line: String(line) } }
+    return { to: '/firestore/rules', search: { db: dbParam(target.database), line } }
+  return { to: '/storage/rules', search: { bucket: target.bucket, line } }
 }
 
 /** "Rules decisions for this user ↗": the Firestore rules page's decisions, narrowed to the uid. */

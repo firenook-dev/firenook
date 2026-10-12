@@ -269,6 +269,7 @@ export function JsonField({
   maxLines = 16,
   readOnly = false,
   autoFocus = false,
+  completeKeys,
   ariaLabel,
   testId,
 }: {
@@ -280,6 +281,11 @@ export function JsonField({
   maxLines?: number | undefined
   readOnly?: boolean | undefined
   autoFocus?: boolean | undefined
+  /**
+   * The top-level keys completion offers, read on each completion — the
+   * custom claim keys users carry, say (`useClaimKeys().now`).
+   */
+  completeKeys?: (() => readonly string[]) | undefined
   ariaLabel: string
   testId?: string | undefined
 }) {
@@ -318,6 +324,7 @@ export function JsonField({
           autoFocus={autoFocus}
           ariaLabel={ariaLabel}
           testId={testId}
+          jsonCompletion={completeKeys ? { keys: completeKeys } : undefined}
         />
       </div>
       {(!parsed.ok || !readOnly) && (

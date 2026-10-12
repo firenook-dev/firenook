@@ -74,7 +74,7 @@ export interface CodeEditorProps {
     | {
         dialect?: 'firestore' | 'storage' | undefined
         fields?: (pattern: string) => readonly string[] | Promise<readonly string[]>
-        claims?: () => readonly string[]
+        claims?: () => readonly string[] | Promise<readonly string[]>
         metadataKeys?: (prefix: string) => readonly string[] | Promise<readonly string[]>
       }
     | undefined

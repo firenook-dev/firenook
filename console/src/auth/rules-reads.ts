@@ -16,6 +16,8 @@ import { apiGet } from '@/api/client'
 import type { DatabaseList } from '@/api/generated/DatabaseList'
 import type { RulesClaimRead } from '@/api/generated/RulesClaimRead'
 import type { RulesDocument } from '@/api/generated/RulesDocument'
+import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
+import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
 import { statusQuery } from '@/api/queries'
 import { storage } from '@/lib/sections/storage'
 import type { RulesTarget } from './links'
@@ -86,14 +88,6 @@ const firestoreRulesQuery = (database: string) =>
     staleTime: 0,
   })
 
-interface StorageBucketList {
-  buckets: { name: string }[]
-}
-interface StorageRules {
-  bucket: string | null
-  claimReads: RulesClaimRead[] | null
-}
-
 /**
  * Every ruleset's claim reads while its service runs: Firestore's databases,
  * and Storage's buckets once the Storage section is built. Read when the
@@ -112,7 +106,7 @@ export function useClaimReadSources(enabled: boolean): {
   const databases = useQuery({ ...databasesQuery, enabled: firestore })
   const buckets = useQuery({
     queryKey: ['storage', 'claim-read-buckets'],
-    queryFn: ({ signal }) => apiGet<StorageBucketList>('/storage/buckets', undefined, signal),
+    queryFn: ({ signal }) => apiGet<StorageBuckets>('/storage/buckets', undefined, signal),
     enabled: storageOn,
     retry: false,
   })
@@ -125,7 +119,7 @@ export function useClaimReadSources(enabled: boolean): {
     queries: (storageOn ? (buckets.data?.buckets ?? []) : []).map((bucket) => ({
       queryKey: ['storage', 'claim-reads', bucket.name],
       queryFn: ({ signal }: { signal: AbortSignal }) =>
-        apiGet<StorageRules>('/storage/rules', { bucket: bucket.name }, signal),
+        apiGet<StorageRulesDocument>('/storage/rules', { bucket: bucket.name }, signal),
       retry: false,
       staleTime: 0,
     })),

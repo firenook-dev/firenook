@@ -8,7 +8,7 @@ import { LOGS_LINK_KEYS, linkToLogs, logs } from './logs'
 const LOG_FIELDS: FilterFieldSet = { fields: cases.fields as never, regex: true }
 
 /** What `q` means to the Logs filter: its terms as key and value. */
-function terms(q: string | boolean | undefined): [string, string][] {
+function terms(q: string | number | boolean | undefined): [string, string][] {
   if (typeof q !== 'string') throw new Error(`no q in the link: ${String(q)}`)
   const result = checkFilter(q, LOG_FIELDS)
   if (!result.ok) throw new Error(result.error.message)

@@ -475,3 +475,60 @@ test('a clean load shows no problems, and a link to a line reveals and marks it'
   await page.getByTestId('rules-revert').click()
   await expect(page.getByTestId('rules-draft-state')).toHaveCount(0)
 })
+
+/** Sets (or, with `{}`, clears) a seed user's custom claims through the Auth emulator's own API. */
+async function setClaims(page: Page, uid: string, claims: Record<string, unknown>) {
+  const response = await page.request.post(
+    `${origin()}/console/api/v1/auth/identitytoolkit.googleapis.com/v1/accounts:update?key=fake-api-key`,
+    {
+      headers: { authorization: 'Bearer owner' },
+      data: { localId: uid, customAttributes: JSON.stringify(claims) },
+    },
+  )
+  expect(response.ok(), await response.text()).toBeTruthy()
+}
+
+test('completion offers the claim keys users carry, in the editor and the playground', async ({
+  page,
+}) => {
+  // A key only this journey uses, set on a seed person: the engine's claim
+  // index answers it; no list of users is read.
+  const ada = 'u_k65eq'
+  await setClaims(page, ada, { console_tier: 'gold' })
+  try {
+    const claimReads: string[] = []
+    page.on('request', (request) => {
+      const path = new URL(request.url()).pathname
+      if (path.endsWith('/auth/claims') || path.endsWith('/auth/identities')) claimReads.push(path)
+    })
+    await page.goto(`${origin()}/console/firestore/rules`)
+    await expect(page.getByTestId('rules-source')).toContainText('allow read')
+
+    // After `request.auth.token.`, the key is offered as a custom claim.
+    await pasteRules(
+      page,
+      `${OPEN.split('\n').slice(0, 4).join('\n')}\n      allow read: if request.auth.token.`,
+    )
+    await page.keyboard.type('console_t')
+    const options = page.locator('.cm-tooltip-autocomplete [role="option"]')
+    await expect(options.filter({ hasText: 'console_tier' })).toHaveCount(1)
+    await expect(options.filter({ hasText: 'console_tier' })).toContainText('custom claim')
+    await page.keyboard.press('Escape')
+    expect(claimReads.some((path) => path.endsWith('/auth/claims'))).toBe(true)
+    await page.getByTestId('rules-revert').click()
+    await expect(page.getByTestId('rules-draft-state')).toHaveCount(0)
+
+    // The playground's claims offer it too, as a key is typed.
+    await page.getByRole('tab', { name: /Playground/ }).click()
+    await page.getByRole('combobox', { name: 'Who is asking' }).click()
+    await page.getByRole('option', { name: 'Someone else…' }).click()
+    const claims = page.getByTestId('playground-claims')
+    await claims.click()
+    await page.keyboard.type('{"cons')
+    await expect(options.filter({ hasText: 'console_tier' })).toHaveCount(1)
+    await page.keyboard.press('Enter')
+    await expect(claims).toContainText('"console_tier":')
+  } finally {
+    await setClaims(page, ada, {})
+  }
+})

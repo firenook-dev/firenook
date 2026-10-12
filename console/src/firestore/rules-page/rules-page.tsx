@@ -24,7 +24,7 @@ import { statusQuery } from '@/api/queries'
 import { CodeEditor } from '@/components/code-editor'
 import { SectionBanner } from '@/components/console/section-banner'
 import { Page } from '@/components/shell/page'
-import { identityUsersQuery } from '@/lib/identity'
+import { useClaimKeys } from '@/lib/claim-keys'
 import { useShortcuts } from '@/lib/shortcuts'
 import {
   FileProblemsBanner,
@@ -149,21 +149,18 @@ function RulesBody({ project }: { project: string }) {
   const impact = useQuery({ ...impactQuery(database, checked ?? ''), enabled: compiles })
 
   // Completion that knows the data: the fields documents of a collection
-  // carry, and the custom claims the Auth emulator's users have (the first
-  // page of them, from the engine's bounded identity search — never every
-  // account).
-  const users = useQuery(identityUsersQuery(project, ''))
+  // carry, and the custom claim keys the Auth emulator's users carry (the
+  // engine's claim index, asked when completion opens — never every account).
+  const claimKeys = useClaimKeys(project)
   const completion = useMemo(
     () => ({
       fields: async (pattern: string) =>
         (await queryClient.fetchQuery(fieldsQuery(project, database, pattern))).map(
           (sample) => sample.field,
         ),
-      claims: () => [
-        ...new Set((users.data ?? []).flatMap((user) => Object.keys(user.claims ?? {}))),
-      ],
+      claims: claimKeys.fresh,
     }),
-    [queryClient, project, database, users.data],
+    [queryClient, project, database, claimKeys],
   )
 
   // ⌘↵ applies, ⌘S saves: the two things an edit ends in, from the keys,

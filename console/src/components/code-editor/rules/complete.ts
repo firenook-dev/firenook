@@ -849,7 +849,7 @@ function members(scope: Scope, dot: number): Answer {
         propertiesOf(receiver.kind, scope.dialect).map((entry) => propertyCompletion(entry)),
       )
     case 'token':
-      return result(from, [...claims(scope), ...ownMethods('map', RANK.methods)])
+      return tokenMembers(scope)
     case 'data':
       return dataMembers(scope, receiver)
     case 'metadata':
@@ -897,19 +897,35 @@ function members(scope: Scope, dot: number): Answer {
   }
 }
 
-function claims(scope: Scope): Completion[] {
-  const standard = PROPERTIES.token ?? []
-  const known = new Set(standard.map((entry) => entry.name))
-  let custom: readonly string[] = []
+/**
+ * The token's claims: the standard ones, then the custom claim keys users
+ * carry (asked of the page, which may have to ask the engine), then the
+ * map's methods.
+ */
+function tokenMembers(scope: Scope): Answer {
+  const build = (custom: readonly string[]): Result =>
+    result(scope.at, [...claims(custom), ...ownMethods('map', RANK.methods)])
+  let custom: readonly string[] | Promise<readonly string[]>
   try {
     custom = scope.options.claims?.() ?? []
   } catch {
-    custom = []
+    return build([])
   }
+  if (isPromiseLike(custom))
+    return Promise.resolve(custom).then(
+      (found) => build(Array.isArray(found) ? found : []),
+      () => build([]),
+    )
+  return build(Array.isArray(custom) ? custom : [])
+}
+
+function claims(custom: readonly string[]): Completion[] {
+  const standard = PROPERTIES.token ?? []
+  const known = new Set(standard.map((entry) => entry.name))
   return [
     ...standard.map((entry) => propertyCompletion(entry, RANK.field)),
     ...[...new Set(custom)]
-      .filter((name) => name !== '' && !known.has(name))
+      .filter((name) => typeof name === 'string' && name !== '' && !known.has(name))
       .map((name) =>
         keyCompletion(name, {
           label: name,
