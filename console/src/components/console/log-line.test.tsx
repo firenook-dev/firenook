@@ -87,6 +87,10 @@ describe('a log line', () => {
     const chip = part(screen.getByTestId('text'), 'source')?.firstElementChild
     expect(chip).toHaveTextContent('hello')
     expect(chip?.className).toContain('bg-kumo-tint')
+    // A long name ends in an ellipsis: the chip is a flex box, so the text
+    // truncates in a span of its own, the whole name a hover away.
+    expect(chip?.firstElementChild?.className).toContain('truncate')
+    expect(chip?.getAttribute('title')).toBe('hello')
     expect(part(screen.getByTestId('node'), 'source')?.querySelector('button')).toHaveTextContent(
       'fn',
     )

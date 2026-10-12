@@ -110,7 +110,12 @@ export function EmptyState({
     </div>
   )
   return (
-    <div className="min-h-0 flex-1 overflow-auto" data-testid={testId}>
+    // Kumo's command line draws a raw `border-white`, a bright frame in dark
+    // mode; it takes the surface's own colour, and its ring is the edge.
+    <div
+      className="min-h-0 flex-1 overflow-auto [&_.border-white]:border-kumo-overlay"
+      data-testid={testId}
+    >
       <Empty
         icon={<Glyph size={48} className="text-kumo-inactive" />}
         title={title}

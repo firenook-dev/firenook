@@ -19,8 +19,9 @@
 //   `×12` for a repeated group, then whatever the caller adds (a payload
 //   caret, the primary link).
 //
-// No zebra: stripes fight the level rails. Hover is `hover:ink`; the cursor
-// row and the row in the inspector take the grid's focused-row treatment.
+// No zebra: stripes fight the level rails. Hover is `hover:ink` (inside a
+// FeedList, the list's row inks instead); the cursor row and the row in the
+// inspector take the grid's focused-row treatment.
 
 import { cn } from '@cloudflare/kumo'
 import type { ComponentPropsWithRef, ReactNode } from 'react'
@@ -121,7 +122,9 @@ export function LogLine({
     <div
       {...rest}
       className={cn(
-        'group relative grid gap-x-2 pr-3 pl-3 hover:ink',
+        // Inside FeedList the row under it already inks on hover; a second
+        // ink here would double the step.
+        'group relative grid gap-x-2 pr-3 pl-3 hover:ink [[data-testid=feed-row]_&]:hover:bg-none',
         source === undefined
           ? 'grid-cols-[104px_44px_minmax(0,1fr)_auto]'
           : 'grid-cols-[104px_44px_var(--log-source-width,120px)_minmax(0,1fr)_auto]',
@@ -159,7 +162,11 @@ export function LogLine({
       {source !== undefined && (
         <span className="flex min-w-0 items-center" data-part="source">
           {typeof source === 'string' ? (
-            <span className={cn(SOURCE_CHIP, 'truncate')}>{source}</span>
+            // The chip is a flex box, which clips without an ellipsis: the
+            // text truncates inside it.
+            <span className={SOURCE_CHIP} title={source}>
+              <span className="min-w-0 truncate">{source}</span>
+            </span>
           ) : (
             source
           )}
