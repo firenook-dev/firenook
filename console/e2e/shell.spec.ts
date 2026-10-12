@@ -51,7 +51,8 @@ test('one live connection serves every page and every tab of a browser', async (
   await page.getByTestId('nav-auth').click()
   await expect(page).toHaveURL(/\/console\/auth$/)
   await expect.poll(() => subscriptions.removed.includes('firestore.rules')).toBe(true)
-  await page.getByTestId('nav-functions').click()
+  // Functions has pages of its own: its heading folds them, the page leads there.
+  await page.getByTestId('nav-page-functions').click()
   await expect(page).toHaveURL(/\/console\/functions$/)
   await page.goBack()
   await expect(page).toHaveURL(/\/console\/auth$/)
