@@ -93,7 +93,9 @@ body {
    a toast open, so the footer stayed covered for as long as the hand did
    not move. 4.5rem clears the 3rem footer with the corner's own gap above
    it. Unlayered, so it wins over the utility class without !important;
-   keyed on the region's name, which is all the viewport exposes. */
-[role='region'][aria-label='Notifications'] {
+   keyed on the region's name, which is all the viewport exposes, and only
+   for the page's own stack (portalled to the body): a Toasty given a
+   container of its own keeps Kumo's place inside it. */
+body > [data-base-ui-portal] > [role='region'][aria-label='Notifications'] {
   bottom: 4.5rem;
 }
