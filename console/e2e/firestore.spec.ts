@@ -3244,6 +3244,36 @@ test('the id stays in view while the fields scroll, and a flash never shows thro
   expect(ground).not.toMatch(/rgba|\/ 0?\.\d|transparent/)
 })
 
+test('the stripes stay with their rows while the grid scrolls', async ({ page }) => {
+  // Kumo's zebra is `even:`, and the virtualized grid draws a spacer row
+  // above the rows on screen, so every row scrolled flipped the stripes of
+  // every row in view: a row read white, then grey, then white again.
+  await page.setViewportSize({ width: 1400, height: 700 })
+  await page.goto(`${origin()}/console/firestore?path=users`)
+  await expect(page.getByTestId('match-count')).toContainText('240 documents')
+  const grid = page.getByTestId('grid-scroll')
+  const stripes = () =>
+    Promise.all(
+      [40, 41, 42].map(async (index) => {
+        const row = page.locator(`tr[data-index="${index}"]`)
+        if ((await row.count()) === 0) return 'missing'
+        return row.evaluate(
+          (tr) => tr.ownerDocument.defaultView!.getComputedStyle(tr).backgroundColor,
+        )
+      }),
+    )
+  const seen: string[][] = []
+  for (const top of [32 * 30, 32 * 31, 32 * 32, 32 * 35]) {
+    await grid.evaluate((element, to) => (element.scrollTop = to), top)
+    await expect.poll(stripes).not.toContain('missing')
+    seen.push(await stripes())
+  }
+  for (const stripe of seen) expect(stripe).toEqual(seen[0])
+  // Alternating, as stripes do.
+  expect(seen[0]?.[0]).not.toBe(seen[0]?.[1])
+  expect(seen[0]?.[0]).toBe(seen[0]?.[2])
+})
+
 test('every value edits where it is, as the inspector edits it', async ({ page }) => {
   await seed(page.request, 'inplace', {
     k1: {

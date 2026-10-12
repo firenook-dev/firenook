@@ -6,11 +6,17 @@
 // is either a value it shows or a ref it calls through, so a scroll that
 // only moves the window over the rows re-renders the rows that entered it.
 
-import { Button, Checkbox, Table } from '@cloudflare/kumo'
+import { Button, Checkbox, Table, cn } from '@cloudflare/kumo'
 import { SidebarSimpleIcon, WarningIcon } from '@phosphor-icons/react'
 import { memo } from 'react'
 import type { ChangeKind } from '@/api/generated/ChangeKind'
-import { CHECK_WIDTH, CURSOR, PIN_CELL, PIN_EDGE } from '@/components/console/table-pins'
+import {
+  CHECK_WIDTH,
+  CURSOR,
+  CURSOR_ROW,
+  PIN_CELL,
+  PIN_EDGE,
+} from '@/components/console/table-pins'
 import type { InferredColumn } from '../columns'
 import type { SchemaNode } from '../schema'
 import type { FsDocument } from '../value'
@@ -84,15 +90,23 @@ export const GridRow = memo(function GridRow({
 }) {
   const openReference = (path: string) => actions.current?.openReference(path)
   return (
-    <Table.Row
+    // The stripes go by the row's place in the list, not its place among
+    // the rendered rows: Kumo's `even:` counted the spacer above the window
+    // too, so every row scrolled flipped the stripes of every row on screen.
+    <tr
       data-index={index}
       data-path={document.path}
-      variant={checked ? 'selected' : 'default'}
-      className={`group/row cursor-default ${
-        focused || open
-          ? 'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)] [&>td:first-child]:shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
-          : ''
-      } ${flash ? (flash === 'deleted' ? 'row-flash-deleted' : 'row-flash') : ''}`}
+      // Merged, so the cursor row's tint wins over the stripe it lands on.
+      className={cn(
+        'group/row cursor-default',
+        checked
+          ? 'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)]'
+          : index % 2 === 1
+            ? 'bg-kumo-elevated [--kumo-table-row-bg:var(--color-kumo-elevated)]'
+            : '[--kumo-table-row-bg:var(--color-kumo-base)]',
+        (focused || open) && CURSOR_ROW,
+        flash === 'deleted' ? 'row-flash-deleted' : flash ? 'row-flash' : '',
+      )}
       onClick={(event) =>
         actions.current?.click(document, (event.target as HTMLElement).closest('td'))
       }
@@ -232,7 +246,7 @@ export const GridRow = memo(function GridRow({
       })}
       {after && <Table.Cell aria-hidden />}
       <Table.Cell aria-hidden />
-    </Table.Row>
+    </tr>
   )
 })
 

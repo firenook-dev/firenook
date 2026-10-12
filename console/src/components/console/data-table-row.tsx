@@ -94,7 +94,7 @@ function DataTableRowView<Row>({
           ? 'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)]'
           : zebra
             ? 'bg-kumo-elevated [--kumo-table-row-bg:var(--color-kumo-elevated)]'
-            : 'bg-kumo-base [--kumo-table-row-bg:var(--color-kumo-base)]',
+            : '[--kumo-table-row-bg:var(--color-kumo-base)]',
         (cursor || open) && CURSOR_ROW,
         flash === 'deleted' ? 'row-flash-deleted' : flash ? 'row-flash' : '',
       )}
