@@ -976,6 +976,58 @@ async fn every_cause_points_at_its_thing_in_its_own_section() {
 }
 
 #[tokio::test]
+async fn a_replay_sends_the_recorded_request_again_secrets_included() {
+    let suite = Suite::running(Setup::default()).await;
+    let monitor = suite.monitor();
+    let original = begin(
+        monitor,
+        "us-central1-api",
+        FunctionKind::Http,
+        InvocationCause::Unknown,
+        &[("authorization", "Bearer original"), ("x-trace", "t-9")],
+    );
+    finish(monitor, &original, 200);
+    let (status, frames) = suite
+        .post_lines(
+            &format!("/functions/invocations/{}/replay", original.id),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let started = &frames[0];
+    assert_eq!(started["frame"], "started", "{frames:?}");
+    assert_eq!(started["invocation"]["origin"], "replay");
+    assert_eq!(started["invocation"]["replayOf"], original.id.as_ref());
+    let replay = started["invocation"]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    // The engine read the sensitive header itself; the browser never had it.
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| frame.to_string().contains("Bearer original"))
+    );
+    let (_, revealed) = suite
+        .get(&format!(
+            "/functions/invocations/{replay}/headers/authorization"
+        ))
+        .await;
+    assert_eq!(revealed["value"], "Bearer original");
+    let (_, view) = suite.get(&format!("/functions/invocations/{replay}")).await;
+    assert!(
+        view["refs"].as_array().is_some_and(|refs| refs
+            .contains(&json!({"kind": "functions.invocation", "key": original.id.as_ref()}))),
+        "{view}"
+    );
+    let (status, _) = suite
+        .post("/functions/invocations/zzzzzz-1/replay", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    suite.stop().await;
+}
+
+#[tokio::test]
 async fn codebases_have_their_load_log_secrets_env_edits_reloads_and_restarts() {
     let suite = Suite::running(Setup::default()).await;
     let (status, log) = suite.get("/functions/codebases/default/log").await;
@@ -1015,9 +1067,28 @@ async fn codebases_have_their_load_log_secrets_env_edits_reloads_and_restarts() 
     assert_eq!(status, StatusCode::OK, "{edited}");
     assert_eq!(edited["written"], json!([".env"]));
     assert_eq!(edited["codebase"]["id"], "default");
-    let text =
-        std::fs::read_to_string(suite.directory.path().join("functions/.env")).expect("read");
-    assert_eq!(text, "# settings\nGREETING=hey\n");
+    let env = suite.directory.path().join("functions/.env");
+    let text = std::fs::read_to_string(&env).expect("read");
+    assert_eq!(text, "# settings\nGREETING=hey\nTIMEOUT=30\n");
+    // A change the codebase does not load with is put back.
+    let (status, failed) = suite
+        .post(
+            "/functions/codebases/default/edit-env",
+            json!({"changes": [{"file": "env", "key": "TIMEOUT", "value": null}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{failed}");
+    assert_eq!(
+        failed["error"]["message"],
+        "default did not load with this change, so your files were put back."
+    );
+    assert!(
+        failed["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("TIMEOUT")),
+        "{failed}"
+    );
+    assert_eq!(std::fs::read_to_string(&env).expect("read"), text);
     let (status, accepted) = suite
         .post("/functions/codebases/default/reload", json!({}))
         .await;

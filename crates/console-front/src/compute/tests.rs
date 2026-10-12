@@ -97,6 +97,7 @@ endpoints:
     entryPoint: api
     platform: gcfv2
     httpsTrigger: {}
+    timeoutSeconds: '{{ params.TIMEOUT }}'
     minInstances: 2
     secretEnvironmentVariables:
       - key: API_KEY
@@ -177,7 +178,7 @@ impl Default for Setup {
     fn default() -> Self {
         Self {
             files: vec![
-                (".env", "# settings\nGREETING=hello\n"),
+                (".env", "# settings\nGREETING=hello\nTIMEOUT=30\n"),
                 (".secret.local", "API_KEY=s3cret\n"),
             ],
             services: None,
