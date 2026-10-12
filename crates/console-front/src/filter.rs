@@ -826,7 +826,9 @@ pub(crate) fn parse_time(text: &str, now: OffsetDateTime) -> Option<OffsetDateTi
         _ => {}
     }
     if let Some(relative) = lower.strip_prefix('-') {
-        let (amount, unit) = relative.split_at(relative.len().checked_sub(1)?);
+        // The unit is the last character, which is not always the last
+        // byte: `-2é` split one byte from the end panicked mid-character.
+        let (amount, unit) = relative.split_at(relative.char_indices().next_back()?.0);
         if amount.is_empty() || !amount.bytes().all(|byte| byte.is_ascii_digit()) {
             return None;
         }
