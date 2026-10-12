@@ -410,7 +410,12 @@ export function MessagesView({
   const live = useTopicLive(project, topic, undefined, {
     onPublished: (published) => {
       const data = queryClient.getQueryData<CursorPages<PubsubMessageRow>>(list.queryKey)
-      if (!data) return
+      // The first page is still on its way and may have been read before
+      // this message: read it again, so it cannot land without it.
+      if (!data) {
+        void readHead()
+        return
+      }
       const atHead = !cursor.hasPrevious && data.pages.length <= 2
       if (atHead) {
         void readHead()

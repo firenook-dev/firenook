@@ -440,8 +440,8 @@ function DeliveriesTable({
     onAdded: (added) => {
       invalidator.push([countsKey])
       const data = queryClient.getQueryData<CursorPages<PubsubDeliveryRow>>(list.queryKey)
-      if (!data) return
-      if (!cursor.hasPrevious && data.pages.length <= 2) void readHead()
+      // A first page still on its way may have been read before these: read it again.
+      if (!data || (!cursor.hasPrevious && data.pages.length <= 2)) void readHead()
       else setNewAbove((count) => count + added)
     },
     onReset: () => {

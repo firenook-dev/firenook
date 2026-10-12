@@ -9,6 +9,7 @@
 import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
   ArrowCounterClockwiseIcon,
+  BracketsCurlyIcon,
   BroadcastIcon,
   CameraIcon,
   CaretDownIcon,
@@ -19,6 +20,7 @@ import {
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { statusQuery } from '@/api/queries'
 import { LiveNotice } from '@/components/console/live-notice'
@@ -81,6 +83,7 @@ export function TopicsPage() {
   const { project, foreign } = useConsoleProject()
   const { search, update } = useRouteSearch<PubsubSearch>('/pubsub', '/pubsub')
   const index = useQuery(topicIndexQuery(project))
+  const navigate = useNavigate()
 
   // The scope from the parameters: an id under the page's project, or a whole name.
   const topic = resourceFromSearch(search.topic, 'topics', project)
@@ -245,6 +248,12 @@ export function TopicsPage() {
             onTopic={() => createTopic()}
             onSubscription={createSubscription}
             onSnapshot={() => update({ new: 'snapshot' })}
+            onSchema={() =>
+              void navigate({
+                to: '/pubsub/schemas',
+                search: { new: 'schema', ...(search.project ? { project: search.project } : {}) },
+              })
+            }
             onSetup={openSetup}
           />
           {replayable && (
@@ -409,6 +418,7 @@ function NewMenu({
   onTopic,
   onSubscription,
   onSnapshot,
+  onSchema,
   onSetup,
 }: {
   primary: boolean
@@ -418,6 +428,8 @@ function NewMenu({
   onTopic: () => void
   onSubscription: () => void
   onSnapshot: () => void
+  /** A new schema, on the Schemas page. */
+  onSchema: () => void
   onSetup: (tab: SetupTab) => void
 }) {
   return (
@@ -425,8 +437,8 @@ function NewMenu({
       <Tooltip
         content={
           primary
-            ? 'New topic (n), or the setup from a file'
-            : 'New topic, subscription or snapshot, or the setup as a file'
+            ? 'New topic (n) or schema, or the setup from a file'
+            : 'New topic, subscription, snapshot or schema, or the setup as a file'
         }
         render={
           <DropdownMenu.Trigger
@@ -471,6 +483,13 @@ function NewMenu({
             Snapshot of <span className="font-mono text-[12px]">{shortName(subscription)}</span>
           </DropdownMenu.Item>
         )}
+        <DropdownMenu.Item
+          icon={BracketsCurlyIcon}
+          onClick={onSchema}
+          data-testid="pubsub-new-schema-item"
+        >
+          Schema…
+        </DropdownMenu.Item>
         <DropdownMenu.Separator />
         <DropdownMenu.Item
           icon={UploadSimpleIcon}
