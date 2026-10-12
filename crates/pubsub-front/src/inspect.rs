@@ -1426,6 +1426,9 @@ pub struct DeltaScope {
     pub project: String,
     /// Report changed topic and subscription figures and resource kinds.
     pub counters: bool,
+    /// Report the resource kinds that changed, without the figures (a
+    /// topic view that lists its snapshots).
+    pub resources: bool,
     /// Topics (full names) whose throughput windows to include.
     pub throughput: Vec<String>,
     /// The topic whose new message ids to report.
@@ -1539,6 +1542,8 @@ impl Broker {
         };
         if scope.counters && since != state.revision {
             counters_since(&state, &consumers, scope, since, &mut delta);
+        } else if scope.resources && since != state.revision {
+            delta.resources = resources_since(&state, since);
         }
         for topic in &scope.throughput {
             if let Some(entry) = state.topics.get(topic) {
@@ -1634,17 +1639,7 @@ fn counters_since(
     since: u64,
     delta: &mut ConsoleDelta,
 ) {
-    let resources = state.resources;
-    for (kind, stamp) in [
-        (ResourceKind::Topics, resources.topics),
-        (ResourceKind::Subscriptions, resources.subscriptions),
-        (ResourceKind::Snapshots, resources.snapshots),
-        (ResourceKind::Schemas, resources.schemas),
-    ] {
-        if stamp > since {
-            delta.resources.push(kind);
-        }
-    }
+    delta.resources = resources_since(state, since);
     let topic_prefix = format!("projects/{}/topics/", scope.project);
     let subscription_prefix = format!("projects/{}/subscriptions/", scope.project);
     // A topic's most-behind figure moves with its subscriptions.
@@ -1679,6 +1674,21 @@ fn counters_since(
         .into_iter()
         .map(|(name, entry)| subscription_counters(consumers, name, entry))
         .collect();
+}
+
+/// The kinds of resource stamped after `since`.
+fn resources_since(state: &State, since: u64) -> Vec<ResourceKind> {
+    let resources = state.resources;
+    [
+        (ResourceKind::Topics, resources.topics),
+        (ResourceKind::Subscriptions, resources.subscriptions),
+        (ResourceKind::Snapshots, resources.snapshots),
+        (ResourceKind::Schemas, resources.schemas),
+    ]
+    .into_iter()
+    .filter(|(_, stamp)| *stamp > since)
+    .map(|(kind, _)| kind)
+    .collect()
 }
 
 fn fanouts_since(topic: &TopicEntry, seen: u64) -> FanoutChanges {

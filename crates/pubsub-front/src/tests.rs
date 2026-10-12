@@ -2031,6 +2031,7 @@ mod schedules {
             subscription: Some(worker.clone()),
             deliveries: true,
             max_changed: 200,
+            ..DeltaScope::default()
         };
         let mut cursor = ConsoleCursor::default();
         broker
@@ -2589,6 +2590,7 @@ mod console {
             subscription: Some(worker.clone()),
             deliveries: false,
             max_changed: 200,
+            ..DeltaScope::default()
         };
         let _reader = broker.backlog_reader(&worker).expect("reader");
         let mut counters = ConsoleCursor::at(index.revision);
@@ -2655,6 +2657,20 @@ mod console {
             .expect("schema");
         let delta = broker.console_delta(&mut counters, &scope);
         assert_eq!(delta.resources, vec![ResourceKind::Schemas]);
+        assert!(delta.topics.is_empty() && delta.subscriptions.is_empty());
+        // A view that only lists resources hears of them without figures.
+        let resources_only = DeltaScope {
+            project: "p".to_owned(),
+            resources: true,
+            ..DeltaScope::default()
+        };
+        let mut lister = ConsoleCursor::at(delta.revision);
+        publish(&broker, ORDERS, vec![message("r")]);
+        broker
+            .create_snapshot("projects/p/snapshots/listed", &worker, BTreeMap::new())
+            .expect("snapshot");
+        let delta = broker.console_delta(&mut lister, &resources_only);
+        assert_eq!(delta.resources, vec![ResourceKind::Snapshots]);
         assert!(delta.topics.is_empty() && delta.subscriptions.is_empty());
 
         // Past the cap the delta says so instead of listing.
@@ -3394,7 +3410,10 @@ mod console {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.id, id);
         assert_eq!(records[0].1.targets.len(), 3);
-        assert_eq!(runtime.broker().topics_with_message(id, 5), vec![topic.clone()]);
+        assert_eq!(
+            runtime.broker().topics_with_message(id, 5),
+            vec![topic.clone()]
+        );
         assert_eq!(
             runtime.broker().topics_with_message(id + 100, 5),
             Vec::<String>::new()
