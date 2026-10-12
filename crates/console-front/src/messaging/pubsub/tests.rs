@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use axum::http::{Method, StatusCode};
+use firenook_functions_runtime::monitor::FunctionKind;
 use firenook_functions_runtime::{Monitor, MonitorLimits};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
@@ -1035,6 +1036,9 @@ async fn backlog_jobs_ack_and_release_by_query() {
 
 // ------------------------------------------------------------ R-CF-13
 
+/// The test inventory's subscriber of `orders`.
+const ON_ORDER: &str = "us-central1-onOrderPlaced";
+
 /// The deliveries row of `event_id` in a deliveries page.
 fn delivery<'a>(page: &'a Value, event_id: &str) -> &'a Value {
     page["items"]
@@ -1098,7 +1102,7 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
 
     // Running, then delivered: compute recorded the request the dispatch
     // made, found by the event id the delivery queue sent.
-    let first = begin_dispatch(&monitor, &dispatch);
+    let first = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &dispatch);
     let (_, page) = suite.call(Method::GET, &deliveries, None).await;
     let row = delivery(&page, &dispatch.event_id);
     assert_eq!(row["mark"], "running");
@@ -1153,7 +1157,7 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     // Failed: the handler threw; its status and the error's first line.
     let declined = publish(&suite.pubsub, ORDERS, "{\"order\":2}");
     let second = suite.deliveries.recv().await.expect("dispatch");
-    let token = begin_dispatch(&monitor, &second);
+    let token = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &second);
     finish_invocation(
         &monitor,
         &token,
@@ -1207,7 +1211,7 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     // No longer kept: the redelivery's invocation is the third finished
     // one, so compute lets the first go. The first message's row cannot
     // say how it went any more; the second's is still kept.
-    let third = begin_dispatch(&monitor, &resent_dispatch);
+    let third = begin_dispatch(&monitor, ON_ORDER, FunctionKind::Pubsub, &resent_dispatch);
     finish_invocation(&monitor, &third, 200, None);
     let (_, page) = suite.call(Method::GET, &deliveries, None).await;
     let row = delivery(&page, &dispatch.event_id);

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
-use firenook_functions_runtime::monitor::FunctionKind;
+use firenook_functions_runtime::monitor::{FunctionKind, InvocationCause};
 use firenook_functions_runtime::{Monitor, MonitorLimits};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
@@ -346,6 +346,7 @@ async fn an_attempt_links_the_invocation_it_caused() {
                 &monitor,
                 "us-central1-processOrder",
                 FunctionKind::Tasks,
+                InvocationCause::Unknown,
                 headers
                     .iter()
                     .map(|(name, value)| (name.as_str(), value.to_str().unwrap_or_default())),

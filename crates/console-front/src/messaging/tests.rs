@@ -257,11 +257,13 @@ pub(crate) fn create_subscription(console: &PubsubConsole, name: &str, topic: &s
 }
 
 /// Compute's side of one invocation: begun with the headers its request
-/// arrived with, as the Functions runtime records it.
+/// arrived with and the cause its classifier read from them, as the
+/// Functions runtime records it.
 pub(crate) fn begin_invocation<'h>(
     monitor: &Monitor,
     function_id: &str,
     kind: FunctionKind,
+    cause: InvocationCause,
     headers: impl IntoIterator<Item = (&'h str, &'h str)>,
     body: &[u8],
 ) -> InvocationToken {
@@ -277,7 +279,7 @@ pub(crate) fn begin_invocation<'h>(
         codebase: "default".to_owned(),
         kind,
         origin: InvocationOrigin::Emulator,
-        cause: InvocationCause::Unknown,
+        cause,
         summary: "POST /".to_owned(),
         target: InvocationTarget::Trigger,
         method: "POST".to_owned(),
@@ -306,13 +308,37 @@ pub(crate) fn finish_invocation(
     );
 }
 
-/// [`begin_invocation`] for a Pub/Sub dispatch, with the headers the
-/// delivery queue sends it with.
-pub(crate) fn begin_dispatch(monitor: &Monitor, dispatch: &DispatchRequest) -> InvocationToken {
+/// [`begin_invocation`] for a Pub/Sub dispatch to `function_id`, with the
+/// headers the delivery queue sends it with and the cause they name.
+pub(crate) fn begin_dispatch(
+    monitor: &Monitor,
+    function_id: &str,
+    kind: FunctionKind,
+    dispatch: &DispatchRequest,
+) -> InvocationToken {
+    let header = |name: &str| {
+        dispatch
+            .headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| firenook_functions_bridge::cause::decode(value))
+    };
+    let topic = header(firenook_functions_bridge::cause::TOPIC).expect("the topic header");
+    let event_id = Some(dispatch.event_id.clone());
+    let cause = if kind == FunctionKind::Schedule {
+        InvocationCause::Schedule { topic, event_id }
+    } else {
+        InvocationCause::Pubsub {
+            topic,
+            message_id: header(firenook_functions_bridge::cause::MESSAGE),
+            event_id,
+        }
+    };
     begin_invocation(
         monitor,
-        "us-central1-onOrderPlaced",
-        FunctionKind::Pubsub,
+        function_id,
+        kind,
+        cause,
         dispatch
             .headers
             .iter()
@@ -953,6 +979,161 @@ async fn the_queue_topic_names_rows_and_finished_tasks() {
             break;
         }
     }
+    suite.stop.send(true).expect("stop");
+}
+
+/// The next `schedules` frame naming the test inventory's schedule: the
+/// frame's revision and that schedule's state.
+async fn schedule_state(stream: &mut crate::live::TopicStream) -> (u64, Value) {
+    loop {
+        let (name, frame) = event(&next(stream).await);
+        assert_eq!(name, "schedules", "{frame}");
+        if let Some(state) = frame["schedules"].as_array().and_then(|states| {
+            states
+                .iter()
+                .find(|state| state["functionId"] == "us-central1-nightlyCleanup")
+        }) {
+            return (frame["revision"].as_u64().expect("revision"), state.clone());
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_schedules_topic_follows_each_runs_outcome() {
+    let monitor = Monitor::new(firenook_functions_runtime::MonitorLimits::default());
+    let mut suite = suite(Some(monitor.clone()));
+    let section = PubsubSection::new({
+        let late = Late::pending("Pub/Sub");
+        late.set(suite.pubsub.clone());
+        late
+    });
+    let topics = section.topics(&context(&suite.stop));
+    let schedules = topic(&topics, "pubsub.schedules");
+    let mut stream = schedules.open(&json!({}), None).expect("open");
+    let run_now = json!({ "functionId": "us-central1-nightlyCleanup" });
+    // Run now records the run: queued, nothing has begun.
+    let (status, run) = suite
+        .call(
+            Method::POST,
+            "/api/v1/pubsub/schedule/run",
+            Some(run_now.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{run}");
+    let (revision, state) = schedule_state(&mut stream).await;
+    assert_eq!(state["runs"], 1);
+    assert_eq!(state["lastOutcome"], "queued");
+    // Compute runs the tick and it fails: the frames follow its outcome
+    // with no change of the scheduler.
+    let dispatch = suite.deliveries.recv().await.expect("the tick");
+    let token = begin_dispatch(
+        &monitor,
+        "us-central1-nightlyCleanup",
+        FunctionKind::Schedule,
+        &dispatch,
+    );
+    finish_invocation(
+        &monitor,
+        &token,
+        500,
+        Some("Error: digest service unavailable"),
+    );
+    let (mut same, mut state) = schedule_state(&mut stream).await;
+    if state["lastOutcome"] == "running" {
+        (same, state) = schedule_state(&mut stream).await;
+    }
+    assert_eq!(state["lastOutcome"], "failed", "{state}");
+    assert_eq!(state["runs"], 1, "the same run");
+    assert_eq!(same, revision, "the scheduler did not change");
+    // An invocation of another topic's function sends nothing: the next
+    // frame is the next run's.
+    let other = begin_invocation(
+        &monitor,
+        "us-central1-onOrderPlaced",
+        FunctionKind::Pubsub,
+        InvocationCause::Pubsub {
+            topic: ORDERS.to_owned(),
+            message_id: Some("1".to_owned()),
+            event_id: Some("elsewhere".to_owned()),
+        },
+        [],
+        b"{}",
+    );
+    finish_invocation(&monitor, &other, 200, None);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let (status, _) = suite
+        .call(Method::POST, "/api/v1/pubsub/schedule/run", Some(run_now))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (revision, state) = schedule_state(&mut stream).await;
+    assert_eq!(state["runs"], 2, "{state}");
+    assert_eq!(state["lastOutcome"], "queued");
+    // The scheduler's revision does not cover outcomes, so resuming at it
+    // while Functions run reloads.
+    let mut resumed = schedules
+        .open(&json!({}), Some(&revision.to_string()))
+        .expect("open");
+    assert!(matches!(
+        next(&mut resumed).await,
+        TopicEvent::Reset {
+            reason: ResetReason::Gap,
+            ..
+        }
+    ));
+    suite.stop.send(true).expect("stop");
+}
+
+#[tokio::test]
+async fn the_deliveries_topic_names_new_deliveries_and_outcome_changes() {
+    let monitor = Monitor::new(firenook_functions_runtime::MonitorLimits::default());
+    let mut suite = suite(Some(monitor.clone()));
+    let section = PubsubSection::new({
+        let late = Late::pending("Pub/Sub");
+        late.set(suite.pubsub.clone());
+        late
+    });
+    let topics = section.topics(&context(&suite.stop));
+    let mut stream = topic(&topics, "pubsub.deliveries")
+        .open(&json!({ "topic": ORDERS }), None)
+        .expect("open");
+    // A publish adds a delivery and names it.
+    publish(&suite.pubsub, ORDERS, "{}");
+    let dispatch = suite.deliveries.recv().await.expect("dispatch");
+    let (name, changed) = event(&next(&mut stream).await);
+    assert_eq!(name, "changed");
+    assert_eq!(changed["added"], 1, "{changed}");
+    assert_eq!(changed["keys"], json!([dispatch.event_id]));
+    // Compute's record of its invocation names it again.
+    let token = begin_dispatch(
+        &monitor,
+        "us-central1-onOrderPlaced",
+        FunctionKind::Pubsub,
+        &dispatch,
+    );
+    finish_invocation(&monitor, &token, 200, None);
+    let (name, changed) = event(&next(&mut stream).await);
+    assert_eq!(name, "changed");
+    assert_eq!(changed["added"], 0, "{changed}");
+    assert_eq!(changed["keys"], json!([dispatch.event_id]));
+    // Another topic's invocation is not this topic's change; the next
+    // event is the next publish.
+    let elsewhere = begin_invocation(
+        &monitor,
+        "us-central1-nightlyCleanup",
+        FunctionKind::Schedule,
+        InvocationCause::Schedule {
+            topic: SCHEDULE_TOPIC.to_owned(),
+            event_id: Some("tick".to_owned()),
+        },
+        [],
+        b"{}",
+    );
+    finish_invocation(&monitor, &elsewhere, 200, None);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    publish(&suite.pubsub, ORDERS, "{}");
+    let second = suite.deliveries.recv().await.expect("dispatch");
+    let (_, changed) = event(&next(&mut stream).await);
+    assert_eq!(changed["keys"], json!([second.event_id]), "{changed}");
     suite.stop.send(true).expect("stop");
 }
 

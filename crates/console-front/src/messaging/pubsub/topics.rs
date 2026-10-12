@@ -7,6 +7,8 @@
 //! (message ids, backlog row keys, event ids), coalesced per 100 ms with
 //! `reset` past 1,000 keys. The push feed is the console's ring, fed inline
 //! by the runtime's push sink, served by the foundation's `replay_topic`.
+//! Schedule frames follow the scheduler and, while Functions run, each
+//! run's outcome in compute's record.
 //! Every stream first waits for the late runtime, and ends when the suite
 //! stops before it arrives.
 
@@ -923,10 +925,24 @@ impl LiveTopic for SchedulesTopic {
 }
 
 /// One `pubsub.schedules` subscriber.
+///
+/// A frame follows each change of the scheduler (its revision is the
+/// cursor) and, while Functions run, each change of a run's outcome in
+/// compute's record: the invocations touched in a 100 ms window are
+/// resolved once, and the schedules whose topic they name are sent again
+/// with the same revision. The scheduler's revision does not cover those
+/// outcomes, so a subscriber resuming while Functions run always gets
+/// `reset` and reloads.
 struct Schedules {
     console: PubsubConsole,
     revision: u64,
     watch: watch::Receiver<u64>,
+    touched: Option<broadcast::Receiver<Arc<str>>>,
+    invocations: HashSet<Arc<str>>,
+    /// More invocations were touched than one window resolves: every
+    /// schedule is sent again.
+    overflow: bool,
+    due: Option<Instant>,
     outbox: VecDeque<TopicEvent>,
 }
 
@@ -935,8 +951,9 @@ impl Schedules {
         let mut watch = console.runtime.schedule_watch();
         watch.mark_unchanged();
         let now = console.runtime.schedule_changes(u64::MAX).revision;
+        let touched = console.monitor.as_ref().map(Monitor::touched);
         let mut outbox = VecDeque::new();
-        if after.is_some_and(|after| after != now) {
+        if after.is_some_and(|after| after != now || touched.is_some()) {
             outbox.push_back(TopicEvent::Reset {
                 reason: ResetReason::Gap,
                 missed: None,
@@ -946,6 +963,10 @@ impl Schedules {
             console,
             revision: now,
             watch,
+            touched,
+            invocations: HashSet::new(),
+            overflow: false,
+            due: None,
             outbox,
         };
         stream::unfold(state, |mut state| async move {
@@ -959,30 +980,88 @@ impl Schedules {
             if let Some(event) = self.outbox.pop_front() {
                 return Some(event);
             }
-            self.watch.changed().await.ok()?;
-            self.watch.mark_unchanged();
-            let changes = self.console.runtime.schedule_changes(self.revision);
-            self.revision = changes.revision;
-            if changes.removed {
-                self.outbox.push_back(TopicEvent::Reset {
-                    reason: ResetReason::Gap,
-                    missed: None,
-                });
-                continue;
-            }
-            if changes.changed.is_empty() {
-                continue;
-            }
-            let states = schedule_states(&self.console, &changes.changed);
-            self.outbox.push_back(TopicEvent::json(
-                "schedules",
-                Some(changes.revision.to_string()),
-                &PubsubSchedulesFrame {
-                    revision: changes.revision,
-                    schedules: states,
+            let due = self.due;
+            tokio::select! {
+                changed = self.watch.changed() => {
+                    changed.ok()?;
+                    self.watch.mark_unchanged();
+                    self.scheduler_changed();
+                }
+                touched = recv_touched(self.touched.as_mut()) => match touched {
+                    Ok(id) => {
+                        if self.invocations.len() < MAX_KEYS {
+                            self.invocations.insert(id);
+                        } else {
+                            self.overflow = true;
+                        }
+                        self.due.get_or_insert_with(|| Instant::now() + KEY_WINDOW);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        self.overflow = true;
+                        self.due.get_or_insert_with(|| Instant::now() + KEY_WINDOW);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => self.touched = None,
                 },
-            ));
+                () = sleep_until(due) => self.outcomes_changed(),
+            }
         }
+    }
+
+    fn scheduler_changed(&mut self) {
+        let changes = self.console.runtime.schedule_changes(self.revision);
+        self.revision = changes.revision;
+        if changes.removed {
+            self.outbox.push_back(TopicEvent::Reset {
+                reason: ResetReason::Gap,
+                missed: None,
+            });
+            return;
+        }
+        if !changes.changed.is_empty() {
+            self.send(&changes.changed);
+        }
+    }
+
+    /// The window ended: the schedules whose runs' invocations were
+    /// touched, sent again.
+    fn outcomes_changed(&mut self) {
+        self.due = None;
+        let ids = std::mem::take(&mut self.invocations);
+        let Some(monitor) = &self.console.monitor else {
+            return;
+        };
+        let views = self.console.runtime.schedules_view();
+        let views: Vec<_> = if std::mem::take(&mut self.overflow) {
+            views
+        } else {
+            let topics: HashSet<String> = invocation_causes(monitor, &ids)
+                .into_iter()
+                .filter_map(|cause| match cause {
+                    InvocationCause::Schedule { topic, .. }
+                    | InvocationCause::Pubsub { topic, .. } => Some(topic),
+                    _ => None,
+                })
+                .collect();
+            views
+                .into_iter()
+                .filter(|view| topics.contains(&view.topic))
+                .collect()
+        };
+        if !views.is_empty() {
+            self.send(&views);
+        }
+    }
+
+    fn send(&mut self, views: &[firenook_pubsub_front::ScheduleView]) {
+        let states = schedule_states(&self.console, views);
+        self.outbox.push_back(TopicEvent::json(
+            "schedules",
+            Some(self.revision.to_string()),
+            &PubsubSchedulesFrame {
+                revision: self.revision,
+                schedules: states,
+            },
+        ));
     }
 }
 
