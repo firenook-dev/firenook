@@ -116,11 +116,14 @@ export function DecisionsPanel({
   )
   // A quiet engine sends nothing on subscribing; "none yet" waits a moment
   // so a replay on its way never flashes it.
-  const [waited, setWaited] = useState(false)
+  // Each question waits again: a narrowing's replay is on its way too.
+  const question = JSON.stringify([search.path, search.uid, search.denied, search.method])
+  const [waitedFor, setWaitedFor] = useState<string | undefined>()
   useEffect(() => {
-    const timer = globalThis.setTimeout(() => setWaited(true), 400)
+    const timer = globalThis.setTimeout(() => setWaitedFor(question), 400)
     return () => globalThis.clearTimeout(timer)
-  }, [])
+  }, [question])
+  const waited = waitedFor === question
 
   const flipped = new Map((flips ?? []).map((flip) => [flip.id, flip]))
   const shown = search.flips ? items.filter((item) => flipped.has(item.id)) : items
