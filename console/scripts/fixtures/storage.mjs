@@ -9,8 +9,10 @@
 // stream owns this file.
 //
 // The default bucket's rules are the journeys' subject: each user reads and
-// writes their own folder (images under 5 MB), anyone reads `public/`, and
-// `reports/` asks Firestore whether the reader's plan is `pro`.
+// writes their own folder (images under 5 MB), anyone reads `public/`,
+// `reports/` asks Firestore whether the reader's plan is `pro`, and any
+// signed-in user lists `shared/` but reads only the files that name them as
+// owner (a folder a client may list and not wholly read).
 
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -31,6 +33,10 @@ export const STORAGE_RULES = [
   '    }',
   '    match /reports/{report} {',
   "      allow read: if firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.plan == 'pro';",
+  '    }',
+  '    match /shared/{allPaths=**} {',
+  '      allow list: if request.auth != null;',
+  '      allow get: if request.auth != null && resource.metadata.ownerUid == request.auth.uid;',
   '    }',
   '  }',
   '}',

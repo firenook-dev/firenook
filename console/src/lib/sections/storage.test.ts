@@ -61,9 +61,10 @@ describe('where Storage things open', () => {
     expect(storage.pages?.[1]?.badges).toEqual(['storage.rules'])
   })
 
-  it('stays unbuilt until its journeys pass, so the nav shows none of its pages yet', () => {
-    expect(storage.built).toBe(false)
-    expect(shownPages(storage)).toBeUndefined()
+  it('is built: the nav lists its pages, and the shell mounts its beacon', () => {
+    expect(storage.built).toBe(true)
+    expect(shownPages(storage)?.map((page) => page.label)).toEqual(['Files', 'Rules'])
+    expect(storage.shellMount).toBeDefined()
     expect(storage.projectScope).toBeUndefined()
   })
 })

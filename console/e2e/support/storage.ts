@@ -2,15 +2,24 @@
 // an app makes, straight to the Storage emulator's own port with a token the
 // Auth emulator minted (so the rules judge them and the decisions feed
 // records them), files put in place as the owner through the console's own
-// route, and the rules in force read and put back.
+// route, and the rules in force read and put back. `seed` is the storage
+// seeder's manifest: every count a journey expects comes from it and from
+// `PAGE_LIMIT`, never typed in a spec.
 
 import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 import { SEED_USERS } from '../../scripts/seed/identities.mjs'
+import { seed as seedStorage, STORAGE_SEED } from '../../scripts/seed/storage.mjs'
 import type { Engine } from '../fixtures'
 import { ownerFetch } from './api'
 
 export { SEED_USERS }
+
+/** What the storage seeder wrote (`scripts/seed/storage.mjs`). */
+export const seed = STORAGE_SEED
+
+/** The rows one list page holds: the engine's default limit, which the page does not change. */
+export const PAGE_LIMIT = 100
 
 /** The seed people by name: `ada`, `grace`, `linus`. */
 export const person = (name: 'ada' | 'grace' | 'linus') => {
@@ -22,6 +31,11 @@ export const person = (name: 'ada' | 'grace' | 'linus') => {
 /** The default bucket and the media bucket of the storage profile's project. */
 export function bucketsOf(engine: Pick<Engine, 'project'>) {
   return { default: `${engine.project}.appspot.com`, media: `${engine.project}-media` }
+}
+
+/** The `as=` value that makes the Files page act as a person (`serializeViewAs`). */
+export function asParam(user: { uid: string; email: string }): string {
+  return encodeURIComponent(`${user.uid}:${user.email}`)
 }
 
 /** An ID token the Auth emulator issues for `uid`, as the app holds it. */
@@ -183,4 +197,73 @@ export async function pasteRules(page: Page, text: string): Promise<void> {
     text,
   )
   await page.keyboard.press('ControlOrMeta+v')
+}
+
+/** A console API answer as the owner, parsed; fails the journey on an error status. */
+export async function ownerJson<T>(engine: Engine, path: string, init?: RequestInit): Promise<T> {
+  const response = await ownerFetch(engine, path, init)
+  expect(response.ok, `${path} → ${response.status} ${await response.clone().text()}`).toBe(true)
+  return (await response.json()) as T
+}
+
+interface FolderFigures {
+  objects: number
+  bytes: number
+}
+
+/** A folder's figures from the folder index, once it has them. */
+export async function folderFigures(
+  engine: Engine,
+  bucket: string,
+  prefix: string,
+): Promise<FolderFigures> {
+  let figures: FolderFigures | undefined
+  await expect
+    .poll(async () => {
+      const folder = await ownerJson<{ objects: number | null; bytes: number | null }>(
+        engine,
+        `/storage/folder?bucket=${encodeURIComponent(bucket)}&prefix=${encodeURIComponent(prefix)}`,
+      )
+      if (folder.objects !== null && folder.bytes !== null)
+        figures = { objects: folder.objects, bytes: folder.bytes }
+      return figures !== undefined
+    })
+    .toBe(true)
+  return figures as FolderFigures
+}
+
+/**
+ * Both buckets as the seed left them. The worker's engine is shared by the
+ * storage project's spec files, and the rules journeys upload and replace
+ * files of their own, so a file that counts what the seed holds starts by
+ * putting it back: Storage cleared (a suite job) and seeded again, only
+ * when the figures differ.
+ */
+export async function resetToSeed(engine: Engine): Promise<void> {
+  const buckets = bucketsOf(engine)
+  const [main, media] = await Promise.all([
+    folderFigures(engine, buckets.default, ''),
+    folderFigures(engine, buckets.media, ''),
+  ])
+  if (
+    main.objects === seed.default.files &&
+    main.bytes === seed.default.bytes &&
+    media.objects === seed.media.files &&
+    media.bytes === seed.media.bytes
+  )
+    return
+  const job = await ownerJson<{ id: string }>(engine, '/suite/clear', {
+    method: 'POST',
+    body: JSON.stringify({ sections: ['storage'] }),
+  })
+  await expect
+    .poll(async () => (await ownerJson<{ state: string }>(engine, `/jobs/${job.id}`)).state, {
+      timeout: 30_000,
+    })
+    .toBe('done')
+  await seedStorage(engine)
+  expect(await folderFigures(engine, buckets.default, '')).toEqual({
+    objects: seed.default.files,
+    bytes: seed.default.bytes,
+  })
 }

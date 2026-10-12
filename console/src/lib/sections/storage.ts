@@ -1,10 +1,9 @@
-// Storage's registry entry. The section stays `built: false` — the nav lists
-// none of its pages (`shownPages`), ⌘K offers none of its actions, links into
-// it are text and the shell mounts no beacon — until its journeys pass; what
-// is filled in is what the rest of the console routes through it once it is:
-// its two pages (Files, and Rules with the `storage.rules` badge), where an
-// object, a folder or a rules decision opens, the ⌘K group labels, the create
-// actions and the uploads beacon. Buckets are not per project, so there is no
+// Storage's registry entry, built: its journeys (e2e/storage.spec.ts and
+// e2e/storage-rules.spec.ts) pass against the real engine. What the rest of
+// the console routes through it: its two pages (Files, and Rules with the
+// `storage.rules` badge), where an object, a folder or a rules decision
+// opens, the ⌘K group labels, the create actions and the uploads beacon the
+// shell mounts on every page. Buckets are not per project, so there is no
 // `projectScope`.
 //
 // A registry file loads with the first route: icons, types and pure string
@@ -29,7 +28,7 @@ export const storage: ConsoleSection = {
   services: ['storage'],
   area: 'data',
   icon: HardDrivesIcon,
-  built: false,
+  built: true,
   summary:
     'Every bucket and folder with live counts and sizes, previews for images, video, audio, PDFs, text and binaries, a metadata editor, download tokens, uploads of files and folders, move, copy and delete at any scale. Security rules have their own page: an editor that knows Storage rules, every decision with the line and values behind it, a playground and saved tests.',
   pages: [

@@ -10,6 +10,7 @@ import {
   person,
   putFile,
   removeFile,
+  resetToSeed,
   restoreRules,
   rulesNow,
   tokenFor,
@@ -32,24 +33,12 @@ const SEVEN_MB = 7 * 1024 * 1024
 const ada = person('ada')
 const grace = person('grace')
 
-/** The files the journeys read; every name is one the storage seed holds too. */
-const FILES = [
-  { name: `users/${ada.uid}/avatar.png`, size: 2048, contentType: 'image/png' },
-  { name: `users/${grace.uid}/avatar.png`, size: 2048, contentType: 'image/png' },
-  // More than twenty folders under users/, so the folders map groups them.
-  ...Array.from({ length: 21 }, (_, index) => ({
-    name: `users/u_${String(index).padStart(3, '0')}/avatar.png`,
-    size: 1024,
-    contentType: 'image/png',
-  })),
-  { name: 'public/logo.png', size: 4096, contentType: 'image/png' },
-  { name: 'misc/blob.bin', size: 4096, contentType: 'application/octet-stream' },
-  { name: 'reports/q3.pdf', size: 3000, contentType: 'application/pdf' },
-]
-
+// The files the journeys read are the storage seed's (scripts/seed/storage.mjs):
+// both avatars, the 120 other users' folders (so the folders map groups
+// them), public/logo.png, misc/ and reports/q3.pdf. The seed is put back
+// first if another spec file of this project changed it.
 test.beforeAll(async ({ engine }) => {
-  const { default: bucket } = bucketsOf(engine)
-  for (const file of FILES) await putFile(engine, { bucket, ...file })
+  await resetToSeed(engine)
 })
 
 /** A rules text with one line changed, for drafts that differ by a clause. */
@@ -103,7 +92,10 @@ test('a bucket’s rules load as they are on disk, and the picker opens another 
   )
   await expect(lines(page)).toHaveCount(onDisk.split('\n').length)
   await expect(page.getByTestId('rules-draft-state')).toHaveCount(0)
-  await page.waitForTimeout(1_000)
+  // The check of the loaded text has come back and is drawn — its two
+  // warnings, the open read of public/ and the any-signed-in list of
+  // shared/, count on the Folders tab — and no error showed on the way.
+  await expect(page.getByTestId('tab-folders')).toContainText('2')
   expect(await page.evaluate(() => (globalThis as unknown as ProblemWatch).rulesSeen?.errors)).toBe(
     false,
   )
@@ -142,7 +134,8 @@ test('the rules are checked as they are typed, with Storage’s own warnings', a
   const unbounded = page.locator('[data-testid="rules-warning"][data-code="unbounded-upload"]')
   await expect(unbounded).toHaveCount(1)
   await expect(unbounded).toContainText('no size limit')
-  await expect(page.getByTestId('tab-folders')).toContainText('2')
+  // With the open read of public/ and the any-signed-in list of shared/.
+  await expect(page.getByTestId('tab-folders')).toContainText('3')
   // A warning is a way to its line.
   await unbounded.click()
   await expect(activeLine(page)).toHaveText(/^(6|7)$/)
