@@ -16,7 +16,12 @@
 // Every rule below is Google's, and the worked example from their page
 // is a unit test, so a misreading of it fails rather than ships.
 
+import { formatBytes } from '@/lib/format'
 import { type FsValue, isPartial } from './value'
+
+// Moved to `lib/format.ts` with the console's other formats; the footer and
+// its tests keep importing it from here.
+export { formatBytes } from '@/lib/format'
 
 /** Firestore's cap on a single document. */
 export const DOCUMENT_LIMIT = 1_048_576
@@ -117,21 +122,6 @@ export function anyElided(fields: Record<string, FsValue>): boolean {
     if (value.type === 'array') return value.items.some(deep)
     return false
   })
-}
-
-/**
- * Short enough for a footer, and precise where precision starts to
- * matter: tenths while the document is small enough that they are the
- * difference, hundredths of a megabyte near the limit, where the
- * difference between 1.0 and 1.04 is the difference between a write and
- * a rejection.
- */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const kilobytes = bytes / 1024
-  if (kilobytes < 1024)
-    return `${kilobytes < 100 ? kilobytes.toFixed(1) : Math.round(kilobytes)} KB`
-  return `${(kilobytes / 1024).toFixed(2)} MB`
 }
 
 export interface SizeReading {

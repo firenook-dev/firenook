@@ -17,6 +17,13 @@ export interface PaletteItem {
   keywords?: string | undefined
   icon: ReactNode
   run: () => void
+  /**
+   * What the item opens, when it is a thing the engine's search can find
+   * too (`EntityRef`'s kind and key: `firestore.collection`,
+   * `(default)|users`). ⌘K then leaves out the engine's hit for it, so the
+   * page's own row is the only one.
+   */
+  ref?: { kind: string; key: string } | undefined
 }
 
 export interface PaletteGroup {

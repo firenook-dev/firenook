@@ -165,10 +165,6 @@ fn concrete(pattern: &str) -> String {
         .join("/")
 }
 
-/// The two streams that predate the live channel, until the console moves
-/// onto its topics and they are removed (empty after that).
-const LEGACY_STREAMS: [&str; 2] = ["/api/v1/firestore/changes", "/api/v1/firestore/rules/live"];
-
 #[tokio::test]
 async fn only_live_streams() {
     let router = router();
@@ -204,10 +200,7 @@ async fn only_live_streams() {
             streams.insert(pattern.clone());
         }
     }
-    let allowed = std::iter::once("/api/v1/live")
-        .chain(LEGACY_STREAMS)
-        .map(str::to_owned)
-        .collect::<BTreeSet<_>>();
+    let allowed = BTreeSet::from(["/api/v1/live".to_owned()]);
     assert_eq!(
         streams, allowed,
         "only the live channel streams; a page's live updates are topics on it"
@@ -612,9 +605,13 @@ async fn the_live_stream_opens_only_from_the_consoles_own_origin() {
 }
 
 #[tokio::test]
-async fn firestore_changes_and_rules_ride_the_live_channel() {
+async fn firestore_changes_and_rules_ride_the_live_channel_until_the_suite_stops() {
     let store = Store::default();
-    let router = console_router(full_services(&store, AllowedHosts::loopback()));
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let router = console_router(ConsoleServices {
+        shutdown: Shutdown::new(shutdown),
+        ..full_services(&store, AllowedHosts::loopback())
+    });
     let response = router
         .clone()
         .oneshot(request(Method::GET, "/api/v1/live", &[], ""))
@@ -675,6 +672,18 @@ async fn firestore_changes_and_rules_ride_the_live_channel() {
         .expect("commit");
     read_until(r#""path":"users/u1","kind":"created""#, &mut seen).await;
     assert!(seen.contains(r#""sub":"t1.s1","name":"change""#), "{seen}");
+
+    // The stop signal ends the one stream both topics ride, after saying
+    // so, so a console tab never holds the engine's shutdown open.
+    stop.send(true).expect("the stream is listening");
+    read_until("event: stopping", &mut seen).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(chunk) = body.next().await {
+            chunk.expect("bytes");
+        }
+    })
+    .await
+    .expect("the stream ended after shutdown");
 }
 
 #[test]

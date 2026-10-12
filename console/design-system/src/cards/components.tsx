@@ -674,7 +674,7 @@ function Feedback() {
       </Section>
       <Section
         title="Toast"
-        note="Bottom right of the viewport. A toast confirms what just happened in the same words as the button."
+        note="Bottom right, above the page's footer band, so a footer's buttons stay in reach. A toast confirms what just happened in the same words as the button."
       >
         <div className="grid grid-cols-2 gap-3">
           <ToastBox

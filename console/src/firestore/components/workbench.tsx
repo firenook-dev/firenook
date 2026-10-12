@@ -2,19 +2,23 @@
 // schema panel in the shell's panel slot, a toolbar with the path and the
 // actions, the query line when summoned, then the grid with the inspector
 // beside it when a document is open. Everything on screen is live from the
-// engine's change feed.
+// engine's change feed, a topic on the console's one live channel.
 
-import { Text, Tooltip } from '@cloudflare/kumo'
+import { Text } from '@cloudflare/kumo'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { statusQuery } from '@/api/queries'
-import { LiveDot } from '@/components/kit'
+import { LiveNotice } from '@/components/console/live-notice'
+import { ToolbarDivider } from '@/components/console/toolbar'
 import { Page } from '@/components/shell/page'
 import { PanelToggle } from '@/components/shell/section-panel'
+import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
+import { isTyping, useShortcuts } from '@/lib/shortcuts'
 import { useCreateDialog } from '../create'
 import { useExportDialog } from '../export'
-import { useLive, useLiveChanges } from '../live'
+import { useLiveChanges } from '../live'
 import { useFirestorePalette } from '../palette'
+import { documentQuery } from '../queries'
 import { resetColumns, useQueryLine } from '../query-line-store'
 import { recentsKey, useRecents } from '../recents'
 import { resetSelection, useSelection } from '../selection'
@@ -57,9 +61,9 @@ export function FirestoreWorkbench() {
 function WorkbenchBody() {
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
-  useLiveChanges(queryClient, workbench.database)
+  const live = useLiveChanges(queryClient, workbench.scope)
   useFirestorePalette()
-  const live = useLive((state) => state.status)
+  useRestartRecovery()
   const checked = useSelection((state) => state.checked)
   const everything = useSelection((state) => state.everything)
   const { total } = useMatchCount()
@@ -73,7 +77,7 @@ function WorkbenchBody() {
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
 
   // The selection and hidden columns belong to one collection.
-  const selectionScope = `${workbench.database}|${workbench.collectionPath}|${workbench.group}`
+  const selectionScope = `${workbench.slot}|${workbench.collectionPath}|${workbench.group}`
   useEffect(() => {
     resetSelection(selectionScope)
     resetColumns(selectionScope)
@@ -93,50 +97,64 @@ function WorkbenchBody() {
     if (workbench.selectedDocument) recordRecent(workbench.selectedDocument, 'document')
   }, [recordRecent, workbench.selectedDocument])
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      // A value being edited in the grid owns the keyboard, wherever in it
-      // focus is — a switch, a type menu — so `f` is a letter and Escape
-      // gives up the edit rather than closing the inspector beside it.
-      if (useSelection.getState().editing) return
-      const target = event.target as HTMLElement | null
-      const typing =
-        target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      if (typing) {
-        if (event.key === 'Escape') (target as HTMLElement).blur()
-        return
-      }
-      if (event.metaKey || event.ctrlKey) return
-      if (event.key === 'f' && workbench.collectionPath) {
-        event.preventDefault()
-        openQuery(true)
-      } else if (event.key === 'Escape') {
-        if (workbench.selectedDocument) workbench.selectDocument(undefined)
+  // The page's keys, through the console's one registry: they stand aside
+  // while a field has the keys or a value is being edited in the grid
+  // (`useEditing`), so `f` is a letter there and Escape gives up the edit
+  // rather than closing the inspector beside it.
+  const inCollection = () => Boolean(workbench.collectionPath)
+  const canCreate = () => Boolean(workbench.collectionPath) && !workbench.isPattern
+  const deleteTicked = () =>
+    setDeleting(
+      everything
+        ? { kind: 'everything', count: total?.count ?? checked.size }
+        : { kind: 'paths', paths: [...checked] },
+    )
+  useShortcuts({ id: 'firestore', label: 'Firestore' }, [
+    { key: 'f', label: 'Filter the documents', when: inCollection, run: () => openQuery(true) },
+    {
+      key: 'e',
+      label: 'Explain the query',
+      when: inCollection,
+      run: () => setExplain(!useQueryLine.getState().explain),
+    },
+    {
+      // The scope is a menu so both scopes are named, but flipping it stays
+      // one keystroke. A pattern is already the group, with nowhere to go.
+      key: 'g',
+      label: 'Switch between this collection and its group',
+      when: canCreate,
+      run: () => workbench.setGroup(!workbench.group),
+    },
+    {
+      key: 'n',
+      label: 'New document',
+      when: canCreate,
+      run: () => openCreate({ kind: 'document', collection: workbench.collectionPath }),
+    },
+    {
+      key: 'Escape',
+      label: 'Close the document, then clear the selection',
+      // Escape in a field leaves the field, so the next key is a shortcut.
+      allowInInputs: true,
+      run: (event) => {
+        if (isTyping(event.target)) (event.target as HTMLElement).blur()
+        else if (workbench.selectedDocument) workbench.selectDocument(undefined)
         else if (checked.size > 0) clearSelection()
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && checked.size > 0) {
-        event.preventDefault()
-        setDeleting(
-          everything
-            ? { kind: 'everything', count: total?.count ?? checked.size }
-            : { kind: 'paths', paths: [...checked] },
-        )
-      } else if (event.key === 'e' && workbench.collectionPath) {
-        event.preventDefault()
-        setExplain(!useQueryLine.getState().explain)
-      } else if (event.key === 'g' && workbench.collectionPath && !workbench.isPattern) {
-        // The scope is a menu so both scopes are named, but flipping it stays
-        // one keystroke. A pattern is already the group, with nowhere to go.
-        event.preventDefault()
-        workbench.setGroup(!workbench.group)
-      } else if (event.key === 'n' && workbench.collectionPath && !workbench.isPattern) {
-        event.preventDefault()
-        openCreate({ kind: 'document', collection: workbench.collectionPath })
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [workbench, checked, everything, total, clearSelection, openQuery, openCreate, setExplain])
+      },
+    },
+    {
+      key: 'Delete',
+      label: 'Delete the ticked documents',
+      when: () => checked.size > 0,
+      run: deleteTicked,
+    },
+    {
+      key: 'Backspace',
+      label: 'Delete the ticked documents',
+      when: () => checked.size > 0,
+      run: deleteTicked,
+    },
+  ])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="firestore-workbench">
@@ -150,9 +168,37 @@ function WorkbenchBody() {
   )
 }
 
-/** The rule that separates one group of toolbar controls from the next. */
-function Divider() {
-  return <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+/**
+ * What an engine restart does to the workbench beyond reloading its queries
+ * (the channel does that): the ticked rows go, since the documents they
+ * named may not exist in the new run, and the inspector closes when its
+ * document no longer does. An edit in progress is kept.
+ */
+function useRestartRecovery() {
+  const workbench = useWorkbench()
+  const queryClient = useQueryClient()
+  const latest = useRef(workbench)
+  useEffect(() => {
+    latest.current = workbench
+  })
+  useEffect(
+    () =>
+      liveChannel.onEngineRestart(() => {
+        useSelection.getState().clear()
+        const { scope, selectedDocument, selectDocument } = latest.current
+        if (!selectedDocument) return
+        void queryClient
+          .fetchQuery(documentQuery(scope, selectedDocument))
+          .then((document) => {
+            if (!document && latest.current.selectedDocument === selectedDocument)
+              selectDocument(undefined)
+          })
+          .catch(() => {
+            // Unreadable now is still a document: the inspector says why.
+          })
+      }),
+    [queryClient],
+  )
 }
 
 /** The data view: the toolbar, the query line and the grid. */
@@ -162,7 +208,7 @@ function WorkbenchData({
   explain,
   setExplain,
 }: {
-  live: string
+  live: SubscriptionStatus
   onDelete: (target: DeleteTarget) => void
   explain: boolean
   setExplain: (explain: boolean) => void
@@ -177,36 +223,24 @@ function WorkbenchData({
       >
         <PanelToggle where="toolbar" />
         <PathBar />
-        <Divider />
-        {/* The channel, said only when it has dropped. The grid is kept
-            current by it, so a dropped channel is a grid that looks fresh
-            and is not — the one thing a dev tool must not do quietly. While
-            it is up there is nothing to say: a green "Live" in every
-            toolbar was the normal case announced, beside the engine's own
-            green dot in the bar above, and a word that is always there is
-            a word nobody reads on the day it changes. The count beside it
-            went earlier, with the window it used to open. */}
-        {(live === 'reconnecting' || live === 'offline') && (
-          <Tooltip
-            content={
-              live === 'offline'
-                ? 'Changes are not arriving, so the grid may be out of date. Reload to reconnect.'
-                : 'Changes stopped arriving, so the grid may be out of date. Reconnecting.'
-            }
-            render={
-              <span className="flex h-7 items-center px-1.5" data-testid="live-state">
-                <LiveDot state={live} />
-              </span>
-            }
-          />
-        )}
+        <ToolbarDivider />
+        {/* This page's own subscription, said only when the engine ended
+            or refused it. A dropped channel is the whole console's, so the
+            engine badge in the bar above says it, once, for every page; a
+            green "Live" here would only announce the normal case. */}
+        <LiveNotice
+          status={live}
+          what="this database"
+          onRetry={() => liveChannel.retry()}
+          testId="live-state"
+        />
         {/* Not a property of the query below: the identity applies to every
             read the workbench makes, the schema tree and inspector included.
             The security rules it reads through have a page of their own in
             the sidebar; the Rules button that stood here swapped the grid
             for an editor, a mode of this page for what is a different job. */}
         <ViewAsPicker />
-        <Divider />
+        <ToolbarDivider />
         <NewMenu />
       </div>
       {workbench.collectionPath && (

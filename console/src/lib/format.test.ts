@@ -1,0 +1,157 @@
+import { act, renderHook } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  compactIso,
+  formatBytes,
+  formatClock,
+  formatCount,
+  formatDuration,
+  formatNumber,
+  formatRate,
+  relativeTime,
+  shortId,
+} from './format'
+
+describe('numbers and counts', () => {
+  it('groups integers and leaves fractions as typed', () => {
+    expect(formatNumber(2340)).toBe('2,340')
+    expect(formatNumber(1_000_000)).toBe('1,000,000')
+    expect(formatNumber(1.5)).toBe('1.5')
+    expect(formatNumber(0)).toBe('0')
+  })
+
+  it('names the thing counted, singular only for one', () => {
+    const users = { one: 'user', other: 'users' }
+    expect(formatCount(1, users)).toBe('1 user')
+    expect(formatCount(0, users)).toBe('0 users')
+    expect(formatCount(2340, users)).toBe('2,340 users')
+  })
+})
+
+describe('sizes', () => {
+  it('writes small documents in bytes and bigger ones in kilobytes', () => {
+    expect(formatBytes(147)).toBe('147 B')
+    expect(formatBytes(1024)).toBe('1.0 KB')
+    expect(formatBytes(12_700)).toBe('12.4 KB')
+    expect(formatBytes(900_000)).toBe('879 KB')
+  })
+
+  it('keeps hundredths of a megabyte, where the document limit is', () => {
+    expect(formatBytes(1_048_576)).toBe('1.00 MB')
+    expect(formatBytes(1_048_576 + 40_000)).toBe('1.04 MB')
+  })
+
+  it('reads large figures for their size, up to terabytes', () => {
+    expect(formatBytes(38 * 1024 * 1024)).toBe('38.0 MB')
+    expect(formatBytes(380 * 1024 * 1024)).toBe('380 MB')
+    expect(formatBytes(1.2 * 1024 ** 3)).toBe('1.2 GB')
+    expect(formatBytes(3 * 1024 ** 4)).toBe('3.0 TB')
+  })
+})
+
+describe('durations', () => {
+  it('uses the unit a reader thinks in', () => {
+    expect(formatDuration(850)).toBe('850 ms')
+    expect(formatDuration(1200)).toBe('1.2 s')
+    expect(formatDuration(42_000)).toBe('42 s')
+    expect(formatDuration(184_000)).toBe('3 min 4 s')
+    expect(formatDuration(7_500_000)).toBe('2 h 5 min')
+    expect(formatDuration(3 * 86_400_000 + 4 * 3_600_000)).toBe('3 d 4 h')
+  })
+
+  it('never writes a figure that belongs in the next unit', () => {
+    expect(formatDuration(999.6)).toBe('1.0 s')
+    expect(formatDuration(9_960)).toBe('10 s')
+    expect(formatDuration(59_600)).toBe('1 min')
+    expect(formatDuration(3_600_000)).toBe('1 h')
+  })
+
+  it('keeps a tenth for sub-10 ms work and never goes negative', () => {
+    expect(formatDuration(0.42)).toBe('0.4 ms')
+    expect(formatDuration(0)).toBe('0 ms')
+    expect(formatDuration(-5)).toBe('0 ms')
+  })
+})
+
+describe('rates', () => {
+  it('compacts thousands and millions', () => {
+    expect(formatRate(1234, 'lines')).toBe('1.2k lines/s')
+    expect(formatRate(12, 'lines')).toBe('12 lines/s')
+    expect(formatRate(0.5, 'events')).toBe('0.5 events/s')
+    expect(formatRate(120_000, 'lines')).toBe('120k lines/s')
+    expect(formatRate(3_400_000, 'events')).toBe('3.4M events/s')
+    expect(formatRate(2000, 'lines')).toBe('2k lines/s')
+  })
+})
+
+describe('times', () => {
+  const now = Date.parse('2026-09-20T09:00:00Z')
+
+  it('describes relative time in the shortest honest form', () => {
+    expect(relativeTime('2026-09-20T08:59:50Z', now)).toBe('just now')
+    expect(relativeTime('2026-09-20T08:57:00Z', now)).toBe('3 min ago')
+    expect(relativeTime('2026-09-20T06:00:00Z', now)).toBe('3 h ago')
+    expect(relativeTime('2026-09-15T09:00:00Z', now)).toBe('5 d ago')
+    expect(relativeTime('2026-09-20T10:00:00Z', now)).toBe('in 1 h')
+    expect(relativeTime('not a date', now)).toBe('not a date')
+  })
+
+  it('switches units at their edges', () => {
+    expect(relativeTime('2026-09-20T08:59:16Z', now)).toBe('just now')
+    expect(relativeTime('2026-09-20T08:59:15Z', now)).toBe('1 min ago')
+    expect(relativeTime('2026-08-01T09:00:00Z', now)).toBe('2 mo ago')
+    expect(relativeTime('2024-09-20T09:00:00Z', now)).toBe('2 y ago')
+  })
+
+  it('takes the machinery out of a timestamp', () => {
+    expect(compactIso('2026-09-20T09:00:00.123456Z')).toBe('2026-09-20 09:00:00')
+    expect(compactIso('2026-09-20T09:00:00Z')).toBe('2026-09-20 09:00:00')
+  })
+
+  it('cuts long ids in the middle and leaves short ones whole', () => {
+    expect(shortId('u_9f3k2')).toBe('u_9f3k2')
+    expect(shortId('projects/demo/messages/18340000000000')).toBe('projec…000000')
+    expect(shortId('abcdefghij', 2)).toBe('ab…ij')
+  })
+})
+
+describe('the clock format', () => {
+  afterEach(() => {
+    localStorage.clear()
+    vi.resetModules()
+  })
+
+  it('writes a feed time three ways', () => {
+    const at = new Date(2026, 8, 20, 14, 2, 11, 348)
+    const iso = at.toISOString()
+    expect(formatClock(iso, 'time')).toBe('14:02:11.348')
+    expect(formatClock(iso, 'utc')).toBe(iso)
+    expect(formatClock(iso, 'relative', at.getTime() + 3_400)).toBe('3 s ago')
+    expect(formatClock(iso, 'relative', at.getTime() + 125_000)).toBe('2 min ago')
+    expect(formatClock(iso, 'relative', at.getTime() - 2_000)).toBe('in 2 s')
+    expect(formatClock('soon', 'time')).toBe('soon')
+  })
+
+  it('is remembered per browser and follows other tabs', async () => {
+    localStorage.setItem('firenook.console.clock-format', 'utc')
+    const { useClockFormat } = await import('./format')
+    const { result } = renderHook(() => useClockFormat())
+    expect(result.current.format).toBe('utc')
+    act(() => result.current.setFormat('relative'))
+    expect(result.current.format).toBe('relative')
+    expect(localStorage.getItem('firenook.console.clock-format')).toBe('relative')
+
+    localStorage.setItem('firenook.console.clock-format', 'time')
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'firenook.console.clock-format' }))
+    })
+    expect(result.current.format).toBe('time')
+  })
+
+  it('reads an unknown stored value as the default', async () => {
+    localStorage.setItem('firenook.console.clock-format', 'sundial')
+    const { useClockFormat } = await import('./format')
+    const { result } = renderHook(() => useClockFormat())
+    expect(result.current.format).toBe('time')
+  })
+})

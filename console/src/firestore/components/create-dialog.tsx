@@ -124,7 +124,7 @@ function CreateForm({
       return path
     },
     onSuccess: (path) => {
-      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
+      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
       toasts.add({
         title: request.kind === 'collection' ? 'Collection created' : 'Document added',
         description: path,
@@ -329,7 +329,7 @@ function ImportForm({ collection, onClose }: { collection: string; onClose: () =
       return operations.length
     },
     onSuccess: (count) => {
-      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
+      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
       toasts.add({
         title: `${count.toLocaleString('en-US')} document${count === 1 ? '' : 's'} imported`,
         description: collection,

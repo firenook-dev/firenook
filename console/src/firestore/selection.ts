@@ -25,9 +25,10 @@ interface SelectionState {
   /** The row a shift-click selects a range from: the last one toggled. */
   anchor: string | undefined
   /**
-   * The cell being edited. Held here rather than in the grid so that the
-   * workbench's own shortcuts — `f`, `e`, Escape closing the inspector —
-   * can stand aside while a value is being typed, wherever focus is.
+   * The cell being edited, which the grid opens its editor over. That an
+   * edit is in progress at all is `useEditing` (`lib/shortcuts.ts`), which
+   * the editor sets while it is open: the console's shortcuts read that, so
+   * the workbench's `f`, `e` and Escape stand aside wherever focus is.
    */
   editing: { path: string; field: string } | null
   toggle: (path: string) => void
