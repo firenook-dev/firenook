@@ -48,7 +48,7 @@ use firenook_storage_front::{
 };
 use firenook_suite_front::{
     BackgroundRequest, EngineRelease, ExportCommand, HubConfig, HubRuntime, LoggingRuntime,
-    ServiceInfo, SuiteDirectory, UiConfig, requests_router, ui_router,
+    ServiceInfo, SuiteDirectory, UiConfig, requests_router, requests_router_with_log, ui_router,
 };
 use firenook_tasks_front::TasksRuntime;
 use firenook_webchannel_front::{FirestoreBackend, router as webchannel_router};
@@ -640,9 +640,10 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
     let (server_failure, mut failed_server) = mpsc::unbounded_channel();
     // One Requests feed serves both the Firestore websocket port and the
     // console; a second instance would run a second history maintainer.
+    // Its loss reports reach the console's log too.
     let requests = firestore
         .is_some()
-        .then(|| requests_router(request_history, shutdown.subscribe()));
+        .then(|| requests_router_with_log(request_history, shutdown.subscribe(), &logging));
     let allowed_hosts = AllowedHosts::new(&config.host, &config.allowed_hosts);
     if ui.is_some() && allowed_hosts.accepts_any() {
         eprintln!(

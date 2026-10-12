@@ -6,18 +6,20 @@
 
 #![forbid(unsafe_code)]
 
+pub mod console_input;
 pub mod entity;
 mod logging;
 mod release;
 pub mod replay;
 mod requests;
+pub use console_input::{Audience, ConsoleSink, LogInput, LogLevel, kinds};
 pub use entity::EntityRef;
 pub use logging::LoggingRuntime;
 pub use replay::{Cursor, Entry, Follow, ReplayRing, RingBudget, RingLimits, RingSize};
 #[cfg(test)]
 mod logging_tests;
 pub use release::{ENGINE_REVISION_VARIABLE, EngineRelease, RELEASE_VERSION_VARIABLE};
-pub use requests::requests_router;
+pub use requests::{requests_router, requests_router_with_log};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter, Write as _};
