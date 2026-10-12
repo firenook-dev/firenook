@@ -10,6 +10,7 @@ import {
   isStalled,
   subscriptionMark,
   subscriptionTone,
+  waitedShort,
   waitedText,
 } from './states'
 
@@ -126,6 +127,11 @@ describe('time left and how long it waited (U-10)', () => {
     expect(waitedText(at(-1), NOW)).toBe('1 second')
     expect(waitedText(at(-3600), NOW)).toBe('1 hour')
     expect(waitedText(at(-3 * 86_400), NOW)).toBe('3 days')
+    expect(waitedShort(at(-12), NOW)).toBe('12 s')
+    expect(waitedShort(at(-4 * 60 - 30), NOW)).toBe('4 m')
+    expect(waitedShort(at(-3 * 3600), NOW)).toBe('3 h')
+    expect(waitedShort(at(-3 * 86_400), NOW)).toBe('3 d')
+    expect(waitedShort(null, NOW)).toBe('')
   })
 
   it('calls a backlog stalled past three ack deadlines with nobody connected', () => {

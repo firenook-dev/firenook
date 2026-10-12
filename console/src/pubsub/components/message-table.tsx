@@ -253,6 +253,11 @@ export function MessagesView({
   exportOpen = false,
   onExportOpenChange,
   empty,
+  fixedExpr,
+  columns = MESSAGE_COLUMNS,
+  memoryKey = 'pubsub.messages',
+  againLabel,
+  emptyState: emptyOverride,
 }: {
   project: string
   topic: string
@@ -276,6 +281,20 @@ export function MessagesView({
   onExportOpenChange?: ((open: boolean) => void) | undefined
   /** The empty state's action (Publish), when the topic has nothing yet. */
   empty?: ReactNode
+  /**
+   * An expression the view holds fixed (a subscription's dead letters): it
+   * narrows every read and shows as a read-only chip in the field's place.
+   */
+  fixedExpr?: { expr: string; chip: string } | undefined
+  columns?: readonly DataTableColumn<PubsubMessageRow>[]
+  memoryKey?: string
+  /**
+   * Publishing again goes to another topic (a dead letter back to its
+   * source): only "edit and publish", under these words, is offered.
+   */
+  againLabel?: string | undefined
+  /** The empty state with no filter typed, in place of the topic's own. */
+  emptyState?: ReactNode
 }) {
   const queryClient = useQueryClient()
   const topicId = shortName(topic)
@@ -318,12 +337,14 @@ export function MessagesView({
 
   // The URL's expression has settled already; the list waits for the
   // engine's word on it rather than asking with a filter it would refuse.
-  const exprCheck = useFilterCheck(project, search.expr ?? '', topic, 0)
-  const exprKnown = !search.expr || exprCheck.check !== undefined
+  const ownExpr = fixedExpr ? undefined : search.expr
+  const exprCheck = useFilterCheck(project, ownExpr ?? '', topic, 0)
+  const exprKnown = !ownExpr || exprCheck.check !== undefined
   const q = usableQuery(search.q ?? '')
   const exprBroken = exprCheck.check !== undefined && !exprCheck.check.ok
-  const expr = search.expr && !exprBroken ? search.expr : undefined
-  const filtered = q !== undefined || expr !== undefined
+  const typedExpr = ownExpr && !exprBroken ? ownExpr : undefined
+  const expr = fixedExpr?.expr ?? typedExpr
+  const filtered = q !== undefined || typedExpr !== undefined
 
   const list = messageList(project, topic, q, expr)
   const query = useInfiniteQuery({ ...list.options, enabled: list.options.enabled && exprKnown })
@@ -395,7 +416,11 @@ export function MessagesView({
         void readHead()
         return
       }
-      if (published.overflow || !filtered || published.ids.length === 0) {
+      if (
+        published.overflow ||
+        (expr === undefined && q === undefined) ||
+        published.ids.length === 0
+      ) {
         setNewAbove((count) => count + published.added)
         return
       }
@@ -427,7 +452,8 @@ export function MessagesView({
     attributeKeys: detail?.attributeKeys ?? [],
     orderingKeys: detail?.orderingKeys ?? [],
   })
-  const hidden = useHiddenColumnCount('pubsub.messages', MESSAGE_COLUMNS)
+  const hidden = useHiddenColumnCount(memoryKey, columns)
+  const republish = onEditAgain !== undefined && againLabel === undefined
   const exprLine = filterCheckText(exprCheck.check, false)
 
   // Ticked rows: for a list, a selection belongs to one filter of one topic.
@@ -471,14 +497,14 @@ export function MessagesView({
           {
             key: 'r',
             label: 'Publish the message again',
-            when: () => cursorRow !== undefined,
+            when: () => republish && cursorRow !== undefined,
             run: () => {
               if (cursorRow) againOne(cursorRow.id)
             },
           },
           {
             key: 'Shift+R',
-            label: 'Edit the message, then publish it',
+            label: againLabel ?? 'Edit the message, then publish it',
             when: () => cursorRow !== undefined,
             run: () => {
               if (cursorRow) onEditAgain(cursorRow.id)
@@ -524,7 +550,7 @@ export function MessagesView({
       shortcut: 'Enter',
       run: () => update({ message: row.id }),
     },
-    ...(onEditAgain
+    ...(republish
       ? [
           {
             id: 'again',
@@ -533,9 +559,13 @@ export function MessagesView({
             shortcut: 'r',
             run: () => againOne(row.id),
           },
+        ]
+      : []),
+    ...(onEditAgain
+      ? [
           {
             id: 'edit-again',
-            label: 'Edit and publish…',
+            label: againLabel ? `${againLabel}…` : 'Edit and publish…',
             icon: PencilSimpleIcon,
             shortcut: 'Shift+R',
             run: () => onEditAgain(row.id),
@@ -566,10 +596,12 @@ export function MessagesView({
   const evicted = detail ? evictedText(detail.history, topicId) : undefined
   const emptyState = filtered ? (
     <NoMatch
-      filter={[q, expr].filter(Boolean).join(' · ')}
+      filter={[q, typedExpr].filter(Boolean).join(' · ')}
       onClear={() => update({ q: undefined, expr: undefined }, { replace: true })}
       noun="messages"
     />
+  ) : emptyOverride !== undefined ? (
+    emptyOverride
   ) : (
     <EmptyState
       icon={TrayIcon}
@@ -605,7 +637,7 @@ export function MessagesView({
               testId="pubsub-selection"
               actions={
                 <>
-                  {onEditAgain && (
+                  {republish && (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -675,14 +707,28 @@ export function MessagesView({
           ariaLabel="Filter messages"
           testId="pubsub-message-filter"
         />
-        <AttributesFilterField
-          value={exprText}
-          onChange={writeExpr}
-          project={project}
-          topic={topic}
-          collapsible
-          testId="pubsub-expr"
-        />
+        {fixedExpr ? (
+          <Tooltip
+            content={<span className="font-mono text-[11px]">{fixedExpr.expr}</span>}
+            render={
+              <span
+                className="flex h-6.5 shrink-0 items-center rounded-md bg-kumo-tint px-2 text-[12px] text-kumo-default"
+                data-testid="pubsub-fixed-expr"
+              >
+                {fixedExpr.chip}
+              </span>
+            }
+          />
+        ) : (
+          <AttributesFilterField
+            value={exprText}
+            onChange={writeExpr}
+            project={project}
+            topic={topic}
+            collapsible
+            testId="pubsub-expr"
+          />
+        )}
         <MatchCount
           total={cursor.total}
           scanned={cursor.scanned}
@@ -707,8 +753,8 @@ export function MessagesView({
               ariaLabel={`Messages of ${topicId}`}
               rows={rows}
               rowKey={(row) => row.id}
-              columns={MESSAGE_COLUMNS}
-              memoryKey="pubsub.messages"
+              columns={columns}
+              memoryKey={memoryKey}
               openKey={search.message}
               onOpen={(row) => update({ message: row.id })}
               onCursorChange={(row) => {
@@ -786,10 +832,11 @@ export function MessagesView({
               onNext={stepTo(1)}
               onOpenSubscription={onOpenSubscription}
               {...(onEditAgain ? { onEditAgain } : {})}
+              againLabel={againLabel}
             />
           ))}
       </div>
-      {onEditAgain && (
+      {republish && (
         <PublishAgainDialog
           request={again}
           topic={topic}
@@ -811,7 +858,7 @@ export function MessagesView({
             <span data-testid="pubsub-export-scope">
               {exportSelected && !ticked.everything
                 ? `The ${formatNumber(ticked.checked.size)} ticked ${ticked.checked.size === 1 ? 'message' : 'messages'} of ${topicId}`
-                : `${cursor.total ? `${formatNumber(cursor.total.count)}${cursor.total.exact ? '' : '+'} ` : ''}messages of ${topicId}${filtered ? ` matching ${[q, expr].filter(Boolean).join(' and ')}` : ' the console keeps'}`}
+                : `${cursor.total ? `${formatNumber(cursor.total.count)}${cursor.total.exact ? '' : '+'} ` : ''}messages of ${topicId}${fixedExpr ? ` ${fixedExpr.chip}` : ''}${filtered ? ` matching ${[q, typedExpr].filter(Boolean).join(' and ')}` : fixedExpr ? '' : ' the console keeps'}`}
               , each as its id, publish time, data (base64), attributes and ordering key. A file
               published back from the composer publishes them again.
             </span>

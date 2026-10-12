@@ -9,7 +9,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { ApiError } from '@/api/client'
 import type { PubsubSubscriptionDetail } from '@/api/generated/messaging/PubsubSubscriptionDetail'
-import type { PubsubSubscriptionSummary } from '@/api/generated/messaging/PubsubSubscriptionSummary'
 import type { PubsubTopicSummary } from '@/api/generated/messaging/PubsubTopicSummary'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
@@ -44,19 +43,37 @@ const LABELS: Record<SubscriptionViewName, string> = {
   settings: 'Settings',
 }
 
-/** What a later tab renders, given the subscription it is on. */
-export type SubscriptionTabRender = (props: {
-  detail: PubsubSubscriptionDetail
-  summary: PubsubSubscriptionSummary | undefined
-}) => { body: ReactNode; end?: ReactNode }
+const ORDER: readonly SubscriptionViewName[] = [
+  'backlog',
+  'pull',
+  'push',
+  'dead-letters',
+  'settings',
+]
+
+/** The tab a `view` parameter names, among those the subscription has, or its first. */
+export function resolveSubscriptionView(
+  detail: PubsubSubscriptionDetail | undefined,
+  requested: string | undefined,
+  available: readonly SubscriptionViewName[],
+): { view: SubscriptionViewName; ordered: SubscriptionViewName[] } {
+  const views = subscriptionViews(detail, [
+    ...available.filter((name) => name !== 'settings'),
+    'settings',
+  ])
+  const ordered = ORDER.filter((name) => views.includes(name))
+  const view = ordered.includes(requested as SubscriptionViewName)
+    ? (requested as SubscriptionViewName)
+    : (ordered[0] ?? 'settings')
+  return { view, ordered }
+}
 
 /** No tabs beyond Settings. */
-const NO_TABS: Partial<Record<SubscriptionViewName, SubscriptionTabRender>> = {}
+const NO_TABS: readonly SubscriptionViewName[] = []
 
 export function SubscriptionView({
   project,
   subscription,
-  summary,
   topic,
   topics,
   view: requested,
@@ -64,12 +81,12 @@ export function SubscriptionView({
   onOpenTopic,
   onDeleted,
   tabs = NO_TABS,
+  body,
+  end,
 }: {
   project: string
   /** The subscription's full name. */
   subscription: string
-  /** Its live figures from the topics index, when the index has it. */
-  summary: PubsubSubscriptionSummary | undefined
   /** Its topic in the index (with the functions it feeds), unless the topic was deleted. */
   topic: PubsubTopicSummary | undefined
   /** The project's topics (full names), for the dead-letter topic. */
@@ -78,8 +95,11 @@ export function SubscriptionView({
   onView: (view: SubscriptionViewName) => void
   onOpenTopic: (topic: string) => void
   onDeleted: () => void
-  /** The tabs other than Settings, in order, each with its body and row two's end. */
-  tabs?: Partial<Record<SubscriptionViewName, SubscriptionTabRender>>
+  /** The tabs other than Settings the page offers. */
+  tabs?: readonly SubscriptionViewName[]
+  /** The resolved tab's body (any but Settings), and row two's end beside the tabs. */
+  body?: ReactNode
+  end?: ReactNode
 }) {
   const queryClient = useQueryClient()
   const detail = useQuery(subscriptionQuery(project, subscription))
@@ -136,17 +156,7 @@ export function SubscriptionView({
     )
   }
 
-  const views = subscriptionViews(detail.data, [
-    ...(Object.keys(tabs) as SubscriptionViewName[]).filter((name) => name !== 'settings'),
-    'settings',
-  ])
-  const ordered = (['backlog', 'pull', 'push', 'dead-letters', 'settings'] as const).filter(
-    (name) => views.includes(name),
-  )
-  const view = ordered.includes(requested as SubscriptionViewName)
-    ? (requested as SubscriptionViewName)
-    : (ordered[0] ?? 'settings')
-  const rendered = view === 'settings' ? undefined : tabs[view]?.({ detail: detail.data, summary })
+  const { view, ordered } = resolveSubscriptionView(detail.data, requested, tabs)
 
   return (
     <>
@@ -157,8 +167,9 @@ export function SubscriptionView({
           value={view}
           onValueChange={(next) => onView(next as SubscriptionViewName)}
           tabs={ordered.map((name) => ({ value: name, label: LABELS[name] }))}
+          className="shrink-0"
         />
-        {rendered?.end}
+        {view === 'settings' ? undefined : end}
       </ToolbarRow>
       {managed === 'orphaned' && (
         <SectionBanner
@@ -190,7 +201,7 @@ export function SubscriptionView({
           onDeleted={onDeleted}
         />
       ) : (
-        rendered?.body
+        body
       )}
       <DangerConfirm
         open={deleting}

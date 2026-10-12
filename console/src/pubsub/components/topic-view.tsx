@@ -1,10 +1,10 @@
-// One topic: row two is its tabs — Messages, Subscriptions, Settings — with
+// One topic: row two is its tabs — Messages, Subscriptions, Snapshots, Settings — with
 // how much it publishes at the right end (since start, the last minute's
 // rate, and the bars, aged on the shared one-second clock so a topic that
 // went quiet decays to zero by itself); below, the tab.
 
 import { Button, Tabs } from '@cloudflare/kumo'
-import { BroadcastIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
+import { BroadcastIcon, CameraIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError } from '@/api/client'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
@@ -15,11 +15,13 @@ import { formatNumber } from '@/lib/format'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useThroughput } from '../live'
 import { shortName } from '../names'
-import { topicQuery } from '../queries'
+import { snapshotsQuery, topicQuery } from '../queries'
 import { Composer } from './composer'
+import { CreateSnapshotDialog } from './create-snapshot-dialog'
 import { JobStrip } from './job-strip'
 import type { MessageTab } from './message-inspector'
 import { type MessagesSearch, MessagesView } from './message-table'
+import { SnapshotsTable, topicSnapshots } from './snapshots-table'
 import { SubscriptionsTable, subscriptionRows } from './subscriptions-table'
 import type { SubscriptionViewName } from './subscription-view'
 import { ThroughputBars, useLastMinute } from './throughput-bars'
@@ -39,7 +41,12 @@ export interface TopicSearch extends MessagesSearch {
 }
 
 /** The topic's tabs, in order; later commits add theirs here. */
-export const TOPIC_VIEWS: readonly TopicViewName[] = ['messages', 'subscriptions', 'settings']
+export const TOPIC_VIEWS: readonly TopicViewName[] = [
+  'messages',
+  'subscriptions',
+  'snapshots',
+  'settings',
+]
 
 /** The view a `view` parameter names for a topic, or the first. */
 export function topicView(view: string | undefined): TopicViewName {
@@ -96,6 +103,7 @@ export function TopicView({
   onCreateSubscription,
   onCreateTopic,
   onLiveStatus,
+  onReplay,
   onDeleted,
 }: {
   project: string
@@ -108,9 +116,12 @@ export function TopicView({
   onCreateSubscription: () => void
   onCreateTopic: (id: string) => void
   onLiveStatus: (status: SubscriptionStatus) => void
+  /** Opens the replay of a subscription, with a snapshot chosen. */
+  onReplay: (subscription: string, snapshot: string) => void
   onDeleted: () => void
 }) {
   const detail = useQuery(topicQuery(project, topic))
+  const snapshots = useQuery(snapshotsQuery(project))
   const topicId = shortName(topic)
   const view = topicView(search.view)
   const missing = detail.error instanceof ApiError && detail.error.code === 'not-found'
@@ -136,6 +147,11 @@ export function TopicView({
     update({ new: 'message', prefill: id, message: undefined, tab: undefined })
   const openComposer = () =>
     update({ new: 'message', prefill: undefined, message: undefined, tab: undefined })
+  const snapshotCount = topicSnapshots(snapshots.data?.items, topic).length
+  // A snapshot is of a subscription the console tracks; the functions' own are drained.
+  const snapshotSources = (detail.data?.subscriptions ?? [])
+    .filter((item) => item.summary.managed !== 'functions')
+    .map((item) => item.summary.name)
   return (
     <>
       <ToolbarRow variant="line" testId="pubsub-topic-tabs">
@@ -163,10 +179,34 @@ export function TopicView({
                 </span>
               ),
             },
+            {
+              value: 'snapshots',
+              label: (
+                <span>
+                  Snapshots{' '}
+                  <span className="font-mono text-[11px] text-kumo-subtle">
+                    {formatNumber(snapshotCount)}
+                  </span>
+                </span>
+              ),
+            },
             { value: 'settings', label: 'Settings' },
           ]}
         />
-        {view === 'subscriptions' ? (
+        {view === 'snapshots' ? (
+          <span className="ml-auto flex shrink-0 items-center">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<CameraIcon />}
+              disabled={snapshotSources.length === 0}
+              onClick={() => update({ new: 'snapshot' })}
+              data-testid="pubsub-new-snapshot"
+            >
+              New snapshot
+            </Button>
+          </span>
+        ) : view === 'subscriptions' ? (
           <span className="ml-auto flex shrink-0 items-center">
             <Button
               variant="secondary"
@@ -232,9 +272,24 @@ export function TopicView({
           onOpen={onOpenSubscription}
           onCreate={onCreateSubscription}
         />
+      ) : view === 'snapshots' ? (
+        <SnapshotsTable
+          project={project}
+          topic={topic}
+          onCreate={() => update({ new: 'snapshot' })}
+          onReplay={onReplay}
+        />
       ) : detail.data ? (
         <TopicSettings key={topic} project={project} detail={detail.data} onDeleted={onDeleted} />
       ) : null}
+      <CreateSnapshotDialog
+        open={search.new === 'snapshot'}
+        project={project}
+        subscriptions={snapshotSources}
+        onOpenChange={(open) => {
+          if (!open) update({ new: undefined }, { replace: true })
+        }}
+      />
     </>
   )
 }

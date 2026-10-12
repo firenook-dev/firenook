@@ -227,6 +227,18 @@ export function waitedText(oldest: string | null, now: number): string {
   return `${days} days`
 }
 
+/** "12 s", "4 m", "3 h", "2 d" — how long the oldest message has waited, in a figure. */
+export function waitedShort(oldest: string | null, now: number): string {
+  if (!oldest) return ''
+  const seconds = Math.max(0, Math.round((now - Date.parse(oldest)) / 1000))
+  if (seconds < 60) return `${seconds} s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return `${hours} h`
+  return `${Math.floor(hours / 24)} d`
+}
+
 /** Who is consuming a subscription, in the table's words: `1 stream`, `2 waiting pulls`, `—`. */
 export function consumersText(consumers: { streaming: number; waitingPulls: number }): string {
   const parts: string[] = []

@@ -73,10 +73,13 @@ export function MessageCode({ message }: { message: PubsubMessageDetail }) {
 export function MessageFooter({
   message,
   onEditAgain,
+  againLabel = 'Publish again',
 }: {
   message: PubsubMessageDetail
   /** Opens the composer filled with this message. */
   onEditAgain: () => void
+  /** The button's words: "Publish again to orders" when the composer opens on another topic. */
+  againLabel?: string
 }) {
   return (
     <InspectorFooter
@@ -91,7 +94,7 @@ export function MessageFooter({
               onClick={onEditAgain}
               data-testid="message-publish-again"
             >
-              Publish again
+              {againLabel}
             </Button>
           }
         />

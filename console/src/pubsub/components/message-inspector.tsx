@@ -181,6 +181,7 @@ export function MessageInspector({
   onOpenSubscription,
   top,
   onEditAgain,
+  againLabel,
 }: {
   project: string
   topic: string
@@ -195,6 +196,8 @@ export function MessageInspector({
   top?: ReactNode
   /** Opens the composer filled with this message; with it, the footer offers Code and Publish again. */
   onEditAgain?: ((id: string) => void) | undefined
+  /** The footer button's words, when the composer opens on another topic. */
+  againLabel?: string | undefined
 }) {
   const query = useQuery(messageQuery(project, topic, id))
   const message = query.data
@@ -243,7 +246,11 @@ export function MessageInspector({
       }
       footer={
         message && onEditAgain ? (
-          <MessageFooter message={message} onEditAgain={() => onEditAgain(message.id)} />
+          <MessageFooter
+            message={message}
+            onEditAgain={() => onEditAgain(message.id)}
+            {...(againLabel ? { againLabel } : {})}
+          />
         ) : undefined
       }
       testId="pubsub-message-inspector"

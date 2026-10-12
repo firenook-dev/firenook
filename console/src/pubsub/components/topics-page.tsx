@@ -8,7 +8,9 @@
 
 import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
+  ArrowCounterClockwiseIcon,
   BroadcastIcon,
+  CameraIcon,
   CaretDownIcon,
   PaperPlaneTiltIcon,
   PlusIcon,
@@ -30,12 +32,13 @@ import { resourceFromSearch } from '@/messaging/links'
 import type { PubsubSearch } from '@/routes/pubsub'
 import { usePubsubCounters } from '../live'
 import { type TypedScope, findSubscription, searchValue, shortName } from '../names'
-import { topicIndexQuery } from '../queries'
+import { subscriptionQuery, topicIndexQuery } from '../queries'
 import type { TreeTarget } from '../tree'
 import { CreateSubscriptionDialog } from './create-subscription-dialog'
 import { CreateTopicDialog } from './create-topic-dialog'
 import { ScopeField } from './scope-field'
-import { SubscriptionView, type SubscriptionViewName } from './subscription-view'
+import { ReplayDialog } from './replay-dialog'
+import { SubscriptionPage } from './subscription-page'
 import { LANDING_CARDS, TopicsLanding, landingTopics } from './topics-landing'
 import { TopicsPanel } from './topics-panel'
 import { TopicView } from './topic-view'
@@ -112,7 +115,7 @@ export function TopicsPage() {
           .map((item) => item.name)
   const counters = usePubsubCounters(project || undefined, followed)
   const [topicLive, setTopicLive] = useState<SubscriptionStatus | undefined>(undefined)
-  const live = worstStatus(counters, topic && !subscription ? topicLive : undefined)
+  const live = worstStatus(counters, topic || subscription ? topicLive : undefined)
 
   const goTo = (scope: TypedScope, extra: Partial<PubsubSearch> = {}) =>
     update({
@@ -154,6 +157,13 @@ export function TopicsPage() {
       view: undefined,
     })
   const onTopic = topic !== undefined && subscription === undefined
+  // A subscription the console can replay: not the functions' own, which is drained.
+  const replayable = subscription !== undefined && subscriptionSummary?.managed !== 'functions'
+  const subscriptionDetail = useQuery({
+    ...subscriptionQuery(project, subscription ?? ''),
+    enabled: replayable,
+  })
+  const openReplay = () => update({ dialog: 'replay', prefill: undefined })
 
   useShortcuts({ id: 'pubsub-topics', label: 'Pub/Sub topics' }, [
     {
@@ -167,6 +177,12 @@ export function TopicsPage() {
       label: 'Publish a message',
       when: () => onTopic,
       run: compose,
+    },
+    {
+      key: 'r',
+      label: 'Replay the subscription',
+      when: () => replayable,
+      run: openReplay,
     },
   ])
   usePubsubPalette({
@@ -215,9 +231,34 @@ export function TopicsPage() {
           <NewMenu
             primary={!topic && !subscription}
             topic={subscription ? undefined : topic}
+            subscription={replayable ? subscription : undefined}
             onTopic={() => createTopic()}
             onSubscription={createSubscription}
+            onSnapshot={() => update({ new: 'snapshot' })}
           />
+          {replayable && (
+            <Tooltip
+              content={
+                <span className="flex items-center gap-1.5">
+                  Replay to a time or a snapshot, or purge
+                  <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1 text-[10px] text-kumo-subtle">
+                    r
+                  </kbd>
+                </span>
+              }
+              render={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<ArrowCounterClockwiseIcon />}
+                  onClick={openReplay}
+                  data-testid="pubsub-replay"
+                >
+                  Replay…
+                </Button>
+              }
+            />
+          )}
           {onTopic && (
             <Tooltip
               content={
@@ -248,23 +289,19 @@ export function TopicsPage() {
       <SectionBody testId="pubsub-body">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {subscription ? (
-            <SubscriptionView
+            <SubscriptionPage
               key={subscription}
               project={project}
               subscription={subscription}
               summary={subscriptionSummary}
               topic={topicSummary}
               topics={topics}
-              view={search.view}
-              onView={(view: SubscriptionViewName) =>
-                update({
-                  view: view === 'backlog' ? undefined : view,
-                  message: undefined,
-                  tab: undefined,
-                  state: undefined,
-                })
-              }
+              search={search}
+              update={update}
               onOpenTopic={(name) => goTo({ topic: name })}
+              onOpenSubscription={openSubscription}
+              onPublishTo={(name, prefill) => goTo({ topic: name }, { new: 'message', prefill })}
+              onLiveStatus={setTopicLive}
               onDeleted={() => goTo(topicSummary ? { topic: topicSummary.name } : {})}
             />
           ) : topic ? (
@@ -279,6 +316,13 @@ export function TopicsPage() {
               onCreateSubscription={createSubscription}
               onCreateTopic={(id) => createTopic(id)}
               onLiveStatus={setTopicLive}
+              onReplay={(name, snapshot) => {
+                const found = findSubscription(index.data, name)
+                goTo(
+                  { topic: found?.topic ?? topic, subscription: name },
+                  { dialog: 'replay', prefill: snapshot },
+                )
+              }}
               onDeleted={() => goTo({})}
             />
           ) : (
@@ -302,6 +346,22 @@ export function TopicsPage() {
         }}
         onCreated={(name) => goTo({ topic: name })}
       />
+      {subscription && subscriptionDetail.data && (
+        <ReplayDialog
+          open={search.dialog === 'replay'}
+          project={project}
+          subscription={subscription}
+          config={subscriptionDetail.data.subscription}
+          waiting={
+            subscriptionSummary?.counters.backlog ??
+            subscriptionDetail.data.subscription.summary.counters.backlog
+          }
+          initialSnapshot={search.dialog === 'replay' ? search.prefill : undefined}
+          onOpenChange={(open) => {
+            if (!open) update({ dialog: undefined, prefill: undefined }, { replace: true })
+          }}
+        />
+      )}
       {topic && (
         <CreateSubscriptionDialog
           open={search.new === 'subscription'}
@@ -323,18 +383,23 @@ export function TopicsPage() {
 function NewMenu({
   primary,
   topic,
+  subscription,
   onTopic,
   onSubscription,
+  onSnapshot,
 }: {
   primary: boolean
   topic: string | undefined
+  /** The subscription in view: a snapshot of it. */
+  subscription: string | undefined
   onTopic: () => void
   onSubscription: () => void
+  onSnapshot: () => void
 }) {
   return (
     <DropdownMenu>
       <Tooltip
-        content={primary ? 'New topic (n) or subscription' : 'New topic or subscription'}
+        content={primary ? 'New topic (n) or subscription' : 'New topic, subscription or snapshot'}
         render={
           <DropdownMenu.Trigger
             render={
@@ -367,6 +432,15 @@ function NewMenu({
             data-testid="pubsub-new-subscription-item"
           >
             Subscription on <span className="font-mono text-[12px]">{shortName(topic)}</span>
+          </DropdownMenu.Item>
+        )}
+        {subscription && (
+          <DropdownMenu.Item
+            icon={CameraIcon}
+            onClick={onSnapshot}
+            data-testid="pubsub-new-snapshot-item"
+          >
+            Snapshot of <span className="font-mono text-[12px]">{shortName(subscription)}</span>
           </DropdownMenu.Item>
         )}
       </DropdownMenu.Content>

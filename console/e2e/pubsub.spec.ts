@@ -16,6 +16,8 @@ import {
   createSubscription,
   createTopic,
   deleteTopic,
+  functionUrl,
+  holdPull,
   portUrl,
   publishOverPort,
   subscriptionName,
@@ -652,6 +654,8 @@ test('PS-14/16 a message is published again, as it is or edited, and copied as c
     await expect(code).toContainText('region: "eu"')
     await expect(code).toContainText('orderingKey: "cust-1"')
     await page.keyboard.press('Escape')
+    // A key pressed inside an overlay belongs to it: wait for the popover to go.
+    await expect(code).toBeHidden()
 
     // `r` asks first, then publishes the cursor row again.
     await page.keyboard.press('r')
@@ -676,6 +680,344 @@ test('PS-14/16 a message is published again, as it is or edited, and copied as c
     await expect(page.getByTestId('pubsub-composer').locator('.cm-content')).toContainText(
       '"orderId": "o_1"',
     )
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+/** A subscription's figures as the engine reports them now. */
+async function countersOf(engine: Parameters<typeof consoleCall>[0], id: string) {
+  const detail = await consoleCall<SubscriptionDetailView>(
+    engine,
+    'GET',
+    `/pubsub/subscription?name=${enc(subscriptionName(engine, id))}`,
+  )
+  return detail.subscription.summary.counters
+}
+
+/** A backlog row by its message id (row keys end with it). */
+const backlogRow = (page: Page, id: string) =>
+  page.getByTestId('pubsub-backlog-table').locator(`tr[data-key$=".${id}"]`)
+
+test('J-PS-06 the backlog is read without leasing anything', async ({ page, engine }) => {
+  const before = await countersOf(engine, 'orders-worker')
+  await openTopics(page, engine.origin, 'topic=orders&subscription=orders-worker')
+  const rows = page.getByTestId('pubsub-backlog-table').getByTestId('data-row')
+  await expect(rows.first()).toBeVisible()
+  // Available rows are numbered in delivery order, from #1.
+  const places = await rows.locator('td[data-column="place"]').allInnerTexts()
+  const numbered = places.filter((text) => text.startsWith('#')).slice(0, 5)
+  expect(numbered).toEqual(numbered.map((_, index) => `#${index + 1}`))
+  for (const index of [0, 1, 2]) {
+    await rows.nth(index).click()
+    await expect(page.getByTestId('pubsub-message-inspector')).toBeVisible()
+    await expect(page.getByTestId('pubsub-subscription-state')).toContainText('on orders-worker')
+  }
+  const after = await countersOf(engine, 'orders-worker')
+  expect(after.outstanding).toBe(before.outstanding)
+  expect(after.available).toBe(before.available)
+  expect(after.backlog).toBe(before.backlog)
+})
+
+test('J-PS-07 pull, ack, nack and extend from the Pull tab', async ({ page, engine }) => {
+  const topic = uniqueId('ps07')
+  const subscription = `${topic}-sub`
+  try {
+    await createTopic(engine, topic)
+    await createSubscription(engine, subscription, topic, { ackDeadlineSeconds: 30 })
+    const ids = (
+      await publishOverPort(
+        engine,
+        topic,
+        [1, 2, 3, 4, 5].map((n) => ({ data: { n } })),
+      )
+    ).messageIds
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
+    await page.getByTestId('pull-max').fill('3')
+    await page.getByTestId('pull-submit').click()
+    const rows = page.getByTestId('pubsub-pull-table').getByTestId('data-row')
+    await expect(rows).toHaveCount(3)
+    await expect(page.getByTestId('pull-summary')).toHaveText('3 received · 3 leased · 0 acked')
+    expect((await countersOf(engine, subscription)).outstanding).toBe(3)
+    const lease = (index: number) => rows.nth(index).locator('td[data-column="lease"]')
+
+    // a: acknowledged — the backlog is one shorter.
+    await rows.nth(0).click()
+    await page.keyboard.press('a')
+    await expect(lease(0)).toHaveText('acked')
+    await expect.poll(async () => (await countersOf(engine, subscription)).backlog).toBe(4)
+
+    // x: nacked — it goes back behind the others.
+    await rows.nth(1).click()
+    await page.keyboard.press('x')
+    await expect(lease(1)).toHaveText('nacked')
+
+    // e: the lease starts again from now.
+    // 30 s from the engine's clock, read a moment later on the browser's.
+    const left = Number((await lease(2).innerText()).match(/(\d+) s left/)?.[1])
+    expect(left).toBeLessThan(40)
+    await rows.nth(2).click()
+    await page.keyboard.press('e')
+    await expect(lease(2)).toHaveText(/^(1 m|5\d s) left$/)
+
+    // The backlog: the extended lease first, then #1, #2 never delivered, and
+    // the nacked one at #3 after its one delivery.
+    await page.getByRole('tab', { name: 'Backlog' }).click()
+    await expect(page.getByTestId('pubsub-backlog-table').getByTestId('data-row')).toHaveCount(4)
+    await expect(backlogRow(page, ids[2] ?? '')).toContainText('outstanding')
+    await expect(backlogRow(page, ids[3] ?? '').locator('td[data-column="place"]')).toHaveText('#1')
+    await expect(backlogRow(page, ids[4] ?? '').locator('td[data-column="place"]')).toHaveText('#2')
+    const nacked = backlogRow(page, ids[1] ?? '')
+    await expect(nacked.locator('td[data-column="place"]')).toHaveText('#3')
+    await expect(nacked.locator('td[data-column="attempts"]')).toHaveText('1')
+    await expect(page.getByTestId('backlog-state-outstanding')).toBeVisible()
+    const after = await countersOf(engine, subscription)
+    expect([after.outstanding, after.available]).toEqual([1, 3])
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-08 a connected subscriber is said before a pull', async ({ page, engine }) => {
+  const topic = uniqueId('ps08')
+  const subscription = `${topic}-sub`
+  try {
+    await createTopic(engine, topic)
+    await createSubscription(engine, subscription, topic)
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
+    await expect(page.getByTestId('pull-submit')).toBeVisible()
+    await expect(page.getByTestId('pubsub-pull-consumers')).toHaveCount(0)
+    const held = holdPull(engine, subscription)
+    try {
+      await expect(page.getByTestId('pubsub-pull-consumers')).toHaveText(
+        `1 subscriber is connected to ${subscription}. Pulling here takes messages away from it.`,
+      )
+      await treeRow(page, subscription).hover()
+      await expect(page.locator('.kumo-tooltip-popup')).toContainText('1 subscriber')
+    } finally {
+      await held.stop()
+    }
+    await expect(page.getByTestId('pubsub-pull-consumers')).toHaveCount(0)
+    expect((await countersOf(engine, subscription)).outstanding).toBe(0)
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-10 replay: purge, back to a time, and back to a snapshot', async ({ page, engine }) => {
+  const topic = uniqueId('ps10')
+  const subscription = `${topic}-sub`
+  const snapshot = `${topic}-before`
+  try {
+    await createTopic(engine, topic)
+    await createSubscription(engine, subscription, topic, { retainAcked: true })
+    await publishOverPort(engine, topic, [
+      { data: { n: 1 } },
+      { data: { n: 2 } },
+      { data: { n: 3 } },
+    ])
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)
+    // Kept once acknowledged, the rows stay in the backlog's All as acked.
+    const rows = page.getByTestId('pubsub-backlog-table').getByTestId('data-row')
+    const available = rows.filter({ hasText: 'available' })
+    const acked = rows.filter({ hasText: 'acked (retained)' })
+    await expect(available).toHaveCount(3)
+    const purge = async () => {
+      await page.getByTestId('pubsub-replay').click()
+      await page.getByRole('radio', { name: /^Purge/ }).click()
+      await expect(page.getByTestId('replay-sentence')).toHaveText(
+        'The 3 messages waiting now are acknowledged; messages published from now on arrive as usual.',
+      )
+      await page.getByTestId('replay-submit').click()
+      await page.getByTestId('replay-purge-confirm-confirm').click()
+      await expect(acked).toHaveCount(3)
+      await expect(available).toHaveCount(0)
+      expect((await countersOf(engine, subscription)).backlog).toBe(0)
+    }
+    await purge()
+
+    // Kept acknowledged, they come back from a minute ago.
+    await expect(page.getByTestId('replay')).toHaveCount(0)
+    await page.keyboard.press('r')
+    await expect(page.getByTestId('replay-sentence')).toContainText(
+      'acknowledged ones too, because this subscription keeps acknowledged messages',
+    )
+    await page.getByTestId('replay-back-1min').click()
+    await page.getByTestId('replay-submit').click()
+    await expect(available).toHaveCount(3)
+    await expect(acked).toHaveCount(0)
+
+    // A snapshot of the three, a purge, and back to the snapshot.
+    await page.getByTestId('pubsub-new-menu').click()
+    await page.getByTestId('pubsub-new-snapshot-item').click()
+    await page.getByTestId('create-snapshot-id').fill(snapshot)
+    await page.getByTestId('create-snapshot-submit').click()
+    await expect(page.getByTestId('create-snapshot')).toHaveCount(0)
+    await purge()
+    await page.getByTestId('pubsub-replay').click()
+    await page.getByRole('radio', { name: 'To a snapshot' }).click()
+    await page.getByRole('combobox', { name: 'Snapshot' }).click()
+    await page.getByRole('option', { name: snapshot }).click()
+    await expect(page.getByTestId('replay-sentence')).toContainText(
+      'the 3 messages it recorded as waiting',
+    )
+    await page.getByTestId('replay-submit').click()
+    await expect(available).toHaveCount(3)
+    expect((await countersOf(engine, subscription)).backlog).toBe(3)
+  } finally {
+    await consoleCall(engine, 'DELETE', '/pubsub/snapshot', {
+      name: `projects/${engine.project}/snapshots/${snapshot}`,
+    }).catch(() => undefined)
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-11 push attempts: a streak in place, the pause, and the switch to pull', async ({
+  page,
+  engine,
+}) => {
+  const topic = uniqueId('ps11')
+  const subscription = `${topic}-push`
+  try {
+    await createTopic(engine, topic)
+    await createSubscription(engine, subscription, topic, {
+      pushEndpoint: functionUrl(engine, 'pushSink'),
+    })
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=push`)
+    await expect(page.getByTestId('pubsub-push-empty')).toBeVisible()
+    const [first] = (
+      await publishOverPort(engine, topic, [{ data: { n: 1 }, attributes: { failTimes: '2' } }])
+    ).messageIds
+    const streaks = page.getByTestId('pubsub-push-feed').locator('[data-streak]')
+    const refused = streaks.filter({
+      has: page.getByTestId('push-status').filter({ hasText: '500' }),
+    })
+    const accepted = streaks.filter({
+      has: page.getByTestId('push-status').filter({ hasText: '200' }),
+    })
+    // Two refusals are one row that counted up, then the delivery.
+    await expect(accepted).toHaveCount(1, { timeout: 15_000 })
+    await expect(refused).toHaveCount(1)
+    await expect(refused).toContainText('×2')
+    await expect(refused.getByTestId('push-attempts')).toHaveText('1–2')
+    await expect(accepted.getByTestId('push-attempts')).toHaveText('3')
+    await expect(streaks.first()).toContainText(first ?? '')
+    await expect.poll(async () => (await countersOf(engine, subscription)).backlog).toBe(0)
+
+    // Paused, a new message's attempts wait; resumed, they are there.
+    await page.keyboard.press('p')
+    const pause = page.getByTestId('pubsub-push-pause')
+    await expect(pause).toHaveText('Paused')
+    await expect(page).toHaveURL(/paused=true/)
+    const [second] = (await publishOverPort(engine, topic, [{ data: { n: 2 } }])).messageIds
+    await expect(pause).toHaveText('Paused · 1 new', { timeout: 15_000 })
+    await page.keyboard.press('p')
+    await expect(pause).toHaveText('Pause')
+    await expect(streaks.first()).toContainText(second ?? '')
+    await expect(streaks.first()).toBeInViewport()
+
+    // Its Pull tab says why a pull gets nothing; switched, it pulls.
+    await page.getByRole('tab', { name: 'Pull' }).click()
+    await expect(page.getByTestId('pubsub-pull-push-note')).toContainText(
+      'A push subscription delivers to its endpoint, so a pull here would get nothing.',
+    )
+    await page.getByTestId('pubsub-switch-to-pull').click()
+    await expect(page.getByTestId('pull-submit')).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Push' })).toHaveCount(0)
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-13 an exactly-once ack on a lease returned elsewhere shows the engine refusal', async ({
+  page,
+  engine,
+}) => {
+  const topic = uniqueId('ps13')
+  const subscription = `${topic}-once`
+  try {
+    await createTopic(engine, topic)
+    await createSubscription(engine, subscription, topic, {
+      exactlyOnce: true,
+      ackDeadlineSeconds: 60,
+    })
+    const [id] = (await publishOverPort(engine, topic, [{ data: { n: 1 } }])).messageIds
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
+    await page.getByTestId('pull-max').fill('1')
+    await page.getByTestId('pull-submit').click()
+    const rows = page.getByTestId('pubsub-pull-table').getByTestId('data-row')
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first().locator('td[data-column="lease"]')).toHaveText(/s left$/)
+
+    // Returned from the Backlog: the engine ends this tab's lease now.
+    await page.getByRole('tab', { name: 'Backlog' }).click()
+    const row = backlogRow(page, id ?? '')
+    await expect(row).toContainText('outstanding')
+    await row.click({ button: 'right' })
+    await page.getByTestId('row-menu-release').click()
+    await expect(page.getByTestId('pubsub-backlog-confirm')).toContainText(
+      'A subscriber holds its lease.',
+    )
+    await page.getByTestId('pubsub-backlog-confirm-confirm').click()
+    await expect(row).toContainText('available')
+
+    // Back in Pull the row says so, and acking it anyway shows the engine's answer.
+    await page.getByRole('tab', { name: 'Pull' }).click()
+    await expect(rows.first().locator('td[data-column="lease"]')).toHaveText('expired')
+    await rows.first().locator('td[data-check] [role="checkbox"]').click()
+    await page.getByTestId('pubsub-pull-selection-ack').click()
+    await expect(page.getByTestId('pull-error')).toContainText(
+      'The lease had expired or the message was already acknowledged, so another delivery may hold it.',
+    )
+    expect((await countersOf(engine, subscription)).backlog).toBe(1)
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+test('J-PS-24 a bulk ack runs as a job and the backlog empties by patches', async ({
+  page,
+  engine,
+}) => {
+  const topic = uniqueId('ps24')
+  const subscription = `${topic}-sub`
+  try {
+    await createTopic(engine, topic)
+    await createSubscription(engine, subscription, topic)
+    await publishOverPort(
+      engine,
+      topic,
+      Array.from({ length: 30 }, (_, n) => ({ data: { n } })),
+    )
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)
+    const rows = page.getByTestId('pubsub-backlog-table').getByTestId('data-row')
+    await expect(page.getByTestId('pubsub-backlog-count')).toContainText('30 messages')
+    await expect(rows.first()).toBeVisible()
+    let navigations = 0
+    let patches = 0
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) navigations += 1
+    })
+    page.on('request', (request) => {
+      if (request.url().includes('/pubsub/backlog:batchGet')) patches += 1
+    })
+
+    await page.keyboard.press('ControlOrMeta+a')
+    await expect(page.getByTestId('selection-count')).toHaveText('30 selected')
+    await page.keyboard.press('Delete')
+    const confirm = page.getByTestId('pubsub-backlog-ack-confirm')
+    await expect(confirm).toContainText(`Acknowledge 30 at ${subscription}`)
+    await page.getByTestId('pubsub-backlog-ack-confirm-confirm').click()
+    await expect(page.getByTestId('pubsub-backlog-ack-confirm-progress')).toContainText(
+      '30 of 30 acknowledged',
+    )
+    await page.getByTestId('pubsub-backlog-ack-confirm-cancel').click()
+    await expect(rows).toHaveCount(0)
+    await expect(page.getByTestId('pubsub-backlog-empty')).toBeVisible()
+    expect(navigations).toBe(0)
+    expect(patches).toBeGreaterThan(0)
+    const after = await countersOf(engine, subscription)
+    expect([after.backlog, after.outstanding]).toEqual([0, 0])
   } finally {
     await deleteTopic(engine, topic)
   }
