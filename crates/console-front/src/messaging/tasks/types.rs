@@ -158,6 +158,37 @@ pub(crate) struct TasksQueueConfig {
     pub values: Vec<TasksConfigValue>,
     /// The `taskQueueConfig` document as the emulator stores it.
     pub document: String,
+    /// What a task that fails every time runs, from its first attempt: the
+    /// dispatcher's own backoff and stop rule, with requests that take no
+    /// time.
+    pub ladder: Vec<TasksLadderStep>,
+}
+
+/// One rung of a queue's retry ladder.
+#[derive(Clone, Debug, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "messaging/")]
+pub(crate) struct TasksLadderStep {
+    pub attempt: u32,
+    /// The backoff before it (0 for the first attempt).
+    pub backoff_seconds: f64,
+    /// When it runs at the earliest, counted from the first attempt.
+    pub after_seconds: f64,
+    /// The emulator gives up after this one.
+    pub last: bool,
+}
+
+/// A queue's history by outcome, for the History tab's switch.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "messaging/")]
+pub(crate) struct TasksOutcomeCounts {
+    pub succeeded: u32,
+    pub failed: u32,
+    pub cancelled: u32,
+    pub deleted: u32,
+    pub purged: u32,
+    pub replaced: u32,
 }
 
 /// What `/queueStats` answers for a queue, quirks included.
@@ -202,6 +233,8 @@ pub(crate) struct TasksQueueCounters {
     pub added: MessagingTenSecondWindow,
     pub oldest_pending_at: Option<String>,
     pub history: u32,
+    /// The history by outcome (they add up to `history`).
+    pub outcomes: TasksOutcomeCounts,
     /// What `/queueStats` answers for this queue, quirks included (computed
     /// on request, never streamed).
     pub official: Option<TasksOfficialStats>,

@@ -16,6 +16,7 @@ use indexmap::IndexMap;
 
 use crate::config::{QUEUE_CAPACITY, QueueConfig};
 use crate::functions::discover;
+use crate::inspect::OutcomeCounts;
 use crate::json::OrderedJson;
 use crate::queue::{
     AttemptRecord, Conflict, Controls, Finished, NotFound, Outcome, RunNow, RunNowError,
@@ -296,6 +297,8 @@ pub(crate) struct QueueConsole {
     pub history_bytes: usize,
     /// Finished tasks evicted from the history since start.
     pub dropped: u64,
+    /// The history by outcome, kept in step with it.
+    pub outcomes: OutcomeCounts,
     /// The revision at which the queue's figures last changed.
     pub stamp: u64,
     /// The newest changed rows, with their sequence numbers.
@@ -315,6 +318,7 @@ impl QueueConsole {
             history: VecDeque::new(),
             history_bytes: 0,
             dropped: 0,
+            outcomes: OutcomeCounts::default(),
             stamp: 0,
             changes: VecDeque::new(),
             change_sequence: 0,
@@ -557,6 +561,7 @@ impl State {
                 });
             }
             let bytes = finished.bytes();
+            console.outcomes.add(finished.outcome);
             console.history.push_back(FinishedTask {
                 sequence: self.next_finished,
                 finished,
@@ -569,6 +574,7 @@ impl State {
                 let Some(oldest) = console.history.pop_front() else {
                     break;
                 };
+                console.outcomes.remove(oldest.finished.outcome);
                 console.history_bytes -= oldest.bytes;
                 self.history_bytes -= oldest.bytes;
                 console.dropped += 1;
@@ -585,6 +591,7 @@ impl State {
             let Some(oldest) = largest.history.pop_front() else {
                 break;
             };
+            largest.outcomes.remove(oldest.finished.outcome);
             largest.history_bytes -= oldest.bytes;
             largest.dropped += 1;
             self.history_bytes -= oldest.bytes;
@@ -1382,6 +1389,7 @@ impl TasksRuntime {
             if let Some(console) = console.get_mut(key) {
                 count.history += u64::try_from(console.history.len()).unwrap_or(u64::MAX);
                 console.history.clear();
+                console.outcomes = OutcomeCounts::default();
                 console.history_bytes = 0;
                 console.dropped = 0;
                 console.windows = QueueWindows::default();
