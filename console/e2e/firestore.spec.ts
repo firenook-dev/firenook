@@ -45,6 +45,27 @@ test('a collection is a typed grid counted once, in the query line', async ({ pa
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
 })
 
+test('an empty collection says how an app writes to it, with this engine’s address', async ({
+  page,
+}) => {
+  const status = (await (await page.request.get(`${origin()}/console/api/v1/status`)).json()) as {
+    services: { name: string; host: string; port: number }[]
+  }
+  const firestore = status.services.find((service) => service.name === 'firestore')!
+  await page.goto(`${origin()}/console/firestore?path=nothing_yet`)
+  const empty = page.getByTestId('empty-collection')
+  await expect(empty).toContainText('No documents in nothing_yet')
+  // The app's way in comes first: the snippet for this engine's host, port
+  // and project, copyable, in the SDK the developer uses.
+  const snippet = page.getByTestId('empty-collection-connect')
+  await expect(snippet).toContainText(
+    `connectFirestoreEmulator(getFirestore(app), '${firestore.host}', ${firestore.port})`,
+  )
+  await expect(snippet).toContainText(project())
+  // Then the console's own: a document added here makes the collection.
+  await expect(page.getByTestId('empty-add-document')).toBeVisible()
+})
+
 test('the query line runs the SDK chain and pages with cursors', async ({ page }) => {
   await page.goto(`${origin()}/console/firestore?path=users`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()

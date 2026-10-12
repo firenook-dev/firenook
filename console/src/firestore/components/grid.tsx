@@ -30,6 +30,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ColumnResizer } from '@/components/console/column-resizer'
 import { useColumnWidths, useIdFreeze } from '@/components/console/column-widths'
+import { EmptyState } from '@/components/console/empty-state'
 import { CHECK_WIDTH, PIN_EDGE, PIN_HEAD, ROW_HEIGHT } from '@/components/console/table-pins'
 import { Kbd } from '@/components/kit'
 import { describeKey, useShortcuts } from '@/lib/shortcuts'
@@ -517,6 +518,38 @@ export function Grid() {
         <Text variant="secondary">Loading {workbench.collectionPath}…</Text>
       </div>
     )
+  if (documents.length === 0 && !workbench.queryText && !workbench.isPattern)
+    // Nothing here yet: how the app writes here first (the connection
+    // snippet with this engine's host, port and project, and the project
+    // the app is using when the engine has seen it write elsewhere), then
+    // the console's own ways in.
+    return (
+      <EmptyState
+        icon={DatabaseIcon}
+        title={`No documents in ${workbench.collectionPath}`}
+        description="A collection exists once it has a document. Write one from your app, add one here, or import JSON."
+        connect={{ service: 'firestore', project: workbench.project }}
+        actions={
+          <>
+            <Button
+              variant="primary"
+              icon={<PlusIcon />}
+              onClick={() => openCreate({ kind: 'document', collection: workbench.collectionPath })}
+              data-testid="empty-add-document"
+            >
+              Add document
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => openCreate({ kind: 'import', collection: workbench.collectionPath })}
+            >
+              Import JSON
+            </Button>
+          </>
+        }
+        testId="empty-collection"
+      />
+    )
   if (documents.length === 0)
     return (
       <div className="min-h-0 flex-1 overflow-auto">
@@ -525,40 +558,12 @@ export function Grid() {
           title={
             workbench.queryText
               ? 'No documents match this query'
-              : workbench.isPattern
-                ? `No documents at ${workbench.collectionPath}`
-                : `No documents in ${workbench.collectionPath}`
+              : `No documents at ${workbench.collectionPath}`
           }
           description={
             workbench.queryText
               ? 'Loosen a clause, or check the field names and types against the collection.'
-              : workbench.isPattern
-                ? 'The collections matching this pattern hold only subcollections; the schema tree shows what is below.'
-                : 'A collection exists once it has a document. Write one from your app, add one here, or import JSON.'
-          }
-          contents={
-            workbench.queryText || workbench.isPattern ? undefined : (
-              <div className="flex gap-2">
-                <Button
-                  variant="primary"
-                  icon={<PlusIcon />}
-                  onClick={() =>
-                    openCreate({ kind: 'document', collection: workbench.collectionPath })
-                  }
-                  data-testid="empty-add-document"
-                >
-                  Add document
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    openCreate({ kind: 'import', collection: workbench.collectionPath })
-                  }
-                >
-                  Import JSON
-                </Button>
-              </div>
-            )
+              : 'The collections matching this pattern hold only subcollections; the schema tree shows what is below.'
           }
         />
       </div>

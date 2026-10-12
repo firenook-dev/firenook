@@ -67,18 +67,26 @@ export function EmptyState({
   /** One command to copy ("firebase deploy --only storage"). */
   commandLine?: string | undefined
   actions?: ReactNode
-  /** The service whose connection snippet to show: `auth`, `storage`, `pubsub`… */
-  connect?: { service: string } | undefined
+  /**
+   * The service whose connection snippet to show (`auth`, `storage`,
+   * `pubsub`…), and the project the page shows when it is another one than
+   * the emulator's (`?project=`): the app's other project is then on screen,
+   * so the "not shown here" line is left out.
+   */
+  connect?: { service: string; project?: string | undefined } | undefined
   testId?: string
 }) {
   const status = useQuery(statusQuery)
   const service = connect?.service
   const running =
     service !== undefined && status.data?.services.some((entry) => entry.name === service)
+  const shown = connect?.project ?? status.data?.projectId
   const foreign =
     service === undefined
       ? undefined
-      : status.data?.foreignProjects.find((project) => project.services.includes(service))
+      : status.data?.foreignProjects.find(
+          (project) => project.services.includes(service) && project.projectId !== shown,
+        )
   const contents = (
     <div className="grid w-[min(560px,100%)] justify-items-center gap-4">
       {foreign && status.data && (

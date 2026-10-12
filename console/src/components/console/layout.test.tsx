@@ -223,6 +223,33 @@ describe('the empty, no-match, error and loading states', () => {
     )
   })
 
+  it('leaves that line out on a view of the app’s project itself, and keeps the snippet', async () => {
+    await renderInConsole(
+      () => (
+        <EmptyState
+          icon={DatabaseIcon}
+          title="No users yet"
+          connect={{ service: 'auth', project: 'my-prod' }}
+        />
+      ),
+      {
+        status: {
+          ...running,
+          foreignProjects: [
+            {
+              projectId: 'my-prod',
+              services: ['auth'],
+              firstSeen: '2026-10-12T00:00:00Z',
+              requests: 3,
+            },
+          ],
+        },
+      },
+    )
+    expect(screen.queryByTestId('empty-state-foreign')).not.toBeInTheDocument()
+    expect(screen.getByTestId('empty-state-connect')).toHaveTextContent('127.0.0.1:9099')
+  })
+
   it('names the filter that matched nothing, with the way out', () => {
     const onClear = vi.fn()
     render(<NoMatch filter="provider:google -is:disabled" onClear={onClear} noun="users" />)
