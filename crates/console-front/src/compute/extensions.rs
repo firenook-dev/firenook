@@ -35,7 +35,7 @@ use crate::json::{BodyLimit, ConsoleJson};
 /// The longest README the console reads from an extension's source.
 const README_BYTES: u64 = 256 * 1024;
 /// Why an extension's task-queue function receives nothing here.
-const TASK_QUEUE_NOTE: &str = "Task queue functions of an extension are not delivered by the emulator, as in the official emulator, so lifecycle tasks such as onInstall do not run here.";
+pub(crate) const TASK_QUEUE_NOTE: &str = "Task queue functions of an extension are not delivered by the emulator, as in the official emulator, so lifecycle tasks such as onInstall do not run here.";
 
 /// The variables the emulator sets for every instance.
 const AUTO_PARAMS: [&str; 8] = [

@@ -17,6 +17,7 @@ import { RequiresNotice } from '@/components/console/requires-notice'
 import { SendButton } from '@/components/console/request/send-button'
 import { enqueueTask } from '../api'
 import { type TaskDraft, useRunDraft } from '../run-drafts'
+import { statusReasonText } from '../trigger-text'
 import { FormRow, RunAnswer, RunError, RunFooter, useNextInvocation } from './run-parts'
 
 /** A queue option in words: `maxAttempts 3`, the set ones only. */
@@ -73,6 +74,17 @@ export function TaskForm({
       )
     },
   })
+  if (summary.status === 'ignored')
+    return (
+      <div className="px-5 py-4" data-testid="task-form-ignored">
+        <Text size="sm">
+          {summary.statusReason
+            ? statusReasonText(summary.statusReason)
+            : 'The emulator does not deliver tasks to this function.'}{' '}
+          A task would not reach it.
+        </Text>
+      </div>
+    )
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="task-form">
       <div className="grid shrink-0 gap-2.5 px-5 py-3">

@@ -166,6 +166,28 @@ async fn an_instance_shows_its_source_configuration_functions_apis_and_events() 
         "{backfill}"
     );
     assert_eq!(detail["envFiles"], json!(["extensions/greeter.env"]));
+    // The Functions pages say the same of it, in the overview and on its page.
+    let (_, snapshot) = suite.get("/functions").await;
+    let listed = snapshot["functions"]
+        .as_array()
+        .and_then(|functions| {
+            functions
+                .iter()
+                .find(|function| function["id"] == "us-central1-ext-greeter-backfill")
+        })
+        .expect("backfill in the snapshot");
+    assert_eq!(listed["kind"], "tasks", "{listed}");
+    assert_eq!(listed["status"], "ignored", "{listed}");
+    assert_eq!(
+        listed["statusReason"], backfill["ignoredReason"],
+        "{listed}"
+    );
+    let (status, page) = suite
+        .get("/functions/us-central1-ext-greeter-backfill")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["summary"]["kind"], "tasks");
+    assert_eq!(page["summary"]["statusReason"], backfill["ignoredReason"]);
     suite.stop().await;
 }
 

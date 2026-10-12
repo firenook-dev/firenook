@@ -11,7 +11,7 @@
 //! which only the console builds); the runtime's own types come from
 //! `firenook_functions_runtime::monitor` and are exported beside them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::time::SystemTime;
 
 use axum::body::{Body, Bytes};
@@ -41,10 +41,11 @@ use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use ts_rs::TS;
 
+use super::extensions::TASK_QUEUE_NOTE;
 use super::filters::invocation_filter;
 use super::live::codebase_entry;
 use super::topics::not_kept;
-use super::{ComputeState, ComputeSuite, console_error, random_uuid};
+use super::{ComputeControl, ComputeState, ComputeSuite, console_error, random_uuid};
 use crate::api_error::ApiError;
 use crate::entity::EntityRef;
 use crate::http::{attachment, ndjson_response};
@@ -777,10 +778,15 @@ async fn snapshot(State(state): State<ComputeState>) -> Json<FunctionsSnapshot> 
             .collect()
     });
     let suite = state.parts.suite();
+    let queues = extension_task_queues(control.as_ref()).await;
     let functions = views
         .iter()
         .zip(figures)
-        .map(|(view, figures)| summary_of(view, figures, suite, &state.project))
+        .map(|(view, figures)| {
+            let mut summary = summary_of(view, figures, suite, &state.project);
+            extension_task_queue(&mut summary, view, &queues);
+            summary
+        })
         .collect();
     Json(FunctionsSnapshot {
         phase,
@@ -806,7 +812,9 @@ async fn detail(
         .map(environment_of)
         .unwrap_or_default();
     let suite = state.parts.suite();
-    let summary = summary_of(&view, counters.clone(), suite, &state.project);
+    let mut summary = summary_of(&view, counters.clone(), suite, &state.project);
+    let queues = extension_task_queues(state.control().ok().as_ref()).await;
+    extension_task_queue(&mut summary, &view, &queues);
     let schedule =
         (view.kind == FunctionKind::Schedule).then(|| schedule_of(&view, &counters, &state));
     let task_queue = (view.kind == FunctionKind::Tasks).then(|| task_queue_of(&view, &state));
@@ -1887,6 +1895,52 @@ pub(crate) fn summary_of(
             })
             .collect(),
         stats: counters,
+    }
+}
+
+/// The extensions' task-queue functions, as `(instance, resource)`: the
+/// emulator copies no trigger for them (the recorded official behaviour), so
+/// the runtime sees a function with none; the instance's spec still says
+/// what each one is.
+async fn extension_task_queues(control: Option<&ComputeControl>) -> HashSet<(String, String)> {
+    let mut queues = HashSet::new();
+    let Some(extensions) = control.and_then(|control| control.extensions.as_ref()) else {
+        return queues;
+    };
+    for (id, instance) in extensions.instances().await {
+        let Some(loaded) = &instance.loaded else {
+            continue;
+        };
+        let resources = loaded.spec.get("resources").and_then(Value::as_array);
+        for resource in resources.into_iter().flatten() {
+            if resource.pointer("/properties/taskQueueTrigger").is_none() {
+                continue;
+            }
+            if let Some(name) = resource.get("name").and_then(Value::as_str) {
+                queues.insert((id.clone(), name.to_owned()));
+            }
+        }
+    }
+    queues
+}
+
+/// An extension's task-queue function as the Functions pages say it: a task
+/// queue, and why nothing reaches it (the runtime's own reason names an
+/// "unknown emulator").
+fn extension_task_queue(
+    summary: &mut FunctionSummary,
+    view: &FunctionView,
+    queues: &HashSet<(String, String)>,
+) {
+    let Some(instance) = &view.extension_instance else {
+        return;
+    };
+    if !queues.contains(&(instance.clone(), view.entry_point.clone())) {
+        return;
+    }
+    summary.kind = FunctionKind::Tasks;
+    if summary.status != FunctionStatus::Receiving {
+        summary.status_reason = Some(TASK_QUEUE_NOTE.to_owned());
     }
 }
 
