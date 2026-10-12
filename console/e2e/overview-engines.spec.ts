@@ -340,6 +340,10 @@ dedicated.describe('the Overview with engines of their own', () => {
       const foreign = page.getByTestId('banner-foreign-project')
       await expect(foreign).toBeVisible({ timeout: 3_000 })
       await expect(foreign).toContainText('demo-other')
+      // Their documents are that project's, never counted as this one's: one
+      // of this project's own, written after them, is the only one.
+      await writeOnPort(engine, 'orders/o_own', { total: { integerValue: '3' } })
+      await expect(page.getByTestId('overview-figure-firestore-documents')).toHaveText('1')
       // The same words as on the Firestore page (which also offers to show that project).
       const said = `Your app is using project demo-other; this emulator is ${engine.project}, so its data is not shown here.`
       await expect(foreign).toContainText(said)

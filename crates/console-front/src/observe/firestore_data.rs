@@ -3,14 +3,17 @@
 //! delegate here, so the finished Firestore files carry only the hooks.
 //!
 //! The figures are O(1) to read on every status tick: the document count is
-//! the store snapshot's logical entry count, and the database count is a
-//! set kept up to date from the commits the change feed already observes.
-//! The set is seeded once, on the blocking pool, the first time the
-//! Overview asks; a commit that creates the first document of a database
-//! adds it at once, and one that deletes a document marks its database as
-//! possibly empty, which a check on the blocking pool confirms at most once
-//! every 5 seconds with [`Snapshot::has_documents`] (one seek), never a walk
-//! of every key.
+//! the store snapshot's logical entry count less the documents of other
+//! projects (an app that names another project id writes there), and the
+//! database count is a set kept up to date from the commits the change feed
+//! already observes. Both are seeded once, on the blocking pool, the first
+//! time the Overview asks: one key-only pass over this project's documents
+//! tells its own from the rest; from then on each commit's changes to other
+//! projects move their count. A commit that creates the first document of a
+//! database adds it at once, and one that deletes a document marks its
+//! database as possibly empty, which a check on the blocking pool confirms
+//! at most once every 5 seconds with [`Snapshot::has_documents`] (one seek),
+//! never a walk of every key.
 //!
 //! [`Section::summary`]: crate::section::Section::summary
 //! [`Section::status_changes`]: crate::section::Section::status_changes
@@ -22,7 +25,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
-use firenook_core_store::{CommitObservation, DatabaseName, Precondition, Store, Write};
+use firenook_core_store::{CommitObservation, DatabaseName, Precondition, Revision, Store, Write};
 use futures_util::FutureExt as _;
 use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream, StreamExt as _};
@@ -86,9 +89,64 @@ struct Counting {
     checking: AtomicBool,
     /// When the last check ran.
     checked: Mutex<Option<Instant>>,
+    /// The documents of other projects, which the store's entry count
+    /// includes.
+    foreign: Mutex<Foreign>,
+    /// `foreign.count`, read without a lock once the seed is in.
+    foreign_documents: AtomicU64,
+}
+
+/// Other projects' documents: counted by the seed, then moved by every
+/// commit after the seed's snapshot.
+#[derive(Default)]
+struct Foreign {
+    /// The revision of the seed's snapshot, once the seed is in.
+    since: Option<Revision>,
+    count: u64,
+    /// What commits did to them before the seed was in, by revision: the
+    /// seed's snapshot holds some of them already.
+    early: Vec<(Revision, i64)>,
+}
+
+/// `count` moved by `delta`, never below zero.
+fn moved_by(count: u64, delta: i64) -> u64 {
+    if delta < 0 {
+        count.saturating_sub(delta.unsigned_abs())
+    } else {
+        count.saturating_add(delta.unsigned_abs())
+    }
 }
 
 impl Counting {
+    /// One commit's creations (positive) and deletions (negative) of other
+    /// projects' documents.
+    fn foreign_moved(&self, revision: Revision, delta: i64) {
+        let mut foreign = lock(&self.foreign);
+        match foreign.since {
+            Some(since) if revision > since => {
+                foreign.count = moved_by(foreign.count, delta);
+                self.foreign_documents
+                    .store(foreign.count, Ordering::Release);
+            }
+            // The seed's snapshot holds it already.
+            Some(_) => {}
+            None => foreign.early.push((revision, delta)),
+        }
+    }
+
+    /// Other projects' documents in the seed's snapshot at `revision`, with
+    /// what commits after it did meanwhile.
+    fn foreign_seeded(&self, revision: Revision, count: u64) {
+        let mut foreign = lock(&self.foreign);
+        let later = std::mem::take(&mut foreign.early)
+            .into_iter()
+            .filter(|(at, _)| *at > revision)
+            .fold(count, |count, (_, delta)| moved_by(count, delta));
+        foreign.since = Some(revision);
+        foreign.count = later;
+        self.foreign_documents.store(later, Ordering::Release);
+    }
+
     fn count(&self, written: &BTreeSet<String>) {
         let total = self.fixed.len() + written.difference(&self.fixed).count();
         self.databases
@@ -151,9 +209,17 @@ impl FirestoreData {
         };
         let mut moved = false;
         let mut created: Vec<&str> = Vec::new();
+        let mut foreign: Option<(Revision, i64)> = None;
         for change in &observation.changes {
             let database = change.key.database();
             if database.project_id() != counting.project.as_ref() {
+                let delta = match (&change.before, &change.after) {
+                    (None, Some(_)) => 1,
+                    (Some(_), None) => -1,
+                    _ => 0,
+                };
+                let (_, sum) = foreign.get_or_insert((change.revision, 0));
+                *sum += delta;
                 continue;
             }
             match (&change.before, &change.after) {
@@ -172,6 +238,10 @@ impl FirestoreData {
         }
         if !created.is_empty() {
             counting.add(created);
+        }
+        if let Some((revision, delta)) = foreign.filter(|(_, delta)| *delta != 0) {
+            counting.foreign_moved(revision, delta);
+            moved = true;
         }
         if moved {
             self.tick();
@@ -202,6 +272,8 @@ impl FirestoreData {
                 maybe_empty: Mutex::new(BTreeSet::new()),
                 checking: AtomicBool::new(false),
                 checked: Mutex::new(None),
+                foreign: Mutex::new(Foreign::default()),
+                foreign_documents: AtomicU64::new(0),
             }
         });
         if started {
@@ -211,20 +283,26 @@ impl FirestoreData {
     }
 
     /// The store's databases when counting began, joined with what commits
-    /// added meanwhile.
+    /// added meanwhile, and the documents of other projects: the store's
+    /// entries less this project's, counted key by key once.
     fn seed(&self, counting: &Counting) {
         let store = counting.store.clone();
         let project = counting.project.clone();
         let data = self.clone();
         let seed = move || {
-            let databases: Vec<String> = store
-                .snapshot()
-                .databases(&project)
-                .into_iter()
-                .map(|database| database.database_id().to_owned())
-                .collect();
+            let snapshot = store.snapshot();
+            let databases = snapshot.databases(&project);
+            let mut own: u64 = 0;
+            for database in &databases {
+                let mut keys = snapshot.key_cursor(database, "");
+                while keys.next().is_some() {
+                    own += 1;
+                }
+            }
+            let foreign = snapshot.logical_memory_usage().entries.saturating_sub(own);
             if let Some(counting) = data.counting.get() {
-                counting.add(databases.iter().map(String::as_str));
+                counting.foreign_seeded(snapshot.revision(), foreign);
+                counting.add(databases.iter().map(DatabaseName::database_id));
                 counting.seeded.store(true, Ordering::Release);
             }
             data.tick();
@@ -276,15 +354,20 @@ impl FirestoreData {
 
 /// "211,260 documents · 3 databases", for the Overview's card and the nav
 /// tooltip: lock-free reads, plus at most a scheduled emptiness check.
+/// Until the seed is in, the documents are every project's (almost always
+/// this one's alone) and the databases are not known yet.
 pub(crate) fn summary(firestore: &FirestoreConsole) -> SectionSummary {
     let data = firestore.changes.data();
     let counting = data.counting(firestore);
     data.schedule_check(counting);
-    let documents = counting.store.snapshot().logical_memory_usage().entries;
-    let databases = counting
-        .seeded
-        .load(Ordering::Acquire)
-        .then(|| counting.databases.load(Ordering::Acquire));
+    let entries = counting.store.snapshot().logical_memory_usage().entries;
+    let seeded = counting.seeded.load(Ordering::Acquire);
+    let documents = if seeded {
+        entries.saturating_sub(counting.foreign_documents.load(Ordering::Acquire))
+    } else {
+        entries
+    };
+    let databases = seeded.then(|| counting.databases.load(Ordering::Acquire));
     firestore_summary(documents, databases)
 }
 

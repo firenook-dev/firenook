@@ -76,6 +76,91 @@ async fn the_summary_counts_documents_and_databases_without_walking_on_the_calle
     );
 }
 
+/// A write to another project's database, as an app with the wrong project id makes.
+fn elsewhere(path: &str, exists: bool) -> Write {
+    let key = DocumentKey::new(
+        DatabaseName::new("demo-other", "(default)").expect("database"),
+        path,
+    )
+    .expect("key");
+    if exists {
+        Write::Create {
+            key,
+            fields: Fields::new(),
+        }
+    } else {
+        Write::Delete {
+            key,
+            precondition: Precondition::None,
+        }
+    }
+}
+
+#[tokio::test]
+async fn another_projects_documents_are_never_counted_as_this_ones() {
+    let store = Store::default();
+    let console = firestore_console(&store);
+    // Before the Overview first asks: one of ours, two of another project.
+    store
+        .commit(&[
+            create("(default)", "users/a"),
+            elsewhere("orders/o_1", true),
+            elsewhere("orders/o_2", true),
+        ])
+        .expect("seeded");
+    databases_become(&console, 1).await;
+    assert_eq!(figures(&console).0, Some(1));
+    // Afterwards, the other project's writes and deletes move nothing here.
+    store
+        .commit(&[elsewhere("orders/o_3", true)])
+        .expect("committed");
+    assert_eq!(figures(&console).0, Some(1));
+    store
+        .commit(&[
+            elsewhere("orders/o_1", false),
+            create("(default)", "users/b"),
+        ])
+        .expect("committed");
+    assert_eq!(figures(&console), (Some(2), Some(1)));
+    store
+        .commit(&[
+            elsewhere("orders/o_2", false),
+            elsewhere("orders/o_3", false),
+        ])
+        .expect("committed");
+    assert_eq!(figures(&console).0, Some(2));
+}
+
+#[test]
+fn changes_from_before_the_seeds_snapshot_are_not_counted_twice() {
+    let store = Store::default();
+    let counting = Counting {
+        store,
+        project: Arc::from(PROJECT),
+        fixed: BTreeSet::new(),
+        written: Mutex::new(BTreeSet::new()),
+        databases: AtomicU64::new(0),
+        seeded: AtomicBool::new(false),
+        maybe_empty: Mutex::new(BTreeSet::new()),
+        checking: AtomicBool::new(false),
+        checked: Mutex::new(None),
+        foreign: Mutex::new(Foreign::default()),
+        foreign_documents: AtomicU64::new(0),
+    };
+    let at = Revision::from_u64;
+    // Seen while the seed walks: two creations, one at the seed's revision.
+    counting.foreign_moved(at(4), 1);
+    counting.foreign_moved(at(6), 1);
+    counting.foreign_seeded(at(5), 10);
+    assert_eq!(counting.foreign_documents.load(Ordering::Acquire), 11);
+    // After: only commits past the seed's snapshot move it.
+    counting.foreign_moved(at(5), -1);
+    counting.foreign_moved(at(7), -3);
+    assert_eq!(counting.foreign_documents.load(Ordering::Acquire), 8);
+    counting.foreign_moved(at(8), -20);
+    assert_eq!(counting.foreign_documents.load(Ordering::Acquire), 0);
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_emptied_database_leaves_the_count_after_the_next_check() {
     let store = Store::default();
