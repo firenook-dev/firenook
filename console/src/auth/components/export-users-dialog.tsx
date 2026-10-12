@@ -82,7 +82,7 @@ export function ExportUsersDialog({
               Export more than 500 users with This filter, or Select all matching.
             </span>
           )}
-          <span className="text-[13px] text-kumo-subtle" data-testid="export-users-scope">
+          <span className="text-[13px] text-kumo-subtle" data-testid="export-users-target">
             {chosen === 'selected'
               ? `The ${formatNumber(selected.length)} ticked ${selected.length === 1 ? 'user' : 'users'} of ${where}.`
               : chosen === 'filter'
