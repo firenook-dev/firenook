@@ -19,9 +19,7 @@ pub(crate) fn tasks_ready(
     _config: &SuiteConfig,
     _logging: &LoggingRuntime,
 ) {
-    late.set(TasksConsole {
-        native: tasks.application(),
-    });
+    late.set(TasksConsole::new(tasks.application(), tasks.clone(), None));
 }
 
 /// Pub/Sub has started: hands it to the console (`late` is the one `Late`
@@ -33,9 +31,11 @@ pub(crate) fn pubsub_ready(
     _config: &SuiteConfig,
     _logging: &LoggingRuntime,
 ) {
-    late.set(PubsubConsole {
-        native: pubsub.application(),
-    });
+    late.set(PubsubConsole::new(
+        pubsub.application(),
+        pubsub.clone(),
+        None,
+    ));
 }
 
 /// The suite's services are prepared; the console is not built yet.
