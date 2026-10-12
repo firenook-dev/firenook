@@ -3,16 +3,16 @@
 
 use firenook_functions_runtime::Monitor;
 use firenook_tasks_front::inspect::{
-    BodyPreview, ConfigView, FinishedView, HistoryRow, OfficialStats, PlannedAttempt,
-    QueueCounters, QueueView, RefusedView, TaskDetail, TaskRow, TaskState,
+    BodyPreview, ConfigView, FinishedView, HistoryRow, OfficialStats, OutcomeCounts,
+    PlannedAttempt, QueueCounters, QueueView, RefusedView, TaskDetail, TaskRow, TaskState,
 };
 use firenook_tasks_front::{AttemptRecord, QueueOrigin, RejectedQueue, TaskOutcome};
 
 use super::types::{
     TasksAttempt, TasksBodyPreview, TasksConfigValue, TasksFinished, TasksHeader, TasksHistoryRow,
-    TasksOfficialStats, TasksOutcome, TasksPlannedAttempt, TasksQueue, TasksQueueConfig,
-    TasksQueueCounters, TasksQueueFunction, TasksQueueOrigin, TasksRefused, TasksRejectedQueue,
-    TasksReplaced, TasksTaskDetail, TasksTaskRow, TasksTaskState,
+    TasksLadderStep, TasksOfficialStats, TasksOutcome, TasksOutcomeCounts, TasksPlannedAttempt,
+    TasksQueue, TasksQueueConfig, TasksQueueCounters, TasksQueueFunction, TasksQueueOrigin,
+    TasksRefused, TasksRejectedQueue, TasksReplaced, TasksTaskDetail, TasksTaskRow, TasksTaskState,
 };
 use crate::entity::EntityRef;
 use crate::messaging::shared::{millis, stamped_seconds, stamped_ten_seconds, time, time_of};
@@ -91,6 +91,27 @@ fn config(view: &ConfigView) -> TasksQueueConfig {
             })
             .collect(),
         document: view.document.clone(),
+        ladder: view
+            .ladder
+            .iter()
+            .map(|step| TasksLadderStep {
+                attempt: step.attempt,
+                backoff_seconds: step.backoff_seconds,
+                after_seconds: step.after_seconds,
+                last: step.last,
+            })
+            .collect(),
+    }
+}
+
+fn outcomes(counts: OutcomeCounts) -> TasksOutcomeCounts {
+    TasksOutcomeCounts {
+        succeeded: counts.succeeded,
+        failed: counts.failed,
+        cancelled: counts.cancelled,
+        deleted: counts.deleted,
+        purged: counts.purged,
+        replaced: counts.replaced,
     }
 }
 
@@ -124,6 +145,7 @@ pub(crate) fn counters(counters: &QueueCounters) -> TasksQueueCounters {
         added: stamped_ten_seconds(&counters.added),
         oldest_pending_at: time_of(counters.oldest_pending_at),
         history: counters.history,
+        outcomes: outcomes(counters.outcomes),
         official: counters.official.as_ref().map(official),
     }
 }

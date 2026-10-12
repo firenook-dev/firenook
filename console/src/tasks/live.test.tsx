@@ -54,6 +54,7 @@ function counters(
     added: window,
     oldestPendingAt: null,
     history: 0,
+    outcomes: { succeeded: 0, failed: 0, cancelled: 0, deleted: 0, purged: 0, replaced: 0 },
     official,
   }
 }
@@ -112,6 +113,15 @@ describe('task keys (U-15)', () => {
       rows: ['0.4', '1.4'],
       tasks: ['4'],
     })
+  })
+
+  it('read a task detail again when its row changed', () => {
+    expect(live.splitTaskKeys(['row:0.9', 'row:1.12', 'task:3'])).toEqual({
+      rows: ['0.9', '1.12'],
+      tasks: ['9', '12', '3'],
+    })
+    expect(live.rowTaskId('1.12')).toBe('12')
+    expect(live.rowTaskId('nonsense')).toBeUndefined()
   })
 })
 

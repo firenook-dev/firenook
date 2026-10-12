@@ -1,7 +1,7 @@
 // Cloud Tasks' registry entry: one page (queues in the panel, the queue on
 // the right with its Tasks, Attempts, History and Configuration), its
-// badge, its ⌘K action, and where a queue or a task opens. `built` stays
-// false, and the page shows the placeholder, until its journeys pass.
+// badge, its ⌘K action, and where a queue or a task opens. Built: its
+// journeys (e2e/tasks.spec.ts) pass against the real engine.
 
 import { PlusIcon, QueueIcon } from '@phosphor-icons/react'
 import { queueSearch, taskSearch } from '@/messaging/links'
@@ -19,7 +19,7 @@ export const tasks: ConsoleSection = {
   services: ['tasks'],
   area: 'messaging',
   icon: QueueIcon,
-  built: false,
+  built: true,
   summary:
     'Queues with their configuration and live counters, every pending and running task with its attempts, responses and next retry, every attempt as it happens, finished tasks with their outcome, enqueue by hand, run now, pause, hold and purge.',
   // `tasks.jobs` (run and delete jobs) is the engine's automatic gauge.

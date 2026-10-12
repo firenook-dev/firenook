@@ -94,20 +94,35 @@ export function useTasksCounters(project: string | undefined): SubscriptionStatu
 
 // ------------------------------------------------------------ one queue
 
+/** The task id in a row key (`phase.id`), or undefined when it is not one. */
+export function rowTaskId(key: string): string | undefined {
+  const dot = key.indexOf('.')
+  const id = dot === -1 ? '' : key.slice(dot + 1)
+  return /^\d+$/.test(id) ? id : undefined
+}
+
 /** The keys of a `stale` event, sorted by what they name. */
 export function splitTaskKeys(keys: readonly string[]): {
   /** Task row keys, the `row:` prefix removed (old and new keys of a task that changed phase). */
   rows: string[]
-  /** Task ids whose detail changed. */
+  /**
+   * Task ids whose detail changed: those a `task:` key names, and those
+   * whose row changed (a task that changed phase or state changed its
+   * detail too; the engine sends the row key alone then).
+   */
   tasks: string[]
 } {
   const rows: string[] = []
-  const tasks: string[] = []
+  const tasks = new Set<string>()
   for (const key of keys) {
-    if (key.startsWith('row:')) rows.push(key.slice('row:'.length))
-    else if (key.startsWith('task:')) tasks.push(key.slice('task:'.length))
+    if (key.startsWith('row:')) {
+      const row = key.slice('row:'.length)
+      rows.push(row)
+      const id = rowTaskId(row)
+      if (id !== undefined) tasks.add(id)
+    } else if (key.startsWith('task:')) tasks.add(key.slice('task:'.length))
   }
-  return { rows, tasks }
+  return { rows, tasks: [...tasks] }
 }
 
 export interface QueueLiveHandlers {

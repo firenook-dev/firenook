@@ -273,6 +273,34 @@ async fn tasks_through_the_console() {
         )
         .await;
     assert_eq!(outcomes["total"]["count"], 1);
+    // The History switch's counts ride the queue's counters.
+    let (_, queue) = suite
+        .call(
+            Method::GET,
+            &format!("/api/v1/tasks/queue?queue={}", encoded(PROCESS_ORDER)),
+            None,
+        )
+        .await;
+    let counts = &queue["counters"]["outcomes"];
+    assert_eq!(counts["purged"], 1, "{queue}");
+    assert_eq!(counts["deleted"], 1, "{queue}");
+    let counted: u64 = [
+        "succeeded",
+        "failed",
+        "cancelled",
+        "deleted",
+        "purged",
+        "replaced",
+    ]
+    .iter()
+    .map(|outcome| counts[outcome].as_u64().expect("a count"))
+    .sum();
+    assert_eq!(Some(counted), queue["counters"]["history"].as_u64());
+    // The ladder is the dispatcher's: the last rung is where it gives up.
+    let ladder = queue["config"]["ladder"].as_array().expect("a ladder");
+    assert_eq!(ladder[0]["attempt"], 1);
+    assert_eq!(ladder[0]["afterSeconds"], 0.0);
+    assert_eq!(ladder.last().expect("a rung")["last"], true);
     let (_, resumed) = suite
         .call(
             Method::POST,
