@@ -475,6 +475,34 @@ describe('a page that read its data before it could subscribe', () => {
     expect(logs?.resets).toEqual([{ reason: 'gap', missed: null }])
   })
 
+  it('given the position its first page reached, it resumes there and is not reloaded', async () => {
+    const tab = browser.tab({ hidden: true })
+    const channel = open(tab)
+    const feed = record()
+    channel.subscribe('auth.activity', { console: false }, feed.listener, {
+      after: '0000000a.41',
+    })
+    tab.document.show()
+    await settle()
+    browser.engine.hello()
+    await settle()
+    expect(browser.engine.posts.at(-1)?.add).toEqual([
+      expect.objectContaining({ topic: 'auth.activity', after: '0000000a.41' }),
+    ])
+    expect(feed.states.at(-1)).toBe('active')
+    expect(feed.resets).toEqual([])
+    // From its first event on, its own cursor leads.
+    browser.engine.ev(browser.engine.idOf('auth.activity'), 'calls', '0000000a.44', { items: [] })
+    await settle()
+    browser.engine.drop()
+    await settle()
+    browser.engine.hello()
+    await settle()
+    expect(browser.engine.posts.at(-1)?.add).toEqual([
+      expect.objectContaining({ topic: 'auth.activity', after: '0000000a.44' }),
+    ])
+  })
+
   it('ended with an error before it had a cursor, it reloads when it comes back', async () => {
     const a = await leaderWith(['logs.entries', {}])
     const [logs] = a.recorded

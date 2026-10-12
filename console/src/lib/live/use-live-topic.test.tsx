@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChangeBatch } from '@/api/generated/ChangeBatch'
-import type { LiveChannel, TopicListener } from './channel'
+import type { LiveChannel, SubscribeOptions, TopicListener } from './channel'
 import { createInvalidator, useInvalidateOn, useLiveTopic } from './use-live-topic'
 
 /** A channel that records subscriptions and lets a test speak for the engine. */
@@ -12,11 +12,12 @@ function fakeChannel() {
     topic: string
     params: object
     listener: TopicListener
+    options: SubscribeOptions | undefined
     active: boolean
   }> = []
   const channel: LiveChannel = {
-    subscribe(topic, params, listener) {
-      const entry = { topic, params, listener, active: true }
+    subscribe(topic, params, listener, options) {
+      const entry = { topic, params, listener, options, active: true }
       subscriptions.push(entry)
       return () => {
         entry.active = false
@@ -83,6 +84,26 @@ describe('useLiveTopic', () => {
     rerender({ database: 'other' })
     expect(fake.subscriptions).toHaveLength(2)
     expect(fake.active().map((entry) => entry.params)).toEqual([{ database: 'other' }])
+  })
+
+  it('starts a new subscription after the position the page read, and only a new one', () => {
+    const fake = fakeChannel()
+    const { rerender } = renderHook(
+      ({ q, after }: { q: string; after: string | undefined }) =>
+        useLiveTopic('firestore.changes', { database: q }, {}, fake.channel, { after }),
+      { initialProps: { q: 'a', after: '0000000a.7' as string | undefined }, wrapper },
+    )
+    expect(fake.subscriptions[0]?.options).toEqual({ after: '0000000a.7' })
+    // A newer position alone is not a new subscription: its own cursor leads.
+    rerender({ q: 'a', after: '0000000a.9' })
+    expect(fake.subscriptions).toHaveLength(1)
+    rerender({ q: 'b', after: '0000000a.12' })
+    expect(fake.subscriptions.map((entry) => entry.options)).toEqual([
+      { after: '0000000a.7' },
+      { after: '0000000a.12' },
+    ])
+    rerender({ q: 'c', after: undefined })
+    expect(fake.subscriptions.at(-1)?.options).toBeUndefined()
   })
 
   it("answers this subscription's status: ended or refused, else the channel's", () => {
