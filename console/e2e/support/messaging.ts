@@ -135,6 +135,25 @@ export interface MessageDetailView {
   push: PushStreakView[]
 }
 
+export interface SchemaDetailView {
+  name: string
+  kind: string
+  /** Oldest first. */
+  revisions: { id: string; createdAt: string; definition: string }[]
+}
+
+export interface TopicDetailView {
+  summary: TopicSummaryView
+  schema: {
+    schema: string
+    deleted: boolean
+    encoding: string
+    firstRevisionId: string | null
+    lastRevisionId: string | null
+    boundRevisionId: string
+  } | null
+}
+
 export interface ScheduleRunView {
   at: string
   trigger: 'clock' | 'console'
@@ -400,6 +419,41 @@ export function holdPull(engine: Engine, subscription: string): { stop: () => Pr
       await pending
     },
   }
+}
+
+/**
+ * Pulls a subscription's next message over the Pub/Sub port and nacks it
+ * (`modifyAckDeadline` 0), round after round, as a subscriber that keeps
+ * failing does, until nothing comes back or `rounds` are spent; answers
+ * how many deliveries were nacked. With a dead-letter policy the message
+ * moves to its dead-letter topic once its deliveries run out.
+ */
+export async function nackOverPort(
+  engine: Engine,
+  subscription: string,
+  rounds = 10,
+): Promise<number> {
+  const base = `${portUrl(engine, 'pubsub')}/v1/projects/${engine.project}/subscriptions/${encodeURIComponent(subscription)}`
+  const post = (verb: string, body: unknown) =>
+    fetch(`${base}:${verb}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  let nacked = 0
+  for (let round = 0; round < rounds; round += 1) {
+    const pulled = (await (
+      await post('pull', { maxMessages: 1, returnImmediately: true })
+    ).json()) as {
+      receivedMessages?: { ackId: string }[]
+    }
+    const ackId = pulled.receivedMessages?.[0]?.ackId
+    if (!ackId) break
+    const answer = await post('modifyAckDeadline', { ackIds: [ackId], ackDeadlineSeconds: 0 })
+    expect(answer.ok, `nack → ${answer.status}`).toBe(true)
+    nacked += 1
+  }
+  return nacked
 }
 
 /** A queue as its parts and its key. */

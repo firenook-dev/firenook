@@ -1,12 +1,14 @@
-// One topic: row two is its tabs — Messages, Subscriptions, Snapshots, Settings — with
-// how much it publishes at the right end (since start, the last minute's
-// rate, and the bars, aged on the shared one-second clock so a topic that
-// went quiet decays to zero by itself); below, the tab.
+// One topic: row two is its tabs — Messages, Subscriptions, Deliveries,
+// Snapshots, Settings — with how much it publishes at the right end (since
+// start, the last minute's rate, and the bars, aged on the shared
+// one-second clock so a topic that went quiet decays to zero by itself);
+// below, the tab.
 
 import { Button, Tabs } from '@cloudflare/kumo'
 import { BroadcastIcon, CameraIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError } from '@/api/client'
+import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctionMark'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
 import type { PubsubTopicSummary } from '@/api/generated/messaging/PubsubTopicSummary'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
@@ -18,6 +20,7 @@ import { shortName } from '../names'
 import { snapshotsQuery, topicQuery } from '../queries'
 import { Composer } from './composer'
 import { CreateSnapshotDialog } from './create-snapshot-dialog'
+import { DeliveriesView } from './deliveries-table'
 import { JobStrip } from './job-strip'
 import type { MessageTab } from './message-inspector'
 import { type MessagesSearch, MessagesView } from './message-table'
@@ -38,12 +41,17 @@ export interface TopicSearch extends MessagesSearch {
   /** With new=message: the message that fills the composer. */
   prefill?: string | undefined
   dialog?: 'replay' | 'setup' | 'export' | undefined
+  /** Deliveries: one function's, by its id. */
+  function?: string | undefined
+  /** Deliveries: one outcome's. */
+  outcome?: PubsubFunctionMark | undefined
 }
 
 /** The topic's tabs, in order; later commits add theirs here. */
 export const TOPIC_VIEWS: readonly TopicViewName[] = [
   'messages',
   'subscriptions',
+  'deliveries',
   'snapshots',
   'settings',
 ]
@@ -70,9 +78,10 @@ function Throughput({
   const window = useThroughput(project, topic) ?? detail?.throughput
   const minute = useLastMinute(window)
   const published = summary?.counters.published ?? detail?.summary.counters.published
+  // Below xl the five tabs need the row: the landing's cards and the tree say the same.
   return (
     <span
-      className="ml-auto flex shrink-0 items-center gap-2 text-[12px] text-kumo-subtle"
+      className="ml-auto hidden shrink-0 items-center gap-2 text-[12px] text-kumo-subtle xl:flex"
       data-testid="pubsub-topic-throughput"
     >
       {published !== undefined && (
@@ -142,6 +151,7 @@ export function TopicView({
     )
 
   const rows = subscriptionRows(detail.data?.subscriptions ?? [], summary)
+  const functions = summary?.functions ?? detail.data?.summary.functions ?? []
   // Publishing again, edited first: the composer filled with the message.
   const editAgain = (id: string) =>
     update({ new: 'message', prefill: id, message: undefined, tab: undefined })
@@ -164,6 +174,8 @@ export function TopicView({
               view: next === 'messages' ? undefined : (next as TopicViewName),
               message: undefined,
               tab: undefined,
+              function: undefined,
+              outcome: undefined,
             })
           }
           tabs={[
@@ -179,6 +191,7 @@ export function TopicView({
                 </span>
               ),
             },
+            { value: 'deliveries', label: 'Deliveries' },
             {
               value: 'snapshots',
               label: (
@@ -262,6 +275,27 @@ export function TopicView({
           exportOpen={search.dialog === 'export'}
           onExportOpenChange={(open) =>
             update({ dialog: open ? 'export' : undefined }, { replace: !open })
+          }
+        />
+      ) : view === 'deliveries' ? (
+        <DeliveriesView
+          project={project}
+          topic={topic}
+          functions={functions}
+          search={search}
+          update={update}
+          onLiveStatus={onLiveStatus}
+          onOpenSubscription={onOpenSubscription}
+          onEditAgain={(id) =>
+            update({
+              view: undefined,
+              new: 'message',
+              prefill: id,
+              message: undefined,
+              tab: undefined,
+              function: undefined,
+              outcome: undefined,
+            })
           }
         />
       ) : view === 'subscriptions' ? (

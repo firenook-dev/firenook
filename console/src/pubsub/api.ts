@@ -214,14 +214,19 @@ export function redeliver(body: PubsubRedeliverBody): Promise<PubsubRedelivery> 
   return apiSend('POST', '/pubsub/message/redeliver', body)
 }
 
-/** The request a function received for a message (compute's record), or rebuilt when that is gone. */
+/**
+ * The request a function received for a message (compute's record), or
+ * rebuilt when that is gone. `eventId` picks one delivery of the function
+ * (a run again has its own); without it, the newest whose request is kept.
+ */
 export function getDispatch(
   topic: string,
   id: string,
   functionId: string,
+  eventId?: string,
   signal?: AbortSignal,
 ): Promise<PubsubDispatchBody> {
-  return apiGet('/pubsub/dispatch', { topic, id, function: functionId }, signal)
+  return apiGet('/pubsub/dispatch', { topic, id, function: functionId, event: eventId }, signal)
 }
 
 /** Requests the Pub/Sub port refused (publish to a missing topic, a schema refusal), coalesced. */

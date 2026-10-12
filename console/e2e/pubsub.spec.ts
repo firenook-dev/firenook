@@ -9,7 +9,10 @@ import { readDownload } from './support/downloads'
 import { dropLive, restoreLive } from './support/live'
 import { cutRings, paintOf } from './support/look'
 import {
+  type DeliveryPageView,
+  type SchemaDetailView,
   type SubscriptionDetailView,
+  type TopicDetailView,
   type TopicIndexView,
   OTHER_PROJECT,
   consoleCall,
@@ -18,8 +21,10 @@ import {
   deleteTopic,
   functionUrl,
   holdPull,
+  nackOverPort,
   portUrl,
   publishOverPort,
+  schemaName,
   subscriptionName,
   topicName,
   uniqueId,
@@ -1020,5 +1025,339 @@ test('J-PS-24 a bulk ack runs as a job and the backlog empties by patches', asyn
     expect([after.backlog, after.outstanding]).toEqual([0, 0])
   } finally {
     await deleteTopic(engine, topic)
+  }
+})
+
+// ------------------------------------------------------------ deliveries and the setup
+
+/** A topic's deliveries as the engine reports them now (newest first). */
+async function deliveriesOf(engine: Parameters<typeof consoleCall>[0], topic: string) {
+  return consoleCall<DeliveryPageView>(
+    engine,
+    'GET',
+    `/pubsub/deliveries?topic=${enc(topicName(engine, topic))}&limit=500`,
+  )
+}
+
+/** A Deliveries table row by its event id. */
+const deliveryRow = (page: Page, eventId: string) =>
+  page.getByTestId('pubsub-delivery-table').locator(`tr[data-key="${eventId}"]`)
+
+test('J-PS-03 a JSON message is published, read whole, and delivered to its function', async ({
+  page,
+  engine,
+}) => {
+  await openTopics(page, engine.origin, 'topic=orders')
+  await page.keyboard.press('n')
+  await expect(page.getByTestId('pubsub-composer')).toBeVisible()
+  await writeData(page, '{"orderId":"o_1","amount":4.5}')
+  await page.getByTestId('composer-attributes-add-key').pressSequentially('region')
+  await expect(page.getByTestId('composer-attributes-key').first()).toHaveValue('region')
+  await page.getByTestId('composer-attributes-value').first().fill('eu')
+  await page.getByTestId('composer-ordering-key').fill('cust-1')
+  await page.getByTestId('composer-ordering-key').press('ControlOrMeta+Enter')
+
+  // The result line names the id; the row is at the top and flashes.
+  const result = page.getByTestId('pubsub-publish-result')
+  await expect(result).toContainText(/^Published 1 · id \d+/)
+  const id = /id (\d+)/.exec(await result.innerText())?.[1] ?? ''
+  const row = page.getByTestId('pubsub-message-table').locator(`tr[data-key="${id}"]`)
+  await expect(row).toHaveClass(/row-flash/)
+  await expect(
+    page.getByTestId('pubsub-message-table').getByTestId('data-row').first(),
+  ).toHaveAttribute('data-key', id)
+
+  // Opened: the data as a tree, the attribute and the key, and where it went.
+  await page.getByTestId('pubsub-composer-close').click()
+  await row.click()
+  const inspector = page.getByTestId('pubsub-message-inspector')
+  await expect(inspector.getByTestId('pubsub-message-data-json')).toContainText('o_1')
+  await inspector.getByRole('tab', { name: /Attributes/ }).click()
+  await expect(inspector.getByTestId('message-attribute-region')).toContainText('eu')
+  await expect(inspector.getByTestId('message-ordering-key')).toContainText('cust-1')
+  await inspector.getByRole('tab', { name: /Deliveries/ }).click()
+  // The function decoded it with the real SDK (`event.data.message.json`) and returned.
+  await expect(inspector.getByTestId('message-function')).toHaveAttribute(
+    'data-mark',
+    'delivered',
+    {
+      timeout: 15_000,
+    },
+  )
+  await expect(inspector.getByTestId('message-function')).toContainText('onOrderPlaced')
+  const at = (subscription: string) =>
+    inspector.getByTestId('message-at-subscription').filter({ hasText: subscription })
+  await expect(at('orders-worker')).toHaveAttribute('data-state', 'available')
+  await expect(at('orders-filtered')).toHaveAttribute('data-state', 'available')
+})
+
+test('J-PS-04 a failing function, its request, and a run again with one message', async ({
+  page,
+  engine,
+}) => {
+  const [id] = (
+    await publishOverPort(engine, 'orders', [
+      { data: { fail: true, reason: 'card declined' }, attributes: { region: 'us' } },
+    ])
+  ).messageIds
+  const failed = async () =>
+    (await deliveriesOf(engine, 'orders')).items.find(
+      (item) => item.messageId === id && !item.redelivery,
+    )
+  await expect.poll(async () => (await failed())?.mark, { timeout: 15_000 }).toBe('failed')
+  const original = (await failed())?.eventId ?? ''
+  const topic = await consoleCall<TopicDetailView>(
+    engine,
+    'GET',
+    `/pubsub/topic?name=${enc(topicName(engine, 'orders'))}`,
+  )
+  const published = topic.summary.counters.published
+
+  // The message's row marks the function in the danger tone.
+  await openTopics(page, engine.origin, 'topic=orders')
+  const messageRow = page.getByTestId('pubsub-message-table').locator(`tr[data-key="${id}"]`)
+  await expect(messageRow.locator('[data-mark="failed"]')).toBeVisible()
+
+  // Deliveries: failed, with the handler's own error.
+  await page.getByTestId('pubsub-topic-tabs').getByRole('tab', { name: 'Deliveries' }).click()
+  await expect(page).toHaveURL(/view=deliveries/)
+  const row = deliveryRow(page, original)
+  await expect(row).toContainText('failed')
+  await expect(row).toContainText('order rejected: card declined')
+
+  // Opened: the CloudEvent the function received, as compute recorded it.
+  await row.click()
+  const inspector = page.getByTestId('pubsub-message-inspector')
+  const delivery = inspector.getByTestId('message-function').filter({ hasText: 'failed' })
+  await expect(delivery).toContainText('order rejected: card declined')
+  await delivery.getByTestId('message-function-dispatch-toggle').click()
+  const body = delivery.getByTestId('message-function-dispatch-body')
+  await expect(body).toContainText('cloudevents')
+  await expect(body).toContainText('google.cloud.pubsub.topic.v1.messagePublished')
+  await expect(body).toContainText(original)
+  await expect(delivery.getByTestId('message-function-dispatch-rebuilt')).toHaveCount(0)
+  // Logs links there once the Logs section is shown in this console.
+  const logs = delivery.getByTestId('message-function-logs')
+  if ((await logs.count()) > 0) await expect(logs).toHaveAttribute('href', /function/)
+
+  // `r` on the row asks first; Enter runs it again, for this function alone.
+  await row.click()
+  await page.keyboard.press('Escape')
+  await expect(inspector).toBeHidden()
+  await page.keyboard.press('r')
+  const confirm = page.getByTestId('pubsub-run-again')
+  await expect(confirm).toContainText(`Run onOrderPlaced again with message ${id}?`)
+  expect(
+    (await deliveriesOf(engine, 'orders')).items.filter((item) => item.messageId === id),
+  ).toHaveLength(1)
+  await page.keyboard.press('Enter')
+  await expect(confirm).toBeHidden()
+  const again = page
+    .getByTestId('pubsub-delivery-table')
+    .getByTestId('data-row')
+    .filter({ has: page.getByTestId('delivery-again') })
+    .filter({ hasText: id ?? '' })
+  await expect(again).toHaveCount(1, { timeout: 15_000 })
+  const resent = await again.getAttribute('data-key')
+  expect(resent).not.toBe(original)
+  await expect(again).toContainText('failed', { timeout: 15_000 })
+  // Nothing was published again: the topic's count is what it was.
+  const after = await consoleCall<TopicDetailView>(
+    engine,
+    'GET',
+    `/pubsub/topic?name=${enc(topicName(engine, 'orders'))}`,
+  )
+  expect(after.summary.counters.published).toBe(published)
+  // Each delivery's request carries its own event id.
+  await again.click()
+  const second = page
+    .getByTestId('pubsub-message-inspector')
+    .getByTestId('message-function')
+    .filter({ has: page.getByTestId('message-function-redelivery') })
+  await second.getByTestId('message-function-dispatch-toggle').click()
+  await expect(second.getByTestId('message-function-dispatch-body')).toContainText(resent ?? '')
+})
+
+test('J-PS-09 a dead letter reaches its topic, its tab, and the function on it', async ({
+  page,
+  engine,
+}) => {
+  const topic = uniqueId('ps09')
+  const subscription = `${topic}-sub`
+  try {
+    await createTopic(engine, topic)
+    await createSubscription(engine, subscription, topic, {
+      deadLetter: { topic: topicName(engine, 'orders-dead'), maxDeliveryAttempts: 5 },
+    })
+    const [id] = (await publishOverPort(engine, topic, [{ data: { orderId: 'o_dead' } }]))
+      .messageIds
+    expect(await nackOverPort(engine, subscription)).toBe(5)
+
+    // In orders-dead, the attributes the engine wrote are explained and linked.
+    const findDead = async () => {
+      const page1 = await consoleCall<{
+        items: { id: string; attributes: Record<string, string> }[]
+      }>(engine, 'GET', `/pubsub/messages?topic=${enc(topicName(engine, 'orders-dead'))}&limit=50`)
+      return page1.items.find(
+        (item) => item.attributes.CloudPubSubDeadLetterSourceSubscription === subscription,
+      )?.id
+    }
+    await expect.poll(findDead, { timeout: 15_000 }).toBeTruthy()
+    const dead = (await findDead()) ?? ''
+    await openTopics(page, engine.origin, `topic=orders-dead&message=${dead}&tab=attributes`)
+    const source = page.getByTestId('message-dead-letter-source')
+    await expect(source).toHaveText(subscription)
+
+    // The function listening on orders-dead ran for it (dead letters reach functions).
+    await page.getByTestId('pubsub-topic-tabs').getByRole('tab', { name: 'Deliveries' }).click()
+    const delivered = page
+      .getByTestId('pubsub-delivery-table')
+      .getByTestId('data-row')
+      .filter({ hasText: 'onOrderDeadLettered' })
+      .filter({ hasText: dead })
+    await expect(delivered).toContainText('delivered', { timeout: 15_000 })
+
+    // The subscription's Dead letters tab lists it, under its fixed expression.
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)
+    await page.getByRole('tab', { name: 'Dead letters' }).click()
+    await expect(page.getByTestId('pubsub-fixed-expr')).toHaveText(`from ${subscription}`)
+    await expect(
+      page.getByTestId('pubsub-message-table').locator(`tr[data-key="${dead}"]`),
+    ).toBeVisible()
+    expect(id).toBeTruthy()
+  } finally {
+    await deleteTopic(engine, topic)
+  }
+})
+
+/** An Avro record with one field of `type`: each revision of J-PS-15's schema changes it. */
+const definition = (type: string) =>
+  JSON.stringify({ type: 'record', name: 'Order', fields: [{ name: 'amount', type }] })
+
+test('J-PS-15 the setup goes out as a file and comes back with its revisions', async ({
+  page,
+  engine,
+}) => {
+  const schema = uniqueId('ps15')
+  const topic = `${schema}-topic`
+  const subscription = `${schema}-sub`
+  try {
+    // A schema with three revisions, a topic bound to the first two, a subscription.
+    const created = await consoleCall<SchemaDetailView>(engine, 'POST', '/pubsub/schemas', {
+      name: schemaName(engine, schema),
+      kind: 'AVRO',
+      definition: definition('int'),
+    })
+    await consoleCall(engine, 'POST', '/pubsub/schema/commit', {
+      name: schemaName(engine, schema),
+      definition: definition('long'),
+    })
+    const full = await consoleCall<SchemaDetailView>(engine, 'POST', '/pubsub/schema/commit', {
+      name: schemaName(engine, schema),
+      definition: definition('double'),
+    })
+    const [first, second] = full.revisions.map((revision) => revision.id)
+    expect(full.revisions).toHaveLength(3)
+    expect(created.revisions[0]?.id).toBe(first)
+    await createTopic(engine, topic, {
+      schema: {
+        schema: schemaName(engine, schema),
+        encoding: 'JSON',
+        firstRevisionId: first ?? '',
+        lastRevisionId: second ?? '',
+      },
+    })
+    await createSubscription(engine, subscription, topic)
+
+    // Export from the New menu: a file, indented, without what the functions make.
+    await openTopics(page, engine.origin)
+    await page.getByTestId('pubsub-new-menu').click()
+    await page.getByTestId('pubsub-export-setup').click()
+    await expect(page).toHaveURL(/dialog=setup/)
+    await expect(page.getByTestId('pubsub-setup-counts')).toContainText('schema with 3 revisions')
+    await expect(page.getByTestId('pubsub-setup-left-out')).toContainText('function-managed')
+    const download = page.waitForEvent('download')
+    await page.getByTestId('pubsub-setup-download').click()
+    const file = await download
+    expect(file.suggestedFilename()).toBe('pubsub-setup.json')
+    const text = await readDownload(file)
+    const setup = JSON.parse(text) as {
+      topics: { name: string }[]
+      subscriptions: { name: string }[]
+      schemas: { name: string; revisions: { id: string }[] }[]
+    }
+    expect(setup.topics.map((item) => item.name)).toContain(topicName(engine, topic))
+    expect(setup.topics.some((item) => item.name.includes('/topics/firebase-schedule-'))).toBe(
+      false,
+    )
+    expect(
+      setup.subscriptions.some((item) => item.name.includes('/subscriptions/emulator-sub-')),
+    ).toBe(false)
+    expect(
+      setup.schemas
+        .find((item) => item.name === schemaName(engine, schema))
+        ?.revisions.map((revision) => revision.id),
+    ).toEqual(full.revisions.map((revision) => revision.id))
+
+    // Gone: the topic, its subscription and the schema.
+    await deleteTopic(engine, topic)
+    await consoleCall(engine, 'DELETE', '/pubsub/schema', { name: schemaName(engine, schema) })
+
+    // Import: the preview, then the engine's answer with the revision ids it mapped.
+    await page.reload()
+    await page.getByTestId('pubsub-new-menu').click()
+    await page.getByTestId('pubsub-import-setup').click()
+    await page.getByTestId('pubsub-setup-file').setInputFiles({
+      name: 'pubsub-setup.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(text),
+    })
+    const item = (name: string) =>
+      page.getByTestId('pubsub-setup-item').and(page.locator(`[data-name="${name}"]`))
+    await expect(item(schemaName(engine, schema))).toHaveAttribute('data-status', 'create')
+    await expect(item(topicName(engine, topic))).toHaveAttribute('data-status', 'create')
+    await expect(item(subscriptionName(engine, subscription))).toHaveAttribute(
+      'data-status',
+      'create',
+    )
+    await expect(item(topicName(engine, 'orders'))).toHaveAttribute('data-status', 'exists')
+    await expect(page.getByTestId('pubsub-setup-create')).toHaveText('Create 3')
+    await page.getByTestId('pubsub-setup-create').click()
+    const answer = page.getByTestId('pubsub-setup-result')
+    await expect(answer).toContainText('Created 3')
+    await expect(page.getByTestId('pubsub-setup-mapping')).toHaveCount(3)
+    await expect(page.getByTestId('pubsub-setup-skipped').first()).toContainText(
+      'It already exists.',
+    )
+
+    // All back: the topic bound to the ids the replay made, the window kept.
+    const back = await consoleCall<SchemaDetailView>(
+      engine,
+      'GET',
+      `/pubsub/schema?name=${enc(schemaName(engine, schema))}`,
+    )
+    expect(back.revisions.map((revision) => revision.definition)).toEqual(
+      full.revisions.map((revision) => revision.definition),
+    )
+    const bound = await consoleCall<TopicDetailView>(
+      engine,
+      'GET',
+      `/pubsub/topic?name=${enc(topicName(engine, topic))}`,
+    )
+    expect(bound.schema?.firstRevisionId).toBe(back.revisions[0]?.id)
+    expect(bound.schema?.lastRevisionId).toBe(back.revisions[1]?.id)
+    await expect(page.getByTestId('pubsub-setup-mapping').first()).toContainText(
+      back.revisions[0]?.id ?? '',
+    )
+    await page.getByTestId('pubsub-setup-done').click()
+    await expect(page).not.toHaveURL(/dialog=setup/)
+    await expand(page, topic)
+    await expect(treeRow(page, subscription)).toBeVisible()
+  } finally {
+    await deleteTopic(engine, topic)
+    await ownerFetch(engine, '/pubsub/schema', {
+      method: 'DELETE',
+      body: JSON.stringify({ name: schemaName(engine, schema) }),
+    })
   }
 })

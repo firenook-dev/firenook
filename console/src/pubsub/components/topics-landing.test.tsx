@@ -52,6 +52,7 @@ async function renderLanding(
         foreign={false}
         onOpen={handlers.onOpen ?? (() => {})}
         onCreateTopic={handlers.onCreateTopic ?? (() => {})}
+        onImportSetup={handlers.onImportSetup ?? (() => {})}
         onProject={handlers.onProject ?? (() => {})}
       />
     ),
@@ -134,10 +135,13 @@ describe('the Topics landing (U-18)', () => {
     expect(screen.queryByText(/Background triggers/)).not.toBeInTheDocument()
   })
 
-  it('teaches how topics get here when there are none', async () => {
-    await renderLanding(topicIndex([]))
+  it('teaches how topics get here when there are none, and offers the setup back', async () => {
+    const onImportSetup = vi.fn()
+    await renderLanding(topicIndex([]), rejected([]), { onImportSetup })
     expect(await screen.findByTestId('pubsub-empty')).toHaveTextContent('No topics yet')
     expect(screen.getByTestId('pubsub-empty-new-topic')).toBeInTheDocument()
+    screen.getByTestId('pubsub-empty-import-setup').click()
+    expect(onImportSetup).toHaveBeenCalledOnce()
   })
 })
 

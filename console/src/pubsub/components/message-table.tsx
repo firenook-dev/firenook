@@ -490,9 +490,14 @@ export function MessagesView({
   // The table's cursor row, for the row keys.
   const [cursorId, setCursorId] = useState<string | undefined>(undefined)
   const cursorRow = rows.find((row) => row.id === cursorId)
-  useShortcuts(
-    { id: 'pubsub-messages', label: 'Messages' },
-    onEditAgain
+  useShortcuts({ id: 'pubsub-messages', label: 'Messages' }, [
+    {
+      key: 'Escape',
+      label: 'Close the message',
+      when: () => search.message !== undefined && composer === undefined,
+      run: () => update({ message: undefined, tab: undefined }),
+    },
+    ...(onEditAgain
       ? [
           {
             key: 'r',
@@ -511,8 +516,8 @@ export function MessagesView({
             },
           },
         ]
-      : [],
-  )
+      : []),
+  ])
 
   const copyAsJson = async (row: PubsubMessageRow) => {
     try {

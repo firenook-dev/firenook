@@ -35,6 +35,19 @@ function config(overrides: Partial<PubsubSubscription> = {}): PubsubSubscription
   }
 }
 
+// The live channel's leader opens the console's one stream a tick after a
+// page subscribes, which may be after the test has finished; jsdom has no
+// EventSource, so a quiet one stands in for the whole file (nothing here
+// asserts a live event).
+class QuietEventSource {
+  readyState = 0
+  addEventListener() {}
+  removeEventListener() {}
+  close() {}
+}
+const live = globalThis as { EventSource?: unknown }
+live.EventSource ??= QuietEventSource
+
 beforeEach(() => vi.stubGlobal('fetch', () => new Promise<Response>(() => {})))
 afterEach(() => {
   cleanup()

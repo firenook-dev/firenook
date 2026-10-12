@@ -12,9 +12,11 @@ import {
   BroadcastIcon,
   CameraIcon,
   CaretDownIcon,
+  DownloadSimpleIcon,
   PaperPlaneTiltIcon,
   PlusIcon,
   TrayArrowDownIcon,
+  UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -38,6 +40,7 @@ import { CreateSubscriptionDialog } from './create-subscription-dialog'
 import { CreateTopicDialog } from './create-topic-dialog'
 import { ScopeField } from './scope-field'
 import { ReplayDialog } from './replay-dialog'
+import { type SetupTab, SetupDialog } from './setup-dialog'
 import { SubscriptionPage } from './subscription-page'
 import { LANDING_CARDS, TopicsLanding, landingTopics } from './topics-landing'
 import { TopicsPanel } from './topics-panel'
@@ -164,6 +167,12 @@ export function TopicsPage() {
     enabled: replayable,
   })
   const openReplay = () => update({ dialog: 'replay', prefill: undefined })
+  // The setup dialog's tab is the page's to choose: Import setup… opens on Import.
+  const [setupTab, setSetupTab] = useState<SetupTab>('export')
+  const openSetup = (tab: SetupTab) => {
+    setSetupTab(tab)
+    update({ dialog: 'setup', prefill: undefined })
+  }
 
   useShortcuts({ id: 'pubsub-topics', label: 'Pub/Sub topics' }, [
     {
@@ -190,6 +199,7 @@ export function TopicsPage() {
     onCreateTopic: () => createTopic(),
     onCreateSubscription: createSubscription,
     onPublish: compose,
+    onSetup: openSetup,
   })
 
   // The tree's lit row: the subscription or topic in view; a function's row
@@ -235,6 +245,7 @@ export function TopicsPage() {
             onTopic={() => createTopic()}
             onSubscription={createSubscription}
             onSnapshot={() => update({ new: 'snapshot' })}
+            onSetup={openSetup}
           />
           {replayable && (
             <Tooltip
@@ -332,6 +343,7 @@ export function TopicsPage() {
               foreign={foreign}
               onOpen={(name) => goTo({ topic: name })}
               onCreateTopic={createTopic}
+              onImportSetup={() => openSetup('import')}
               onProject={switchProject}
             />
           )}
@@ -345,6 +357,16 @@ export function TopicsPage() {
           if (!open) update({ new: undefined, prefill: undefined }, { replace: true })
         }}
         onCreated={(name) => goTo({ topic: name })}
+      />
+      <SetupDialog
+        open={search.dialog === 'setup'}
+        onOpenChange={(open) => {
+          if (!open) update({ dialog: undefined }, { replace: true })
+        }}
+        project={project}
+        index={index.data}
+        tab={setupTab}
+        onTab={setSetupTab}
       />
       {subscription && subscriptionDetail.data && (
         <ReplayDialog
@@ -387,6 +409,7 @@ function NewMenu({
   onTopic,
   onSubscription,
   onSnapshot,
+  onSetup,
 }: {
   primary: boolean
   topic: string | undefined
@@ -395,11 +418,16 @@ function NewMenu({
   onTopic: () => void
   onSubscription: () => void
   onSnapshot: () => void
+  onSetup: (tab: SetupTab) => void
 }) {
   return (
     <DropdownMenu>
       <Tooltip
-        content={primary ? 'New topic (n) or subscription' : 'New topic, subscription or snapshot'}
+        content={
+          primary
+            ? 'New topic (n), or the setup from a file'
+            : 'New topic, subscription or snapshot, or the setup as a file'
+        }
         render={
           <DropdownMenu.Trigger
             render={
@@ -443,6 +471,21 @@ function NewMenu({
             Snapshot of <span className="font-mono text-[12px]">{shortName(subscription)}</span>
           </DropdownMenu.Item>
         )}
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item
+          icon={UploadSimpleIcon}
+          onClick={() => onSetup('import')}
+          data-testid="pubsub-import-setup"
+        >
+          Import setup…
+        </DropdownMenu.Item>
+        <DropdownMenu.Item
+          icon={DownloadSimpleIcon}
+          onClick={() => onSetup('export')}
+          data-testid="pubsub-export-setup"
+        >
+          Export setup…
+        </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu>
   )
@@ -454,18 +497,20 @@ function usePubsubPalette({
   onCreateTopic,
   onCreateSubscription,
   onPublish,
+  onSetup,
 }: {
   topic: string | undefined
   onCreateTopic: () => void
   onCreateSubscription: () => void
   onPublish: () => void
+  onSetup: (tab: SetupTab) => void
 }) {
   const register = usePaletteProviders((state) => state.register)
   const unregister = usePaletteProviders((state) => state.unregister)
   // The provider reads the page as it is when ⌘K asks, not as it was when registered.
-  const actions = useRef({ topic, onCreateTopic, onCreateSubscription, onPublish })
+  const actions = useRef({ topic, onCreateTopic, onCreateSubscription, onPublish, onSetup })
   useLayoutEffect(() => {
-    actions.current = { topic, onCreateTopic, onCreateSubscription, onPublish }
+    actions.current = { topic, onCreateTopic, onCreateSubscription, onPublish, onSetup }
   })
   useEffect(() => {
     register('pubsub-topics', (query) => {
@@ -474,6 +519,7 @@ function usePubsubPalette({
         onCreateTopic: newTopic,
         onCreateSubscription: newSubscription,
         onPublish: publish,
+        onSetup: setup,
       } = actions.current
       const items: PaletteItem[] = [
         {
@@ -501,6 +547,20 @@ function usePubsubPalette({
               },
             ]
           : []),
+        {
+          id: 'pubsub.page.export-setup',
+          title: 'Export Pub/Sub setup',
+          keywords: 'topics subscriptions schemas file download',
+          icon: <DownloadSimpleIcon size={16} />,
+          run: () => setup('export'),
+        },
+        {
+          id: 'pubsub.page.import-setup',
+          title: 'Import Pub/Sub setup',
+          keywords: 'topics subscriptions schemas file restore',
+          icon: <UploadSimpleIcon size={16} />,
+          run: () => setup('import'),
+        },
       ].filter((item) => matchesQuery(item, query))
       return items.length > 0 ? [{ label: 'Pub/Sub', items }] : []
     })

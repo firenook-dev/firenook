@@ -6,11 +6,11 @@
 // function's outcome with the handler's own error, and the way to the
 // invocation and its logs.
 
-import { Text } from '@cloudflare/kumo'
-import { TrayIcon } from '@phosphor-icons/react'
+import { Button, Text, Tooltip } from '@cloudflare/kumo'
+import { ArrowClockwiseIcon, TrayIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { type ReactNode, useRef } from 'react'
 import { ApiError } from '@/api/client'
 import type { PubsubDeliveryRow } from '@/api/generated/messaging/PubsubDeliveryRow'
 import type { PubsubMessageAtSubscription } from '@/api/generated/messaging/PubsubMessageAtSubscription'
@@ -22,14 +22,16 @@ import { KeyValueList, type KeyValueItem } from '@/components/console/key-value-
 import { OutcomeChip } from '@/components/console/outcome-chip'
 import { PayloadView } from '@/components/console/payload-view'
 import { RelativeTime, exactTime } from '@/components/console/relative-time'
-import { StatusDot } from '@/components/kit'
+import { Kbd, StatusDot } from '@/components/kit'
 import { useNow } from '@/lib/clock'
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
 import { linkToLogs } from '@/lib/sections/logs'
 import { sectionById } from '@/lib/services'
 import { shortName } from '../names'
 import { messageQuery } from '../queries'
+import { DispatchView } from './dispatch-view'
 import { MessageFooter } from './message-footer'
+import { useRunAgain } from './run-again'
 import { atSubscriptionText, deliveryDetail, functionMark, subscriptionTone } from '../states'
 
 export type MessageTab = 'data' | 'attributes' | 'deliveries'
@@ -63,10 +65,28 @@ export function LogsLink({
   )
 }
 
-/** One function's delivery of the message: the outcome, how long, the handler's error, the links. */
-export function FunctionDelivery({ row, testId }: { row: PubsubDeliveryRow; testId?: string }) {
+/**
+ * One function's delivery of the message: the outcome, how long, the
+ * handler's error, the request it received (with the topic), the links,
+ * and running it again (with `onRunAgain`).
+ */
+export function FunctionDelivery({
+  row,
+  project,
+  topic,
+  onRunAgain,
+  testId,
+}: {
+  row: PubsubDeliveryRow
+  /** With `topic`: the request the function received can be opened. */
+  project?: string | undefined
+  topic?: string | undefined
+  onRunAgain?: ((row: PubsubDeliveryRow, anchor: Element | null) => void) | undefined
+  testId?: string
+}) {
   const look = functionMark(row.mark)
   const detail = deliveryDetail(row)
+  const again = useRef<HTMLButtonElement>(null)
   return (
     <div className="grid gap-1 py-1.5" data-testid={testId} data-mark={row.mark}>
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -86,7 +106,12 @@ export function FunctionDelivery({ row, testId }: { row: PubsubDeliveryRow; test
           <span className="font-mono text-[12px] text-kumo-subtle tabular-nums">{row.status}</span>
         )}
         {row.redelivery && (
-          <span className="rounded bg-kumo-tint px-1 text-[11px] text-kumo-subtle">run again</span>
+          <span
+            className="rounded bg-kumo-tint px-1 text-[11px] text-kumo-subtle"
+            data-testid={testId && `${testId}-redelivery`}
+          >
+            run again
+          </span>
         )}
       </div>
       {detail && row.mark !== 'delivered' && (
@@ -113,7 +138,41 @@ export function FunctionDelivery({ row, testId }: { row: PubsubDeliveryRow; test
         >
           Logs
         </LogsLink>
+        {onRunAgain && (
+          <Tooltip
+            content={
+              <span className="flex items-center gap-1.5">
+                Run {row.functionName} again with this message
+                <Kbd>r</Kbd>
+              </span>
+            }
+            render={
+              <Button
+                ref={again}
+                variant="ghost"
+                size="xs"
+                icon={<ArrowClockwiseIcon />}
+                className="ml-auto"
+                onClick={() => onRunAgain(row, again.current)}
+                data-testid={testId && `${testId}-again`}
+              >
+                Run again
+              </Button>
+            }
+          />
+        )}
       </div>
+      {project !== undefined && topic !== undefined && (
+        <DispatchView
+          project={project}
+          topic={topic}
+          messageId={row.messageId}
+          functionId={row.functionId}
+          eventId={row.eventId}
+          mark={row.mark}
+          testId={testId ? `${testId}-dispatch` : 'dispatch'}
+        />
+      )}
     </div>
   )
 }
@@ -201,6 +260,7 @@ export function MessageInspector({
 }) {
   const query = useQuery(messageQuery(project, topic, id))
   const message = query.data
+  const runAgain = useRunAgain(project, topic)
   const gone = query.error instanceof ApiError && query.error.code === 'not-found'
   const shown = tab ?? 'data'
 
@@ -255,6 +315,7 @@ export function MessageInspector({
       }
       testId="pubsub-message-inspector"
     >
+      {runAgain.element}
       {gone ? (
         <EmptyState
           icon={TrayIcon}
@@ -406,7 +467,14 @@ export function MessageInspector({
               >
                 <div className="grid divide-y divide-kumo-hairline">
                   {message.functions.map((row) => (
-                    <FunctionDelivery key={row.eventId} row={row} testId="message-function" />
+                    <FunctionDelivery
+                      key={row.eventId}
+                      row={row}
+                      project={project}
+                      topic={topic}
+                      onRunAgain={runAgain.ask}
+                      testId="message-function"
+                    />
                   ))}
                 </div>
               </InspectorSection>

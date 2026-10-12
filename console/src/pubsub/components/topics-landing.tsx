@@ -6,7 +6,7 @@
 // only the cards on screen have their throughput sent (§6.2).
 
 import { Button } from '@cloudflare/kumo'
-import { BroadcastIcon, LightningIcon, PlusIcon } from '@phosphor-icons/react'
+import { BroadcastIcon, LightningIcon, PlusIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import type { PubsubTopicIndex } from '@/api/generated/messaging/PubsubTopicIndex'
 import type { PubsubTopicSummary } from '@/api/generated/messaging/PubsubTopicSummary'
@@ -45,6 +45,7 @@ export function TopicsLanding({
   foreign,
   onOpen,
   onCreateTopic,
+  onImportSetup,
   onProject,
 }: {
   index: PubsubTopicIndex | undefined
@@ -53,6 +54,8 @@ export function TopicsLanding({
   foreign: boolean
   onOpen: (topic: string) => void
   onCreateTopic: (id?: string) => void
+  /** Opens the setup dialog on Import: the way back after a restart. */
+  onImportSetup: () => void
   onProject: (project: string) => void
 }) {
   const rejected = useQuery(rejectedQuery(project))
@@ -86,14 +89,24 @@ export function TopicsLanding({
           description="Your app creates them with createTopic, a function that listens on a topic creates it at startup, or create one here."
           connect={{ service: 'pubsub', ...(foreign ? { project } : {}) }}
           actions={
-            <Button
-              variant="primary"
-              icon={<PlusIcon />}
-              onClick={() => onCreateTopic()}
-              data-testid="pubsub-empty-new-topic"
-            >
-              New topic
-            </Button>
+            <>
+              <Button
+                variant="primary"
+                icon={<PlusIcon />}
+                onClick={() => onCreateTopic()}
+                data-testid="pubsub-empty-new-topic"
+              >
+                New topic
+              </Button>
+              <Button
+                variant="secondary"
+                icon={<UploadSimpleIcon />}
+                onClick={onImportSetup}
+                data-testid="pubsub-empty-import-setup"
+              >
+                Import setup
+              </Button>
+            </>
           }
           testId="pubsub-empty"
         />

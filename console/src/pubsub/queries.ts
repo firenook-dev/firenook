@@ -75,8 +75,14 @@ export const pubsubKeys = {
     ['pubsub', project, 'message', topic] as const,
   message: (project: string, topic: string, id: string) =>
     ['pubsub', project, 'message', topic, id] as const,
-  dispatch: (project: string, topic: string, id: string, functionId: string) =>
-    ['pubsub', project, 'dispatch', topic, id, functionId] as const,
+  dispatch: (
+    project: string,
+    topic: string,
+    id: string,
+    functionId: string,
+    eventId = '',
+    mark = '',
+  ) => ['pubsub', project, 'dispatch', topic, id, functionId, eventId, mark] as const,
   /** Every backlog list of a subscription (a prefix). */
   subscriptionBacklog: (project: string, subscription: string) =>
     ['pubsub', project, 'backlog', subscription] as const,
@@ -87,6 +93,9 @@ export const pubsubKeys = {
     ['pubsub', project, 'deliveries', topic] as const,
   deliveries: (project: string, topic: string, functionId?: string, outcome?: PubsubFunctionMark) =>
     ['pubsub', project, 'deliveries', topic, functionId ?? '', outcome ?? 'all'] as const,
+  /** A topic's delivery counts by outcome, over every delivery kept (one function's, or all). */
+  deliveryCounts: (project: string, topic: string, functionId?: string) =>
+    ['pubsub', project, 'deliveries', topic, functionId ?? '', 'counts'] as const,
   snapshots: (project: string) => ['pubsub', project, 'snapshots'] as const,
   schemas: (project: string) => ['pubsub', project, 'schemas'] as const,
   /** Every schema detail of the project (a prefix). */
@@ -139,11 +148,22 @@ export const messageQuery = (project: string, topic: string, id: string) =>
     enabled: project !== '' && topic !== '' && id !== '',
   })
 
-/** The request a function received; it never changes once recorded. */
-export const dispatchQuery = (project: string, topic: string, id: string, functionId: string) =>
+/**
+ * The request one delivery of a function received. It never changes once
+ * recorded; before that (queued, running) it is rebuilt, so the delivery's
+ * mark is in the key and a delivery that moves on is read again.
+ */
+export const dispatchQuery = (
+  project: string,
+  topic: string,
+  id: string,
+  functionId: string,
+  eventId?: string,
+  mark?: PubsubFunctionMark,
+) =>
   queryOptions({
-    queryKey: pubsubKeys.dispatch(project, topic, id, functionId),
-    queryFn: ({ signal }) => getDispatch(topic, id, functionId, signal),
+    queryKey: pubsubKeys.dispatch(project, topic, id, functionId, eventId, mark),
+    queryFn: ({ signal }) => getDispatch(topic, id, functionId, eventId, signal),
     staleTime: Number.POSITIVE_INFINITY,
   })
 
@@ -249,14 +269,42 @@ export function deliveryList(
     queryKey,
     fetchPage,
     rowKey: (row: { eventId: string }) => row.eventId,
-    batchGet: (request: Parameters<typeof batchGetDeliveries>[1], signal: AbortSignal) =>
-      batchGetDeliveries(topic, request, signal),
+    // The engine reads a delivery by event id whatever the list's narrowing;
+    // one that no longer matches it (a queued delivery that ran, under
+    // "Queued") leaves the list, as it would on a fresh read.
+    batchGet: async (request: Parameters<typeof batchGetDeliveries>[1], signal: AbortSignal) => {
+      const answer = await batchGetDeliveries(topic, request, signal)
+      if (functionId === undefined && outcome === undefined) return answer
+      return {
+        ...answer,
+        items: answer.items.map((item) =>
+          item.row &&
+          ((functionId !== undefined && item.row.functionId !== functionId) ||
+            (outcome !== undefined && item.row.mark !== outcome))
+            ? { key: item.key, row: null, page: null }
+            : item,
+        ),
+      }
+    },
     options: {
       ...cursorPagesOptions(queryKey, fetchPage),
       enabled: project !== '' && topic !== '',
     },
   }
 }
+
+/**
+ * A topic's delivery counts by outcome (one function's, or every one), read
+ * on their own so the outcome switch stays current wherever the list is
+ * scrolled: a one-row page carries them.
+ */
+export const deliveryCountsQuery = (project: string, topic: string, functionId?: string) =>
+  queryOptions({
+    queryKey: pubsubKeys.deliveryCounts(project, topic, functionId),
+    queryFn: async ({ signal }) =>
+      (await getDeliveries({ topic, function: functionId }, { limit: 1 }, signal)).counts,
+    enabled: project !== '' && topic !== '',
+  })
 
 /** The outcome counts a deliveries list's first page carries (over every delivery kept). */
 export function deliveryCountsOf(
