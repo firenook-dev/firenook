@@ -16,17 +16,11 @@ import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { useDelayedFlag } from '@/components/console/empty-state'
 import { EntityLink } from '@/components/console/entity-link'
 import { LiveNotice } from '@/components/console/live-notice'
-import { MiniBars } from '@/components/console/mini-bars'
 import { useNow } from '@/lib/clock'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
 import { formatClock, formatCount, relativeTime } from '@/lib/format'
-import {
-  LEVEL_SERIES,
-  bucketSentence,
-  bucketSpan,
-  hourBucketStart,
-  problemBuckets,
-} from '@/observe/level-bars'
+import { bucketSentence, bucketSpan, hourBucketStart, problemBuckets } from '@/observe/level-bars'
+import { LevelStrip } from '@/observe/level-strip'
 import { LevelWord } from '@/observe/level-word'
 import { SourceChip, labelSource } from '@/observe/source-chip'
 import { logsEntryLink, logsProblemsLink, problemLink } from '../model'
@@ -78,25 +72,24 @@ export function RecentProblems({
         </h2>
         {data && hour.length > 0 && (
           <div className="flex items-center gap-2">
-            {/* A hairline under the bars: an hour with no problem still shows its axis. */}
-            <div className="w-48 border-b border-kumo-line">
-              <MiniBars
-                buckets={problemBuckets(hour)}
-                series={LEVEL_SERIES}
-                height={20}
-                label="Warnings and errors per minute, last hour"
-                tooltip={(index) => {
-                  const bucket = hour[index]
-                  const span = bucketSpan(
-                    hourBucketStart(data.generatedAt, index, hour.length),
-                    MINUTE,
-                  )
-                  return bucket ? bucketSentence(bucket, span) : span
-                }}
-                {...(pick ? { onPick: pick } : {})}
-                testId="overview-problems-bars"
-              />
-            </div>
+            {/* A slot per minute: an hour with no problem still reads as an hour. */}
+            <LevelStrip
+              buckets={problemBuckets(hour)}
+              height={20}
+              ground="slots"
+              label="Warnings and errors per minute, last hour"
+              tooltip={(index) => {
+                const bucket = hour[index]
+                const span = bucketSpan(
+                  hourBucketStart(data.generatedAt, index, hour.length),
+                  MINUTE,
+                )
+                return bucket ? bucketSentence(bucket, span) : span
+              }}
+              {...(pick ? { onPick: pick } : {})}
+              className="w-60"
+              testId="overview-problems-bars"
+            />
             <span className="text-[12px] text-kumo-subtle">last hour</span>
           </div>
         )}

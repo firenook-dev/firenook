@@ -24,7 +24,6 @@ import { FilterField, type FilterRefusal } from '@/components/console/filter-fie
 import type { JsonPath } from '@/components/console/json-tree-model'
 import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
-import { MiniBars } from '@/components/console/mini-bars'
 import { PauseButton } from '@/components/console/pause-button'
 import {
   type RowMenuAnchor,
@@ -46,13 +45,8 @@ import { useConsoleProject } from '@/lib/project'
 import { useRouteSearch } from '@/lib/search-params'
 import { toast } from '@/lib/toasts'
 import { isProblemLine } from '@/observe/kinds'
-import {
-  LEVEL_SERIES,
-  bucketSentence,
-  bucketSpan,
-  bucketTotal,
-  levelBuckets,
-} from '@/observe/level-bars'
+import { bucketSentence, bucketSpan, bucketTotal, levelBuckets } from '@/observe/level-bars'
+import { LevelStrip } from '@/observe/level-strip'
 import { type SourceToken, sourceTokenText } from '@/observe/source-chip'
 import { engineQuery } from '@/overview/api'
 import {
@@ -612,9 +606,8 @@ export function LogsPage() {
             data-testid="logs-volume-total"
           >
             {histogramData && (
-              <MiniBars
+              <LevelStrip
                 buckets={buckets}
-                series={LEVEL_SERIES}
                 height={24}
                 label="Lines over the window, by level: click a bar or drag across bars to read that time"
                 tooltip={(index) => {
