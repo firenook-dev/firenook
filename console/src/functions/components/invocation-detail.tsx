@@ -458,14 +458,17 @@ export function InvocationDetail({
             data-testid="invocation-head"
           >
             <div className="flex min-w-0 items-center gap-2">
-              <OutcomeChip
-                outcome={summary.outcome}
-                outcomeClass={summary.outcomeClass}
-                status={chipStatus(summary)}
-                callableStatus={summary.callableStatus ?? undefined}
-                startedAt={summary.startedAt}
-                testId="invocation-detail-outcome"
-              />
+              {/* The chip's own wrapper may shrink; beside a long summary it must not, or the summary draws over it. */}
+              <span className="flex shrink-0 items-center">
+                <OutcomeChip
+                  outcome={summary.outcome}
+                  outcomeClass={summary.outcomeClass}
+                  status={chipStatus(summary)}
+                  callableStatus={summary.callableStatus ?? undefined}
+                  startedAt={summary.startedAt}
+                  testId="invocation-detail-outcome"
+                />
+              </span>
               <span
                 className="min-w-0 truncate font-mono text-[13px] text-kumo-default"
                 data-testid="invocation-detail-summary"
