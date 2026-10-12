@@ -139,6 +139,30 @@ describe('a section card', () => {
     await user.click(screen.getByTestId('overview-card-firestore-connect'))
     expect(onConnect).toHaveBeenCalledWith('web')
   })
+
+  it('opens the Functions output in Logs from the Functions card, and from no other', async () => {
+    const status = testStatus({
+      projectId: 'demo-overview',
+      services: [
+        ...services,
+        { name: 'functions', host: '127.0.0.1', port: 5001, listening: true, pid: null },
+      ],
+      sections: [sectionEntry('firestore'), sectionEntry('functions'), sectionEntry('logs')],
+    })
+    const cards = sectionCards(status, new Map())
+    await renderInConsole(
+      () =>
+        cards.map((card) => (
+          <SectionCard key={card.section.id} card={card} tick={status} onConnect={() => {}} />
+        )),
+      { status },
+    )
+    expect(screen.getByTestId('overview-card-functions-logs')).toHaveAttribute(
+      'href',
+      '/logs?q=service%3Afunctions',
+    )
+    expect(screen.queryByTestId('overview-card-firestore-logs')).not.toBeInTheDocument()
+  })
 })
 
 describe('configuration notices', () => {

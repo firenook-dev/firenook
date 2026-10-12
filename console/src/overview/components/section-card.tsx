@@ -37,6 +37,18 @@ export function SectionCard({
       key: page.to,
       node: <TextLink link={{ to: page.to }}>{page.label}</TextLink>,
     })),
+    ...(card.logs
+      ? [
+          {
+            key: 'logs',
+            node: (
+              <TextLink link={card.logs} testId={`overview-card-${section.id}-logs`}>
+                Logs
+              </TextLink>
+            ),
+          },
+        ]
+      : []),
     ...(connect
       ? [
           {

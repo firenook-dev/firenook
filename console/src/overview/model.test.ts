@@ -139,6 +139,20 @@ describe('section cards', () => {
     expect(functions?.status.detail).toBe('Discovering functions in 2 codebases…')
   })
 
+  it('send the Functions card to its lines in Logs while Logs runs, and no other card', () => {
+    const cards = sectionCards(STATUS, badges())
+    expect(cards.find((card) => card.section.id === 'functions')?.logs).toEqual({
+      to: '/logs',
+      search: { q: 'service:functions' },
+    })
+    for (const card of cards.filter((entry) => entry.section.id !== 'functions'))
+      expect(card.logs).toBeNull()
+    const absent = testStatus({
+      sections: [sectionEntry('functions'), sectionEntry('logs', { state: 'absent' })],
+    })
+    expect(sectionCards(absent, badges())[0]?.logs).toBeNull()
+  })
+
   it('link a built section’s later pages, and none of an unbuilt one', () => {
     const cards = sectionCards(STATUS, badges())
     expect(cards[0]?.pages).toEqual([

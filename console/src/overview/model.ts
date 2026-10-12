@@ -16,6 +16,7 @@ import type { ServiceStatus } from '@/api/generated/ServiceStatus'
 import type { SummaryFigure } from '@/api/generated/SummaryFigure'
 import { formatBytes, formatCount, formatDuration, formatNumber } from '@/lib/format'
 import { linkTo } from '@/lib/links'
+import { linkToLogs } from '@/lib/sections/logs'
 import { type ConsoleSection, type SectionId, type SectionLink, sectionById } from '@/lib/services'
 import type { ConnectParam } from './search'
 
@@ -49,6 +50,12 @@ export interface SectionCard {
   health: CardHealth
   /** The section's pages after its first, as links on the card ("Rules"); none while it is not built. */
   pages: readonly { to: string; label: string }[]
+  /**
+   * The section's own lines in Logs: the Functions card's "Logs", as the
+   * official Functions card linked to the log viewer. `null` for every
+   * other section, and while Logs is not built or does not run.
+   */
+  logs: SectionLink | null
 }
 
 const PROBLEM = { one: 'problem', other: 'problems' }
@@ -118,6 +125,8 @@ export function sectionCards(
       problems,
       health: cardHealth(entry, problems),
       pages: section.built ? (section.pages ?? []).slice(1) : [],
+      logs:
+        entry.id === 'functions' && logsOpen(status) ? linkToLogs({ service: 'functions' }) : null,
     })
   }
   return cards
@@ -367,10 +376,13 @@ export function logsEntryLink(cursor: string, status?: ConsoleStatus): SectionLi
   return linkTo({ kind: 'logs.entry', key: cursor }, status)
 }
 
+/** Whether a link into Logs opens: the page is built and this engine runs it. */
+function logsOpen(status?: ConsoleStatus): boolean {
+  if (!sectionById('logs')?.built) return false
+  return status?.sections.find((entry) => entry.id === 'logs')?.state !== 'absent'
+}
+
 /** Where "Open logs" goes from the recent problems; `null` while Logs is not built or absent. */
 export function logsProblemsLink(status?: ConsoleStatus): SectionLink | null {
-  const logs = sectionById('logs')
-  if (!logs?.built) return null
-  if (status?.sections.find((entry) => entry.id === 'logs')?.state === 'absent') return null
-  return { to: '/logs', search: { q: 'is:problem' } }
+  return logsOpen(status) ? { to: '/logs', search: { q: 'is:problem' } } : null
 }
