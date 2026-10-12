@@ -36,7 +36,7 @@ export const auth: ConsoleSection = {
   area: 'data',
   icon: UsersIcon,
   // False keeps the placeholder until the Authentication journeys pass.
-  built: false,
+  built: true,
   summary:
     'Users with search and live rows, a claims editor that shows the token it produces, an inbox for every link and code the emulator sends, every call with its exact error, tenants and blocking functions.',
   pages: [
