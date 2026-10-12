@@ -12,6 +12,44 @@ import {
 } from '@tanstack/react-router'
 import { z } from 'zod'
 
+/**
+ * One search value as the console reads it. The router's default reads
+ * every value as JSON, which suits the links the console writes (strings
+ * that look like JSON are quoted) but not an address typed or pasted by
+ * hand: `?invocation=40406e-694` became the number 4.04e-690 and the page
+ * failed, `?uid=12345` or `?q=123` a number a text param refuses. A bare
+ * number is therefore kept as the text it is; a param that is a number
+ * coerces it (`z.coerce.number()`). Quoted strings, `true`/`false`, `null`,
+ * objects and arrays read as JSON, as the console writes them.
+ */
+export function parseSearchValue(raw: string): unknown {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return raw
+  }
+  return typeof parsed === 'number' ? raw : parsed
+}
+
+/**
+ * The router's `parseSearch`: each value through `parseSearchValue`, a
+ * repeated key as a list. (The router's own decoder turns `12345` into a
+ * number before any value parser sees it, so it is not used.)
+ */
+export function parseSearch(searchStr: string): Record<string, unknown> {
+  const query: Record<string, unknown> = {}
+  for (const [key, raw] of new URLSearchParams(searchStr)) {
+    const value = parseSearchValue(raw)
+    if (!(key in query)) query[key] = value
+    else {
+      const held = query[key]
+      query[key] = Array.isArray(held) ? [...(held as unknown[]), value] : [held, value]
+    }
+  }
+  return query
+}
+
 type RouteId = RouteIds<RegisteredRouter['routeTree']>
 
 /** `patch` over `previous`, with `undefined`, `''`, `false` and `[]` removed. */

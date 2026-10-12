@@ -10,7 +10,16 @@ import { act, render, screen } from '@testing-library/react'
 import { createElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { mergeSearch, parseSort, printSort, useRouteSearch, zFlag, zSort } from './search-params'
+import {
+  mergeSearch,
+  parseSearch,
+  parseSearchValue,
+  parseSort,
+  printSort,
+  useRouteSearch,
+  zFlag,
+  zSort,
+} from './search-params'
 
 describe('updating search params', () => {
   it('drops undefined, empty text, false and empty lists', () => {
@@ -126,5 +135,47 @@ describe('useRouteSearch', () => {
     expect(router.state.location.search).toEqual({ sort: 'time:desc' })
     expect(history.length).toBe(pushed)
     expect(screen.getByTestId('search')).toHaveTextContent('{"sort":"time:desc"}')
+  })
+})
+
+describe('search values typed or pasted by hand', () => {
+  it('keep a bare number as the text it is, and read the rest as the console writes it', () => {
+    expect(parseSearchValue('40406e-694')).toBe('40406e-694')
+    expect(parseSearchValue('12345')).toBe('12345')
+    expect(parseSearchValue('007')).toBe('007')
+    expect(parseSearchValue('"12345"')).toBe('12345')
+    expect(parseSearchValue('true')).toBe(true)
+    expect(parseSearchValue('null')).toBeNull()
+    expect(parseSearchValue('{"a":1}')).toEqual({ a: 1 })
+    expect(parseSearchValue('Cart is empty')).toBe('Cart is empty')
+  })
+
+  it('reach a page as text, and a number param coerces it', async () => {
+    const root = createRootRoute()
+    const things = createRoute({
+      getParentRoute: () => root,
+      path: '/things',
+      validateSearch: z.object({
+        invocation: z.string().optional(),
+        uid: z.string().optional(),
+        line: z.coerce.number().int().optional(),
+        paused: zFlag,
+      }),
+      component: () => createElement('p', { 'data-testid': 'typed-search' }, 'ok'),
+    })
+    const history = createMemoryHistory({
+      initialEntries: ['/things?invocation=40406e-694&uid=12345&line=12&paused=true'],
+    })
+    const router = createRouter({ routeTree: root.addChildren([things]), history, parseSearch })
+    render(createElement(RouterProvider, { router: router as never }))
+    expect(await screen.findByTestId('typed-search')).toHaveTextContent('ok')
+    // The address holds text; the page's validated search has the number.
+    expect(router.state.location.search).toMatchObject({ uid: '12345', line: '12' })
+    expect(router.state.matches.at(-1)?.search).toEqual({
+      invocation: '40406e-694',
+      uid: '12345',
+      line: 12,
+      paused: true,
+    })
   })
 })

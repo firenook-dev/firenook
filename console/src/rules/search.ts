@@ -40,7 +40,8 @@ export function rulesPageSearch<
     flips: zFlag,
     // Open the newest denial the narrowing matches, once, then forget it.
     pick: zFlag,
-    // A line of the rules to bring into view and mark, once.
-    line: z.number().int().min(1).optional(),
+    // A line of the rules to bring into view and mark, once (the address
+    // carries it as text; a link may pass the number).
+    line: z.coerce.number().int().min(1).optional(),
   })
 }
