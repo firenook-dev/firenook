@@ -8,7 +8,7 @@
 import { useEffect, useRef } from 'react'
 import { type Job, cancelJob, useJobs } from '@/lib/jobs'
 import { formatNumber } from '@/lib/format'
-import { toast } from '@/lib/toasts'
+import { type ToastOptions, toast } from '@/lib/toasts'
 
 /** "1,204 of 5,000 · 3 skipped · 2 failed". */
 export function jobProgress(job: Job): string {
@@ -28,6 +28,21 @@ export function jobProgress(job: Job): string {
  */
 export function jobFailure(job: Job): string {
   return job.message ?? job.errors[0]?.message ?? jobProgress(job)
+}
+
+/** The toast for a suite job that has ended, as this watch says it. */
+export function jobEndToast(job: Job): ToastOptions {
+  const key = `job:${job.id}`
+  if (job.state === 'done')
+    return { key, title: `${job.title}: done`, description: jobProgress(job), tone: 'success' }
+  if (job.state === 'cancelled')
+    return {
+      key,
+      title: `${job.title}: cancelled`,
+      description: jobProgress(job),
+      tone: 'warning',
+    }
+  return { key, title: `${job.title}: failed`, description: jobFailure(job), tone: 'danger' }
 }
 
 export function JobsWatch() {
@@ -50,22 +65,8 @@ export function JobsWatch() {
           tone: 'info',
           action: { label: 'Cancel', run: () => void cancelJob(job.id) },
         })
-      } else if (job.state === 'done') {
-        toast({ key, title: `${job.title}: done`, description: jobProgress(job), tone: 'success' })
-      } else if (job.state === 'cancelled') {
-        toast({
-          key,
-          title: `${job.title}: cancelled`,
-          description: jobProgress(job),
-          tone: 'warning',
-        })
       } else {
-        toast({
-          key,
-          title: `${job.title}: failed`,
-          description: jobFailure(job),
-          tone: 'danger',
-        })
+        toast(jobEndToast(job))
       }
     }
   }, [jobs])

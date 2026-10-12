@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Job } from '@/lib/jobs'
-import { jobFailure, jobProgress } from './jobs-watch'
+import { jobEndToast, jobFailure, jobProgress } from './jobs-watch'
 
 const job = (overrides: Partial<Job>): Job => ({
   id: 'j1',
@@ -38,5 +38,25 @@ describe('why a job failed', () => {
     expect(jobFailure({ ...failed, message: 'The engine stopped.' })).toBe('The engine stopped.')
     expect(jobFailure(failed)).toBe('Permission denied.')
     expect(jobFailure(job({ state: 'failed' }))).toBe('1,204 of 5,000')
+  })
+})
+
+describe('how a job’s ending is said', () => {
+  it('names the job and how it ended, keyed to replace its running toast', () => {
+    expect(jobEndToast(job({ state: 'done', done: 5000 }))).toEqual({
+      key: 'job:j1',
+      title: 'Reset Firestore: done',
+      description: '5,000 of 5,000',
+      tone: 'success',
+    })
+    expect(jobEndToast(job({ state: 'cancelled' }))).toMatchObject({
+      title: 'Reset Firestore: cancelled',
+      tone: 'warning',
+    })
+    expect(jobEndToast(job({ state: 'failed', message: 'The engine stopped.' }))).toMatchObject({
+      title: 'Reset Firestore: failed',
+      description: 'The engine stopped.',
+      tone: 'danger',
+    })
   })
 })
