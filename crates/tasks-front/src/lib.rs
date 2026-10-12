@@ -49,6 +49,7 @@
 pub mod config;
 pub mod functions;
 mod http;
+pub mod inspect;
 pub mod json;
 pub mod queue;
 mod rfc3339;
@@ -62,9 +63,11 @@ pub use queue::{
     AttemptLog, AttemptRecord, Controls, Finished, Outcome, RunNow, RunRequest, Statistics,
     Stopped, TaskOrigin, TaskOutcome, TaskQueue, TaskRecord,
 };
+pub use queue::{RowKey, TaskChange};
 pub use runtime::{
-    AttemptSink, ConsoleTask, ControlError, EnqueueError, EnqueuedTask, FinishedTask, LogSink,
-    QueueFunction, QueueOrigin, QueueParts, QueueSource, RejectedQueue, RemoveError, Replaced,
+    AttemptSink, ConsoleTask, ControlError, EnqueueError, EnqueuedTask, FinishedTask, LOG_FAILED,
+    LOG_TASKS, LogSink, QueueFunction, QueueOrigin, QueueParts, QueueSource, Refused,
+    RejectedQueue, RemoveError, Replaced, StampedWindow, TasksLogLine, TasksResetCount,
     TasksRuntime,
 };
 

@@ -4,7 +4,7 @@
 //! reaches: each slot's attempt log, tasks held until their schedule time,
 //! pause, run now, stop retrying and purge.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -467,6 +467,58 @@ impl Statistics {
     }
 }
 
+/// A row of the console's task list: `(phase, task id)`, phase 0 for a
+/// task in a slot and 1 for a pending or held one, so a task that takes a
+/// slot is one gone key and one new key. Written `phase.id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RowKey {
+    pub phase: u8,
+    pub id: u64,
+}
+
+impl RowKey {
+    #[must_use]
+    pub const fn slotted(id: u64) -> Self {
+        Self { phase: 0, id }
+    }
+
+    #[must_use]
+    pub const fn waiting(id: u64) -> Self {
+        Self { phase: 1, id }
+    }
+}
+
+impl std::fmt::Display for RowKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}.{}", self.phase, self.id)
+    }
+}
+
+impl std::str::FromStr for RowKey {
+    type Err = ();
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let (phase, id) = text.split_once('.').ok_or(())?;
+        let phase = phase.parse::<u8>().map_err(|_| ())?;
+        if phase > 1 {
+            return Err(());
+        }
+        Ok(Self {
+            phase,
+            id: id.parse().map_err(|_| ())?,
+        })
+    }
+}
+
+/// What changed in a queue, for the console's live list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TaskChange {
+    /// A row changed, appeared or left.
+    Row(RowKey),
+    /// Only the task's detail changed (a response snippet arrived).
+    Detail(u64),
+}
+
 /// Why `enqueue` rejected a task (the 409 path).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Conflict;
@@ -486,6 +538,10 @@ pub struct TaskQueue {
     /// Tasks waiting for their schedule time while the console holds them,
     /// by due time; counted as pending by the official count.
     held: BTreeMap<(SystemTime, u64), Arc<TaskRecord>>,
+    /// Each held task's due time, by task id.
+    held_due: HashMap<u64, SystemTime>,
+    /// Rows changed since the runtime last took them.
+    changes: Vec<TaskChange>,
     /// The official `Queue.count`: incremented on enqueue, decremented on
     /// dequeue *and* on remove, so removing a dispatched task takes it
     /// negative.
@@ -520,6 +576,8 @@ impl TaskQueue {
             config,
             pending: VecDeque::new(),
             held: BTreeMap::new(),
+            held_due: HashMap::new(),
+            changes: Vec::new(),
             count: 0,
             known_names: HashSet::new(),
             queued_ids: HashSet::new(),
@@ -549,9 +607,10 @@ impl TaskQueue {
         self.known_names.insert(task.name.clone());
         self.queued_ids.insert(task.name.clone());
         let task = Arc::new(task);
+        self.changes.push(TaskChange::Row(RowKey::waiting(task.id)));
         match task.scheduled {
             Some(due) if controls.hold_scheduled && due > SystemTime::now() => {
-                self.held.insert((due, task.id), task);
+                self.hold_task(due, task);
             }
             _ => self.pending.push_back(task),
         }
@@ -588,11 +647,46 @@ impl TaskQueue {
 
     /// Takes the first pending or held task `matches` picks.
     fn take_waiting(&mut self, matches: impl Fn(&TaskRecord) -> bool) -> Option<Arc<TaskRecord>> {
-        if let Some(position) = self.pending.iter().position(|task| matches(task)) {
-            return self.pending.remove(position);
+        let task = if let Some(position) = self.pending.iter().position(|task| matches(task)) {
+            self.pending.remove(position)
+        } else {
+            let key = *self.held.iter().find(|(_, task)| matches(task))?.0;
+            self.unhold(key)
+        };
+        if let Some(task) = &task {
+            self.changes.push(TaskChange::Row(RowKey::waiting(task.id)));
         }
-        let key = *self.held.iter().find(|(_, task)| matches(task))?.0;
+        task
+    }
+
+    fn hold_task(&mut self, due: SystemTime, task: Arc<TaskRecord>) {
+        self.held_due.insert(task.id, due);
+        self.held.insert((due, task.id), task);
+    }
+
+    fn unhold(&mut self, key: (SystemTime, u64)) -> Option<Arc<TaskRecord>> {
+        self.held_due.remove(&key.1);
         self.held.remove(&key)
+    }
+
+    /// Takes every pending and held task, in task-id order then by due time.
+    fn take_all_waiting(&mut self) -> Vec<Arc<TaskRecord>> {
+        self.held_due.clear();
+        let tasks: Vec<Arc<TaskRecord>> = std::mem::take(&mut self.pending)
+            .into_iter()
+            .chain(std::mem::take(&mut self.held).into_values())
+            .collect();
+        self.changes.extend(
+            tasks
+                .iter()
+                .map(|task| TaskChange::Row(RowKey::waiting(task.id))),
+        );
+        tasks
+    }
+
+    /// The rows changed since the last call.
+    pub fn take_changes(&mut self) -> Vec<TaskChange> {
+        std::mem::take(&mut self.changes)
     }
 
     /// `isActive`, with the console's controls: a paused queue is idle
@@ -616,6 +710,8 @@ impl TaskQueue {
                 break;
             }
             let task = entry.remove();
+            self.held_due.remove(&task.id);
+            self.changes.push(TaskChange::Row(RowKey::waiting(task.id)));
             self.insert_pending(task);
         }
     }
@@ -634,14 +730,17 @@ impl TaskQueue {
             for task in std::mem::take(&mut self.pending) {
                 match task.scheduled {
                     Some(due) if due > now => {
-                        self.held.insert((due, task.id), task);
+                        self.changes.push(TaskChange::Row(RowKey::waiting(task.id)));
+                        self.hold_task(due, task);
                     }
                     _ => kept.push_back(task),
                 }
             }
             self.pending = kept;
         } else {
+            self.held_due.clear();
             for task in std::mem::take(&mut self.held).into_values() {
+                self.changes.push(TaskChange::Row(RowKey::waiting(task.id)));
                 self.insert_pending(task);
             }
         }
@@ -700,6 +799,8 @@ impl TaskQueue {
             };
             self.count -= 1;
             *next_id += 1;
+            self.changes.push(TaskChange::Row(RowKey::waiting(task.id)));
+            self.changes.push(TaskChange::Row(RowKey::slotted(task.id)));
             self.slots[slot] = Some(Dispatch::new(*next_id, task, now));
             self.tokens -= 1.0;
         }
@@ -725,6 +826,8 @@ impl TaskQueue {
                     let Some(dispatch) = self.slots[index].take() else {
                         continue;
                     };
+                    self.changes
+                        .push(TaskChange::Row(RowKey::slotted(dispatch.task.id)));
                     self.open.push(index);
                     let outcome = match status {
                         Status::Failed => {
@@ -751,6 +854,8 @@ impl TaskQueue {
                     }
                     dispatch.run_now = false;
                     dispatch.status = Status::Running;
+                    self.changes
+                        .push(TaskChange::Row(RowKey::slotted(dispatch.task.id)));
                     runs.push(build_request(&self.key, dispatch, now_ms));
                 }
                 Status::Retry => {
@@ -761,6 +866,8 @@ impl TaskQueue {
                         update_metadata(dispatch, config);
                         dispatch.status = Status::NotStarted;
                     }
+                    self.changes
+                        .push(TaskChange::Row(RowKey::slotted(dispatch.task.id)));
                 }
                 Status::Running => {}
             }
@@ -808,6 +915,8 @@ impl TaskQueue {
         if dispatch.stop_requested && dispatch.status == Status::Retry {
             dispatch.status = Status::Cancelled;
         }
+        let id = dispatch.task.id;
+        self.changes.push(TaskChange::Row(RowKey::slotted(id)));
         true
     }
 
@@ -825,10 +934,14 @@ impl TaskQueue {
             .flatten()
             .find(|dispatch| dispatch.id == dispatch_id)
         {
-            Some(dispatch) => dispatch
-                .attempts
-                .attach_response(attempt, response.clone())
-                .ok_or(response),
+            Some(dispatch) => {
+                let attached = dispatch
+                    .attempts
+                    .attach_response(attempt, response.clone())
+                    .ok_or(response);
+                self.changes.push(TaskChange::Detail(dispatch.task.id));
+                attached
+            }
             None => Err(response),
         }
     }
@@ -854,6 +967,8 @@ impl TaskQueue {
                 Status::NotStarted if dispatch.last_run.is_none() => Ok(RunNow::AlreadyStarting),
                 Status::NotStarted | Status::Retry => {
                     dispatch.run_now = true;
+                    let id = dispatch.task.id;
+                    self.changes.push(TaskChange::Row(RowKey::slotted(id)));
                     Ok(RunNow::BackoffSkipped)
                 }
                 Status::Failed | Status::Finished | Status::Cancelled => {
@@ -873,6 +988,7 @@ impl TaskQueue {
         };
         self.count -= 1;
         *next_id += 1;
+        self.changes.push(TaskChange::Row(RowKey::slotted(task.id)));
         self.slots[slot] = Some(Dispatch::new(*next_id, task, now));
         Ok(RunNow::Started)
     }
@@ -880,18 +996,48 @@ impl TaskQueue {
     /// Task `id`, pending, held or in a slot.
     #[must_use]
     pub fn task(&self, id: u64) -> Option<Arc<TaskRecord>> {
-        self.pending
-            .iter()
-            .chain(self.held.values())
-            .chain(self.slots.iter().flatten().map(|dispatch| &dispatch.task))
-            .find(|task| task.id == id)
-            .cloned()
+        if let Some(position) = self.pending_position(id) {
+            return self.pending.get(position).cloned();
+        }
+        if let Some((_, task)) = self.held_task(id) {
+            return Some(Arc::clone(task));
+        }
+        self.dispatch_of(id)
+            .map(|dispatch| Arc::clone(&dispatch.task))
     }
 
     /// Whether task `id` is pending or held.
     fn waiting(&self, id: u64) -> bool {
-        self.pending.iter().any(|task| task.id == id)
-            || self.held.values().any(|task| task.id == id)
+        self.pending_position(id).is_some() || self.held_due.contains_key(&id)
+    }
+
+    /// Task `id`'s place in the pending queue, from 0 (pending stays in
+    /// task-id order, so a binary search finds it).
+    #[must_use]
+    pub fn pending_position(&self, id: u64) -> Option<usize> {
+        let position = self.pending.partition_point(|task| task.id < id);
+        (self.pending.get(position)?.id == id).then_some(position)
+    }
+
+    /// Held task `id` and when it comes due.
+    #[must_use]
+    pub fn held_task(&self, id: u64) -> Option<(SystemTime, &Arc<TaskRecord>)> {
+        let due = *self.held_due.get(&id)?;
+        self.held.get(&(due, id)).map(|task| (due, task))
+    }
+
+    /// The dispatch holding task `id`.
+    #[must_use]
+    pub fn dispatch_of(&self, id: u64) -> Option<&Dispatch> {
+        self.slots
+            .iter()
+            .flatten()
+            .find(|dispatch| dispatch.task.id == id)
+    }
+
+    /// The dispatches occupying slots.
+    pub fn slotted(&self) -> impl Iterator<Item = &Dispatch> {
+        self.slots.iter().flatten()
     }
 
     /// The console's Stop retrying for a task in a slot: waiting, its slot
@@ -903,6 +1049,7 @@ impl TaskQueue {
             .iter()
             .position(|slot| slot.as_ref().is_some_and(|dispatch| dispatch.task.id == id))?;
         let dispatch = self.slots[index].as_mut()?;
+        self.changes.push(TaskChange::Row(RowKey::slotted(id)));
         match dispatch.status {
             Status::Running => {
                 dispatch.stop_requested = true;
@@ -953,11 +1100,7 @@ impl TaskQueue {
     /// purged tasks, and the stopped ones with how many there were.
     pub fn purge(&mut self, stop_retrying: bool) -> (Vec<Finished>, u32) {
         let mut finished = Vec::new();
-        let waiting: Vec<Arc<TaskRecord>> = std::mem::take(&mut self.pending)
-            .into_iter()
-            .chain(std::mem::take(&mut self.held).into_values())
-            .collect();
-        for task in waiting {
+        for task in self.take_all_waiting() {
             if self.known_names.remove(&task.name) {
                 self.count -= 1;
             }
@@ -984,9 +1127,9 @@ impl TaskQueue {
     /// Every pending, held and slotted task, leaving for the history as
     /// replaced (a re-registration replaces the queue).
     pub fn drain_replaced(&mut self) -> Vec<Finished> {
-        let mut finished: Vec<Finished> = std::mem::take(&mut self.pending)
+        let mut finished: Vec<Finished> = self
+            .take_all_waiting()
             .into_iter()
-            .chain(std::mem::take(&mut self.held).into_values())
             .map(|task| Finished::pending(task, TaskOutcome::Replaced))
             .collect();
         for slot in &mut self.slots {
@@ -1006,6 +1149,8 @@ impl TaskQueue {
             + self.slots.iter().filter(|slot| slot.is_some()).count();
         self.pending.clear();
         self.held.clear();
+        self.held_due.clear();
+        self.changes.clear();
         self.slots.fill(None);
         self.open = (0..self.slots.len()).collect();
         self.count = 0;
@@ -1077,6 +1222,13 @@ impl TaskQueue {
         self.slots.iter().flatten().cloned().collect()
     }
 
+    /// Names reserved for the life of the process (the console's clear
+    /// frees them).
+    #[must_use]
+    pub fn reserved_names(&self) -> usize {
+        self.queued_ids.union(&self.known_names).count()
+    }
+
     /// The signed pending count.
     #[must_use]
     pub fn count(&self) -> i64 {
@@ -1146,9 +1298,18 @@ impl Dispatch {
     }
 }
 
-/// The request `runTask` sends for a dispatch.
-fn build_request(queue_key: &str, dispatch: &Dispatch, now_ms: u64) -> RunRequest {
-    let task = &dispatch.task;
+/// The headers an attempt of `task` sends: the emulator's `X-CloudTasks-*`
+/// headers, the caller's over them, then the previous response, exactly as
+/// `runTask` builds them.
+#[must_use]
+pub fn preview_headers(
+    queue_key: &str,
+    task: &TaskRecord,
+    attempt: u32,
+    execution_count: u32,
+    previous_response: Option<u16>,
+    now_ms: u64,
+) -> Vec<(String, String)> {
     let mut headers: Vec<(String, String)> = vec![
         ("Content-Type".to_owned(), "application/json".to_owned()),
         ("X-CloudTasks-QueueName".to_owned(), queue_key.to_owned()),
@@ -1158,11 +1319,11 @@ fn build_request(queue_key: &str, dispatch: &Dispatch, now_ms: u64) -> RunReques
         ),
         (
             "X-CloudTasks-TaskRetryCount".to_owned(),
-            (dispatch.attempt - 1).to_string(),
+            attempt.saturating_sub(1).to_string(),
         ),
         (
             "X-CloudTasks-TaskExecutionCount".to_owned(),
-            dispatch.execution_count.to_string(),
+            execution_count.to_string(),
         ),
         (
             "X-CloudTasks-TaskETA".to_owned(),
@@ -1174,13 +1335,95 @@ fn build_request(queue_key: &str, dispatch: &Dispatch, now_ms: u64) -> RunReques
     for (name, value) in &task.headers {
         spread(&mut headers, name, value);
     }
-    if let Some(previous) = dispatch.previous_response.filter(|status| *status != 0) {
+    if let Some(previous) = previous_response.filter(|status| *status != 0) {
         spread(
             &mut headers,
             "X-CloudTasks-TaskPreviousResponse",
             &previous.to_string(),
         );
     }
+    headers
+}
+
+/// One attempt the dispatcher would still make if every attempt failed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlannedAttempt {
+    pub attempt: u32,
+    /// How long after `from` it runs at the earliest (requests taking no
+    /// time).
+    pub after: Duration,
+    /// The backoff before it.
+    pub backoff_seconds: f64,
+    /// The dispatcher gives up after this one.
+    pub last: bool,
+}
+
+/// Planned attempts kept at most (a time-bounded ladder can be long).
+const PLAN_LIMIT: u32 = 50;
+
+/// The attempts the dispatcher still makes if each fails: `attempt` runs at
+/// `wait` from now, and every later one after the backoff the dispatcher's
+/// own `updateMetadata` computes, until its own `shouldStopRetrying` stops,
+/// with `elapsed` already spent since the first attempt. Run through the
+/// same two functions, so the plan cannot disagree with the dispatcher.
+#[must_use]
+pub fn retry_plan(
+    config: &QueueConfig,
+    attempt: u32,
+    wait: Duration,
+    elapsed: Duration,
+) -> Vec<PlannedAttempt> {
+    let origin = Instant::now();
+    let started = origin.checked_sub(elapsed).unwrap_or(origin);
+    let mut dispatch = Dispatch::new(0, Arc::new(empty_task()), started);
+    dispatch.attempt = attempt;
+    let mut after = wait;
+    let mut backoff = 0.0;
+    let mut plan = Vec::new();
+    loop {
+        let finished_at = origin + after;
+        let last = should_stop_retrying(&dispatch, config, finished_at);
+        plan.push(PlannedAttempt {
+            attempt: dispatch.attempt,
+            after,
+            backoff_seconds: backoff,
+            last,
+        });
+        if last || plan.len() >= PLAN_LIMIT as usize {
+            return plan;
+        }
+        update_metadata(&mut dispatch, config);
+        backoff = dispatch.backoff_seconds;
+        after += Duration::try_from_secs_f64(backoff.max(0.0)).unwrap_or_default();
+    }
+}
+
+fn empty_task() -> TaskRecord {
+    TaskRecord {
+        id: 0,
+        name: String::new(),
+        url: None,
+        headers: Vec::new(),
+        body: String::new(),
+        schedule_time: None,
+        deadline: Duration::ZERO,
+        enqueued_at: UNIX_EPOCH,
+        origin: TaskOrigin::Console,
+        scheduled: None,
+    }
+}
+
+/// The request `runTask` sends for a dispatch.
+fn build_request(queue_key: &str, dispatch: &Dispatch, now_ms: u64) -> RunRequest {
+    let task = &dispatch.task;
+    let headers = preview_headers(
+        queue_key,
+        task,
+        dispatch.attempt,
+        dispatch.execution_count,
+        dispatch.previous_response,
+        now_ms,
+    );
     RunRequest {
         queue_key: queue_key.to_owned(),
         dispatch_id: dispatch.id,

@@ -79,11 +79,12 @@ fn inventory() -> FunctionsInventory {
 fn recording_log() -> (LogSink, Log) {
     let lines: Log = Arc::new(Mutex::new(Vec::new()));
     let sink = lines.clone();
-    let log: LogSink = Arc::new(move |level: &str, text: &str| {
+    // The `(level, text)` printer the suite hands over converts into a sink.
+    let log = LogSink::from(Arc::new(move |level: &str, text: &str| {
         sink.lock()
             .unwrap()
             .push((level.to_owned(), text.to_owned()));
-    });
+    }));
     (log, lines)
 }
 
@@ -2885,5 +2886,769 @@ mod console {
             dispatch_id: None,
         };
         assert!(finished.bytes() > 1_000);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Read models, the console delta, refusals, the clear and log refs.
+
+mod inspect {
+    use std::time::SystemTime;
+
+    use super::*;
+    use crate::inspect::{TaskClause, TaskQuery, TaskState, TaskTerm, TasksCursor, TasksScope};
+    use crate::queue::{
+        Controls, Outcome, RowKey, TaskChange, TaskOrigin, TaskOutcome, TaskQueue, TaskRecord,
+    };
+    use crate::runtime::{LOG_FAILED, TasksLogLine};
+
+    async fn client_queue(runtime: &TasksRuntime, queue: &str, body: &serde_json::Value) -> String {
+        let reply = call(
+            &runtime.application(),
+            Method::POST,
+            &queue_path(queue),
+            Some(&OrderedJson::from_value(body)),
+        )
+        .await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        queue_key(PROJECT, "us-central1", queue)
+    }
+
+    fn record(name: &str, url: &str, body: &str) -> TaskRecord {
+        TaskRecord {
+            id: 0,
+            name: name.to_owned(),
+            url: Some(url.to_owned()),
+            headers: vec![("x-caller".to_owned(), "yes".to_owned())],
+            body: body.to_owned(),
+            schedule_time: None,
+            deadline: Duration::from_secs(60),
+            enqueued_at: SystemTime::now(),
+            origin: TaskOrigin::Wire,
+            scheduled: None,
+        }
+    }
+
+    async fn wait_until(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + timeout;
+        while !done() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn lines_runtime(origin: &str) -> (TasksRuntime, Arc<Mutex<Vec<TasksLogLine>>>) {
+        let lines: Arc<Mutex<Vec<TasksLogLine>>> = Arc::default();
+        let sink = Arc::clone(&lines);
+        let runtime = TasksRuntime::new(
+            PROJECT,
+            &inventory(),
+            origin,
+            LogSink::new(move |line| sink.lock().unwrap().push(line)),
+        );
+        (runtime, lines)
+    }
+
+    #[tokio::test]
+    async fn queues_read_as_the_console_shows_them() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = queue_key(PROJECT, "us-central1", "taskRetry");
+        let list = runtime.queues_view(Some(PROJECT));
+        assert_eq!(list.queues.len(), 6);
+        assert_eq!(list.projects, [PROJECT]);
+        let view = runtime.queue_view(&key).expect("taskRetry");
+        assert_eq!(view.parts.location, "us-central1");
+        assert_eq!(view.registrations, 1);
+        assert_eq!(view.config.max_attempts, 3.0);
+        assert_eq!(view.config.max_concurrent_dispatches, 1000);
+        let value = |name: &str| {
+            view.config
+                .values
+                .iter()
+                .find(|value| value.key == name)
+                .cloned()
+                .unwrap_or_else(|| panic!("{name}"))
+        };
+        assert!(value("retryConfig.maxAttempts").provided);
+        assert_eq!(value("retryConfig.maxAttempts").value, "3");
+        assert!(!value("retryConfig.maxRetrySeconds").provided);
+        assert_eq!(value("retryConfig.maxRetrySeconds").value, "null");
+        assert!(value("timeoutSeconds").unused && !value("timeoutSeconds").provided);
+        assert!(value("retry").unused);
+        assert!(value("defaultUri").provided);
+        assert_eq!(view.counters.official.as_ref().unwrap().running_tasks, 1000);
+        assert_eq!(view.history_capacity, 1000);
+
+        runtime.shutdown().await;
+    }
+
+    /// Three tasks of taskRetry while it is paused and holding: two
+    /// pending around one held, in that id order.
+    fn three_tasks(runtime: &TasksRuntime, key: &str) -> (u64, u64, u64) {
+        // Three tasks waiting while paused, one held.
+        runtime.set_paused(key, true).unwrap();
+        runtime.set_hold_scheduled(key, true).unwrap();
+        let first = runtime
+            .enqueue(
+                key,
+                record(
+                    &task_name("taskRetry", "a"),
+                    "http://127.0.0.1:1/x",
+                    r#"{"data":{"order":1}}"#,
+                ),
+            )
+            .unwrap();
+        let mut later = record(
+            "/generated/tasks/77",
+            "http://127.0.0.1:1/x",
+            r#"{"data":2}"#,
+        );
+        later.schedule_time = Some("2999-01-01T00:00:00.000Z".to_owned());
+        later.scheduled = crate::queue::parse_schedule_time("2999-01-01T00:00:00.000Z");
+        let held = runtime.enqueue(key, later).unwrap();
+        let third = runtime
+            .enqueue(
+                key,
+                record(
+                    &task_name("taskRetry", "c"),
+                    "http://127.0.0.1:1/x",
+                    "[1,2]",
+                ),
+            )
+            .unwrap();
+        (first, held, third)
+    }
+
+    #[tokio::test]
+    async fn task_pages_follow_one_order_and_filter() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = queue_key(PROJECT, "us-central1", "taskRetry");
+        let (first, held, third) = three_tasks(&runtime, &key);
+        let page = runtime
+            .tasks_page(&key, None, &TaskQuery::default(), None, None, 100)
+            .unwrap();
+        assert_eq!(page.total, 3);
+        let ids: Vec<u64> = page.rows.iter().map(|row| row.id).collect();
+        assert_eq!(ids, [first, held, third], "task-id order");
+        assert_eq!(page.rows[0].state, TaskState::Pending);
+        assert_eq!(page.rows[0].position, Some(1));
+        assert_eq!(page.rows[0].max_runs, Some(4), "maxAttempts 3 runs 4 times");
+        assert_eq!(page.rows[0].body.text, r#"{"order":1}"#);
+        assert!(page.rows[0].body.data_member);
+        assert_eq!(page.rows[1].state, TaskState::Held);
+        assert!(page.rows[1].generated);
+        assert_eq!(page.rows[1].next_attempt_at, page.rows[1].due_at);
+        assert_eq!(page.rows[2].position, Some(2));
+        assert!(!page.rows[2].body.data_member);
+        // Pages by cursor, both ways.
+        let one = runtime
+            .tasks_page(&key, None, &TaskQuery::default(), None, None, 1)
+            .unwrap();
+        assert_eq!(one.next, Some(RowKey::waiting(first)));
+        let two = runtime
+            .tasks_page(&key, None, &TaskQuery::default(), one.next, None, 1)
+            .unwrap();
+        assert_eq!(two.rows[0].id, held);
+        let back = runtime
+            .tasks_page(&key, None, &TaskQuery::default(), None, two.previous, 1)
+            .unwrap();
+        assert_eq!(back.rows[0].id, first);
+        // Filters: state, name, flags, words.
+        let held_only = runtime
+            .tasks_page(
+                &key,
+                Some(TaskState::Held),
+                &TaskQuery::default(),
+                None,
+                None,
+                10,
+            )
+            .unwrap();
+        assert_eq!(held_only.total, 1);
+        let query = |terms: Vec<TaskTerm>, negated: bool| TaskQuery {
+            clauses: vec![TaskClause {
+                any: terms,
+                negated,
+            }],
+        };
+        let filtered = |query: &TaskQuery| {
+            runtime
+                .tasks_page(&key, None, query, None, None, 10)
+                .unwrap()
+                .rows
+                .iter()
+                .map(|row| row.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(filtered(&query(vec![TaskTerm::Generated], false)), [held]);
+        assert_eq!(
+            filtered(&query(vec![TaskTerm::Generated], true)),
+            [first, third]
+        );
+        assert_eq!(
+            filtered(&query(
+                vec![TaskTerm::Name {
+                    value: "c".to_owned(),
+                    prefix: false
+                }],
+                false
+            )),
+            [third]
+        );
+        assert_eq!(
+            filtered(&query(
+                vec![TaskTerm::Name {
+                    value: "/generated".to_owned(),
+                    prefix: true
+                }],
+                false
+            )),
+            [held]
+        );
+        assert_eq!(
+            filtered(&query(vec![TaskTerm::Word("ORDER".to_owned())], false)),
+            [first]
+        );
+        assert_eq!(
+            filtered(&query(vec![TaskTerm::Console], false)),
+            Vec::<u64>::new()
+        );
+
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn task_details_and_batches() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = queue_key(PROJECT, "us-central1", "taskRetry");
+        let (first, _, _) = three_tasks(&runtime, &key);
+        // The detail: headers the first attempt sends, and the retry plan.
+        let detail = runtime.task_view(&key, first).expect("detail");
+        assert_eq!(detail.data.as_deref(), Some(r#"{"order":1}"#));
+        let header = |name: &str| {
+            detail
+                .dispatch_headers
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(header("X-CloudTasks-TaskName").as_deref(), Some("a"));
+        assert_eq!(header("X-CloudTasks-TaskRetryCount").as_deref(), Some("0"));
+        assert_eq!(header("x-caller").as_deref(), Some("yes"));
+        let plan: Vec<(u32, f64, bool)> = detail
+            .retry_plan
+            .iter()
+            .map(|planned| (planned.attempt, planned.backoff_seconds, planned.last))
+            .collect();
+        assert_eq!(
+            plan,
+            [
+                (1, 0.0, false),
+                (2, 0.2, false),
+                (3, 0.4, false),
+                (4, 0.8, true)
+            ]
+        );
+        assert_eq!(
+            detail.stops,
+            "Gives up after attempt 4 (maxAttempts 3 + 1, as the official emulator runs it)."
+        );
+        // Batch reads: a row while it stays in its phase.
+        let batch = runtime.task_rows(&key, &[RowKey::waiting(first), RowKey::slotted(first)]);
+        assert!(batch[0].1.is_some() && batch[1].1.is_none());
+        assert_eq!(
+            runtime.run_now(&key, first),
+            Ok(crate::queue::RunNow::Started)
+        );
+        let batch = runtime.task_rows(&key, &[RowKey::waiting(first), RowKey::slotted(first)]);
+        assert!(batch[0].1.is_none());
+        assert_eq!(batch[1].1.as_ref().unwrap().state, TaskState::Dispatching);
+        let counters = runtime.queue_view(&key).unwrap().counters;
+        assert_eq!(
+            (counters.pending, counters.held, counters.slots_in_use),
+            (1, 1, 1)
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn history_pages_are_newest_first() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = client_queue(
+            &runtime,
+            "paged",
+            &json!({"rateLimits": {"maxDispatchesPerSecond": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
+        )
+        .await;
+        for index in 0..5 {
+            runtime
+                .enqueue(
+                    &key,
+                    record(&format!("t{index}"), "http://127.0.0.1:1/x", "{}"),
+                )
+                .unwrap();
+        }
+        runtime.purge(&key, false).unwrap();
+        let page = runtime
+            .history_page(&key, None, &TaskQuery::default(), None, None, 2)
+            .unwrap();
+        assert_eq!(page.total, 5);
+        let names: Vec<&str> = page.rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["t4", "t3"]);
+        assert_eq!(page.rows[0].outcome, TaskOutcome::Purged);
+        let next = runtime
+            .history_page(&key, None, &TaskQuery::default(), page.next, None, 2)
+            .unwrap();
+        assert_eq!(next.rows[0].name, "t2");
+        assert_eq!(
+            runtime
+                .history_page(
+                    &key,
+                    Some(TaskOutcome::Succeeded),
+                    &TaskQuery::default(),
+                    None,
+                    None,
+                    10
+                )
+                .unwrap()
+                .total,
+            0
+        );
+        let sequence = page.rows[0].sequence;
+        let rows = runtime.history_rows(&key, &[sequence, 999]);
+        assert_eq!(rows[0].1.as_ref().unwrap().name, "t4");
+        assert!(rows[1].1.is_none());
+        let detail = runtime
+            .task_view(&key, page.rows[0].id)
+            .expect("finished detail");
+        assert_eq!(detail.row.state, TaskState::Finished);
+        assert_eq!(detail.finished.unwrap().outcome, TaskOutcome::Purged);
+        assert_eq!(detail.retry_plan.len(), 0);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn console_delta_reports_changed_queues() {
+        let server = TestServer::ok().await;
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = client_queue(&runtime, "watched", &json!({"defaultUri": server.url})).await;
+        let mut watch = runtime.watch();
+        watch.borrow_and_update();
+
+        let counters = TasksScope {
+            project: Some(PROJECT.to_owned()),
+            counters: true,
+            queue: None,
+            max_changed: 200,
+        };
+        let mut cursor = TasksCursor::default();
+        let first = runtime.console_delta(&mut cursor, &counters);
+        assert_eq!(first.queues.len(), 7, "every queue, from revision 0");
+        assert!(first.queues_changed);
+        let nothing = runtime.console_delta(&mut cursor, &counters);
+        assert!(nothing.is_empty(), "{nothing:?}");
+
+        // Pausing a queue changes the list and its figures.
+        runtime.set_paused(&key, true).unwrap();
+        assert!(watch.has_changed().unwrap());
+        let paused = runtime.console_delta(&mut cursor, &counters);
+        assert!(paused.queues_changed);
+        assert_eq!(paused.queues.len(), 1);
+        assert_eq!(paused.queues[0].key, key);
+
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn console_delta_follows_a_queue_and_its_attempts() {
+        let server = TestServer::ok().await;
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = client_queue(&runtime, "watched", &json!({"defaultUri": server.url})).await;
+        let other = client_queue(&runtime, "other", &json!({"defaultUri": server.url})).await;
+        let records: Arc<Mutex<Vec<crate::queue::AttemptRecord>>> = Arc::default();
+        let sink = Arc::clone(&records);
+        runtime.set_attempt_sink(Arc::new(move |record| sink.lock().unwrap().push(record)));
+        runtime.set_paused(&key, true).unwrap();
+        let counters = TasksScope {
+            project: Some(PROJECT.to_owned()),
+            counters: true,
+            queue: None,
+            max_changed: 200,
+        };
+        let mut cursor = TasksCursor::at(runtime.queues_view(None).revision);
+        // The scoped queue's rows: the first call starts the cursor.
+        let scoped = TasksScope {
+            project: Some(PROJECT.to_owned()),
+            counters: false,
+            queue: Some(key.clone()),
+            max_changed: 200,
+        };
+        let mut rows = TasksCursor::default();
+        assert!(runtime.console_delta(&mut rows, &scoped).is_empty());
+        let a = runtime
+            .enqueue(&key, record("a", &server.url, "{}"))
+            .unwrap();
+        let b = runtime
+            .enqueue(&key, record("b", &server.url, "{}"))
+            .unwrap();
+        runtime
+            .enqueue(&other, record("o", &server.url, "{}"))
+            .unwrap();
+        let delta = runtime.console_delta(&mut rows, &scoped);
+        assert_eq!(
+            delta.changes,
+            [
+                TaskChange::Row(RowKey::waiting(a)),
+                TaskChange::Row(RowKey::waiting(b))
+            ],
+            "the other queue's task is not here"
+        );
+        let counted = runtime.console_delta(&mut cursor, &counters);
+        assert_eq!(counted.queues.len(), 2);
+        let watched = counted
+            .queues
+            .iter()
+            .find(|queue| queue.key == key)
+            .unwrap();
+        assert_eq!(watched.pending, 2);
+        assert_eq!(
+            watched
+                .added
+                .buckets
+                .iter()
+                .map(|(_, count)| count)
+                .sum::<u32>(),
+            2
+        );
+        // A task that takes a slot: its old and new keys.
+        runtime.run_now(&key, a).unwrap();
+        let delta = runtime.console_delta(&mut rows, &scoped);
+        assert!(delta.changes.contains(&TaskChange::Row(RowKey::waiting(a))));
+        assert!(delta.changes.contains(&TaskChange::Row(RowKey::slotted(a))));
+        wait_until("a to finish", Duration::from_secs(5), || {
+            runtime
+                .history_page(&key, None, &TaskQuery::default(), None, None, 10)
+                .unwrap()
+                .total
+                == 1
+        })
+        .await;
+        let delta = runtime.console_delta(&mut rows, &scoped);
+        let finished = delta.finished.expect("a finished");
+        assert_eq!(finished.added, 1);
+        assert_eq!(finished.ids.len(), 1);
+        assert!(delta.changes.contains(&TaskChange::Row(RowKey::slotted(a))));
+        // Every finished attempt reaches the sink once.
+        wait_until("one attempt record", Duration::from_secs(2), || {
+            records.lock().unwrap().len() == 1
+        })
+        .await;
+        let attempt = records.lock().unwrap()[0].clone();
+        assert_eq!(
+            (attempt.task_id, attempt.attempt, attempt.status),
+            (a, 1, Some(204))
+        );
+        // Past the ring of 1,000 changed rows: start over.
+        for index in 0..600 {
+            runtime
+                .enqueue(&key, record(&format!("bulk{index}"), &server.url, "{}"))
+                .unwrap();
+        }
+        runtime.purge(&key, false).unwrap();
+        let delta = runtime.console_delta(&mut rows, &scoped);
+        assert!(delta.changes_reset);
+        assert_eq!(delta.changes.len(), 0);
+        let _ = b;
+        runtime.shutdown().await;
+    }
+
+    #[test]
+    fn retry_plan_matches_the_dispatcher() {
+        let configs = [
+            json!({}),
+            json!({"retryConfig": {"maxAttempts": 3, "maxBackoffSeconds": 1, "maxDoublings": 2, "minBackoffSeconds": 0.2}}),
+            json!({"retryConfig": {"maxAttempts": 0}}),
+            json!({"retryConfig": {"maxAttempts": 4, "maxDoublings": 0, "minBackoffSeconds": 1}}),
+            json!({"retryConfig": {"maxAttempts": 1, "maxRetrySeconds": 2, "minBackoffSeconds": 0.5, "maxBackoffSeconds": 1}}),
+            json!({"retryConfig": {"maxAttempts": 5, "maxBackoffSeconds": 1, "minBackoffSeconds": 0.3}}),
+        ];
+        for body in configs {
+            let mut body = body;
+            body["defaultUri"] = json!("http://x");
+            let config = QueueConfig::from_body(&OrderedJson::from_value(&body)).unwrap();
+            let plan = crate::queue::retry_plan(&config, 1, Duration::ZERO, Duration::ZERO);
+            // The dispatcher itself, failing every attempt, with requests
+            // that take no time.
+            let start = Instant::now();
+            let mut queue = TaskQueue::new("queue:p-l-q".to_owned(), config.clone(), start);
+            let mut task = record("t", "http://x", "{}");
+            task.id = 1;
+            queue.enqueue(task, start, Controls::default()).unwrap();
+            queue.set_tokens(1.0);
+            let mut next = 0;
+            queue.dispatch_tasks(start, &mut next, Controls::default());
+            let mut at = start;
+            let mut observed = Vec::new();
+            let mut finished = Vec::new();
+            let mut backoff = 0.0;
+            loop {
+                let runs = queue.process(at, 0, &mut finished);
+                if !finished.is_empty() {
+                    break;
+                }
+                let Some(run) = runs.first() else {
+                    // Waiting out a backoff: jump to when it ends.
+                    let dispatch = queue.dispatches().remove(0);
+                    backoff = dispatch.backoff_seconds;
+                    at = dispatch.last_run.unwrap() + Duration::from_secs_f64(backoff);
+                    continue;
+                };
+                observed.push((run.attempt, backoff));
+                let attempt = crate::queue::AttemptRecord {
+                    queue_key: run.queue_key.clone(),
+                    task_id: 1,
+                    task_name: "t".to_owned(),
+                    attempt: run.attempt,
+                    started_at: SystemTime::now(),
+                    duration: Duration::ZERO,
+                    status: Some(500),
+                    error: None,
+                    response: None,
+                    counted_execution: false,
+                    retry_count: run.attempt - 1,
+                };
+                assert!(queue.complete(run.dispatch_id, Outcome::Status(500), attempt, at));
+                queue.process(at, 0, &mut finished);
+            }
+            let planned: Vec<(u32, f64)> = plan
+                .iter()
+                .map(|planned| (planned.attempt, planned.backoff_seconds))
+                .collect();
+            assert_eq!(planned, observed, "{body}");
+            assert!(plan.last().unwrap().last, "{body}");
+            assert_eq!(plan.iter().filter(|planned| planned.last).count(), 1);
+            assert_eq!(finished[0].outcome, TaskOutcome::Failed);
+        }
+    }
+
+    #[tokio::test]
+    async fn clear_removes_tasks_history_and_names() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = client_queue(
+            &runtime,
+            "cleared",
+            &json!({"rateLimits": {"maxDispatchesPerSecond": 0}, "retryConfig": {"maxAttempts": 7}, "defaultUri": "http://127.0.0.1:1/x"}),
+        )
+        .await;
+        runtime.set_paused(&key, true).unwrap();
+        runtime.set_hold_scheduled(&key, true).unwrap();
+        let name = task_name("cleared", "order-1");
+        runtime
+            .enqueue(&key, record(&name, "http://127.0.0.1:1/x", "{}"))
+            .unwrap();
+        runtime
+            .enqueue(&key, record("t2", "http://127.0.0.1:1/x", "{}"))
+            .unwrap();
+        runtime.purge(&key, false).unwrap();
+        runtime
+            .enqueue(&key, record("t3", "http://127.0.0.1:1/x", "{}"))
+            .unwrap();
+        let mut held = record("t4", "http://127.0.0.1:1/x", "{}");
+        held.scheduled = Some(SystemTime::now() + Duration::from_secs(60));
+        runtime.enqueue(&key, held).unwrap();
+        let removed = runtime.reset();
+        assert_eq!(removed.tasks, 2);
+        assert_eq!(removed.history, 2);
+        assert_eq!(removed.names, 4);
+        let view = runtime.queue_view(&key).unwrap();
+        assert_eq!((view.counters.pending, view.counters.held), (0, 0));
+        assert_eq!(view.counters.history, 0);
+        assert!(view.paused && view.hold_scheduled, "controls stay");
+        assert_eq!(view.config.max_attempts, 7.0, "configuration stays");
+        // The name can be used again.
+        runtime
+            .enqueue(&key, record(&name, "http://127.0.0.1:1/x", "{}"))
+            .unwrap();
+        let reply = call(&runtime.application(), Method::GET, "/queueStats", None).await;
+        assert_eq!(stats_of(&reply, &key)["numberOfTasks"], json!(1));
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn refused_requests_name_where_the_queue_is() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let app = runtime.application();
+        let elsewhere = format!("/projects/{PROJECT}/locations/us-east1/queues/taskDefault/tasks");
+        for _ in 0..2 {
+            let reply = call(
+                &app,
+                Method::POST,
+                &elsewhere,
+                Some(&task(&json!({}), None, &[])),
+            )
+            .await;
+            assert_eq!(reply.status, StatusCode::NOT_FOUND);
+        }
+        let other_project = "/projects/demo-other/locations/us-central1/queues/taskDefault/tasks";
+        let reply = call(
+            &app,
+            Method::POST,
+            other_project,
+            Some(&task(&json!({}), None, &[])),
+        )
+        .await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND);
+        let key = queue_key(PROJECT, "us-central1", "taskDefault");
+        runtime.set_paused(&key, true).unwrap();
+        let named = task(&json!({}), Some(&task_name("taskDefault", "dup")), &[]);
+        let reply = call(&app, Method::POST, &tasks_path("taskDefault"), Some(&named)).await;
+        assert_eq!(reply.status, StatusCode::OK);
+        for _ in 0..2 {
+            let reply = call(&app, Method::POST, &tasks_path("taskDefault"), Some(&named)).await;
+            assert_eq!(reply.status, StatusCode::CONFLICT);
+            assert_eq!(
+                reply.body, "A task with the same name already exists",
+                "the wire is unchanged"
+            );
+        }
+        let reply = call(
+            &app,
+            Method::DELETE,
+            &format!("{}/nothing", tasks_path("taskDefault")),
+            None,
+        )
+        .await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND);
+
+        let all = runtime.queues_view(None).refused;
+        let east = all
+            .iter()
+            .find(|entry| entry.refused.queue.location == "us-east1")
+            .expect("the us-east1 enqueue");
+        assert_eq!(east.refused.count, 2);
+        assert_eq!(east.refused.status, 404);
+        assert_eq!(east.refused.operation, "enqueue");
+        assert_eq!(
+            east.suggestion.as_deref(),
+            Some("taskDefault is registered in us-central1")
+        );
+        let project = all
+            .iter()
+            .find(|entry| entry.refused.queue.project == "demo-other")
+            .expect("the other project's enqueue");
+        assert_eq!(
+            project.suggestion.as_deref(),
+            Some(format!("taskDefault is registered in project {PROJECT}, us-central1").as_str())
+        );
+        let duplicate = all
+            .iter()
+            .find(|entry| entry.refused.status == 409)
+            .expect("the reused name");
+        assert_eq!(duplicate.refused.count, 2);
+        assert_eq!(
+            duplicate.refused.error,
+            "A task with this name was enqueued before in this run."
+        );
+        assert!(all.iter().any(|entry| entry.refused.operation == "delete"));
+        // A project's list keeps its own refusals.
+        assert!(
+            runtime
+                .queues_view(Some("demo-other"))
+                .refused
+                .iter()
+                .all(|entry| entry.refused.queue.project == "demo-other")
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn log_lines_carry_queue_and_task_refs() {
+        let (runtime, lines) = lines_runtime("http://127.0.0.1:5001");
+        let key = client_queue(
+            &runtime,
+            "logged",
+            &json!({"retryConfig": {"maxAttempts": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
+        )
+        .await;
+        let id = runtime
+            .enqueue(
+                &key,
+                record(&task_name("logged", "card-1"), "http://127.0.0.1:1/x", "{}"),
+            )
+            .unwrap();
+        wait_until("the failure line", Duration::from_secs(10), || {
+            lines
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line.kind == LOG_FAILED)
+        })
+        .await;
+        let lines = lines.lock().unwrap().clone();
+        assert!(lines.iter().all(|line| line.queue.is_some()), "{lines:?}");
+        let failed = lines.iter().find(|line| line.kind == LOG_FAILED).unwrap();
+        assert_eq!(failed.task, Some((id, task_name("logged", "card-1"))));
+        assert_eq!(failed.queue.as_ref().unwrap().queue, "logged");
+        assert_eq!(
+            failed.text,
+            "Task card-1 in logged ran out of retries after 1 attempt; its last attempt failed: FetchError: request to http://127.0.0.1:1/x failed, reason: connect ECONNREFUSED 127.0.0.1:1"
+        );
+        let fetch = lines
+            .iter()
+            .find(|line| line.text.starts_with("FetchError"))
+            .expect("the fetch error line");
+        assert_eq!(fetch.task.as_ref().map(|task| task.0), Some(id));
+        // A name as Cloud Tasks sends it resolves to the console's id.
+        assert_eq!(runtime.task_id(&key, "card-1"), Some(id.to_string()));
+        assert_eq!(
+            runtime.task_id(&key, &task_name("logged", "card-1")),
+            Some(id.to_string())
+        );
+        assert_eq!(runtime.task_id(&key, "nope"), None);
+        assert_eq!(
+            runtime.find_tasks("card-1", 5),
+            [(key.clone(), id, task_name("logged", "card-1"))]
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "timing; run with --ignored perf_ in release on the acceptance host"]
+    async fn perf_task_page_at_ten_thousand() {
+        let (runtime, _) = runtime("http://127.0.0.1:5001");
+        let key = client_queue(
+            &runtime,
+            "big",
+            &json!({"rateLimits": {"maxDispatchesPerSecond": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
+        )
+        .await;
+        for index in 0..10_000 {
+            runtime
+                .enqueue(
+                    &key,
+                    record(
+                        &format!("t{index}"),
+                        "http://127.0.0.1:1/x",
+                        r#"{"data":{"n":1}}"#,
+                    ),
+                )
+                .unwrap();
+        }
+        let started = Instant::now();
+        let page = runtime
+            .tasks_page(
+                &key,
+                None,
+                &TaskQuery::default(),
+                Some(RowKey::waiting(5_000)),
+                None,
+                100,
+            )
+            .unwrap();
+        let took = started.elapsed();
+        assert_eq!(page.total, 10_000);
+        assert_eq!(page.rows.len(), 100);
+        assert!(took < Duration::from_millis(30), "{took:?}");
+        runtime.shutdown().await;
     }
 }

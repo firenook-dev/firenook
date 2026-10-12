@@ -19,7 +19,8 @@ use crate::config::{
 use crate::json::{OrderedJson, decode_base64_forgiving};
 use crate::queue::{TaskOrigin, TaskRecord, dispatch_deadline, parse_schedule_time};
 use crate::runtime::{
-    ConsoleTask, EnqueueError, QueueOrigin, QueueParts, QueueSource, RemoveError, TasksRuntime,
+    ConsoleTask, EnqueueError, QueueOrigin, QueueParts, QueueSource, RemoveError, TasksLogLine,
+    TasksRuntime,
 };
 
 const EXPRESS: &str = "Express";
@@ -205,7 +206,15 @@ async fn dispatch(
             queue,
         } => match express_json(headers, body).await {
             Ok(body) => enqueue(runtime, &project, &location, &queue, &body),
-            Err(error) => error.page(),
+            Err(error) => {
+                runtime.refused(
+                    "enqueue",
+                    parts(&project, &location, &queue),
+                    error.status.as_u16(),
+                    error.message.clone(),
+                );
+                error.page()
+            }
         },
         Route::Task {
             project,
@@ -214,8 +223,25 @@ async fn dispatch(
             task,
         } => match express_json(headers, body).await {
             Ok(_) => remove(runtime, &project, &location, &queue, &task),
-            Err(error) => error.page(),
+            Err(error) => {
+                runtime.refused(
+                    "delete",
+                    parts(&project, &location, &queue),
+                    error.status.as_u16(),
+                    error.message.clone(),
+                );
+                error.page()
+            }
         },
+    }
+}
+
+/// A queue's parts as a request's path names them.
+fn parts(project: &str, location: &str, queue: &str) -> QueueParts {
+    QueueParts {
+        project: project.to_owned(),
+        location: location.to_owned(),
+        queue: queue.to_owned(),
     }
 }
 
@@ -255,11 +281,7 @@ fn register(
                 &key,
                 config,
                 QueueSource {
-                    parts: QueueParts {
-                        project: project.to_owned(),
-                        location: location.to_owned(),
-                        queue: queue.to_owned(),
-                    },
+                    parts: parts(project, location, queue),
                     origin: QueueOrigin::Client,
                     function: None,
                 },
@@ -269,14 +291,22 @@ fn register(
             json_response(StatusCode::OK, &OrderedJson::Object(envelope).stringify())
         }
         Err(ConfigError::OverConcurrencyLimit) => {
-            runtime.log("INFO", &format!("Created queue with key: {key}"));
+            runtime.log_for(
+                "INFO",
+                format!("Created queue with key: {key}"),
+                parts(project, location, queue),
+            );
             json_response(
                 StatusCode::BAD_REQUEST,
                 &error_object(OVER_CONCURRENCY_LIMIT).stringify(),
             )
         }
         Err(ConfigError::InvalidArrayLength) => {
-            runtime.log("INFO", &format!("Created queue with key: {key}"));
+            runtime.log_for(
+                "INFO",
+                format!("Created queue with key: {key}"),
+                parts(project, location, queue),
+            );
             error_page(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "RangeError: Invalid array length",
@@ -286,6 +316,8 @@ fn register(
 }
 
 /// `POST /projects/:project_id/locations/:location_id/queues/:queue_name/tasks`.
+/// A refusal (no such queue, a reused name, a full queue, a task the
+/// handler cannot prepare) is kept for the console, coalesced.
 fn enqueue(
     runtime: &TasksRuntime,
     project: &str,
@@ -294,8 +326,24 @@ fn enqueue(
     body: &OrderedJson,
 ) -> Response {
     let key = queue_key(project, location, queue);
+    let refuse = |status: StatusCode, error: &str| {
+        runtime.refused(
+            "enqueue",
+            parts(project, location, queue),
+            status.as_u16(),
+            error.to_owned(),
+        );
+    };
     let Some(default_uri) = runtime.default_uri(&key) else {
-        runtime.log("WARN", "Tried to queue a task into a non-existent queue");
+        runtime.log_for(
+            "WARN",
+            "Tried to queue a task into a non-existent queue",
+            parts(project, location, queue),
+        );
+        refuse(
+            StatusCode::NOT_FOUND,
+            "Tried to queue a task from a non-existent queue",
+        );
         return text_response(
             StatusCode::NOT_FOUND,
             "Tried to queue a task from a non-existent queue",
@@ -304,40 +352,54 @@ fn enqueue(
     // `req.body.task.name = …`, `req.body.task.httpRequest.body = JSON.parse(…)`
     // and `url === "" ? defaultUri : url` mutate the request's task object,
     // which the 200 echoes.
-    let mut task = match body.get("task") {
-        Some(OrderedJson::Object(map)) => map.clone(),
-        _ => {
-            return error_page(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "TypeError: Cannot read properties of undefined (reading 'name')",
-            );
-        }
+    let Some(OrderedJson::Object(map)) = body.get("task") else {
+        let error = "TypeError: Cannot read properties of undefined (reading 'name')";
+        refuse(StatusCode::INTERNAL_SERVER_ERROR, error);
+        return error_page(StatusCode::INTERNAL_SERVER_ERROR, error);
     };
-    let generated = generated_name(&QueueParts {
-        project: project.to_owned(),
-        location: location.to_owned(),
-        queue: queue.to_owned(),
-    });
+    let mut task = map.clone();
+    let generated = generated_name(&parts(project, location, queue));
     let record = match build_task(&mut task, generated, default_uri.as_ref()) {
         Ok(record) => record,
-        Err(error) => return error_page(StatusCode::INTERNAL_SERVER_ERROR, &error.0),
+        Err(error) => {
+            refuse(StatusCode::INTERNAL_SERVER_ERROR, &error.0);
+            return error_page(StatusCode::INTERNAL_SERVER_ERROR, &error.0);
+        }
     };
     let name = record.name.clone();
     match runtime.enqueue(&key, record) {
-        Ok(_) => {
-            runtime.log("DEBUG", &format!("Enqueueing task {name} onto {key}"));
+        Ok(id) => {
+            runtime.log(
+                TasksLogLine::new(
+                    "DEBUG",
+                    format!("Enqueueing task {name} onto {key}"),
+                    Some(parts(project, location, queue)),
+                )
+                .task(id, &name),
+            );
             let mut envelope = IndexMap::new();
             envelope.insert("task".to_owned(), OrderedJson::Object(task));
             json_response(StatusCode::OK, &OrderedJson::Object(envelope).stringify())
         }
-        Err(EnqueueError::NameReserved | EnqueueError::QueueFull { .. }) => text_response(
-            StatusCode::CONFLICT,
-            "A task with the same name already exists",
-        ),
+        Err(error @ (EnqueueError::NameReserved | EnqueueError::QueueFull { .. })) => {
+            refuse(StatusCode::CONFLICT, &error.to_string());
+            text_response(
+                StatusCode::CONFLICT,
+                "A task with the same name already exists",
+            )
+        }
         Err(_) => {
             // The queue was replaced or is gone between the two locks; the
             // official app answers as if it had never existed.
-            runtime.log("WARN", "Tried to queue a task into a non-existent queue");
+            runtime.log_for(
+                "WARN",
+                "Tried to queue a task into a non-existent queue",
+                parts(project, location, queue),
+            );
+            refuse(
+                StatusCode::NOT_FOUND,
+                "Tried to queue a task from a non-existent queue",
+            );
             text_response(
                 StatusCode::NOT_FOUND,
                 "Tried to queue a task from a non-existent queue",
@@ -587,26 +649,23 @@ fn remove(
 ) -> Response {
     let key = queue_key(project, location, queue);
     let name = format!("projects/{project}/locations/{location}/queues/{queue}/tasks/{task}");
+    let queue_parts = parts(project, location, queue);
     if runtime.has_queue(&key) {
-        runtime.log("DEBUG", &format!("removing: {name}"));
+        runtime.log_for("DEBUG", format!("removing: {name}"), queue_parts.clone());
     }
-    match runtime.remove(&key, &name) {
-        Ok(()) => json_response(StatusCode::OK, "{\"res\":\"OK\"}"),
-        Err(RemoveError::UnknownQueue) => {
-            runtime.log("WARN", "Tried to remove a task from a non-existent queue");
-            text_response(
-                StatusCode::NOT_FOUND,
-                "Tried to remove a task from a non-existent queue",
-            )
-        }
-        Err(RemoveError::NotFound) => {
-            runtime.log("WARN", "Tried to remove a task that doesn't exist");
-            text_response(
-                StatusCode::NOT_FOUND,
-                "Tried to remove a task that doesn't exist",
-            )
-        }
-    }
+    let error = match runtime.remove(&key, &name) {
+        Ok(()) => return json_response(StatusCode::OK, "{\"res\":\"OK\"}"),
+        Err(RemoveError::UnknownQueue) => "Tried to remove a task from a non-existent queue",
+        Err(RemoveError::NotFound) => "Tried to remove a task that doesn't exist",
+    };
+    runtime.log_for("WARN", error, queue_parts.clone());
+    runtime.refused(
+        "delete",
+        queue_parts,
+        StatusCode::NOT_FOUND.as_u16(),
+        error.to_owned(),
+    );
+    text_response(StatusCode::NOT_FOUND, error)
 }
 
 /// `Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)`.
