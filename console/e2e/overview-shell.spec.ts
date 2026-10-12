@@ -8,6 +8,7 @@ import {
   GRACE,
   callFunction,
   cursorOf,
+  facetsOf,
   lineOf,
   logRow,
   readAs,
@@ -106,7 +107,10 @@ test('the Rules badge counts the app’s denials, not the console’s, and a bro
   await page.goto(`${engine.origin}/console/firestore?path=products`)
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   const rules = page.getByTestId('nav-badge-firestore-rules')
-  const before = await countOf(page, 'nav-badge-firestore-rules')
+  // This browser has seen none of the app's earlier denials: the badge
+  // counts every one the engine logged, once the shell has heard of them.
+  const before = (await facetsOf(engine, { q: 'kind:rules.denied' })).matched
+  await expect.poll(() => countOf(page, 'nav-badge-firestore-rules')).toBe(before)
 
   // The app, signed in as Ada, reads Grace's document.
   expect(await readAs(engine, ADA, `users/${GRACE.uid}`)).toBe(403)
