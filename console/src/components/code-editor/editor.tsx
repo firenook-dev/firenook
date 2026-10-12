@@ -15,7 +15,7 @@
 
 import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { json, jsonParseLinter } from '@codemirror/lang-json'
+import { json, jsonLanguage, jsonParseLinter } from '@codemirror/lang-json'
 import {
   HighlightStyle,
   bracketMatching,
@@ -49,6 +49,7 @@ import {
 } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { useEffect, useRef } from 'react'
+import { jsonKeySource } from './json-keys'
 import type { CodeEditorProps, CodeGutterNote, CodeInlineValue, CodeLineMark } from './props'
 import { rulesLanguage } from './rules'
 
@@ -458,12 +459,14 @@ const LANGUAGE = new Compartment()
 const NOTES = new Compartment()
 
 /**
- * JSON gets the parser's own linter; rules get nothing from the editor —
- * their marks come from the engine's compiler through `marks`.
+ * JSON gets the parser's own linter, and the caller's top-level keys to
+ * complete; rules get nothing from the editor — their marks come from the
+ * engine's compiler through `marks`.
  */
 function languageFor(
   language: CodeEditorProps['language'],
   completion: () => CodeEditorProps['rulesCompletion'],
+  jsonCompletion: () => CodeEditorProps['jsonCompletion'],
 ): Extension {
   if (language === 'rules')
     return [
@@ -480,6 +483,8 @@ function languageFor(
     ]
   return [
     json(),
+    // Read through on each completion, as the rules' callbacks are.
+    jsonLanguage.data.of({ autocomplete: jsonKeySource(() => jsonCompletion()?.keys?.() ?? []) }),
     linter(jsonParseLinter(), { delay: 150 }),
     // The same for JSON: ⌘↵ is a composer's Send, and a request body
     // gained a blank line with every send from the keyboard.
@@ -529,6 +534,7 @@ export default function CodeEditor({
   onChange,
   language = 'json',
   rulesCompletion,
+  jsonCompletion,
   annotate,
   marks,
   lineMarks: lit,
@@ -552,6 +558,7 @@ export default function CodeEditor({
     value,
     language,
     rulesCompletion,
+    jsonCompletion,
     readOnly,
     autoFocus,
     onChange,
@@ -563,6 +570,7 @@ export default function CodeEditor({
       value,
       language,
       rulesCompletion,
+      jsonCompletion,
       readOnly,
       autoFocus,
       onChange,
@@ -600,7 +608,13 @@ export default function CodeEditor({
             ...foldKeymap,
             indentWithTab,
           ]),
-          LANGUAGE.of(languageFor(latest.current.language, () => latest.current.rulesCompletion)),
+          LANGUAGE.of(
+            languageFor(
+              latest.current.language,
+              () => latest.current.rulesCompletion,
+              () => latest.current.jsonCompletion,
+            ),
+          ),
           tidyOnPaste(() => latest.current.tidyPaste),
           syntaxHighlighting(INK),
           SKIN,
@@ -643,7 +657,13 @@ export default function CodeEditor({
 
   useEffect(() => {
     view.current?.dispatch({
-      effects: LANGUAGE.reconfigure(languageFor(language, () => latest.current.rulesCompletion)),
+      effects: LANGUAGE.reconfigure(
+        languageFor(
+          language,
+          () => latest.current.rulesCompletion,
+          () => latest.current.jsonCompletion,
+        ),
+      ),
     })
   }, [language])
 

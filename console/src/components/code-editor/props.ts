@@ -62,6 +62,17 @@ export interface CodeEditorProps {
       }
     | undefined
   /**
+   * For JSON: the top-level object's keys completion offers — the custom
+   * claim keys other users carry, say. Read on each completion, so a new
+   * list never rebuilds the editor; a key the object already has is not
+   * offered, and picking one writes it quoted with its colon.
+   */
+  jsonCompletion?:
+    | {
+        keys?: () => readonly string[]
+      }
+    | undefined
+  /**
    * Marks found outside the editor — the engine's compiler and its
    * checks — for the text as it is now. Shown like the editor's own.
    */
