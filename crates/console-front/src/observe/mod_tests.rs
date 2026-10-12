@@ -80,3 +80,70 @@ fn the_logs_summary_reads_lines_and_errors() {
     assert_eq!(summary.figures[1].label, "Errors since start");
     assert_eq!(logs_summary(1, 1).headline, "1 line · 1 error");
 }
+
+#[test]
+fn every_observe_type_is_named_for_its_family_and_the_kinds_are_exported() {
+    let out =
+        std::env::temp_dir().join(format!("firenook-observe-bindings-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    export_bindings(&ts_rs::Config::new().with_out_dir(&out));
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(out.join("observe")).expect("generated/observe") {
+        let path = entry.expect("entry").path();
+        let text = std::fs::read_to_string(&path).expect("read");
+        for line in text.lines() {
+            if let Some(rest) = line
+                .strip_prefix("export type ")
+                .or_else(|| line.strip_prefix("export const "))
+            {
+                let name: String = rest
+                    .chars()
+                    .take_while(|character| character.is_alphanumeric() || *character == '_')
+                    .collect();
+                names.push(name);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&out);
+    names.sort();
+    for name in &names {
+        assert!(
+            name.starts_with("Log") || name.starts_with("Overview") || name == "LOG_KINDS",
+            "{name} does not carry its family's prefix"
+        );
+    }
+    for expected in [
+        "LOG_KINDS",
+        "LogEntry",
+        "LogFacetCount",
+        "LogFacets",
+        "LogHistogram",
+        "LogKindInfo",
+        "LogLevel",
+        "LogLevelCounts",
+        "LogPage",
+        "LogTotals",
+        "OverviewConnection",
+        "OverviewEngineConfig",
+        "OverviewEngineDetails",
+        "OverviewEnvSource",
+        "OverviewEnvVariable",
+        "OverviewNotice",
+        "OverviewNoticeLevel",
+        "OverviewProblem",
+        "OverviewSnapshotFile",
+        "OverviewSnapshotRequest",
+        "OverviewState",
+    ] {
+        assert!(
+            names.iter().any(|name| name == expected),
+            "{expected} in {names:?}"
+        );
+    }
+    let kinds = log_kinds_module();
+    assert_eq!(
+        kinds.matches("{ kind: ").count(),
+        firenook_suite_front::kinds::all().count()
+    );
+    assert!(kinds.contains("{ kind: \"rules.denied\", label: \"Rules denied\", problem: true, marker: false, internal: false },"));
+}
