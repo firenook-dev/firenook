@@ -247,6 +247,7 @@ export function MetadataTab({
               size="sm"
               value={draft.fields.contentLanguage}
               onChange={(event) => set('contentLanguage', event.target.value)}
+              aria-label="contentLanguage"
               placeholder="en"
               spellCheck={false}
               autoComplete="off"
