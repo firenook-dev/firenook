@@ -1,101 +1,22 @@
-import { Badge, LayerCard, Link, Text } from '@cloudflare/kumo'
-import { useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { statusQuery } from '@/api/queries'
-import { ShellBanners } from '@/components/console/shell-banners'
-import { ServiceTable } from '@/components/service-table'
-import { Page } from '@/components/shell/page'
-import { engineVersion } from '@/lib/engine'
-import { SECTIONS } from '@/lib/services'
+import { OverviewPage } from '@/overview/components/overview-page'
+import { engineQuery, overviewQuery } from '@/overview/queries'
+import { overviewSearchSchema } from '@/overview/search'
 
+// The Overview: what runs, where, whether it is healthy, the newest
+// problems, how to connect an app, the data and the engine. The status is
+// awaited (everything on the page reads it); the overview state and the
+// engine's configuration are fetched beside it, and a part whose request
+// failed says so in its own place rather than failing the page.
 export const Route = createFileRoute('/')({
-  loader: ({ context }) => context.queryClient.ensureQueryData(statusQuery),
-  component: Overview,
+  validateSearch: overviewSearchSchema,
+  loader: async ({ context }) => {
+    const status = await context.queryClient.ensureQueryData(statusQuery)
+    await Promise.all([
+      context.queryClient.prefetchQuery(overviewQuery(status.projectId)),
+      context.queryClient.prefetchQuery(engineQuery(status.projectId)),
+    ])
+  },
+  component: OverviewPage,
 })
-
-function Overview() {
-  const { data } = useSuspenseQuery(statusQuery)
-  const running = new Set(data.services.map((service) => service.name))
-  return (
-    // The suite-wide banners sit at the top of the content column, as on
-    // every section page; the overview scrolls under them.
-    <div className="flex h-full min-h-0 flex-col">
-      <ShellBanners />
-      <div className="min-h-0 flex-1 overflow-auto">
-        <Page className="grid gap-8">
-          <div className="grid gap-1.5">
-            <Text variant="heading" size="lg" as="h1">
-              Overview
-            </Text>
-            <Text variant="secondary">
-              {data.services.length} services running for project{' '}
-              <span className="font-mono text-[0.9em]">{data.projectId}</span> on {data.engine.name}{' '}
-              {engineVersion(data.engine)}
-              {data.engine.revision ? (
-                <>
-                  , engine source{' '}
-                  <span className="font-mono text-[0.9em]">
-                    {data.engine.revision.slice(0, 12)}
-                  </span>
-                </>
-              ) : null}
-              .
-            </Text>
-          </div>
-
-          <section className="grid gap-3">
-            <Text variant="heading" as="h2">
-              Services
-            </Text>
-            <ServiceTable services={data.services} />
-          </section>
-
-          <section className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Text variant="heading" as="h2">
-                Sections
-              </Text>
-              <Text variant="secondary">
-                Each section is a screen the console will own. The Google Emulator UI keeps
-                answering on this port at <Link href="/">/</Link> until every section has landed.
-              </Text>
-            </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {SECTIONS.map((section) => {
-                const active = section.services.some((name) => running.has(name))
-                return (
-                  <LayerCard key={section.to} className="px-5 py-4">
-                    <div className="grid gap-3">
-                      <div className="flex items-start gap-2">
-                        <span className="h-lh flex items-center text-kumo-subtle">
-                          <section.icon size={16} />
-                        </span>
-                        <Link href={`/console${section.to}`} variant="inline">
-                          {section.label}
-                        </Link>
-                        <span className="ml-auto">
-                          {active ? (
-                            <Badge variant="success" appearance="dot">
-                              running
-                            </Badge>
-                          ) : (
-                            <Badge variant="neutral" appearance="dot">
-                              not running
-                            </Badge>
-                          )}
-                        </span>
-                      </div>
-                      <Text variant="secondary" size="sm">
-                        {section.summary}
-                      </Text>
-                    </div>
-                  </LayerCard>
-                )
-              })}
-            </div>
-          </section>
-        </Page>
-      </div>
-    </div>
-  )
-}

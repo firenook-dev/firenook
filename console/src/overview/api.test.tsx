@@ -24,6 +24,7 @@ const {
   discardSnapshot,
   downloadSnapshot,
   engineQuery,
+  laterJob,
   latestJob,
   memoryQuery,
   overviewKeys,
@@ -193,6 +194,26 @@ describe('snapshots', () => {
     expect(client.getQueryData(sectionJobsKey('suite'))).toEqual([started])
     await prepareSnapshot(client)
     expect(calls.send).toHaveBeenLastCalledWith('POST', '/overview/snapshots', {})
+  })
+
+  it('keep the end of a short job that the topic said before the start answered', async () => {
+    // The `jobs` topic delivered the end first; the POST's answer (still
+    // running) must not put the job back to running for good.
+    const finished = job({
+      state: 'done',
+      done: 1,
+      result: { snapshot: SNAPSHOT, files: 3, bytes: 9 },
+    })
+    client.setQueryData(sectionJobsKey('suite'), [finished])
+    calls.send.mockResolvedValue(job())
+    await expect(prepareSnapshot(client)).resolves.toEqual(finished)
+    expect(client.getQueryData(sectionJobsKey('suite'))).toEqual([finished])
+    expect(client.getQueryData(jobKey('j1'))).toEqual(finished)
+    expect(laterJob(job({ done: 5 }), job({ done: 2 }))).toMatchObject({ done: 5 })
+    expect(laterJob(job({ done: 2 }), job({ state: 'cancelled', done: 2 }))).toMatchObject({
+      state: 'cancelled',
+    })
+    expect(laterJob(job({ id: 'other', state: 'done' }), job())).toMatchObject({ state: 'running' })
   })
 
   it('download through the browser’s own download, once', async () => {

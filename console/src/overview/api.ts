@@ -9,17 +9,13 @@
 // buffers are read when their row is shown and on its refresh button; a
 // job moves on the foundation's `jobs` topic (`useJobs('suite')`).
 //
-// The route's loader imports this file, and route loaders are in the first
-// route's bundle: it holds queries and calls only, never a component.
+// The route's loader reads `queries.ts` alone (it is in the first route's
+// bundle); this file is the page's.
 
-import { type QueryClient, queryOptions, useQuery, useQueryClient } from '@tanstack/react-query'
-import { API_BASE, ApiError, apiGet, apiSend } from '@/api/client'
+import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
+import { API_BASE, ApiError, apiSend } from '@/api/client'
 import type { Job } from '@/api/generated/Job'
-import type { MemoryReport } from '@/api/generated/MemoryReport'
-import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngineDetails'
-import type { OverviewSnapshotFile } from '@/api/generated/observe/OverviewSnapshotFile'
 import type { OverviewSnapshotRequest } from '@/api/generated/observe/OverviewSnapshotRequest'
-import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { download } from '@/lib/download'
 import { jobKey, mergeJob, sectionJobsKey, useJobs } from '@/lib/jobs'
 import type { LiveChannel, SubscriptionStatus } from '@/lib/live/channel'
@@ -27,68 +23,9 @@ import { liveChannel } from '@/lib/live/channel'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { useConsoleProject } from '@/lib/project'
 import '@/observe/live'
+import { overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
 
-/**
- * The Overview's query keys: the section id first, then the project (the
- * configured one: the Overview never takes `?project=`). Invalidating
- * `state(project)` by prefix reaches every other key.
- */
-export const overviewKeys = {
-  state: (project: string) => ['overview', project] as const,
-  engine: (project: string) => ['overview', project, 'engine'] as const,
-  memory: (project: string) => ['overview', project, 'memory'] as const,
-  snapshot: (project: string, id: string) => ['overview', project, 'snapshot', id] as const,
-}
-
-/** `GET /overview`; afterwards the `overview` topic replaces it (`useOverviewLive`). */
-export const overviewQuery = (project: string) =>
-  queryOptions({
-    queryKey: overviewKeys.state(project),
-    queryFn: ({ signal }) => apiGet<OverviewState>('/overview', undefined, signal),
-    // The topic keeps it current while the page is mounted; a restart
-    // invalidates every query.
-    staleTime: Number.POSITIVE_INFINITY,
-  })
-
-/** `GET /overview/engine`: how this engine was started, fixed for its run. */
-export const engineQuery = (project: string) =>
-  queryOptions({
-    queryKey: overviewKeys.engine(project),
-    queryFn: ({ signal }) => apiGet<OverviewEngineDetails>('/overview/engine', undefined, signal),
-    staleTime: Number.POSITIVE_INFINITY,
-  })
-
-/**
- * `GET /status/memory`: the console's buffers against their budget. Read
- * when the engine section is shown (enable the query then) and again on
- * its refresh button (`refetch`); never on a timer. Always stale, so each
- * time the row is shown again it reads afresh.
- */
-export const memoryQuery = (project: string) =>
-  queryOptions({
-    queryKey: overviewKeys.memory(project),
-    queryFn: ({ signal }) => apiGet<MemoryReport>('/status/memory', undefined, signal),
-    staleTime: 0,
-  })
-
-/**
- * `GET /overview/snapshots/{id}`: a prepared snapshot the engine still
- * keeps. It never changes; a `not-found` means the engine let it go (it
- * keeps the newest one for 10 minutes, and a download takes it), so it is
- * not asked again.
- */
-export const snapshotFileQuery = (project: string, id: string) =>
-  queryOptions({
-    queryKey: overviewKeys.snapshot(project, id),
-    queryFn: ({ signal }) =>
-      apiGet<OverviewSnapshotFile>(
-        `/overview/snapshots/${encodeURIComponent(id)}`,
-        undefined,
-        signal,
-      ),
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: false,
-  })
+export { engineQuery, memoryQuery, overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
 
 /**
  * Keeps `['overview', project]` current from the `overview` topic while
@@ -164,11 +101,27 @@ export function runningSuiteJob(jobs: readonly Job[]): Job | undefined {
   return jobs.find((job) => job.state === 'running' && job.kind.startsWith('suite.'))
 }
 
+/**
+ * The later of two states of one job. The `jobs` topic can deliver a short
+ * job's end before the request that started it has answered, and the
+ * answer (still `running`) must not put the job back to running for good.
+ */
+export function laterJob(known: Job | undefined, answer: Job): Job {
+  if (!known || known.id !== answer.id) return answer
+  if (known.state !== 'running' && answer.state === 'running') return known
+  if (known.state === answer.state && known.done > answer.done) return known
+  return answer
+}
+
 /** A job the page just started, put where `useJob` and `useJobs('suite')` read it. */
 function remember(client: QueryClient, job: Job): Job {
-  client.setQueryData(jobKey(job.id), job)
-  client.setQueryData<Job[]>(sectionJobsKey(job.section), (list) => mergeJob(list ?? [], job))
-  return job
+  const known =
+    client.getQueryData<Job>(jobKey(job.id)) ??
+    client.getQueryData<Job[]>(sectionJobsKey(job.section))?.find((entry) => entry.id === job.id)
+  const later = laterJob(known, job)
+  client.setQueryData(jobKey(job.id), later)
+  client.setQueryData<Job[]>(sectionJobsKey(job.section), (list) => mergeJob(list ?? [], later))
+  return later
 }
 
 /**
@@ -220,19 +173,23 @@ export async function discardSnapshot(
   client.removeQueries({ queryKey: overviewKeys.snapshot(project, id), exact: true })
 }
 
+const NONE: ReadonlySet<string> = new Set()
+
 /**
  * The page's snapshot: the newest `suite.snapshot` job the engine lists
  * (running, or finished in the last 10 minutes, so a reload or another tab
  * finds it), what it produced, and whether the engine still keeps that
- * file (`file.data`; a `not-found` error once it is gone).
+ * file (`file.data`; a `not-found` error once it is gone). A snapshot this
+ * tab has downloaded (`downloaded`, by snapshot id) is not asked about
+ * again: the engine serves the file once.
  */
-export function useSnapshot(project: string) {
+export function useSnapshot(project: string, downloaded: ReadonlySet<string> = NONE) {
   const jobs = useJobs('suite')
   const job = latestJob(jobs, SNAPSHOT_JOB)
   const result = snapshotResult(job)
   const file = useQuery({
     ...snapshotFileQuery(project, result?.snapshot ?? ''),
-    enabled: result !== undefined && project !== '',
+    enabled: result !== undefined && project !== '' && !downloaded.has(result.snapshot),
   })
   return { jobs, job, result, file, running: runningSuiteJob(jobs) }
 }
