@@ -21,7 +21,13 @@ import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import type { StorageListPage } from '@/api/generated/storage/StorageListPage'
 import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
 import { type CursorPageParam, cursorPagesOptions } from '@/components/console/use-cursor-rows'
-import { type ViewAs, forgetToken, identityKey, resolveAuthorization } from '@/lib/identity'
+import {
+  OWNER_AUTHORIZATION,
+  type ViewAs,
+  forgetToken,
+  identityKey,
+  resolveAuthorization,
+} from '@/lib/identity'
 import { coverageQueryOptions } from '@/rules/coverage'
 import type { RulesBackend } from '@/rules/draft'
 import {
@@ -86,6 +92,11 @@ export const storageKeys = {
   objects: (project: string, bucket: string, prefix: string, view: StorageListView) =>
     [ST, project, bucket, 'objects', prefix, view] as const,
   foldersOf: (project: string, bucket: string) => [ST, project, bucket, 'folder'] as const,
+  /** Every node of the panel's folder tree. */
+  treeOf: (project: string, bucket: string) => [ST, project, bucket, 'tree'] as const,
+  /** The folders directly under `prefix`, as the tree shows them (the first 100). */
+  tree: (project: string, bucket: string, prefix: string) =>
+    [ST, project, bucket, 'tree', prefix] as const,
   folder: (project: string, bucket: string, prefix: string) =>
     [ST, project, bucket, 'folder', prefix] as const,
   /** An object as any identity reads it. */
@@ -232,6 +243,27 @@ export function objectsList(project: string, scope: StorageListScope, viewAs: Vi
     },
   }
 }
+
+/** How many folders a tree node shows before it offers the rest in the list. */
+export const TREE_LIMIT = 100
+
+/**
+ * The folders directly under `prefix`, the first 100 by name: one node of
+ * the panel's tree. The tree is the bucket's map, read as the operator
+ * whoever the page acts as — its figures are the folder index's, which no
+ * rule governs — while the listing beside it meets the rules.
+ */
+export const treeQuery = (project: string, bucket: string, prefix: string) =>
+  queryOptions({
+    queryKey: storageKeys.tree(project, bucket, prefix),
+    queryFn: ({ signal }) =>
+      listObjects(
+        { bucket, prefix, kind: 'folders' },
+        { limit: TREE_LIMIT },
+        { authorization: OWNER_AUTHORIZATION, signal },
+      ),
+    staleTime: FOREVER,
+  })
 
 export const folderQuery = (project: string, bucket: string, prefix: string) =>
   queryOptions({

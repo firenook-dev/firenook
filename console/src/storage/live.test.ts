@@ -100,6 +100,7 @@ describe('what a window refreshes besides the lists', () => {
     expect(has(keys, storageKeys.buckets('demo'))).toBe(true)
     for (const folder of ['', 'users/', 'users/u1/']) {
       expect(has(keys, storageKeys.folder('demo', 'b', folder))).toBe(true)
+      expect(has(keys, storageKeys.tree('demo', 'b', folder))).toBe(true)
       expect(has(keys, storageKeys.profile('demo', 'b', folder))).toBe(true)
     }
     expect(has(keys, storageKeys.objectAnyone('demo', 'b', 'users/u1/avatar.png'))).toBe(true)
@@ -114,11 +115,13 @@ describe('what a window refreshes besides the lists', () => {
     expect(has(keys, storageKeys.sessions('demo', 'b'))).toBe(true)
     expect(has(keys, storageKeys.objectsOf('demo', 'b'))).toBe(true)
     expect(has(keys, storageKeys.foldersOf('demo', 'b'))).toBe(true)
+    expect(has(keys, storageKeys.treeOf('demo', 'b'))).toBe(true)
   })
 
   it('whole kinds of the bucket under a window too big to list', () => {
     const keys = invalidationKeys('demo', 'b', batch([], { truncated: true, folders: ['users/'] }))
     expect(has(keys, storageKeys.foldersOf('demo', 'b'))).toBe(true)
+    expect(has(keys, storageKeys.treeOf('demo', 'b'))).toBe(true)
     expect(has(keys, [...storageKeys.bucket('demo', 'b'), 'object'])).toBe(true)
   })
 

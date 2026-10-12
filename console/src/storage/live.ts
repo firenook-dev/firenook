@@ -131,6 +131,7 @@ export function invalidationKeys(
   if (batch.truncated) {
     keys.push(
       storageKeys.foldersOf(project, bucket),
+      storageKeys.treeOf(project, bucket),
       storageKeys.profilesOf(project, bucket),
       storageKeys.accessOf(project, bucket),
       [...storageKeys.bucket(project, bucket), 'object'],
@@ -150,12 +151,17 @@ export function invalidationKeys(
     for (const folder of folders)
       keys.push(
         storageKeys.folder(project, bucket, folder),
+        storageKeys.tree(project, bucket, folder),
         storageKeys.profile(project, bucket, folder),
       )
     keys.push(storageKeys.accessOf(project, bucket))
   }
   if (batch.indexReady)
-    keys.push(storageKeys.foldersOf(project, bucket), storageKeys.objectsOf(project, bucket))
+    keys.push(
+      storageKeys.foldersOf(project, bucket),
+      storageKeys.treeOf(project, bucket),
+      storageKeys.objectsOf(project, bucket),
+    )
   if (batch.sessions.length > 0) keys.push(storageKeys.sessions(project, bucket))
   return keys
 }
