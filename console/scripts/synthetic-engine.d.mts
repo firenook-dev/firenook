@@ -16,12 +16,19 @@ export interface Profile {
   seeds: string[]
 }
 
+/** The project's `.firebaserc`; a fixture may add `targets` before it is written. */
+export interface FirebaseRc {
+  projects: { default: string }
+  /** `targets[project][service][target]`: the resources a target names (Storage's buckets). */
+  targets?: Record<string, Record<string, Record<string, string[]>>>
+}
+
 export interface Fixture {
   name: string
   prepare(
     directory: string,
     firebaseJson: Record<string, unknown>,
-    options: { fixtureEnv: Record<string, string> },
+    options: { fixtureEnv: Record<string, string>; project: string; firebaseRc: FirebaseRc },
   ): void | Promise<void>
 }
 
