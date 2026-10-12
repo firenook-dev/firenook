@@ -648,6 +648,9 @@ struct State {
     /// a subscription deleted and created again (or cleared) under an open
     /// view keeps recording its moved rows.
     readers: HashMap<String, u32>,
+    /// Messages dead-lettered since the broker started: a running total a
+    /// clear does not take back (the console's counter badge).
+    dead_lettered_total: u64,
 }
 
 /// The kinds of resource the console lists.
@@ -682,6 +685,16 @@ struct ResourceStamps {
 
 /// Dead-letter forwards the outbox holds at most between two ticks.
 const OUTBOX_CAPACITY: usize = 100_000;
+
+/// What the console's summary counts, from figures the broker keeps anyway.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BrokerTotals {
+    pub topics: u32,
+    pub subscriptions: u32,
+    /// The largest backlog (available, outstanding and pushing) of any
+    /// subscription.
+    pub largest_backlog: u64,
+}
 
 /// What [`Broker::reset`] removed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1087,6 +1100,7 @@ impl Broker {
                     announced: 0,
                     resources: ResourceStamps::default(),
                     readers: HashMap::new(),
+                    dead_lettered_total: 0,
                 }),
                 changed,
                 in_flight: Mutex::new(HashMap::new()),
@@ -2455,6 +2469,35 @@ impl Broker {
         count
     }
 
+    /// Topics, subscriptions and the largest backlog, from the counters
+    /// each subscription keeps: one walk of the subscriptions, no message
+    /// visited.
+    #[must_use]
+    pub fn totals(&self) -> BrokerTotals {
+        let state = lock(&self.inner.state);
+        let largest_backlog = state
+            .subscriptions
+            .values()
+            .map(|entry| {
+                let counts = entry.index.counts;
+                counts.available + counts.leased + counts.pushing
+            })
+            .max()
+            .unwrap_or(0);
+        BrokerTotals {
+            topics: u32::try_from(state.topics.len()).unwrap_or(u32::MAX),
+            subscriptions: u32::try_from(state.subscriptions.len()).unwrap_or(u32::MAX),
+            largest_backlog,
+        }
+    }
+
+    /// Messages dead-lettered since the broker started (a clear keeps the
+    /// count). O(1).
+    #[must_use]
+    pub fn dead_lettered_total(&self) -> u64 {
+        lock(&self.inner.state).dead_lettered_total
+    }
+
     /// Creates the topic when it does not exist yet (function targets).
     pub fn ensure_topic(&self, name: &str) {
         let _ = self.create_topic(Topic {
@@ -2507,6 +2550,9 @@ impl State {
     }
 
     fn forward_dead_letters(&mut self, forwarded: Vec<(String, Arc<StoredMessage>, u32)>) {
+        self.dead_lettered_total = self
+            .dead_lettered_total
+            .saturating_add(u64::try_from(forwarded.len()).unwrap_or(u64::MAX));
         for (subscription, message, attempts) in forwarded {
             let Some(policy) = self
                 .subscriptions

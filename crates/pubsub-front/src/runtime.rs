@@ -288,6 +288,8 @@ struct RejectedRing {
     entries: VecDeque<Rejection>,
     dropped: u64,
     revision: u64,
+    /// Refusals since start, repeats included; a clear keeps the count.
+    total: u64,
 }
 
 /// A message as the console publishes it.
@@ -1012,6 +1014,7 @@ impl PubsubRuntime {
         {
             let mut ring = lock(&self.inner.rejected);
             ring.revision += 1;
+            ring.total += 1;
             let existing = ring.entries.iter().position(|entry| {
                 entry.operation == operation
                     && entry.resource == resource
@@ -1042,6 +1045,13 @@ impl PubsubRuntime {
             }
         }
         self.inner.broker.console_changed();
+    }
+
+    /// Wire requests refused since start, repeats included (a clear keeps
+    /// the count): the console's counter badge. O(1).
+    #[must_use]
+    pub fn refusals_total(&self) -> u64 {
+        lock(&self.inner.rejected).total
     }
 
     /// The refused wire requests kept, oldest first, each with the nearest

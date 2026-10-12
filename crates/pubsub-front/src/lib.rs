@@ -20,7 +20,7 @@ pub mod schedule_control;
 pub mod scheduler;
 pub mod templates;
 
-pub use broker::Broker;
+pub use broker::{Broker, BrokerTotals};
 pub use error::PubsubError;
 pub use functions::ScheduleDefinition;
 pub use functions::{FunctionTarget, TargetKind};
@@ -35,6 +35,9 @@ pub use schedule_control::{
 pub use scheduler::{ScheduleChanges, ScheduleDetail, ScheduleError, SchedulerRuntime};
 
 use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
+/// The protobuf well-known types the broker's resources carry (durations,
+/// timestamps), so a caller builds them without its own dependency.
+pub use pbjson_types;
 
 /// Generated Google API protocol types: the `google.pubsub.v1` services and
 /// the `google.iam.v1` policy service, with proto3 JSON serialization.

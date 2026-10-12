@@ -694,6 +694,10 @@ async fn dead_lettered_messages_reach_functions() {
             .dead_lettered_total,
         1
     );
+    // The broker-wide running total, which a clear keeps.
+    assert_eq!(broker.dead_lettered_total(), 1);
+    let _ = runtime.reset();
+    assert_eq!(broker.dead_lettered_total(), 1);
     runtime.shutdown().await;
 }
 
@@ -3258,6 +3262,8 @@ mod console {
         assert_eq!(payments.elsewhere.as_deref(), Some("demo-elsewhere"));
         assert_eq!(payments.suggestion, None);
         assert_eq!(rejected.entries[2].operation, "pull");
+        // Every refusal counts, repeats included.
+        assert_eq!(runtime.refusals_total(), 4);
 
         for index in 0..201 {
             let _ = runtime
@@ -3270,7 +3276,42 @@ mod console {
         let rejected = runtime.rejected();
         assert_eq!(rejected.entries.len(), 200);
         assert_eq!(rejected.dropped, 4);
+        assert_eq!(runtime.refusals_total(), 205);
+        // A clear forgets the refusals and keeps the running total.
+        let _ = runtime.reset();
+        assert_eq!(runtime.rejected().entries.len(), 0);
+        assert_eq!(runtime.refusals_total(), 205);
         runtime.shutdown().await;
+    }
+
+    #[test]
+    fn totals_come_from_the_figures_kept() {
+        let broker = Broker::new();
+        assert_eq!(broker.totals(), crate::BrokerTotals::default());
+        topic(&broker, ORDERS, None);
+        topic(&broker, DEAD, None);
+        let workers = subscription(&broker, "workers", ORDERS, |_| {});
+        subscription(&broker, "audit", ORDERS, |_| {});
+        subscription(&broker, "dead-letters", DEAD, |_| {});
+        publish(
+            &broker,
+            ORDERS,
+            vec![message("a"), message("b"), message("c")],
+        );
+        publish(&broker, DEAD, vec![message("d")]);
+        // A leased message is still behind; an acknowledged one is not.
+        let received = broker.pull(&workers, 2).expect("pull");
+        broker
+            .acknowledge(&workers, &[received[0].ack_id.clone()])
+            .expect("ack");
+        assert_eq!(
+            broker.totals(),
+            crate::BrokerTotals {
+                topics: 2,
+                subscriptions: 3,
+                largest_backlog: 3,
+            }
+        );
     }
 
     fn deliveries_runtime() -> (
