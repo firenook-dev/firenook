@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import order from './section-order.json'
-import { SECTIONS, sectionAt, sectionById } from './services'
+import { SECTIONS, itemBadges, sectionAt, sectionById } from './services'
 
 describe('the one section order', () => {
   it('is the sidebar order, which the engine sorts its status by', () => {
@@ -26,5 +26,17 @@ describe('finding a section', () => {
     expect(sectionAt('/auth')?.id).toBe('auth')
     expect(sectionAt('/authx')).toBeUndefined()
     expect(sectionAt('/')).toBeUndefined()
+  })
+})
+
+describe('a section item’s badges', () => {
+  it('are its registry’s and its running jobs’ gauge', () => {
+    const firestore = sectionById('firestore')
+    if (!firestore) throw new Error('no Firestore section')
+    expect(itemBadges(firestore)).toEqual(['firestore.jobs'])
+    expect(itemBadges({ ...firestore, badges: ['firestore.x'] })).toEqual([
+      'firestore.x',
+      'firestore.jobs',
+    ])
   })
 })

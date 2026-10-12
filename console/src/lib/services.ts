@@ -130,6 +130,15 @@ export function sectionById(id: string): ConsoleSection | undefined {
   return Object.hasOwn(REGISTRY, id) ? REGISTRY[id as SectionId] : undefined
 }
 
+/**
+ * The badges a section's own nav item shows: its registry's, and the gauge
+ * the engine keeps while the section's bulk jobs run (`<id>.jobs`), which
+ * no registry needs to list.
+ */
+export function itemBadges(section: ConsoleSection): readonly string[] {
+  return [...(section.badges ?? []), `${section.id}.jobs`]
+}
+
 /** The section a console path belongs to (`/firestore/rules` → Firestore). */
 export function sectionAt(pathname: string): ConsoleSection | undefined {
   return SECTIONS.find(

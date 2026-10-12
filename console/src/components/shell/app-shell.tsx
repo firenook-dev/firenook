@@ -50,6 +50,7 @@ import {
   SECTIONS,
   type SectionLink,
   type ServiceArea,
+  itemBadges,
 } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
 import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
@@ -356,7 +357,7 @@ function SectionItem({
   active: boolean
 }) {
   const go = useGo()
-  const badge = useNavBadge(section.badges)
+  const badge = useNavBadge(itemBadges(section))
   // While a counter badge is up, the item leads to what is new.
   const link: SectionLink =
     badge?.counter && section.badgeLink ? section.badgeLink(badge.seen) : { to: section.to }
@@ -380,7 +381,7 @@ function SectionItem({
           data-state={state}
         >
           <span className="truncate">{section.label}</span>
-          <NavBadge ids={section.badges} testId={`nav-badge-${section.id}`} />
+          <NavBadge ids={itemBadges(section)} testId={`nav-badge-${section.id}`} />
         </Sidebar.MenuButton>
       </WithStateTooltip>
     </Sidebar.MenuItem>
@@ -405,7 +406,7 @@ function SectionWithPages({
 }) {
   const go = useGo()
   const pages = section.pages ?? []
-  const everyBadge = [...(section.badges ?? []), ...pages.flatMap((page) => page.badges ?? [])]
+  const everyBadge = [...itemBadges(section), ...pages.flatMap((page) => page.badges ?? [])]
   const badge = useNavBadge(everyBadge)
   const state = entry?.state ?? 'ready'
   const testId = `nav-${section.label.toLowerCase()}`
@@ -428,7 +429,7 @@ function SectionWithPages({
                 data-state={state}
               >
                 <span className="truncate">{section.label}</span>
-                <NavBadge ids={section.badges} testId={`nav-badge-${section.id}`} />
+                <NavBadge ids={itemBadges(section)} testId={`nav-badge-${section.id}`} />
                 <Sidebar.MenuChevron />
               </Sidebar.MenuButton>
             }
