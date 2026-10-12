@@ -7,6 +7,7 @@ import './cards/foundations'
 import './cards/components'
 import './cards/patterns'
 import './cards/console-requests'
+import './cards/outcome-chip'
 import './styles.css'
 
 declare global {
