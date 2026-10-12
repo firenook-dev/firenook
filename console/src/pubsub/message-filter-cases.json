@@ -1,0 +1,546 @@
+{
+  "note": "The message filter's golden cases (crates/console-front/src/messaging/pubsub/filters.rs, console/src/pubsub). Both sides parse and validate every text against these fields and must give exactly this result or this error, message and UTF-16 span included. The `expr` parameter is a Pub/Sub filter expression, not this grammar.",
+  "regex": false,
+  "fields": [
+    {
+      "key": "id",
+      "kind": "number",
+      "help": "Message id"
+    },
+    {
+      "key": "key",
+      "aliases": ["orderingkey"],
+      "kind": "exact",
+      "help": "Ordering key (a trailing * matches the start)"
+    },
+    {
+      "key": "attributes",
+      "aliases": ["attribute"],
+      "kind": "path",
+      "help": "An attribute, by its key",
+      "prefixes": ["attributes."]
+    },
+    {
+      "key": "has",
+      "kind": "enum",
+      "help": "Messages that carry an ordering key, a schema or attributes",
+      "values": ["key", "schema", "attributes"]
+    },
+    {
+      "key": "is",
+      "kind": "enum",
+      "help": "Dead-lettered, binary or JSON messages",
+      "values": ["dead-lettered", "binary", "json"],
+      "valueAliases": {
+        "deadlettered": "dead-lettered"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "ok": {}
+    },
+    {
+      "name": "refund",
+      "text": "refund",
+      "ok": {
+        "words": [
+          {
+            "text": "refund",
+            "negated": false,
+            "from": 0,
+            "to": 6
+          }
+        ]
+      }
+    },
+    {
+      "name": "id-1180",
+      "text": "id:1180",
+      "ok": {
+        "terms": [
+          {
+            "key": "id",
+            "op": "eq",
+            "value": "1180",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "id-1180-2",
+      "text": "id:>1180",
+      "ok": {
+        "terms": [
+          {
+            "key": "id",
+            "op": "gt",
+            "value": "1180",
+            "negated": false,
+            "from": 0,
+            "to": 8
+          }
+        ]
+      },
+      "note": "Ids compare as numbers."
+    },
+    {
+      "name": "id-12",
+      "text": "id:<=12",
+      "ok": {
+        "terms": [
+          {
+            "key": "id",
+            "op": "le",
+            "value": "12",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "key-order-1",
+      "text": "key:order-1",
+      "ok": {
+        "terms": [
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "order-1",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "key-order",
+      "text": "key:order-*",
+      "ok": {
+        "terms": [
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "order-*",
+            "negated": false,
+            "from": 0,
+            "to": 11
+          }
+        ]
+      },
+      "note": "A trailing * is kept in the value; the engine matches it as a prefix."
+    },
+    {
+      "name": "key-a-key-b",
+      "text": "key:a key:b",
+      "ok": {
+        "terms": [
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "a",
+            "negated": false,
+            "from": 0,
+            "to": 5
+          },
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "b",
+            "negated": false,
+            "from": 6,
+            "to": 11
+          }
+        ]
+      },
+      "note": "Repeated plain terms of one key match any of their values."
+    },
+    {
+      "name": "key-a-key-b-2",
+      "text": "-key:a -key:b",
+      "ok": {
+        "terms": [
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "a",
+            "negated": true,
+            "from": 0,
+            "to": 6
+          },
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "b",
+            "negated": true,
+            "from": 7,
+            "to": 13
+          }
+        ]
+      },
+      "note": "Each negated term excludes on its own."
+    },
+    {
+      "name": "attributes-region-eu",
+      "text": "attributes.region:eu",
+      "ok": {
+        "terms": [
+          {
+            "key": "attributes.region",
+            "op": "eq",
+            "value": "eu",
+            "negated": false,
+            "from": 0,
+            "to": 20
+          }
+        ]
+      }
+    },
+    {
+      "name": "attributes-region-eu-2",
+      "text": "attributes.Region:EU",
+      "ok": {
+        "terms": [
+          {
+            "key": "attributes.Region",
+            "op": "eq",
+            "value": "EU",
+            "negated": false,
+            "from": 0,
+            "to": 20
+          }
+        ]
+      },
+      "note": "An attribute key keeps its case; the prefix is matched case-insensitively."
+    },
+    {
+      "name": "attribute-region-eu",
+      "text": "attribute.region:eu",
+      "error": {
+        "from": 0,
+        "to": 19,
+        "message": "Unknown filter \"attribute.region:\". Use id, key, has, is or attributes.…; quote it to search for the text."
+      },
+      "note": "The alias names the field, not its prefix."
+    },
+    {
+      "name": "attributes-region-eu-attributes-region-us",
+      "text": "attributes.region:eu attributes.region:us",
+      "ok": {
+        "terms": [
+          {
+            "key": "attributes.region",
+            "op": "eq",
+            "value": "eu",
+            "negated": false,
+            "from": 0,
+            "to": 20
+          },
+          {
+            "key": "attributes.region",
+            "op": "eq",
+            "value": "us",
+            "negated": false,
+            "from": 21,
+            "to": 41
+          }
+        ]
+      }
+    },
+    {
+      "name": "attributes-n-5",
+      "text": "attributes.n:>5",
+      "ok": {
+        "terms": [
+          {
+            "key": "attributes.n",
+            "op": "gt",
+            "value": "5",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-key",
+      "text": "has:key",
+      "ok": {
+        "terms": [
+          {
+            "key": "has",
+            "op": "eq",
+            "value": "key",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "has-schema-has-attributes",
+      "text": "has:schema has:attributes",
+      "ok": {
+        "terms": [
+          {
+            "key": "has",
+            "op": "eq",
+            "value": "schema",
+            "negated": false,
+            "from": 0,
+            "to": 10
+          },
+          {
+            "key": "has",
+            "op": "eq",
+            "value": "attributes",
+            "negated": false,
+            "from": 11,
+            "to": 25
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-dead-lettered",
+      "text": "is:dead-lettered",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "dead-lettered",
+            "negated": false,
+            "from": 0,
+            "to": 16
+          }
+        ]
+      }
+    },
+    {
+      "name": "is-deadlettered",
+      "text": "is:deadlettered",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "dead-lettered",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      },
+      "note": "A short spelling of an enum value."
+    },
+    {
+      "name": "is-binary-is-json",
+      "text": "is:binary -is:json",
+      "ok": {
+        "terms": [
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "binary",
+            "negated": false,
+            "from": 0,
+            "to": 9
+          },
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "json",
+            "negated": true,
+            "from": 10,
+            "to": 18
+          }
+        ]
+      }
+    },
+    {
+      "name": "card-declined",
+      "text": "\"card declined\"",
+      "ok": {
+        "words": [
+          {
+            "text": "card declined",
+            "negated": false,
+            "from": 0,
+            "to": 15
+          }
+        ]
+      }
+    },
+    {
+      "name": "refund-2",
+      "text": "-refund",
+      "ok": {
+        "words": [
+          {
+            "text": "refund",
+            "negated": true,
+            "from": 0,
+            "to": 7
+          }
+        ]
+      }
+    },
+    {
+      "name": "id-abc",
+      "text": "id:abc",
+      "error": {
+        "from": 0,
+        "to": 6,
+        "message": "\"id:\" needs a number, like 42 or 2.5."
+      }
+    },
+    {
+      "name": "id-1-5x",
+      "text": "id:1.5x",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "\"id:\" needs a number, like 42 or 2.5."
+      }
+    },
+    {
+      "name": "attributes-x",
+      "text": "attributes.:x",
+      "error": {
+        "from": 0,
+        "to": 13,
+        "message": "\"attributes.\" needs a field name after it, like attributes.userId:u_1."
+      }
+    },
+    {
+      "name": "attributes-x-2",
+      "text": "attributes:x",
+      "error": {
+        "from": 0,
+        "to": 12,
+        "message": "\"attributes.\" needs a field name after it, like attributes.userId:u_1."
+      }
+    },
+    {
+      "name": "has-nothing",
+      "text": "has:nothing",
+      "error": {
+        "from": 0,
+        "to": 11,
+        "message": "\"has:\" is one of key, schema, attributes."
+      }
+    },
+    {
+      "name": "is",
+      "text": "is:",
+      "error": {
+        "from": 0,
+        "to": 3,
+        "message": "\"is:\" is one of dead-lettered (deadlettered), binary, json."
+      }
+    },
+    {
+      "name": "foo-bar",
+      "text": "foo:bar",
+      "error": {
+        "from": 0,
+        "to": 7,
+        "message": "Unknown filter \"foo:\". Use id, key, has, is or attributes.…; quote it to search for the text."
+      }
+    },
+    {
+      "name": "key-a",
+      "text": "key:>a",
+      "error": {
+        "from": 0,
+        "to": 6,
+        "message": "\">\" works on times, numbers, sizes and durations only."
+      },
+      "note": "An ordering key is exact: no ranges."
+    },
+    {
+      "name": "orderingkey-k",
+      "text": "orderingkey:k",
+      "ok": {
+        "terms": [
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "k",
+            "negated": false,
+            "from": 0,
+            "to": 13
+          }
+        ]
+      },
+      "note": "An alias of key."
+    },
+    {
+      "name": "id-1180-key-order-attributes-region-eu-has-attributes-is-binary-refund",
+      "text": "id:1180 key:order-* attributes.region:eu has:attributes -is:binary refund",
+      "ok": {
+        "terms": [
+          {
+            "key": "id",
+            "op": "eq",
+            "value": "1180",
+            "negated": false,
+            "from": 0,
+            "to": 7
+          },
+          {
+            "key": "key",
+            "op": "eq",
+            "value": "order-*",
+            "negated": false,
+            "from": 8,
+            "to": 19
+          },
+          {
+            "key": "attributes.region",
+            "op": "eq",
+            "value": "eu",
+            "negated": false,
+            "from": 20,
+            "to": 40
+          },
+          {
+            "key": "has",
+            "op": "eq",
+            "value": "attributes",
+            "negated": false,
+            "from": 41,
+            "to": 55
+          },
+          {
+            "key": "is",
+            "op": "eq",
+            "value": "binary",
+            "negated": true,
+            "from": 56,
+            "to": 66
+          }
+        ],
+        "words": [
+          {
+            "text": "refund",
+            "negated": false,
+            "from": 67,
+            "to": 73
+          }
+        ]
+      }
+    }
+  ]
+}

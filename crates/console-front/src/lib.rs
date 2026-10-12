@@ -314,10 +314,10 @@ fn assemble(services: &mut ConsoleServices) -> Vec<Arc<dyn Section>> {
         }));
     }
     if let Some(pubsub) = services.pubsub.take() {
-        sections.push(Arc::new(messaging::PubsubSection(pubsub)));
+        sections.push(Arc::new(messaging::PubsubSection::new(pubsub)));
     }
     if let Some(tasks) = services.tasks.take() {
-        sections.push(Arc::new(messaging::TasksSection(tasks)));
+        sections.push(Arc::new(messaging::TasksSection::new(tasks)));
     }
     sections.push(Arc::new(observe::ObserveSection(services.observe.clone())));
     sections
@@ -1029,9 +1029,7 @@ mod tests {
             functions: Router::new().route("/backends", get(|| async { "backends" })),
             eventarc: Router::new(),
         });
-        pubsub.set(PubsubConsole {
-            native: Router::new(),
-        });
+        pubsub.set(messaging::test_pubsub_console(Router::new()));
         let status = status_of(services()).await;
         for id in ["functions", "extensions", "eventarc", "pubsub"] {
             assert_eq!(section(&status, id)["state"], "ready", "{id}");

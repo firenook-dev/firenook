@@ -26,9 +26,78 @@ pub enum Target {
     Legacy(FunctionDefinition, u32),
 }
 
+/// How a function receives a topic's messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    /// A `CloudEvent` (`onMessagePublished`).
+    CloudEvent,
+    /// The first-generation event envelope (`pubsub.topic().onPublish`).
+    Legacy,
+    /// An `onSchedule` function's tick.
+    Schedule,
+}
+
+/// A function listening on a topic, as the console names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionTarget {
+    /// The region-qualified Functions id, `us-central1-onOrderPlaced`.
+    pub function_id: String,
+    pub name: String,
+    pub region: String,
+    pub kind: TargetKind,
+}
+
+impl Target {
+    /// The function behind the target.
+    #[must_use]
+    pub fn function(&self) -> &FunctionDefinition {
+        match self {
+            Self::Schedule(function, _) | Self::Pubsub(function, _) | Self::Legacy(function, _) => {
+                function
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> TargetKind {
+        match self {
+            Self::Schedule(..) => TargetKind::Schedule,
+            Self::Pubsub(..) => TargetKind::CloudEvent,
+            Self::Legacy(..) => TargetKind::Legacy,
+        }
+    }
+
+    /// The target as the console names it.
+    #[must_use]
+    pub fn describe(&self) -> FunctionTarget {
+        let function = self.function();
+        FunctionTarget {
+            function_id: function.id.clone(),
+            name: function.name.clone(),
+            region: region_of(function),
+            kind: self.kind(),
+        }
+    }
+}
+
+/// A function's region (the first of a first-generation Extension's regions).
+fn region_of(function: &FunctionDefinition) -> String {
+    if function.region.is_empty() {
+        function.regions.first().cloned().unwrap_or_default()
+    } else {
+        function.region.clone()
+    }
+}
+
 /// One discovered schedule and its synthetic Pub/Sub topic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleDefinition {
+    /// The scheduled function's region-qualified id, the scheduler's key.
+    pub function_id: String,
+    /// The exported function name.
+    pub function_name: String,
+    /// The function's region.
+    pub region: String,
     /// Firebase project.
     pub project: String,
     /// Synthetic `firebase-schedule-*` topic.
@@ -55,6 +124,9 @@ pub fn discover(
                 .or_default()
                 .push(Target::Schedule(function.clone(), inventory.generation));
             schedules.push(ScheduleDefinition {
+                function_id: function.id.clone(),
+                function_name: function.name.clone(),
+                region: region_of(function),
                 project: project.to_owned(),
                 topic,
                 expression: schedule.schedule.clone(),
@@ -89,6 +161,33 @@ pub fn build_dispatch(
     target: &Target,
     message: &StoredMessage,
 ) -> DispatchRequest {
+    build_dispatch_with(topic_name, target, message, 0)
+}
+
+/// The event id of the dispatch of one message to one target: stable for
+/// the publish's own delivery (`redelivery` 0), fresh for each console
+/// redelivery, since the delivery runtime suppresses a repeated id.
+#[must_use]
+pub fn event_id(topic_name: &str, target: &Target, message_id: &str, redelivery: u64) -> String {
+    let (project, topic) = parse_topic_resource(topic_name).unwrap_or_default();
+    stable_event_id(
+        &project,
+        &topic,
+        &target.function().id,
+        message_id,
+        redelivery,
+    )
+}
+
+/// [`build_dispatch`] for a console redelivery numbered `redelivery` (0 is
+/// the publish's own delivery).
+#[must_use]
+pub fn build_dispatch_with(
+    topic_name: &str,
+    target: &Target,
+    message: &StoredMessage,
+    redelivery: u64,
+) -> DispatchRequest {
     let (project, topic) = parse_topic_resource(topic_name).unwrap_or_default();
     let (function, generation) = match target {
         Target::Schedule(function, generation)
@@ -96,7 +195,7 @@ pub fn build_dispatch(
         | Target::Legacy(function, generation) => (function, *generation),
     };
     let message_id = &message.message.message_id;
-    let event_id = stable_event_id(&project, &topic, &function.id, message_id);
+    let event_id = stable_event_id(&project, &topic, &function.id, message_id, redelivery);
     let time = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_default();
@@ -187,11 +286,21 @@ fn with_cause(
     ])
 }
 
-fn stable_event_id(project: &str, topic: &str, function: &str, message_id: &str) -> String {
+fn stable_event_id(
+    project: &str,
+    topic: &str,
+    function: &str,
+    message_id: &str,
+    redelivery: u64,
+) -> String {
     let mut digest = Sha256::new();
     for value in [project, topic, function, message_id] {
         digest.update(value.as_bytes());
         digest.update([0]);
+    }
+    if redelivery > 0 {
+        digest.update(b"redelivery");
+        digest.update(redelivery.to_le_bytes());
     }
     let bytes = digest.finalize();
     format!(

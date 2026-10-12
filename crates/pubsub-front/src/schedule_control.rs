@@ -21,7 +21,8 @@ pub trait ScheduleControl: Send + Sync + 'static {
     fn schedule(&self, function_id: &str) -> Option<ScheduleView>;
 
     /// Publishes one tick now, exactly as the clock does: the same message
-    /// to the same topic, so it reaches every function listening on it. It works while the schedule is paused and records a
+    /// to the same topic, so it reaches every function listening on it. It
+    /// works while the schedule is paused and records a
     /// [`RunTrigger::Console`] run.
     ///
     /// Fails with [`RunScheduleError::NotScheduled`] for an unknown id,
@@ -146,3 +147,19 @@ impl std::error::Error for RunScheduleError {}
 
 // The console shares the scheduler between sections as `Arc<dyn ScheduleControl>`.
 const _: fn(&dyn ScheduleControl) = |_| {};
+
+/// The runtime's scheduler: `Arc::new(runtime.clone())` is the console's
+/// `Arc<dyn ScheduleControl>`.
+impl ScheduleControl for crate::runtime::PubsubRuntime {
+    fn schedule(&self, function_id: &str) -> Option<ScheduleView> {
+        self.schedule_view(function_id)
+    }
+
+    fn run(&self, function_id: &str) -> Result<RunOutcome, RunScheduleError> {
+        self.run_schedule(function_id)
+    }
+
+    fn set_paused(&self, function_id: &str, paused: bool) -> Result<(), RunScheduleError> {
+        self.set_schedule_paused(function_id, paused)
+    }
+}

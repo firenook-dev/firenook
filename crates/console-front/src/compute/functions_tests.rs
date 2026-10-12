@@ -58,13 +58,13 @@ fn stub(status: StatusCode, reply: Value) -> (Router, Seen) {
 
 fn pubsub(router: Router) -> Late<PubsubConsole> {
     let late = Late::pending("Pub/Sub");
-    late.set(PubsubConsole { native: router });
+    late.set(crate::messaging::test_pubsub_console(router));
     late
 }
 
 fn tasks(router: Router) -> Late<TasksConsole> {
     let late = Late::pending("Cloud Tasks");
-    late.set(TasksConsole { native: router });
+    late.set(crate::messaging::test_tasks_console(router));
     late
 }
 
