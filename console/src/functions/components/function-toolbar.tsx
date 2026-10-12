@@ -109,7 +109,6 @@ export function FunctionToolbar({
   logs,
   menu,
   runOpen,
-  primaryLabel,
   onRun,
 }: {
   summary: FunctionSummary
@@ -121,13 +120,11 @@ export function FunctionToolbar({
   menu: readonly RowMenuItem[]
   /** The Run tab is open: the primary steps aside. */
   runOpen: boolean
-  /** The primary's word when it is not the kind's verb. */
-  primaryLabel?: string | undefined
   /** Opens the Run tab and focuses its first field. */
   onRun?: (() => void) | undefined
 }) {
   const chips = problemChips(summary, codebase)
-  const verb = primaryLabel ?? kindVerb(summary.kind)
+  const verb = kindVerb(summary.kind)
   return (
     <ToolbarRow testId="function-toolbar">
       <PanelToggle where="toolbar" />

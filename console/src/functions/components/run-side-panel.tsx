@@ -11,9 +11,15 @@ import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
 import { QueryError } from '@/components/console/empty-state'
 import { Inspector } from '@/components/console/inspector'
 import { functionDetailQuery } from '../api'
-import { runTabLabel } from '../kinds'
+import { runForm, runTabLabel } from '../kinds'
 import type { FunctionTab } from '../search'
+import { BlockingForm } from './blocking-form'
+import { CallableForm } from './callable-form'
 import { EnvironmentTab } from './environment-tab'
+import { EventForm } from './event-form'
+import { InvokeForm } from './invoke-form'
+import { ScheduleForm } from './schedule-form'
+import { TaskForm } from './task-form'
 import { TriggerTab } from './trigger-tab'
 
 /** The tabs a function's inspector offers, in order. */
@@ -80,4 +86,38 @@ export function RunSidePanel({
       )}
     </Inspector>
   )
+}
+
+/** The Run tab: the form the function's kind takes. */
+export function RunTab({
+  project,
+  detail,
+  url,
+  prefill,
+  onPrefilled,
+  onOpenInvocation,
+}: {
+  project: string
+  detail: FunctionDetail
+  /** The function's URL as apps reach it, for kinds that answer on one. */
+  url: string | undefined
+  prefill?: string | undefined
+  onPrefilled: () => void
+  onOpenInvocation: (id: string) => void
+}) {
+  const form = runForm(detail.summary.kind)
+  const common = { project, detail, onOpenInvocation }
+  if (form === 'event') return <EventForm {...common} prefill={prefill} onPrefilled={onPrefilled} />
+  if (form === 'schedule') return <ScheduleForm {...common} />
+  if (form === 'task') return <TaskForm {...common} />
+  if (!url)
+    return (
+      <p className="px-5 py-4 text-[13px] text-kumo-subtle" data-testid="run-no-url">
+        This function has no address to call: the emulator does not serve it on a URL.
+      </p>
+    )
+  if (form === 'callable')
+    return <CallableForm {...common} url={url} prefill={prefill} onPrefilled={onPrefilled} />
+  if (form === 'blocking') return <BlockingForm {...common} url={url} />
+  return <InvokeForm {...common} url={url} prefill={prefill} onPrefilled={onPrefilled} />
 }

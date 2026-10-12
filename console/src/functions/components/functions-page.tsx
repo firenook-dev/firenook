@@ -11,7 +11,6 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import type { FunctionCodebaseEntry } from '@/api/generated/compute/FunctionCodebaseEntry'
-import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { FunctionsSnapshot } from '@/api/generated/compute/FunctionsSnapshot'
 import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
 import {
@@ -52,9 +51,8 @@ import { FunctionsPanel } from './functions-panel'
 import { FunctionsOverview, overviewCount } from './overview'
 import { RestartWorkerDialog } from './restart-worker-dialog'
 
-/** What the pages built on top of this one add: the Run tab, invocation rows' menus and detail. */
+/** What the pages built on top of this one add: invocation rows' menus and detail. */
 export interface FunctionsPageParts {
-  run?: ((detail: FunctionDetail) => ReactNode) | undefined
   invocationMenu?: ((invocation: InvocationSummary) => readonly RowMenuItem[]) | undefined
   invocationDetail?: ((id: string) => ReactNode) | undefined
 }
@@ -148,7 +146,7 @@ export function FunctionsPage({ parts = NO_PARTS }: { parts?: FunctionsPageParts
     current: search.function
       ? {
           id: search.function,
-          run: () => update({ tab: parts.run ? 'run' : 'trigger', invocation: undefined }),
+          run: () => update({ tab: 'run', invocation: undefined }),
           copyUrl: (() => {
             const summary = snapshot.data?.functions.find((entry) => entry.id === search.function)
             const url = summary ? functionUrl(summary, address) : undefined
@@ -203,7 +201,6 @@ export function FunctionsPage({ parts = NO_PARTS }: { parts?: FunctionsPageParts
         summary={summary}
         search={search}
         update={update}
-        run={parts.run}
         invocationMenu={parts.invocationMenu}
         invocationDetail={parts.invocationDetail}
       />
@@ -264,7 +261,7 @@ export function FunctionsPage({ parts = NO_PARTS }: { parts?: FunctionsPageParts
           update({
             function: summary.id,
             codebase: undefined,
-            tab: parts.run ? 'run' : 'trigger',
+            tab: 'run',
             q: undefined,
             sort: undefined,
           }),

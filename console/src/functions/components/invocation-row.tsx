@@ -78,7 +78,7 @@ function InvocationRowInner({
   menu: readonly RowMenuItem[]
 }) {
   const chip = (
-    <span className="flex w-[88px] shrink-0 items-center overflow-hidden">
+    <span className="flex w-[124px] shrink-0 items-center overflow-hidden">
       <OutcomeChip
         outcome={invocation.outcome}
         outcomeClass={invocation.outcomeClass}
@@ -172,7 +172,7 @@ export function InvocationsHeader() {
       <span className="w-[78px] shrink-0">Kind</span>
       <span className="min-w-0 flex-1">Summary</span>
       <span className="w-[64px] shrink-0">Origin</span>
-      <span className="w-[88px] shrink-0">Outcome</span>
+      <span className="w-[124px] shrink-0">Outcome</span>
       <span className="w-[84px] shrink-0 text-right">Duration</span>
     </div>
   )

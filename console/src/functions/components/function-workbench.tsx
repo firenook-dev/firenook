@@ -31,7 +31,7 @@ import { CodebaseBanners, useReloadCodebase } from './codebase-banners'
 import { FunctionToolbar } from './function-toolbar'
 import { InvocationList, invocationKey, useInvocationFeed } from './invocation-list'
 import { RestartWorkerDialog } from './restart-worker-dialog'
-import { RunSidePanel } from './run-side-panel'
+import { RunSidePanel, RunTab } from './run-side-panel'
 import { SummaryStrip } from './summary-strip'
 
 /** What the empty list says, by kind: how this function gets called. */
@@ -66,7 +66,6 @@ export function FunctionWorkbench({
   summary,
   search,
   update,
-  run,
   invocationMenu,
   invocationDetail,
 }: {
@@ -75,8 +74,6 @@ export function FunctionWorkbench({
   summary: FunctionSummary
   search: FunctionsSearch
   update: (patch: Partial<FunctionsSearch>, options?: { replace?: boolean }) => void
-  /** The Run tab, given the detail; absent: the inspector opens on Trigger. */
-  run?: ((detail: FunctionDetail) => ReactNode) | undefined
   /** The row menu of one invocation. */
   invocationMenu?: ((invocation: InvocationSummary) => readonly RowMenuItem[]) | undefined
   /** The inspector for one invocation (`invocation=`). */
@@ -102,7 +99,17 @@ export function FunctionWorkbench({
   const tab: FunctionTab | undefined = search.tab
   const inspectorOpen = tab !== undefined || search.invocation !== undefined
   const openTab = (next: FunctionTab) => update({ tab: next, invocation: undefined })
-  const primaryTab: FunctionTab = run ? 'run' : 'trigger'
+  const primaryTab: FunctionTab = 'run'
+  const run = (detail: FunctionDetail) => (
+    <RunTab
+      project={project}
+      detail={detail}
+      url={url}
+      prefill={search.prefill}
+      onPrefilled={() => update({ prefill: undefined }, { replace: true })}
+      onOpenInvocation={(id) => update({ invocation: id })}
+    />
+  )
 
   const menu = functionMenu(summary, codebase?.codebase, {
     run: () => openTab(primaryTab),
@@ -136,7 +143,7 @@ export function FunctionWorkbench({
     },
     {
       key: 'i',
-      label: run ? 'Open the Run tab' : 'Open the Trigger tab',
+      label: 'Open the Run tab',
       run: () => openTab(primaryTab),
     },
     ...(logs
@@ -164,7 +171,6 @@ export function FunctionWorkbench({
           logs={logs}
           menu={menu}
           runOpen={tab === primaryTab}
-          primaryLabel={run ? undefined : 'Details'}
           onRun={() => openTab(primaryTab)}
         />
       </SectionToolbar>
