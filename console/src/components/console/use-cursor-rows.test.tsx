@@ -126,6 +126,7 @@ describe('patching rows from a batch read', () => {
       {
         items: [
           { key: 'new', row: { id: 'new', value: 1.5 }, page: 0 },
+          { key: 'newer', row: { id: 'newer', value: 1.6 }, page: 0 },
           { key: 'far', row: { id: 'far', value: 999 }, page: null },
         ],
       },
@@ -133,6 +134,7 @@ describe('patching rows from a batch read', () => {
     )
     expect(result.data).toBe(data)
     expect(result.refetch).toEqual([0])
+    expect([...result.arriving]).toEqual([[0, 2]])
   })
 
   it('asks with the window’s page starts, its end, filter and order', () => {
@@ -151,12 +153,13 @@ describe('patching rows from a batch read', () => {
 })
 
 /** An engine list in memory: positions as cursors, a batch read that places rows in pages. */
-function fakeEngine(count: number, size = 100) {
+function fakeEngine(count: number, pageSize = 100) {
   const all: Row[] = Array.from({ length: count }, (_, index) => ({
     id: `r${String(index).padStart(5, '0')}`,
     value: index,
   }))
   const fetchPage = vi.fn(async (param: CursorPageParam): Promise<Page<Row>> => {
+    const size = param.limit ?? pageSize
     let start = 0
     let end = size
     if (param.cursor !== undefined) {
@@ -272,6 +275,28 @@ describe('useCursorRows', () => {
     expect(engine.fetchPage).toHaveBeenCalledTimes(fetched + 1)
     expect(engine.fetchPage.mock.calls.at(-1)?.[0]).toEqual({ cursor: '100' })
     expect(result.current.flashes.get('r00149b')).toBe('created')
+  })
+
+  it('reads a page that gained rows with them, so none falls before the next page', async () => {
+    const engine = fakeEngine(250)
+    const { result } = mount(engine)
+    await waitFor(() => expect(result.current.rows).toHaveLength(100))
+    act(() => result.current.loadMore())
+    await waitFor(() => expect(result.current.rows).toHaveLength(200))
+    // Two rows land in the first page, above every row the reader sees.
+    engine.all.unshift({ id: 'a-new', value: -1 }, { id: 'b-new', value: -0.5 })
+    act(() => result.current.applyKeys(['a-new', 'b-new']))
+    await waitFor(() => expect(result.current.rows).toHaveLength(202))
+    expect(engine.fetchPage.mock.calls.at(-1)?.[0]).toEqual({ limit: 102 })
+    // The row the first page held last is still there, before the second page.
+    expect(result.current.rows.slice(99, 103).map(rowKey)).toEqual([
+      'r00097',
+      'r00098',
+      'r00099',
+      'r00100',
+    ])
+    expect(new Set(result.current.rows.map(rowKey)).size).toBe(202)
+    expect(result.current.flashes.get('a-new')).toBe('created')
   })
 
   it('starts again from page one past a thousand keys', async () => {

@@ -15,8 +15,10 @@
 // for 120 ms and read again in one `:batchGet` with the window's filter,
 // order and page starts. A key whose row is loaded is patched where it is; a
 // key the engine says is gone (deleted, or no longer matching) leaves; a new
-// key the engine places in a loaded page refetches that page alone; a new key
-// outside the window is left for the scroll to find. More than 1,000 keys in
+// key the engine places in a loaded page refetches that page alone — asking,
+// when another loaded page follows it, for its rows and the new ones, so it
+// still ends where the next one starts and no row falls between them; a new
+// key outside the window is left for the scroll to find. More than 1,000 keys in
 // one window, a `reset`, an `end` or an engine restart start again from page
 // one. Nothing is patched while a page is being fetched — a page that left
 // before the change and lands after it would undo the patch — so the batch
@@ -40,6 +42,14 @@ import { liveChannel } from '@/lib/live/channel'
 export interface CursorPageParam {
   cursor?: string
   before?: string
+  /**
+   * How many rows a page read again should hold: its own and the new ones
+   * the engine placed in it, so it still ends where the next loaded page
+   * starts. Only on a page read again with a loaded page after it; never
+   * kept in the page parameters. A fetcher passes it as the request's
+   * limit; one that ignores it reads its usual page.
+   */
+  limit?: number
 }
 
 export type CursorPages<T> = InfiniteData<Page<T>, CursorPageParam>
@@ -123,6 +133,8 @@ export interface PatchResult<T> {
   data: CursorPages<T>
   /** Indexes of loaded pages a new row falls in: each is fetched again alone. */
   refetch: number[]
+  /** How many new rows each page of `refetch` gains, by page index. */
+  arriving: ReadonlyMap<number, number>
   updated: string[]
 }
 
@@ -137,13 +149,14 @@ export function patchRows<T>(
     for (const row of page.items) where.set(rowKey(row), index)
   })
   const replace = new Map<string, T | null>()
-  const refetch = new Set<number>()
+  const arriving = new Map<number, number>()
   for (const item of answer.items) {
     if (where.has(item.key)) replace.set(item.key, item.row)
     else if (item.row !== null && item.page !== null && item.page < data.pages.length)
-      refetch.add(item.page)
+      arriving.set(item.page, (arriving.get(item.page) ?? 0) + 1)
   }
-  if (replace.size === 0) return { data, refetch: [...refetch], updated: [] }
+  const refetch = [...arriving.keys()]
+  if (replace.size === 0) return { data, refetch, arriving, updated: [] }
   const updated: string[] = []
   const pages = data.pages.map((page) => {
     if (!page.items.some((row) => replace.has(rowKey(row)))) return page
@@ -159,7 +172,7 @@ export function patchRows<T>(
       }),
     }
   })
-  return { data: { ...data, pages }, refetch: [...refetch], updated }
+  return { data: { ...data, pages }, refetch, arriving, updated }
 }
 
 /** The `:batchGet` body for `keys` against the loaded window. */
@@ -322,7 +335,8 @@ export function useCursorRows<T>(
       )
       if (patched.data !== now) queryClient.setQueryData(opts.queryKey, patched.data)
       flash(patched.updated, 'updated')
-      for (const index of patched.refetch) void refetchPage(index, abort.signal)
+      for (const index of patched.refetch)
+        void refetchPage(index, patched.arriving.get(index) ?? 0, abort.signal)
     } catch {
       if (abort.signal.aborted) return
       // The rows could not be read again: what the window holds can no
@@ -331,13 +345,24 @@ export function useCursorRows<T>(
     }
   }
 
-  /** Reads one loaded page again and puts it in its place; its new rows flash. */
-  const refetchPage = async (index: number, signal: AbortSignal) => {
+  /**
+   * Reads one loaded page again and puts it in its place; its new rows
+   * flash. Read alone at its usual size, a page that gained rows would end
+   * earlier than before and the rows it pushed out would fall between it
+   * and the next loaded page, there in neither; so a page with another
+   * loaded after it asks for its rows and the `arriving` ones.
+   */
+  const refetchPage = async (index: number, arriving: number, signal: AbortSignal) => {
     const { options: opts } = latest.current
     const before = queryClient.getQueryData<CursorPages<T>>(opts.queryKey)
     const param = before?.pageParams[index]
     if (!before || param === undefined) return
-    const page = await opts.fetchPage(param, signal)
+    const held = before.pages[index]?.items.length ?? 0
+    const followed = index < before.pages.length - 1
+    const page = await opts.fetchPage(
+      followed && arriving > 0 ? { ...param, limit: held + arriving } : param,
+      signal,
+    )
     if (signal.aborted) return
     const now = queryClient.getQueryData<CursorPages<T>>(opts.queryKey)
     if (!now || paramKey(now.pageParams[index]) !== paramKey(param)) return
