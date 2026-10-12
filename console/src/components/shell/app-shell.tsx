@@ -410,7 +410,9 @@ function SectionWithPages({
   const everyBadge = [...itemBadges(section), ...pages.flatMap((page) => page.badges ?? [])]
   const badge = useNavBadge(everyBadge)
   const state = entry?.state ?? 'ready'
-  const testId = `nav-${section.label.toLowerCase()}`
+  // The section's id, as its single-entry form has it: `nav-auth` names
+  // Authentication whether it is a heading over pages or not yet built.
+  const testId = `nav-${section.id}`
   return (
     <Sidebar.MenuItem>
       <Sidebar.Collapsible defaultOpen>
