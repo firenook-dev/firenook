@@ -735,7 +735,52 @@ served until every section has landed.
   snippet too.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
   sign-in timeline, providers and tenants; users in ⌘K.
-- [ ] Storage.
+- [x] Storage. Every bucket and folder with the files under it, counted
+  and sized exactly by an index the engine keeps beside the objects and
+  updates one write at a time, so the folder tree and the counts stay
+  current without a scan. A folder lists from the engine one page at a
+  time in either direction, by name, size, last change or type, filtered
+  by name, type, size, dates, custom metadata or what a file carries;
+  writes from the app patch the rows they touch in place, and a sorted or
+  filtered view counts them and offers Refresh instead of jumping. A list
+  and a thumbnail grid, and previews that ask only for what they draw:
+  images, video, audio, PDFs, text and code, JSON as text or a tree, CSV
+  as a table, HTML with scripts off, the entries of a zip, raw bytes. A
+  file opens onto its facts, the gs:// path, the download URL and REST
+  address an app connected to the emulator gets, its download tokens (made
+  and revoked from there), a metadata editor that sends only what changed
+  and says when the file changed underneath, its history — who changed it,
+  from the app or the console, and whether the event reached the Functions
+  emulator — the exact event bodies it sends, with Send again, and a
+  warning with a one-click fix when its contentType disagrees with its
+  bytes. Small text files edit in place. Uploads of files and whole folders
+  with progress, cancel, retry and a question when names are taken; new
+  folders, rename, move, copy, duplicate, metadata for many files at once,
+  delete and zip downloads at any size run as jobs that report progress
+  and can be cancelled, and the unfinished resumable uploads an app left
+  are listed with Discard. The whole page can act as any Auth user, an
+  anonymous client or a custom token: listings, previews and uploads then
+  meet the rules (uploads are judged before a byte is sent), a column says
+  what that identity may read and delete, and every refusal names the line
+  that refused it, with "See why" and "Try in the playground". ⌘K goes to
+  a pasted gs:// or download URL, a recent folder or file, any folder the
+  tree has read and any bucket. Storage rules have their own page: an
+  editor that knows Storage rules (the file an upload proposes,
+  `firestore.get()`, the metadata keys the bucket's files carry), live
+  checks with Storage's own lints, every decision the rules made with the
+  values each expression had written into the editor, a playground, saved
+  tests that export as a test file, coverage, history, what applying a
+  draft would turn around, starter rules drawn from the bucket's folders,
+  and the folders each match block governs. Found and fixed on the way:
+  Storage rules files were never reloaded when they changed (the official
+  CLI watches them); listing a folder walked every object under it twice
+  on every page while holding the service's lock; an aborted upload left
+  its staged bytes behind, and so did a crash mid-upload; two uploads
+  staged in the same microsecond shared a file; Storage queued trigger
+  events even when the suite ran no Functions (the official emulator sends
+  none then); and an unfinished resumable upload kept its staged bytes for
+  ever (it now goes after seven idle days, as production's session URIs
+  expire).
 - [ ] Functions.
 - [ ] Extensions.
 - [ ] Eventarc.

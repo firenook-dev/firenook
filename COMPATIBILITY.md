@@ -60,6 +60,21 @@ Resumable upload sessions idle for seven days are removed with their staged
 bytes (production expires a resumable session URI after a week; the official
 emulator keeps unfinished sessions for ever).
 
+The console works on Storage through its own routes, never through the
+protocol, and a few of its behaviours have no counterpart in the official
+emulator. It reads and writes as Admin in a bucket no rules govern, where
+the emulator refuses every request, the Admin SDK's included, and the page
+says so. A zero-byte `folder/` marker object is shown as an empty folder
+(the protocol still lists it). Its uploads mint a download token and send
+the finalize event as an upload through the SDK does (a text edited in
+place as Admin keeps the file's tokens); a copy mints its own token, and a
+move is one operation that sends the events a copy and then a delete would
+send.
+Bulk work runs in batches of 200 and waits between batches while the
+Functions emulator has more than 10,000 requests queued. A client
+identity's console listing read again within a minute (a refresh, a live
+update) is recorded as one rules decision, not one per read.
+
 The package supports only its enumerated native targets after their exact
 candidate checks pass. Linux musl, Windows ARM64/32-bit, network-filesystem
 durability and Windows power-loss recovery are not qualified.

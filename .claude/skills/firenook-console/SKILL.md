@@ -2483,7 +2483,205 @@ reads as damage.
 
 ## Authentication (on the way, `src/auth/`)
 
-## Storage (on the way, `src/storage/`)
+## Storage (built, `src/storage/`)
+
+**Pages**: `/storage` (Files, `routes/storage.tsx`) and `/storage/rules`
+(`routes/storage_.rules.tsx`; route id `/storage_/rules`, so
+`useSearch({ from: '/storage_/rules' })` and `useNavigate({ from:
+'/storage/rules' })`). Every view of Files is a link (`storage/search.ts`):
+`bucket` (absent for the default bucket), `path` (the folder, ending in `/`;
+empty segments such as `a//b/` are kept, never collapsed), `object` (the
+entity: the file open in the inspector), `tab`, `layout=list|grid`,
+`sort=<name|size|updated|type>:<asc|desc>`, `q`, `flat` (everything under
+the folder), `as` (`serializeViewAs`), `new=folder|upload` and
+`dialog=quick-look`. Defaults never reach the address
+(`stripSearchParams(FILES_DEFAULTS)`), and the default bucket is dropped by
+the route's middleware or, for a link that lands before the buckets are
+known, by the page. The page's own moves navigate with `resetScroll:
+false`: the router restores the previous view's offsets on every search
+change, and that threw a keyboard move (Home with a file open) back to where
+the reader had been. The Rules page reads the rules kit's schema,
+`rulesPageSearch('bucket', { panel: [decisions, playground, tests, folders]
+})` in `rules-page/rules-search.ts` (`bucket` only in per-bucket mode).
+Files links to Rules only through `storage/rules-link.ts`
+(`useRulesPageLink`, `useTryInPlayground`), which offers a link only while
+the router knows `/storage_/rules`. Links out are `EntityRef`s through
+`EntityLink`/`linkTo` (an Auth user in Activity, a function a trigger
+reached), never hand-built URLs; Storage's own keys are pinned in
+`entity.rs`: `storage.object` and `storage.folder` are `<bucket>|<path>`,
+`storage.decision` is `<bucket or *>|<id>`.
+
+**The engine lists; the browser never walks.** One `GET /storage/objects`
+per page (100 rows) through `useCursorRows`, folders first; cursors are
+opaque and go both ways (`nextCursor`, `prevCursor` → `before`), so a long
+folder is a sliding window of 20 pages, never a capped forward list. A sort
+or a filter is an engine view (`view_cache.rs`: compact, single-flight,
+served for up to 2 s after its folder moved, marked `stale` with
+`changesSince`); Refresh asks for it `fresh`. Never `listAll` plus
+`getMetadata` per file (the official UI's N + 1). The filter's fields come
+from `GET /storage/objects/meta` and the folder's profile (types and
+metadata keys it holds); `filter-cases.json` holds the client parser and
+the engine's to one set of cases (`runGoldenCases`, `include_str!`).
+
+**Counts come from the folder index** (`folder_index.rs`): exact, built once
+by a walk that never stops writers and then kept one write at a time;
+`null` means "still counting", never zero. The count slot reads
+`GET /storage/folder` while unfiltered and the view's totals while
+filtered, never `useCursorRows`' total. The panel's tree reads each open
+level as the owner (`treeQuery`, the first 100 folders by name, then "+N
+more · open in the list"), whoever the page acts as: it is the operator's
+map, and its figures are the index's, which no rule governs. The listing
+beside it meets the rules.
+
+**Live patches rows, and only where it is cheap.** `storage.objects`
+(params `{ bucket }`) names the touched objects; `useStorageObjectsLive`
+refreshes every non-list key itself, throttled to 250 ms per key, and the
+page decides per listing: by name and unfiltered, `rows.applyKeys` patches
+those rows through `POST /storage/objects:batchGet` and a new name refetches
+only the page it falls in; a sorted or filtered view is never refetched by
+a live event, it counts what touched its scope and `MatchCount` offers
+Refresh (`stale`). A window of over 1,000 names arrives `truncated`, and a
+listing it covers starts again from page one. The topic resumes by replay
+over a path-only ring, because the storage revision is global across
+buckets. `storage.rules` (compare) keeps the banners true; subscribe only
+from the page that shows the data.
+
+**A folder marker is a folder.** A zero-byte `prefix/` object is hidden
+inside its folder and drawn by its parent as an empty folder (`empty: true`);
+the protocol's own output is untouched. "This folder is empty" says the
+marker is what the app's `list()` sees.
+
+**One connection per browser, three long requests per tab.** Previews,
+thumbnails and uploads share the tab's three long-request slots
+(`storage/net.ts` over `lib/long-requests.ts`): the inspector's preview
+first, tiles in view order, then uploads, which hold at most two while a
+picture waits. A tile that scrolls away leaves the queue or clears its
+`src`. So a console read always gets a connection.
+
+**User bytes never run as the console.** `/storage/object/media` always
+sends `nosniff` and a sandbox CSP (PDF excepted) with an inline
+disposition; HTML is shown as source or in a script-less `srcdoc` frame,
+never `<iframe src>`; "Open in new tab" stays on the console's origin.
+**Previews ask for what they draw**: 256 KB of text ("Load all" up to 16 MB),
+64 KB of hex, a zip's central directory, a 320 px thumbnail; a gzip-encoded
+object is read decoded and never by range (`media.ts`). Text up to 1 MB that
+is valid UTF-8 and not gzip-encoded edits in place; Save writes it as one
+upload that keeps the metadata. The list draws type icons; only the grid
+and the inspector show pictures, and SVG, AVIF, ICO and images up to
+256 KB come from the media route, larger ones from the thumbnail route.
+
+**Uploads are real uploads.** One streaming `PUT /storage/object` per file
+(XHR for progress; metadata in `x-firenook-metadata: b64.<base64url
+JSON>`; `ifNoneMatch` sends `If-None-Match: *`, and the 409 `already-exists`
+it can get is a row skipped as taken), through the commit path: a minted token, the rules as `create` for the identity, the
+finalize event. A client identity's drop is judged first with
+`POST /storage/rules/evaluate` and refused files are never sent. The queue
+is data (`upload-queue-store.ts`, finished rows past 1,000 dropped, the
+tray virtualized past 50); the work is `uploads.ts`; the shell's beacon
+(`uploads-beacon.tsx`, `shellMount`) reads the queue for the nav's "N
+uploading" and the leave-page guard on every page. `setUploadTransport` is
+the one way to stand in for XHR (tests, the design-system card).
+
+**Identity applies to everything the Files page does**, previews included:
+a file the access check (`POST /storage/rules/access`, `get` and `delete`
+for each page, recorded nowhere) refuses is a lock tile with its line, not a
+picture, since an `<img>` cannot carry a token. Tokens are Admin-only (the
+official API's rule), and so are Send again and Discard. A refusal is an
+`ApiError` `permission-denied` with `decision`, `line`, `noRuleset`,
+`evaluation` and `request` extras, so `RefusalDetail` explains it ("See
+why") and hands it to the playground ("Try in the playground") even after
+the decision has left the engine's window; a stale metageneration is
+`failed-precondition` with `current`, which the inspector turns into
+"Changed since you opened it" with Load the new version / Keep mine. The
+console reads and writes as Admin where the emulator refuses every client
+(a bucket no rules govern), and says so in a banner.
+
+**Foundation Jobs, not loops**, for anything beyond one file:
+`POST /storage/objects:<delete|move|copy|metadata>` with a `BulkTarget`
+(the ticked keys, or the page's `q` for "Select all"), and `dryRun: true`
+for the counts a dialog shows. storage-front does only the batch work:
+batches of 200 under one guard through the write path's `*_locked`
+pieces (never the locking wrappers: a tokio mutex is not reentrant), one
+metadata transaction and one live event per batch, and a wait between
+batches while the Functions emulator has over 10,000 requests queued.
+Progress, cancel, retention and the jobs badge are the foundation's; a
+reload re-attaches through `GET /jobs?section=storage` (`StorageJobs`).
+Move hard-links and commits both records at once; copy stages before the
+guard and commits like an upload (never new bytes with old metadata, one
+new token); both send the events a copy-then-delete sends. A zip of a
+folder or a selection streams from `objects:export` (zip64 past 4 GB).
+Destruction goes through `DangerConfirm` (its trigger line from
+`useTriggersFor`, none while it answers `'unknown'`).
+
+**Storage's log lines are Storage's.** Rules runtime errors and failed
+flushes go through `set_log_sink` (still printed to the terminal, never in
+the official Logging feed); every recorded denial becomes a
+`storage.denied` line (`storage.denied.console` at info for the console's
+own) with `EntityRef`s to the file or folder, the decision and the user,
+at most 50 a second and then one line counting the rest. A console list
+refetched within a minute for the same identity, folder and outcome is not
+recorded again: `DecisionLog::record` returns the decision that stands for
+it, so a refusal always names one.
+
+**The Rules page is the rules kit's** (`src/rules/`, see Security rules):
+Storage adds the `storage.decisions` adapter (`rules-page/decisions.ts`: the
+filters are the topic's parameters and the URL, the log keeps the newest
+10,000, the engine re-runs the newest 2,000), the playground's file
+requests (`requests.ts`, `formFromRequest` for a hand-over), the Folders
+tab (which match block governs each folder, from the folder index), starter
+rules from a folder's profile, and tests that export as a test file. Change
+the kit with both pages' journeys running; coverage is the same report
+Firestore reads.
+
+**Keys** (the foundation's reserved table): `g` flat, `v` list or grid,
+Shift+Space Quick Look, Alt+⌘C copy the path, `n` new folder, `u` / Shift+U
+upload files / a folder, F2 rename, Delete or Backspace delete the ticked
+rows, Escape closes the file then clears the ticks, ⌘S saves in the
+inspector, the grid's arrows, Home, End, PgUp, PgDn, Space, ⌘A and
+Shift+F10. `⌘↑` is deliberately not bound. ⌘K (`storage/palette.tsx`) goes
+to a pasted location (gs://, a download URL of production or an emulator,
+a JSON API URL, `bucket/path`), recent folders and files, folders the tree
+has read and other buckets; rows carry `ref { kind, key }`.
+
+**Test hooks**: the `storage` Playwright project (`e2e/storage.spec.ts`,
+`e2e/storage-rules.spec.ts`) on the `storage` profile. The seed
+(`scripts/seed/storage.mjs`) exports `STORAGE_SEED`, every count a journey
+expects; the fixture (`scripts/fixtures/storage.mjs`) writes per-bucket
+rules by default (`STORAGE_RULES_MODE` `single` or `none` for the other
+shapes), and its lines 1 to 15 are the journeys' line numbers.
+`e2e/support/storage.ts` has `tokenFor`, `upload`/`getMetadata`/
+`listFolder` as an app sends them, `ownerJson`, `folderFigures` and
+`resetToSeed`; people come from `SEED_USERS` (`?as=<uid>%3A<email>`).
+Journeys never count what another journey made: each works in its own
+folder. The design-system cards (`design-system/src/cards/storage.tsx`)
+render the whole Files and Rules pages over a filled cache, with the card
+leading the live channel on the relay, drawing the pictures the media
+routes would send and holding uploads mid-way through `setUploadTransport`.
+
+**What building it taught**:
+- TanStack Router restores element scroll on every search navigation;
+  in-page updates need `resetScroll: false`.
+- Kumo's `Popover.Content`, `Dialog` and `Select` drop `data-testid`: put
+  test ids on an inner `<div className="contents">`.
+- A Kumo tooltip on a focused button eats the first Escape: an overlay that
+  must close at once listens at the window in the capture phase.
+- Kumo's DataTable header checkbox is `thead [role=checkbox]` (a span).
+- `npx playwright test --project data file.ts` takes the file as another
+  project name: use `--project=data`. `setInputFiles` refuses buffers over
+  50 MB: pass the path of a sparse file. `page.route` then `unroute` while a
+  handler still awaits throws "Route is already handled".
+- `toContainText('1,201 deleted')` matches "200 of 1,201 deleted…": wait
+  for the final "Done: N of N".
+- React sets an image's address twice: the attribute when it creates it,
+  the `src` property again once it is mounted.
+- macOS: temporary names from the clock collide (microsecond clock), and a
+  std `Mutex` hands itself straight back to a thread that re-locks, so a
+  long walk must sleep between steps or it starves writers.
+- A runtime keeps redb open while its console tasks run: `shutdown()` or
+  `stop_console_tasks()` before removing its directory.
+- `vi.spyOn(Storage.prototype, 'getItem')` misses happy-dom's
+  `localStorage`; under Vitest's happy-dom `import.meta.url` is not a file
+  URL (read a source with `?raw`).
 
 ## Functions, Extensions and Eventarc (on the way, `src/functions/`, `src/extensions/`, `src/eventarc/`)
 
