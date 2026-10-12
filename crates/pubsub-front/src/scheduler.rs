@@ -5,7 +5,11 @@
 //! (`every 2 hours from 10:00 to 14:00`, `every 15 mins synchronized`),
 //! `every day HH:MM`, `every monday 09:00`, `every mon,wed,fri 09:00`, and
 //! five-field cron. Clock times and cron fields are civil times in the
-//! schedule's declared zone (UTC when none is declared).
+//! schedule's declared zone (UTC when none is declared), evaluated with the
+//! IANA time-zone database the engine bundles, so a machine without
+//! `/usr/share/zoneinfo` runs `Europe/Paris` at the same instants as any
+//! other. A civil time a daylight-saving change skips runs right after the
+//! gap; one it repeats runs once, at its first occurrence.
 //!
 //! The scheduler is keyed by function id: [`ScheduleBook`] keeps each
 //! schedule's cadence, pause flag, next tick and runs, and survives codebase
@@ -92,11 +96,13 @@ impl SchedulerRuntime {
 // ------------------------------------------------------------------ zones
 
 /// The zone a schedule's clock times and cron fields are civil times in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Zone {
     Utc,
     /// A zone with one offset all year (`Etc/GMT-5` is five hours east).
     Fixed(UtcOffset),
+    /// A zone of the bundled IANA database, with its daylight-saving rules.
+    Tz(jiff::tz::TimeZone),
 }
 
 impl Zone {
@@ -122,36 +128,96 @@ impl Zone {
         {
             return Ok(Self::Fixed(offset));
         }
-        Err(format!(
-            "time zone {name} is not in this engine's time-zone database"
-        ))
-    }
-
-    fn offset(self) -> UtcOffset {
-        match self {
-            Self::Utc => UtcOffset::UTC,
-            Self::Fixed(offset) => offset,
-        }
+        jiff::tz::TimeZone::get(name)
+            .map(Self::Tz)
+            .map_err(|_| format!("time zone {name} is not in this engine's time-zone database"))
     }
 
     /// The civil time in this zone at `instant`.
-    fn civil(self, instant: OffsetDateTime) -> PrimitiveDateTime {
-        let local = instant.to_offset(self.offset());
+    fn civil(&self, instant: OffsetDateTime) -> PrimitiveDateTime {
+        let offset = match self {
+            Self::Utc => UtcOffset::UTC,
+            Self::Fixed(offset) => *offset,
+            Self::Tz(zone) => {
+                if let Some(civil) = jiff::Timestamp::new(
+                    instant.unix_timestamp(),
+                    i32::try_from(instant.nanosecond()).unwrap_or(0),
+                )
+                .ok()
+                .and_then(|timestamp| from_jiff(zone.to_datetime(timestamp)))
+                {
+                    return civil;
+                }
+                // Outside the database's range (never for a real clock):
+                // the instant's own UTC civil time.
+                UtcOffset::UTC
+            }
+        };
+        let local = instant.to_offset(offset);
         PrimitiveDateTime::new(local.date(), local.time())
     }
 
     /// The instant a civil time in this zone names. A time a transition
     /// skips resolves forward by the gap and a repeated one to its earlier
-    /// instant; a zone with one offset has neither.
-    fn instant(self, civil: PrimitiveDateTime) -> OffsetDateTime {
-        civil.assume_offset(self.offset()).to_offset(UtcOffset::UTC)
+    /// instant (jiff's compatible disambiguation); a zone with one offset
+    /// has neither.
+    fn instant(&self, civil: PrimitiveDateTime) -> OffsetDateTime {
+        let offset = match self {
+            Self::Utc => UtcOffset::UTC,
+            Self::Fixed(offset) => *offset,
+            Self::Tz(zone) => {
+                if let Some(instant) = to_jiff(civil)
+                    .and_then(|civil| zone.to_ambiguous_timestamp(civil).compatible().ok())
+                    .and_then(|timestamp| {
+                        OffsetDateTime::from_unix_timestamp(timestamp.as_second()).ok()
+                    })
+                {
+                    return instant;
+                }
+                UtcOffset::UTC
+            }
+        };
+        civil.assume_offset(offset).to_offset(UtcOffset::UTC)
     }
+}
+
+/// A civil time from jiff's calendar to the `time` crate's.
+fn from_jiff(civil: jiff::civil::DateTime) -> Option<PrimitiveDateTime> {
+    let month = time::Month::try_from(u8::try_from(civil.month()).ok()?).ok()?;
+    let date = Date::from_calendar_date(
+        i32::from(civil.year()),
+        month,
+        u8::try_from(civil.day()).ok()?,
+    )
+    .ok()?;
+    let time = Time::from_hms(
+        u8::try_from(civil.hour()).ok()?,
+        u8::try_from(civil.minute()).ok()?,
+        u8::try_from(civil.second()).ok()?,
+    )
+    .ok()?;
+    Some(PrimitiveDateTime::new(date, time))
+}
+
+/// A civil time from the `time` crate's calendar to jiff's (to the second;
+/// schedules never name a fraction).
+fn to_jiff(civil: PrimitiveDateTime) -> Option<jiff::civil::DateTime> {
+    jiff::civil::DateTime::new(
+        i16::try_from(civil.year()).ok()?,
+        i8::try_from(u8::from(civil.month())).ok()?,
+        i8::try_from(civil.day()).ok()?,
+        i8::try_from(civil.hour()).ok()?,
+        i8::try_from(civil.minute()).ok()?,
+        i8::try_from(civil.second()).ok()?,
+        0,
+    )
+    .ok()
 }
 
 // ---------------------------------------------------------------- cadence
 
 /// How a schedule's clock ticks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Cadence {
     /// `every N minutes|hours`: from when the clock starts, independent of
     /// zones.
@@ -289,7 +355,7 @@ impl CronSpec {
 
     /// The next matching minute strictly after `now` in `zone`, within a
     /// year.
-    pub(crate) fn next_after(self, now: OffsetDateTime, zone: Zone) -> Option<OffsetDateTime> {
+    pub(crate) fn next_after(self, now: OffsetDateTime, zone: &Zone) -> Option<OffsetDateTime> {
         let start = zone.civil(now);
         let mut candidate =
             start.replace_second(0).ok()?.replace_nanosecond(0).ok()? + time::Duration::minutes(1);
@@ -408,9 +474,9 @@ impl Cadence {
 
     /// The tick after `now`; `None` when the cadence never ticks again
     /// within a year (a cron for the 31st of February).
-    pub(crate) fn next_after(self, now: OffsetDateTime) -> Option<OffsetDateTime> {
+    pub(crate) fn next_after(&self, now: OffsetDateTime) -> Option<OffsetDateTime> {
         match self {
-            Self::Interval(duration) => Some(now + duration),
+            Self::Interval(duration) => Some(now + *duration),
             Self::Cron { spec, zone } => spec.next_after(now, zone),
             Self::Weekly {
                 weekdays,
@@ -420,7 +486,7 @@ impl Cadence {
                 let mut date = zone.civil(now).date();
                 for _ in 0..8 {
                     if weekdays & (1 << date.weekday().number_days_from_sunday()) != 0 {
-                        let instant = zone.instant(PrimitiveDateTime::new(date, time));
+                        let instant = zone.instant(PrimitiveDateTime::new(date, *time));
                         if instant > now {
                             return Some(instant);
                         }
@@ -438,7 +504,7 @@ impl Cadence {
                 // A window that runs past midnight may have started yesterday.
                 let mut date = zone.civil(now).date().previous_day()?;
                 for _ in 0..3 {
-                    if let Some(next) = window_next(date, every, from, to, zone, now) {
+                    if let Some(next) = window_next(date, *every, *from, *to, zone, now) {
                         return Some(next);
                     }
                     date = date.next_day()?;
@@ -455,7 +521,7 @@ fn window_next(
     every: time::Duration,
     from: Time,
     to: Time,
-    zone: Zone,
+    zone: &Zone,
     now: OffsetDateTime,
 ) -> Option<OffsetDateTime> {
     let start = PrimitiveDateTime::new(date, from);
@@ -626,7 +692,7 @@ impl ScheduleBook {
     /// clock has none yet.
     pub(crate) fn due(&mut self, function_id: &str, now: OffsetDateTime) -> Option<OffsetDateTime> {
         let entry = self.entries.get_mut(function_id)?;
-        let cadence = *entry.cadence.as_ref().ok()?;
+        let cadence = entry.cadence.as_ref().ok()?.clone();
         if let Some(next) = entry.next_at {
             return Some(next);
         }
@@ -653,7 +719,7 @@ impl ScheduleBook {
         if entry.next_at != Some(due) {
             return None;
         }
-        let cadence = *entry.cadence.as_ref().ok()?;
+        let cadence = entry.cadence.as_ref().ok()?.clone();
         let next = cadence
             .next_after(due)
             .filter(|next| *next > now)
@@ -756,7 +822,7 @@ impl ScheduleBook {
         let view = self.view(function_id)?;
         let entry = self.entries.get(function_id)?;
         let mut upcoming = Vec::with_capacity(UPCOMING);
-        if let (Ok(&cadence), Some(next)) = (entry.cadence.as_ref(), entry.next_at) {
+        if let (Ok(cadence), Some(next)) = (entry.cadence.as_ref(), entry.next_at) {
             let mut at = next;
             upcoming.push(at);
             while upcoming.len() < UPCOMING {

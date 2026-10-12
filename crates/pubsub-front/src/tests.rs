@@ -345,7 +345,7 @@ fn supported_schedule_expressions_have_deterministic_cadence() {
 fn cron_expressions_evaluate_in_their_zone() {
     let at = |text: &str| OffsetDateTime::parse(text, &Rfc3339).unwrap();
     let next = |spec: CronSpec, zone: Zone, now: &str| {
-        spec.next_after(at(now), zone)
+        spec.next_after(at(now), &zone)
             .unwrap()
             .format(&Rfc3339)
             .unwrap()
@@ -395,13 +395,75 @@ fn cron_expressions_evaluate_in_their_zone() {
     let monday = CronSpec::parse("0 9 * * 1").unwrap();
     let east = Zone::resolve(Some("Etc/GMT-1")).unwrap();
     assert_eq!(
-        next(monday, east, "2026-01-01T00:00:00Z"),
+        next(monday, east.clone(), "2026-01-01T00:00:00Z"),
         "2026-01-05T08:00:00Z"
     );
     assert!(matches!(
         Cadence::parse_expression("0 9 * * 1", Some("Etc/GMT-1")),
         Ok(Cadence::Cron { zone, .. }) if zone == east
     ));
+}
+
+#[test]
+fn cron_daily_and_windows_follow_daylight_saving() {
+    let at = |text: &str| OffsetDateTime::parse(text, &Rfc3339).unwrap();
+    let ticks = |expression: &str, zone: Option<&str>, from: &str, count: usize| {
+        let cadence = Cadence::parse_expression(expression, zone).expect(expression);
+        let mut now = at(from);
+        let mut out = Vec::new();
+        for _ in 0..count {
+            now = cadence.next_after(now).expect("a next tick");
+            out.push(now.format(&Rfc3339).unwrap());
+        }
+        out
+    };
+    // The bundled IANA database, daylight saving included: Monday 09:00 in
+    // Paris is 08:00Z in winter and 07:00Z in summer.
+    assert_eq!(
+        ticks("0 9 * * 1", Some("Europe/Paris"), "2026-01-01T00:00:00Z", 1),
+        ["2026-01-05T08:00:00Z"]
+    );
+    assert_eq!(
+        ticks("0 9 * * 1", Some("Europe/Paris"), "2026-07-01T00:00:00Z", 1),
+        ["2026-07-06T07:00:00Z"]
+    );
+    // New York springs forward at 02:00 on 2026-03-08, so 02:30 does not
+    // exist that day: it runs right after the gap, at 03:30 local (07:30Z),
+    // then at 02:30 EDT (06:30Z).
+    assert_eq!(
+        ticks(
+            "every day 02:30",
+            Some("America/New_York"),
+            "2026-03-08T00:00:00Z",
+            2
+        ),
+        ["2026-03-08T07:30:00Z", "2026-03-09T06:30:00Z"]
+    );
+    // Falling back on 2026-11-01 repeats 01:30: it runs once, at the first
+    // (EDT, 05:30Z), then at 01:30 EST the next day (06:30Z).
+    assert_eq!(
+        ticks(
+            "30 1 * * *",
+            Some("America/New_York"),
+            "2026-11-01T00:00:00Z",
+            2
+        ),
+        ["2026-11-01T05:30:00Z", "2026-11-02T06:30:00Z"]
+    );
+    // A window crosses the change in its own zone.
+    assert_eq!(
+        ticks(
+            "every 6 hours from 00:00 to 23:00",
+            Some("Europe/Paris"),
+            "2026-03-28T22:00:00Z",
+            3
+        ),
+        [
+            "2026-03-28T23:00:00Z",
+            "2026-03-29T04:00:00Z",
+            "2026-03-29T10:00:00Z"
+        ]
+    );
 }
 
 #[test]
@@ -502,6 +564,8 @@ fn cron_and_daily_run_in_their_zone() {
     assert_eq!(view(None).evaluated_in, "UTC");
     assert_eq!(view(Some("Etc/GMT+5")).evaluated_in, "Etc/GMT+5");
     assert!(view(Some("Etc/GMT+5")).automatic);
+    let paris = view(Some("Europe/Paris"));
+    assert!(paris.automatic && paris.problem.is_none(), "{paris:?}");
     let unknown = view(Some("Mars/Olympus_Mons"));
     assert!(!unknown.automatic);
     assert_eq!(
@@ -3340,6 +3404,22 @@ mod console {
             )
             .expect("publish");
         assert_eq!((outcome.functions, outcome.functions_skipped), (1, 1));
+        assert_eq!(runtime.delivery_queue_depth(), 0, "nothing was queued");
+        // Resumed: the dispatch waits in the queue until the delivery
+        // runtime takes it (this test's receiver takes without counting).
+        background.set_background_enabled(true);
+        let outcome = runtime
+            .publish_from_console(
+                &topic,
+                vec![OutgoingMessage {
+                    data: b"{}".to_vec(),
+                    ..OutgoingMessage::default()
+                }],
+            )
+            .expect("publish");
+        assert_eq!((outcome.functions, outcome.functions_skipped), (1, 0));
+        assert_eq!(runtime.delivery_queue_depth(), 1);
+        assert!(deliveries.try_recv().is_ok(), "the dispatch was queued");
         runtime.shutdown().await;
     }
 

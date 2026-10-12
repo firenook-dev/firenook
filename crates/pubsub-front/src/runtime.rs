@@ -884,6 +884,14 @@ impl PubsubRuntime {
         Ok(outcome)
     }
 
+    /// Function deliveries waiting for a dispatch slot: what "queued · 214
+    /// waiting for a slot" counts. Nothing here watches the background
+    /// switch; a publish reads the flag as it fans out.
+    #[must_use]
+    pub fn delivery_queue_depth(&self) -> usize {
+        self.inner.queue.depth()
+    }
+
     /// The functions listening on `topic` (the targets
     /// [`PubsubRuntime::deliver_to_functions`] uses).
     #[must_use]
