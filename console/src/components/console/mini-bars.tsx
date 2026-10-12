@@ -6,7 +6,9 @@
 //
 // Bars scale to the largest bucket, and a bucket that holds anything is at
 // least one pixel tall, so a single error in an hour of quiet is still
-// there to see. With `onPick` the strip picks a range: click a bucket, or
+// there to see. With `floor`, every series a bucket holds is at least that
+// many pixels: one error beside a minute of 400 lines reads as a bar, not a
+// hairline under its neighbours. With `onPick` the strip picks a range: click a bucket, or
 // drag across several (a tinted brush follows), or from the keyboard move
 // with ← →, widen with Shift, and press Enter.
 
@@ -26,9 +28,16 @@ const FILL: Record<MiniBarTone, string> = {
  * Each series' height in whole pixels, stacked to the bucket's total: the
  * bucket is scaled to the largest one, a non-empty bucket is never below
  * one pixel, and rounding is done on the running sum so the segments add
- * up to the bucket exactly.
+ * up to the bucket exactly. With a `floor`, each series that holds anything
+ * is at least that tall; the bucket grows to fit, and what would pass the
+ * strip's height comes off its tallest series.
  */
-export function stackHeights(bucket: readonly number[], max: number, height: number): number[] {
+export function stackHeights(
+  bucket: readonly number[],
+  max: number,
+  height: number,
+  floor = 0,
+): number[] {
   const total = bucket.reduce((sum, value) => sum + Math.max(0, value), 0)
   if (total <= 0 || max <= 0) return bucket.map(() => 0)
   const pixels = Math.max(1, Math.round((total / max) * height))
@@ -41,7 +50,28 @@ export function stackHeights(bucket: readonly number[], max: number, height: num
     heights.push(upTo - drawn)
     drawn = upTo
   }
-  return heights
+  return floor > 0 ? raiseToFloor(bucket, heights, Math.min(floor, height), height) : heights
+}
+
+function raiseToFloor(
+  bucket: readonly number[],
+  heights: number[],
+  floor: number,
+  height: number,
+): number[] {
+  const raised = heights.map((pixels, at) => ((bucket[at] ?? 0) > 0 ? Math.max(pixels, floor) : 0))
+  let over = raised.reduce((sum, pixels) => sum + pixels, 0) - height
+  while (over > 0) {
+    let tallest = -1
+    for (let at = 0; at < raised.length; at += 1)
+      if ((raised[at] ?? 0) > floor && (tallest < 0 || (raised[at] ?? 0) > (raised[tallest] ?? 0)))
+        tallest = at
+    if (tallest < 0) break
+    const take = Math.min(over, (raised[tallest] ?? 0) - floor)
+    raised[tallest] = (raised[tallest] ?? 0) - take
+    over -= take
+  }
+  return raised
 }
 
 /** The largest bucket total; 0 when every bucket is empty. */
@@ -58,6 +88,7 @@ export function MiniBars({
   buckets,
   series,
   height = 24,
+  floor,
   label,
   tooltip,
   onPick,
@@ -69,6 +100,12 @@ export function MiniBars({
   series: readonly { label: string; tone: MiniBarTone }[]
   /** Pixels; the strip's width is its container's. */
   height?: number
+  /**
+   * Pixels every series a bucket holds is at least, so a lone error stays a
+   * bar beside busy buckets. Without it heights are to scale (a non-empty
+   * bucket is still at least one pixel).
+   */
+  floor?: number
   /** What the bars show, for assistive technology: "Log lines per minute, last hour". */
   label: string
   /** The bucket's own sentence: "12:05–12:06 · 412 lines · 3 errors". */
@@ -147,7 +184,7 @@ export function MiniBars({
       data-testid={testId}
     >
       {buckets.map((bucket, index) => {
-        const heights = stackHeights(bucket, max, height)
+        const heights = stackHeights(bucket, max, height, floor)
         const brushed = range !== undefined && index >= range.low && index <= range.high
         const column = (
           <div

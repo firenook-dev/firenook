@@ -57,6 +57,31 @@ describe('mini bars', () => {
     expect(maxTotal([])).toBe(0)
   })
 
+  it('raises every series a bucket holds to the floor, within the height', () => {
+    // A lone warning beside a busy bucket: a hairline to scale, a bar with a floor.
+    expect(stackHeights([0, 1, 0], 400, 24)).toEqual([0, 1, 0])
+    expect(stackHeights([0, 1, 0], 400, 24, 3)).toEqual([0, 3, 0])
+    // A full bucket keeps the strip's height: the floor comes off its tallest series.
+    expect(stackHeights([400, 1, 1], 402, 24, 3)).toEqual([18, 3, 3])
+    // Series to scale above the floor are untouched; empty series stay empty.
+    expect(stackHeights([10, 0, 10], 20, 24, 3)).toEqual([12, 0, 12])
+    // A floor taller than the strip is the strip.
+    expect(stackHeights([0, 0, 1], 1, 2, 5)).toEqual([0, 0, 2])
+    render(
+      <MiniBars
+        buckets={[
+          [400, 0, 0],
+          [0, 0, 1],
+        ]}
+        series={LEVELS}
+        height={24}
+        floor={3}
+        label="Log lines per minute"
+      />,
+    )
+    expect(segments(1)).toEqual([{ series: 'error', height: 3 }])
+  })
+
   it('draws a single series, the sparkline case', () => {
     render(
       <MiniBars
