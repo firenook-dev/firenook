@@ -23,7 +23,7 @@ import { KeyValueEditor, type KeyValueRow, rowId } from '@/components/console/ke
 import { Kbd } from '@/components/kit'
 import { formatBytes, relativeTime } from '@/lib/format'
 import { enqueue } from '../api'
-import { errorText } from '../errors'
+import { errorText } from '@/messaging/confirm-popover'
 import {
   type EnqueueDraft,
   REQUEST_LIMIT,

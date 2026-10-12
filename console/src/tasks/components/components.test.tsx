@@ -17,7 +17,7 @@ import {
   testRow,
 } from '../test-data'
 import { AttemptsTimeline } from './attempts-timeline'
-import { type ConfirmRequest, useConfirmPopover } from './confirm-popover'
+import { type ConfirmRequest, useConfirmPopover } from '@/messaging/confirm-popover'
 import { panelNodes } from './queues-panel'
 import { meantQueue, refusedText } from './refused-banner'
 import { replacedText } from './replaced-banner'

@@ -1,9 +1,11 @@
 // "Run onOrderPlaced again with message 1187? It runs your function's
-// code." A step that runs user code — a function given one message again, a
-// schedule's tick now — asks first, in a popover beside what it acts on
-// (the row, or the button pressed), never a dialog that takes the screen,
-// and never on a key alone: `r` opens it, Enter confirms (messaging spec
-// §4.6, §4.9). One popover per page, asked for by whoever needs it.
+// code." "Run order-1 now? It runs processOrder's code." A step that runs
+// user code — a function given one message again, a schedule's tick now, a
+// task sent past its queue's pause or enqueued again — asks first, in a
+// popover beside what it acts on (the row, or the button pressed), never a
+// dialog that takes the screen, and never on a key alone: `r` opens it,
+// Enter confirms (messaging spec §4.6, §4.9). One popover per page, asked
+// for by whoever needs it; Pub/Sub and Cloud Tasks share it.
 
 import { Button, Popover } from '@cloudflare/kumo'
 import { type ReactNode, useState } from 'react'
@@ -15,7 +17,7 @@ export interface ConfirmRequest {
   title: string
   /** "It runs your function's code." */
   description: ReactNode
-  /** The button's word: "Run now", "Run again". */
+  /** The button's word: "Run now", "Run again", "Enqueue again". */
   confirm: string
   /** What the popover hangs off: a row, or the control pressed; the page's middle when gone. */
   anchor: Element | null

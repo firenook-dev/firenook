@@ -10,9 +10,8 @@ import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { toast } from '@/lib/toasts'
 import { deleteTask, enqueueAgain, runTask, stopTask } from '../api'
-import { errorText } from '../errors'
 import { useTasksSearch } from '../search'
-import { type ConfirmRequest, useConfirmPopover } from './confirm-popover'
+import { type ConfirmRequest, errorText, useConfirmPopover } from '@/messaging/confirm-popover'
 
 /** A task as the actions name it. */
 export interface TaskSubject {

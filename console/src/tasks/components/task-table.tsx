@@ -41,7 +41,7 @@ import { formatNumber } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { useShortcuts } from '@/lib/shortcuts'
 import { startDeleteTasks, startRunTasks } from '../api'
-import { errorText } from '../errors'
+import { errorText } from '@/messaging/confirm-popover'
 import { taskList } from '../queries'
 import { useQueueListener } from '../queue-live'
 import {
