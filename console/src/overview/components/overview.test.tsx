@@ -186,6 +186,44 @@ describe('recent problems', () => {
     ).toBeInTheDocument()
   })
 
+  it('say "just now" for a problem logged late in the current minute', async () => {
+    // A clock that turns once a minute would put this line 58 s in the future: "in 1 min".
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-12T04:06:59.000Z'))
+    try {
+      const status = withDocuments(1)
+      await renderInConsole(
+        () => (
+          <RecentProblems
+            status={status}
+            live="live"
+            state={answered(
+              state({
+                generatedAt: '2026-10-12T04:06:58.900Z',
+                logs: { entries: 120, errors: 1, warnings: 0, problems: 1 },
+                problems: [
+                  {
+                    cursor: 'e1.9',
+                    time: '2026-10-12T04:06:58.500Z',
+                    level: 'error',
+                    kind: null,
+                    source: 'functions[us-central1-fails]',
+                    firstLine: "TypeError: cannot read 'id' of undefined",
+                    refs: [],
+                  },
+                ],
+              }),
+            )}
+          />
+        ),
+        { status },
+      )
+      expect(screen.getByTestId('overview-problem-time')).toHaveTextContent('just now')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('list the newest with their level, source and first line, and why a denial was refused', async () => {
     const status = withDocuments(1)
     await renderInConsole(

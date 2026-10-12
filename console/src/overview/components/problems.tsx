@@ -16,9 +16,9 @@ import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { useDelayedFlag } from '@/components/console/empty-state'
 import { EntityLink } from '@/components/console/entity-link'
 import { LiveNotice } from '@/components/console/live-notice'
-import { useNow } from '@/lib/clock'
+import { RelativeTime } from '@/components/console/relative-time'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
-import { formatClock, formatCount, relativeTime } from '@/lib/format'
+import { formatCount } from '@/lib/format'
 import { bucketSentence, bucketSpan, hourBucketStart, problemBuckets } from '@/observe/level-bars'
 import { LevelStrip } from '@/observe/level-strip'
 import { LevelWord } from '@/observe/level-word'
@@ -148,7 +148,6 @@ export function RecentProblems({
 }
 
 function ProblemRow({ problem, status }: { problem: OverviewProblem; status: ConsoleStatus }) {
-  const now = useNow('minute')
   const entry = logsEntryLink(problem.cursor, status)
   const primary = problemLink(problem, status)
   const source = labelSource(problem.source)
@@ -159,13 +158,12 @@ function ProblemRow({ problem, status }: { problem: OverviewProblem; status: Con
       data-level={problem.level}
       data-kind={problem.kind ?? undefined}
     >
-      <Tooltip
-        content={`${formatClock(problem.time, 'time')} · ${problem.time}`}
-        render={
-          <span className="relative z-10 w-fit truncate text-[12px] text-kumo-subtle">
-            {relativeTime(problem.time, now)}
-          </span>
-        }
+      {/* The console's relative time: to the second while it is recent, so a line logged
+          late in a minute never reads "in 1 min" against a clock that turns once a minute. */}
+      <RelativeTime
+        iso={problem.time}
+        className="relative z-10 w-fit truncate text-kumo-subtle"
+        testId="overview-problem-time"
       />
       <LevelWord level={problem.level} />
       <span className="relative z-10 flex min-w-0">
