@@ -407,4 +407,94 @@ mod tests {
             EntityRef::function("f")
         );
     }
+
+    /// One reference of every kind this file constructs, each written by its
+    /// constructor with a realistic key (a tenant, an object name holding a
+    /// bar, an id that looks like a number). The console resolves every one
+    /// to a page whose search schema accepts it (`src/lib/links.test.ts`
+    /// reads them from `console/src/lib/entity-kinds.json`).
+    fn console_samples() -> Vec<EntityRef> {
+        vec![
+            EntityRef::firestore_collection("(default)", "users/*/orders"),
+            EntityRef::firestore_document("analytics", "users/u_k65eq/orders/o_1"),
+            EntityRef::firestore_decision("(default)", "8f2c1a7e"),
+            EntityRef::auth_user(Some("acme"), "u_9f3k2"),
+            EntityRef::auth_call("1284"),
+            EntityRef::auth_message("37"),
+            EntityRef::storage_object("demo-console.appspot.com", "avatars/a|b 1.png"),
+            EntityRef::storage_folder("demo-console.appspot.com", "avatars/"),
+            EntityRef::storage_decision(None, "d_204"),
+            EntityRef::function("us-central1-onOrderCreated"),
+            EntityRef::invocation("40406e-694"),
+            EntityRef::codebase("default"),
+            EntityRef::extension_instance("greeter"),
+            EntityRef::eventarc_event("40406e-12"),
+            EntityRef::eventarc_channel(
+                "projects/demo-console/locations/us-central1/channels/firebase",
+            ),
+            EntityRef::pubsub_topic("projects/demo-console/topics/orders"),
+            EntityRef::pubsub_subscription("projects/demo-console/subscriptions/orders-worker"),
+            EntityRef::pubsub_schema("projects/demo-console/schemas/order"),
+            EntityRef::pubsub_message("projects/demo-console/topics/orders", "1204"),
+            EntityRef::pubsub_schedule("us-central1-nightly"),
+            EntityRef::tasks_queue("demo-console", "us-central1", "orders"),
+            EntityRef::tasks_task("demo-console", "us-central1", "orders", "7731"),
+            EntityRef::log_entry("9f3c0a71.18204"),
+        ]
+    }
+
+    /// The kinds named in the constructors' block (the `impl`, tests left out).
+    fn constructed_kinds() -> std::collections::BTreeSet<String> {
+        let source = include_str!("entity.rs");
+        let start = source.find("impl EntityRef {").expect("the impl");
+        let end = source.find("#[cfg(test)]").expect("the tests");
+        source[start..end]
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|text| {
+                text.split_once('.').is_some_and(|(section, thing)| {
+                    !section.is_empty()
+                        && section.bytes().all(|byte| byte.is_ascii_lowercase())
+                        && !thing.is_empty()
+                        && thing
+                            .bytes()
+                            .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+                })
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn every_constructed_kind_has_a_console_sample() {
+        let sampled: std::collections::BTreeSet<String> = console_samples()
+            .into_iter()
+            .map(|entity| entity.kind)
+            .collect();
+        assert_eq!(sampled, constructed_kinds());
+    }
+
+    #[test]
+    fn the_console_reads_the_samples_as_they_are() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../console/src/lib/entity-kinds.json"
+        );
+        let expected = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&console_samples()).expect("json")
+        );
+        if std::env::var_os("FIRENOOK_WRITE_ENTITY_KINDS").is_some() {
+            // Written for the next build, which compares it.
+            std::fs::write(path, &expected).expect("written");
+            return;
+        }
+        assert_eq!(
+            include_str!("../../../console/src/lib/entity-kinds.json"),
+            expected,
+            "console/src/lib/entity-kinds.json is stale: run \
+             FIRENOOK_WRITE_ENTITY_KINDS=1 cargo test -p firenook-suite-front entity"
+        );
+    }
 }

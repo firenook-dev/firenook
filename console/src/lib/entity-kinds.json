@@ -1,0 +1,94 @@
+[
+  {
+    "kind": "firestore.collection",
+    "key": "(default)|users/*/orders"
+  },
+  {
+    "kind": "firestore.document",
+    "key": "analytics|users/u_k65eq/orders/o_1"
+  },
+  {
+    "kind": "firestore.decision",
+    "key": "(default)|8f2c1a7e"
+  },
+  {
+    "kind": "auth.user",
+    "key": "acme|u_9f3k2"
+  },
+  {
+    "kind": "auth.call",
+    "key": "1284"
+  },
+  {
+    "kind": "auth.message",
+    "key": "37"
+  },
+  {
+    "kind": "storage.object",
+    "key": "demo-console.appspot.com|avatars/a|b 1.png"
+  },
+  {
+    "kind": "storage.folder",
+    "key": "demo-console.appspot.com|avatars/"
+  },
+  {
+    "kind": "storage.decision",
+    "key": "*|d_204"
+  },
+  {
+    "kind": "functions.function",
+    "key": "us-central1-onOrderCreated"
+  },
+  {
+    "kind": "functions.invocation",
+    "key": "40406e-694"
+  },
+  {
+    "kind": "functions.codebase",
+    "key": "default"
+  },
+  {
+    "kind": "extensions.instance",
+    "key": "greeter"
+  },
+  {
+    "kind": "eventarc.event",
+    "key": "40406e-12"
+  },
+  {
+    "kind": "eventarc.channel",
+    "key": "projects/demo-console/locations/us-central1/channels/firebase"
+  },
+  {
+    "kind": "pubsub.topic",
+    "key": "projects/demo-console/topics/orders"
+  },
+  {
+    "kind": "pubsub.subscription",
+    "key": "projects/demo-console/subscriptions/orders-worker"
+  },
+  {
+    "kind": "pubsub.schema",
+    "key": "projects/demo-console/schemas/order"
+  },
+  {
+    "kind": "pubsub.message",
+    "key": "projects/demo-console/topics/orders|1204"
+  },
+  {
+    "kind": "pubsub.schedule",
+    "key": "us-central1-nightly"
+  },
+  {
+    "kind": "tasks.queue",
+    "key": "demo-console|us-central1|orders"
+  },
+  {
+    "kind": "tasks.task",
+    "key": "demo-console|us-central1|orders|7731"
+  },
+  {
+    "kind": "logs.entry",
+    "key": "9f3c0a71.18204"
+  }
+]
