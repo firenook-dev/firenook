@@ -1038,6 +1038,16 @@
       }
     },
     {
+      "name": "time-relative-unit-not-ascii",
+      "text": "created:-5é",
+      "error": {
+        "from": 0,
+        "to": 11,
+        "message": "\"created:\" needs a time, like 2026-10-01, -2h or today."
+      },
+      "note": "the unit is the last character, never a byte inside one"
+    },
+    {
       "name": "bytes-plain",
       "text": "size:512",
       "ok": {

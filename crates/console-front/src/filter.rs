@@ -826,17 +826,21 @@ pub(crate) fn parse_time(text: &str, now: OffsetDateTime) -> Option<OffsetDateTi
         _ => {}
     }
     if let Some(relative) = lower.strip_prefix('-') {
-        let (amount, unit) = relative.split_at(relative.len().checked_sub(1)?);
+        // The unit is the last character, not the last byte: `-5é` must be
+        // refused, not split inside the `é`.
+        let mut characters = relative.chars();
+        let unit = characters.next_back()?;
+        let amount = characters.as_str();
         if amount.is_empty() || !amount.bytes().all(|byte| byte.is_ascii_digit()) {
             return None;
         }
         let amount: i64 = amount.parse().ok()?;
         let seconds = match unit {
-            "s" => amount,
-            "m" => amount.checked_mul(60)?,
-            "h" => amount.checked_mul(3_600)?,
-            "d" => amount.checked_mul(86_400)?,
-            "w" => amount.checked_mul(604_800)?,
+            's' => amount,
+            'm' => amount.checked_mul(60)?,
+            'h' => amount.checked_mul(3_600)?,
+            'd' => amount.checked_mul(86_400)?,
+            'w' => amount.checked_mul(604_800)?,
             _ => return None,
         };
         return now.checked_sub(time::Duration::seconds(seconds));
@@ -1147,7 +1151,16 @@ mod tests {
             at("2026-10-01T08:00:00+08:00").as_deref(),
             Some("2026-10-01T08:00:00+08:00")
         );
-        for bad in ["2026-02-30", "-2", "-h", "yesterday", "2026-10-1", "-1.5h"] {
+        for bad in [
+            "2026-02-30",
+            "-2",
+            "-h",
+            "yesterday",
+            "2026-10-1",
+            "-1.5h",
+            "-5é",
+            "-",
+        ] {
             assert_eq!(at(bad), None, "{bad}");
         }
         assert_eq!(parse_bytes("512"), Some(512));
