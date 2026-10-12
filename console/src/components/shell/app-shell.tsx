@@ -280,7 +280,9 @@ function Navigation() {
             <Sidebar.GroupLabel>{AREA_LABELS[area]}</Sidebar.GroupLabel>
             <Sidebar.Menu>
               {SECTIONS.filter((section) => section.area === area).map((section) =>
-                shownPages(section) ? (
+                // A section the engine does not run is one dimmed item that
+                // says why and leads to its gate: its pages have nothing to show.
+                shownPages(section) && entries.get(section.id)?.state !== 'absent' ? (
                   <SectionWithPages
                     key={section.id}
                     section={section}
