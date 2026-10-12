@@ -13,10 +13,15 @@
 import { cn } from '@cloudflare/kumo'
 import type { ReactNode } from 'react'
 
-/** The stack of toolbar rows at the top of a section page. */
+/**
+ * The stack of toolbar rows at the top of a section page. Its one column is
+ * the page's width, never its rows' content: a row's path field shrinks
+ * (and scrolls to its end) instead of pushing the controls after it out of
+ * a narrow window.
+ */
 export function SectionToolbar({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
-    <div className="grid shrink-0" data-testid={testId}>
+    <div className="grid shrink-0 grid-cols-[minmax(0,1fr)]" data-testid={testId}>
       {children}
     </div>
   )
