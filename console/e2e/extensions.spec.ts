@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { type Engine, expect, test } from './fixtures'
 import { ownerFetch } from './support/api'
+import { callFunction, loadsOf as codebaseLoads } from './support/compute'
 
 // The Extensions section's journeys (compute spec §9.3, 28–33) against the
 // `compute` profile's engine: the local `greeter` extension the fixture
@@ -16,22 +17,18 @@ const ENV_FILE = 'extensions/greeter.env'
 /** The greeter's parameter file in the engine's project. */
 const envPath = (engine: Engine) => join(engine.directory, ENV_FILE)
 
-/** How many completed loads the runtime counts for a codebase or instance. */
-async function loadsOf(engine: Engine, codebase = 'greeter'): Promise<number> {
-  const response = await ownerFetch(engine, '/functions')
-  const snapshot = (await response.json()) as {
-    codebases: { codebase: { id: string; loads: number } }[]
-  }
-  return snapshot.codebases.find((entry) => entry.codebase.id === codebase)?.codebase.loads ?? 0
-}
+/** How many completed loads the runtime counts for the greeter instance. */
+const loadsOf = (engine: Engine) => codebaseLoads(engine, 'greeter')
 
 /** Calls the greeter's HTTP function as an app would, and reads its greeting. */
 async function greet(engine: Engine, name: string): Promise<string> {
-  const response = await fetch(
-    `http://127.0.0.1:${engine.ports.functions}/${engine.project}/us-central1/ext-greeter-greet?name=${encodeURIComponent(name)}`,
+  const answer = await callFunction(
+    engine,
+    'ext-greeter-greet',
+    `?name=${encodeURIComponent(name)}`,
   )
-  expect(response.status).toBe(200)
-  return ((await response.json()) as { greeting: string }).greeting
+  expect(answer.status).toBe(200)
+  return answer.json<{ greeting: string }>().greeting
 }
 
 /** Writes the parameter file back as it was, and waits for the instance to read it again. */
@@ -171,14 +168,17 @@ test('reconfigure writes the file that set the value, keeps its comment and relo
 
     // One reload for the save: the watcher sees the console's own write and lets it be.
     await expect.poll(() => loadsOf(engine)).toBe(before + 1)
-    await page.waitForTimeout(1_500)
-    expect(await loadsOf(engine)).toBe(before + 1)
     const written = readFileSync(envPath(engine), 'utf8')
     expect(written).toContain(
       '# Parameters of the greeter instance. A comment kept by reconfigure.',
     )
     expect(written).toMatch(/^GREETING_TEMPLATE=.*Hi, \{name\}.*$/m)
     expect(await greet(engine, 'Ada')).toBe('Hi, Ada')
+    // An edit made after it reaches the watcher behind the console's write,
+    // in order: once it has loaded, the count says the save cost one load.
+    writeFileSync(envPath(engine), written.replace('Hi, {name}', 'Hey, {name}'))
+    await expect.poll(() => greet(engine, 'Ada'), { timeout: 15_000 }).toBe('Hey, Ada')
+    expect(await loadsOf(engine)).toBe(before + 2)
   } finally {
     await restore(engine, original)
   }

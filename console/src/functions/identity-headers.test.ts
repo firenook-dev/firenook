@@ -12,7 +12,17 @@ vi.mock('@/lib/identity', async (original) => ({
   },
 }))
 
-const { callingIdentity, identityHeaders, maskToken } = await import('./identity-headers')
+const { callingIdentity, identityHeaders, isSynthetic, maskToken } =
+  await import('./identity-headers')
+const { queryClient } = await import('@/lib/query')
+const { userTokenQuery } = await import('@/lib/identity')
+
+/** The engine's answer for a user's token: real, or made here for no account. */
+const token = (synthetic: boolean) => ({
+  token: 'unused',
+  expiresAt: Date.now() + 3_600_000,
+  synthetic,
+})
 
 describe('Call as and App Check as headers', () => {
   beforeEach(() => {
@@ -59,5 +69,15 @@ describe('Call as and App Check as headers', () => {
       'Bearer abcdefghijkl…456789',
     )
     expect(maskToken('Bearer short')).toBe('Bearer short')
+  })
+
+  it('keeps "Not an Auth user" for a user the engine has no account for', () => {
+    const ada = { kind: 'user' as const, uid: 'ada' }
+    const ghost = { kind: 'user' as const, uid: 'u_ghost' }
+    queryClient.setQueryData(userTokenQuery(ada, 'demo-x').queryKey, token(false) as never)
+    queryClient.setQueryData(userTokenQuery(ghost, 'demo-x').queryKey, token(true) as never)
+    expect(isSynthetic(ada, 'demo-x')).toBe(false)
+    expect(isSynthetic(ghost, 'demo-x')).toBe(true)
+    expect(isSynthetic({ kind: 'owner' }, 'demo-x')).toBe(false)
   })
 })

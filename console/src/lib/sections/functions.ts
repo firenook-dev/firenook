@@ -4,9 +4,9 @@
 // one (an `EntityRef` the engine built) or ⌘K's engine search finds one.
 // Compute exports no link builder: every link here goes through `routes`.
 //
-// `built` stays false until the section's journeys pass (hard rule 6): the
-// nav keeps the honest placeholder, `linkTo` answers null so a link into
-// Functions reads as text, and ⌘K offers none of it.
+// Built: its journeys (`e2e/functions*.spec.ts`) pass against a real engine,
+// so the nav opens its pages, a link into Functions opens there, and ⌘K
+// offers what it holds.
 
 import { LightningIcon, ListIcon } from '@phosphor-icons/react'
 import type { ConsoleSection } from '../services'
@@ -18,7 +18,7 @@ export const functions: ConsoleSection = {
   services: ['functions'],
   area: 'compute',
   icon: LightningIcon,
-  built: false,
+  built: true,
   summary:
     'Every function by codebase with its trigger and health, invoke HTTP and callable functions as any user, send test events or do the real thing, and every invocation with its own logs, replay and timing.',
   // Each badge sits on the page it is about, so the page that shows the

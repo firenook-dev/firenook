@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { type Engine, expect, test } from './fixtures'
 import { ownerFetch } from './support/api'
+import { callFunction } from './support/compute'
 
 // Eventarc's journeys (compute spec §9.3, 34–37) against the `compute`
 // profile's engine: the greeter extension publishes `test.greeter.v1.greeted`
@@ -11,11 +12,12 @@ import { ownerFetch } from './support/api'
 
 /** The greeter's HTTP function, as an app calls it; it publishes one event. */
 async function greet(engine: Engine, name: string): Promise<void> {
-  const response = await fetch(
-    `http://127.0.0.1:${engine.ports.functions}/${engine.project}/us-central1/ext-greeter-greet?name=${encodeURIComponent(name)}`,
+  const answer = await callFunction(
+    engine,
+    'ext-greeter-greet',
+    `?name=${encodeURIComponent(name)}`,
   )
-  expect(response.status).toBe(200)
-  await response.arrayBuffer()
+  expect(answer.status).toBe(200)
 }
 
 const channelOf = (engine: Engine) =>
