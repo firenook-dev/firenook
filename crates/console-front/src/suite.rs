@@ -20,7 +20,7 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use firenook_functions_bridge::TriggerRegistry;
-use firenook_suite_front::{BackgroundRequest, ExportCommand, RingBudget};
+use firenook_suite_front::{BackgroundRequest, ExportCommand, LoggingRuntime, RingBudget};
 use futures_util::stream::BoxStream;
 use futures_util::{FutureExt as _, StreamExt as _};
 use serde::{Deserialize, Serialize};
@@ -304,14 +304,18 @@ struct ClearScope {
     sections: Vec<Arc<dyn Section>>,
     jobs: JobRegistry,
     project: Arc<str>,
+    /// Where each section's `data.reset` marker goes.
+    logging: LoggingRuntime,
 }
 
 /// `POST /suite/clear` over `sections`, as jobs of `jobs`, confirmed with
-/// `project`.
+/// `project`; each section it clears leaves a `data.reset` marker in
+/// `logging`'s console log.
 pub(crate) fn clear_router(
     sections: Vec<Arc<dyn Section>>,
     jobs: JobRegistry,
     project: Arc<str>,
+    logging: LoggingRuntime,
 ) -> Router {
     Router::new()
         .route("/suite/clear", post(clear))
@@ -319,6 +323,7 @@ pub(crate) fn clear_router(
             sections,
             jobs,
             project,
+            logging,
         }))
 }
 
@@ -346,7 +351,8 @@ fn clear_title(ids: &[String]) -> String {
 }
 
 /// `POST /suite/clear`: one `suite.clear` job running each named section's
-/// clear in sidebar order (`202` with the job). Everything is checked before
+/// clear in sidebar order (`202` with the job), each finished section
+/// logging one `data.reset` marker. Everything is checked before
 /// the job starts: each section exists, runs and can be cleared, and
 /// clearing more than one names the project id in `confirm`.
 async fn clear(
@@ -380,6 +386,7 @@ async fn clear(
         run_triggers: request.run_triggers,
     };
     let title = clear_title(&ids);
+    let logging = scope.logging.clone();
     let job = scope
         .jobs
         .try_start("suite", "suite.clear", title, None, |handle| {
@@ -417,7 +424,13 @@ async fn clear(
                         break;
                     }
                     part.start_at(handle.done());
+                    let started = Instant::now();
                     let report = work.await?;
+                    logging.emit(crate::observe::reset_input(
+                        &report,
+                        started.elapsed(),
+                        handle.cancelled(),
+                    ));
                     reports.push(report);
                     handle.set_result(serde_json::to_value(&reports).unwrap_or_default());
                 }
@@ -931,9 +944,19 @@ mod tests {
 
     type Turns = Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>;
 
+    /// Every line the clear route hands the console log.
+    #[derive(Default)]
+    struct Logged(std::sync::Mutex<Vec<firenook_suite_front::LogInput>>);
+
+    impl firenook_suite_front::ConsoleSink for Logged {
+        fn accept(&self, input: firenook_suite_front::LogInput) {
+            self.0.lock().expect("lines").push(input);
+        }
+    }
+
     /// Firestore, Auth and Storage that clear; Logs that cannot; Pub/Sub
     /// still starting.
-    fn clearing_suite() -> (Router, JobRegistry, Turns) {
+    fn clearing_suite() -> (Router, JobRegistry, Turns, Arc<Logged>) {
         let turns: Turns = Arc::new(std::sync::Mutex::new(Vec::new()));
         let section = |id, removed, ready| -> Arc<dyn Section> {
             Arc::new(Clearable {
@@ -944,6 +967,9 @@ mod tests {
             })
         };
         let jobs = JobRegistry::new();
+        let logging = LoggingRuntime::new();
+        let logged = Arc::new(Logged::default());
+        logging.set_console_sink(logged.clone());
         let router = clear_router(
             vec![
                 section("storage", 7, true),
@@ -954,13 +980,14 @@ mod tests {
             ],
             jobs.clone(),
             Arc::from("demo-clear"),
+            logging,
         );
-        (router, jobs, turns)
+        (router, jobs, turns, logged)
     }
 
     #[tokio::test]
     async fn a_clear_is_refused_before_any_job_when_it_cannot_run() {
-        let (router, jobs, turns) = clearing_suite();
+        let (router, jobs, turns, logged) = clearing_suite();
         // Two sections need the project id.
         let (status, body) = post(
             &router,
@@ -1018,11 +1045,16 @@ mod tests {
             "nothing refused left a job behind"
         );
         assert_eq!(*turns.lock().expect("turns"), []);
+        assert_eq!(
+            logged.0.lock().expect("lines").len(),
+            0,
+            "nothing was reset"
+        );
     }
 
     #[tokio::test]
     async fn a_clear_runs_each_section_in_sidebar_order_inside_one_job() {
-        let (router, jobs, turns) = clearing_suite();
+        let (router, jobs, turns, logged) = clearing_suite();
         let (status, job) = post(
             &router,
             "/suite/clear",
@@ -1063,6 +1095,47 @@ mod tests {
                 { "section": "auth", "removed": 5 },
                 { "section": "storage", "removed": 7 },
             ]))
+        );
+        // One marker per section, as each finished.
+        let markers: Vec<(String, Option<&str>, String, Value)> = logged
+            .0
+            .lock()
+            .expect("lines")
+            .iter()
+            .map(|line| {
+                let mut payload = line.payload.clone().expect("a payload");
+                assert!(payload["durationMs"].is_u64(), "{payload}");
+                payload["durationMs"] = json!(0);
+                (
+                    line.service.clone(),
+                    line.kind,
+                    line.message.clone(),
+                    payload,
+                )
+            })
+            .collect();
+        assert_eq!(
+            markers,
+            [
+                (
+                    "firestore".to_owned(),
+                    Some("data.reset"),
+                    "Firestore reset from the console: 30 documents deleted".to_owned(),
+                    json!({ "section": "firestore", "removed": 30, "durationMs": 0, "cancelled": false }),
+                ),
+                (
+                    "auth".to_owned(),
+                    Some("data.reset"),
+                    "Authentication reset from the console: 5 users deleted".to_owned(),
+                    json!({ "section": "auth", "removed": 5, "durationMs": 0, "cancelled": false }),
+                ),
+                (
+                    "storage".to_owned(),
+                    Some("data.reset"),
+                    "Storage reset from the console: 7 objects deleted".to_owned(),
+                    json!({ "section": "storage", "removed": 7, "durationMs": 0, "cancelled": false }),
+                ),
+            ]
         );
     }
 

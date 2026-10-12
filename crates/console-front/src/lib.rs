@@ -534,6 +534,7 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
             sections.clone(),
             context.jobs.clone(),
             context.project.clone(),
+            services.observe.logging.clone(),
         ))
         .merge(context.jobs.router())
         .merge(hub.router());

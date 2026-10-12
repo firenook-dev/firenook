@@ -147,3 +147,75 @@ fn every_observe_type_is_named_for_its_family_and_the_kinds_are_exported() {
     );
     assert!(kinds.contains("{ kind: \"rules.denied\", label: \"Rules denied\", problem: true, marker: false, internal: false },"));
 }
+
+#[test]
+fn a_reset_marker_says_what_was_deleted_and_whether_it_finished() {
+    let report = |section: &str, removed| ClearReport {
+        section: section.to_owned(),
+        removed,
+    };
+    let done = reset_input(
+        &report("firestore", 211_260),
+        Duration::from_millis(1_250),
+        false,
+    );
+    assert_eq!(done.kind, Some(kinds::DATA_RESET));
+    assert_eq!(done.level, LogLevel::Info);
+    assert_eq!(done.service, "firestore");
+    assert_eq!(done.audience, firenook_suite_front::Audience::Console);
+    assert_eq!(
+        done.message,
+        "Firestore reset from the console: 211,260 documents deleted"
+    );
+    assert_eq!(
+        done.payload,
+        Some(serde_json::json!({
+            "section": "firestore",
+            "removed": 211_260,
+            "durationMs": 1_250,
+            "cancelled": false,
+        }))
+    );
+    for (section, removed, cancelled, service, message) in [
+        (
+            "auth",
+            1,
+            false,
+            "auth",
+            "Authentication reset from the console: 1 user deleted",
+        ),
+        (
+            "storage",
+            3,
+            true,
+            "storage",
+            "Storage reset from the console was cancelled after 3 objects were deleted",
+        ),
+        (
+            "pubsub",
+            1,
+            true,
+            "pubsub",
+            "Pub/Sub reset from the console was cancelled after 1 item was deleted",
+        ),
+        (
+            "tasks",
+            0,
+            true,
+            "tasks",
+            "Cloud Tasks reset from the console was cancelled before anything was deleted",
+        ),
+        (
+            "extensions",
+            2,
+            false,
+            "functions",
+            "Extensions reset from the console: 2 items deleted",
+        ),
+    ] {
+        let line = reset_input(&report(section, removed), Duration::ZERO, cancelled);
+        assert_eq!(line.service, service, "{section}");
+        assert_eq!(line.message, message, "{section}");
+        assert_eq!(line.payload.expect("a payload")["cancelled"], cancelled);
+    }
+}

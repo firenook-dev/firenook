@@ -13,15 +13,18 @@ use std::time::Duration;
 
 use axum::Router;
 use firenook_suite_front::{
-    Cursor, LoggingRuntime, OverviewEngineDetails, OverviewNotice, SnapshotPort,
+    Audience, Cursor, LogInput, LogLevel, LoggingRuntime, OverviewEngineDetails, OverviewNotice,
+    SnapshotPort, kinds,
 };
 use futures_util::StreamExt as _;
 use futures_util::stream::{self, BoxStream};
+use serde_json::json;
 
 use crate::live::LiveTopic;
 use crate::live::badges::{BadgeKind, BadgeNoun, BadgeTone};
 use crate::section::{
-    Section, SectionContext, SectionStatus, SectionSummary, SummaryFigure, SummaryUnit,
+    ClearReport, Section, SectionContext, SectionStatus, SectionSummary, SummaryFigure,
+    SummaryUnit, section_label,
 };
 
 use log::ConsoleLog;
@@ -265,6 +268,56 @@ fn logs_summary(kept: u64, errors: u64) -> SectionSummary {
                 unit: SummaryUnit::Count,
             },
         ],
+    }
+}
+
+/// The `data.reset` marker for one section a console reset emptied
+/// (`POST /suite/clear`, once per section it reached): what it deleted, how
+/// long that took, and whether the job was cancelled part way. Only the
+/// console reads it; the official feed never carried such a line.
+pub(crate) fn reset_input(report: &ClearReport, elapsed: Duration, cancelled: bool) -> LogInput {
+    let id = report.section.as_str();
+    let (one, many) = match id {
+        "firestore" => ("document", "documents"),
+        "auth" => ("user", "users"),
+        "storage" => ("object", "objects"),
+        _ => ("item", "items"),
+    };
+    let deleted = format!(
+        "{} {}",
+        logs::grouped(usize::try_from(report.removed).unwrap_or(usize::MAX)),
+        if report.removed == 1 { one } else { many }
+    );
+    let label = section_label(id);
+    let message = match (cancelled, report.removed) {
+        (false, _) => format!("{label} reset from the console: {deleted} deleted"),
+        (true, 0) => {
+            format!("{label} reset from the console was cancelled before anything was deleted")
+        }
+        (true, _) => format!(
+            "{label} reset from the console was cancelled after {deleted} {} deleted",
+            if report.removed == 1 { "was" } else { "were" }
+        ),
+    };
+    // The emulator whose data it was: extension data is Functions'.
+    let service = match id {
+        "firestore" | "auth" | "storage" | "functions" | "eventarc" | "pubsub" | "tasks" => id,
+        "extensions" => "functions",
+        _ => "hub",
+    };
+    LogInput {
+        level: LogLevel::Info,
+        service: service.to_owned(),
+        kind: Some(kinds::DATA_RESET),
+        message,
+        payload: Some(json!({
+            "section": id,
+            "removed": report.removed,
+            "durationMs": u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+            "cancelled": cancelled,
+        })),
+        audience: Audience::Console,
+        ..LogInput::default()
     }
 }
 
