@@ -37,6 +37,14 @@ const BODY_LIMIT = "32mb";
 let functionModule;
 let ready = false;
 
+// The runtime stops its workers when it stops. A runtime killed outright
+// (SIGKILL, a crash) cannot, so a worker whose parent is gone ends itself
+// rather than idling on forever.
+const parentPid = process.ppid;
+setInterval(() => {
+  if (process.ppid !== parentPid) process.exit(0);
+}, 1000).unref();
+
 // The invocation the current code runs for: { execution, function }.
 const invocation = new AsyncLocalStorage();
 
