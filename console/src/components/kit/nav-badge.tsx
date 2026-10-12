@@ -18,7 +18,9 @@ export function NavBadge({ ids, testId }: { ids: readonly string[] | undefined; 
       content={badge.label}
       side="right"
       render={
-        <span className="ml-auto flex shrink-0 items-center group-data-[state=collapsed]/sidebar:hidden">
+        // Positioned, so it sits above the menu button's own hover layer
+        // (an absolute ::before over the row) and the pointer reaches it.
+        <span className="relative ml-auto flex shrink-0 items-center group-data-[state=collapsed]/sidebar:hidden">
           <CountBadge
             count={badge.count}
             tone={badge.tone}
