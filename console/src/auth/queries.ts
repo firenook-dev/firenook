@@ -88,6 +88,8 @@ export const authKeys = {
   messages: (project: string, scope: string, q: string) =>
     [AUTH, project, 'messages', scope, q] as const,
   message: (project: string, id: number) => [AUTH, project, 'message', id] as const,
+  /** The newest message of the project, whatever its tenant: where the Inbox's unread dots start. */
+  newestMessage: (project: string) => [AUTH, project, 'newest-message'] as const,
   /** The messages one call created (`?activity=`). */
   callMessages: (project: string, call: number) => [AUTH, project, 'call-messages', call] as const,
   /** The beacon's newest code or link of one channel. */
@@ -361,6 +363,20 @@ export function olderMessages(
 ): Promise<AuthMessagePage> {
   return getMessages(project, { tenant: feedTenant(scope), q, cursor, limit: PAGE_SIZE }, signal)
 }
+
+/**
+ * The project's newest message id, read once when the Inbox opens: the
+ * messages that arrived since this browser last looked are the newest
+ * `unseen` of them (the badge's growth), so their dots start below it.
+ */
+export const newestMessageQuery = (project: string) =>
+  queryOptions({
+    queryKey: authKeys.newestMessage(project),
+    queryFn: async ({ signal }) =>
+      (await getMessages(project, { limit: 1 }, signal)).items[0]?.id ?? 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 0,
+  })
 
 /** One message a link names; `not-found` once the store dropped it. */
 export const messageQuery = (project: string, id: number) =>

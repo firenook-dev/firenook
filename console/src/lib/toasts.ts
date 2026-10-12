@@ -21,6 +21,8 @@ export interface ToastOptions {
   description?: string | undefined
   tone?: 'info' | 'success' | 'warning' | 'danger' | undefined
   action?: { label: string; run: () => void } | undefined
+  /** Several actions, in order, after `action` when both are given ("Open", "Copy link"). */
+  actions?: readonly { label: string; run: () => void }[] | undefined
   /** Replayed on reconnect: already seen, never shown again. */
   replayed?: boolean | undefined
   /** The console's own change, coming back: the person already knows. */
@@ -72,21 +74,20 @@ export function createToastPolicy(sink: ToastSink, limit = TOAST_LIMIT) {
       id = entry?.id ?? options.key
     }
     open.push({ key: options.key, id })
+    const actions = [...(options.action ? [options.action] : []), ...(options.actions ?? [])]
     sink.add({
       id,
       title: options.title,
       description: options.description,
       variant: options.tone ? VARIANT[options.tone] : 'default',
-      ...(options.action
+      ...(actions.length > 0
         ? {
-            actions: [
-              {
-                children: options.action.label,
-                onClick: options.action.run,
-                variant: 'secondary' as const,
-                size: 'sm' as const,
-              },
-            ],
+            actions: actions.map((action) => ({
+              children: action.label,
+              onClick: action.run,
+              variant: 'secondary' as const,
+              size: 'sm' as const,
+            })),
           }
         : {}),
       onClose: () => {

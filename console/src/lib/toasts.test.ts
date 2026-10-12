@@ -87,4 +87,20 @@ describe('the toast policy', () => {
     toast({ key: 'plain', title: 'Saved' })
     expect([...shown.values()].at(-1)?.variant).toBe('default')
   })
+
+  it('offers every action given, the single one first', () => {
+    const { sink, shown } = fakeSink()
+    const toast = createToastPolicy(sink)
+    const run = vi.fn()
+    toast({
+      key: 'link',
+      title: 'Password reset link for ada@example.test',
+      action: { label: 'Open', run },
+      actions: [{ label: 'Copy link', run }],
+    })
+    const [added] = shown.values()
+    expect(added?.actions?.map((action) => action.children)).toEqual(['Open', 'Copy link'])
+    added?.actions?.[1]?.onClick()
+    expect(run).toHaveBeenCalledTimes(1)
+  })
 })
