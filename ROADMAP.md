@@ -692,10 +692,57 @@ served until every section has landed.
   which line and column, and never reaches the file. A database whose rules
   `firebase.json` does not configure can still be edited and says it was not
   saved rather than implying it was.
+- [x] One live connection per browser. Every console page used to open its
+  own server-sent event stream, and over plain http the browser allows six
+  connections to the console's address, shared by every tab and every request:
+  a few tabs and the console's own requests queued behind its streams. Pages now
+  subscribe to topics on one stream that one visible tab holds for all the
+  others; a tab opened in the background takes nothing until it is shown. A
+  subscriber that missed something — a reconnect, a slow tab, a tab that was
+  hidden — gets what it missed replayed, or is told so and reloads what it
+  shows; the Firestore grid now refetches only the queries a missed write
+  touched, and patches a changed document in place instead of reloading every
+  page it had scrolled through. When the engine stops it says so at once; when
+  it restarts, the console notices by itself, says so, and reloads what is on
+  screen.
+- [x] Every section knows whether it can be used. The status document names
+  each section as ready, starting or absent, with why — not configured in
+  firebase.json, left out by --only, or not emulated by Firenook — and the
+  exact firebase.json lines or command to turn it on, and is pushed when a
+  service finishes starting, so the Functions page fills in by itself when
+  discovery ends. The navigation dims what is not running and carries badges
+  for what needs a look: a rules file that stopped compiling is a red count on
+  Rules the moment it is saved.
+- [x] The console says what is true for the whole suite: background triggers
+  paused by a test harness (with Resume, since when, and how many events
+  reached no function), an app that writes to another project id than this
+  emulator's (with the project it used, its data a click away, and how to fix
+  it), and whether the data lives in memory or on disk and survives a restart.
+- [x] ⌘K searches Firestore's collections and documents from anywhere, from the
+  engine's own indexes rather than a walk of the data; each section adds its
+  own things to the same search when it lands.
+- [x] One error shape across the Console API, with a code and a fix, one
+  paging contract with opaque cursors, and one filter language
+  (`provider:google -is:disabled ada`, `level=error data.userId:u_1`) that the
+  browser and the engine parse the same way, held to one shared file of cases.
+- [x] One kit every section is built from: the page's panel, toolbar rows and
+  inspector, a table that pages through the engine in both directions and
+  patches live rows in place, feeds that pause without losing their place,
+  JSON and payload views, a filter field that knows its keys, editors, a
+  request composer, an identity picker, a confirmation that says what a
+  destructive action sets off, and empty states that hand over the exact
+  snippet to connect an app. An empty Firestore collection now shows that
+  snippet too.
 - [ ] Authentication: users table with actions, the codes-and-links inbox,
-  sign-in timeline, providers and tenants.
-- [ ] Storage, Functions, Extensions, Pub/Sub, Eventarc, Cloud Tasks, Logs and
-  Requests sections.
+  sign-in timeline, providers and tenants; users in ⌘K.
+- [ ] Storage.
+- [ ] Functions.
+- [ ] Extensions.
+- [ ] Eventarc.
+- [ ] Pub/Sub.
+- [ ] Cloud Tasks.
+- [ ] Logs.
+- [ ] Overview.
 - [ ] Parity checklist against the Google UI, then remove the archive and
   `setup`.
 - [ ] A write log, and perhaps an undo with it. Built and then taken out

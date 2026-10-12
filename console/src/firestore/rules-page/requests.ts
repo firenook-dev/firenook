@@ -4,9 +4,15 @@
 // and here it becomes the request a real client would send: a token minted
 // the way the SDK mints one against the emulator, data typed the way the
 // grid types it, a query structured the way the grid structures it.
+//
+// The person asking is a uid with the claims the form gives it: a custom
+// identity, minted through the console's one token path for that kind
+// (`authorizationFor`). It is the identity a saved test exports as
+// (`authenticatedContext(uid, { email, email_verified, ...claims })`), so a
+// run here and the exported test decide alike, Auth record or not.
 
+import { type ViewAs, authorizationFor } from '@/lib/identity'
 import { type WorkbenchQuery, parseQuery, toStructuredQuery } from '../query'
-import { type ViewAs, mintUnsignedToken } from '../view-as'
 import { INFER, encodeFields, fromJson } from '../value'
 import type { EvaluateRequest } from '@/api/generated/EvaluateRequest'
 import type { FirestoreRestValue } from '@/api/generated/FirestoreRestValue'
@@ -99,13 +105,15 @@ export function toEvaluateRequest(
         return { error: `The custom claims are not JSON: ${(error as Error).message}` }
       }
     }
-    const user: Extract<ViewAs, { kind: 'user' }> = {
-      kind: 'user',
+    const email = form.who.email
+    const identity: Extract<ViewAs, { kind: 'custom' }> = {
+      kind: 'custom',
       uid: form.who.uid.trim(),
-      email: form.who.email,
-      claims,
+      claims: claims ?? {},
+      signInProvider: email ? 'password' : 'custom',
+      ...(email ? { email, emailVerified: true } : {}),
     }
-    request.authorization = `Bearer ${mintUnsignedToken(user, project)}`
+    request.authorization = authorizationFor(identity, project) ?? null
   }
 
   if (form.method === 'create' || form.method === 'update') {

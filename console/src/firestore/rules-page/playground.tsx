@@ -9,7 +9,7 @@ import { FlaskIcon, PlayIcon, UserIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { CodeEditor } from '@/components/code-editor'
-import { authUsersQuery } from '../queries'
+import { identityUsersQuery } from '@/lib/identity'
 import { RulesCompileError } from '../rules'
 import { decodeFields } from '../value'
 import { evaluateRules } from './api'
@@ -50,7 +50,10 @@ export function Playground({
   const show = useOverlay((state) => state.show)
   const clear = useOverlay((state) => state.clear)
   const addTest = useTests((state) => state.add)
-  const users = useQuery(authUsersQuery(project))
+  // The project's own users (a tenant's are another namespace of uids),
+  // the first page of the engine's bounded identity search; anyone else is
+  // "Someone else…" with a uid typed in.
+  const users = useQuery(identityUsersQuery(project, '', ''))
   const [running, setRunning] = useState(false)
   const problem = pathProblem(form.method, form.path, form.group)
 
@@ -186,7 +189,7 @@ export function Playground({
                   who: {
                     kind: 'user',
                     uid: value,
-                    email: user?.email,
+                    email: user?.email ?? undefined,
                     claims: user?.claims ? JSON.stringify(user.claims) : '',
                   },
                 })
