@@ -32,7 +32,6 @@ import {
   RowMenuPopup,
   useRowMenuPalette,
 } from '@/components/console/row-menu'
-import { useFeedPending } from '@/components/console/feed-list'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
 import { ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
 import { CopyButton } from '@/components/console/copy-button'
@@ -40,6 +39,7 @@ import { PanelToggle } from '@/components/shell/section-panel'
 import { Kbd } from '@/components/kit'
 import { EVENT_LIST } from '@/compute/event-row'
 import { ReplayConfirm } from '@/compute/replay-confirm'
+import { useSeededPending } from '@/compute/seeded-pending'
 import { linkTo } from '@/lib/links'
 import { useFunctionsEvents } from '@/functions/live'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
@@ -79,6 +79,9 @@ function refusal(error: unknown): { message: string; fix?: string | undefined } 
 /** `functions.events` for inventory changes only: no rows, no figures. */
 const INVENTORY = { changesOnly: true } as const
 
+/** An event's row key. */
+const eventKey = (event: { id: string }) => event.id
+
 export function EventsPage() {
   const { search, update } = useRouteSearch<EventsSearch>('/eventarc', '/eventarc')
   const project = useQuery(statusQuery).data?.projectId ?? ''
@@ -94,7 +97,7 @@ export function EventsPage() {
     : undefined
   const feed = useEventFeed(project, channel, q)
   const paused = search.paused === true
-  const pending = useFeedPending(feed.store, paused, (event) => event.id)
+  const pending = useSeededPending(feed.store, paused, eventKey, feed.total?.count)
 
   // The drawer's draft lives here, so closing and reopening it keeps it.
   const [draft, setDraft] = useState<PublishDraft>(() => emptyDraft(channel))

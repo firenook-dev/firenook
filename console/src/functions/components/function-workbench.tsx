@@ -13,12 +13,12 @@ import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
 import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
 import { EmptyState } from '@/components/console/empty-state'
 import { PauseButton } from '@/components/console/pause-button'
+import { useSeededPending } from '@/compute/seeded-pending'
 import { RequiresNotice } from '@/components/console/requires-notice'
 import { SectionBanner } from '@/components/console/section-banner'
 import { SectionBody } from '@/components/console/section-page'
 import { SectionToolbar, ToolbarRow } from '@/components/console/toolbar'
 import { Kbd } from '@/components/kit'
-import { useFeedPending } from '@/components/console/feed-list'
 import { useShortcuts } from '@/lib/shortcuts'
 import { hasFailedOnly, toggleFailedOnly, withScopeTerm } from '../filters'
 import { functionMenu } from '../function-menu'
@@ -95,7 +95,7 @@ export function FunctionWorkbench({
     params: q.trim() === '' ? { function: summary.id } : { function: summary.id, q },
   })
   const paused = search.paused === true
-  const pending = useFeedPending(feed.store, paused, invocationKey)
+  const pending = useSeededPending(feed.store, paused, invocationKey, feed.total)
 
   const actions = useInvocationActions({ onOpen: (id) => update({ invocation: id }) })
   const newer = search.invocation ? neighbour(feed.store, search.invocation, 1) : undefined

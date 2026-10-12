@@ -12,12 +12,12 @@ import { useState } from 'react'
 import { ApiError } from '@/api/client'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { EmptyState, NoMatch } from '@/components/console/empty-state'
-import { useFeedPending } from '@/components/console/feed-list'
 import { FilterField } from '@/components/console/filter-field'
 import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
 import { PauseButton } from '@/components/console/pause-button'
+import { useSeededPending } from '@/compute/seeded-pending'
 import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { checkFilter } from '@/lib/filter'
@@ -68,7 +68,7 @@ export function InvocationsPage() {
     toasts: true,
   })
   const paused = search.paused === true
-  const pending = useFeedPending(feed.store, paused, invocationKey)
+  const pending = useSeededPending(feed.store, paused, invocationKey, feed.total)
   const [clearing, setClearing] = useState(false)
   const [clearError, setClearError] = useState<string | undefined>()
   const [clearPending, setClearPending] = useState(false)
