@@ -14,7 +14,9 @@
 // row by key, measured rows included.
 //
 // Rows are fixed height while collapsed (24, 28 or 32 px) and measured only
-// when expanded, so a stack trace costs nothing until it is opened. The
+// when expanded, so a stack trace costs nothing until it is opened; in wrap
+// mode (`wrap`) every row is measured at its natural height instead, and a
+// following list stays on its newest row as the measurements arrive. The
 // list is `role="log"` with `aria-live="off"`: ten thousand lines a second
 // must not be read aloud.
 
@@ -96,6 +98,12 @@ export interface FeedListProps<T> {
   renderRow: (item: T) => ReactNode
   /** Rows shown expanded (a stack trace, a payload): measured; the rest stay fixed. */
   expanded?: ReadonlySet<string> | undefined
+  /**
+   * Wrap mode: every row is measured at its natural height, at least
+   * `rowHeight` (Logs' "Wrap lines": a long message wraps whole instead of
+   * being cut). Off, rows go back to their fixed height.
+   */
+  wrap?: boolean | undefined
   renderExpanded?: ((item: T) => ReactNode) | undefined
   /** → / ← on the selected row, or the row's caret (never `o`). */
   onToggleExpanded?: ((key: string, open: boolean) => void) | undefined
@@ -135,6 +143,7 @@ export function FeedList<T>({
   rowKey,
   renderRow,
   expanded,
+  wrap = false,
   renderExpanded,
   onToggleExpanded,
   renderMarker,
@@ -206,12 +215,18 @@ export function FeedList<T>({
 
   // After a frame of new rows (or a change of mode): follow the edge, or
   // keep the reader's row in place. Only then: a render the scroll itself
-  // caused must not pull the view back to where the reader just left.
-  const seen = useRef<{ version: number; follow: boolean } | null>(null)
+  // caused must not pull the view back to where the reader just left. A
+  // following list also goes back to the edge when measured rows (wrapped,
+  // expanded) change its height, which happens a frame after they render.
+  const seen = useRef<{ version: number; follow: boolean; total: number } | null>(null)
+  const total = virtualizer.getTotalSize()
   useLayoutEffect(() => {
     const element = scrollRef.current
-    const moved = seen.current?.version !== version || seen.current.follow !== follow
-    seen.current = { version, follow }
+    const moved =
+      seen.current?.version !== version ||
+      seen.current.follow !== follow ||
+      (follow && seen.current.total !== total)
+    seen.current = { version, follow, total }
     if (!element || !moved) return
     if (follow) {
       toEdge(element)
@@ -226,6 +241,15 @@ export function FeedList<T>({
     if (Math.abs(element.scrollTop - target) >= 1) element.scrollTop = target
   })
 
+  // Out of wrap mode, every row goes back to its fixed height: the measured
+  // sizes are forgotten at once.
+  const wrapped = useRef(wrap)
+  useLayoutEffect(() => {
+    if (wrapped.current === wrap) return
+    wrapped.current = wrap
+    if (!wrap) virtualizer.measure()
+  })
+
   // A collapsed row goes back to its fixed height: its measured size is
   // forgotten, or it would keep the room its stack trace took.
   const previousExpanded = useRef<ReadonlySet<string>>(expanded ?? new Set())
@@ -234,7 +258,7 @@ export function FeedList<T>({
     const now = expanded ?? new Set<string>()
     previousExpanded.current = now
     for (const key of before) {
-      if (now.has(key)) continue
+      if (now.has(key) || wrap) continue
       const display = displayOf(store.indexOf(key))
       if (display !== -1) virtualizer.resizeItem(display, rowHeight)
     }
@@ -412,7 +436,7 @@ export function FeedList<T>({
               aria-live="off"
               aria-label={ariaLabel}
               className="relative w-full"
-              style={{ height: virtualizer.getTotalSize() }}
+              style={{ height: total }}
             >
               {items.map((virtual) => {
                 const row = rowAt(virtual.index)
@@ -444,7 +468,7 @@ export function FeedList<T>({
                       )}
                     </div>
                   )
-                const open = expanded?.has(key) ?? false
+                const open = (expanded?.has(key) ?? false) && renderExpanded !== undefined
                 return (
                   <FeedRowView
                     key={key}
@@ -454,10 +478,9 @@ export function FeedList<T>({
                     top={virtual.start}
                     height={rowHeight}
                     selected={selectedKey === key}
-                    open={open && renderExpanded !== undefined}
-                    measure={
-                      open && renderExpanded !== undefined ? virtualizer.measureElement : undefined
-                    }
+                    open={open}
+                    wrap={wrap}
+                    measure={open || wrap ? virtualizer.measureElement : undefined}
                     renderRow={renderRow}
                     renderExpanded={renderExpanded}
                     onSelect={onSelect}
@@ -499,6 +522,7 @@ function FeedRowViewInner<T>({
   height,
   selected,
   open,
+  wrap,
   measure,
   renderRow,
   renderExpanded,
@@ -511,6 +535,7 @@ function FeedRowViewInner<T>({
   height: number
   selected: boolean
   open: boolean
+  wrap: boolean
   measure: ((element: HTMLDivElement | null) => void) | undefined
   renderRow: (item: T) => ReactNode
   renderExpanded: ((item: T) => ReactNode) | undefined
@@ -527,10 +552,14 @@ function FeedRowViewInner<T>({
         'absolute inset-x-0 cursor-default select-none',
         selected ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]' : 'hover:ink',
       )}
-      style={{ transform: `translateY(${top}px)`, ...(open ? {} : { height }) }}
+      style={{ transform: `translateY(${top}px)`, ...(open || wrap ? {} : { height }) }}
       onClick={() => onSelect?.(item)}
     >
-      <div className="flex items-center overflow-hidden" style={{ height }}>
+      {/* Wrapped, the line grows with its text, never below a row. */}
+      <div
+        className="flex items-center overflow-hidden"
+        style={wrap ? { minHeight: height } : { height }}
+      >
         {renderRow(item)}
       </div>
       {open && renderExpanded?.(item)}

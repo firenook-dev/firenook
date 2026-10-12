@@ -132,6 +132,34 @@ describe('FeedList', () => {
     expect(screen.getAllByTestId('feed-row')[0]?.style.height).toBe('28px')
   })
 
+  it('measures every row in wrap mode, at least a row tall, and fixes them again after', async () => {
+    const store = createFeedStore<Line>({ max: 10_000, key: rowKey })
+    store.push(lines(20))
+    const { rerender } = render(<Feed store={store} wrap />)
+    await frame()
+    const row = screen.getAllByTestId('feed-row')[0]
+    expect(row?.style.height).toBe('')
+    expect((row?.firstElementChild as HTMLElement | null)?.style.minHeight).toBe('28px')
+    rerender(<Feed store={store} wrap={false} />)
+    await frame()
+    const fixed = screen.getAllByTestId('feed-row')[0]
+    expect(fixed?.style.height).toBe('28px')
+    expect((fixed?.firstElementChild as HTMLElement | null)?.style.height).toBe('28px')
+  })
+
+  it('stays at the live edge while following when measured rows change its height', async () => {
+    const store = createFeedStore<Line>({ max: 10_000, key: rowKey })
+    store.push(lines(40))
+    render(<Feed store={store} wrap />)
+    await frame()
+    // Every element is 320 px tall here, so each measured row grows the
+    // list well past its estimate; following, the view goes with it.
+    act(() => scroller().dispatchEvent(new Event('scroll')))
+    await frame()
+    expect(scroller().scrollTop).toBe(scroller().scrollHeight)
+    expect(screen.getByTestId('following')).toHaveTextContent('true')
+  })
+
   it('follows: each frame of new rows keeps the view at the live edge', async () => {
     const store = createFeedStore<Line>({ max: 10_000, key: rowKey })
     render(<Feed store={store} />)
