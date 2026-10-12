@@ -58,6 +58,7 @@ pub mod runtime;
 pub use config::{QueueConfig, queue_key};
 pub use functions::{DiscoveredQueue, discover};
 pub use http::{TaskError, build_task, generated_name};
+pub use inspect::TasksTotals;
 pub use json::OrderedJson;
 pub use queue::{
     AttemptLog, AttemptRecord, Controls, Finished, Outcome, RunNow, RunRequest, Statistics,

@@ -2896,7 +2896,9 @@ mod inspect {
     use std::time::SystemTime;
 
     use super::*;
-    use crate::inspect::{TaskClause, TaskQuery, TaskState, TaskTerm, TasksCursor, TasksScope};
+    use crate::inspect::{
+        TaskClause, TaskQuery, TaskState, TaskTerm, TasksCursor, TasksScope, TasksTotals,
+    };
     use crate::queue::{
         Controls, Outcome, RowKey, TaskChange, TaskOrigin, TaskOutcome, TaskQueue, TaskRecord,
     };
@@ -3609,6 +3611,55 @@ mod inspect {
             runtime.find_tasks("card-1", 5),
             [(key.clone(), id, task_name("logged", "card-1"))]
         );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_replaced_log_sink_takes_every_later_line_and_failures_are_totalled() {
+        let (runtime, first) = lines_runtime("http://127.0.0.1:5001");
+        let before = first.lock().unwrap().len();
+        let second: Arc<Mutex<Vec<TasksLogLine>>> = Arc::default();
+        let sink = Arc::clone(&second);
+        runtime.set_log_sink(LogSink::new(move |line| sink.lock().unwrap().push(line)));
+        let queues = runtime.totals().queues;
+        let key = client_queue(
+            &runtime,
+            "totalled",
+            &json!({"retryConfig": {"maxAttempts": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
+        )
+        .await;
+        runtime
+            .enqueue(
+                &key,
+                record(&task_name("totalled", "t-1"), "http://127.0.0.1:1/x", "{}"),
+            )
+            .unwrap();
+        wait_until("the failure line", Duration::from_secs(10), || {
+            second
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line.kind == LOG_FAILED)
+        })
+        .await;
+        assert_eq!(
+            first.lock().unwrap().len(),
+            before,
+            "the old sink hears nothing"
+        );
+        assert_eq!(runtime.failed_total(), 1);
+        assert_eq!(
+            runtime.totals(),
+            TasksTotals {
+                queues: queues + 1,
+                pending: 0,
+                failed_recently: 1,
+                failed_total: 1,
+            }
+        );
+        // A clear empties the queues and keeps the running total.
+        let _ = runtime.reset();
+        assert_eq!(runtime.failed_total(), 1);
         runtime.shutdown().await;
     }
 

@@ -24,6 +24,21 @@ const PREVIEW_CHARS: usize = 256;
 const MAX_PAGE: usize = 500;
 /// New finished ids a delta lists at most.
 const MAX_IDS: usize = 100;
+/// The summary's "failed in 5 min", in seconds.
+const FIVE_MINUTES: u64 = 300;
+
+/// What the console's summary and badge count, from figures each queue
+/// keeps anyway.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TasksTotals {
+    pub queues: u32,
+    /// Pending and held tasks across queues.
+    pub pending: u64,
+    /// Tasks that ran out of retries in the last five minutes.
+    pub failed_recently: u64,
+    /// Tasks that ran out of retries since start (a clear keeps the count).
+    pub failed_total: u64,
+}
 
 /// Every queue of a project, with what the queues panel shows beside them.
 #[derive(Debug, Clone)]
@@ -1010,6 +1025,44 @@ impl State {
 }
 
 impl TasksRuntime {
+    /// Queues, pending tasks and failures, from each queue's counts and
+    /// failure window: one walk of the queues, no task visited.
+    #[must_use]
+    pub fn totals(&self) -> TasksTotals {
+        let state = self.lock_state();
+        let now = SystemTime::now();
+        let mut totals = TasksTotals {
+            queues: u32::try_from(state.queues.len()).unwrap_or(u32::MAX),
+            failed_total: state.failed_total,
+            ..TasksTotals::default()
+        };
+        for (key, queue) in &state.queues {
+            totals.pending +=
+                u64::try_from(queue.pending().len() + queue.held().len()).unwrap_or(u64::MAX);
+            if let Some(console) = state.console.get(key) {
+                let window = console.windows.failed.window();
+                let age = now
+                    .duration_since(window.ends_at)
+                    .unwrap_or_default()
+                    .as_secs();
+                let width = u64::from(window.width_seconds.max(1));
+                totals.failed_recently += window
+                    .buckets
+                    .iter()
+                    .filter(|(before, _)| u64::from(*before) * width + age < FIVE_MINUTES)
+                    .map(|(_, count)| u64::from(*count))
+                    .sum::<u64>();
+            }
+        }
+        totals
+    }
+
+    /// Tasks that ran out of retries since start. O(1).
+    #[must_use]
+    pub fn failed_total(&self) -> u64 {
+        self.lock_state().failed_total
+    }
+
     /// Every queue of `project` (every project when `None`), in
     /// registration order, with the refused registrations and requests.
     #[must_use]

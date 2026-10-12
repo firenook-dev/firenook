@@ -364,13 +364,17 @@ pub(crate) struct State {
     pub refused_dropped: u64,
     /// Log lines waiting for the lock to be released.
     pub lines: Vec<TasksLogLine>,
+    /// Tasks that ran out of retries since start; a clear keeps the count
+    /// (the console's counter badge).
+    pub failed_total: u64,
 }
 
 struct Inner {
     project: String,
     state: Mutex<State>,
     http: reqwest::Client,
-    log: LogSink,
+    /// Replaced once the console builds its sink (`set_log_sink`).
+    log: Mutex<LogSink>,
     ticker: Mutex<Option<tokio::task::JoinHandle<()>>>,
     attempt_sink: Mutex<Option<AttemptSink>>,
     /// Wakes the ticker early after a console control that frees work.
@@ -528,6 +532,7 @@ impl State {
             self.next_finished += 1;
             if finished.outcome == TaskOutcome::Failed {
                 console.windows.failed.record(finished.at, 1);
+                self.failed_total = self.failed_total.saturating_add(1);
                 let last = finished.attempts.last();
                 let reason = match (
                     last.and_then(|attempt| attempt.status),
@@ -725,9 +730,10 @@ impl TasksRuntime {
                     refused: VecDeque::new(),
                     refused_dropped: 0,
                     lines: Vec::new(),
+                    failed_total: 0,
                 }),
                 http,
-                log,
+                log: Mutex::new(log),
                 ticker: Mutex::new(None),
                 attempt_sink: Mutex::new(None),
                 wake: tokio::sync::Notify::new(),
@@ -1301,7 +1307,15 @@ impl TasksRuntime {
 
     /// Logs a line through the sink, now (never while the state is locked).
     pub(crate) fn log(&self, line: TasksLogLine) {
-        self.inner.log.emit(line);
+        let sink = lock(&self.inner.log).clone();
+        sink.emit(line);
+    }
+
+    /// Replaces the log sink: every line from now on goes to `sink` (the
+    /// suite hands the console's sink over once the runtime is built, so
+    /// the lines keep their queue and task refs).
+    pub fn set_log_sink(&self, sink: impl Into<LogSink>) {
+        *lock(&self.inner.log) = sink.into();
     }
 
     /// A line naming its queue, for the HTTP handlers.
