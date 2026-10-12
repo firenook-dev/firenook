@@ -127,7 +127,7 @@ function QueueField({ queue }: { queue: TasksQueue }) {
 }
 
 /** A tab's label with its figure: `Tasks 15`. */
-function TabLabel({ label, count }: { label: string; count?: number | undefined }) {
+export function TabLabel({ label, count }: { label: string; count?: number | undefined }) {
   return (
     <span className="flex items-center gap-1.5">
       {label}
@@ -144,7 +144,15 @@ function TabLabel({ label, count }: { label: string; count?: number | undefined 
  * A switch item's label: its count beside it where there is room, else in
  * its tooltip (`useWide`), so the figure is on screen once either way.
  */
-function SwitchLabel({ label, count, wide }: { label: string; count: number; wide: boolean }) {
+export function SwitchLabel({
+  label,
+  count,
+  wide,
+}: {
+  label: string
+  count: number
+  wide: boolean
+}) {
   if (wide) return <TabLabel label={label} count={count} />
   return (
     <Tooltip
@@ -155,7 +163,7 @@ function SwitchLabel({ label, count, wide }: { label: string; count: number; wid
 }
 
 /** `slots 2/2 · 4.1 tokens`, the bucket refilling on the shared clock. */
-function SlotsAndTokens({ queue }: { queue: TasksQueue }) {
+export function SlotsAndTokens({ queue }: { queue: TasksQueue }) {
   const { counters } = queue
   const tokens = useTokens(counters) ?? counters.tokens
   return (

@@ -129,7 +129,8 @@ export function PayloadCell({ body }: { body: TasksTaskRow['body'] }) {
   )
 }
 
-function columns(rows: readonly TasksTaskRow[]): DataTableColumn<TasksTaskRow>[] {
+/** The Tasks tab's columns; ETA shows only when a task here carries a schedule time. */
+export function taskColumns(rows: readonly TasksTaskRow[]): DataTableColumn<TasksTaskRow>[] {
   return [
     { id: 'state', header: 'State', width: 150, cell: (row) => <StateCell row={row} /> },
     {
@@ -383,7 +384,7 @@ export function TasksView({
     },
   ])
 
-  const hidden = useHiddenColumnCount('tasks.tasks', columns(rows.rows))
+  const hidden = useHiddenColumnCount('tasks.tasks', taskColumns(rows.rows))
   const counters = queue.counters
   const neverUsed =
     counters.history === 0 &&
@@ -506,7 +507,7 @@ export function TasksView({
             ariaLabel={`Tasks of ${queue.id}`}
             rows={rows.rows}
             rowKey={(row) => row.key}
-            columns={columns(rows.rows)}
+            columns={taskColumns(rows.rows)}
             memoryKey="tasks.tasks"
             selection={{
               checked: ticked.keys,
