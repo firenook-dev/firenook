@@ -1930,7 +1930,24 @@ to open: a number nobody can look into is trivia, and it was counting
 writes since the tab opened while the panel counted what the engine still
 held, both under the word "change".
 
-## Security rules (built, `src/firestore/rules-page/`)
+## Security rules (built, `src/firestore/rules-page/` on the rules kit `src/rules/`)
+
+**The rules kit** (`src/rules/`) is what every rules page shares, Firestore's
+and Storage's: the draft (`useRulesDraft` over a backend: the document in
+force, how to install a text, where the draft is kept), the check as you type
+(`useRulesCheck`), the toolbar (`RulesToolbar` with a `scope` slot, its
+`DraftState`, `CoverageToggle`, `DraftActions`), the banners (on
+`SectionBanner`), `Problems` (F8 / Shift+F8 walk them), `HistoryDialog`,
+`diff.ts`, `overlay.ts`, `explain.ts`, `ExplanationView`, `coverage.ts`,
+`tests-core.ts` and `TestsPanel`, `Verdict` (on `StatusDot`), the decisions
+panel shell (`DecisionsShell`; each page's adapter fills it), `focus.ts` and
+the one search schema (`rulesPageSearch('db' | 'bucket')`, with `line`). It
+imports nothing from a section's directory. Change it with both pages'
+journeys running. **Only a loaded text is checked**: the editor holds an
+empty text until the rules arrive, and checking it flashed `1:1 expected
+"service"` in the Problems strip on every visit (`textToCheck`). A link's
+`line` is revealed and marked once the rules have loaded, then leaves the
+address.
 
 Rules are **a page of their own**, `/firestore/rules` (route file
 `routes/firestore_.rules.tsx`, the trailing underscore keeps it out of the
@@ -1966,10 +1983,10 @@ claimed by the rules language (`Prec.highest` keymap) — CodeMirror's own
 keyboard Apply.
 
 **One overlay at a time.** A panel draws into the editor through
-`useOverlay` (`overlay.ts`): lines and values, plus the `source` they refer
-to; the page applies it only while the editor holds that exact text. A
-reveal comes from a click or an overlay's arrival — each carries `at`, the
-latest wins (no setState in an effect).
+`useOverlay` (`src/rules/overlay.ts`): lines and values, plus the `source`
+they refer to; the page applies it only while the editor holds that exact
+text. A reveal comes from a click, an overlay's arrival or a link's `line`
+(`useEditorFocus`) — each carries `at`, the latest wins.
 
 **Checking as you type.** `POST /rules/check` (debounced 300 ms) returns
 compile errors or the engine's lint warnings (`code`: `open-access`,
@@ -2001,7 +2018,7 @@ the React Compiler memoizes the filtered list, so a sabotage that drops
 list says the Admin SDK and the console as admin skip rules; a database
 with no rules file says nothing is checked.
 
-**Inline values** (`explain.ts`, `inlineSteps`): the engine reports every
+**Inline values** (`src/rules/explain.ts`, `inlineSteps`): the engine reports every
 expression evaluated; written after each, a line is unreadable. Keep each
 whole operand and each comparison — drop a span when a longer evaluated
 span starts at the same place and the text after it continues the chain
@@ -2025,7 +2042,7 @@ request a real client sends — a token minted like View as, data typed by
 every edit. "Try in the playground" loads a decision's replayable
 `request` (recorded auth, before-document, time).
 
-**Tests** (`tests-store.ts`): saved cases per project+database in
+**Tests** (`tests-store.ts` on the kit's `tests-core.ts`): saved cases per project+database in
 localStorage, run against the editor's text after each edit (an error
 counts as a deny, as in Firestore); export as a
 `@firebase/rules-unit-testing` file (`tests-export.ts`: seeds the
@@ -2034,7 +2051,7 @@ document read with `withSecurityRulesDisabled`, `assertSucceeds` /
 
 **History and the file.** `GET /rules/history` (startup, console, file,
 reload); the dialog diffs any version — and the file on disk when it
-differs — against the editor (`diff.ts`), "Put in the editor" makes it the
+differs — against the editor (`src/rules/diff.ts`), "Put in the editor" makes it the
 draft. The live channel's `firestore.rules` topic tells the page when what
 governs the database changed (`rules`, cursor = the hash in force) and the
 file's status on every subscription (`file`), so a file saved in an editor

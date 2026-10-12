@@ -17,7 +17,10 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { API_BASE } from '@/api/client'
 import { backoffDelay } from '@/lib/live/channel'
+import type { RulesTypedValue } from '@/rules/typed-value'
 import type { FsValue } from '../value'
+
+export type { RulesTypedValue }
 
 export type DecisionOutcome = 'allow' | 'deny' | 'error'
 export type RulesMethod = 'get' | 'list' | 'create' | 'update' | 'delete'
@@ -50,22 +53,6 @@ export interface RulesDecision {
   query: { limit: number | undefined; orderBy: string[] } | undefined
   inTransaction: boolean
   raw: unknown
-}
-
-/** A value as the rules runtime writes it into a Requests event. */
-export interface RulesTypedValue {
-  nullValue?: null
-  boolValue?: boolean
-  intValue?: string | number
-  floatValue?: number | string
-  stringValue?: string
-  timestampValue?: string
-  bytesValue?: string
-  latlngValue?: { latitude?: number; longitude?: number }
-  pathValue?: { segments?: Array<{ simple?: string }> }
-  mapValue?: { fields?: Record<string, RulesTypedValue> }
-  listValue?: { values?: RulesTypedValue[] }
-  undefined?: Record<string, never>
 }
 
 /**
@@ -259,6 +246,8 @@ export interface DecisionFilter {
   path?: string | undefined
   uid?: string | undefined
   denied?: boolean | undefined
+  /** One operation, from a link's `method`. */
+  method?: RulesMethod | undefined
   /** Free text over the path, the uid and the method. */
   text?: string | undefined
 }
@@ -272,6 +261,7 @@ export function filterDecisions(
   return decisions.filter((decision) => {
     if (decision.database !== database) return false
     if (filter.denied && decision.outcome === 'allow') return false
+    if (filter.method !== undefined && decision.method !== filter.method) return false
     if (filter.uid !== undefined && (decision.uid ?? '') !== filter.uid) return false
     if (
       filter.path &&

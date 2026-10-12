@@ -1,24 +1,31 @@
-// What governed this database over time: every ruleset installed — at
+// What governed this scope over time: every ruleset installed — at
 // startup, applied here, changed in the file on disk, hot-reloaded by a
 // test suite — newest first, each against the text in the editor, and any
 // of them one click from being the draft again. Plus the file on disk
-// itself, when it is not what is in force.
+// itself, when it is not what is in force. Each page names its origins in
+// its own words (Firestore's reload is a client's hot reload, Storage's
+// comes through `/internal/setRules`).
 
 import { Badge, Button, Dialog, Text, Tooltip } from '@cloudflare/kumo'
 import { ClockCounterClockwiseIcon, XIcon } from '@phosphor-icons/react'
-import { useQuery } from '@tanstack/react-query'
+import { type QueryKey, type UseQueryOptions, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { relativeTime } from '../value'
-import { historyQuery } from './api'
+import type { RulesOrigin } from '@/api/generated/RulesOrigin'
+import type { RulesVersion } from '@/api/generated/RulesVersion'
+import { relativeTime } from '@/lib/format'
 import { type DiffLine, diffLines, diffSize } from './diff'
-import type { RulesDraft } from './use-rules-draft'
+import type { RulesDraft } from './draft'
 
-const ORIGIN_LABELS: Record<string, string> = {
-  startup: 'Loaded at startup',
-  console: 'Applied in the console',
-  file: 'Changed on disk',
-  reload: 'Hot-reloaded by a client',
-}
+/** Where each version came from, in the page's words. */
+export type OriginLabels = Readonly<Record<RulesOrigin, string>>
+
+/** The versions of the rules in force, newest first. */
+export type HistoryQuery<K extends QueryKey = QueryKey> = UseQueryOptions<
+  RulesVersion[],
+  Error,
+  RulesVersion[],
+  K
+> & { queryKey: K }
 
 interface Version {
   key: string
@@ -28,7 +35,15 @@ interface Version {
   current: boolean
 }
 
-export function HistoryButton({ database, draft }: { database: string; draft: RulesDraft }) {
+export function HistoryButton<K extends QueryKey>({
+  draft,
+  history,
+  origins,
+}: {
+  draft: RulesDraft
+  history: HistoryQuery<K>
+  origins: OriginLabels
+}) {
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -46,21 +61,30 @@ export function HistoryButton({ database, draft }: { database: string; draft: Ru
           </Button>
         }
       />
-      {open && <HistoryDialog database={database} draft={draft} onClose={() => setOpen(false)} />}
+      {open && (
+        <HistoryDialog
+          draft={draft}
+          history={history}
+          origins={origins}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </>
   )
 }
 
-function HistoryDialog({
-  database,
+export function HistoryDialog<K extends QueryKey>({
   draft,
+  history: historyOptions,
+  origins,
   onClose,
 }: {
-  database: string
   draft: RulesDraft
+  history: HistoryQuery<K>
+  origins: OriginLabels
   onClose: () => void
 }) {
-  const history = useQuery(historyQuery(database))
+  const history = useQuery(historyOptions)
   const fileSource = draft.fileSource
   const versions: Version[] = []
   if (fileSource !== null && fileSource !== draft.inForce)
@@ -74,7 +98,7 @@ function HistoryDialog({
   for (const [index, version] of (history.data ?? []).entries())
     versions.push({
       key: `${version.hash}-${version.installedAt}`,
-      label: ORIGIN_LABELS[version.origin] ?? version.origin,
+      label: origins[version.origin] ?? version.origin,
       source: version.source,
       time: version.installedAt,
       current: index === 0,

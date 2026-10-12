@@ -1,11 +1,12 @@
 // The rules page's conversation with the engine: checking a draft without
 // installing it, evaluating requests against it, opening a recorded
-// decision, asking what a draft would change, the version history, and the
-// live topic that says when the rules in force move.
+// decision, asking what a draft would change, the version history, the
+// coverage report, the backend the rules kit's draft runs on, and the live
+// topic that says when the rules in force move.
 
 import { queryOptions } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
-import { API_BASE, ApiError } from '@/api/client'
+import { API_BASE } from '@/api/client'
 import type { DecisionDetail } from '@/api/generated/DecisionDetail'
 import type { EvaluateRequest } from '@/api/generated/EvaluateRequest'
 import type { RulesCheck } from '@/api/generated/RulesCheck'
@@ -14,8 +15,11 @@ import type { RulesImpact } from '@/api/generated/RulesImpact'
 import type { RulesVersion } from '@/api/generated/RulesVersion'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
+import { coverageQueryOptions } from '@/rules/coverage'
+import type { RulesBackend } from '@/rules/draft'
+import { rulesFailure } from '@/rules/text'
 import { FS } from '../queries'
-import { RulesCompileError, type RulesDiagnostic, type RulesDocument, rulesQuery } from '../rules'
+import { type RulesDocument, putRules, rulesQuery } from '../rules'
 
 export type {
   DecisionDetail,
@@ -26,22 +30,13 @@ export type {
   RulesVersion,
 }
 
-async function failure(response: Response): Promise<ApiError> {
-  let message = `${response.status} ${response.statusText}`
-  let diagnostics: RulesDiagnostic[] = []
-  try {
-    const body = (await response.json()) as {
-      error?: { message?: string }
-      diagnostics?: RulesDiagnostic[]
-    }
-    if (body.error?.message) message = body.error.message
-    if (body.diagnostics) diagnostics = body.diagnostics
-  } catch {
-    // Keep the status line.
-  }
-  return diagnostics.length > 0
-    ? new RulesCompileError(message, diagnostics)
-    : new ApiError(response.status, message)
+/** A database's rules as the rules kit's draft reaches them; the draft is kept per database. */
+export function firestoreRulesBackend(project: string, database: string) {
+  return {
+    draftKey: `firenook.console.rules-draft.${project}.${database}`,
+    document: rulesQuery(database),
+    put: (source: string, save: boolean) => putRules(database, source, save),
+  } satisfies RulesBackend<RulesDocument, string[]>
 }
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -51,7 +46,7 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
     body: JSON.stringify(body),
     signal: signal ?? null,
   })
-  if (!response.ok) throw await failure(response)
+  if (!response.ok) throw await rulesFailure(response)
   return (await response.json()) as T
 }
 
@@ -93,7 +88,7 @@ export const decisionQuery = (database: string, requestId: string) =>
       )
       // Not retained any more: the list still has what the feed recorded.
       if (response.status === 404) return null
-      if (!response.ok) throw await failure(response)
+      if (!response.ok) throw await rulesFailure(response)
       return (await response.json()) as DecisionDetail
     },
     staleTime: Number.POSITIVE_INFINITY,
@@ -117,12 +112,22 @@ export const historyQuery = (database: string) =>
         `${API_BASE}/firestore/rules/history?database=${encodeURIComponent(database)}`,
         { headers: { accept: 'application/json' } },
       )
-      if (!response.ok) throw await failure(response)
+      if (!response.ok) throw await rulesFailure(response)
       return (await response.json()) as RulesVersion[]
     },
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })
+
+/**
+ * How often each rule ran: the official report, read from the console's
+ * origin. Asked for again when the decisions feed grows (no timer).
+ */
+export const coverageQuery = (project: string, database: string) =>
+  coverageQueryOptions(
+    [FS, database, 'rules-coverage'],
+    `${API_BASE}/firestore/emulator/v1/projects/${encodeURIComponent(project)}:ruleCoverage?database=${encodeURIComponent(database)}`,
+  )
 
 /**
  * Holds the `firestore.rules` subscription while mounted: when what governs

@@ -2,13 +2,34 @@
 // that ran, the value every part of it had, and what a list query lacked.
 // The editor shows the same values inline; this is the version that reads
 // as a sentence, for a condition too long to scan on its line, and for the
-// parts that ran inside functions it called.
+// parts that ran inside functions it called. Firestore's and Storage's
+// results both read this way; only Firestore's lists have a `queryReason`
+// and a document cache.
 
 import { Text } from '@cloudflare/kumo'
 import { WarningIcon } from '@phosphor-icons/react'
 import type { AllowTrace } from '@/api/generated/AllowTrace'
-import type { EvaluateResult } from '@/api/generated/EvaluateResult'
+import type { ExplainStep } from '@/api/generated/ExplainStep'
+import type { RulesOutcome } from '@/api/generated/RulesOutcome'
 import { inlineSteps } from './explain'
+
+/** What an evaluation answers with, whichever service's rules ran. */
+export interface ExplainedResult {
+  outcome: RulesOutcome
+  error: string | null
+  allows: AllowTrace[]
+  explanation: ExplainStep[]
+  truncated: boolean
+  documentAccesses: number
+  documentAccessLimit: number
+  /** Reads `get()`/`exists()` were served from the evaluation's cache (Firestore). */
+  documentCacheHits?: number | undefined
+  /** A denied list: what the query must filter on for the rules to hold (Firestore). */
+  queryReason?: string | null | undefined
+}
+
+/** How Firestore's rules spell their two document reads. */
+const DOCUMENT_READS: readonly [string, string] = ['get()', 'exists()']
 
 function outcomeWord(outcome: AllowTrace['outcome']): string {
   return outcome === 'allow' ? 'allowed' : outcome === 'deny' ? 'refused' : 'raised an error'
@@ -33,13 +54,17 @@ export function ExplanationView({
   result,
   rules,
   onReveal,
+  readFunctions = DOCUMENT_READS,
 }: {
-  result: EvaluateResult
+  result: ExplainedResult
   /** The rules source the offsets refer to. */
   rules: string
   /** Bring a line of these rules into view in the editor, when the editor holds them. */
   onReveal?: ((line: number) => void) | undefined
+  /** How the rules language spells its two document reads: Storage's are `firestore.get()`. */
+  readFunctions?: readonly [string, string]
 }) {
+  const [getter, exister] = readFunctions
   const steps = inlineSteps(result.explanation, rules)
   // The allows that decided it first, then the ones that merely ran.
   const deciding = (allow: AllowTrace) =>
@@ -128,9 +153,11 @@ export function ExplanationView({
       )}
       <Text size="xs" variant="secondary">
         {result.documentAccesses === 0
-          ? 'No document reads: the rules called neither get() nor exists().'
-          : `${result.documentAccesses} of ${result.documentAccessLimit} document reads used by get() and exists()${
-              result.documentCacheHits > 0 ? `, ${result.documentCacheHits} served from cache` : ''
+          ? `No document reads: the rules called neither ${getter} nor ${exister}.`
+          : `${result.documentAccesses} of ${result.documentAccessLimit} document reads used by ${getter} and ${exister}${
+              (result.documentCacheHits ?? 0) > 0
+                ? `, ${result.documentCacheHits} served from cache`
+                : ''
             }. In production each is a billed read.`}
       </Text>
     </div>

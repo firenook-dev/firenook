@@ -7,15 +7,16 @@ import { Button, Text, Tooltip } from '@cloudflare/kumo'
 import { FlaskIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
+import { DetailSection as Section, Mono, RuleLines, Term } from '@/rules/decision-parts'
+import { inlineSteps } from '@/rules/explain'
+import { ExplanationView } from '@/rules/explanation-view'
+import { useOverlay } from '@/rules/overlay'
+import { Verdict } from '@/rules/verdict'
 import type { FsValue } from '../value'
 import { displayValue } from '../value'
 import { decisionQuery } from './api'
 import { type RulesDecision, decidingLines, linesRun } from './decisions'
-import { Verdict } from './decisions-panel'
 import { FieldList } from './field-list'
-import { inlineSteps } from './explain'
-import { ExplanationView } from './explanation-view'
-import { useOverlay } from './overlay'
 import { usePlayground } from './playground-store'
 import { formFromRequest } from './requests'
 import { useRulesSearch } from './rules-search'
@@ -36,11 +37,6 @@ const STANDARD_CLAIMS = new Set([
   'picture',
   'firebase',
 ])
-
-/** A line of a ruleset, trimmed, for showing beside its number. */
-export function ruleLine(rules: string, line: number): string {
-  return (rules.split('\n')[line - 1] ?? '').trim()
-}
 
 function claim(token: Record<string, FsValue> | undefined, path: string): string | undefined {
   let value: FsValue | undefined = undefined
@@ -181,41 +177,17 @@ export function DecisionDetail({
             No rule matched {decision.path || 'this path'}, so it was denied by default.
           </Text>
         ) : (
-          <ul className="grid min-w-0 gap-0.5" data-testid="decision-lines">
-            {linesRun(decision).map((line) => (
-              <li key={`${line.line}-${line.outcome}`} className="min-w-0">
-                <button
-                  type="button"
-                  disabled={!sameRules}
-                  onClick={() => onReveal(line.line)}
-                  className="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left enabled:hover:ink disabled:cursor-default"
-                >
-                  <span className="w-14 shrink-0 font-mono text-[11px] whitespace-nowrap text-kumo-subtle tabular-nums">
-                    line {line.line}
-                  </span>
-                  <span
-                    className={`w-12 shrink-0 text-[11px] ${
-                      line.outcome ? 'text-kumo-success' : 'text-kumo-danger'
-                    }`}
-                  >
-                    {line.outcome ? 'allowed' : 'refused'}
-                  </span>
-                  <span
-                    className={`min-w-0 truncate font-mono text-[12px] ${
-                      deciding.has(line.line) ? 'text-kumo-default' : 'text-kumo-subtle'
-                    }`}
-                  >
-                    {ruleLine(decision.rules, line.line)}
-                  </span>
-                  {line.times > 1 && (
-                    <span className="ml-auto shrink-0 text-[11px] text-kumo-subtle tabular-nums">
-                      ×{line.times}
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <RuleLines
+            lines={linesRun(decision).map((line) => ({
+              line: line.line,
+              allowed: line.outcome,
+              times: line.times,
+            }))}
+            deciding={deciding}
+            rules={decision.rules}
+            sameRules={sameRules}
+            onReveal={onReveal}
+          />
         )}
       </Section>
 
@@ -278,36 +250,4 @@ export function DecisionDetail({
       )}
     </div>
   )
-}
-
-function Section({
-  title,
-  note,
-  children,
-}: {
-  title: string
-  note?: string | undefined
-  children: React.ReactNode
-}) {
-  return (
-    <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 border-b border-kumo-line px-3 py-3">
-      <Text as="h3" size="xs" bold>
-        {title}
-      </Text>
-      {note && (
-        <Text size="xs" variant="secondary">
-          {note}
-        </Text>
-      )}
-      {children}
-    </section>
-  )
-}
-
-function Term({ children }: { children: React.ReactNode }) {
-  return <dt className="text-kumo-subtle">{children}</dt>
-}
-
-function Mono({ children }: { children: React.ReactNode }) {
-  return <dd className="min-w-0 truncate font-mono text-kumo-default">{children}</dd>
 }

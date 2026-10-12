@@ -411,3 +411,56 @@ test('a decision opens onto why, and a draft says which decisions it would turn 
   await page.getByTestId('rules-revert').click()
   await expect(impact).toHaveCount(0)
 })
+
+/** What the load watch needs of the page; this file is typed for Node, not the DOM. */
+interface ProblemWatch {
+  rulesSeen?: { problems: boolean }
+  document: { querySelector(selector: string): unknown }
+  MutationObserver: new (callback: () => void) => {
+    observe(target: unknown, options: { childList: boolean; subtree: boolean }): void
+  }
+}
+
+test('a clean load shows no problems, and a link to a line reveals and marks it', async ({
+  page,
+}) => {
+  // Watch the whole load: the Problems strip once flashed `1:1 expected
+  // "service"` for a second, the check of the empty text the editor held
+  // before the rules arrived.
+  await page.addInitScript(() => {
+    const browser = globalThis as unknown as ProblemWatch
+    const seen = { problems: false }
+    browser.rulesSeen = seen
+    new browser.MutationObserver(() => {
+      if (browser.document.querySelector('[data-testid="rules-diagnostics"]')) seen.problems = true
+    }).observe(browser.document, { childList: true, subtree: true })
+  })
+  await page.goto(`${origin()}/console/firestore/rules?line=5`)
+  await expect(page.getByTestId('rules-source')).toContainText('allow read')
+
+  // The line a link names is brought into view and marked once, and the
+  // address forgets it, so a reload does not jump back to it.
+  const lines = page.getByTestId('rules-source').locator('.cm-line')
+  await expect(lines.nth(4)).toHaveClass(/cm-line-focus/)
+  await expect(page.locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText('5')
+  await expect(page).not.toHaveURL(/line=/)
+
+  // Long past the first check and its settling, nothing was ever wrong.
+  await page.waitForTimeout(1_500)
+  expect(
+    await page.evaluate(() => (globalThis as unknown as ProblemWatch).rulesSeen?.problems),
+  ).toBe(false)
+  await expect(page.getByTestId('rules-diagnostics')).toHaveCount(0)
+
+  // F8 walks to the next problem from where the caret is.
+  await pasteRules(page, OPEN)
+  const warning = page.getByTestId('rules-diagnostics').locator('[data-severity="warning"]')
+  await expect(warning.first()).toBeVisible()
+  const line = /^(\d+):/.exec((await warning.first().textContent()) ?? '')?.[1]
+  expect(line).toBeTruthy()
+  await page.keyboard.press('F8')
+  await expect(page.locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText(line as string)
+  // The text was never applied.
+  await page.getByTestId('rules-revert').click()
+  await expect(page.getByTestId('rules-draft-state')).toHaveCount(0)
+})

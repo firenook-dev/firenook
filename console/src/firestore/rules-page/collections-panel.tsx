@@ -14,7 +14,7 @@ import type { RulesDiagnostic } from '@/api/generated/RulesDiagnostic'
 import type { CollectionRules } from '@/api/generated/CollectionRules'
 import { fieldsQuery } from './schema-fields'
 import { insertBlock, starterRules } from './starter'
-import type { RulesDraft } from './use-rules-draft'
+import type { RulesDraft } from '@/rules/draft'
 
 const OPERATIONS = ['get', 'list', 'create', 'update', 'delete'] as const
 
@@ -28,11 +28,11 @@ export function CollectionsPanel({
   project: string
   database: string
   draft: RulesDraft
-  /** The text the page last checked, which the map and warnings describe. */
-  checked: string
+  /** The text the page last checked, which the map and warnings describe; none before the rules load. */
+  checked: string | undefined
   onReveal: (line: number) => void
 }) {
-  const check = useQuery(checkQuery(database, checked))
+  const check = useQuery({ ...checkQuery(database, checked ?? ''), enabled: checked !== undefined })
   const warnings = (check.data?.diagnostics ?? []).filter(
     (diagnostic): diagnostic is RulesDiagnostic => diagnostic.severity === 'warning',
   )

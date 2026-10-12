@@ -1,15 +1,15 @@
 // How often each rule ran, from the engine's coverage report — the same
 // report the official emulator serves at `…:ruleCoverage`, counting what
-// the evaluator actually visited. Asked for again whenever a new decision
-// arrives on the feed, so the counts move as the app makes requests,
-// without polling.
+// the evaluator actually visited. Firestore's comes from that route,
+// Storage's from `/storage/rules/coverage`, in the one official shape, so
+// this file reads both unchanged. A page asks for it again whenever a new
+// decision arrives on its feed, so the counts move as the app makes
+// requests, without polling.
 
-import { queryOptions } from '@tanstack/react-query'
-import { API_BASE, ApiError } from '@/api/client'
+import { type QueryKey, queryOptions } from '@tanstack/react-query'
+import { ApiError } from '@/api/client'
 import type { CodeGutterNote, CodeInlineValue } from '@/components/code-editor'
-import { FS } from '../queries'
-import { type RulesTypedValue, fromRulesValue } from './decisions'
-import { displayValue } from '../value'
+import { type RulesTypedValue, rulesValueText } from './typed-value'
 
 interface CoverageNode {
   sourcePosition: { line: number; column: number; currentOffset: number; endOffset: number }
@@ -27,14 +27,12 @@ export interface CoverageReport {
   firenookCoverage?: { truncated?: boolean }
 }
 
-export const coverageQuery = (project: string, database: string) =>
+/** The report at `url` (a console URL), under `queryKey`; null when there is nothing to count. */
+export const coverageQueryOptions = (queryKey: QueryKey, url: string) =>
   queryOptions({
-    queryKey: [FS, database, 'rules-coverage'],
+    queryKey,
     queryFn: async (): Promise<CoverageReport | null> => {
-      const response = await fetch(
-        `${API_BASE}/firestore/emulator/v1/projects/${encodeURIComponent(project)}:ruleCoverage?database=${encodeURIComponent(database)}`,
-        { headers: { accept: 'application/json' } },
-      )
+      const response = await fetch(url, { headers: { accept: 'application/json' } })
       // No rules loaded, or diagnostics off: nothing to count, which is
       // not an error worth a red line on the page.
       if (response.status === 404 || response.status === 503) return null
@@ -84,10 +82,7 @@ function unreached(node: CoverageNode, source: string, toUnit: (s: number) => nu
 /** What each value a condition produced, and how often: `false ×2 · true ×1`. */
 function tally(node: CoverageNode): string {
   return (node.values ?? [])
-    .map((item) => {
-      const value = fromRulesValue(item.value)
-      return `${value ? displayValue(value) : '?'} ×${item.count}`
-    })
+    .map((item) => `${rulesValueText(item.value) ?? '?'} ×${item.count}`)
     .join(' · ')
 }
 

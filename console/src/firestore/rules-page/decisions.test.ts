@@ -7,6 +7,9 @@ import {
   fromRulesValue,
   linesRun,
 } from './decisions'
+import { rulesValueText } from '@/rules/typed-value'
+import { displayValue } from '../value'
+import type { RulesTypedValue } from './decisions'
 
 const RULES = "rules_version = '2';\nservice cloud.firestore {}\n"
 
@@ -233,5 +236,58 @@ describe('reading decisions', () => {
       ),
     ).toEqual(['a', 'c'])
     expect(changedKeys(null, { a: { type: 'null' } })).toEqual(['a'])
+  })
+})
+
+describe('the rules kit writes a rules value as Firestore does', () => {
+  // Coverage tallies moved to the kit (`rulesValueText`); the text must stay
+  // exactly what `displayValue(fromRulesValue(value))` wrote here before.
+  const values: RulesTypedValue[] = [
+    { nullValue: null },
+    { boolValue: true },
+    { intValue: '1234567' },
+    { intValue: 3 },
+    { floatValue: 2.5 },
+    { floatValue: '0.125' },
+    { stringValue: 'ada@example.test' },
+    { timestampValue: '2026-09-20T09:00:00Z' },
+    { bytesValue: 'aGVsbG8=' },
+    { latlngValue: { latitude: 51.5, longitude: -0.12 } },
+    { latlngValue: {} },
+    {
+      pathValue: {
+        segments: ['databases', '(default)', 'documents', 'users', 'u1'].map((simple) => ({
+          simple,
+        })),
+      },
+    },
+    { pathValue: { segments: [{ simple: 'b' }, { simple: 'demo' }] } },
+    { mapValue: { fields: {} } },
+    { mapValue: { fields: { a: { intValue: 1 }, b: { undefined: {} }, c: { stringValue: 'x' } } } },
+    { listValue: { values: [{ boolValue: true }] } },
+    { listValue: { values: [] } },
+    { undefined: {} },
+    {},
+  ]
+  for (const value of values)
+    it(JSON.stringify(value), () => {
+      const decoded = fromRulesValue(value)
+      expect(rulesValueText(value)).toBe(decoded ? displayValue(decoded) : undefined)
+    })
+})
+
+describe('narrowing by operation', () => {
+  it('keeps only the method a link names', () => {
+    const get = decodeDecision(frame({}))
+    const list = decodeDecision(
+      frame({
+        requestId: 'r-2',
+        rulesContext: { method: 'list', path: '/databases/(default)/documents/users/*' },
+      }),
+    )
+    const all = [get, list].filter((decision) => decision !== undefined)
+    expect(filterDecisions(all, '(default)', { method: 'list' }).map((d) => d.requestId)).toEqual([
+      'r-2',
+    ])
   })
 })

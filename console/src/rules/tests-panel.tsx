@@ -1,8 +1,10 @@
 // The rules' saved tests: each a request and the verdict it should get,
 // run against the editor's text as it changes. Red here is a draft that
-// would break something before it is applied.
+// would break something before it is applied. The panel is every rules
+// page's; a page hands it its store, how a case reads, how it opens in the
+// playground and what the export file is.
 
-import { Button, DropdownMenu, Text, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
+import { Button, DropdownMenu, Text, Tooltip } from '@cloudflare/kumo'
 import {
   CaretDownIcon,
   CheckCircleIcon,
@@ -14,35 +16,42 @@ import {
   XCircleIcon,
 } from '@phosphor-icons/react'
 import { useRef } from 'react'
-import { Verdict } from './decisions-panel'
-import { usePlayground } from './playground-store'
-import { describeForm } from './requests'
-import { useRulesSearch } from './rules-search'
-import { exportTests } from './tests-export'
-import { type TestCase, passes, runTests, useTests } from './tests-store'
+import { useStore } from 'zustand'
+import type { RulesOutcome } from '@/api/generated/RulesOutcome'
+import { toast } from '@/lib/toasts'
+import { type TestCaseBase, type TestsStore, passes } from './tests-core'
+import { Verdict } from './verdict'
 
-export function TestsPanel({
-  project,
-  database,
+export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOutcome }>({
+  store,
   source,
-  rulesFile,
+  onRun,
+  describe,
+  onOpen,
+  exportFile,
+  isCase,
 }: {
-  project: string
-  database: string
+  store: TestsStore<C, R>
+  /** The rules text in the editor, which the cases run against. */
   source: string
-  rulesFile: string | undefined
+  onRun: () => void
+  /** A case as one line: its name, or its request. */
+  describe: (test: C) => string
+  /** Open the case's request in the playground. */
+  onOpen: (test: C) => void
+  /** The `@firebase/rules-unit-testing` file the cases export as. */
+  exportFile: (cases: readonly C[]) => { name: string; text: string }
+  /** Whether an item of an imported JSON file is a case this page can run. */
+  isCase: (item: unknown) => item is C
 }) {
-  const toasts = useKumoToastManager()
-  const { update } = useRulesSearch()
-  const cases = useTests((state) => state.cases)
-  const outcomes = useTests((state) => state.outcomes)
-  const ranSource = useTests((state) => state.ranSource)
-  const running = useTests((state) => state.running)
-  const failure = useTests((state) => state.failure)
-  const updateTest = useTests((state) => state.update)
-  const remove = useTests((state) => state.remove)
-  const replaceAll = useTests((state) => state.replaceAll)
-  const load = usePlayground((state) => state.load)
+  const cases = useStore(store, (state) => state.cases)
+  const outcomes = useStore(store, (state) => state.outcomes)
+  const ranSource = useStore(store, (state) => state.ranSource)
+  const running = useStore(store, (state) => state.running)
+  const failure = useStore(store, (state) => state.failure)
+  const updateTest = useStore(store, (state) => state.update)
+  const remove = useStore(store, (state) => state.remove)
+  const replaceAll = useStore(store, (state) => state.replaceAll)
   const picker = useRef<HTMLInputElement>(null)
   const current = ranSource === source
   const failing = current
@@ -50,11 +59,11 @@ export function TestsPanel({
     : 0
 
   const download = () => {
-    const text = exportTests(cases, { project, rulesFile: rulesFile ?? 'firestore.rules' })
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/typescript' }))
+    const file = exportFile(cases)
+    const url = URL.createObjectURL(new Blob([file.text], { type: 'text/typescript' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = 'firestore.rules.test.ts'
+    link.download = file.name
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -79,7 +88,7 @@ export function TestsPanel({
             variant="ghost"
             size="sm"
             icon={<PlayIcon />}
-            onClick={() => void runTests(project, database, source)}
+            onClick={onRun}
             loading={running}
             disabled={cases.length === 0}
             data-testid="tests-run"
@@ -107,7 +116,8 @@ export function TestsPanel({
                 disabled={cases.length === 0}
                 onClick={() => {
                   void navigator.clipboard.writeText(JSON.stringify(cases, null, 2))
-                  toasts.add({
+                  toast({
+                    key: 'rules-tests',
                     title: `Copied ${cases.length} test${cases.length === 1 ? '' : 's'} as JSON`,
                   })
                 }}
@@ -130,22 +140,21 @@ export function TestsPanel({
               if (!file) return
               try {
                 const parsed: unknown = JSON.parse(await file.text())
-                const added = (Array.isArray(parsed) ? parsed : []).filter(
-                  (item): item is TestCase =>
-                    Boolean(
-                      item && typeof item === 'object' && 'form' in item && 'expected' in item,
-                    ),
-                )
+                const added = (Array.isArray(parsed) ? parsed : []).filter(isCase)
                 replaceAll([
                   ...cases,
                   ...added.map((test) => ({ ...test, id: crypto.randomUUID() })),
                 ])
-                toasts.add({ title: `Added ${added.length} test${added.length === 1 ? '' : 's'}` })
+                toast({
+                  key: 'rules-tests',
+                  title: `Added ${added.length} test${added.length === 1 ? '' : 's'}`,
+                })
               } catch (error) {
-                toasts.add({
+                toast({
+                  key: 'rules-tests',
                   title: 'Not added',
                   description: (error as Error).message,
-                  variant: 'error',
+                  tone: 'danger',
                 })
               }
             }}
@@ -192,7 +201,7 @@ export function TestsPanel({
                     <XCircleIcon size={14} weight="fill" className="shrink-0 text-kumo-danger" />
                   )}
                   <span className="min-w-0 truncate font-mono text-[12px] text-kumo-default">
-                    {test.name || describeForm(test.form)}
+                    {describe(test)}
                   </span>
                   <span className="ml-auto flex shrink-0 items-center opacity-0 group-hover/test:opacity-100 focus-within:opacity-100">
                     <Tooltip
@@ -204,10 +213,7 @@ export function TestsPanel({
                           shape="square"
                           icon={<FlaskIcon />}
                           aria-label={`Open ${test.name} in the playground`}
-                          onClick={() => {
-                            load(test.form)
-                            update({ panel: 'playground' })
-                          }}
+                          onClick={() => onOpen(test)}
                         />
                       }
                     />
@@ -236,7 +242,7 @@ export function TestsPanel({
                         onClick={() =>
                           updateTest(test.id, {
                             expected: test.expected === 'allow' ? 'deny' : 'allow',
-                          })
+                          } as Partial<Omit<C, 'id'>>)
                         }
                         data-testid="test-expected"
                       >
