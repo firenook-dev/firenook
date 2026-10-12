@@ -50,7 +50,7 @@ export const FAST_RATE = 100
 const SINCE_IN_VIEW = 30
 
 /** The engine's ring, for the words of a gap. */
-const ENGINE_KEEPS = 20_000
+export const ENGINE_KEEPS = 20_000
 
 /** What to open: the view, and a line or a mark to open at. */
 export interface FeedOpen {

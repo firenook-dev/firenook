@@ -10,7 +10,9 @@ import { PaperPlaneTiltIcon } from '@phosphor-icons/react'
 import { Button } from '@cloudflare/kumo'
 import { useEffect, useRef, useState } from 'react'
 import type { EventarcEventSummary } from '@/api/generated/compute/EventarcEventSummary'
-import { EmptyState, NoMatch, useDelayedFlag } from '@/components/console/empty-state'
+import { CodeBlock } from '@/components/console/code-block'
+import { EmptyState, NoMatch, TableSkeleton } from '@/components/console/empty-state'
+import { FeedFooter, useItemCount } from '@/components/console/feed-footer'
 import { FeedList } from '@/components/console/feed-list'
 import { EventCells, EventHeader } from '@/compute/event-row'
 import { useNow } from '@/lib/clock'
@@ -141,6 +143,29 @@ export function useNeighbours(
   return { newer: step(1), older: step(-1) }
 }
 
+/** The skeleton's cells: the list's own columns (time, type, published by, subject, deliveries). */
+const EVENT_SKELETON = [
+  { width: 108 },
+  { width: 220 },
+  { width: 170 },
+  { width: 170 },
+  { width: 196 },
+]
+
+const EVENTS = { one: 'event', other: 'events' }
+
+/** How an app publishes to a channel (the default one when none is named), for the empty state. */
+export function publishSnippet(channel: string | undefined): string {
+  const target = channel ? `channel(${JSON.stringify(channel)})` : 'channel()'
+  return `import { getEventarc } from 'firebase-admin/eventarc'
+
+await getEventarc().${target}.publish({
+  type: 'achieved-leaderboard',
+  subject: 'Welcome to the leaderboard',
+  data: { message: 'You reached the top ten.' },
+})`
+}
+
 export function EventList({
   store,
   loading,
@@ -176,54 +201,68 @@ export function EventList({
 }) {
   const { format } = useClockFormat()
   const now = useNow(format === 'relative' ? 'second' : 'minute')
-  const waiting = useDelayedFlag(loading)
+  const loaded = useItemCount(store)
   return (
-    <FeedList
-      ariaLabel="Eventarc events"
-      store={store}
-      order="newest-first"
-      rowHeight={32}
-      rowKey={(event) => event.id}
-      renderRow={(event) => <EventCells event={event} clock={format} now={now} />}
-      selectedKey={selected}
-      onSelect={onSelect}
-      onOpenTarget={onOpenTarget}
-      follow={follow}
-      onFollowChange={onFollowChange}
-      hasMore={hasMore}
-      loadMore={loadMore}
-      header={<EventHeader />}
-      testId="event-list"
-      empty={
-        failed ??
-        (loading ? (
-          waiting ? (
-            <div className="flex-1 p-6 text-[13px] text-kumo-subtle" aria-busy>
-              Reading the events…
-            </div>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeedList
+        ariaLabel="Eventarc events"
+        store={store}
+        order="newest-first"
+        rowHeight={32}
+        rowKey={(event) => event.id}
+        renderRow={(event) => <EventCells event={event} clock={format} now={now} />}
+        selectedKey={selected}
+        onSelect={onSelect}
+        onOpenTarget={onOpenTarget}
+        follow={follow}
+        onFollowChange={onFollowChange}
+        hasMore={hasMore}
+        loadMore={loadMore}
+        header={<EventHeader />}
+        testId="event-list"
+        empty={
+          failed ??
+          (loading ? (
+            <TableSkeleton columns={EVENT_SKELETON} />
+          ) : q !== '' ? (
+            <NoMatch filter={q} onClear={onClearFilter} noun="events" />
           ) : (
-            <div className="flex-1" />
-          )
-        ) : q !== '' ? (
-          <NoMatch filter={q} onClear={onClearFilter} noun="events" />
-        ) : (
-          <EmptyState
-            icon={PaperPlaneTiltIcon}
-            title="No events yet"
-            description={
-              channelName
-                ? 'Nothing has been published on this channel since the engine started. Publish one, or emit one from an extension or with getEventarc().channel().publish().'
-                : 'Publish one, or emit one from an extension or with getEventarc().channel().publish().'
-            }
-            actions={
-              <Button variant="secondary" icon={<PaperPlaneTiltIcon />} onClick={onPublish}>
-                Publish an event
-              </Button>
-            }
-            testId="events-empty"
-          />
-        ))
-      }
-    />
+            <EmptyState
+              icon={PaperPlaneTiltIcon}
+              title="No events yet"
+              description={
+                channelName
+                  ? 'Nothing has been published on this channel since the engine started. Publish one from your app or an extension, or here.'
+                  : 'Publish one from your app or an extension, or here.'
+              }
+              actions={
+                <div className="grid w-[min(560px,100%)] justify-items-center gap-4">
+                  <div className="w-full text-left">
+                    <CodeBlock
+                      label="From your app"
+                      code={publishSnippet(channelName)}
+                      language="js"
+                      testId="events-snippet"
+                    />
+                  </div>
+                  <Button
+                    variant="primary"
+                    icon={<PaperPlaneTiltIcon />}
+                    onClick={onPublish}
+                    data-testid="events-empty-publish"
+                  >
+                    Publish event
+                  </Button>
+                </div>
+              }
+              testId="events-empty"
+            />
+          ))
+        }
+      />
+      {loaded > 0 && (
+        <FeedFooter loaded={loaded} capacity={EVENTS_KEPT} noun={EVENTS} testId="events-footer" />
+      )}
+    </div>
   )
 }

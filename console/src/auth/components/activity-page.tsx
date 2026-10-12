@@ -35,13 +35,19 @@ import { FilterField } from '@/components/console/filter-field'
 import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
 import { PanelHeader } from '@/components/console/panel'
+import { ClearHistoryButton } from '@/components/console/clear-history-button'
 import { PauseButton } from '@/components/console/pause-button'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
-import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
+import {
+  SectionToolbar,
+  ToolbarDivider,
+  ToolbarRow,
+  ToolbarScope,
+} from '@/components/console/toolbar'
 import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
 import { formatNumber } from '@/lib/format'
-import { useLayout } from '@/lib/layout'
+import { panelShown, useLayout } from '@/lib/layout'
 import { linkTo } from '@/lib/links'
 import { liveChannel } from '@/lib/live/channel'
 import { useConsoleProject } from '@/lib/project'
@@ -62,11 +68,11 @@ import { ACTIVITY_CAPACITY, activityEntryQuery, authKeys, summaryQuery } from '.
 import { type TenantScope, tenantKey, tenantParam, tenantScope } from '../tenant-scope'
 import { ActivityDetail, useAuthBase, useReplay } from './activity-detail'
 import { ActivityRow } from './activity-row'
-import { FeedFooter, useItemCount } from './feed-footer'
+import { FeedFooter, useItemCount } from '@/components/console/feed-footer'
 import { useFeedItem, useFeedMenu, useFeedNeighbours } from './feed-menu'
 import { InspectToken } from './inspect-token'
 import { usePagePalette } from './page-palette'
-import { TenantPicker } from './tenant-picker'
+import { TenantPicker, scopeLabel } from './tenant-picker'
 import { TrySignIn } from './try-sign-in'
 
 /** Activity's search params (`routes/auth_.activity.tsx`). */
@@ -114,7 +120,7 @@ export function ActivityPage() {
   const summary = useQuery({ ...summaryQuery(project), enabled: project !== '' })
   const capacity = summary.data?.activityCapacity ?? ACTIVITY_CAPACITY
   const feed = useActivityFeed({ project, scope, q, includeConsole, capacity })
-  const panelOpen = useLayout((state) => state.panelOpen)
+  const panelOpen = useLayout(panelShown)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
@@ -515,6 +521,11 @@ export function ActivityPage() {
               />
             </div>
           )}
+          {panelOpen && (
+            <ToolbarScope detail={scopeLabel(scope)} testId="toolbar-scope">
+              Activity
+            </ToolbarScope>
+          )}
           <span className="min-w-0 flex-1" />
           <LiveNotice
             status={feed.status}
@@ -531,15 +542,11 @@ export function ActivityPage() {
           >
             Inspect a token
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
+          <ClearHistoryButton
             onClick={() => setClearing(true)}
             disabled={loaded === 0}
-            data-testid="activity-clear"
-          >
-            Clear history…
-          </Button>
+            testId="activity-clear"
+          />
           <ToolbarDivider />
           <Button
             variant="primary"

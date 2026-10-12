@@ -143,6 +143,20 @@ function keyOf<T>(row: FeedRow<T> | undefined, rowKey: (item: T) => string, at: 
   return `\u0000gap@${at}`
 }
 
+/**
+ * A feed's column header: the table header's band, measured on Firestore's
+ * grid — 33 px with its rule, 12 px medium — so a feed's first row starts
+ * where a table's does under the same toolbar. Exported for a feed's own
+ * loading state, which draws the header over its skeleton rows.
+ */
+export function FeedHeader({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-[33px] shrink-0 items-center border-b border-kumo-line bg-kumo-elevated text-[12px] font-medium text-kumo-strong [&>*]:w-full">
+      {children}
+    </div>
+  )
+}
+
 export function FeedList<T>({
   ariaLabel,
   store,
@@ -433,11 +447,7 @@ export function FeedList<T>({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-kumo-base" data-testid={testId}>
-      {header && (
-        <div className="shrink-0 border-b border-kumo-line bg-kumo-elevated text-[12px] text-kumo-strong">
-          {header}
-        </div>
-      )}
+      {header && <FeedHeader>{header}</FeedHeader>}
       {size === 0 ? (
         empty
       ) : (

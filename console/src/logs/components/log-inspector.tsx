@@ -37,7 +37,7 @@ import type { JsonPath } from '@/components/console/json-tree-model'
 import { type KeyValueItem, KeyValueList } from '@/components/console/key-value-list'
 import { PanelTitle } from '@/components/kit'
 import { useNow } from '@/lib/clock'
-import { formatClock, formatNumber, relativeTime, useClockFormat } from '@/lib/format'
+import { formatClock, formatNumber, useClockFormat, whenParts } from '@/lib/format'
 import { kindInfo, kindLabel } from '@/observe/kinds'
 import { LevelWord } from '@/observe/level-word'
 import { functionName } from '@/observe/source-chip'
@@ -226,8 +226,8 @@ function LineTitle({ entry }: { entry: LogEntry }) {
     <Tooltip
       content={first}
       render={
-        <span className="min-w-0 truncate" data-testid="log-inspector-title">
-          <PanelTitle>{first || 'Empty line'}</PanelTitle>
+        <span className="flex min-w-0" data-testid="log-inspector-title">
+          <PanelTitle truncate>{first || 'Empty line'}</PanelTitle>
         </span>
       }
     />
@@ -260,18 +260,14 @@ function When({
   last: LogEntry | undefined
 }) {
   const now = useNow('second')
-  const local = formatClock(entry.time, 'time')
-  const date = new Date(entry.time)
-  const today = new Date(now).toDateString() === date.toDateString()
-  const day = today ? 'Today' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const when = whenParts(entry.time, now)
   return (
     <div className="grid gap-0.5 text-[12px] text-kumo-subtle">
       <span>
         <span className="font-mono text-kumo-default tabular-nums">
-          {day} {local}
+          {when?.local ?? entry.time}
         </span>{' '}
-        local · <span className="font-mono tabular-nums">{entry.time}</span> ·{' '}
-        {relativeTime(entry.time, now)}
+        local · <span className="font-mono tabular-nums">{entry.time}</span> · {when?.ago}
       </span>
       {repeat > 1 && last && (
         <span data-testid="log-inspector-repeat">

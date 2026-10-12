@@ -319,9 +319,10 @@ export function scheduleState(
 }
 
 export function stateLook(state: ScheduleState): { word: string; tone: StatusTone } {
-  if (state === 'paused') return { word: 'paused', tone: 'neutral' }
-  if (state === 'not-automatic') return { word: 'not automatic', tone: 'warning' }
-  return { word: 'running', tone: 'neutral' }
+  // Status words, capitalised as every status word is (Cloud Tasks' queues say the same).
+  if (state === 'paused') return { word: 'Paused', tone: 'neutral' }
+  if (state === 'not-automatic') return { word: 'Not automatic', tone: 'warning' }
+  return { word: 'Running', tone: 'neutral' }
 }
 
 /** Why a schedule is not automatic, with the way it still runs. */

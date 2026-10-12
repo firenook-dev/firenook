@@ -45,7 +45,7 @@ import { COLUMN_MIN, isColumnHidden, useColumnWidths, useHiddenColumns } from '.
 import { DataTableRow, type PlacedColumn, type RowActions, cellId } from './data-table-row'
 import { TableSkeleton } from './empty-state'
 import { type RowMenuAnchor, type RowMenuItem, RowMenuPopup, useRowMenuPalette } from './row-menu'
-import { CHECK_WIDTH, PIN_EDGE, PIN_HEAD, ROW_HEIGHT } from './table-pins'
+import { CHECK_WIDTH, PIN_EDGE, PIN_EDGE_END, PIN_HEAD, ROW_HEIGHT } from './table-pins'
 
 export interface DataTableColumn<Row> {
   /** Sort key sent to the engine; width memory key. */
@@ -191,6 +191,13 @@ export function ariaRowCount(options: {
 }
 
 /** The keys between the last ticked row and this one, inclusive: a shift-click's range. */
+/** Whether columns lie to the right of a scroller's view (a pixel of rounding is none). */
+export function columnsBeyond(
+  element: Pick<HTMLElement, 'scrollLeft' | 'clientWidth' | 'scrollWidth'>,
+): boolean {
+  return element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+}
+
 export function rangeKeys(keys: readonly string[], from: string | undefined, to: string): string[] {
   const end = keys.indexOf(to)
   const start = from === undefined ? -1 : keys.indexOf(from)
@@ -235,12 +242,32 @@ export function DataTable<Row>({
   const scrollRef = useRef<HTMLDivElement>(null)
   const headRef = useRef<HTMLTableSectionElement>(null)
   const [scrolledX, setScrolledX] = useState(false)
+  // Columns lie to the right of the view: the pinned settings cell draws its edge.
+  const [beyond, setBeyond] = useState(false)
   const [cursor, setCursor] = useState<{ key: string; column: string | undefined } | undefined>()
   const [menu, setMenu] = useState<{ key: string; anchor: RowMenuAnchor } | null>(null)
   const [resizing, setResizing] = useState<{ column: string; width: number } | null>(null)
   const [counted, setCounted] = useState(0)
   const [atTop, setAtTop] = useState(true)
   const shiftAnchor = useRef<string | undefined>(undefined)
+
+  // A window, a panel or a column that changes size changes what lies
+  // beyond the view as surely as a scroll does.
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+    const measure = () => {
+      const more = columnsBeyond(element)
+      setBeyond((now) => (now === more ? now : more))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    const table = element.querySelector('table')
+    if (table) observer.observe(table)
+    return () => observer.disconnect()
+  }, [])
 
   // The open row is the cursor row: the inspector's own previous / next
   // move it, and the table follows (derived during render, no effect).
@@ -674,10 +701,13 @@ export function DataTable<Row>({
           className="group/grid min-h-0 flex-1 overflow-auto select-none [overflow-anchor:none]"
           data-testid={testId ? `${testId}-scroll` : 'data-table-scroll'}
           data-scrolled={scrolledX ? '' : undefined}
+          data-beyond={beyond ? '' : undefined}
           onScroll={(event) => {
             const element = event.currentTarget
             const moved = element.scrollLeft > 0
             if (moved !== scrolledX) setScrolledX(moved)
+            const more = columnsBeyond(element)
+            if (more !== beyond) setBeyond(more)
             const nowAtTop = element.scrollTop <= 0
             if (nowAtTop !== atTop) setAtTop(nowAtTop)
             if (nowAtTop && counted > 0) setCounted(0)
@@ -796,7 +826,9 @@ export function DataTable<Row>({
                   )
                 })}
                 <Table.Head className="border-b border-kumo-line" aria-hidden />
-                <Table.Head className={cn('right-0 border-b border-kumo-line !px-1', PIN_HEAD)}>
+                <Table.Head
+                  className={cn('right-0 border-b border-kumo-line !px-1', PIN_HEAD, PIN_EDGE_END)}
+                >
                   <ColumnsMenu
                     columns={columns}
                     choices={choices}
@@ -928,7 +960,7 @@ function HeaderLabel({
     return (
       <span
         className={cn(
-          'flex h-6 min-w-0 items-center gap-1 px-2 text-kumo-strong',
+          'flex h-[18px] min-w-0 items-center gap-1 px-2 text-kumo-strong',
           align === 'end' && 'justify-end',
         )}
       >
@@ -940,7 +972,7 @@ function HeaderLabel({
       type="button"
       onClick={onSort}
       className={cn(
-        'flex h-6 w-full min-w-0 items-center gap-1 rounded-md px-2 text-kumo-strong hover:ink',
+        'flex h-[18px] w-full min-w-0 items-center gap-1 rounded-md px-2 text-kumo-strong hover:ink',
         align === 'end' && 'flex-row-reverse',
       )}
       data-testid="sort-header"
@@ -970,7 +1002,7 @@ function ColumnsMenu<Row>({
         render={
           <Button
             variant="ghost"
-            size="sm"
+            size="xs"
             shape="square"
             icon={<SlidersHorizontalIcon />}
             aria-label="Columns"

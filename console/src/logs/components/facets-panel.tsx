@@ -19,7 +19,6 @@ import type { LogFacets } from '@/api/generated/observe/LogFacets'
 import { type Facet, type FacetGroup, FacetList } from '@/components/console/facet-list'
 import { PanelFilter } from '@/components/console/panel'
 import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
-import { PanelTitle } from '@/components/kit'
 import { filterValueText, parseFilter } from '@/lib/filter'
 import { INTERNAL_FACET_LABEL, kindFacetLabel, kindFacets } from '@/observe/kinds'
 
@@ -134,8 +133,10 @@ export function FacetsPanel({
         data-testid="panel-header"
       >
         <PanelToggle where="panel" />
-        <div className="min-w-0 flex-1">
-          <PanelTitle>Filters</PanelTitle>
+        {/* The panel's name as every section's panel names itself: a quiet
+            12 px label beside the toggle, not a title. */}
+        <div className="flex min-w-0 flex-1 items-center">
+          <span className="truncate text-[12px] text-kumo-subtle">Filters</span>
         </div>
         {hasFacetTerms(q) && (
           <Tooltip

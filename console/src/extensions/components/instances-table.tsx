@@ -14,10 +14,15 @@ import {
 import type { ExtensionDropped } from '@/api/generated/compute/ExtensionDropped'
 import type { ExtensionInstanceSummary } from '@/api/generated/compute/ExtensionInstanceSummary'
 import { CodeBlock } from '@/components/console/code-block'
-import { DataTable, type DataTableColumn } from '@/components/console/data-table'
+import {
+  DataTable,
+  type DataTableColumn,
+  useHiddenColumnCount,
+} from '@/components/console/data-table'
 import { EmptyState, NoMatch } from '@/components/console/empty-state'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { SectionBanner } from '@/components/console/section-banner'
+import { TableFooter } from '@/components/console/table-footer'
 import { StatusDot } from '@/components/kit'
 import { toast } from '@/lib/toasts'
 import {
@@ -43,6 +48,11 @@ export function droppedSentence(entry: ExtensionDropped): string {
   const services = entry.services.join(' and ')
   return `${entry.instanceId} (${entry.written}) includes ${services} triggered functions, and the ${services} emulator is not run, so the instance is left out.`
 }
+
+/** Where the table's widths and hidden columns are remembered. */
+const MEMORY = 'extensions.overview'
+
+const INSTANCES = { one: 'instance', other: 'instances' }
 
 function columns(): DataTableColumn<ExtensionInstanceSummary>[] {
   return [
@@ -167,6 +177,8 @@ export function InstancesTable({
   onReload: (instance: string) => void
 }) {
   const shown = instances.filter((summary) => instanceMatches(summary, filter))
+  const table = columns()
+  const hidden = useHiddenColumnCount(MEMORY, table)
   const menu = (row: ExtensionInstanceSummary): RowMenuItem[] => [
     {
       id: 'open',
@@ -200,7 +212,9 @@ export function InstancesTable({
     },
   ]
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    // min-w-0, or the column grows to the table's width and its own
+    // scroller has nothing to scroll: the last columns ran off the window.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {dropped.map((entry) => (
         <SectionBanner key={entry.instanceId} tone="warning" testId="dropped-banner">
           Not emulated: {droppedSentence(entry)}
@@ -210,12 +224,24 @@ export function InstancesTable({
         ariaLabel="Extension instances"
         rows={shown}
         rowKey={(row) => row.instanceId}
-        columns={columns()}
-        memoryKey="extensions.overview"
+        columns={table}
+        memoryKey={MEMORY}
         onOpen={(row) => onOpen(row.instanceId)}
         rowMenu={menu}
         loading={loading}
         total={{ count: shown.length, exact: true }}
+        footer={
+          shown.length > 0 && (
+            <TableFooter
+              loaded={shown.length}
+              hasMore={false}
+              hiddenColumns={hidden.hidden}
+              onShowAll={hidden.showAll}
+              noun={INSTANCES}
+              testId="instances-footer"
+            />
+          )
+        }
         testId="instances-table"
         empty={
           instances.length > 0 ? (

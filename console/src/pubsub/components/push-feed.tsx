@@ -58,7 +58,7 @@ export function latencyText(milliseconds: number): string {
 const GRID = 'grid grid-cols-[88px_64px_72px_96px_64px_minmax(0,1fr)] items-center gap-x-3 px-3'
 
 const HEADER = (
-  <div className={cn(GRID, 'h-8 whitespace-nowrap')}>
+  <div className={cn(GRID, 'whitespace-nowrap')}>
     <span>When</span>
     <span className="text-right">Message</span>
     <span className="text-right">Attempts</span>

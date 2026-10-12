@@ -600,7 +600,7 @@ export function FilesWorkbench() {
             where={where}
             emptyActions={
               <Button
-                variant="secondary"
+                variant="primary"
                 icon={<UploadSimpleIcon />}
                 onClick={() => filesInput.current?.click()}
                 data-testid="empty-upload"

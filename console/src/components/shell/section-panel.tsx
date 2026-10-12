@@ -8,11 +8,11 @@ import { Button, Tooltip } from '@cloudflare/kumo'
 import { type ReactNode, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { PanelIcon } from '@/components/kit'
-import { useLayout } from '@/lib/layout'
+import { panelShown, useLayout } from '@/lib/layout'
 
 export function SectionPanel({ label, children }: { label: string; children: ReactNode }) {
   const slot = useLayout((state) => state.slot)
-  const open = useLayout((state) => state.panelOpen)
+  const open = useLayout(panelShown)
   const setPanel = useLayout((state) => state.setPanel)
   useEffect(() => {
     setPanel({ present: true, label })
@@ -35,7 +35,7 @@ export function SectionPanel({ label, children }: { label: string; children: Rea
  */
 export function PanelToggle({ where }: { where: 'panel' | 'toolbar' }) {
   const panel = useLayout((state) => state.panel)
-  const open = useLayout((state) => state.panelOpen)
+  const open = useLayout(panelShown)
   const toggle = useLayout((state) => state.togglePanel)
   if (!panel.present || open !== (where === 'panel')) return null
   const name = `the ${panel.label.toLowerCase()} panel`

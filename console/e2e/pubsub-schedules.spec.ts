@@ -156,7 +156,7 @@ test('J-SH-04 pause and resume a schedule’s clock, live', async ({ page, engin
     await expect(state).toHaveAttribute('data-state', 'running')
     await page.getByTestId('schedule-pause').click()
     await expect(state).toHaveAttribute('data-state', 'paused')
-    await expect(page.getByTestId('schedule-inspector-state')).toContainText('paused')
+    await expect(page.getByTestId('schedule-inspector-state')).toContainText('Paused')
     await expect(page.getByTestId('schedule-paused-note')).toBeVisible()
     expect((await scheduleOf(engine, NIGHTLY)).paused).toBe(true)
     await expect(page.getByTestId('schedule-pause')).toHaveText('Resume')

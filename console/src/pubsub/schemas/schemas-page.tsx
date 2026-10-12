@@ -21,6 +21,7 @@ import { ApiError } from '@/api/client'
 import type { PubsubSchemaRevision } from '@/api/generated/messaging/PubsubSchemaRevision'
 import type { PubsubSchemaSummary } from '@/api/generated/messaging/PubsubSchemaSummary'
 import { statusQuery } from '@/api/queries'
+import { CodeBlock } from '@/components/console/code-block'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { DataTable, type DataTableColumn } from '@/components/console/data-table'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
@@ -389,16 +390,26 @@ function SchemasLanding({
           <EmptyState
             icon={BracketsCurlyIcon}
             title="No schemas"
-            description="A schema makes a topic refuse messages that do not match it, as production does. Create one here, or with createSchema from your app."
+            description="A schema makes a topic refuse messages that do not match it, as production does. Create one from your app, or here."
             actions={
-              <Button
-                variant="primary"
-                icon={<PlusIcon />}
-                onClick={onCreate}
-                data-testid="pubsub-schemas-empty-new"
-              >
-                New schema
-              </Button>
+              <div className="grid w-[min(560px,100%)] justify-items-center gap-4">
+                <div className="w-full text-left">
+                  <CodeBlock
+                    label="From your app"
+                    code={CREATE_SCHEMA_SNIPPET}
+                    language="js"
+                    testId="pubsub-schemas-snippet"
+                  />
+                </div>
+                <Button
+                  variant="primary"
+                  icon={<PlusIcon />}
+                  onClick={onCreate}
+                  data-testid="pubsub-schemas-empty-new"
+                >
+                  New schema
+                </Button>
+              </div>
             }
             testId="pubsub-schemas-empty"
           />
@@ -408,6 +419,19 @@ function SchemasLanding({
     </div>
   )
 }
+
+/** How an app creates a schema, for the empty state. */
+export const CREATE_SCHEMA_SNIPPET = `import { PubSub, SchemaTypes } from '@google-cloud/pubsub'
+
+await new PubSub().createSchema(
+  'order',
+  SchemaTypes.Avro,
+  JSON.stringify({
+    type: 'record',
+    name: 'Order',
+    fields: [{ name: 'id', type: 'string' }],
+  }),
+)`
 
 /** The editor's text and the revision it started from. */
 interface Draft {

@@ -31,12 +31,18 @@ import { FilterField } from '@/components/console/filter-field'
 import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
 import { PanelHeader } from '@/components/console/panel'
+import { ClearHistoryButton } from '@/components/console/clear-history-button'
 import { PauseButton } from '@/components/console/pause-button'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
-import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
+import {
+  SectionToolbar,
+  ToolbarDivider,
+  ToolbarRow,
+  ToolbarScope,
+} from '@/components/console/toolbar'
 import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
-import { useLayout } from '@/lib/layout'
+import { panelShown, useLayout } from '@/lib/layout'
 import { unseenCount, useSeen } from '@/lib/badges'
 import { formatNumber } from '@/lib/format'
 import { liveChannel } from '@/lib/live/channel'
@@ -63,12 +69,12 @@ import {
 } from '../messages'
 import { MESSAGE_CAPACITY, authKeys, newestMessageQuery, summaryQuery } from '../queries'
 import { type TenantScope, tenantKey, tenantParam, tenantScope } from '../tenant-scope'
-import { FeedFooter, useItemCount } from './feed-footer'
+import { FeedFooter, useItemCount } from '@/components/console/feed-footer'
 import { useFeedItem, useFeedMenu, useFeedNeighbours } from './feed-menu'
 import { MessageReader } from './message-reader'
 import { MessageRow } from './message-row'
 import { usePagePalette } from './page-palette'
-import { TenantPicker } from './tenant-picker'
+import { TenantPicker, scopeLabel } from './tenant-picker'
 
 /** The Inbox's search params (`routes/auth_.inbox.tsx`). */
 export type InboxSearch = {
@@ -144,7 +150,7 @@ export function InboxPage() {
   const summary = useQuery({ ...summaryQuery(project), enabled: project !== '' })
   const capacity = summary.data?.messageCapacity ?? MESSAGE_CAPACITY
   const feed = useInboxFeed({ project, scope, q, capacity })
-  const panelOpen = useLayout((state) => state.panelOpen)
+  const panelOpen = useLayout(panelShown)
 
   // The filter follows typing into the address once it settles.
   const settle = useRef<number | undefined>(undefined)
@@ -471,6 +477,11 @@ export function InboxPage() {
               />
             </div>
           )}
+          {panelOpen && (
+            <ToolbarScope detail={scopeLabel(scope)} testId="toolbar-scope">
+              Inbox
+            </ToolbarScope>
+          )}
           <span className="min-w-0 flex-1" />
           <LiveNotice status={feed.status} what="the inbox" onRetry={() => liveChannel.retry()} />
           <ToolbarDivider />
@@ -493,15 +504,11 @@ export function InboxPage() {
               </Button>
             }
           />
-          <Button
-            variant="ghost"
-            size="sm"
+          <ClearHistoryButton
             onClick={() => setClearing(true)}
             disabled={loaded === 0}
-            data-testid="inbox-clear"
-          >
-            Clear history…
-          </Button>
+            testId="inbox-clear"
+          />
         </ToolbarRow>
         <ToolbarRow variant="line" testId="inbox-row-two">
           <FilterField

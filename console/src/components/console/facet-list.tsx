@@ -249,12 +249,14 @@ export function FacetList({
                         'shrink-0 font-mono text-[11px] tabular-nums',
                         excludable &&
                           'group-hover/facet:invisible group-focus-within/facet:invisible',
-                        facet.tone === 'danger'
+                        // No errors is not news: a zero keeps the quiet ink.
+                        facet.count > 0 && facet.tone === 'danger'
                           ? 'text-kumo-danger'
-                          : facet.tone === 'warning'
+                          : facet.count > 0 && facet.tone === 'warning'
                             ? 'text-kumo-warning'
                             : 'text-kumo-subtle',
                       )}
+                      data-tone={facet.count > 0 ? facet.tone : undefined}
                     >
                       {formatNumber(facet.count)}
                     </span>

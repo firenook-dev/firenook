@@ -7,7 +7,7 @@
 import { Button, Checkbox, cn } from '@cloudflare/kumo'
 import { DotsThreeIcon, SidebarSimpleIcon } from '@phosphor-icons/react'
 import { type ReactNode, type RefObject, memo } from 'react'
-import { CURSOR, CURSOR_ROW, PIN_CELL, PIN_EDGE } from './table-pins'
+import { CURSOR, CURSOR_ROW, PIN_CELL, PIN_EDGE, PIN_EDGE_END } from './table-pins'
 
 /** A column as a row draws it: its width settled and, when pinned, where it sticks. */
 export interface PlacedColumn<Row> {
@@ -210,7 +210,10 @@ function DataTableRowView<Row>({
       ))}
       {/* Slack: columns keep their width when the inspector opens. */}
       <td aria-hidden />
-      <td className="sticky right-0 z-[1] bg-(--kumo-table-row-bg) !px-1 !py-0" data-menu="">
+      <td
+        className={cn('sticky right-0 z-[1] bg-(--kumo-table-row-bg) !px-1 !py-0', PIN_EDGE_END)}
+        data-menu=""
+      >
         {menu && (
           <Button
             variant="ghost"

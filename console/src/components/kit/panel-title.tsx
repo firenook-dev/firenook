@@ -9,13 +9,24 @@ import type { ReactNode } from 'react'
 
 export function PanelTitle({
   as = 'h3',
+  truncate = false,
   children,
 }: {
   as?: 'h2' | 'h3' | 'h4'
+  /**
+   * One line, cut with an ellipsis where its box ends. A truncating wrapper
+   * cannot do this for it: `text-overflow` does not reach a block child, so
+   * the title was clipped mid-glyph with no ellipsis.
+   */
+  truncate?: boolean
   children: ReactNode
 }) {
   return (
-    <Text variant="heading" as={as} DANGEROUS_className="text-base">
+    <Text
+      variant="heading"
+      as={as}
+      DANGEROUS_className={truncate ? 'min-w-0 truncate text-base' : 'text-base'}
+    >
       {children}
     </Text>
   )

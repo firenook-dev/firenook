@@ -48,13 +48,13 @@ const COLUMNS = {
 
 function Header() {
   return (
-    <div className="flex h-7 items-center gap-3 px-3 font-mono text-[11px] text-kumo-subtle">
-      <span className={COLUMNS.when}>when</span>
-      <span className={COLUMNS.task}>task</span>
-      <span className={`${COLUMNS.attempt} text-right`}>attempt</span>
-      <span className={COLUMNS.status}>status</span>
-      <span className={`${COLUMNS.took} text-right`}>took</span>
-      <span>response / error</span>
+    <div className="flex items-center gap-3 px-3">
+      <span className={COLUMNS.when}>When</span>
+      <span className={COLUMNS.task}>Task</span>
+      <span className={`${COLUMNS.attempt} text-right`}>Attempt</span>
+      <span className={COLUMNS.status}>Status</span>
+      <span className={`${COLUMNS.took} text-right`}>Took</span>
+      <span>Response or error</span>
     </div>
   )
 }

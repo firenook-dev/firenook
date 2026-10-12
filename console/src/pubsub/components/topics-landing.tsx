@@ -130,7 +130,7 @@ export function TopicsLanding({
               <button
                 type="button"
                 onClick={() => onCreateTopic()}
-                className="flex h-full min-h-[104px] w-full items-center justify-center gap-2 rounded-lg border border-dashed border-kumo-line px-4 text-kumo-subtle hover:ink hover:text-kumo-default"
+                className="flex h-full min-h-[104px] w-full items-center gap-2 rounded-lg border border-dashed border-kumo-line px-4 text-left text-kumo-subtle hover:ink hover:text-kumo-default"
                 data-testid="pubsub-landing-new-topic"
               >
                 <PlusIcon size={16} />
@@ -193,7 +193,7 @@ function TopicCard({
       <div className="pointer-events-none grid gap-1.5 px-4 py-3">
         <span className="flex min-w-0 items-center gap-2">
           <BroadcastIcon size={14} className="shrink-0 text-kumo-subtle" />
-          <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-kumo-default">
+          <span className="min-w-0 flex-1 truncate font-mono text-[14px] text-kumo-default">
             {topic.id}
           </span>
         </span>

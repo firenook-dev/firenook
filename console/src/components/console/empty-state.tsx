@@ -132,23 +132,31 @@ export function NoMatch({
   filter,
   onClear,
   noun,
+  children,
+  testId = 'no-match',
 }: {
   filter: string
   onClear: () => void
   /** Plural: "users". */
   noun: string
+  /** What else the page can say about why (Logs: which filter hides how many lines), under the filter. */
+  children?: ReactNode
+  testId?: string
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-auto" data-testid="no-match">
+    <div className="min-h-0 flex-1 overflow-auto" data-testid={testId}>
       <Empty
         icon={<FunnelIcon size={48} className="text-kumo-inactive" />}
         title={`No ${noun} match`}
         description="Loosen a term or clear it."
         contents={
           <div className="grid justify-items-center gap-3">
-            <span className="max-w-[560px] rounded-md bg-kumo-tint px-2 py-1 font-mono text-[12px] break-words text-kumo-default">
-              {filter}
-            </span>
+            {filter.trim() !== '' && (
+              <span className="max-w-[560px] rounded-md bg-kumo-tint px-2 py-1 font-mono text-[12px] break-words text-kumo-default">
+                {filter}
+              </span>
+            )}
+            {children}
             <Button variant="secondary" onClick={onClear} data-testid="no-match-clear">
               Clear the filter
             </Button>

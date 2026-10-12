@@ -6,7 +6,7 @@
 // topic: a run, its message and its delivery are one story. Live through
 // `pubsub.schedules`: a run, a pause or a reload shows as it happens.
 
-import { Badge, Tooltip } from '@cloudflare/kumo'
+import { Tooltip } from '@cloudflare/kumo'
 import {
   ArrowSquareOutIcon,
   CalendarBlankIcon,
@@ -22,7 +22,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Page } from '@/api/generated/Page'
 import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
 import { statusQuery } from '@/api/queries'
-import { DataTable, type DataTableColumn } from '@/components/console/data-table'
+import {
+  DataTable,
+  type DataTableColumn,
+  useHiddenColumnCount,
+} from '@/components/console/data-table'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
 import { LiveNotice } from '@/components/console/live-notice'
 import { RelativeTime } from '@/components/console/relative-time'
@@ -30,7 +34,8 @@ import { RequiresNotice } from '@/components/console/requires-notice'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { sectionStatus } from '@/components/console/section-gate'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
-import { SectionToolbar, ToolbarField, ToolbarRow } from '@/components/console/toolbar'
+import { TableFooter } from '@/components/console/table-footer'
+import { SectionToolbar, ToolbarRow, ToolbarScope } from '@/components/console/toolbar'
 import { StatusDot } from '@/components/kit'
 import { useNow } from '@/lib/clock'
 import { formatNumber } from '@/lib/format'
@@ -55,6 +60,7 @@ import {
   nextRunText,
   notAutomaticText,
   scheduleState,
+  stateLook,
 } from '../schedule-text'
 import { functionMark } from '../states'
 import { useRunNow } from './run-now-popover'
@@ -115,33 +121,19 @@ function LastRunCell({ schedule }: { schedule: PubsubSchedule }) {
   )
 }
 
+/** The state as Cloud Tasks' queues draw theirs: the kit's dot and a capitalised word. */
 function StateCell({ schedule }: { schedule: PubsubSchedule }) {
   const state = scheduleState(schedule)
-  if (state === 'paused')
-    return (
-      <span className="inline-flex font-sans" data-testid="schedule-state" data-state={state}>
-        <Badge variant="outline">paused</Badge>
-      </span>
-    )
-  if (state === 'not-automatic')
-    return (
-      <Tooltip
-        content={notAutomaticText(schedule.problem)}
-        render={
-          <span
-            className="font-sans text-kumo-warning"
-            data-testid="schedule-state"
-            data-state={state}
-          >
-            not automatic
-          </span>
-        }
-      />
-    )
-  return (
-    <span className="font-sans text-kumo-subtle" data-testid="schedule-state" data-state={state}>
-      running
+  const look = stateLook(state)
+  const cell = (
+    <span className="inline-flex font-sans" data-testid="schedule-state" data-state={state}>
+      <StatusDot tone={look.tone} label={look.word} />
     </span>
+  )
+  return state === 'not-automatic' ? (
+    <Tooltip content={notAutomaticText(schedule.problem)} render={cell} />
+  ) : (
+    cell
   )
 }
 
@@ -226,12 +218,14 @@ export function SchedulesPage() {
     >
       <SectionToolbar testId="pubsub-schedules-toolbar">
         <ToolbarRow testId="pubsub-schedules-row-one">
-          <ToolbarField icon={<ClockIcon size={14} />} testId="pubsub-schedules-field">
-            <span className="text-[12px] text-kumo-default">Schedules</span>
-            <span className="ml-2 truncate text-[12px] text-kumo-subtle">
-              functions exported with onSchedule, each tick a publish to its topic
-            </span>
-          </ToolbarField>
+          <ToolbarScope
+            icon={<ClockIcon size={14} />}
+            detail="functions exported with onSchedule, each tick a publish to its topic"
+            testId="pubsub-schedules-field"
+          >
+            Schedules
+          </ToolbarScope>
+          <span className="min-w-0 flex-1" />
           <LiveNotice
             status={live}
             what="the schedules"
@@ -264,6 +258,7 @@ function SchedulesTable({
   const navigate = useNavigate()
   const query = useQuery(schedulesQuery(project))
   const rows = query.data?.items ?? []
+  const hidden = useHiddenColumnCount('pubsub.schedules', SCHEDULE_COLUMNS)
   const open = rows.find((row) => row.functionId === search.schedule)
   const runNow = useRunNow(project)
   const [cursorKey, setCursorKey] = useState<string | undefined>(undefined)
@@ -414,6 +409,18 @@ function SchedulesTable({
             rowClick="open"
             rowMenu={rowMenu}
             loading={query.isPending}
+            footer={
+              rows.length > 0 && (
+                <TableFooter
+                  loaded={rows.length}
+                  hasMore={false}
+                  hiddenColumns={hidden.hidden}
+                  onShowAll={hidden.showAll}
+                  noun={{ one: 'schedule', other: 'schedules' }}
+                  testId="pubsub-schedules-footer"
+                />
+              )
+            }
             empty={
               <EmptyState
                 icon={CalendarBlankIcon}

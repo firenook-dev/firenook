@@ -293,6 +293,8 @@ function TreeRowView({
       : typeof node.count === 'number'
         ? formatNumber(node.count)
         : node.count
+  // A zero is not news: it keeps the quiet ink whatever the node's tone.
+  const tone = node.count === 0 ? undefined : node.tone
   const body = (
     <div
       role="treeitem"
@@ -309,7 +311,11 @@ function TreeRowView({
       onClick={() => onOpen(node)}
       className={cn(
         'absolute inset-x-0 flex h-7 cursor-default items-center rounded-md pr-1.5 outline-none select-none focus-visible:ring-2 focus-visible:ring-kumo-focus focus-visible:ring-inset',
-        current ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]' : 'hover:ink',
+        // The accent is a bar of its own: an inset shadow on a rounded box
+        // follows the corners and bends into a bracket.
+        current
+          ? "bg-kumo-tint before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-kumo-brand before:content-['']"
+          : 'hover:ink',
       )}
       style={{ transform: `translateY(${top}px)` }}
     >
@@ -357,13 +363,13 @@ function TreeRowView({
           <span
             className={cn(
               'shrink-0 font-mono text-[11px] tabular-nums',
-              node.tone === 'danger'
+              tone === 'danger'
                 ? 'text-kumo-danger'
-                : node.tone === 'warning'
+                : tone === 'warning'
                   ? 'text-kumo-warning'
                   : 'text-kumo-subtle',
             )}
-            data-tone={node.tone}
+            data-tone={tone}
           >
             {count}
           </span>

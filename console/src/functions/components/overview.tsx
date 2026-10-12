@@ -16,11 +16,13 @@ import {
   DataTable,
   type DataTableColumn,
   type DataTableSort,
+  useHiddenColumnCount,
 } from '@/components/console/data-table'
 import { EmptyState, NoMatch } from '@/components/console/empty-state'
 import { invocationChip } from '@/components/console/outcome-chip'
 import { RelativeTime, exactTime } from '@/components/console/relative-time'
 import type { RowMenuItem } from '@/components/console/row-menu'
+import { TableFooter } from '@/components/console/table-footer'
 import { KindBadge } from '@/compute/kind-badge'
 import { DurationText } from '@/compute/duration-text'
 import { formatNumber } from '@/lib/format'
@@ -133,8 +135,11 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
               data-testid="overview-problem"
             />
           )}
-          <span className="truncate text-kumo-default">{nameOf(row)}</span>
-          <span className="shrink-0 text-[11px] text-kumo-subtle">{regionOf(row)}</span>
+          {/* The name is what tells rows apart: the region gives way first. */}
+          <span className="shrink-[0.1] truncate text-kumo-default">{nameOf(row)}</span>
+          <span className="min-w-0 shrink truncate text-[11px] text-kumo-subtle">
+            {regionOf(row)}
+          </span>
         </span>
       )
     },
@@ -275,6 +280,8 @@ export function FunctionsOverview({
 }) {
   const all = overviewRows(snapshot)
   const rows = sortOverview(filterOverview(all, q), sort)
+  const hidden = useHiddenColumnCount(MEMORY_KEY, COLUMNS)
+  const counts = overviewCounts(snapshot, q)
   return (
     <DataTable
       ariaLabel="Functions"
@@ -288,6 +295,18 @@ export function FunctionsOverview({
       rowClick="open"
       rowMenu={rowMenu}
       total={{ count: rows.length, exact: true }}
+      footer={
+        rows.length > 0 && (
+          <TableFooter
+            loaded={counts.functions}
+            hasMore={false}
+            hiddenColumns={hidden.hidden}
+            onShowAll={hidden.showAll}
+            noun={FUNCTIONS}
+            testId="functions-footer"
+          />
+        )
+      }
       empty={
         all.length === 0 ? (
           <EmptyState
@@ -309,7 +328,22 @@ export function FunctionsOverview({
   )
 }
 
-/** The overview's count: every row the filter keeps. */
-export function overviewCount(snapshot: FunctionsSnapshot, q: string): number {
-  return filterOverview(overviewRows(snapshot), q).length
+const FUNCTIONS = { one: 'function', other: 'functions' }
+
+/**
+ * The overview's counts: the loaded functions the filter keeps — the figure
+ * the panel's "All functions" and the Overview's card give, counted the same
+ * way — and, apart, the functions the emulator left out at load, which are
+ * rows here but are not functions it runs.
+ */
+export function overviewCounts(
+  snapshot: FunctionsSnapshot,
+  q: string,
+): { functions: number; notLoaded: number } {
+  let functions = 0
+  let notLoaded = 0
+  for (const row of filterOverview(overviewRows(snapshot), q))
+    if (row.kind === 'notLoaded') notLoaded += 1
+    else functions += 1
+  return { functions, notLoaded }
 }

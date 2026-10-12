@@ -90,6 +90,7 @@ export function MessageFooter({
           render={
             <Button
               variant="secondary"
+              size="sm"
               icon={<PaperPlaneTiltIcon />}
               onClick={onEditAgain}
               data-testid="message-publish-again"

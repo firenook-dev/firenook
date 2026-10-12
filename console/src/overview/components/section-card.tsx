@@ -8,7 +8,6 @@
 import { Tooltip, cn } from '@cloudflare/kumo'
 import { WarningIcon } from '@phosphor-icons/react'
 import { Link } from '@tanstack/react-router'
-import { Fragment } from 'react'
 import type { SummaryFigure } from '@/api/generated/SummaryFigure'
 import { CopyField } from '@/components/console/copy-button'
 import { StatusDot } from '@/components/kit'
@@ -155,17 +154,22 @@ export function SectionCard({
         </ul>
       )}
 
-      <div className="mt-auto flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pt-1 text-[12px]">
-        {links.map((item, index) => (
-          <Fragment key={item.key}>
-            {index > 0 && (
-              <span aria-hidden className="text-kumo-subtle">
-                ·
-              </span>
-            )}
-            {item.node}
-          </Fragment>
-        ))}
+      {/* Each link carries the dot before it in a 16 px slot, and the row
+          starts 16 px left of the card’s clip: the first link of every line
+          has its dot cut off, so a wrapped row neither ends nor starts on a
+          dangling separator. */}
+      <div className="mt-auto overflow-hidden pt-1 pb-0.5">
+        <div className="-ml-4 flex min-w-0 flex-wrap items-center gap-y-1 text-[12px]">
+          {links.map((item) => (
+            <span
+              key={item.key}
+              className="inline-flex min-w-0 items-center whitespace-nowrap before:w-4 before:shrink-0 before:text-center before:text-kumo-subtle before:content-['·']"
+              data-testid="card-link"
+            >
+              {item.node}
+            </span>
+          ))}
+        </div>
       </div>
     </article>
   )

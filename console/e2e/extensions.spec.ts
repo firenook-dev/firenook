@@ -54,7 +54,11 @@ test('the overview lists each instance with its source, readiness, APIs, roles a
   await expect(row).toContainText('translate.googleapis.com')
 
   // The panel's row opens it; the toolbar says what it is and where it lives.
-  await page.getByTestId('instance-row').filter({ hasText: 'greeter' }).click()
+  await page
+    .getByTestId('instance-list')
+    .getByTestId('panel-tree-node')
+    .filter({ hasText: 'greeter' })
+    .click()
   await expect(page).toHaveURL(/instance=greeter/)
   await expect(page.getByTestId('instance-id')).toHaveText('greeter')
   await expect(page.getByTestId('instance-identity')).toContainText('extensions/greeter')

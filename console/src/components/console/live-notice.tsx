@@ -26,6 +26,7 @@ export function LiveNotice({
   what,
   message,
   onRetry,
+  divider,
   testId = 'live-notice',
 }: {
   status: SubscriptionStatus
@@ -35,11 +36,18 @@ export function LiveNotice({
   message?: string | undefined
   /** Usually `liveChannel.retry`. */
   onRetry: () => void
+  /**
+   * A toolbar rule on this side of the notice, drawn only with it: the
+   * notice is usually absent, and a rule beside nothing is a stray mark.
+   */
+  divider?: 'before' | 'after' | undefined
   testId?: string
 }) {
   if (status !== 'ended' && status !== 'refused') return null
+  const rule = <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
   return (
     <span className="flex shrink-0 items-center gap-0.5" data-testid={testId} data-state={status}>
+      {divider === 'before' && rule}
       <Tooltip
         content={liveNoticeText(status, what, message)}
         render={
@@ -60,6 +68,7 @@ export function LiveNotice({
       <Button variant="ghost" size="xs" onClick={onRetry} data-testid={`${testId}-retry`}>
         Retry
       </Button>
+      {divider === 'after' && rule}
     </span>
   )
 }

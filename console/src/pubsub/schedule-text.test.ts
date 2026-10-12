@@ -91,7 +91,9 @@ describe('the next run and the state', () => {
     expect(scheduleState({ automatic: true, paused: false })).toBe('running')
     expect(scheduleState({ automatic: true, paused: true })).toBe('paused')
     expect(scheduleState({ automatic: false, paused: true })).toBe('not-automatic')
-    expect(stateLook('not-automatic')).toEqual({ word: 'not automatic', tone: 'warning' })
+    expect(stateLook('not-automatic')).toEqual({ word: 'Not automatic', tone: 'warning' })
+    expect(stateLook('paused')).toEqual({ word: 'Paused', tone: 'neutral' })
+    expect(stateLook('running')).toEqual({ word: 'Running', tone: 'neutral' })
     expect(notAutomaticText('unsupported Firebase schedule expression: every monday 9')).toBe(
       'unsupported Firebase schedule expression: every monday 9 — run it here with Run now.',
     )

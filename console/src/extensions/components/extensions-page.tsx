@@ -12,7 +12,7 @@ import { FilterField } from '@/components/console/filter-field'
 import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
-import { ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
+import { ToolbarRow, ToolbarScope } from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { liveChannel } from '@/lib/live/channel'
 import { useRouteSearch } from '@/lib/search-params'
@@ -97,19 +97,13 @@ export function ExtensionsPage() {
         <>
           <ToolbarRow testId="extensions-toolbar">
             <PanelToggle where="toolbar" />
-            <span className="min-w-0 truncate px-1 text-[12px] font-medium text-kumo-default">
-              All instances
-            </span>
-            {(live === 'ended' || live === 'refused') && (
-              <>
-                <ToolbarDivider />
-                <LiveNotice
-                  status={live}
-                  what="the instances"
-                  onRetry={() => liveChannel.retry()}
-                />
-              </>
-            )}
+            <ToolbarScope testId="extensions-scope">All instances</ToolbarScope>
+            <LiveNotice
+              status={live}
+              what="the instances"
+              onRetry={() => liveChannel.retry()}
+              divider="before"
+            />
           </ToolbarRow>
           {/* Nothing to filter in a project with no instance: the empty state says how to add one. */}
           {(list.isPending || instances.length > 0 || search.q) && (

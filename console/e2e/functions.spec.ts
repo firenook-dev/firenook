@@ -483,7 +483,7 @@ test('a broken reload says what broke and keeps serving the last good load', asy
   engine,
 }) => {
   const lib = projectFile(engine, 'jobs/lib/index.js')
-  const badge = page.getByTestId('nav-badge-functions-functions')
+  const badge = page.getByTestId('nav-badge-functions-all-functions')
   // `broken` never loaded: said from the start, and counted in the nav.
   await openFunctions(page, engine, '?codebase=broken')
   await expect(page.getByTestId('codebase-failed')).toContainText(

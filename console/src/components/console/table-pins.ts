@@ -44,6 +44,16 @@ export const PIN_HEAD = 'sticky z-[2] bg-kumo-elevated'
 export const PIN_EDGE =
   "after:pointer-events-none after:absolute after:inset-y-0 after:-right-[6px] after:w-[6px] after:bg-linear-to-r after:from-kumo-line after:to-transparent after:opacity-0 after:content-[''] group-data-[scrolled]/grid:after:opacity-100"
 
+/**
+ * The edge of the cell pinned to the right (a table's column settings),
+ * drawn while columns lie beyond it — the scroller carries `data-beyond`
+ * until it is scrolled to its right end. Without it the pinned cell cut the
+ * last header it covered to a fragment ("Prov", "Deliver") and nothing said
+ * that there was more to the right.
+ */
+export const PIN_EDGE_END =
+  "before:pointer-events-none before:absolute before:inset-y-0 before:-left-[6px] before:w-[6px] before:bg-linear-to-l before:from-kumo-line before:to-transparent before:opacity-0 before:content-[''] group-data-[beyond]/grid:before:opacity-100"
+
 /** The cell the keyboard is on: the console's accent, inside the cell, so nothing moves. */
 export const CURSOR = 'shadow-[inset_0_0_0_1.5px_var(--color-kumo-brand)]'
 

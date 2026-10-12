@@ -3,10 +3,9 @@
 // what it hides is its own count less what matches), plus the engine
 // internals the default view leaves out, and one way out.
 
-import { Button } from '@cloudflare/kumo'
-import { FunnelIcon } from '@phosphor-icons/react'
 import type { LogFacetCount } from '@/api/generated/observe/LogFacetCount'
 import type { LogFacets } from '@/api/generated/observe/LogFacets'
+import { NoMatch } from '@/components/console/empty-state'
 import { parseFilter } from '@/lib/filter'
 import { formatNumber } from '@/lib/format'
 
@@ -75,26 +74,23 @@ export function NoLines({
   onClear: () => void
 }) {
   const sentence = facets ? hiddenSentence(hiddenBy(q, facets), facets.internalHidden) : undefined
+  // The shared no-match state — title, the filter in a chip, the way out —
+  // with what only Logs can say about why under the chip.
   return (
-    <div
-      className="flex flex-1 flex-col items-center justify-start gap-3 px-6 pt-16 text-center"
-      data-testid="logs-no-match"
-    >
-      <FunnelIcon size={40} className="text-kumo-inactive" />
-      <p className="m-0 text-[14px] font-medium text-kumo-default">No lines match these filters.</p>
+    <NoMatch filter={q} onClear={onClear} noun="lines" testId="logs-no-match">
       {sentence && (
-        <p className="m-0 max-w-[560px] text-[13px] text-kumo-subtle" data-testid="logs-hidden-by">
+        <p
+          className="m-0 max-w-[560px] text-center text-[13px] text-kumo-subtle"
+          data-testid="logs-hidden-by"
+        >
           {sentence}
         </p>
       )}
       {windowed && (
-        <p className="m-0 max-w-[560px] text-[13px] text-kumo-subtle">
+        <p className="m-0 max-w-[560px] text-center text-[13px] text-kumo-subtle">
           The time range leaves out every line outside it.
         </p>
       )}
-      <Button variant="secondary" size="sm" onClick={onClear} data-testid="logs-clear-filters">
-        Clear filters
-      </Button>
-    </div>
+    </NoMatch>
   )
 }

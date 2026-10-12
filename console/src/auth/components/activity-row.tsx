@@ -33,7 +33,9 @@ function ActivityRowView({
   const hidden = chips.length - shown.length
   return (
     <FeedMenuRow rowKey={String(call.id)} label={`Actions for call ${call.id}`} handle={handle}>
-      <FeedTime iso={call.at} className="w-[92px] shrink-0 pl-3 text-left" />
+      {/* 12 px of gutter and HH:MM:SS.mmm in the data face (about 86 px), with
+          room to spare: at 92 px the time ran into the caller's chip. */}
+      <FeedTime iso={call.at} className="w-[104px] shrink-0 pl-3 text-left" />
       <span className="flex w-[68px] shrink-0 items-center pl-2">
         <span
           className={`${QUIET_CHIP} ${asked ? 'text-kumo-default' : ''}`}
@@ -84,7 +86,8 @@ function ActivityRowView({
             </span>
           </>
         ) : (
-          <OutcomeChip word="ok" tone="success" mono testId="activity-outcome" />
+          // A success is a word, as an invocation's is; an error's code is data.
+          <OutcomeChip word="Succeeded" tone="success" testId="activity-outcome" />
         )}
       </span>
       <span className="hidden min-w-0 flex-[3] basis-0 items-center gap-1 pr-3 @4xl:flex">

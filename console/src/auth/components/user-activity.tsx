@@ -193,7 +193,7 @@ function CallLine({ call }: { call: AuthActivitySummary }) {
       )}
       <span className="shrink-0">
         <OutcomeChip
-          word={call.error ? call.error.code : 'ok'}
+          word={call.error ? call.error.code : 'Succeeded'}
           tone={call.error ? 'danger' : 'success'}
           mono={call.error !== null}
         />

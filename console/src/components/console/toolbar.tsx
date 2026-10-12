@@ -78,9 +78,43 @@ function Overlaid({ overlay, children }: { overlay: ReactNode; children: ReactNo
   )
 }
 
-/** The rule between two groups of toolbar controls. */
+/**
+ * The rule between two groups of toolbar controls. Draw one only where
+ * there is a group on both sides of it: a rule before nothing, or after an
+ * empty spacer, reads as a control that failed to load.
+ */
 export function ToolbarDivider() {
   return <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
+}
+
+/**
+ * Row one's scope when it is a name rather than a path — "All functions",
+ * "Users" with the tenant after it: 12 px medium in the default ink, its
+ * detail in the quiet ink, where Firestore's path field starts. One style
+ * for every section, so the row reads the same wherever it is.
+ */
+export function ToolbarScope({
+  icon,
+  detail,
+  children,
+  testId,
+}: {
+  icon?: ReactNode
+  /** What qualifies the scope (a project, a tenant, a sentence), quieter and cut first. */
+  detail?: ReactNode
+  children: ReactNode
+  testId?: string
+}) {
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5 px-1 text-[12px] whitespace-nowrap"
+      data-testid={testId}
+    >
+      {icon ? <span className="flex shrink-0 text-kumo-subtle">{icon}</span> : null}
+      <span className="min-w-0 shrink-0 truncate font-medium text-kumo-default">{children}</span>
+      {detail ? <span className="min-w-0 truncate text-kumo-subtle">{detail}</span> : null}
+    </span>
+  )
 }
 
 /**

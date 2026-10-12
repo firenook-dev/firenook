@@ -26,7 +26,7 @@ import type { SearchResults } from '@/api/generated/SearchResults'
 import { statusQuery } from '@/api/queries'
 import { Kbd, PanelIcon } from '@/components/kit'
 import { describeTheme, useTheme } from '@/lib/color-mode'
-import { useLayout } from '@/lib/layout'
+import { panelShown, useLayout } from '@/lib/layout'
 import { linkTo } from '@/lib/links'
 import {
   type PaletteGroup,
@@ -185,7 +185,7 @@ export function CommandPalette() {
   const navOpen = useLayout((state) => state.navOpen)
   const toggleNav = useLayout((state) => state.toggleNav)
   const panel = useLayout((state) => state.panel)
-  const panelOpen = useLayout((state) => state.panelOpen)
+  const panelOpen = useLayout(panelShown)
   const togglePanel = useLayout((state) => state.togglePanel)
   const theme = useTheme((state) => state.choice)
   const mode = useTheme((state) => state.mode)

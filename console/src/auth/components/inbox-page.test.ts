@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { feedFooterText } from './feed-footer'
+import { feedFooterText } from '@/components/console/feed-footer'
 import { unreadBoundary } from './inbox-page'
 
 describe('the inbox', () => {

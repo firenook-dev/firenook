@@ -17,7 +17,8 @@
 
 import { Button, InlineCopyText, Tabs, Tooltip } from '@cloudflare/kumo'
 import { CaretDownIcon, CaretUpIcon, XIcon } from '@phosphor-icons/react'
-import { type ReactNode, createContext, useContext, useMemo } from 'react'
+import { type ReactNode, createContext, useContext, useEffect, useMemo } from 'react'
+import { useLayout } from '@/lib/layout'
 import { formatNumber } from '@/lib/format'
 import { isTyping } from '@/lib/shortcuts'
 import { CODE_LABEL_AT, useInspectorWidth } from './inspector-width'
@@ -88,6 +89,9 @@ export function Inspector({
   children: ReactNode
 }) {
   const { width } = useInspectorWidth(widthKey)
+  // Counted while open: on a narrow window the section panel steps aside.
+  const inspectorOpened = useLayout((state) => state.inspectorOpened)
+  useEffect(() => inspectorOpened(), [inspectorOpened])
   const stepping = noun !== undefined || onPrev !== undefined || onNext !== undefined
   const thing = noun ?? 'row'
   const context = useMemo(() => ({ widthKey }), [widthKey])
@@ -187,7 +191,8 @@ export function Inspector({
   )
 }
 
-function StepButton({
+/** A previous or next chevron, as every inspector's header draws them (Firestore's too). */
+export function StepButton({
   label,
   keyHint,
   icon,

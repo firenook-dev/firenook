@@ -27,7 +27,9 @@ export const functions: ConsoleSection = {
   pages: [
     {
       to: '/functions',
-      label: 'Functions',
+      // Not "Functions" again under Functions: the page lists all of them,
+      // as its panel's first row and its toolbar say.
+      label: 'All functions',
       exact: true,
       badges: ['functions.load'],
       keywords: 'codebases triggers workers environment secrets',

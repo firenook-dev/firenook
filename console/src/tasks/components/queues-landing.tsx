@@ -15,7 +15,12 @@ import { RelativeTime } from '@/components/console/relative-time'
 import { SectionBanner } from '@/components/console/section-banner'
 import { SectionBody } from '@/components/console/section-page'
 import { TableFooter } from '@/components/console/table-footer'
-import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
+import {
+  SectionToolbar,
+  ToolbarDivider,
+  ToolbarRow,
+  ToolbarScope,
+} from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { Kbd, StatusDot } from '@/components/kit'
 import { formatNumber } from '@/lib/format'
@@ -36,9 +41,23 @@ function Rate({
   span: number
   bucket?: number
 }) {
-  const count = useAgedCount(window, span, bucket)
+  return <Figure value={useAgedCount(window, span, bucket)} />
+}
+
+/**
+ * A count in the table: a zero in the inactive ink, so the figures that are
+ * not zero are the ones the eye finds — one rule for every count column,
+ * the live rates and the queue's own counters alike.
+ */
+function Figure({ value, tone }: { value: number; tone?: 'warning' | undefined }) {
   return (
-    <span className={count === 0 ? 'text-kumo-inactive' : undefined}>{formatNumber(count)}</span>
+    <span
+      className={
+        value === 0 ? 'text-kumo-inactive' : tone === 'warning' ? 'text-kumo-warning' : undefined
+      }
+    >
+      {formatNumber(value)}
+    </span>
   )
 }
 
@@ -70,25 +89,21 @@ function columns(queues: readonly TasksQueue[]): DataTableColumn<TasksQueue>[] {
       header: 'Waiting',
       width: 80,
       align: 'end',
-      cell: (queue) => formatNumber(queue.counters.pending + queue.counters.held),
+      cell: (queue) => <Figure value={queue.counters.pending + queue.counters.held} />,
     },
     {
       id: 'running',
       header: 'Running',
       width: 80,
       align: 'end',
-      cell: (queue) => formatNumber(queue.counters.running + queue.counters.dispatching),
+      cell: (queue) => <Figure value={queue.counters.running + queue.counters.dispatching} />,
     },
     {
       id: 'backoff',
       header: 'Backoff',
       width: 80,
       align: 'end',
-      cell: (queue) => (
-        <span className={queue.counters.backoff > 0 ? 'text-kumo-warning' : undefined}>
-          {formatNumber(queue.counters.backoff)}
-        </span>
-      ),
+      cell: (queue) => <Figure value={queue.counters.backoff} tone="warning" />,
     },
     {
       id: 'dispatched',
@@ -182,14 +197,14 @@ export function QueuesLanding({
       <SectionToolbar>
         <ToolbarRow testId="tasks-toolbar">
           <PanelToggle where="toolbar" />
-          <div
-            className="flex h-8 min-w-0 flex-1 items-center gap-2 pl-2 text-[12px]"
-            data-testid="queue-field"
+          <ToolbarScope
+            icon={<QueueIcon size={14} />}
+            detail={<span className="font-mono">{project}</span>}
+            testId="queue-field"
           >
-            <QueueIcon size={14} className="shrink-0 text-kumo-subtle" />
-            <span className="text-kumo-default">Task queues</span>
-            <span className="truncate font-mono text-kumo-subtle">{project}</span>
-          </div>
+            Task queues
+          </ToolbarScope>
+          <span className="min-w-0 flex-1" />
           <ToolbarDivider />
           <Tooltip
             content={

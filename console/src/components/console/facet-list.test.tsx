@@ -135,6 +135,23 @@ describe('FacetList', () => {
     )
   })
 
+  it('keeps a zero in the quiet ink, whatever its facet’s tone', () => {
+    const quiet: FacetGroup = {
+      label: 'Level',
+      facets: [
+        { term: 'level:error', label: 'Error', count: 0, tone: 'danger' },
+        { term: 'level:warn', label: 'Warning', count: 0, tone: 'warning' },
+      ],
+    }
+    render(<FacetList groups={[quiet]} value="" onChange={() => {}} />)
+    for (const name of ['Error', 'Warning']) {
+      const count = within(facet(name)).getByText('0')
+      expect(count.className).toContain('text-kumo-subtle')
+      expect(count.className).not.toMatch(/text-kumo-(danger|warning)/)
+      expect(count).not.toHaveAttribute('data-tone')
+    }
+  })
+
   it('offers neither Only nor Hide on a compound facet, and keeps its count in sight', () => {
     const group: FacetGroup = {
       label: 'Not yet',

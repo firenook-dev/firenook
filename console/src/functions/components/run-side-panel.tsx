@@ -1,15 +1,15 @@
-// The function page's inspector: a 44 px band of underline tabs — Run (the
-// kind's own word: Invoke, Call, Test event, Run, Enqueue, Test), Trigger,
-// Environment — written to the URL's `tab`, over the function's detail. Its
-// width is remembered under `functions.function`; Escape and × close it.
+// The function page's inspector: the function's name as its title, then the
+// kit's segmented tabs — Run (the kind's own word: Invoke, Call, Test event,
+// Run, Enqueue, Test), Trigger, Environment — written to the URL's `tab`,
+// over the function's detail. Its width is remembered under
+// `functions.function`; Escape and × close it.
 
-import { Tabs } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
 import { QueryError } from '@/components/console/empty-state'
-import { Inspector } from '@/components/console/inspector'
+import { Inspector, InspectorTitle } from '@/components/console/inspector'
 import { functionDetailQuery } from '../api'
 import { runForm, runTabLabel } from '../kinds'
 import type { FunctionTab } from '../search'
@@ -56,15 +56,12 @@ export function RunSidePanel({
   return (
     <Inspector
       widthKey="functions.function"
-      title={
-        <Tabs
-          variant="underline"
-          size="sm"
-          value={shown}
-          onValueChange={(next) => onTab(next as FunctionTab)}
-          tabs={tabs}
-        />
-      }
+      title={<InspectorTitle value={summary.id}>{summary.name}</InspectorTitle>}
+      tabs={{
+        items: tabs,
+        value: shown,
+        onChange: (next) => onTab(next as FunctionTab),
+      }}
       onClose={onClose}
       closeLabel="Close the panel"
       testId="function-inspector"

@@ -82,7 +82,7 @@ export const EVENT_LIST = '@container flex min-h-0 min-w-0 flex-1 flex-col'
 /** The header over a list of events. */
 export function EventHeader() {
   return (
-    <div className={cn(EVENT_COLUMNS, 'h-7 whitespace-nowrap [&>*]:truncate')} role="row">
+    <div className={cn(EVENT_COLUMNS, 'whitespace-nowrap [&>*]:truncate')} role="row">
       <span role="columnheader">Time</span>
       <span role="columnheader">Type</span>
       <span role="columnheader" className={NARROW_HIDDEN}>

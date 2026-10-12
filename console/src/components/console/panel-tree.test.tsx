@@ -116,6 +116,22 @@ describe('PanelTree', () => {
     expect(item('uploads').querySelector('[data-tone="warning"]')).toHaveTextContent('9+')
   })
 
+  it('keeps a zero count in the quiet ink, and draws the accent as a bar of its own', () => {
+    render(
+      <PanelTree
+        nodes={[{ id: 'dead/', label: 'dead', count: 0, tone: 'danger' }]}
+        current="dead/"
+        expanded={new Set()}
+        onToggle={() => {}}
+        onOpen={() => {}}
+        ariaLabel="Folders"
+      />,
+    )
+    expect(item('dead').querySelector('[data-tone]')).toBeNull()
+    expect(item('dead').className).toContain('before:bg-kumo-brand')
+    expect(item('dead').className).not.toContain('shadow-[inset')
+  })
+
   it('walks with the arrows: → opens then steps in, ← shuts then steps out, Enter opens', () => {
     const onOpen = vi.fn()
     render(<Harness onOpen={onOpen} />)

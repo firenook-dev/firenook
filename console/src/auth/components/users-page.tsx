@@ -37,12 +37,17 @@ import { MatchCount } from '@/components/console/match-count'
 import { PanelHeader } from '@/components/console/panel'
 import { SectionBanner } from '@/components/console/section-banner'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
-import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
+import {
+  SectionToolbar,
+  ToolbarDivider,
+  ToolbarRow,
+  ToolbarScope,
+} from '@/components/console/toolbar'
 import { useCursorRows } from '@/components/console/use-cursor-rows'
 import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
 import { checkFilter } from '@/lib/filter'
 import { formatDuration } from '@/lib/format'
-import { useLayout } from '@/lib/layout'
+import { panelShown, useLayout } from '@/lib/layout'
 import { liveChannel } from '@/lib/live/channel'
 import { useConsoleProject } from '@/lib/project'
 import { parseSort, printSort } from '@/lib/search-params'
@@ -82,7 +87,7 @@ import { ExportUsersDialog } from './export-users-dialog'
 import { ImportUsersDialog } from './import-users-dialog'
 import { type NewChoice, NewUserMenu } from './new-user-menu'
 import { SampleUsersDialog } from './sample-users-dialog'
-import { TenantPicker } from './tenant-picker'
+import { TenantPicker, scopeLabel } from './tenant-picker'
 import { UserInspector } from './user-inspector'
 import { UsersGrid } from './users-grid'
 import { TENANT_GONE, useUserRowMenu } from './user-row-menu'
@@ -144,7 +149,7 @@ export function UsersPage() {
   const sortText = search.sort ?? USERS_DEFAULTS.sort
   const fallbackSort = parseSort(USERS_DEFAULTS.sort) ?? { column: 'created', direction: 'desc' }
   const sort = parseSort(sortText) ?? fallbackSort
-  const panelOpen = useLayout((state) => state.panelOpen)
+  const panelOpen = useLayout(panelShown)
 
   // ------------------------------------------------------------ the tenant
   const tenantRow = useQuery({
@@ -444,6 +449,11 @@ export function UsersPage() {
                 testId="toolbar-tenant-picker"
               />
             </div>
+          )}
+          {panelOpen && (
+            <ToolbarScope detail={scopeLabel(scope)} testId="toolbar-scope">
+              Users
+            </ToolbarScope>
           )}
           <span className="min-w-0 flex-1" />
           <LiveNotice

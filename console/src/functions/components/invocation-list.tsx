@@ -11,12 +11,12 @@
 // paused); this file gives it the hook that fills it and the list that
 // draws it.
 
-import { Text } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
-import { QueryError, useDelayedFlag } from '@/components/console/empty-state'
-import { FeedList } from '@/components/console/feed-list'
+import { QueryError, TableSkeleton } from '@/components/console/empty-state'
+import { FeedFooter, useItemCount } from '@/components/console/feed-footer'
+import { FeedHeader, FeedList } from '@/components/console/feed-list'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { formatNumber, useClockFormat } from '@/lib/format'
 import { type FeedStore, createFeedStore } from '@/lib/live/feed-store'
@@ -120,6 +120,18 @@ export function useInvocationFeed({
   }
 }
 
+/** The skeleton's cells: the list's own columns (time, function, kind, summary, outcome, duration). */
+const INVOCATION_SKELETON = [
+  { width: 104 },
+  { width: 124 },
+  { width: 90 },
+  { width: 320 },
+  { width: 136 },
+  { width: 96 },
+]
+
+const INVOCATIONS = { one: 'invocation', other: 'invocations' }
+
 export function InvocationList({
   feed,
   variant,
@@ -147,7 +159,7 @@ export function InvocationList({
   testId: string
 }) {
   const { format } = useClockFormat()
-  const slow = useDelayedFlag(feed.loading)
+  const loaded = useItemCount(feed.store)
   if (feed.error)
     return (
       <div className="min-h-0 flex-1 overflow-auto">
@@ -155,16 +167,14 @@ export function InvocationList({
       </div>
     )
   if (feed.loading)
+    // A feed waits the way a table does: its header, then rows of lines
+    // once the wait passes 150 ms.
     return (
       <div className="flex min-h-0 flex-1 flex-col" aria-busy data-testid={`${testId}-loading`}>
-        {slow && (
-          <Text variant="secondary" size="sm" DANGEROUS_className="px-3 py-2">
-            Reading invocations…
-          </Text>
-        )}
+        {header && <FeedHeader>{header}</FeedHeader>}
+        <TableSkeleton columns={INVOCATION_SKELETON} />
       </div>
     )
-  const full = (feed.total ?? 0) >= INVOCATIONS_KEPT
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <FeedList
@@ -192,13 +202,13 @@ export function InvocationList({
         empty={empty}
         testId={testId}
       />
-      {full && !feed.hasMore && (
-        <p
-          className="shrink-0 border-t border-kumo-line px-3 py-1.5 text-[11px] text-kumo-subtle"
-          data-testid="invocations-kept"
-        >
-          The engine keeps the newest {formatNumber(INVOCATIONS_KEPT)} invocations.
-        </p>
+      {loaded > 0 && (
+        <FeedFooter
+          loaded={loaded}
+          capacity={INVOCATIONS_KEPT}
+          noun={INVOCATIONS}
+          testId="invocations-kept"
+        />
       )}
     </div>
   )

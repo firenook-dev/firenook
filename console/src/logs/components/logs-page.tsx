@@ -18,7 +18,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { type MouseEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LogEntry } from '@/api/generated/observe/LogEntry'
 import { statusQuery } from '@/api/queries'
-import { EmptyState, QueryError, useDelayedFlag } from '@/components/console/empty-state'
+import { EmptyState, QueryError, TableSkeleton } from '@/components/console/empty-state'
+import { FeedFooter } from '@/components/console/feed-footer'
 import { FeedList, useFeedPending } from '@/components/console/feed-list'
 import { FilterField, type FilterRefusal } from '@/components/console/filter-field'
 import type { JsonPath } from '@/components/console/json-tree-model'
@@ -39,7 +40,7 @@ import { checkFilter } from '@/lib/filter'
 import { formatNumber } from '@/lib/format'
 import { linkTo } from '@/lib/links'
 import { liveChannel } from '@/lib/live/channel'
-import { useFeed } from '@/lib/live/feed-store'
+import { type FeedStore, useFeed } from '@/lib/live/feed-store'
 import { createInvalidator } from '@/lib/live/use-live-topic'
 import { useConsoleProject } from '@/lib/project'
 import { useRouteSearch } from '@/lib/search-params'
@@ -57,7 +58,7 @@ import {
   histogramQuery,
   logsKeys,
 } from '../api'
-import { type FeedOpen, type LogFeed, useLogFeed } from '../feed'
+import { ENGINE_KEEPS, type FeedOpen, type LogFeed, useLogFeed } from '../feed'
 import { LOGS_PLACEHOLDER, LOG_FIELDS, logFields } from '../fields'
 import { entriesAsText, entryAsJson, entryAsText } from '../format'
 import { highlighter } from '../highlight'
@@ -210,6 +211,7 @@ export function LogsPage() {
     keepAcrossRestarts: () => useLogsPrefs.getState().keepAcrossRestarts,
     onLines: () => onLines.current(),
   })
+  const linesLoaded = useLineCount(feed.store)
 
   // Counts follow the lines: marked stale as they arrive, refetched at most
   // once in 1.5 s (and once after the last), never counted here.
@@ -555,7 +557,7 @@ export function LogsPage() {
           section="logs"
         />
       )
-    if (state.phase === 'loading') return <LoadingLog />
+    if (state.phase === 'loading') return <TableSkeleton columns={LOG_SKELETON} rows={12} />
     if (facets.data && facets.data.kept === 0 && !narrowed)
       return (
         <EmptyState
@@ -713,54 +715,64 @@ export function LogsPage() {
           ) : refusal ? (
             <QueryError error={refusedBy} onRetry={() => void facets.refetch()} />
           ) : (
-            <FeedList<LogItem>
-              ariaLabel="Log lines"
-              store={feed.store}
-              order="newest-last"
-              rowHeight={24}
-              rowKey={itemKey}
-              renderRow={(item) => (
-                <LogRow
-                  item={item}
-                  wrap={wrapNow}
-                  expanded={expanded.has(item.key)}
-                  highlight={highlight}
-                  actions={rowActions}
-                  edges={edges}
+            <>
+              <FeedList<LogItem>
+                ariaLabel="Log lines"
+                store={feed.store}
+                order="newest-last"
+                rowHeight={24}
+                rowKey={itemKey}
+                renderRow={(item) => (
+                  <LogRow
+                    item={item}
+                    wrap={wrapNow}
+                    expanded={expanded.has(item.key)}
+                    highlight={highlight}
+                    actions={rowActions}
+                    edges={edges}
+                  />
+                )}
+                expanded={expanded}
+                wrap={wrapNow}
+                renderExpanded={(item) =>
+                  item.kind === 'line' ? (
+                    <LogDetail
+                      entry={item.entry}
+                      wrap={wrapNow}
+                      highlight={highlight}
+                      onFilter={filterPayload}
+                    />
+                  ) : null
+                }
+                onToggleExpanded={(key, open) => toggleExpanded(key, open)}
+                renderMarker={(row) => <FeedMarker text={row.text} action={row.action} />}
+                selectedKey={cursor ?? search.entry}
+                onSelect={onSelect}
+                onOpenTarget={openTarget}
+                pausedMode="freeze"
+                follow={following}
+                onFollowChange={onFollowChange}
+                hasMore={state.hasMore}
+                loadMore={feed.loadOlder}
+                scrollToKey={
+                  jump?.generation === state.generation
+                    ? { key: jump.key, align: 'center' }
+                    : state.focus
+                      ? { key: state.focus.key, align: state.focus.align }
+                      : undefined
+                }
+                empty={empty}
+                testId="logs-feed"
+              />
+              {state.phase === 'ready' && linesLoaded > 0 && (
+                <FeedFooter
+                  loaded={linesLoaded}
+                  capacity={ENGINE_KEEPS}
+                  noun={LINES}
+                  testId="logs-footer"
                 />
               )}
-              expanded={expanded}
-              wrap={wrapNow}
-              renderExpanded={(item) =>
-                item.kind === 'line' ? (
-                  <LogDetail
-                    entry={item.entry}
-                    wrap={wrapNow}
-                    highlight={highlight}
-                    onFilter={filterPayload}
-                  />
-                ) : null
-              }
-              onToggleExpanded={(key, open) => toggleExpanded(key, open)}
-              renderMarker={(row) => <FeedMarker text={row.text} action={row.action} />}
-              selectedKey={cursor ?? search.entry}
-              onSelect={onSelect}
-              onOpenTarget={openTarget}
-              pausedMode="freeze"
-              follow={following}
-              onFollowChange={onFollowChange}
-              hasMore={state.hasMore}
-              loadMore={feed.loadOlder}
-              scrollToKey={
-                jump?.generation === state.generation
-                  ? { key: jump.key, align: 'center' }
-                  : state.focus
-                    ? { key: state.focus.key, align: state.focus.align }
-                    : undefined
-              }
-              empty={empty}
-              testId="logs-feed"
-            />
+            </>
           )}
           {state.loadingOlder && (
             <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center">
@@ -891,19 +903,23 @@ function InspectorHost({
   )
 }
 
-/** The first page on its way: nothing for 300 ms, then one quiet line. */
-function LoadingLog() {
-  const shown = useDelayedFlag(true, 300)
-  if (!shown) return <div className="flex-1" />
-  return (
-    <div
-      className="flex flex-1 items-start justify-center pt-16"
-      aria-busy
-      data-testid="logs-loading"
-    >
-      <p className="m-0 text-[13px] text-kumo-subtle">Loading the log…</p>
-    </div>
-  )
+/** The skeleton's cells while the first page is on its way: time, level, source, message. */
+const LOG_SKELETON = [{ width: 104 }, { width: 64 }, { width: 140 }, { width: 520 }]
+
+const LINES = { one: 'line', other: 'lines' }
+
+/** The lines the store holds, a repeated line counted as often as it was printed. */
+function useLineCount(store: FeedStore<LogItem>): number {
+  // It walks the mutable store while rendering: the compiler would keep the
+  // first answer for as long as the store is the same object.
+  'use no memo'
+  useFeed(store)
+  let lines = 0
+  for (let index = 0; index < store.size(); index += 1) {
+    const row = store.at(index)
+    if (row?.kind === 'item' && row.item.kind === 'line') lines += row.item.repeat
+  }
+  return lines
 }
 
 /** A filter that does not parse: why, and the way out; never the last good rows. */

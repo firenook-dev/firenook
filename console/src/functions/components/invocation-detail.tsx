@@ -4,7 +4,7 @@
 // only its own log lines, live while it runs. Replay sends the same request
 // again against the code loaded now; Edit and replay puts it in the Run tab.
 
-import { Button, DropdownMenu, Tabs, Text, Tooltip } from '@cloudflare/kumo'
+import { Button, DropdownMenu, Text, Tooltip } from '@cloudflare/kumo'
 import {
   ArrowCounterClockwiseIcon,
   ArrowLeftIcon,
@@ -23,6 +23,7 @@ import {
   Inspector,
   InspectorFooter,
   InspectorSection,
+  type InspectorTabs,
   InspectorTitle,
 } from '@/components/console/inspector'
 import { JsonView } from '@/components/console/json-view'
@@ -317,14 +318,21 @@ export function InvocationDetail({
       ? `${address}/${project}/${summary.functionId.replace(/^([a-z]+-[a-z]+\d+)-/, '$1/')}`
       : undefined
   const background = detail?.event !== null && detail?.event !== undefined
-  const tabs: { value: Tab; label: string }[] = detail
-    ? [
-        { value: 'request', label: 'Request' },
-        ...(background ? [{ value: 'event' as const, label: 'Event' }] : []),
-        { value: 'response', label: 'Response' },
-        { value: 'logs', label: `Logs · ${formatNumber(detail.logs.length)}` },
-      ]
-    : []
+  // The kit's segmented tabs under the header, as every inspector has them;
+  // the outcome block stays at the top of the body, above each tab.
+  const tabs: InspectorTabs | undefined =
+    detail && summary && !view.error
+      ? {
+          items: [
+            { value: 'request', label: 'Request' },
+            ...(background ? [{ value: 'event', label: 'Event' }] : []),
+            { value: 'response', label: 'Response' },
+            { value: 'logs', label: 'Logs', count: detail.logs.length },
+          ],
+          value: tab,
+          onChange: (next) => setTab(next as Tab),
+        }
+      : undefined
   const error = detail ? errorText(detail) : undefined
   const failed = summary?.outcomeClass === 'failed'
 
@@ -353,6 +361,7 @@ export function InvocationDetail({
       noun="invocation"
       onPrev={onPrev}
       onNext={onNext}
+      tabs={tabs}
       testId="invocation-detail"
       footer={
         summary &&
@@ -522,15 +531,7 @@ export function InvocationDetail({
           {error && (failed || summary.outcome === 'blocked') && (
             <ErrorBlock text={error} failed={failed} />
           )}
-          <div className="flex h-11 shrink-0 items-center border-y border-kumo-line px-3">
-            <Tabs
-              variant="underline"
-              size="sm"
-              value={tab}
-              onValueChange={(next) => setTab(next as Tab)}
-              tabs={tabs}
-            />
-          </div>
+          <div className="border-t border-kumo-line" aria-hidden />
           {tab === 'logs' ? (
             <InvocationLogsTab detail={detail} running={running} />
           ) : tab === 'event' ? (

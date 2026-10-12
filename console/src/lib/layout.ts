@@ -4,6 +4,12 @@
 // its content, is on screen. Both choices are remembered per browser; what
 // a section puts in the panel is ephemeral and comes from the section
 // itself through `SectionPanel`.
+//
+// On a narrow window (below `xl`, where an inspector floats over the list)
+// the panel steps aside while an inspector is open: the navigation, the
+// panel and a 420 px inspector left the list about 140 px at 1024, one
+// column of it. The person's choice is not touched — it comes back when
+// the inspector closes — and pressing the toggle shows the panel anyway.
 
 import { create } from 'zustand'
 
@@ -26,6 +32,15 @@ interface LayoutState {
   /** The shell's slot element the panel portals into. */
   slot: HTMLElement | null
   setSlot: (slot: HTMLElement | null) => void
+  /** Inspectors open now (each `Inspector` counts itself while mounted). */
+  inspectors: number
+  /** Counts an open inspector; the function it returns takes it off again. */
+  inspectorOpened: () => () => void
+  /** The window is narrower than `NARROW_BELOW`. */
+  narrow: boolean
+  setNarrow: (narrow: boolean) => void
+  /** The panel was asked for while it stood aside; it stays until the inspectors close. */
+  panelOverride: boolean
 }
 
 function read(key: string): string | null {
@@ -50,6 +65,16 @@ function loadNavOpen(): boolean {
   return stored !== 'closed' && stored !== 'collapsed' && stored !== 'hover'
 }
 
+/** Below this width an inspector floats over the list: Tailwind's `xl`, px. */
+export const NARROW_BELOW = 1280
+
+/** Whether the panel is on screen: the person's choice, unless it stands aside for an inspector. */
+export function panelShown(
+  state: Pick<LayoutState, 'panelOpen' | 'inspectors' | 'narrow' | 'panelOverride'>,
+): boolean {
+  return state.panelOpen && !(state.inspectors > 0 && state.narrow && !state.panelOverride)
+}
+
 export const useLayout = create<LayoutState>((set) => ({
   navOpen: loadNavOpen(),
   setNavOpen: (navOpen) => {
@@ -64,15 +89,37 @@ export const useLayout = create<LayoutState>((set) => ({
   panelOpen: read(PANEL_KEY) !== 'closed',
   setPanelOpen: (panelOpen) => {
     write(PANEL_KEY, panelOpen ? 'open' : 'closed')
-    set({ panelOpen })
+    set({ panelOpen, panelOverride: panelOpen })
   },
+  // What the person sees flips: a panel standing aside for an inspector is
+  // shown (their choice was already open), a shown one is closed.
   togglePanel: () =>
     set((state) => {
-      write(PANEL_KEY, state.panelOpen ? 'closed' : 'open')
-      return { panelOpen: !state.panelOpen }
+      if (panelShown(state)) {
+        write(PANEL_KEY, 'closed')
+        return { panelOpen: false, panelOverride: false }
+      }
+      write(PANEL_KEY, 'open')
+      return { panelOpen: true, panelOverride: true }
     }),
   panel: { present: false, label: '' },
   setPanel: (panel) => set({ panel }),
   slot: null,
   setSlot: (slot) => set({ slot }),
+  inspectors: 0,
+  inspectorOpened: () => {
+    set((state) => ({ inspectors: state.inspectors + 1 }))
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      set((state) => {
+        const inspectors = Math.max(0, state.inspectors - 1)
+        return inspectors === 0 ? { inspectors, panelOverride: false } : { inspectors }
+      })
+    }
+  },
+  narrow: false,
+  setNarrow: (narrow) => set({ narrow }),
+  panelOverride: false,
 }))

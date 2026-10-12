@@ -5,8 +5,7 @@
 // the one opened. Pause holds the list still; Clear history empties the
 // engine's record.
 
-import { Button } from '@cloudflare/kumo'
-import { ListIcon, TrashIcon } from '@phosphor-icons/react'
+import { ListIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/api/client'
@@ -16,6 +15,7 @@ import { FilterField } from '@/components/console/filter-field'
 import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
+import { ClearHistoryButton } from '@/components/console/clear-history-button'
 import { PauseButton } from '@/components/console/pause-button'
 import { useSeededPending } from '@/compute/seeded-pending'
 import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
@@ -197,15 +197,7 @@ export function InvocationsPage() {
           />
           <span className="ml-auto flex items-center">
             <ToolbarDivider />
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<TrashIcon className="text-kumo-danger" />}
-              onClick={() => setClearing(true)}
-              data-testid="invocations-clear"
-            >
-              <span className="text-kumo-danger">Clear history…</span>
-            </Button>
+            <ClearHistoryButton onClick={() => setClearing(true)} testId="invocations-clear" />
           </span>
         </ToolbarRow>
         <ToolbarRow variant="line">

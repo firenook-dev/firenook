@@ -23,7 +23,7 @@ import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
-import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
+import { SectionToolbar, ToolbarRow, ToolbarScope } from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { useNow } from '@/lib/clock'
 import { formatCount } from '@/lib/format'
@@ -47,7 +47,7 @@ import { copyText, functionUrl, useFunctionsAddress, useFunctionsProject } from 
 import { CodebaseView } from './codebase-view'
 import { FunctionWorkbench, MissingFunction } from './function-workbench'
 import { FunctionsPanel } from './functions-panel'
-import { FunctionsOverview, overviewCount } from './overview'
+import { FunctionsOverview, overviewCounts } from './overview'
 import { RestartWorkerDialog } from './restart-worker-dialog'
 
 /** The overview's fields, with the codebases of this engine offered after `codebase:`. */
@@ -68,7 +68,7 @@ function PlainToolbar({ title }: { title: string }) {
     <SectionToolbar>
       <ToolbarRow>
         <PanelToggle where="toolbar" />
-        <span className="truncate px-1 text-[13px] text-kumo-default">{title}</span>
+        <ToolbarScope>{title}</ToolbarScope>
       </ToolbarRow>
     </SectionToolbar>
   )
@@ -262,19 +262,19 @@ export function FunctionsPage() {
         restart: () => setRestarting(summary.codebase),
       })
     }
+    const counts = overviewCounts(data, q)
     body = (
       <>
         <SectionToolbar>
           <ToolbarRow testId="functions-toolbar">
             <PanelToggle where="toolbar" />
-            <span
-              className="truncate px-1 text-[13px] text-kumo-default"
-              data-testid="functions-scope"
-            >
-              All functions
-            </span>
-            <ToolbarDivider />
-            <LiveNotice status={live} what="the functions" onRetry={() => liveChannel.retry()} />
+            <ToolbarScope testId="functions-scope">All functions</ToolbarScope>
+            <LiveNotice
+              status={live}
+              what="the functions"
+              onRetry={() => liveChannel.retry()}
+              divider="before"
+            />
           </ToolbarRow>
           <ToolbarRow variant="line">
             <FilterField
@@ -286,10 +286,15 @@ export function FunctionsPage() {
               testId="functions-filter-field"
             />
             <MatchCount
-              total={{ count: overviewCount(data, q), exact: true }}
+              total={{ count: counts.functions, exact: true }}
               noun={{ one: 'function', other: 'functions' }}
               widest="0,000"
-              tooltip="Every function the filter keeps, of every codebase."
+              detail={counts.notLoaded > 0 ? `${counts.notLoaded} not loaded` : undefined}
+              tooltip={
+                counts.notLoaded > 0
+                  ? 'Every loaded function the filter keeps, of every codebase; the functions the emulator left out at load are counted apart and listed last.'
+                  : 'Every function the filter keeps, of every codebase.'
+              }
             />
           </ToolbarRow>
         </SectionToolbar>

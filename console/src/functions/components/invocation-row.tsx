@@ -169,10 +169,7 @@ export const InvocationRow = memo(InvocationRowInner)
 /** The column header of the Invocations page's list (the function page's list has none). */
 export function InvocationsHeader() {
   return (
-    <div
-      className="@container flex h-8 items-center gap-3 px-3 text-[12px] text-kumo-strong"
-      data-testid="invocations-header"
-    >
+    <div className="@container flex items-center gap-3 px-3" data-testid="invocations-header">
       <span className="w-[92px] shrink-0">Time</span>
       <span className="w-[112px] shrink-0 @min-[860px]:w-[150px]">Function</span>
       <span className="hidden w-[78px] shrink-0 @min-[760px]:block">Kind</span>

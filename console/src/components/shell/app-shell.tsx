@@ -41,7 +41,7 @@ import { statusQuery } from '@/api/queries'
 import { useNavBadge } from '@/lib/badges'
 import { engineBuild, engineVersion } from '@/lib/engine'
 import { Kbd, NavBadge, NavIconWithDot } from '@/components/kit'
-import { useLayout } from '@/lib/layout'
+import { NARROW_BELOW, panelShown, useLayout } from '@/lib/layout'
 import { useLiveStatus } from '@/lib/live/channel'
 import { useBadges, useShellLive } from '@/lib/live/shell'
 import {
@@ -117,6 +117,11 @@ export const PANEL_WIDTH = 264
  */
 const NAV_WIDTH: CSSProperties = { '--sidebar-width': '14rem' } as CSSProperties
 
+/** A page label as a test id's tail: "All functions" → `all-functions`. */
+function slug(label: string): string {
+  return label.toLowerCase().replaceAll(' ', '-')
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const togglePalette = useConsoleUi((state) => state.togglePalette)
   const navOpen = useLayout((state) => state.navOpen)
@@ -124,8 +129,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   const toggleNav = useLayout((state) => state.toggleNav)
   const togglePanel = useLayout((state) => state.togglePanel)
   const panel = useLayout((state) => state.panel)
-  const panelOpen = useLayout((state) => state.panelOpen)
+  const panelOpen = useLayout(panelShown)
   const setSlot = useLayout((state) => state.setSlot)
+  const setNarrow = useLayout((state) => state.setNarrow)
+  // Below `xl` an open inspector floats over the list, and the panel steps
+  // aside for it (`lib/layout.ts`).
+  useEffect(() => {
+    const query = globalThis.matchMedia?.(`(max-width: ${NARROW_BELOW - 0.02}px)`)
+    if (!query) return
+    setNarrow(query.matches)
+    const onChange = (event: MediaQueryListEvent) => setNarrow(event.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [setNarrow])
 
   const paletteOpen = useConsoleUi((state) => state.paletteOpen)
   const [paletteLoaded, setPaletteLoaded] = useState(false)
@@ -453,12 +469,12 @@ function SectionWithPages({
                 }
                 onClick={go({ to: page.to })}
                 className={state === 'absent' ? 'text-kumo-inactive' : ''}
-                data-testid={`nav-page-${page.label.toLowerCase()}`}
+                data-testid={`nav-page-${slug(page.label)}`}
               >
                 <span className="truncate">{page.label}</span>
                 <NavBadge
                   ids={page.badges}
-                  testId={`nav-badge-${section.id}-${page.label.toLowerCase()}`}
+                  testId={`nav-badge-${section.id}-${slug(page.label)}`}
                 />
               </Sidebar.MenuSubButton>
             ))}
