@@ -7,7 +7,7 @@
 // goes through the foundation's DangerConfirm, with the functions it would
 // run when the engine knows them.
 
-import { Button, DropdownMenu } from '@cloudflare/kumo'
+import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
   ArrowsOutCardinalIcon,
   CloudArrowUpIcon,
@@ -24,7 +24,6 @@ import type { StorageConflictPolicy } from '@/api/generated/storage/StorageConfl
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectDetail'
 import { DangerConfirm } from '@/components/console/danger-confirm'
-import { useInspectorRoom } from '@/components/console/inspector'
 import { download } from '@/lib/download'
 import { formatBytes, formatNumber } from '@/lib/format'
 import { toast } from '@/lib/toasts'
@@ -47,6 +46,7 @@ import { existingNames, keepBothName } from '../uploads'
 import { EditMetadataDialog, type MetadataRequest } from './edit-metadata-dialog'
 import { MoveDialog, type MoveRequest } from './move-dialog'
 import { UploadsInProgress, useSessions } from './uploads-in-progress'
+import { useToolLabels } from './inspector/room'
 
 type Confirm =
   | { kind: 'file'; name: string; size: number }
@@ -714,7 +714,7 @@ export function useFileActions(selectionScope: {
   }
 }
 
-/** The inspector foot's tools: Download, Move, Duplicate (labels go first when the panel is narrow). */
+/** The inspector foot's tools: Download, Move, Duplicate (icons with tooltips until the panel has room for words). */
 function InspectorTools({
   entry,
   actions,
@@ -722,21 +722,26 @@ function InspectorTools({
   entry: StorageEntry
   actions: Partial<EntryActions>
 }) {
-  const room = useInspectorRoom()
+  const labels = useToolLabels()
   const tool = (label: string, icon: ReactNode, run: (() => void) | undefined, testId: string) =>
-    room.labels ? (
+    labels ? (
       <Button variant="ghost" size="sm" icon={icon} onClick={run} data-testid={testId}>
         {label}
       </Button>
     ) : (
-      <Button
-        variant="ghost"
-        size="sm"
-        shape="square"
-        icon={icon}
-        aria-label={label}
-        onClick={run}
-        data-testid={testId}
+      <Tooltip
+        content={label}
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={icon}
+            aria-label={label}
+            onClick={run}
+            data-testid={testId}
+          />
+        }
       />
     )
   return (

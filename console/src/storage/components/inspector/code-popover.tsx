@@ -10,7 +10,7 @@ import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectD
 import { statusQuery } from '@/api/queries'
 import { CodeBlock } from '@/components/console/code-block'
 import { PanelTitle } from '@/components/kit'
-import { useInspectorRoom } from '@/components/console/inspector'
+import { useToolLabels } from './room'
 import { type CodeDialect, type CodeVariant, objectAsCode, storageAddress } from '../../code'
 
 const DIALECTS: readonly { id: CodeDialect; label: string }[] = [
@@ -27,7 +27,7 @@ export function CodePopover({
   defaultBucket: string
 }) {
   const status = useQuery(statusQuery)
-  const room = useInspectorRoom()
+  const labels = useToolLabels()
   const [variant, setVariant] = useState<CodeVariant>('read')
   const [dialect, setDialect] = useState<string>('web')
   const address = storageAddress(status.data)
@@ -43,7 +43,7 @@ export function CodePopover({
     contentLanguage: object.contentLanguage,
     customMetadata: object.customMetadata,
   }
-  const trigger = room.labels ? (
+  const trigger = labels ? (
     <Button variant="ghost" size="sm" icon={<CodeIcon />} data-testid="inspector-code">
       Code
     </Button>
