@@ -32,7 +32,7 @@ Checks, all run in CI:
 npm run check --prefix console         # TypeScript
 npm run lint --prefix console          # oxlint
 npm run format:check --prefix console  # oxfmt
-npm run test --prefix console          # Vitest + Testing Library
+npm run test --prefix console          # Vitest + Testing Library, compiled by the React compiler as the build is
 npm run budget --prefix console        # first-route gzip budget from the Vite manifest
 npm run e2e:sdk --prefix console       # once: the offline Functions SDK the fixture codebase links
 npm run test:e2e --prefix console      # every Playwright project, each against real engines
@@ -43,6 +43,9 @@ One Playwright project per area (`data`, `auth`, `storage`, `compute`,
 `messaging`, `observe`, `shell`): `npx playwright test --project data` from
 `console/`. The shell project's perf journeys are opt-in:
 `FIRENOOK_PERF=1 FIRENOOK_SEED_SCALE=large npx playwright test --project shell --grep @perf`.
+They measure the grid, the live channel and background tabs on the Firestore
+page, and FeedList and JsonView on the kit harness (`e2e/kit-harness/`), which
+they build in production mode and serve beside the engine's console.
 
 The component library: `npm run design-system --prefix console` renders every
 card in `design-system/src/cards/` and captures it to `.design-system/`;

@@ -30,6 +30,15 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 3. Ephemeral UI state: `src/lib/store.ts` (Zustand): palette, socket status,
    selection sets. Layout choices that should survive a reload live in
    `src/lib/layout.ts` (localStorage per browser).
+4. Mutable things outside React (a feed's ring, a request history) reach a
+   component through `useSyncExternalStore` with an **immutable snapshot**
+   (`FeedStore.snapshot()`, one object per change), never by calling their
+   methods while rendering. The React compiler compiles every component and
+   hook, in the build and in Vitest alike, and keeps a call's answer for as
+   long as its arguments are the same objects: `store.size()` read during a
+   render stays at its first answer, because the store is always the same
+   store. A function that must read such an object while it renders opts
+   out with `'use no memo'` and says why (`FeedList`, `useFeedPending`).
 
 ## The shell (`src/components/shell/`)
 
@@ -341,8 +350,9 @@ message as the title, its fix under it, Retry), `TableSkeleton` and
   at most 20 pages; scrolled back, a dropped page is read again.
 - Footer: `TableFooter` + `useHiddenColumnCount(memoryKey, columns)`.
   Selection: `<ToolbarRow variant="line" overlay={selecting && <SelectionBar …/>}>`.
-  Feeds: `FeedList` over `createFeedStore` (a ring, one notification a frame),
-  `useFeedPending` for `PauseButton`. A second table on one page:
+  Feeds: `FeedList` over `createFeedStore` (a ring, one notification a frame;
+  `useFeed(store)` hands out its `FeedSnapshot` — size, version, dropped,
+  pending), `useFeedPending` for `PauseButton`. A second table on one page:
   `keyboard="focus"`.
 
 ### Shared engine services
@@ -597,6 +607,14 @@ stream, loaded by glob).
   an open `EventSource` alone — `api`, `shell`). Run one project:
   `npx playwright test --project <name>`; perf journeys:
   `FIRENOOK_PERF=1 FIRENOOK_SEED_SCALE=large npx playwright test --project shell --grep @perf`.
+- The kit's own primitives are measured on the **kit harness**
+  (`e2e/kit-harness/`: FeedList as Logs draws it, JsonView as an inspector
+  does). `e2e/support/kit.ts` builds it with the console's plugins in
+  production mode (`buildKitHarness`) and serves it under the engine's
+  `/console/__kit/` (`openKitHarness`), so it takes the console's fonts; the
+  page answers through `window.__kit` (types in `kit-harness/runs.ts`, the
+  one file both TypeScript projects check). A stream measures its own page
+  at load in its own spec; the harness is for what a page is built from.
 
 ### Who edits what
 
@@ -659,6 +677,12 @@ shared files only where a follow-up was asked for.
 - A frame-time measurement from a scroll driven by a round trip per step
   measures the round trips: drive the scroll inside the page
   (`requestAnimationFrame`) and measure after the engine's first schema walk.
+- Tests of uncompiled code passed while every production `FeedList` drew
+  nothing that arrived after it mounted: the compiler had cached
+  `store.size()` by the store's identity. Vitest now compiles with the React
+  compiler, and the kit's perf journeys run a production build of the kit.
+- `toLocaleString('en-US')` builds a number formatter per call (about 20 µs);
+  a tree of a hundred shut rows paid 11 ms for it. `formatNumber` keeps one.
 
 ## Commands
 
