@@ -1,8 +1,14 @@
-// Functions' registry entry. The compute stream fills in its pages, badges,
-// actions, routes and search labels when it builds the section; until its
-// journeys pass it stays `built: false` and shows the placeholder.
+// Functions' registry entry: its two pages, the two badges the engine
+// publishes for it, what ⌘K offers from anywhere, and where a function, an
+// invocation or a codebase opens when another section's payload points at
+// one (an `EntityRef` the engine built) or ⌘K's engine search finds one.
+// Compute exports no link builder: every link here goes through `routes`.
+//
+// `built` stays false until the section's journeys pass (hard rule 6): the
+// nav keeps the honest placeholder, `linkTo` answers null so a link into
+// Functions reads as text, and ⌘K offers none of it.
 
-import { LightningIcon } from '@phosphor-icons/react'
+import { LightningIcon, ListIcon } from '@phosphor-icons/react'
 import type { ConsoleSection } from '../services'
 
 export const functions: ConsoleSection = {
@@ -14,5 +20,38 @@ export const functions: ConsoleSection = {
   icon: LightningIcon,
   built: false,
   summary:
-    'Functions by codebase with trigger type, invoke HTTP and callable functions, inject background events, and follow each function’s log stream.',
+    'Every function by codebase with its trigger and health, invoke HTTP and callable functions as any user, send test events or do the real thing, and every invocation with its own logs, replay and timing.',
+  // Each badge sits on the page it is about, so the page that shows the
+  // failures is the one that marks them seen. None on the section itself:
+  // a section's own badges are marked seen on every one of its pages.
+  pages: [
+    {
+      to: '/functions',
+      label: 'Functions',
+      exact: true,
+      badges: ['functions.load'],
+      keywords: 'codebases triggers workers environment secrets',
+    },
+    {
+      to: '/functions/invocations',
+      label: 'Invocations',
+      badges: ['functions.failed'],
+      keywords: 'runs executions history calls',
+    },
+  ],
+  actions: [
+    {
+      id: 'functions.invocations',
+      title: 'Show every invocation',
+      keywords: 'runs executions history',
+      icon: ListIcon,
+      link: { to: '/functions/invocations' },
+    },
+  ],
+  searchLabels: { 'functions.function': 'Functions' },
+  routes: {
+    'functions.function': (id) => ({ to: '/functions', search: { function: id } }),
+    'functions.invocation': (id) => ({ to: '/functions/invocations', search: { invocation: id } }),
+    'functions.codebase': (codebase) => ({ to: '/functions', search: { codebase } }),
+  },
 }

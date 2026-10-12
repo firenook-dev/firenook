@@ -20,7 +20,9 @@ import { Route as PubsubRouteImport } from './routes/pubsub'
 import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as StorageRouteImport } from './routes/storage'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as EventarcChannelsRouteImport } from './routes/eventarc_.channels'
 import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
+import { Route as FunctionsInvocationsRouteImport } from './routes/functions_.invocations'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -77,9 +79,19 @@ const TasksRoute = TasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EventarcChannelsRoute = EventarcChannelsRouteImport.update({
+  id: '/eventarc_/channels',
+  path: '/eventarc/channels',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FirestoreRulesRoute = FirestoreRulesRouteImport.update({
   id: '/firestore_/rules',
   path: '/firestore/rules',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FunctionsInvocationsRoute = FunctionsInvocationsRouteImport.update({
+  id: '/functions_/invocations',
+  path: '/functions/invocations',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -95,7 +107,9 @@ export interface FileRoutesByFullPath {
   '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/eventarc/channels': typeof EventarcChannelsRoute
   '/firestore/rules': typeof FirestoreRulesRoute
+  '/functions/invocations': typeof FunctionsInvocationsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -109,7 +123,9 @@ export interface FileRoutesByTo {
   '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/eventarc/channels': typeof EventarcChannelsRoute
   '/firestore/rules': typeof FirestoreRulesRoute
+  '/functions/invocations': typeof FunctionsInvocationsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -124,7 +140,9 @@ export interface FileRoutesById {
   '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
+  '/eventarc_/channels': typeof EventarcChannelsRoute
   '/firestore_/rules': typeof FirestoreRulesRoute
+  '/functions_/invocations': typeof FunctionsInvocationsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -140,7 +158,9 @@ export interface FileRouteTypes {
     | '/requests'
     | '/storage'
     | '/tasks'
+    | '/eventarc/channels'
     | '/firestore/rules'
+    | '/functions/invocations'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -154,7 +174,9 @@ export interface FileRouteTypes {
     | '/requests'
     | '/storage'
     | '/tasks'
+    | '/eventarc/channels'
     | '/firestore/rules'
+    | '/functions/invocations'
   id:
     | '__root__'
     | '/'
@@ -168,7 +190,9 @@ export interface FileRouteTypes {
     | '/requests'
     | '/storage'
     | '/tasks'
+    | '/eventarc_/channels'
     | '/firestore_/rules'
+    | '/functions_/invocations'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -183,7 +207,9 @@ export interface RootRouteChildren {
   RequestsRoute: typeof RequestsRoute
   StorageRoute: typeof StorageRoute
   TasksRoute: typeof TasksRoute
+  EventarcChannelsRoute: typeof EventarcChannelsRoute
   FirestoreRulesRoute: typeof FirestoreRulesRoute
+  FunctionsInvocationsRoute: typeof FunctionsInvocationsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -265,11 +291,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/eventarc_/channels': {
+      id: '/eventarc_/channels'
+      path: '/eventarc/channels'
+      fullPath: '/eventarc/channels'
+      preLoaderRoute: typeof EventarcChannelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/firestore_/rules': {
       id: '/firestore_/rules'
       path: '/firestore/rules'
       fullPath: '/firestore/rules'
       preLoaderRoute: typeof FirestoreRulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/functions_/invocations': {
+      id: '/functions_/invocations'
+      path: '/functions/invocations'
+      fullPath: '/functions/invocations'
+      preLoaderRoute: typeof FunctionsInvocationsRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -287,7 +327,9 @@ const rootRouteChildren: RootRouteChildren = {
   RequestsRoute: RequestsRoute,
   StorageRoute: StorageRoute,
   TasksRoute: TasksRoute,
+  EventarcChannelsRoute: EventarcChannelsRoute,
   FirestoreRulesRoute: FirestoreRulesRoute,
+  FunctionsInvocationsRoute: FunctionsInvocationsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
