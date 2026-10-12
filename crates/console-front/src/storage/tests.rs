@@ -53,11 +53,15 @@ struct Harness {
     jobs: JobRegistry,
 }
 
+/// A directory of its own: the clock has microseconds on some platforms,
+/// so a counter tells apart two made in one tick.
 fn temp(label: &str) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     std::env::temp_dir().join(format!(
-        "firenook-console-storage-{label}-{}-{}",
+        "firenook-console-storage-{label}-{}-{}-{}",
         std::process::id(),
-        time::OffsetDateTime::now_utc().unix_timestamp_nanos()
+        time::OffsetDateTime::now_utc().unix_timestamp_nanos(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ))
 }
 
@@ -1286,5 +1290,49 @@ async fn search_source_respects_the_budget() {
     cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     let stopped = crate::search::SearchSource::search(&source, "users", 5, &cancel);
     assert!(stopped.partial);
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rules_documents_carry_claim_reads() {
+    let source = "rules_version = '2';\nservice firebase.storage {\n  match /b/{bucket}/o {\n    match /admin/{file=**} {\n      allow read: if request.auth.token.admin == true;\n    }\n    match /teams/{team}/{file=**} {\n      allow write: if request.auth.token.get('team', '') == team;\n    }\n  }\n}\n";
+    let harness = harness("claims", Some(source));
+    let (_, document) = harness.get("/rules", None).await;
+    let reads = document["claimReads"].as_array().expect("claimReads");
+    assert_eq!(reads.len(), 2, "{reads:?}");
+    assert_eq!(reads[0]["key"], "admin");
+    assert_eq!(reads[0]["form"], "member");
+    assert_eq!(reads[0]["line"], 5);
+    assert_eq!(reads[1]["key"], "team");
+    assert_eq!(reads[1]["form"], "get");
+    // A draft that reads nothing says so; one that does not compile has no
+    // answer rather than an empty one.
+    let (_, none) = harness
+        .json(
+            Method::POST,
+            "/rules/check",
+            &json!({ "source": RULES }),
+            None,
+        )
+        .await;
+    assert_eq!(none["claimReads"], json!([]));
+    let (_, broken) = harness
+        .json(
+            Method::POST,
+            "/rules/check",
+            &json!({ "source": "service firebase.storage {" }),
+            None,
+        )
+        .await;
+    assert!(broken["claimReads"].is_null());
+    let (_, draft) = harness
+        .json(
+            Method::POST,
+            "/rules/check",
+            &json!({ "source": source }),
+            None,
+        )
+        .await;
+    assert_eq!(draft["claimReads"], document["claimReads"]);
     harness.finish().await;
 }
