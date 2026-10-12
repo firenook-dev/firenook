@@ -5,11 +5,13 @@ import { createFeedStore } from '@/lib/live/feed-store'
 import { giveListsALayout } from '@/test/virtual'
 import {
   LogLines,
+  MINUTE_OFFSET_MS,
   VIRTUAL_FROM,
   canOpen,
   fieldsOf,
   lineGapText,
   lineKey,
+  offsetColumns,
   offsetText,
   returnsBefore,
 } from './log-lines'
@@ -52,6 +54,24 @@ describe('the pieces of a line', () => {
     expect(offsetText(12)).toBe('+12 ms')
     expect(offsetText(2.6)).toBe('+2.6 ms')
     expect(offsetText(1_240)).toBe('+1.2 s')
+  })
+
+  it('sizes the time column for offsets, wider only once one reads in minutes', () => {
+    // The narrow column holds 7 characters: every offset under a minute fits.
+    for (const ms of [0, 9.9, 999, 1_240, 9_949, 59_499]) {
+      expect(offsetText(ms).length).toBeLessThanOrEqual(7)
+      expect(offsetColumns(ms, true)).toBe('grid-cols-[52px_44px_minmax(0,1fr)_auto]')
+    }
+    expect(offsetText(MINUTE_OFFSET_MS)).toBe('+1 min')
+    expect(offsetColumns(MINUTE_OFFSET_MS, true)).toBe('grid-cols-[84px_44px_minmax(0,1fr)_auto]')
+    expect(offsetText(3_599_000)).toHaveLength(12)
+    // No level column while there is no level word to put in it.
+    expect(offsetColumns(12, false)).toBe(
+      'grid-cols-[52px_minmax(0,1fr)_auto] [&>[data-part=level]]:hidden',
+    )
+    expect(offsetColumns(61_000, false)).toBe(
+      'grid-cols-[84px_minmax(0,1fr)_auto] [&>[data-part=level]]:hidden',
+    )
   })
 
   it('opens fields worth opening, and cut lines only where rows are one line each', () => {
@@ -106,6 +126,24 @@ describe("an invocation's lines", () => {
     expect(rows[3]?.querySelector('[data-part="time"]')).toHaveTextContent('+1.2 s')
     expect(rows[3]?.querySelector('[data-part="message"]')).toHaveClass('text-kumo-subtle')
     expect(screen.getByRole('log', { name: 'Logs of #1,284' })).toHaveAttribute('aria-live', 'off')
+    // Every row on the offset template, so the messages line up.
+    for (const row of rows) expect(row).toHaveClass('grid-cols-[52px_44px_minmax(0,1fr)_auto]')
+  })
+
+  it('gives the message the level column while every line is info, and every row together', async () => {
+    const store = storeOf([line(0), line(1, { offsetMs: 61_000, afterFinish: true })])
+    render(<LogLines ariaLabel="Logs" store={store} mode="invocation" />)
+    for (const row of screen.getAllByTestId('log-line'))
+      expect(row).toHaveClass('grid-cols-[84px_minmax(0,1fr)_auto]', '[&>[data-part=level]]:hidden')
+    // The first line with a level word brings the column back for all of them.
+    act(() => store.push([line(2, { level: 'warn', offsetMs: 62_000 })]))
+    await frame()
+    const rows = screen.getAllByTestId('log-line')
+    expect(rows).toHaveLength(3)
+    for (const row of rows) {
+      expect(row).toHaveClass('grid-cols-[84px_44px_minmax(0,1fr)_auto]')
+      expect(row).not.toHaveClass('[&>[data-part=level]]:hidden')
+    }
   })
 
   it("opens a structured entry's fields as a tree", () => {
@@ -144,6 +182,8 @@ describe("a codebase's load log", () => {
     render(<LogLines ariaLabel="Load log of app" store={store} mode="codebase" />)
     const rows = screen.getAllByTestId('log-line')
     expect(rows[0]?.querySelector('[data-part="time"]')?.textContent).not.toMatch(/^\+/)
+    // The clock keeps the shared row's own, wider time column.
+    expect(rows[0]).toHaveClass('grid-cols-[104px_44px_minmax(0,1fr)_auto]')
     expect(rows[1]?.querySelector('[data-part="message"]')).toHaveTextContent(/^Error: no$/)
     const open = screen.getByRole('button', { name: 'Show the whole message' })
     expect(open).toHaveTextContent('+2 lines')

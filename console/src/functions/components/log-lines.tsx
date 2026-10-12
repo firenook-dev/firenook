@@ -41,6 +41,50 @@ export function offsetText(ms: number): string {
   return `+${formatDuration(ms)}`
 }
 
+/**
+ * An invocation's row template. It is `LogLine`'s own (time, level 44 px,
+ * message, trail) with two changes that give the message the rest of an
+ * inspector's width: the time column is as wide as an offset, not the
+ * clock's 104 px, and while every line is info (whose level word is blank)
+ * there is no level column at all. It comes, for every row at once, with
+ * the first debug, warn or error line. Under a minute the widest offset is
+ * `+999 ms`, 7 characters of the data face at 11 px (6.6 px each); past it
+ * `+59 min 59 s`, 12.
+ */
+const OFFSET_COLUMNS = {
+  levels: 'grid-cols-[52px_44px_minmax(0,1fr)_auto]',
+  plain: 'grid-cols-[52px_minmax(0,1fr)_auto] [&>[data-part=level]]:hidden',
+}
+const MINUTE_OFFSET_COLUMNS = {
+  levels: 'grid-cols-[84px_44px_minmax(0,1fr)_auto]',
+  plain: 'grid-cols-[84px_minmax(0,1fr)_auto] [&>[data-part=level]]:hidden',
+}
+/** From here on an offset reads in minutes (`+1 min`), ms. */
+export const MINUTE_OFFSET_MS = 59_500
+
+/** The row template for an invocation whose newest line is `newestMs` in. */
+export function offsetColumns(newestMs: number, levels: boolean): string {
+  const columns = newestMs >= MINUTE_OFFSET_MS ? MINUTE_OFFSET_COLUMNS : OFFSET_COLUMNS
+  return levels ? columns.levels : columns.plain
+}
+
+/** The newest line's offset, and whether any line has a level word to show. */
+function offsetShape(
+  store: FeedStore<FunctionLogLine>,
+  size: number,
+): { newestMs: number; levels: boolean } {
+  let newestMs: number | undefined
+  let levels = false
+  // Lines arrive in order, so the newest is also the furthest in.
+  for (let at = size - 1; at >= 0 && (newestMs === undefined || !levels); at -= 1) {
+    const row = store.at(at)
+    if (row?.kind !== 'item') continue
+    newestMs ??= row.item.offsetMs
+    if (row.item.level !== 'info') levels = true
+  }
+  return { newestMs: newestMs ?? 0, levels }
+}
+
 /** A structured entry's own fields, when it has any worth opening. */
 export function fieldsOf(line: FunctionLogLine): Record<string, unknown> | undefined {
   const { fields } = line
@@ -160,6 +204,10 @@ export function LogLines({
       return next
     })
 
+  // One template for every row, so the messages line up.
+  const shape = mode === 'invocation' ? offsetShape(store, size) : undefined
+  const columns = shape && offsetColumns(shape.newestMs, shape.levels)
+
   const renderRow = (index: number) => {
     const row = store.at(index)
     if (!row) return null
@@ -205,6 +253,7 @@ export function LogLines({
           dim={line.afterFinish}
           wrap={wrap}
           expanded={expanded}
+          className={columns}
           trail={
             opens ? (
               <OpenButton
