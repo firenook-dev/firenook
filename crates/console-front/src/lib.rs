@@ -58,7 +58,7 @@ use tokio_stream::wrappers::WatchStream;
 use ts_rs::TS;
 
 pub use api_error::{ApiError, ApiErrorBody, ApiErrorDetail, ErrorCode};
-pub use auth::AuthConsole;
+pub use auth::{AuthConsole, AuthToken, AuthTokenRequest, IdentityUser};
 pub use compute::{ComputeConsole, ComputeParts};
 pub use databases::{DatabaseCatalog, DatabaseInfo, DatabaseList};
 pub use entity::EntityRef;
@@ -109,8 +109,8 @@ pub use section::{
 pub use sse::Shutdown;
 pub use storage::StorageConsole;
 pub use suite::{
-    BackgroundTriggers, DataFacts, DataMode, ExportDestination, ExportResult, MemoryReport,
-    RingSize, SuiteControls, SuiteSettings,
+    BackgroundTriggers, DataFacts, DataMode, DroppedCount, ExportDestination, ExportResult,
+    MemoryReport, RingSize, SuiteControls, SuiteSettings,
 };
 
 use instance::Instance;
@@ -435,9 +435,7 @@ impl StatusSource {
 
     /// Ticks whenever the status may have changed.
     pub(crate) fn changes(&self) -> BoxStream<'static, ()> {
-        let suite = WatchStream::from_changes(self.inner.suite.changes())
-            .map(|_| ())
-            .boxed();
+        let suite = self.inner.suite.changes();
         let foreign = WatchStream::from_changes(self.inner.foreign.changes())
             .map(|_| ())
             .boxed();
@@ -549,7 +547,9 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
     for prefix in firestore::REST_PREFIXES {
         natives.add(&format!("/api/v1/firestore{prefix}"));
     }
-    natives.add("/api/v1/auth");
+    for path in auth::NATIVE_PATHS {
+        natives.add(&format!("/api/v1/auth{path}"));
+    }
     let policy = guard::GuardPolicy {
         hosts: services.allowed_hosts,
         natives: Arc::new(natives),
@@ -673,6 +673,8 @@ const NOT_BUILT_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>Fire
 or work on the console with <code>npm run dev --prefix console</code>, which proxies this engine's console API.</p>";
 
 #[cfg(test)]
+mod generated_names;
+#[cfg(test)]
 mod router_tests;
 
 #[cfg(test)]
@@ -746,46 +748,54 @@ mod tests {
         (status, headers, body)
     }
 
+    /// Where the console reads its generated types from.
+    pub(crate) const GENERATED: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../console/src/api/generated"
+    );
+
+    /// Writes every TypeScript binding the console reads into `config`'s
+    /// directory: the foundation's types, then each section module's.
+    pub(crate) fn export_all_bindings(config: &ts_rs::Config) {
+        ConsoleStatus::export_all(config).expect("TypeScript bindings written");
+        ChangeBatch::export_all(config).expect("TypeScript bindings written");
+        ChangeHello::export_all(config).expect("TypeScript bindings written");
+        SchemaSnapshot::export_all(config).expect("TypeScript bindings written");
+        SubcollectionsSnapshot::export_all(config).expect("TypeScript bindings written");
+        DatabaseList::export_all(config).expect("TypeScript bindings written");
+        Explanation::export_all(config).expect("TypeScript bindings written");
+        RulesDocument::export_all(config).expect("TypeScript bindings written");
+        RulesInstalled::export_all(config).expect("TypeScript bindings written");
+        RulesDiagnostic::export_all(config).expect("TypeScript bindings written");
+        RulesCheck::export_all(config).expect("TypeScript bindings written");
+        RulesVersion::export_all(config).expect("TypeScript bindings written");
+        RulesChanged::export_all(config).expect("TypeScript bindings written");
+        RulesFileStatus::export_all(config).expect("TypeScript bindings written");
+        ApiErrorBody::export_all(config).expect("TypeScript bindings written");
+        ExportDestination::export_all(config).expect("TypeScript bindings written");
+        ExportResult::export_all(config).expect("TypeScript bindings written");
+        MemoryReport::export_all(config).expect("TypeScript bindings written");
+        JobList::export_all(config).expect("TypeScript bindings written");
+        BulkTarget::export_all(config).expect("TypeScript bindings written");
+        ClearReport::export_all(config).expect("TypeScript bindings written");
+        EntityRef::export_all(config).expect("TypeScript bindings written");
+        Page::<()>::export_all(config).expect("TypeScript bindings written");
+        BatchGetRequest::export_all(config).expect("TypeScript bindings written");
+        BatchGetResponse::<()>::export_all(config).expect("TypeScript bindings written");
+        ListMeta::export_all(config).expect("TypeScript bindings written");
+        SearchResults::export_all(config).expect("TypeScript bindings written");
+        live::export_bindings(config);
+        auth::export_bindings(config);
+        storage::export_bindings(config);
+        compute::export_bindings(config);
+        messaging::export_bindings(config);
+        observe::export_bindings(config);
+    }
+
     #[test]
     fn export_bindings() {
-        let out = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../console/src/api/generated"
-        );
-        let config = ts_rs::Config::new().with_out_dir(out);
-        ConsoleStatus::export_all(&config).expect("TypeScript bindings written");
-        ChangeBatch::export_all(&config).expect("TypeScript bindings written");
-        ChangeHello::export_all(&config).expect("TypeScript bindings written");
-        SchemaSnapshot::export_all(&config).expect("TypeScript bindings written");
-        SubcollectionsSnapshot::export_all(&config).expect("TypeScript bindings written");
-        DatabaseList::export_all(&config).expect("TypeScript bindings written");
-        Explanation::export_all(&config).expect("TypeScript bindings written");
-        RulesDocument::export_all(&config).expect("TypeScript bindings written");
-        RulesInstalled::export_all(&config).expect("TypeScript bindings written");
-        RulesDiagnostic::export_all(&config).expect("TypeScript bindings written");
-        RulesCheck::export_all(&config).expect("TypeScript bindings written");
-        RulesVersion::export_all(&config).expect("TypeScript bindings written");
-        RulesChanged::export_all(&config).expect("TypeScript bindings written");
-        RulesFileStatus::export_all(&config).expect("TypeScript bindings written");
-        ApiErrorBody::export_all(&config).expect("TypeScript bindings written");
-        ExportDestination::export_all(&config).expect("TypeScript bindings written");
-        ExportResult::export_all(&config).expect("TypeScript bindings written");
-        MemoryReport::export_all(&config).expect("TypeScript bindings written");
-        JobList::export_all(&config).expect("TypeScript bindings written");
-        BulkTarget::export_all(&config).expect("TypeScript bindings written");
-        ClearReport::export_all(&config).expect("TypeScript bindings written");
-        EntityRef::export_all(&config).expect("TypeScript bindings written");
-        Page::<()>::export_all(&config).expect("TypeScript bindings written");
-        BatchGetRequest::export_all(&config).expect("TypeScript bindings written");
-        BatchGetResponse::<()>::export_all(&config).expect("TypeScript bindings written");
-        ListMeta::export_all(&config).expect("TypeScript bindings written");
-        SearchResults::export_all(&config).expect("TypeScript bindings written");
-        live::export_bindings(&config);
-        auth::export_bindings(&config);
-        storage::export_bindings(&config);
-        compute::export_bindings(&config);
-        messaging::export_bindings(&config);
-        observe::export_bindings(&config);
+        let out = GENERATED;
+        export_all_bindings(&ts_rs::Config::new().with_out_dir(out));
         let written = std::fs::read_to_string(format!("{out}/ConsoleStatus.ts")).expect("read");
         assert!(written.contains("projectId: string"), "{written}");
         assert!(
@@ -853,7 +863,7 @@ mod tests {
         // foreign project.
         assert_eq!(
             value["backgroundTriggers"],
-            serde_json::json!({ "enabled": true })
+            serde_json::json!({ "enabled": true, "since": null, "dropped": [] })
         );
         assert_eq!(value["data"]["mode"], "memory");
         assert_eq!(value["data"]["stateDir"], serde_json::Value::Null);

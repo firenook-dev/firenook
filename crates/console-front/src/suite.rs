@@ -21,9 +21,12 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use firenook_functions_bridge::TriggerRegistry;
 use firenook_suite_front::{BackgroundRequest, ExportCommand, RingBudget};
-use futures_util::FutureExt as _;
+use futures_util::stream::BoxStream;
+use futures_util::{FutureExt as _, StreamExt as _};
 use serde::{Deserialize, Serialize};
+use time::format_description::well_known::Rfc3339;
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio_stream::wrappers::WatchStream;
 use ts_rs::TS;
 
 use crate::api_error::ApiError;
@@ -48,6 +51,21 @@ pub struct BackgroundTriggers {
     /// harness can pause them through the hub, which changes what every
     /// section does: while paused, events are dropped, not queued.
     pub enabled: bool,
+    /// When delivery was paused, RFC 3339; `null` while it is enabled.
+    pub since: Option<String>,
+    /// Events that reached no function since `since`, per service; empty
+    /// while enabled.
+    pub dropped: Vec<DroppedCount>,
+}
+
+/// How many events of one service reached no function while delivery was
+/// paused.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+pub struct DroppedCount {
+    /// `firestore`, `auth`, `storage`, `pubsub` or `schedule`.
+    pub service: String,
+    #[ts(type = "number")]
+    pub count: u64,
 }
 
 /// Where this engine keeps its data, fixed for the engine's life.
@@ -215,14 +233,35 @@ impl SuiteControls {
         }
     }
 
-    /// Whether background triggers are delivered now.
+    /// Whether background triggers are delivered now, and since a pause,
+    /// what was dropped.
     pub(crate) fn background_triggers(&self) -> BackgroundTriggers {
+        let Some(triggers) = &self.inner.triggers else {
+            return BackgroundTriggers {
+                enabled: true,
+                since: None,
+                dropped: Vec::new(),
+            };
+        };
+        if triggers.background_enabled() {
+            return BackgroundTriggers {
+                enabled: true,
+                since: None,
+                dropped: Vec::new(),
+            };
+        }
+        let dropped = triggers.dropped();
         BackgroundTriggers {
-            enabled: self
-                .inner
-                .triggers
-                .as_ref()
-                .is_none_or(TriggerRegistry::background_enabled),
+            enabled: false,
+            since: dropped.since.and_then(|since| since.format(&Rfc3339).ok()),
+            dropped: dropped
+                .counts
+                .into_iter()
+                .map(|(service, count)| DroppedCount {
+                    service: service.as_str().to_owned(),
+                    count,
+                })
+                .collect(),
         }
     }
 
@@ -231,9 +270,22 @@ impl SuiteControls {
         self.inner.data.clone()
     }
 
-    /// Ticks when the console flips background triggers.
-    pub(crate) fn changes(&self) -> watch::Receiver<u64> {
-        self.inner.flips.subscribe()
+    /// Ticks when background delivery flips (from the console or the
+    /// hub) or a dropped count moves.
+    pub(crate) fn changes(&self) -> BoxStream<'static, ()> {
+        let flips = WatchStream::from_changes(self.inner.flips.subscribe())
+            .map(|_| ())
+            .boxed();
+        let Some(triggers) = &self.inner.triggers else {
+            return flips;
+        };
+        let background = WatchStream::from_changes(triggers.background_watch())
+            .map(|_| ())
+            .boxed();
+        let dropped = WatchStream::from_changes(triggers.dropped_changes())
+            .map(|_| ())
+            .boxed();
+        futures_util::stream::select_all([flips, background, dropped]).boxed()
     }
 
     /// `POST /suite/background`, `GET /suite/destinations`,
@@ -641,11 +693,18 @@ mod tests {
         )
     }
 
+    /// Whether `changes` ticks within 5 s.
+    async fn ticked(changes: &mut BoxStream<'static, ()>) -> bool {
+        tokio::time::timeout(Duration::from_secs(5), changes.next())
+            .await
+            .is_ok()
+    }
+
     #[tokio::test]
     async fn the_background_switch_flips_the_registry_forwards_it_and_says_so() {
         let (suite, (mut background, _exports)) = suite("background");
         let router = suite.controls.router();
-        let mut flips = suite.controls.changes();
+        let mut changes = suite.controls.changes();
         let acknowledge = tokio::spawn(async move {
             let request = background.recv().await.expect("forwarded");
             assert!(!request.enabled);
@@ -654,15 +713,50 @@ mod tests {
         });
         let (status, body) = post(&router, "/suite/background", json!({ "enabled": false })).await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body, json!({ "enabled": false }));
+        assert_eq!(body["enabled"], false);
+        assert!(body["since"].is_string(), "{body}");
+        assert_eq!(body["dropped"], json!([]));
         assert!(!suite.triggers.background_enabled());
-        assert!(flips.has_changed().expect("open"));
-        flips.mark_unchanged();
-        assert!(!suite.controls.background_triggers().enabled);
+        assert!(ticked(&mut changes).await, "the switch says so");
         let _background = acknowledge.await.expect("acknowledged");
-        // A flip made through the hub is read whenever the status is built.
+        // While paused, what reached no function is counted per service,
+        // and each count is news.
+        suite
+            .triggers
+            .note_dropped(firenook_functions_bridge::DroppedService::Firestore);
+        suite
+            .triggers
+            .note_dropped(firenook_functions_bridge::DroppedService::Firestore);
+        suite
+            .triggers
+            .note_dropped(firenook_functions_bridge::DroppedService::Storage);
+        assert!(ticked(&mut changes).await, "a dropped event is news");
+        let paused = suite.controls.background_triggers();
+        assert_eq!(
+            paused.dropped,
+            [
+                DroppedCount {
+                    service: "firestore".to_owned(),
+                    count: 2
+                },
+                DroppedCount {
+                    service: "storage".to_owned(),
+                    count: 1
+                },
+            ]
+        );
+        // A flip made through the hub is news too, and resuming clears the
+        // counts.
         suite.triggers.set_background_enabled(true);
-        assert!(suite.controls.background_triggers().enabled);
+        assert!(ticked(&mut changes).await, "the hub's switch is watched");
+        assert_eq!(
+            suite.controls.background_triggers(),
+            BackgroundTriggers {
+                enabled: true,
+                since: None,
+                dropped: Vec::new()
+            }
+        );
         let (status, body) = post(&router, "/suite/background", json!({ "on": true })).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         assert_eq!(body["error"]["code"], "invalid-argument");

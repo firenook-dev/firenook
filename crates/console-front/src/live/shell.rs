@@ -284,7 +284,7 @@ mod tests {
         let triggers = firenook_functions_bridge::TriggerRegistry::default();
         let (exporter, _exports) = tokio::sync::mpsc::channel(1);
         let suite = crate::SuiteControls::new(crate::SuiteSettings {
-            triggers,
+            triggers: triggers.clone(),
             background: None,
             exporter,
             data: crate::SuiteControls::detached().data(),
@@ -324,6 +324,21 @@ mod tests {
         let (name, status) = next(&mut stream).await;
         assert_eq!(name, "status");
         assert_eq!(status["backgroundTriggers"]["enabled"], false);
+        // A dropped event while paused, and the hub's own switch, each
+        // send a status too.
+        triggers.note_dropped(firenook_functions_bridge::DroppedService::Pubsub);
+        let (_, status) = next(&mut stream).await;
+        assert_eq!(
+            status["backgroundTriggers"]["dropped"],
+            json!([{ "service": "pubsub", "count": 1 }])
+        );
+        triggers.set_background_enabled(true);
+        let (_, status) = next(&mut stream).await;
+        assert_eq!(status["backgroundTriggers"]["enabled"], true);
+        assert_eq!(
+            status["backgroundTriggers"]["since"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]

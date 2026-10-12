@@ -49,6 +49,14 @@ fn auth_application() -> Router {
     Router::new().fallback(|| async { "auth" })
 }
 
+/// A real Auth emulator's state, for the console's own Auth routes.
+fn auth_runtime() -> firenook_auth_front::Runtime {
+    let registry = firenook_functions_bridge::TriggerRegistry::default();
+    let (observer, _deliveries) =
+        firenook_functions_bridge::TriggerObserver::channel(registry.clone());
+    firenook_auth_front::router(PROJECT, observer.queue(), registry).runtime()
+}
+
 /// A stand-in for a service's own application that answers every path,
 /// and says which service it is.
 fn native_application(name: &'static str) -> Router {
@@ -75,6 +83,7 @@ pub(crate) fn full_services(store: &Store, hosts: AllowedHosts) -> ConsoleServic
         firestore: Some(firestore_console(store)),
         auth: Some(AuthConsole {
             native: auth_application(),
+            runtime: auth_runtime(),
         }),
         storage: Some(StorageConsole {
             native: native_application("storage"),

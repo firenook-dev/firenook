@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{self, Display, Formatter};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -40,9 +41,112 @@ const EMULATED_LOCATION: &str = "us-central1";
 const FIRESTORE_EVENT_DATA_SCHEMA: &str = "https://github.com/googleapis/google-cloudevents/blob/main/proto/google/events/cloud/firestore/v1/data.proto";
 
 /// Shared trigger inventory populated by the Functions workload host.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct TriggerRegistry {
     inner: Arc<Mutex<RegistryState>>,
+    /// Background delivery as last set, for whoever watches it (the
+    /// console shows a pause the moment a test harness makes it).
+    background: Arc<tokio::sync::watch::Sender<bool>>,
+    /// Events that reached no function while delivery was paused.
+    dropped: Arc<DroppedCounters>,
+}
+
+impl Default for TriggerRegistry {
+    fn default() -> Self {
+        Self {
+            inner: Arc::default(),
+            background: Arc::new(tokio::sync::watch::Sender::new(true)),
+            dropped: Arc::default(),
+        }
+    }
+}
+
+/// A source of background events that can be dropped while delivery is
+/// paused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DroppedService {
+    /// A Firestore change some trigger would have matched.
+    Firestore,
+    /// An Auth lifecycle event.
+    Auth,
+    /// A Storage object event.
+    Storage,
+    /// A Pub/Sub message for a topic with function targets.
+    Pubsub,
+    /// A scheduled function's tick.
+    Schedule,
+}
+
+impl DroppedService {
+    /// Every service, in the order counts are reported.
+    pub const ALL: [Self; 5] = [
+        Self::Firestore,
+        Self::Auth,
+        Self::Storage,
+        Self::Pubsub,
+        Self::Schedule,
+    ];
+
+    /// `firestore`, `auth`, `storage`, `pubsub`, `schedule`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Firestore => "firestore",
+            Self::Auth => "auth",
+            Self::Storage => "storage",
+            Self::Pubsub => "pubsub",
+            Self::Schedule => "schedule",
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Firestore => 0,
+            Self::Auth => 1,
+            Self::Storage => 2,
+            Self::Pubsub => 3,
+            Self::Schedule => 4,
+        }
+    }
+}
+
+/// Events that reached no function since delivery was paused.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DroppedEvents {
+    /// When delivery was paused; `None` while it is enabled.
+    pub since: Option<OffsetDateTime>,
+    /// Each service that dropped something, with how many, in
+    /// [`DroppedService::ALL`] order.
+    pub counts: Vec<(DroppedService, u64)>,
+}
+
+/// Per-service counters, one atomic add per dropped event.
+struct DroppedCounters {
+    counts: [AtomicU64; 5],
+    since: Mutex<Option<OffsetDateTime>>,
+    /// Ticks on every count and every reset.
+    changes: tokio::sync::watch::Sender<u64>,
+}
+
+impl Default for DroppedCounters {
+    fn default() -> Self {
+        Self {
+            counts: Default::default(),
+            since: Mutex::new(None),
+            changes: tokio::sync::watch::Sender::new(0),
+        }
+    }
+}
+
+impl DroppedCounters {
+    fn reset(&self, since: Option<OffsetDateTime>) {
+        for count in &self.counts {
+            count.store(0, Ordering::Release);
+        }
+        *lock(&self.since) = since;
+        self.changes
+            .send_modify(|ticks| *ticks = ticks.wrapping_add(1));
+    }
 }
 
 struct RegistryState {
@@ -352,9 +456,66 @@ impl TriggerRegistry {
         Ok(())
     }
 
-    /// Enables or disables background event delivery without deleting inventory.
+    /// Enables or disables background event delivery without deleting
+    /// inventory. Pausing starts the dropped counts from zero with the
+    /// pause time; resuming clears them. Watchers of
+    /// [`TriggerRegistry::background_watch`] see the change.
     pub fn set_background_enabled(&self, enabled: bool) {
-        lock(&self.inner).background_enabled = enabled;
+        let changed = {
+            let mut state = lock(&self.inner);
+            let changed = state.background_enabled != enabled;
+            state.background_enabled = enabled;
+            changed
+        };
+        if changed {
+            self.dropped.reset((!enabled).then(OffsetDateTime::now_utc));
+        }
+        self.background.send_if_modified(|current| {
+            let changed = *current != enabled;
+            *current = enabled;
+            changed
+        });
+    }
+
+    /// Background delivery as it is now, then every change, from the hub's
+    /// switches and the console's alike.
+    #[must_use]
+    pub fn background_watch(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.background.subscribe()
+    }
+
+    /// Counts one event of `service` that reached no function because
+    /// background delivery is paused. One atomic add; never blocks on I/O.
+    pub fn note_dropped(&self, service: DroppedService) {
+        self.dropped.counts[service.index()].fetch_add(1, Ordering::AcqRel);
+        self.dropped
+            .changes
+            .send_modify(|ticks| *ticks = ticks.wrapping_add(1));
+    }
+
+    /// The events dropped since delivery was paused.
+    #[must_use]
+    pub fn dropped(&self) -> DroppedEvents {
+        let since = *lock(&self.dropped.since);
+        DroppedEvents {
+            since,
+            counts: DroppedService::ALL
+                .into_iter()
+                .map(|service| {
+                    (
+                        service,
+                        self.dropped.counts[service.index()].load(Ordering::Acquire),
+                    )
+                })
+                .filter(|(_, count)| *count > 0)
+                .collect(),
+        }
+    }
+
+    /// Ticks whenever [`TriggerRegistry::dropped`] may have changed.
+    #[must_use]
+    pub fn dropped_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.dropped.changes.subscribe()
     }
 
     /// Whether background delivery is currently enabled by the Emulator Hub.
@@ -789,20 +950,83 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct TriggerObserver {
     registry: TriggerRegistry,
     sender: tokio::sync::mpsc::UnboundedSender<DispatchRequest>,
+    depth: Arc<QueueDepth>,
+}
+
+/// How many dispatches wait for the delivery runtime to take them.
+#[derive(Default)]
+struct QueueDepth {
+    queued: AtomicUsize,
+    /// Woken whenever the depth falls.
+    fell: tokio::sync::Notify,
+}
+
+impl QueueDepth {
+    /// Sends `request`, counting it while it waits.
+    fn send(
+        &self,
+        sender: &tokio::sync::mpsc::UnboundedSender<DispatchRequest>,
+        request: DispatchRequest,
+    ) -> Result<(), BridgeError> {
+        // Counted before it can be taken, so the count never goes below
+        // what is queued.
+        self.queued.fetch_add(1, Ordering::AcqRel);
+        sender.send(request).map_err(|_| {
+            self.taken();
+            BridgeError("Functions delivery runtime is stopped".to_owned())
+        })
+    }
+
+    /// One dispatch was taken (admitted or deduplicated) or never queued.
+    fn taken(&self) {
+        let _ = self
+            .queued
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |queued| {
+                Some(queued.saturating_sub(1))
+            });
+        self.fell.notify_waiters();
+    }
 }
 
 /// Cloneable producer for non-Firestore background events.
 #[derive(Clone)]
 pub struct DispatchQueue {
     sender: tokio::sync::mpsc::UnboundedSender<DispatchRequest>,
+    depth: Arc<QueueDepth>,
 }
 
 impl DispatchQueue {
     /// Enqueues one event before the Firestore/Pub/Sub shared dedupe boundary.
     pub fn enqueue(&self, request: DispatchRequest) -> Result<(), BridgeError> {
-        self.sender
-            .send(request)
-            .map_err(|_| BridgeError("Functions delivery runtime is stopped".to_owned()))
+        self.depth.send(&self.sender, request)
+    }
+
+    /// Dispatches queued and not yet taken by the delivery runtime (every
+    /// producer of this queue's runtime counted, Firestore's observer
+    /// included). A receiver taken straight from [`TriggerObserver::channel`]
+    /// takes without counting down; the delivery runtime counts.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        self.depth.queued.load(Ordering::Acquire)
+    }
+
+    /// Resolves once fewer than `n` dispatches are queued, or when the
+    /// delivery runtime has stopped (nothing will take them any more). A
+    /// bulk producer awaits it between batches so it never floods the
+    /// queue.
+    pub async fn wait_below(&self, n: usize) {
+        loop {
+            let fell = self.depth.fell.notified();
+            tokio::pin!(fell);
+            fell.as_mut().enable();
+            if self.depth() < n {
+                return;
+            }
+            tokio::select! {
+                () = &mut fell => {}
+                () = self.sender.closed() => return,
+            }
+        }
     }
 }
 
@@ -816,7 +1040,14 @@ impl TriggerObserver {
         tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
     ) {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        (Arc::new(Self { registry, sender }), receiver)
+        (
+            Arc::new(Self {
+                registry,
+                sender,
+                depth: Arc::default(),
+            }),
+            receiver,
+        )
     }
 
     /// Queue producer sharing this observer's dedupe and delivery worker.
@@ -824,6 +1055,7 @@ impl TriggerObserver {
     pub fn queue(&self) -> DispatchQueue {
         DispatchQueue {
             sender: self.sender.clone(),
+            depth: Arc::clone(&self.depth),
         }
     }
 }
@@ -833,7 +1065,7 @@ impl CommitObserver for TriggerObserver {
         for (change_index, change) in observation.changes.iter().enumerate() {
             for trigger in self.registry.matching(change) {
                 if let Ok(request) = build_dispatch(&trigger, observation, change_index) {
-                    let _ = self.sender.send(request);
+                    let _ = self.depth.send(&self.sender, request);
                 }
             }
         }
@@ -943,6 +1175,7 @@ impl DeliveryRuntime {
         let (shutdown, shutdown_receiver) = tokio::sync::watch::channel(false);
         let coordinator = tokio::spawn(delivery_coordinator(
             receiver,
+            Arc::clone(&observer.depth),
             shutdown_receiver,
             endpoint,
             client,
@@ -994,8 +1227,13 @@ fn validate_policy(policy: DeliveryPolicy) -> Result<(), BridgeError> {
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the delivery loop's inputs, each used on its own path"
+)]
 async fn delivery_coordinator(
     mut receiver: tokio::sync::mpsc::UnboundedReceiver<DispatchRequest>,
+    depth: Arc<QueueDepth>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     endpoint: reqwest::Url,
     client: reqwest::Client,
@@ -1011,6 +1249,7 @@ async fn delivery_coordinator(
         if stopping {
             receiver.close();
             while let Ok(request) = receiver.try_recv() {
+                depth.taken();
                 admit_delivery(
                     request,
                     &mut seen,
@@ -1030,16 +1269,19 @@ async fn delivery_coordinator(
         tokio::select! {
             request = receiver.recv(), if !stopping && deliveries.len() < policy.max_concurrent => {
                 match request {
-                    Some(request) => admit_delivery(
-                        request,
-                        &mut seen,
-                        &mut seen_order,
-                        &mut deliveries,
-                        &endpoint,
-                        &client,
-                        policy,
-                        &health,
-                    ),
+                    Some(request) => {
+                        depth.taken();
+                        admit_delivery(
+                            request,
+                            &mut seen,
+                            &mut seen_order,
+                            &mut deliveries,
+                            &endpoint,
+                            &client,
+                            policy,
+                            &health,
+                        );
+                    }
                     None => stopping = true,
                 }
             }
@@ -2142,5 +2384,128 @@ mod tests {
             body: b"{}".to_vec(),
             event_id: event_id.to_owned(),
         }
+    }
+
+    #[tokio::test]
+    async fn the_background_watch_sees_every_switch() {
+        let registry = TriggerRegistry::default();
+        let mut watch = registry.background_watch();
+        assert!(*watch.borrow_and_update());
+        registry.set_background_enabled(false);
+        assert!(watch.has_changed().expect("open"));
+        assert!(!*watch.borrow_and_update());
+        // The same value again is not a change.
+        registry.set_background_enabled(false);
+        assert!(!watch.has_changed().expect("open"));
+        registry.set_background_enabled(true);
+        assert!(*watch.borrow_and_update());
+        assert!(registry.background_enabled());
+    }
+
+    #[test]
+    fn dropped_events_count_per_service_from_the_pause_and_clear_on_resume() {
+        let registry = TriggerRegistry::default();
+        let mut changes = registry.dropped_changes();
+        assert_eq!(registry.dropped(), DroppedEvents::default());
+        registry.set_background_enabled(false);
+        let paused = registry.dropped();
+        assert!(paused.since.is_some());
+        assert_eq!(paused.counts, Vec::new());
+        changes.mark_unchanged();
+        for _ in 0..3 {
+            registry.note_dropped(DroppedService::Storage);
+        }
+        registry.note_dropped(DroppedService::Firestore);
+        assert!(changes.has_changed().expect("open"));
+        let dropped = registry.dropped();
+        assert_eq!(dropped.since, paused.since);
+        assert_eq!(
+            dropped.counts,
+            [(DroppedService::Firestore, 1), (DroppedService::Storage, 3)]
+        );
+        registry.set_background_enabled(true);
+        assert_eq!(registry.dropped(), DroppedEvents::default());
+        registry.set_background_enabled(false);
+        assert_eq!(
+            registry.dropped().counts,
+            Vec::new(),
+            "a new pause counts from zero"
+        );
+        assert_eq!(DroppedService::Pubsub.as_str(), "pubsub");
+        assert_eq!(DroppedService::Schedule.as_str(), "schedule");
+    }
+
+    #[tokio::test]
+    async fn the_depth_counts_queued_dispatches_and_wait_below_ends_with_the_runtime() {
+        let (observer, receiver) = TriggerObserver::channel(TriggerRegistry::default());
+        let queue = observer.queue();
+        for index in 0..3 {
+            queue
+                .enqueue(chaos_dispatch(&format!("e{index}"), "t"))
+                .expect("queued");
+        }
+        assert_eq!(queue.depth(), 3);
+        assert_eq!(
+            observer.queue().depth(),
+            3,
+            "every producer shares the count"
+        );
+        // Below already: resolves at once.
+        tokio::time::timeout(Duration::from_secs(1), queue.wait_below(4))
+            .await
+            .expect("already below");
+        let waiting = tokio::spawn({
+            let queue = queue.clone();
+            async move { queue.wait_below(1).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!waiting.is_finished(), "nothing took the dispatches");
+        drop(receiver);
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the stopped runtime ends the wait")
+            .expect("joined");
+        // A send to a stopped runtime fails and is not counted.
+        assert!(queue.enqueue(chaos_dispatch("late", "t")).is_err());
+        assert_eq!(queue.depth(), 3);
+    }
+
+    #[tokio::test]
+    async fn the_delivery_runtime_counts_the_depth_down_as_it_admits() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bound");
+        let address = listener.local_addr().expect("address");
+        let host = Router::new().fallback(post(|| async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            ([(DELIVERY_HEADER, DELIVERY_HANDLED)], "ok")
+        }));
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, host).await;
+        });
+        let runtime = DeliveryRuntime::start(
+            TriggerRegistry::default(),
+            &format!("http://{address}"),
+            DeliveryPolicy {
+                max_concurrent: 1,
+                ..DeliveryPolicy::default()
+            },
+        )
+        .expect("started");
+        let queue = runtime.queue();
+        for index in 0..8 {
+            queue
+                .enqueue(chaos_dispatch(&format!("d{index}"), "t"))
+                .expect("queued");
+        }
+        assert!(queue.depth() >= 6, "{} queued", queue.depth());
+        tokio::time::timeout(Duration::from_secs(10), queue.wait_below(3))
+            .await
+            .expect("the runtime took enough");
+        assert!(queue.depth() < 3);
+        let health = runtime.shutdown().await;
+        assert_eq!(health.admitted, 8);
+        assert_eq!(queue.depth(), 0);
+        server.abort();
     }
 }
