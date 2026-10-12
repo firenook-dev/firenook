@@ -3947,3 +3947,138 @@ mod diagnostics {
         let _ = SystemTime::now();
     }
 }
+
+#[tokio::test]
+async fn function_deliveries_name_their_cause_and_paused_ones_are_counted() {
+    use firenook_functions_bridge::{DroppedService, cause};
+    let (runtime, mut deliveries, background) = runtime_and_deliveries();
+    let application = runtime.application();
+    let response = application
+        .clone()
+        .oneshot(publish_request(
+            "phase4-topic",
+            &json!({ "messages": [{ "data": BASE64.encode("hello") }] }),
+        ))
+        .await
+        .expect("publish response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let dispatch = deliveries.recv().await.expect("topic dispatch");
+    let event: JsonValue = serde_json::from_slice(&dispatch.body).expect("CloudEvent");
+    assert_eq!(
+        dispatch.headers[cause::TOPIC],
+        format!("projects/{PROJECT}/topics/phase4-topic")
+    );
+    assert_eq!(dispatch.headers[cause::MESSAGE], "1");
+    assert_eq!(dispatch.headers[cause::EVENT_ID], event["id"]);
+    assert_eq!(
+        dispatch.headers["content-type"],
+        "application/cloudevents+json; charset=UTF-8"
+    );
+    // A schedule tick names its synthetic topic and its event id too.
+    let schedule = runtime.schedules().remove(0);
+    runtime
+        .run_schedule(&schedule.function_id)
+        .expect("run the schedule now");
+    let tick = deliveries.recv().await.expect("schedule dispatch");
+    let event: JsonValue = serde_json::from_slice(&tick.body).expect("CloudEvent");
+    assert_eq!(
+        tick.headers[cause::TOPIC],
+        format!("projects/{PROJECT}/topics/firebase-schedule-scheduledTick")
+    );
+    assert_eq!(tick.headers[cause::EVENT_ID], event["id"]);
+
+    background.set_background_enabled(false);
+    let response = application
+        .clone()
+        .oneshot(publish_request(
+            "phase4-topic",
+            &json!({ "messages": [{ "data": "e30=" }, { "data": "e30=" }] }),
+        ))
+        .await
+        .expect("paused publish");
+    assert_eq!(response.status(), StatusCode::OK);
+    // A topic no function listens on drops nothing.
+    let response = application
+        .clone()
+        .oneshot(
+            Request::put(format!("/v1/projects/{PROJECT}/topics/plain"))
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .expect("create topic"),
+        )
+        .await
+        .expect("create response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = application
+        .oneshot(publish_request(
+            "plain",
+            &json!({ "messages": [{ "data": "e30=" }] }),
+        ))
+        .await
+        .expect("unwatched publish");
+    assert_eq!(response.status(), StatusCode::OK);
+    // The clock's tick while paused is dropped (and recorded as skipped).
+    let due = runtime
+        .schedule_due(&schedule.function_id)
+        .expect("an automatic schedule");
+    runtime.clock_tick(&schedule.function_id, due);
+    assert!(
+        deliveries.try_recv().is_err(),
+        "nothing is delivered while paused"
+    );
+    assert_eq!(
+        background.dropped().counts,
+        [(DroppedService::Pubsub, 2), (DroppedService::Schedule, 1)]
+    );
+}
+
+#[tokio::test]
+async fn a_legacy_delivery_names_its_cause_too() {
+    use firenook_functions_bridge::{FunctionsInventory, cause};
+    let inventory = FunctionsInventory::from_backends_json(
+        &json!({
+            "backends": [{
+                "functionTriggers": [{
+                    "name": "legacyEcho",
+                    "entryPoint": "legacyEcho",
+                    "region": "us-central1",
+                    "platform": "gcfv1",
+                    "eventTrigger": {
+                        "eventType": crate::functions::LEGACY_PUBSUB_EVENT_TYPE,
+                        "resource": format!("projects/{PROJECT}/topics/legacy"),
+                    },
+                }],
+            }],
+        }),
+        3,
+    )
+    .expect("inventory");
+    let background = TriggerRegistry::default();
+    let (observer, mut deliveries) = TriggerObserver::channel(background.clone());
+    let runtime = router(PROJECT, &inventory, observer.queue(), background);
+    let response = runtime
+        .application()
+        .oneshot(publish_request(
+            "legacy",
+            &json!({ "messages": [{ "data": "e30=" }] }),
+        ))
+        .await
+        .expect("publish response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let dispatch = deliveries.recv().await.expect("legacy dispatch");
+    let body: JsonValue = serde_json::from_slice(&dispatch.body).expect("legacy envelope");
+    assert_eq!(
+        dispatch.path,
+        format!("/functions/projects/{PROJECT}/triggers/us-central1-legacyEcho-3")
+    );
+    assert_eq!(dispatch.headers["content-type"], "application/json");
+    assert_eq!(
+        dispatch.headers[cause::TOPIC],
+        format!("projects/{PROJECT}/topics/legacy")
+    );
+    assert_eq!(dispatch.headers[cause::MESSAGE], "1");
+    assert_eq!(
+        dispatch.headers[cause::EVENT_ID],
+        body["context"]["eventId"]
+    );
+}

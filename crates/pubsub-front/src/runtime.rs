@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use firenook_functions_bridge::{DispatchQueue, FunctionsInventory, TriggerRegistry};
+use firenook_functions_bridge::{
+    DispatchQueue, DroppedService, FunctionsInventory, TriggerRegistry,
+};
 use time::OffsetDateTime;
 
 use crate::broker::{Broker, FanoutSkip, FanoutTarget, Published, PushJob, ResetCount};
@@ -808,7 +810,11 @@ impl PubsubRuntime {
             None
         } else {
             // Background triggers are paused: the events are dropped, not
-            // queued; the fanout says so.
+            // queued; the fanout says so, and the suite counts them.
+            self.inner.background.note_dropped_many(
+                DroppedService::Pubsub,
+                u64::try_from(published.messages.len()).unwrap_or(u64::MAX),
+            );
             for message in &published.messages {
                 let fanout = targets
                     .iter()
@@ -1136,6 +1142,7 @@ impl PubsubRuntime {
                     }
                 }
             } else {
+                self.inner.background.note_dropped(DroppedService::Schedule);
                 ScheduleRun {
                     at: now,
                     trigger: RunTrigger::Clock,

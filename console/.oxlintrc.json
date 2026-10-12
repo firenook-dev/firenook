@@ -13,7 +13,14 @@
   "rules": {
     "react/react-in-jsx-scope": "off",
     "no-console": "warn",
-    "no-underscore-dangle": ["off"]
+    "no-underscore-dangle": ["off"],
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "EventSource",
+        "message": "Subscribe to a topic with useLiveTopic (src/lib/live); the console holds one live connection per browser."
+      }
+    ]
   },
   "ignorePatterns": [
     "dist/",
@@ -25,6 +32,12 @@
     "test-results/"
   ],
   "overrides": [
+    {
+      "files": ["src/lib/live/**", "src/firestore/live.ts", "src/firestore/rules-page/api.ts"],
+      "rules": {
+        "no-restricted-globals": "off"
+      }
+    },
     {
       "files": ["scripts/**", "e2e/**", "design-system/kit/scripts/**"],
       "rules": {

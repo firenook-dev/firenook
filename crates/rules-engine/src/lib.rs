@@ -7,6 +7,7 @@
 
 mod analysis;
 mod ast;
+mod claim_reads;
 mod coverage_layout;
 mod coverage_observer;
 mod evaluator;
@@ -20,6 +21,7 @@ pub use analysis::{
     CollectionGovernance, GoverningMap, GoverningMatch, LintCode, OutlineAllow, OutlineMatch,
     RulesOutline, SourceRange, UnusedMatch,
 };
+pub use claim_reads::{ClaimRead, ClaimReadForm};
 pub use coverage_layout::{CoverageNode, SourcePosition};
 pub use coverage_observer::{
     CoverageObserver, ExpressionKey, ExpressionValue, MapDifference, MapKeyStatus, QueryComparison,
