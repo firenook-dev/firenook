@@ -45,7 +45,7 @@ jobs:
         run: git diff --exit-code -- console/src/api/generated
 
   console:
-    name: Console checks and browser journey
+    name: Console checks and the engine the journeys run against
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -72,8 +72,50 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc --version
-      - name: Build the engine the browser journey runs against
+      # Built once here and handed to every journey shard: a cold debug
+      # build is most of this job, and seven shards building it would be
+      # seven times that. The debug binary reads console/dist from this
+      # checkout's path at run time, which every shard's checkout shares.
+      - name: Build the engine the browser journeys run against
         run: cargo build --locked --bin firenook
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: console-engine
+          path: target/debug/firenook
+          retention-days: 1
+          if-no-files-found: error
+
+  console-journeys:
+    # The whole suite is about 17 minutes on a 12-core machine; on a 4-vCPU
+    # runner it would not fit one job's budget, so each Playwright project
+    # (one engine profile) is its own job with its own limit.
+    name: Console journeys (${{ matrix.project }})
+    needs: console
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [data, auth, storage, compute, messaging, observe, shell]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Install current npm and the pinned console dependencies
+        run: |
+          npm install --global npm@12.0.2
+          npm ci --prefix console
+      - name: Build the console the engine serves
+        run: npm run build --prefix console
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: console-engine
+          path: target/debug
+      - name: Make the engine executable
+        run: chmod +x target/debug/firenook
       - name: Provision the pinned Emulator UI asset the UI port still requires
         run: node -e 'import("./packages/cli/src/assets.mjs").then(m => m.setupAssets())'
       - name: Install Chromium for Playwright
@@ -81,13 +123,13 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Install the pinned Functions SDK the journeys' Functions fixture links in
         run: npm run e2e:sdk --prefix console
-      - name: Run the console browser journey against the real engine
+      - name: Run the ${{ matrix.project }} journeys against the real engine
         working-directory: console
-        run: npm run test:e2e
+        run: npx playwright test --project ${{ matrix.project }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: failure()
         with:
-          name: console-playwright-report
+          name: console-playwright-report-${{ matrix.project }}
           path: |
             console/playwright-report
             console/test-results
