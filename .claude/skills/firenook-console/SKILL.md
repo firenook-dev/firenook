@@ -80,11 +80,20 @@ the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - Virtualize every long list (rows, log lines, JSON trees).
 - First route under 300 KB gzip: `npm run budget --prefix console` reads the
   Vite manifest and fails over budget. Lazy-load CodeMirror, shiki, echarts.
-  **The budget is the entry chunk and its static imports only** — route
-  chunks are not counted, so "it would blow the budget" is never by itself
-  a reason to refuse something a route loads lazily. Check the manifest
-  before claiming it; the rules editor carried that wrong claim in a
-  header comment for months.
+  **Two budgets**: the entry chunk and its static imports (300 KB), and the
+  landing route, `/console` — the entry plus the Overview's route chunk and
+  its static imports (420 KB), which is what every visit loads before its
+  first paint. Other route chunks are not counted, so "it would blow the
+  budget" is never by itself a reason to refuse something a route loads
+  lazily. Check the manifest before claiming it; the rules editor carried
+  that wrong claim in a header comment for months. The Overview's dialogs
+  (snapshot, save, reset) load when first asked for, which kept the
+  dropdown, dialog, radio, checkbox and danger-confirm chunks off the
+  landing route.
+- Every script, stylesheet and SVG over 1 KB gets a gzip copy at build time
+  (`precompress` in `vite.config.ts`); the engine serves it when the
+  request accepts gzip, with `Vary: accept-encoding` (`serve` in
+  console-front's `lib.rs`).
 - Assets ship inside the binary with immutable cache headers; the shell is
   `no-cache`. Fonts are self-hosted, never fetched.
 - The engine does the heavy lifting (key cursors, index counts, incremental
@@ -274,7 +283,8 @@ SectionFrame → SectionPage (h-full flex-col overflow-hidden; sr-only h1)
 | Row one | `flex h-11 shrink-0 items-center gap-1 border-b border-kumo-line bg-kumo-base pr-2 pl-3` (38.5 px at the 14 px root, Firestore's) |
 | Row two | outer `grid shrink-0 border-b border-kumo-line bg-kumo-base`, inner `box-content flex min-h-8 items-center gap-2 overflow-x-auto px-3 py-1.5` |
 | Field | `flex h-8 min-w-0 flex-1 items-center rounded-lg pr-0.5 focus-within:bg-kumo-control focus-within:ring focus-within:ring-kumo-focus hover:not-focus-within:ink`; `ring ring-kumo-danger` at rest when invalid |
-| Divider | `mx-1.5 h-5 w-px shrink-0 bg-kumo-line` |
+| Divider | `mx-1.5 h-5 w-px shrink-0 bg-kumo-line`, only between two groups that are both on screen: `LiveNotice divider="before"` draws its own, so a notice that is absent leaves no stray rule |
+| Scope (a name, not a path) | `ToolbarScope`: 12 px medium, its `detail` quiet after it ("All functions", "Users · No tenant", "Task queues demo-…") |
 
 **The inspector** (`Inspector`, `InspectorTitle`, `InspectorSection`,
 `InspectorFooter`): header 44 px with the title (an entity's key in the data
@@ -291,9 +301,32 @@ before it clears a selection. One `widthKey` per inspector (`auth.user`).
 
 Empty, loading and error: `EmptyState` (with `connect: { service }`, the
 connection snippet for this engine, and the project the app writes to when
-the engine has seen it use another), `NoMatch`, `QueryError` (the engine's
-message as the title, its fix under it, Retry), `TableSkeleton` and
-`DataTable loading` (both after 150 ms, so a fast answer never flashes).
+the engine has seen it use another; a section with an API to call teaches
+it with a `CodeBlock` and a primary main button), `NoMatch` (its `children`
+add what only the page can say — Logs names the filter that hides how many
+lines), `QueryError` (the engine's message as the title, its fix under it,
+Retry), `TableSkeleton` and `DataTable loading` (both after 150 ms, so a
+fast answer never flashes). **One loading pattern per kind of surface**: a
+table or a feed shows its skeleton rows (a feed under its `FeedHeader`); a
+pane that is not a list shows the Firestore grid's centred secondary line;
+the word is always "Loading …"; a page that waits for its scope (Storage's
+buckets) draws its frame — panel and both toolbar rows — and puts the
+skeleton where the list goes.
+
+Tables and feeds share one header band: 33 px with its rule, 12 px medium
+(`DataTable`'s header controls are 18 px; a feed's `FeedHeader` is the same
+band). A list's status bar is `TableFooter` ("N loaded") or, for a feed,
+`FeedFooter` ("N loaded · the engine keeps the newest N …"). The column
+settings cell pinned to the right draws its edge (`PIN_EDGE_END`) while
+columns lie beyond it. Clearing what a page holds is `ClearHistoryButton`
+(ghost, glyph and word in the danger tone) everywhere.
+
+Below `xl` an open inspector floats over the list, and the section panel
+steps aside while it is open (`panelShown` in `lib/layout.ts`; the
+person's choice is untouched and comes back when the inspector closes;
+the toggle shows the panel anyway). An inspector's tabs are always the
+kit's segmented `tabs` under the header, never underline tabs in the
+title or the body.
 
 ### The live channel
 
@@ -612,9 +645,18 @@ stream, loaded by glob). A few behaviours worth knowing:
 ### End-to-end
 
 - `scripts/synthetic-engine.mjs` `startEngine({ profile, project, only, wait,
-  seed, fixtureEnv, env, launchContext, args, uiPort })` — a real engine on
-  free ports (held until spawn) with the launch context the npm CLI would
-  pass; `npm run engine -- --profile <name>` runs one for development.
+  seed, fixtureEnv, env, launchContext, args, uiPort, keepDirectory })` — a
+  real engine on free ports (held until spawn) with the launch context the
+  npm CLI would pass; `npm run engine -- --profile <name>` runs one for
+  development. `stop()` removes the engine's project directory (15–75 MB
+  each; a suite run starts hundreds), and so does a start that fails;
+  `keepDirectory` keeps it past `stop()` for another engine to start on what
+  this one saved, and `remove()` takes it away (`dedicatedEngine` keeps
+  each journey's until the journey ends). `FIRENOOK_KEEP_ENGINE_DIR=1` keeps
+  them all, to look at what an engine wrote.
+- CI builds the engine once and runs each Playwright project as its own job
+  (`console-journeys` in `.github/workflows/ci.yml`): the whole suite is
+  about 17 minutes on 12 cores, more than one runner's budget.
 - **Profiles** (`scripts/profiles/<name>.mjs`: data, auth, storage, compute,
   messaging, observe, all) say what runs, which **fixtures** write the
   project (`scripts/fixtures/<name>.mjs`) and which **seeders** fill it
@@ -2030,8 +2072,14 @@ collections, match blocks that reach no data). "Add starter rules"
 carries, and type checks; inserted before the documents block closes.
 
 **Decisions** (`decisions.ts`, `decisions-panel.tsx`, `decision-detail.tsx`)
-read the official Requests websocket, unchanged — its JSON is pinned by
-conformance fixtures. **History arrives as one JSON array, live events
+are drawn by the rules kit's `DecisionsShell`, the same panel as Storage's:
+one filter field (Firestore matches path, user and method in the browser;
+Storage parses `path uid:<uid> method` into the topic's parameters), All /
+Denied, Clear, the count line, two-line rows from `DecisionRowParts`
+(verdict, method, path; when, who, extras, the draft's flip, the deciding
+lines) and the "Holding the last N…" footer. They read the official
+Requests websocket, unchanged — its JSON is pinned by conformance
+fixtures. **History arrives as one JSON array, live events
 one by one**; the old drawer parsed only objects and silently dropped the
 replay. Typed rules values (`intValue`, `pathValue`, `undefined` …) become
 `FsValue` through `fromRulesValue`. A decision opens onto who asked
@@ -2268,23 +2316,9 @@ indenting: paste instead (`pasteRules`).
   as a map; it matches on the wire's own field names, so a person's own
   one-key map is not mistaken for it. The dialog names the scope and whose
   identity it reads as, because rules apply.
-- Undo (the live indicator's popover, ⌘K): `ChangeLog` in
-  `crates/console-front/src/changelog.rs` is a commit observer keeping a
-  bounded window of commits with the `before`/`after` images the store hands
-  it, so an undo restores the exact document rather than a re-derivation.
-  `GET /changelog` lists, `POST /undo` applies the inverse as **one** commit
-  with a precondition per document, so a change something has moved past is
-  refused whole. Two rules that are easy to get wrong: a document written
-  twice in one commit must collapse to a single inverse (two writes would
-  precondition on different update times and refuse each other), and the
-  undo's own commit is found again by the revision it installed, not by
-  being the newest. The window carries document data, so it is bounded in
-  commits and bytes, drops a commit over `MAX_COMMIT_BYTES` rather than
-  letting a bulk import evict everything, and is attached only when
-  `config.diagnostics` is on — the route is then simply absent, and the
-  console reads a 404 as "diagnostics are off" rather than "nothing
-  happened". The console asks only while the popover is open, because the
-  live channel invalidates `['fs', db, 'changelog']` on every commit.
+- There is no undo: the write log and its undo were taken out (see "The
+  write log and its undo were taken out" under Design), and there is no
+  `changelog.rs`, `GET /changelog` or `POST /undo`.
 - Rules are a page of their own — see "Security rules" below. `?view=rules`
   and `/requests` redirect there.
 - ⌘K is the shell's palette; pages contribute through

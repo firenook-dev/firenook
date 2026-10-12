@@ -131,6 +131,34 @@ also injects the background events the shell would), and every deploy/login
 command (never intercepted). `firenook mcp` serves the running suite to an
 agent; see [Model Context Protocol](#model-context-protocol).
 
+## Console
+
+Firenook has its own console at `/console` on the Emulator UI port —
+`http://127.0.0.1:4000/console` with the default port (`emulators.ui.port` in
+`firebase.json` sets another). It covers every service the suite runs:
+Firestore data and security rules, Authentication (users, activity, the
+inbox of codes and links, settings), Storage files and rules, Functions and
+their invocations, Extensions, Eventarc, Pub/Sub (topics, schedules,
+schemas), Cloud Tasks, Logs and an Overview with each section's health,
+recent problems, snapshots and resets. It follows the engine live over one
+connection per browser, links a thing in one section to where it shows in
+another, and works without network access.
+
+The official Emulator UI is still served at `/` until every row of the
+[console parity checklist](../../support/console-parity.md) is ticked.
+
+The console answers only for `localhost`, `127.0.0.1`, `::1` and the
+`--host` address. Reached by another name — through a reverse proxy, a
+tunnel, a container's service name or a cloud host — it answers
+"This console does not answer for host …" until that name is allowed:
+
+```sh
+npx firenook emulators:start --project demo-my-app --allowed-hosts emulator.internal,dev.example.test
+```
+
+Started with `--host 0.0.0.0` (or `::`) and no `--allowed-hosts`, it answers
+any host name.
+
 ## Configuration
 
 - **Services.** A service starts when `firebase.json` has its top-level
@@ -381,6 +409,7 @@ can still reach external services. Pub/Sub is a full emulator since
 `0.1.0-next.8` (pull, streaming pull, push, ordering, filters, dead-letter,
 seek, snapshots, Avro schemas); Protocol Buffer schemas, IAM and export
 subscriptions are not, and neither are Realtime Database, Hosting, App Hosting
-and Data Connect. Supporting UI routes do not imply full Emulator UI parity.
+and Data Connect. The [console](#console) covers every service the suite runs;
+the official Emulator UI at `/` is kept until the parity checklist is complete.
 Windows power-loss durability and network filesystems have not been qualified;
 the native Windows checks cover local-disk writes, reopen, export and import.

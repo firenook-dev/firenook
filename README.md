@@ -49,7 +49,10 @@ Storage Security Rules, are implemented in Rust; no Java runtime is used.
 Functions run the user's JavaScript in Node workers supervised by Firenook's
 own runtime, and Extensions are resolved and run by Firenook from local,
 vendored or cached sources (or fetched once from the registry); firebase-tools
-is not installed or loaded. Client SDKs are unchanged.
+is not installed or loaded. Client SDKs are unchanged. The engine's own
+console, at `/console` on the Emulator UI port, covers every service the
+suite runs; the [CLI guide](packages/cli/README.md#console) says what it shows
+and when `--allowed-hosts` is needed.
 
 ## Development and verification
 
