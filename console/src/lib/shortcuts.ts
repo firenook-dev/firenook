@@ -248,6 +248,11 @@ export function matchesKey(event: KeyboardEvent, spec: string): boolean {
     if (/^[a-z]$/i.test(event.key)) return event.key.toLowerCase() === key.toLowerCase()
     return event.code === `Key${key.toUpperCase()}`
   }
+  if (key === ' ') {
+    // Space is a key, not a symbol: Shift+Space is a key of its own (Storage's
+    // Quick Look), so the table's Space must not take it.
+    return event.shiftKey === parsed.shift && event.key === ' '
+  }
   if (key.length === 1) {
     // A symbol carries its own Shift: `?` is Shift+/ on one layout and a key
     // of its own on another, so Shift is only checked when it is asked for.

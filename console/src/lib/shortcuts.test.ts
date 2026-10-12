@@ -318,6 +318,10 @@ describe('matching a key', () => {
 
   it('knows the spelled names for keys', () => {
     expect(matchesKey(event(' '), 'Space')).toBe(true)
+    // Space is a key with its own Shift, not a symbol that carries one.
+    expect(matchesKey(event(' ', { shiftKey: true }), 'Space')).toBe(false)
+    expect(matchesKey(event(' ', { shiftKey: true }), 'Shift+Space')).toBe(true)
+    expect(matchesKey(event(' '), 'Shift+Space')).toBe(false)
     expect(matchesKey(event('Escape'), 'Esc')).toBe(true)
     expect(matchesKey(event('Delete'), 'Delete')).toBe(true)
   })
