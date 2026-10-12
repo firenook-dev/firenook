@@ -30,7 +30,7 @@ describe('links between sections', () => {
 
   it('are plain text into a section that is not built yet', () => {
     expect(linkTo({ kind: 'auth.user', key: '|u_9f3k2' }, ready)).toBeNull()
-    expect(linkTo({ kind: 'logs.entry', key: 'c1' }, ready)).toBeNull()
+    expect(linkTo({ kind: 'storage.object', key: 'demo.appspot.com|a.png' }, ready)).toBeNull()
   })
 
   it('are plain text for a kind nobody knows', () => {
