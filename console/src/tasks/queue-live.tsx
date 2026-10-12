@@ -13,6 +13,8 @@ export interface QueueListener {
   rows?: (keys: string[]) => void
   finished?: (batch: TasksFinishedBatch) => void
   reset?: () => void
+  /** The engine took the subscription: a list read before it reads again. */
+  taken?: () => void
 }
 
 interface QueueHub {
@@ -36,6 +38,9 @@ export function useQueueHub(
     },
     onReset: () => {
       for (const listener of listeners.current) listener.reset?.()
+    },
+    onTaken: () => {
+      for (const listener of listeners.current) listener.taken?.()
     },
   })
   const [hub] = useState<QueueHub>(() => ({
@@ -62,6 +67,7 @@ export function useQueueListener(handlers: QueueListener): void {
         rows: (keys) => latest.current.rows?.(keys),
         finished: (batch) => latest.current.finished?.(batch),
         reset: () => latest.current.reset?.(),
+        taken: () => latest.current.taken?.(),
       }),
     [hub],
   )

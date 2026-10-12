@@ -136,6 +136,12 @@ export interface QueueLiveHandlers {
   onFinished?: (batch: TasksFinishedBatch) => void
   /** The subscription lost track: the page's tables go back to page one. */
   onReset?: () => void
+  /**
+   * The engine took the subscription. `tasks.queue` names what changes from
+   * then on, so a table read before it (its first read races the
+   * subscription) reads its rows again, in place.
+   */
+  onTaken?: () => void
 }
 
 /** Holds `tasks.queue` for the open queue (by its engine key); task details are read again here. */
@@ -160,6 +166,7 @@ export function useQueueLive(
       handlers.onReset?.()
     },
     onEnd: () => handlers.onReset?.(),
+    onTaken: () => handlers.onTaken?.(),
   })
 }
 

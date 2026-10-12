@@ -577,3 +577,36 @@ test('J-TK-17 ⌘K opens a queue and acts on the queue in view', async ({ page, 
   await page.getByRole('option', { name: `Resume ${queue.queue}` }).click()
   await expect(page.getByTestId('queue-pause')).toBeVisible()
 })
+
+test('a task enqueued while the queue page subscribes is listed', async ({ page, engine }) => {
+  const queue = await registerQueue(engine, uniqueId('race'))
+  // The page's live subscriptions wait until its first read of the tasks is
+  // in, and a task is enqueued in between: `tasks.queue` names what changes
+  // from the moment the engine takes it, so no event will tell of this one.
+  let release: (() => void) | undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route(/\/console\/api\/v1\/live\/[^/]+\/subscriptions$/, async (route) => {
+    await held
+    await route.continue()
+  })
+  try {
+    const read = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/console/api/v1/tasks/tasks',
+    )
+    await openQueue(page, engine, queue.queue)
+    await read
+    const id = `race-${Date.now()}`
+    // An hour out, so it stays pending for the length of the journey.
+    expect(
+      (await enqueueOverPort(engine, queue, { orderId: id }, { id, scheduleDelaySeconds: 3_600 }))
+        .status,
+    ).toBe(200)
+    release?.()
+    await expect(rowOf(page.getByTestId('task-table'), id)).toBeVisible()
+  } finally {
+    release?.()
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+  }
+})

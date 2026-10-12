@@ -17,7 +17,7 @@ import {
   TrashIcon,
   TrayIcon,
 } from '@phosphor-icons/react'
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useRef, useState } from 'react'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import type { TasksTaskRow } from '@/api/generated/messaging/TasksTaskRow'
@@ -43,6 +43,7 @@ import { useShortcuts } from '@/lib/shortcuts'
 import { startDeleteTasks, startRunTasks } from '../api'
 import { errorText } from '@/messaging/confirm-popover'
 import { taskList } from '../queries'
+import { readStarted } from '@/lib/live/use-live-topic'
 import { useQueueListener } from '../queue-live'
 import {
   STATE_DETAIL,
@@ -237,7 +238,17 @@ export function TasksView({
   const list = taskList(project, queue.key, state, usable)
   const query = useInfiniteQuery(list.options)
   const rows = useCursorRows(query, { ...list, q: usable })
-  useQueueListener({ rows: rows.applyKeys, reset: rows.reset })
+  const queryClient = useQueryClient()
+  useQueueListener({
+    rows: rows.applyKeys,
+    reset: rows.reset,
+    // Rows read before the engine took the subscription are read again, in
+    // place: a task enqueued between the two was never going to be told.
+    taken: () => {
+      if (readStarted(queryClient.getQueryState(list.queryKey)))
+        void queryClient.refetchQueries({ queryKey: list.queryKey, exact: true })
+    },
+  })
 
   // Ticked rows, by row key; cleared when the list they were ticked in changes.
   const scope = `${queue.key}|${state ?? ''}|${usable ?? ''}`

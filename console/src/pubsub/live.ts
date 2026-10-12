@@ -366,6 +366,8 @@ export interface DeliveriesLiveHandlers {
   onAdded?: (count: number) => void
   /** Too many to name, a reconnect, or a reset: back to page one, the counts with it. */
   onReset?: () => void
+  /** The engine took the subscription: a head read before it reads again (`TopicLiveHandlers.onTaken`). */
+  onTaken?: () => void
 }
 
 /** Holds `pubsub.deliveries` for the topic whose Deliveries tab is open. */
@@ -385,6 +387,7 @@ export function useDeliveriesLive(
     },
     onReset: () => handlers.onReset?.(),
     onEnd: () => handlers.onReset?.(),
+    onTaken: () => handlers.onTaken?.(),
   })
 }
 

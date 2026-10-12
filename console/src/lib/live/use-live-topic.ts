@@ -228,6 +228,18 @@ export function useInvalidateOn<K extends TopicName>(
     onEnd() {
       invalidator.flush(latest.current.resetKeys)
     },
+    // An invalidation topic names what changes from the moment the engine
+    // takes it: what was read before then (the page's first read races the
+    // subscription) is read again in place. Only queries on screen whose
+    // read had started; one not read yet reads after the take anyway.
+    onTaken() {
+      for (const queryKey of latest.current.resetKeys)
+        void queryClient.refetchQueries({
+          queryKey,
+          type: 'active',
+          predicate: (query) => readStarted(query.state),
+        })
+    },
   })
   return useSubscription(topic, params, listener, channel)
 }

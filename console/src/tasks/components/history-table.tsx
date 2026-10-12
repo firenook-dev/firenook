@@ -39,6 +39,7 @@ import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
 import { taskAsCode } from '../code'
 import { historyList, taskQuery } from '../queries'
+import { readStarted } from '@/lib/live/use-live-topic'
 import { useQueueListener } from '../queue-live'
 import { displayName, generatedDetail, outcomeChip } from '../states'
 import { FilterLine, useTaskFields, usableQuery } from './filter-line'
@@ -182,6 +183,10 @@ export function HistoryView({
     // reader's rows still and counts them above when scrolled away.
     finished: (batch) => (batch.overflow ? rows.reset() : rows.applyKeys(batch.ids)),
     reset: rows.reset,
+    taken: () => {
+      if (readStarted(client.getQueryState(list.queryKey)))
+        void client.refetchQueries({ queryKey: list.queryKey, exact: true })
+    },
   })
   const [cursor, setCursor] = useState<TasksHistoryRow | undefined>(undefined)
   const openRow = rows.rows.find((row) => row.taskId === taskId)

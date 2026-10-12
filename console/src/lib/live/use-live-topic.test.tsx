@@ -238,4 +238,34 @@ describe('useInvalidateOn', () => {
     act(() => listener?.onEnd({ code: 'unavailable', message: 'gone' }))
     expect(spy).toHaveBeenCalledWith({ queryKey: ['fs', '(default)'] })
   })
+
+  it('reads again, once taken, only what was read before the take', async () => {
+    const fake = fakeChannel()
+    const read = vi.fn(async () => 'rows')
+    const unread = vi.fn(async () => 'rows')
+    // Read before the take: read again. Known but never asked for: left alone.
+    await client.fetchQuery({ queryKey: ['ext', 'p', 'list'], queryFn: read })
+    client.getQueryCache().build(client, { queryKey: ['ext', 'p', 'other'], queryFn: unread })
+    const spy = vi.spyOn(client, 'refetchQueries')
+    renderHook(
+      () =>
+        useInvalidateOn(
+          'extensions.changes',
+          {},
+          { keys: () => [], resetKeys: [['ext', 'p']] },
+          fake.channel,
+        ),
+      { wrapper },
+    )
+    act(() => fake.active()[0]?.listener.onTaken?.())
+    expect(spy).toHaveBeenCalledTimes(1)
+    const filters = spy.mock.calls[0]?.[0]
+    expect(filters?.queryKey).toEqual(['ext', 'p'])
+    expect(filters?.type).toBe('active')
+    const list = client.getQueryCache().find({ queryKey: ['ext', 'p', 'list'] })
+    const other = client.getQueryCache().find({ queryKey: ['ext', 'p', 'other'] })
+    expect(list && filters?.predicate?.(list)).toBe(true)
+    expect(other && filters?.predicate?.(other)).toBe(false)
+    expect(unread).not.toHaveBeenCalled()
+  })
 })

@@ -51,7 +51,7 @@ import { useCursorRows } from '@/components/console/use-cursor-rows'
 import { formatDuration, formatNumber } from '@/lib/format'
 import { linkTo } from '@/lib/links'
 import type { SubscriptionStatus } from '@/lib/live/channel'
-import { createInvalidator } from '@/lib/live/use-live-topic'
+import { createInvalidator, readStarted } from '@/lib/live/use-live-topic'
 import { linkToLogs } from '@/lib/sections/logs'
 import { type SectionLink, sectionById } from '@/lib/services'
 import { useShortcuts } from '@/lib/shortcuts'
@@ -448,6 +448,14 @@ function DeliveriesTable({
       setNewAbove(0)
       cursor.reset()
       invalidator.push([countsKey])
+    },
+    // A head (and its counts) read before the engine took the subscription
+    // is read again: a delivery between the two was never going to be told.
+    onTaken: () => {
+      if (readStarted(queryClient.getQueryState(list.queryKey))) {
+        void readHead()
+        void queryClient.refetchQueries({ queryKey: countsKey, exact: true })
+      }
     },
   })
   useEffect(() => onLiveStatus(live), [live, onLiveStatus])

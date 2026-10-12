@@ -40,6 +40,7 @@ import { declareTopic } from '@/lib/live/topics'
 import {
   type Handlers,
   createInvalidator,
+  readStarted,
   useInvalidateOn,
   useLiveTopic,
 } from '@/lib/live/use-live-topic'
@@ -189,6 +190,20 @@ export function useConfigLive(
         authKeys.summary(project),
       ])
       handlers.onReset?.()
+    },
+    // What was read before the engine took the subscription is read again
+    // in place: a tenant created between the two was never going to be told.
+    onTaken: () => {
+      for (const queryKey of [
+        authKeys.allTenantPicker(project),
+        authKeys.allConfig(project),
+        authKeys.summary(project),
+      ])
+        void queryClient.refetchQueries({
+          queryKey,
+          type: 'active',
+          predicate: (query) => readStarted(query.state),
+        })
     },
   })
 }
