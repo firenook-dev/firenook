@@ -227,14 +227,8 @@ dedicated.describe('with engines of their own', () => {
       const first = await context.newPage()
       await first.goto(`${engine.origin}/console/firestore`)
       await expect(badgeOf(first)).toHaveText(/^engine /)
-      // Whether this engine can clear Firestore at all: on an empty database
-      // the job is over at once, and a refusal leaves nothing behind.
+      // A clear of the empty database: the job is over at once.
       const probe = await clearFirestore(first)
-      const refused = JSON.stringify(probe.body).includes('cannot be cleared from the console')
-      dedicated.skip(
-        probe.status === 400 && refused,
-        'Firestore cannot be cleared from the console yet (Section::clear, filled by the observe stream)',
-      )
       expect(probe.status).toBe(202)
       await expect
         .poll(async () => {

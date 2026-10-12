@@ -243,10 +243,8 @@ dedicated.describe('the Overview with engines of their own', () => {
       const sections = (await rows.evaluateAll((found) =>
         found.map((row) => row.getAttribute('data-testid')?.replace(/^overview-reset-/, '') ?? ''),
       )) as string[]
-      dedicated.skip(
-        sections.length < 2,
-        'only one section of this engine can be reset from the console so far (each stream lands its clear with its pages)',
-      )
+      // Firestore's seed and the topic made above, at least.
+      expect(sections).toEqual(expect.arrayContaining(['firestore', 'pubsub']))
       // The project id, typed exactly, is the only way to the button.
       await page.getByTestId('overview-reset-everything').click()
       const confirm = page.getByTestId('reset-dialog-confirm')

@@ -1544,7 +1544,6 @@ test('an upload reaches the app’s function, and its event can be sent again', 
   page,
   engine,
 }) => {
-  const { readFileSync } = await import('node:fs')
   const { default: bucket } = bucketsOf(engine)
   const events = async (name: string) => {
     const response = await ownerFetch(engine, `${documentsOf(engine)}:runQuery`, {
@@ -1585,13 +1584,8 @@ test('an upload reaches the app’s function, and its event can be sent again', 
   })
   const delivery = inspector(page).getByTestId('activity-delivery').first()
   await expect(delivery).toContainText('Sent to the Functions emulator')
-  // Named as a link only once the Functions section is built.
-  const functionsBuilt = /\bbuilt: true\b/.test(
-    readFileSync('src/lib/sections/functions.ts', 'utf8'),
-  )
-  if (functionsBuilt)
-    await expect(delivery.getByRole('link', { name: 'storageFinalized' })).toBeVisible()
-  else await expect(delivery.getByRole('link')).toHaveCount(0)
+  // Named as a link to the function, in Functions.
+  await expect(delivery.getByRole('link', { name: 'storageFinalized' })).toBeVisible()
   // The v1 body the function got names the same object, as the function recorded it.
   const payloads = inspector(page).getByTestId('event-payloads')
   await payloads.getByRole('tab', { name: 'Raw' }).click()
@@ -1828,13 +1822,10 @@ test('links from elsewhere open a file, and a decision on the Rules page', async
   const detail = other.getByTestId('decision-detail')
   await expect(detail).toBeVisible()
   await expect(detail.getByTestId('decision-path')).toHaveText(seed.names.avatar)
-  // Its uid links to Authentication only once that section is built.
-  const { readFileSync } = await import('node:fs')
-  const authBuilt = /\bbuilt: true\b/.test(readFileSync('src/lib/sections/auth.ts', 'utf8'))
+  // Its uid links to the user, in Authentication.
   const uid = detail.getByTestId('decision-who')
   await expect(uid).toContainText(person('grace').uid)
-  if (authBuilt) await expect(uid.getByRole('link')).toBeVisible()
-  else await expect(uid.getByRole('link')).toHaveCount(0)
+  await expect(uid.getByRole('link')).toBeVisible()
   await other.close()
 })
 

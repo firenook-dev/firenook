@@ -54,13 +54,10 @@ test('an extension’s event reaches its handler live, with the trace of who got
   )
   await expect(delivered.getByTestId('delivery-outcome')).toContainText('Succeeded')
   await expect(delivered.getByTestId('delivery-invocation')).toContainText('#')
-  // The invocation opens in Functions once that section is built; until then it is plain text.
-  const invocationLink = delivered.getByTestId('delivery-invocation-link')
-  if ((await invocationLink.count()) > 0) {
-    await invocationLink.click()
-    await expect(page).toHaveURL(/\/functions\/invocations\?invocation=/)
-    await page.goBack()
-  }
+  // The invocation opens in Functions.
+  await delivered.getByTestId('delivery-invocation-link').click()
+  await expect(page).toHaveURL(/\/functions\/invocations\?invocation=/)
+  await page.goBack()
   const filtered = detail.locator(
     '[data-testid="delivery"][data-function="us-central1-onGreetedVip"]',
   )

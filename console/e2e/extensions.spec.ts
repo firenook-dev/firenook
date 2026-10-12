@@ -73,7 +73,7 @@ test('the overview lists each instance with its source, readiness, APIs, roles a
   await expect(page.getByTestId('source-files')).toContainText('extensions/greeter.secret.local')
 
   // Functions: the task-queue resource says why it receives nothing, and the
-  // HTTP one links to its function (plain text while Functions is not built).
+  // HTTP one links to its function.
   await page.getByTestId('instance-tab-functions').click()
   await expect(page).toHaveURL(/view=functions/)
   const backfill = page.locator('[data-testid="extension-function"][data-resource="backfill"]')
@@ -86,11 +86,8 @@ test('the overview lists each instance with its source, readiness, APIs, roles a
   await expect(greetRow).toHaveAttribute('data-status', 'receiving')
   const link = greetRow.getByTestId('extension-function-link')
   await expect(link).toContainText('us-central1-ext-greeter-greet')
-  const functionsBuilt = (await link.getByTestId('extension-function-link-link').count()) > 0
-  if (functionsBuilt) {
-    await link.getByTestId('extension-function-link-link').click()
-    await expect(page).toHaveURL(/\/functions\?function=us-central1-ext-greeter-greet/)
-  }
+  await link.getByTestId('extension-function-link-link').click()
+  await expect(page).toHaveURL(/\/functions\?function=us-central1-ext-greeter-greet/)
 })
 
 test('the configuration says where each value comes from, and reveals a secret on request', async ({

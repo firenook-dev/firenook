@@ -571,17 +571,10 @@ test('a schedule says when it runs next, runs now, and keeps its phase across a 
     if (source.restore()) await nextLoad(engine, 'default', before)
   }
 
-  // Its schedule in Pub/Sub: a link once that page is built, words until then.
+  // Its schedule, in Pub/Sub.
   await openFunction(page, engine, 'nightly', 'run')
-  const link = page.getByTestId('schedule-link')
-  if ((await link.count()) > 0) {
-    await link.click()
-    await expect(page).toHaveURL(/\/console\/pubsub/)
-  } else {
-    await expect(page.getByTestId('schedule-form')).toContainText(
-      'Runs through Pub/Sub topic firebase-schedule-nightly.',
-    )
-  }
+  await page.getByTestId('schedule-link').click()
+  await expect(page).toHaveURL(/\/console\/pubsub/)
 })
 
 test('enqueue a task through Cloud Tasks and follow its attempt', async ({ page, engine }) => {
@@ -605,18 +598,13 @@ test('enqueue a task through Cloud Tasks and follow its attempt', async ({ page,
     view.detail.request.headers.some((header) => header.name === 'x-cloudtasks-queuename'),
   ).toBe(true)
   expect(view.detail.logs.some((line) => line.message.includes('a.png'))).toBe(true)
-  // The task, in Cloud Tasks: a link once that section is built, its name until then.
+  // The task, in Cloud Tasks.
   expect(view.refs.some((ref) => ref.kind === 'tasks.task' || ref.kind === 'tasks.queue')).toBe(
     true,
   )
 })
 
 test('a blocking function decides a sign-up, tested and for real', async ({ page, engine }) => {
-  const snapshot = await functionsSnapshot(engine)
-  test.skip(
-    !snapshot.functions.some((summary) => summary.name === 'beforeCreate'),
-    'The auth stream’s fixture (auth.js) does not export beforeCreate on this branch yet.',
-  )
   await openFunction(page, engine, 'beforeCreate', 'run')
   await page.getByTestId('blocking-email').fill('ada@blocked.test')
   await page.getByTestId('blocking-test').click()

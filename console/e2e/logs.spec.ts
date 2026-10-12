@@ -6,8 +6,6 @@ import { setVisibility } from './support/live'
 import {
   ADA,
   GRACE,
-  NEEDS_ATTRIBUTION,
-  attributesInvocations,
   callFunction,
   cursorOf,
   facetsOf,
@@ -34,10 +32,10 @@ import {
 // with the engine's own answer. Journeys share the worker's engine and
 // mark their own lines (a uid, a burst's size), so none reads another's.
 //
-// Functions output on this engine is plain until compute's monitor says
-// which invocation printed each line: the journeys about invocations
-// (attribution, a structured logger payload, a handler's error) run once
-// it does, and skip with that reason before.
+// Every Functions line names the invocation that printed it (compute's
+// monitor, read by observe's `functions_input`), so the journeys about
+// invocations — attribution, a structured logger payload, a handler's
+// error — hold on every engine.
 
 /** Errors the engine logs itself: a call to `stalls` times out after its one second. */
 const TIMED_OUT = 'Your function timed out after ~1s.'
@@ -71,22 +69,19 @@ test('history arrives first, then each new line as it is logged', async ({ page,
   await expect(logRows(page).last()).toBeInViewport()
   await expect(page.getByTestId('logs-pause')).toHaveText('Pause')
 
-  if (await attributesInvocations(engine)) {
-    // Each line names the function that printed it, and the call ends with one line.
-    const end = logRow(page, /Finished "us-central1-hello"/).last()
-    await expect(end).toBeVisible()
-    for (const row of [begin, loading, empty, end])
-      await expect(part(row, 'source')).toHaveText('hello')
-    // The start line says which request it answers.
-    await expect(begin.getByTestId('log-row-request')).toHaveText(`GET /?uid=${uid}`)
-  }
+  // Each line names the function that printed it, and the call ends with one line.
+  const end = logRow(page, /Finished "us-central1-hello"/).last()
+  await expect(end).toBeVisible()
+  for (const row of [begin, loading, empty, end])
+    await expect(part(row, 'source')).toHaveText('hello')
+  // The start line says which request it answers.
+  await expect(begin.getByTestId('log-row-request')).toHaveText(`GET /?uid=${uid}`)
 })
 
 test('a line says which invocation printed it, and opens exactly that one', async ({
   page,
   engine,
 }) => {
-  test.skip(!(await attributesInvocations(engine)), NEEDS_ATTRIBUTION)
   const uid = unique('u')
   await callFunction(engine, 'hello', { uid })
   await openLogs(page, engine)
@@ -136,23 +131,21 @@ test('a payload opens as a tree whose values filter the log', async ({ page, eng
   await expect(logRows(page).first()).toHaveAttribute('data-cursor', denial.cursor)
   await expect(page.getByTestId('logs-match-count')).toHaveText('1 line')
 
-  if (await attributesInvocations(engine)) {
-    // A firebase-functions logger call: its fields are the payload, the
-    // message its text, its severity the level.
-    const uid = unique('u')
-    await callFunction(engine, 'hello', { uid })
-    await openLogs(page, engine, { q: `"Cart is empty"` })
-    const empty = logRows(page).last()
-    await expect(part(empty, 'message')).toHaveText('Cart is empty')
-    await empty.click()
-    await page.getByRole('button', { name: 'Close the line' }).click()
-    await page.keyboard.press('ArrowRight')
-    const cart = page.locator('[data-testid="payload-tree-row"][data-path="cartId"]').last()
-    await expect(cart).toContainText('"c_19"')
-    await cart.hover()
-    await cart.getByTestId('payload-tree-filter').click()
-    await expect.poll(() => queryOf(page)).toBe('"Cart is empty" payload.cartId:"c_19"')
-  }
+  // A firebase-functions logger call: its fields are the payload, the
+  // message its text, its severity the level.
+  const uid = unique('u')
+  await callFunction(engine, 'hello', { uid })
+  await openLogs(page, engine, { q: `"Cart is empty"` })
+  const empty = logRows(page).last()
+  await expect(part(empty, 'message')).toHaveText('Cart is empty')
+  await empty.click()
+  await page.getByRole('button', { name: 'Close the line' }).click()
+  await page.keyboard.press('ArrowRight')
+  const cart = page.locator('[data-testid="payload-tree-row"][data-path="cartId"]').last()
+  await expect(cart).toContainText('"c_19"')
+  await cart.hover()
+  await cart.getByTestId('payload-tree-filter').click()
+  await expect.poll(() => queryOf(page)).toBe('"Cart is empty" payload.cartId:"c_19"')
 })
 
 test('the feed follows, freezes the moment you scroll, and catches up on End', async ({
@@ -184,8 +177,8 @@ test('the feed follows, freezes the moment you scroll, and catches up on End', a
   await page.keyboard.press('End')
   await expect(page.getByTestId('logs-pause')).toHaveText('Pause')
   await expect.poll(() => new URL(page.url()).searchParams.get('paused')).toBeNull()
-  // The burst's last line is in view (an attributing engine ends the call
-  // with its Finished line, under it).
+  // The burst's last line is in view (the call ends with its Finished
+  // line, under it).
   await expect(logRow(page, 'burst line 4999 of 5000')).toBeInViewport()
   await expect(logRows(page).last()).toBeInViewport()
 
@@ -306,7 +299,7 @@ test('debug lines show by default, and engine internals are one switch away', as
   await callFunction(engine, 'debugs')
   const debug = logRow(page, 'debug detail for the e2e').last()
   await expect(debug).toBeVisible()
-  if (await attributesInvocations(engine)) await expect(part(debug, 'level')).toHaveText('debug')
+  await expect(part(debug, 'level')).toHaveText('debug')
 })
 
 test('a line of many lines opens in place, and copies whole', async ({ page, engine }) => {
@@ -337,23 +330,21 @@ test('a line of many lines opens in place, and copies whole', async ({ page, eng
   expect(copied).toContain('https://firebase.google.com/docs/functions/manage-functions')
   expect(copied).toMatch(/ ERROR /)
 
-  if (await attributesInvocations(engine)) {
-    // A handler's error: its stack under the message.
-    await callFunction(engine, 'fails')
-    await openLogs(page, engine, { q: 'level:error "cannot read"' })
-    const failed = logRows(page).last()
-    await expect(part(failed, 'message')).toContainText("TypeError: cannot read 'id' of undefined")
-    await expect(failed.locator('[data-part="more"]')).toHaveText(/^\+[\d,]+ lines?$/)
-    await failed.click()
-    await page.getByRole('button', { name: 'Close the line' }).click()
-    await page.keyboard.press('ArrowRight')
-    await expect(
-      page
-        .locator('[data-testid="feed-row"]')
-        .filter({ has: failed })
-        .getByTestId('log-detail-message'),
-    ).toContainText('at ')
-  }
+  // A handler's error: its stack under the message.
+  await callFunction(engine, 'fails')
+  await openLogs(page, engine, { q: 'level:error "cannot read"' })
+  const failed = logRows(page).last()
+  await expect(part(failed, 'message')).toContainText("TypeError: cannot read 'id' of undefined")
+  await expect(failed.locator('[data-part="more"]')).toHaveText(/^\+[\d,]+ lines?$/)
+  await failed.click()
+  await page.getByRole('button', { name: 'Close the line' }).click()
+  await page.keyboard.press('ArrowRight')
+  await expect(
+    page
+      .locator('[data-testid="feed-row"]')
+      .filter({ has: failed })
+      .getByTestId('log-detail-message'),
+  ).toContainText('at ')
 })
 
 test('a refused read is a line that says why, told apart from the console’s own', async ({
@@ -447,30 +438,24 @@ test('a Google Emulator UI link opens the same view; foreign params are not read
   page,
   engine,
 }) => {
-  const attributed = await attributesInvocations(engine)
   await page.goto(
     `${engine.origin}/console/logs?q=${encodeURIComponent('metadata.function.name="us-central1-hello"')}`,
   )
   await expect.poll(() => queryOf(page)).toBe('function:us-central1-hello')
   await expect(page.getByTestId('logs-filter-input')).toHaveValue('function:us-central1-hello')
-  if (attributed) {
-    await expect(logRow(page, 'loading cart for').first()).toBeVisible()
-    for (const text of await logRows(page).allInnerTexts()) expect(text).toContain('hello')
-    // The link other sections build (`linkToLogs`): one invocation.
-    await logRow(page, 'loading cart for').last().click()
-    const execution =
-      /[0-9a-f]{6}-\d+/.exec(await page.getByTestId('fact-execution').innerText())?.[0] ?? ''
-    expect(execution).not.toBe('')
-    await page.goto(
-      `${engine.origin}/console/logs?q=${encodeURIComponent(
-        `function:us-central1-hello execution:${execution}`,
-      )}`,
-    )
-    await expect(logRows(page)).toHaveCount(4)
-  } else {
-    // Functions lines name no function yet: the filter is right, and says it matches nothing.
-    await expect(page.getByTestId('logs-no-match')).toBeVisible()
-  }
+  await expect(logRow(page, 'loading cart for').first()).toBeVisible()
+  for (const text of await logRows(page).allInnerTexts()) expect(text).toContain('hello')
+  // The link other sections build (`linkToLogs`): one invocation.
+  await logRow(page, 'loading cart for').last().click()
+  const execution =
+    /[0-9a-f]{6}-\d+/.exec(await page.getByTestId('fact-execution').innerText())?.[0] ?? ''
+  expect(execution).not.toBe('')
+  await page.goto(
+    `${engine.origin}/console/logs?q=${encodeURIComponent(
+      `function:us-central1-hello execution:${execution}`,
+    )}`,
+  )
+  await expect(logRows(page)).toHaveCount(4)
 
   // A param of another tool's making is not a filter: every line shows.
   await openLogs(page, engine, { function: 'us-central1-hello' })

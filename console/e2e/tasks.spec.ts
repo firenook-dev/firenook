@@ -142,33 +142,25 @@ test('J-TK-02 a task enqueued from the console runs, and leaves Tasks for Histor
   const attempt = inspector.getByTestId('attempt').first()
   // onTaskDispatched answers 204.
   await expect(attempt.getByTestId('attempt-status')).toHaveText('204')
-  // The invocation it caused, from compute's record: text while Functions
-  // is not built, a link once it is.
-  await expect(attempt.getByTestId('attempt-invocation')).toBeVisible()
+  // The invocation it caused, from compute's record, a link into Functions.
+  await expect(attempt.getByTestId('attempt-invocation').getByRole('link')).toBeVisible()
 
   await page.getByRole('tab', { name: /^History/ }).click()
   const row = rowOf(page.getByTestId('history-table'), id)
   await expect(row.getByTestId('history-outcome')).toHaveText('succeeded')
   await expect(row.getByTestId('task-result')).toHaveText('204')
 
-  // Logs links appear on attempts once Logs is built; until then there is
-  // no link into its placeholder.
-  const logs = page.getByTestId('attempt-logs')
+  // Each attempt links to the lines its function printed, in Logs.
   await row.click()
   await page
     .getByTestId('task-inspector')
     .getByRole('tab', { name: /^Attempts/ })
     .click()
   await expect(page.getByTestId('attempt').first()).toBeVisible()
-  if ((await logs.count()) === 0) {
-    await page.goto(`${engine.origin}/console/logs`)
-    await expect(page.getByText('This section is not built yet')).toBeVisible()
-  } else {
-    await expect(logs.first()).toHaveAttribute(
-      'href',
-      /function%3Aus-central1-processOrder|function:us-central1-processOrder/,
-    )
-  }
+  await expect(page.getByTestId('attempt-logs').first()).toHaveAttribute(
+    'href',
+    /function%3Aus-central1-processOrder|function:us-central1-processOrder/,
+  )
 })
 
 test('J-TK-03 a task name used before in this run is refused, and the dialog says why', async ({

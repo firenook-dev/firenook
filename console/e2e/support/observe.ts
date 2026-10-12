@@ -349,23 +349,6 @@ export async function matchCount(page: Page): Promise<number> {
 }
 
 /**
- * Whether the engine says which invocation printed each Functions line
- * (compute's monitor attribution, read by observe's `functions_input`).
- * Until it does, Functions lines are plain: no function, no execution, no
- * structured payload, no end line for a call whose body is drained late.
- */
-export async function attributesInvocations(engine: ObservedEngine): Promise<boolean> {
-  const uid = unique('probe')
-  await callFunction(engine, 'hello', { uid })
-  const line = await lineOf(engine, `"loading cart for ${uid}"`)
-  return line.execution !== undefined && line.function !== undefined
-}
-
-/** Why a journey that needs invocation attribution does not run on this engine. */
-export const NEEDS_ATTRIBUTION =
-  "this engine does not attribute Functions lines to their invocations yet (compute's monitor, read by functions_input)"
-
-/**
  * Resolves a Kumo colour token in the page, as the browser paints it
  * (`--color-kumo-danger` → `rgb(…)` or `oklch(…)`), for comparing with a
  * computed style: as a text colour, or as a background.

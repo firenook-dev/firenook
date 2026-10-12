@@ -1,15 +1,7 @@
 import { expect, test } from './fixtures'
 import { readClipboard } from './support/clipboard'
 import { statusOf } from './support/shell'
-import {
-  ADA,
-  attributesInvocations,
-  callFunction,
-  lineOf,
-  logRow,
-  runWithAdminSdk,
-  writeOnPort,
-} from './support/observe'
+import { ADA, callFunction, lineOf, logRow, runWithAdminSdk, writeOnPort } from './support/observe'
 
 // The Overview against the worker's engine (project `observe`: every
 // service, seeded by every stream's seeder): what runs and where, the
@@ -140,16 +132,14 @@ test('recent problems: a failure lands on the page, and opens in Logs', async ({
   await expect(opened).toBeInViewport()
   await expect(opened).toHaveAttribute('aria-selected', 'true')
 
-  if (await attributesInvocations(engine)) {
-    // A handler's own error, by its message.
-    await page.goto(`${engine.origin}/console`)
-    await callFunction(engine, 'fails')
-    const thrown = page
-      .getByTestId('overview-problem')
-      .filter({ hasText: "TypeError: cannot read 'id' of undefined" })
-    await expect(thrown).toBeVisible()
-    await expect(thrown).toContainText('fails')
-  }
+  // A handler's own error, by its message.
+  await page.goto(`${engine.origin}/console`)
+  await callFunction(engine, 'fails')
+  const thrown = page
+    .getByTestId('overview-problem')
+    .filter({ hasText: "TypeError: cannot read 'id' of undefined" })
+  await expect(thrown).toBeVisible()
+  await expect(thrown).toContainText('fails')
   // "Open logs" is every problem.
   await page.goto(`${engine.origin}/console`)
   await page.getByTestId('overview-open-logs').click()

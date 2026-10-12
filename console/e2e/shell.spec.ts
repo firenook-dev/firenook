@@ -334,20 +334,14 @@ test('paused background triggers are said on every page, with what was dropped a
 })
 
 /** Whether the section page on screen is its real screen, not the placeholder. */
-const built = async (page: Page) =>
-  (await page.getByText('This section is not built yet').count()) === 0
-
 test.describe('kit pages', () => {
   // The first section pages built on the kit's DataTable and FeedList.
-  // They join these journeys as their sections are built; until then the
-  // placeholder says so and the journeys wait for them.
   test('a table page reads as a grid, row by row, with its inspector’s steps', async ({
     page,
     engine,
   }) => {
     await page.goto(`${engine.origin}/console/auth`)
     await expect(page.getByRole('heading', { name: 'Authentication' }).first()).toBeVisible()
-    test.skip(!(await built(page)), 'Authentication, the first DataTable page, is not built yet')
     const grid = page.getByRole('grid').first()
     await expect(grid).toBeVisible()
     await expect(grid).toMatchAriaSnapshot(`
@@ -372,7 +366,6 @@ test.describe('kit pages', () => {
   test('a feed page is a log that does not speak every line', async ({ page, engine }) => {
     await page.goto(`${engine.origin}/console/logs`)
     await expect(page.getByRole('heading', { name: 'Logs' }).first()).toBeVisible()
-    test.skip(!(await built(page)), 'Logs, the first FeedList page, is not built yet')
     const log = page.getByRole('log').first()
     await expect(log).toBeVisible()
     await expect(log).toHaveAttribute('aria-live', 'off')
