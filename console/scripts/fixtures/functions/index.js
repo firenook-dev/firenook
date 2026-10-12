@@ -10,13 +10,28 @@
 
 const { onCall, onRequest } = require('firebase-functions/v2/https')
 
+/**
+ * A setting of the profile's `fixtureEnv`: from `fixture-env.json`, which
+ * the fixture writes beside this file and which discovery and the running
+ * functions both read (the emulator hands `.env` to the running functions
+ * only), else the environment.
+ */
+const fixtureEnv = (() => {
+  try {
+    return require('./fixture-env.json')
+  } catch {
+    return {}
+  }
+})()
+const setting = (name) => fixtureEnv[name] ?? process.env[name]
+
 const STREAMS = ['auth', 'storage', 'compute', 'messaging', 'observe']
 /** Loaded only when FIXTURE_STREAMS names them. */
 const NAMED_ONLY = ['shell']
 
 // The starting journey's slow codebase: a busy wait while the module loads,
 // so discovery takes this long and the section stays "starting".
-const slow = Number(process.env.SLOW_LOAD_MS ?? 0)
+const slow = Number(setting('SLOW_LOAD_MS') ?? 0)
 if (slow > 0) {
   const until = Date.now() + slow
   while (Date.now() < until) {
@@ -45,7 +60,7 @@ add('index.js', {
   echo: onCall((request) => ({ data: request.data, uid: request.auth?.uid ?? null })),
 })
 
-const wanted = (process.env.FIXTURE_STREAMS ?? '')
+const wanted = (setting('FIXTURE_STREAMS') ?? '')
   .split(',')
   .map((name) => name.trim())
   .filter(Boolean)
