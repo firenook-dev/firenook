@@ -406,7 +406,7 @@ impl ExtensionsControl {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (path, hash) in files {
-            writes.insert(path, hash);
+            writes.insert(written_key(&path), hash);
         }
     }
 
@@ -488,14 +488,17 @@ impl ExtensionsControl {
                     .await
                     .ok()
                     .map(|bytes| content_hash(&bytes));
-                let own = self
+                let key = written_key(path);
+                let mut writes = self
                     .inner
                     .self_writes
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get(path)
-                    .copied();
-                if own != Some(current) {
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if writes.get(&key).copied() != Some(current) {
+                    // The file moved on from what the console wrote: an
+                    // edit. Forget the write, so the same bytes written
+                    // again later by someone else are an edit too.
+                    writes.remove(&key);
                     changed = true;
                 }
             }
@@ -521,6 +524,22 @@ impl ExtensionsControl {
                 );
             }
         }
+    }
+}
+
+/// The key a written file is remembered under: its directory's canonical
+/// spelling and its name. The console writes through the project path it was
+/// given, and the watcher reports the path the operating system resolved
+/// (macOS's `/var` is `/private/var`), so the two must meet on one spelling
+/// or the console's own write reads as an edit and reloads twice. The
+/// directory, not the file, is resolved, so a file that was just removed
+/// keys the same way.
+fn written_key(path: &std::path::Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => parent
+            .canonicalize()
+            .map_or_else(|_| path.to_path_buf(), |parent| parent.join(name)),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -564,14 +583,10 @@ fn problems(
             Some(param) if is_secret(param) => {
                 Some("This is a secret: set it as a secret.".to_owned())
             }
-            Some(param)
-                if param
-                    .get("immutable")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false) =>
-            {
-                Some("This parameter cannot change after the instance is installed.".to_owned())
-            }
+            // `immutable` binds an installed instance in production. Nothing
+            // is installed here: the emulator reads the parameter files on
+            // every load, so changing one (a function's location, say) is
+            // what editing the file by hand would do, and is allowed.
             Some(param) => validate(param, Some(value)),
         };
         if let Some(message) = problem {

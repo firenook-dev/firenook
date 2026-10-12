@@ -151,13 +151,20 @@ async fn an_instance_shows_its_source_configuration_functions_apis_and_events() 
     assert_eq!(greet["kind"], "http");
     assert_eq!(greet["status"], "receiving");
     assert_eq!(greet["stats"]["runs"], 0);
-    // A task-queue function keeps its definition and is not delivered.
+    // A task-queue function keeps its definition and is not delivered; the
+    // spec still says what it is, and the reason says why.
     let backfill = functions
         .iter()
         .find(|function| function["resource"] == "backfill")
         .expect("backfill");
     assert_eq!(backfill["status"], "ignored", "{backfill}");
-    assert!(backfill["ignoredReason"].is_string(), "{backfill}");
+    assert_eq!(backfill["kind"], "tasks", "{backfill}");
+    assert!(
+        backfill["ignoredReason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("Task queue functions of an extension")),
+        "{backfill}"
+    );
     assert_eq!(detail["envFiles"], json!(["extensions/greeter.env"]));
     suite.stop().await;
 }
@@ -172,7 +179,7 @@ async fn reconfigure_lists_every_problem_or_writes_the_files_and_reloads() {
     let (status, refused) = suite
         .post(
             "/extensions/instances/greeter/reconfigure",
-            json!({"values": {"GREETING": "lower", "LOCATION": "europe-west1"}}),
+            json!({"values": {"GREETING": "lower", "LOCATION": "mars-central1"}}),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
@@ -184,11 +191,8 @@ async fn reconfigure_lists_every_problem_or_writes_the_files_and_reloads() {
             .iter()
             .any(|problem| problem["param"] == "GREETING")
     );
-    assert!(
-        problems
-            .iter()
-            .any(|problem| problem["param"] == "LOCATION")
-    );
+    assert!(problems.iter().any(|problem| problem["param"] == "LOCATION"
+        && problem["message"] == "Choose one of: us-central1, europe-west1."));
     let env = suite.directory.path().join("extensions/greeter.env");
     assert!(
         std::fs::read_to_string(&env)
@@ -218,6 +222,24 @@ async fn reconfigure_lists_every_problem_or_writes_the_files_and_reloads() {
     assert_eq!(param(instance, "GREETING")["problem"], Value::Null);
     assert_eq!(param(instance, "API_KEY")["provided"], true);
     assert_eq!(param(instance, "API_KEY")["value"], Value::Null);
+    // A secret names the file it comes from, as a value does.
+    assert_eq!(param(instance, "API_KEY")["source"], "file");
+    assert_eq!(
+        param(instance, "API_KEY")["file"],
+        "extensions/greeter.secret.local"
+    );
+    // An immutable param changes here as editing its file would.
+    let (status, moved) = suite
+        .post(
+            "/extensions/instances/greeter/reconfigure",
+            json!({"values": {"LOCATION": "europe-west1"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(
+        param(&moved["instance"], "LOCATION")["value"],
+        "europe-west1"
+    );
     let (status, secret) = suite
         .get("/extensions/instances/greeter/secrets/API_KEY")
         .await;
@@ -245,4 +267,32 @@ async fn reconfigure_lists_every_problem_or_writes_the_files_and_reloads() {
         assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
     }
     suite.stop().await;
+}
+
+/// A project spelt through a symbolic link (macOS's `/var` is
+/// `/private/var`) still shows its instances' sources relative to it.
+#[cfg(unix)]
+#[test]
+fn a_source_directory_is_relative_to_a_project_spelt_through_a_link() {
+    let real = super::super::tests::Scratch::new("relative-real");
+    real.write("extensions/greeter/extension.yaml", "name: greeter\n");
+    let link = std::env::temp_dir().join(format!(
+        "firenook-compute-relative-link-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(real.path(), &link).expect("link");
+    let source = real.path().join("extensions/greeter");
+    assert_eq!(super::relative(&link, &source), "extensions/greeter");
+    assert_eq!(super::relative(real.path(), &source), "extensions/greeter");
+    let outside = std::env::temp_dir();
+    assert_eq!(
+        super::relative(real.path(), &outside),
+        outside
+            .canonicalize()
+            .expect("canonical")
+            .display()
+            .to_string()
+    );
+    std::fs::remove_file(&link).expect("unlinked");
 }

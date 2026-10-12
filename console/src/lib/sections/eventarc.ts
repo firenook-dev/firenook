@@ -7,9 +7,7 @@
 // with the engine delivering alerts (compute spec §3.5); this engine does
 // not yet, so there is no page, route or nav entry for it.
 //
-// `built` stays false until the section's journeys pass (hard rule 6): the
-// nav keeps the honest placeholder, `linkTo` answers null, and ⌘K offers
-// none of it.
+// Built: its journeys (`e2e/eventarc.spec.ts`) pass against a real engine.
 
 import { PaperPlaneTiltIcon, ShareNetworkIcon } from '@phosphor-icons/react'
 import type { ConsoleSection } from '../services'
@@ -21,7 +19,7 @@ export const eventarc: ConsoleSection = {
   services: ['eventarc'],
   area: 'messaging',
   icon: ShareNetworkIcon,
-  built: false,
+  built: true,
   summary:
     'Every event on every channel with the trigger each one reached or missed, publish a custom event, and who publishes and who listens.',
   pages: [

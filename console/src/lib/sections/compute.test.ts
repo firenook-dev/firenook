@@ -64,18 +64,36 @@ describe('pages and badges', () => {
   })
 })
 
-describe('until the journeys pass', () => {
-  it('no section is built, so a link into one reads as text', () => {
-    const status = testStatus({
-      sections: ['functions', 'extensions', 'eventarc'].map((id) => sectionEntry(id)),
+describe('built once their journeys pass', () => {
+  const status = testStatus({
+    sections: ['functions', 'extensions', 'eventarc'].map((id) => sectionEntry(id)),
+  })
+
+  it('Extensions and Eventarc are built, so a link into them opens their page', () => {
+    expect([extensions.built, eventarc.built]).toEqual([true, true])
+    expect(linkTo({ kind: 'extensions.instance', key: 'greeter' }, status)).toEqual({
+      to: '/extensions',
+      search: { instance: 'greeter' },
     })
-    expect([functions.built, extensions.built, eventarc.built]).toEqual([false, false, false])
+    expect(linkTo({ kind: 'eventarc.event', key: 'a3f9c1-2' }, status)).toEqual({
+      to: '/eventarc',
+      search: { event: 'a3f9c1-2' },
+    })
+  })
+
+  it('a section that is not built yet reads as text', () => {
+    if (functions.built) return
     for (const ref of [
       { kind: 'functions.function', key: 'us-central1-api' },
       { kind: 'functions.invocation', key: 'a3f9c1-1' },
-      { kind: 'extensions.instance', key: 'greeter' },
-      { kind: 'eventarc.event', key: 'a3f9c1-2' },
     ])
       expect(linkTo(ref, status)).toBeNull()
+  })
+
+  it('a built section absent from this engine reads as text too', () => {
+    const absent = testStatus({
+      sections: [sectionEntry('extensions', { state: 'absent' }), sectionEntry('eventarc')],
+    })
+    expect(linkTo({ kind: 'extensions.instance', key: 'greeter' }, absent)).toBeNull()
   })
 })

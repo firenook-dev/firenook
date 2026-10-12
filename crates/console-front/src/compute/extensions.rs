@@ -34,6 +34,8 @@ use crate::json::{BodyLimit, ConsoleJson};
 
 /// The longest README the console reads from an extension's source.
 const README_BYTES: u64 = 256 * 1024;
+/// Why an extension's task-queue function receives nothing here.
+const TASK_QUEUE_NOTE: &str = "Task queue functions of an extension are not delivered by the emulator, as in the official emulator, so lifecycle tasks such as onInstall do not run here.";
 
 /// The variables the emulator sets for every instance.
 const AUTO_PARAMS: [&str; 8] = [
@@ -608,12 +610,20 @@ fn list<'a>(value: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
         .flatten()
 }
 
-/// `path` relative to `root` when inside it.
+/// `path` relative to `root` when inside it. Either may be spelt through a
+/// symbolic link the other is not (macOS's `/var` is `/private/var`), so
+/// the canonical spellings are compared when the written ones differ.
 fn relative(root: &FilePath, path: &FilePath) -> String {
-    path.strip_prefix(root).map_or_else(
-        |_| path.display().to_string(),
-        |rest| rest.display().to_string(),
-    )
+    if let Ok(rest) = path.strip_prefix(root) {
+        return rest.display().to_string();
+    }
+    match (root.canonicalize(), path.canonicalize()) {
+        (Ok(root), Ok(path)) => path.strip_prefix(&root).map_or_else(
+            |_| path.display().to_string(),
+            |rest| rest.display().to_string(),
+        ),
+        _ => path.display().to_string(),
+    }
 }
 
 fn summary(
@@ -782,7 +792,12 @@ fn params_of(id: &str, loaded: &firenook_extensions::LoadedExtension) -> Vec<Ext
             } else {
                 value.as_deref().is_some_and(|value| !value.is_empty())
             };
-            let file = loaded.param_sources.get(&name).cloned();
+            // A secret the instance's `.secret.local` holds names that file,
+            // as an env value names the env file that set it.
+            let file = loaded.param_sources.get(&name).cloned().or_else(|| {
+                (secret && backend.secret_values.contains_key(&name))
+                    .then(|| format!("extensions/{id}.secret.local"))
+            });
             let source = if file.is_some() {
                 ExtensionParamSource::File
             } else if loaded.defaults_applied.contains(&name) {
@@ -1124,17 +1139,33 @@ fn functions_of(
             });
             continue;
         }
+        // The emulator copies no trigger for a task-queue resource (the
+        // recorded official behaviour), so the runtime sees a function with
+        // no trigger at all; the spec still says what it is.
+        let task_queue = resource
+            .get("properties")
+            .and_then(|properties| properties.get("taskQueueTrigger"))
+            .is_some();
         for view in loaded {
             let counters = state.monitor().stats(&view.id);
             let row = summary_of(view, counters.clone(), state.parts.suite(), &state.project);
+            let undelivered = task_queue && row.status != FunctionStatus::Receiving;
             functions.push(ExtensionFunction {
                 resource: name.clone(),
                 description: description.clone(),
                 function_id: Some(view.id.clone()),
                 function: Some(EntityRef::function(&view.id)),
-                kind: view.kind,
+                kind: if task_queue {
+                    FunctionKind::Tasks
+                } else {
+                    view.kind
+                },
                 status: row.status,
-                ignored_reason: row.status_reason,
+                ignored_reason: if undelivered {
+                    Some(TASK_QUEUE_NOTE.to_owned())
+                } else {
+                    row.status_reason
+                },
                 stats: Some(counters),
             });
         }

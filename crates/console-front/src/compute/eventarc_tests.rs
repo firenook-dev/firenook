@@ -261,3 +261,34 @@ async fn publishing_records_the_event_with_what_each_subscription_did() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     suite.stop().await;
 }
+
+const EVENT_CASES: &str = include_str!("../../../../console/src/eventarc/event-filter-cases.json");
+
+/// The console's event filter declares the engine's fields, and both sides
+/// give every golden case the same answer, error spans included.
+#[test]
+fn the_event_filter_is_one_language_in_the_console_and_the_engine() {
+    let cases: Value = serde_json::from_str(EVENT_CASES).expect("cases");
+    let declared = cases["fields"].as_array().expect("fields");
+    let infos = super::super::filters::EVENT_FIELDS.infos();
+    assert_eq!(
+        declared
+            .iter()
+            .filter_map(|field| field["key"].as_str())
+            .collect::<Vec<_>>(),
+        infos
+            .iter()
+            .map(|info| info.key.as_str())
+            .collect::<Vec<_>>()
+    );
+    for (field, info) in declared.iter().zip(&infos) {
+        assert_eq!(field["kind"], info.kind.as_str(), "{}", info.key);
+        assert_eq!(field["help"], info.help.as_str(), "{}", info.key);
+        let values: Vec<&str> = field["values"]
+            .as_array()
+            .map(|values| values.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        assert_eq!(values, info.values, "{}", info.key);
+    }
+    assert!(crate::filter::golden::run(EVENT_CASES) >= 30);
+}

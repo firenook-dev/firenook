@@ -251,6 +251,57 @@ async fn reconfigure_writes_the_winning_files_and_reloads_once() {
     drop(setup.directory);
 }
 
+/// The console writes through the project path it was given; the watcher
+/// reports the path the system resolved (macOS's `/var` is `/private/var`).
+/// A project spelt through a link still reloads once per Save.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_save_through_a_linked_project_path_reloads_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let real = root.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    write_local(&real);
+    let link = root.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let config = config(
+        &link,
+        vec![(
+            "greeter".to_owned(),
+            "./extensions-local/greeter".to_owned(),
+        )],
+    );
+    let (control, runtime, monitor) = start(config, &link).await;
+    control
+        .reconfigure(
+            "greeter",
+            BTreeMap::from([("GREETING".to_owned(), "good day".to_owned())]),
+            BTreeMap::new(),
+        )
+        .await
+        .expect("reconfigured");
+    assert_eq!(loads(&monitor), 2);
+    control
+        .files_changed(vec![real.join("extensions/greeter.env")])
+        .await;
+    assert_eq!(loads(&monitor), 2, "the console's own write is not an edit");
+    // Someone else editing it, then putting back the bytes the console
+    // wrote, is two edits: the console's write is not remembered past them.
+    let env = real.join("extensions/greeter.env");
+    let saved = std::fs::read(&env).unwrap();
+    std::fs::write(
+        &env,
+        "# the greeter\nLOCATION=us-central1\nGREETING=edited\n",
+    )
+    .unwrap();
+    control.files_changed(vec![env.clone()]).await;
+    assert_eq!(loads(&monitor), 3);
+    std::fs::write(&env, saved).unwrap();
+    control.files_changed(vec![env]).await;
+    assert_eq!(loads(&monitor), 4);
+    runtime.shutdown().await;
+}
+
 #[tokio::test]
 async fn values_that_do_not_load_are_put_back_byte_for_byte() {
     let setup = setup().await;
@@ -313,10 +364,9 @@ async fn every_problem_is_reported_at_once() {
         messages["LOCATION"],
         "Choose one of: us-central1, europe-west1."
     );
-    assert_eq!(
-        messages["COLLECTION"],
-        "This parameter cannot change after the instance is installed."
-    );
+    // `immutable` binds an installed instance; nothing is installed here,
+    // so the change is as acceptable as the same edit made in the file.
+    assert!(!messages.contains_key("COLLECTION"), "{messages:?}");
     assert_eq!(
         messages["UNKNOWN"],
         "The extension declares no such parameter."
