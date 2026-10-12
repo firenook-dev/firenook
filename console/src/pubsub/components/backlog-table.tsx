@@ -207,8 +207,9 @@ export function BacklogSwitch({
           ),
         }))}
       />
+      {/* Below xl the row has room for the tabs and the switch only; the tree's tooltip says the same. */}
       <span
-        className="text-[12px] whitespace-nowrap text-kumo-subtle"
+        className="hidden text-[12px] whitespace-nowrap text-kumo-subtle xl:inline"
         data-testid="pubsub-backlog-facts"
       >
         {counters.oldestUnackedAt && counters.backlog > 0

@@ -55,16 +55,16 @@ export function latencyText(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(1)} s`
 }
 
-const GRID = 'grid grid-cols-[88px_72px_80px_120px_64px_minmax(0,1fr)] items-center gap-x-3 px-3'
+const GRID = 'grid grid-cols-[88px_64px_72px_96px_64px_minmax(0,1fr)] items-center gap-x-3 px-3'
 
 const HEADER = (
-  <div className={cn(GRID, 'h-8')}>
+  <div className={cn(GRID, 'h-8 whitespace-nowrap')}>
     <span>When</span>
     <span className="text-right">Message</span>
     <span className="text-right">Attempts</span>
     <span>Status</span>
     <span className="text-right">Took</span>
-    <span>Response or error</span>
+    <span className="truncate">Response or error</span>
   </div>
 )
 
@@ -213,7 +213,8 @@ export function PushEnd({
   })
   return (
     <span className="ml-auto flex min-w-0 items-center gap-2">
-      <span className="flex min-w-0 items-center gap-1 text-[12px] text-kumo-subtle">
+      {/* Below xl the endpoint is in Settings: the switch and the pause keep their room. */}
+      <span className="hidden min-w-0 items-center gap-1 text-[12px] text-kumo-subtle xl:flex">
         endpoint
         <span
           className="max-w-80 min-w-0 truncate font-mono text-kumo-default"
