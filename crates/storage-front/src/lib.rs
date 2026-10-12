@@ -126,6 +126,8 @@ mod changes_tests;
 #[cfg(test)]
 mod console_read_tests;
 #[cfg(test)]
+mod console_scale_tests;
+#[cfg(test)]
 mod console_write_tests;
 #[cfg(test)]
 mod encoding_tests;
