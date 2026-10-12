@@ -67,6 +67,7 @@ import { useAccountTriggers } from '../user-triggers'
 import { USERS_DEFAULTS, useUsersSearch } from '../users-search'
 import { useUsersLive } from '../users-live'
 import { TenantPicker } from './tenant-picker'
+import { UserInspector } from './user-inspector'
 import { UsersGrid } from './users-grid'
 import { TENANT_GONE, useUserRowMenu } from './user-row-menu'
 
@@ -228,6 +229,12 @@ export function UsersPage() {
     }
     recordRecent({ tenant: slot, uid: row.uid, label: identifierOf(row).text })
     update({ user: row.uid })
+  }
+  /** The row above or below the open one, for the inspector's chevrons. */
+  const step = (by: -1 | 1) => {
+    const at = rows.rows.findIndex((row) => row.uid === search.user)
+    const next = at === -1 ? undefined : rows.rows[at + by]
+    return next ? () => update({ user: next.uid }) : undefined
   }
   const setScope = (next: TenantScope) =>
     update({ tenant: tenantParam('users', next), user: undefined })
@@ -446,6 +453,25 @@ export function UsersPage() {
             />
           )}
         </div>
+        {search.user !== undefined && project !== '' && (
+          <UserInspector
+            key={`${project}|${slot}|${search.user}`}
+            project={project}
+            scope={scope}
+            uid={search.user}
+            tab={search.tab ?? 'details'}
+            onTab={(tab) => update({ tab: tab === 'details' ? undefined : tab }, { replace: true })}
+            onClose={() => update({ user: undefined, tab: undefined })}
+            onPrev={step(-1)}
+            onNext={step(1)}
+            blocked={blocked}
+            onDelete={(row) => {
+              remove.reset()
+              setDeleting(row)
+            }}
+            onSeen={(label) => recordRecent({ tenant: slot, uid: search.user ?? '', label })}
+          />
+        )}
       </SectionBody>
       <DangerConfirm
         open={deleting !== null}

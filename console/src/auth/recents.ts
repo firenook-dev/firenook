@@ -72,6 +72,15 @@ export const useRecentUsers = create<RecentsState>((set, get) => ({
   record: (recent) => {
     const { key, items } = get()
     if (!key || !recent.uid) return
+    // Already the newest, as it is: nothing to write (opening the same user twice).
+    const first = items[0]
+    if (
+      first &&
+      first.tenant === recent.tenant &&
+      first.uid === recent.uid &&
+      first.label === recent.label
+    )
+      return
     const next = [
       { ...recent, at: Date.now() },
       ...items.filter((item) => item.tenant !== recent.tenant || item.uid !== recent.uid),
