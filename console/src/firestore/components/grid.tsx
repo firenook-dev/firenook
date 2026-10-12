@@ -28,9 +28,11 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useNavigate } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ColumnResizer } from '@/components/console/column-resizer'
+import { useColumnWidths, useIdFreeze } from '@/components/console/column-widths'
+import { CHECK_WIDTH, PIN_EDGE, PIN_HEAD, ROW_HEIGHT } from '@/components/console/table-pins'
 import { Kbd } from '@/components/kit'
 import { describeKey, useShortcuts } from '@/lib/shortcuts'
-import { shapeKey, useColumnWidths, useIdFreeze } from '../column-widths'
 import { arrangeColumns, foldRare, inferColumns } from '../columns'
 import { useCreateDialog } from '../create'
 import { copyText } from '../draft'
@@ -47,33 +49,29 @@ import {
 } from '../queries'
 import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
-import { childrenOf, describeChildren, workbenchSchemaQuery } from '../schema'
+import { childrenOf, describeChildren, patternOf, workbenchSchemaQuery } from '../schema'
 import { useSelection } from '../selection'
 import { type FsDocument, formatNumber, isPartial } from '../value'
 import { CellEditor } from './cell-editor'
-import { ColumnResizer } from './column-resizer'
-import {
-  CHECK_WIDTH,
-  FOLDED_COLUMN,
-  type GridColumn,
-  GridRow,
-  ID_COLUMN,
-  PIN_EDGE,
-  PIN_HEAD,
-  type RowActions,
-} from './grid-row'
+import { FOLDED_COLUMN, type GridColumn, GridRow, ID_COLUMN, type RowActions } from './grid-row'
 import { FoldedHeader, HeaderMenu, IdHeaderMenu } from './header-menu'
 import { subcollectionsWidth } from './subcollections-cell'
 import { DEFAULT_DATABASE, useWorkbench } from './workbench-context'
 
 /**
- * A row's height, px, and the virtualizer's estimate of it — which have to
- * be the same number. They were not: rows were `h-9`, which is 2.25 rem
- * and so 31.5 px on this console's 14 px root, while the virtualizer
- * placed them at 36, and every spacer and every scroll-to-row was worked
- * out on a height no row had.
+ * Which collections share a set of column widths: per *shape* of collection
+ * rather than per collection, since `users/u1/orders` and `users/u2/orders`
+ * are the same columns under different parents. A collection group is its
+ * own shape, because its first column is a whole path.
  */
-const ROW_HEIGHT = 32
+function shapeKey(
+  project: string,
+  database: string,
+  collectionPath: string,
+  group: boolean,
+): string {
+  return `${project}|${database}|${group ? `group:${collectionPath}` : patternOf(collectionPath)}`
+}
 const ID_WIDTH = 220
 /** A group shows whole paths in the first column, so it gets more room. */
 const PATH_WIDTH = 340

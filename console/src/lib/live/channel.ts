@@ -68,6 +68,12 @@ export interface LiveChannel {
   subscribe(topic: string, params: object, listener: TopicListener): () => void
   /** Called once per engine restart, after every query was invalidated. */
   onEngineRestart(callback: () => void): () => void
+  /**
+   * Offers every subscription of this tab the engine ended or refused again,
+   * now: a page's "Live updates stopped · Retry" (`LiveNotice`). An ended one
+   * also comes back by itself, with backoff; this skips the wait.
+   */
+  retry(): void
 }
 
 export interface LiveStatusState {
@@ -1034,6 +1040,15 @@ export function createLiveChannel(
         restartCallbacks.delete(callback)
       }
     },
+    retry() {
+      for (const local of locals.values()) {
+        if (local.state !== 'ended' && local.state !== 'refused') continue
+        clearTimeout(local.retry)
+        local.retry = undefined
+        setLocalState(local, 'pending')
+        offer(local)
+      }
+    },
     close() {
       if (closed) return
       release()
@@ -1106,4 +1121,5 @@ function page(): LiveChannelInstance {
 export const liveChannel: LiveChannel = {
   subscribe: (topic, params, listener) => page().subscribe(topic, params, listener),
   onEngineRestart: (callback) => page().onEngineRestart(callback),
+  retry: () => page().retry(),
 }

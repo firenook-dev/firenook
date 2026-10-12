@@ -4,11 +4,12 @@
 // beside it when a document is open. Everything on screen is live from the
 // engine's change feed, a topic on the console's one live channel.
 
-import { Text, Tooltip } from '@cloudflare/kumo'
+import { Text } from '@cloudflare/kumo'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { statusQuery } from '@/api/queries'
-import { LiveDot } from '@/components/kit'
+import { LiveNotice } from '@/components/console/live-notice'
+import { ToolbarDivider } from '@/components/console/toolbar'
 import { Page } from '@/components/shell/page'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
@@ -200,11 +201,6 @@ function useRestartRecovery() {
   )
 }
 
-/** The rule that separates one group of toolbar controls from the next. */
-function Divider() {
-  return <span className="mx-1.5 h-5 w-px shrink-0 bg-kumo-line" aria-hidden />
-}
-
 /** The data view: the toolbar, the query line and the grid. */
 function WorkbenchData({
   live,
@@ -227,32 +223,24 @@ function WorkbenchData({
       >
         <PanelToggle where="toolbar" />
         <PathBar />
-        <Divider />
+        <ToolbarDivider />
         {/* This page's own subscription, said only when the engine ended
             or refused it. A dropped channel is the whole console's, so the
             engine badge in the bar above says it, once, for every page; a
             green "Live" here would only announce the normal case. */}
-        {(live === 'ended' || live === 'refused') && (
-          <Tooltip
-            content={
-              live === 'ended'
-                ? 'Live updates stopped, so the grid may be out of date. The console retries by itself.'
-                : 'The engine refused live updates for this database, so the grid may be out of date.'
-            }
-            render={
-              <span className="flex h-7 items-center px-1.5" data-testid="live-state">
-                <LiveDot state={live === 'ended' ? 'reconnecting' : 'offline'} />
-              </span>
-            }
-          />
-        )}
+        <LiveNotice
+          status={live}
+          what="this database"
+          onRetry={() => liveChannel.retry()}
+          testId="live-state"
+        />
         {/* Not a property of the query below: the identity applies to every
             read the workbench makes, the schema tree and inspector included.
             The security rules it reads through have a page of their own in
             the sidebar; the Rules button that stood here swapped the grid
             for an editor, a mode of this page for what is a different job. */}
         <ViewAsPicker />
-        <Divider />
+        <ToolbarDivider />
         <NewMenu />
       </div>
       {workbench.collectionPath && (

@@ -23,6 +23,7 @@ function fakeChannel() {
       }
     },
     onEngineRestart: () => () => {},
+    retry: () => {},
   }
   const active = () => subscriptions.filter((entry) => entry.active)
   return { channel, subscriptions, active }

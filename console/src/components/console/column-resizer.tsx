@@ -12,7 +12,7 @@
 
 import { Tooltip } from '@cloudflare/kumo'
 import { useRef } from 'react'
-import { clampColumn } from '../column-widths'
+import { COLUMN_MIN, clampColumn } from './column-widths'
 
 /** How far an arrow key moves the edge, px. */
 const STEP = 16
@@ -20,6 +20,7 @@ const STEP = 16
 export function ColumnResizer({
   label,
   width,
+  min = COLUMN_MIN,
   onResize,
   onCommit,
   onReset,
@@ -28,6 +29,8 @@ export function ColumnResizer({
   /** The column's name, for the handle's own. */
   label: string
   width: number
+  /** The narrowest this column may be dragged, px. */
+  min?: number
   /** While dragging: the width to draw, or `null` once there is nothing to preview. */
   onResize: (px: number | null) => void
   /** Dragging finished, or an arrow key pressed: the width to keep. */
@@ -59,7 +62,7 @@ export function ColumnResizer({
           onPointerMove={(event) => {
             const start = drag.current
             if (!start) return
-            const next = clampColumn(start.width + event.clientX - start.x)
+            const next = clampColumn(start.width + event.clientX - start.x, min)
             start.last = next
             onResize(next)
           }}
@@ -81,7 +84,7 @@ export function ColumnResizer({
             if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
             event.preventDefault()
             event.stopPropagation()
-            onCommit(clampColumn(width + (event.key === 'ArrowRight' ? STEP : -STEP)))
+            onCommit(clampColumn(width + (event.key === 'ArrowRight' ? STEP : -STEP), min))
           }}
         >
           {/* The line itself, drawn on hover or while it has the keyboard. */}

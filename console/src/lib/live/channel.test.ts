@@ -471,6 +471,35 @@ describe('one subscription', () => {
     expect(browser.engine.live()).toHaveLength(1)
   })
 
+  it('retry offers an ended or refused subscription again at once, not after the backoff', async () => {
+    browser.engine.refuse.set('shell', { code: 'starting', message: 'The engine is starting.' })
+    const a = await leaderWith(['logs.entries', {}], ['shell', {}], ['firestore.changes', CHANGES])
+    const [logs, shell, changes] = a.recorded
+    browser.engine.end(browser.engine.idOf('logs.entries'), GONE)
+    await settle()
+    expect(logs?.states.at(-1)).toBe('ended')
+    expect(shell?.states.at(-1)).toBe('refused')
+    browser.engine.refuse.delete('shell')
+    const posts = browser.engine.posts.length
+    a.channel.retry()
+    await settle()
+    // One POST adds both again; the active subscription is left alone.
+    expect(browser.engine.posts).toHaveLength(posts + 1)
+    expect(
+      browser.engine.posts
+        .at(-1)
+        ?.add.map((add) => add.topic)
+        .toSorted(),
+    ).toEqual(['logs.entries', 'shell'])
+    expect(logs?.states.at(-1)).toBe('active')
+    expect(shell?.states.at(-1)).toBe('active')
+    expect(changes?.states).toEqual(['active'])
+    // The backoff timer it replaced does not offer it a second time.
+    await vi.advanceTimersByTimeAsync(1_000)
+    await settle()
+    expect(browser.engine.posts).toHaveLength(posts + 1)
+  })
+
   it('unsubscribing removes the engine subscription', async () => {
     const tab = browser.tab()
     const channel = open(tab)

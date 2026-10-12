@@ -9,7 +9,7 @@
 import { Badge, Empty, SkeletonLine, Text } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
 import { useRouterState } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { type ReactNode, createContext, useContext } from 'react'
 import type { SectionStatus } from '@/api/generated/SectionStatus'
 import { statusQuery } from '@/api/queries'
 import { Page } from '@/components/shell/page'
@@ -187,6 +187,16 @@ export function ServiceStarting({
   )
 }
 
+const InFrame = createContext(false)
+
+/**
+ * Whether a `SectionFrame` is above: it has drawn the shell banners and marks
+ * the page's badges seen, so a `SectionPage` inside it does neither again.
+ */
+export function useInSectionFrame(): boolean {
+  return useContext(InFrame)
+}
+
 /**
  * What every section route renders: the suite-wide banners at the top of
  * the content column, then the section behind its gate, filling the rest.
@@ -207,9 +217,11 @@ export function SectionFrame({
     <div className="flex h-full min-h-0 flex-col">
       <ShellBanners section={section} {...(projectScope === undefined ? {} : { projectScope })} />
       <div className="relative min-h-0 flex-1 overflow-auto">
-        <SectionGate section={section} skeleton={skeleton}>
-          {children}
-        </SectionGate>
+        <InFrame.Provider value>
+          <SectionGate section={section} skeleton={skeleton}>
+            {children}
+          </SectionGate>
+        </InFrame.Provider>
       </div>
     </div>
   )
