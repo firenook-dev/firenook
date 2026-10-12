@@ -29,6 +29,7 @@ import {
   addClaimKey,
   claimsMarks,
   formatClaims,
+  meteredLength,
   meterTone,
   noteMarks,
 } from '../claims'
@@ -88,11 +89,41 @@ function RulesLine({
   )
 }
 
+/**
+ * The indicator's colour past 900 and past 1,000. Kumo paints the bar as a
+ * brand gradient (`from-`/`via-`/`to-kumo-brand`), which covers any
+ * background colour, so the tone replaces the gradient's three stops.
+ */
 const TONE_CLASS = {
   quiet: undefined,
-  crowded: 'bg-kumo-warning',
-  over: 'bg-kumo-danger',
+  crowded: 'from-kumo-warning via-kumo-warning to-kumo-warning',
+  over: 'from-kumo-danger via-kumo-danger to-kumo-danger',
 } as const
+
+/**
+ * The claims' size as Firebase measures it — JavaScript string length
+ * (UTF-16 code units) of the compact JSON — against the 1,000-character
+ * limit: quiet, amber from 900, red above 1,000. `length` is undefined
+ * while the text is not JSON.
+ */
+export function ClaimsMeter({ length }: { length: number | undefined }) {
+  const tone = length === undefined ? 'quiet' : meterTone(length)
+  return (
+    <div data-testid="claims-meter" data-tone={tone}>
+      <Meter
+        label="Characters, as Firebase counts them"
+        value={Math.min(length ?? 0, CLAIMS_LIMIT)}
+        max={CLAIMS_LIMIT}
+        customValue={
+          length === undefined
+            ? 'not JSON yet'
+            : `${formatNumber(length)} / ${formatNumber(CLAIMS_LIMIT)} characters`
+        }
+        {...(TONE_CLASS[tone] ? { indicatorClassName: TONE_CLASS[tone] } : {})}
+      />
+    </div>
+  )
+}
 
 export function ClaimsEditor({
   detail,
@@ -136,11 +167,7 @@ export function ClaimsEditor({
     retry: false,
   })
   const minted = claims === undefined ? undefined : preview.data
-  const length = (() => {
-    const parsed = previewClaims(text)
-    return parsed === undefined ? undefined : JSON.stringify(parsed).length
-  })()
-  const tone = length === undefined ? 'quiet' : meterTone(length)
+  const length = meteredLength(text)
   const marks = [
     ...claimsMarks(text),
     ...(minted ? noteMarks(text, { shadowed: minted.shadowed, overrides: minted.overrides }) : []),
@@ -157,19 +184,7 @@ export function ClaimsEditor({
     <div className="pb-2" data-testid="claims-editor">
       <InspectorSection title="Custom claims" testId="section-claims">
         <div className="grid gap-2">
-          <div data-testid="claims-meter" data-tone={tone}>
-            <Meter
-              label="Characters, as Firebase counts them"
-              value={Math.min(length ?? 0, CLAIMS_LIMIT)}
-              max={CLAIMS_LIMIT}
-              customValue={
-                length === undefined
-                  ? 'not JSON yet'
-                  : `${formatNumber(length)} / ${formatNumber(CLAIMS_LIMIT)} characters`
-              }
-              {...(TONE_CLASS[tone] ? { indicatorClassName: TONE_CLASS[tone] } : {})}
-            />
-          </div>
+          <ClaimsMeter length={length} />
           {/* ⌘↵ saves from here: taken before CodeMirror reads it as "insert a blank line". */}
           <div
             className="flex h-56 min-h-0 flex-col"

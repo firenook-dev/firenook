@@ -404,29 +404,33 @@ test('U7 the claims editor checks as Firebase does and shows where rules read ea
     await expect(editor).toBeVisible()
     const save = inspector(page).getByTestId('save-user')
 
+    const meter = inspector(page).getByTestId('claims-meter')
+    // The meter's filled bar, which Kumo paints as a brand gradient.
+    const bar = meter.locator('[role="meter"] [class*="transition-[width]"]')
+
     // Not JSON: Save is blocked with the parser's message.
     await pasteInto(page, editor, '{"admin": tru')
     await expect(inspector(page).getByTestId('claims-problem')).toContainText(/JSON/)
     await expect(save).toBeDisabled()
     await expect(inspector(page).getByTestId('save-blocked')).toBeVisible()
+    await expect(meter).toContainText('not JSON yet')
+    const quietPaint = await computed(bar, 'background-image')
 
-    // A reserved key is marked where it is.
+    // A reserved key is marked where it is; the meter still measures the JSON.
     await pasteInto(page, editor, '{"iss": "me"}')
     await expect(editor.locator('.cm-lintRange-error')).toHaveText('"iss"')
     await expect(save).toBeDisabled()
+    await expect(meter).toContainText('12 / 1,000 characters')
 
     // 950 characters with an é: amber, counted as Firebase counts.
     const note = `${'é'}${'x'.repeat(938)}`
     const text = JSON.stringify({ note })
     expect(text.length).toBe(950)
     await pasteInto(page, editor, text)
-    await expect(inspector(page).getByTestId('claims-meter')).toHaveAttribute(
-      'data-tone',
-      'crowded',
-    )
-    await expect(inspector(page).getByTestId('claims-meter')).toContainText(
-      '950 / 1,000 characters',
-    )
+    await expect(meter).toHaveAttribute('data-tone', 'crowded')
+    await expect(meter).toContainText('950 / 1,000 characters')
+    // The bar itself changes colour, not only the attribute.
+    expect(await computed(bar, 'background-image')).not.toBe(quietPaint)
 
     // A claim the token replaces is marked as shadowed.
     await pasteInto(page, editor, '{"email": "x", "admin": true}')

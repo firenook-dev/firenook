@@ -47,6 +47,21 @@ export function claimsLength(text: string): number {
   return JSON.stringify(JSON.parse(text)).length
 }
 
+/**
+ * What the claims meter reads for the text: the length Firebase measures
+ * as soon as the text is JSON (an empty box is `{}`), whatever else Firebase
+ * would refuse in it — a reserved key or a value that is not an object is
+ * said beside the meter, not by it. Undefined while the text is not JSON.
+ */
+export function meteredLength(text: string): number | undefined {
+  if (text.trim() === '') return 2
+  try {
+    return claimsLength(text)
+  } catch {
+    return undefined
+  }
+}
+
 /** Where `JSON.parse` stopped, as an offset into the text, from its message. */
 export function parseErrorOffset(text: string, message: string): number {
   const position = /position (\d+)/.exec(message)

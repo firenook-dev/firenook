@@ -4,6 +4,7 @@ import {
   FORBIDDEN_CLAIMS,
   claimsLength,
   claimsMarks,
+  meteredLength,
   meterTone,
   noteMarks,
   readClaims,
@@ -15,6 +16,14 @@ describe('custom claims as Firebase checks them', () => {
     expect(claimsLength('{"n":"é"}')).toBe(9)
     expect(claimsLength('{"n":"🔥"}')).toBe(10)
     expect(claimsLength('{\n  "role": "admin"\n}')).toBe('{"role":"admin"}'.length)
+  })
+
+  it('meters any JSON, reserved keys and non-objects included, and nothing else', () => {
+    expect(meteredLength('')).toBe(2)
+    expect(meteredLength('{\n  "sub": "x"\n}')).toBe('{"sub":"x"}'.length)
+    expect(meteredLength('["admin"]')).toBe(9)
+    expect(meteredLength('{"n":"🔥"}')).toBe(10)
+    expect(meteredLength('{"role": ')).toBeUndefined()
   })
 
   it('marks text that is not JSON where it stops', () => {
