@@ -275,6 +275,7 @@ pub struct HistoryRow {
     pub name: String,
     pub short_name: String,
     pub outcome: TaskOutcome,
+    pub origin: TaskOrigin,
     pub enqueued_at: SystemTime,
     pub finished_at: SystemTime,
     pub attempts: u32,
@@ -325,22 +326,44 @@ pub struct TaskQuery {
 
 impl TaskQuery {
     fn matches(&self, task: &TaskRecord, preview: &BodyPreview, origin: TaskOrigin) -> bool {
+        self.matches_parts(&task.name, task.short_name(), preview, origin)
+    }
+
+    fn matches_parts(
+        &self,
+        name: &str,
+        short: &str,
+        preview: &BodyPreview,
+        origin: TaskOrigin,
+    ) -> bool {
         self.clauses.iter().all(|clause| {
             let any = clause.any.iter().any(|term| match term {
                 TaskTerm::Name { value, prefix } => {
-                    let short = task.short_name();
                     if *prefix {
-                        task.name.starts_with(value.as_str()) || short.starts_with(value.as_str())
+                        name.starts_with(value.as_str()) || short.starts_with(value.as_str())
                     } else {
-                        task.name == *value || short == value
+                        name == value || short == value
                     }
                 }
-                TaskTerm::Generated => task.generated(),
+                TaskTerm::Generated => name.starts_with('/'),
                 TaskTerm::Console => origin == TaskOrigin::Console,
                 TaskTerm::Word(word) => preview.text.to_lowercase().contains(&word.to_lowercase()),
             });
             any != clause.negated
         })
+    }
+
+    /// Whether a live row still matches (a batch read drops one that no
+    /// longer does).
+    #[must_use]
+    pub fn matches_row(&self, row: &TaskRow) -> bool {
+        self.matches_parts(&row.name, &row.short_name, &row.body, row.origin)
+    }
+
+    /// Whether a history row matches.
+    #[must_use]
+    pub fn matches_history(&self, row: &HistoryRow) -> bool {
+        self.matches_parts(&row.name, &row.short_name, &row.body, row.origin)
     }
 
     fn is_empty(&self) -> bool {
@@ -730,6 +753,7 @@ fn history_row(entry: &FinishedTask) -> HistoryRow {
         name: task.name.clone(),
         short_name: task.short_name().to_owned(),
         outcome: finished.outcome,
+        origin: task.origin,
         enqueued_at: task.enqueued_at,
         finished_at: finished.at,
         attempts: finished.attempts.count(),

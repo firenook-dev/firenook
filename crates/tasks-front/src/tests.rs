@@ -3115,6 +3115,12 @@ mod inspect {
             filtered(&query(vec![TaskTerm::Console], false)),
             Vec::<u64>::new()
         );
+        // A row read again is held to the same query (a batch read drops
+        // one that no longer matches).
+        let generated = query(vec![TaskTerm::Generated], false);
+        assert!(generated.matches_row(&page.rows[1]));
+        assert!(!generated.matches_row(&page.rows[0]));
+        assert!(query(vec![TaskTerm::Word("order".to_owned())], false).matches_row(&page.rows[0]));
 
         runtime.shutdown().await;
     }
@@ -3218,7 +3224,20 @@ mod inspect {
         );
         let sequence = page.rows[0].sequence;
         let rows = runtime.history_rows(&key, &[sequence, 999]);
-        assert_eq!(rows[0].1.as_ref().unwrap().name, "t4");
+        let row = rows[0].1.as_ref().unwrap();
+        assert_eq!(row.name, "t4");
+        assert_eq!(row.origin, TaskOrigin::Wire);
+        let name = |value: &str| TaskQuery {
+            clauses: vec![TaskClause {
+                any: vec![TaskTerm::Name {
+                    value: value.to_owned(),
+                    prefix: false,
+                }],
+                negated: false,
+            }],
+        };
+        assert!(name("t4").matches_history(row));
+        assert!(!name("t3").matches_history(row));
         assert!(rows[1].1.is_none());
         let detail = runtime
             .task_view(&key, page.rows[0].id)
