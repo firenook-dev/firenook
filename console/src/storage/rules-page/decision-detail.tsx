@@ -138,6 +138,7 @@ export function DecisionDetail({
             onClick={() => {
               loadPlayground(
                 rerun ? formFromRequest(rerun.request, decision.id) : formFromDecision(decision),
+                { run: true },
               )
               onTry()
             }}

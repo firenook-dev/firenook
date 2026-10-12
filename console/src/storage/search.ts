@@ -1,7 +1,7 @@
-// Every view of the Storage pages is a link. The Files page keeps the
-// bucket, the folder, the open object and its tab, the layout, the order,
-// the filter, the scope and the identity in its search params; the Rules
-// page reads the rules kit's one schema with `bucket` as its scope.
+// Every view of the Files page is a link: it keeps the bucket, the folder,
+// the open object and its tab, the layout, the order, the filter, the scope
+// and the identity in its search params. (The Rules page reads the rules
+// kit's one schema with `bucket` as its scope: `rules-page/rules-search.ts`.)
 //
 // Defaults never reach the address (`stripSearchParams(FILES_DEFAULTS)` on
 // the route, and the default bucket is dropped by the route's own
@@ -10,7 +10,6 @@
 
 import { z } from 'zod'
 import { useRouteSearch, zFlag } from '@/lib/search-params'
-import { rulesPageSearch } from '@/rules/search'
 import { normalizeFolder } from './paths'
 
 /** The columns a listing sorts by (`GET /storage/objects/meta` `sortable`). */
@@ -58,13 +57,6 @@ export type FilesSearch = z.infer<typeof filesSearch>
 
 /** What the address leaves out. */
 export const FILES_DEFAULTS = { tab: 'details', layout: 'list', sort: 'name:asc' } as const
-
-/** The Rules page's schema: the rules kit's, with `bucket` as its scope. */
-export const storageRulesSearch = rulesPageSearch('bucket', {
-  panel: ['decisions', 'playground', 'tests', 'folders'],
-})
-
-export type StorageRulesSearch = z.infer<typeof storageRulesSearch>
 
 /** The Files page's search params and their patch-style updater. */
 export function useFilesSearch() {

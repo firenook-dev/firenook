@@ -461,6 +461,7 @@ function StorageRulesBody({
                 bucket={bucket}
                 buckets={buckets.buckets}
                 source={draft.source}
+                ready={draft.rules.isSuccess}
                 onReveal={focus.setReveal}
               />
             )}

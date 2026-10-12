@@ -14,6 +14,7 @@ import {
   sizeFields,
   toBytes,
   toEvaluateRequest,
+  tokenWho,
 } from './requests'
 
 const BUCKET = 'demo.appspot.com'
@@ -23,6 +24,16 @@ function claimsOf(authorization: string | null | undefined): Record<string, unkn
   const payload = (authorization ?? '').split(' ')[1]?.split('.')[1] ?? ''
   const binary = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0))))
+}
+
+/** An unsigned ID token with `claims`: UTF-8, base64url, unpadded, as a JWT writes them. */
+function token(claims: Record<string, unknown>): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(claims))
+  const body = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+  return `${btoa('{}')}.${body}.`
 }
 
 const form = (patch: Partial<PlaygroundForm>): PlaygroundForm => ({ ...EMPTY_FORM, ...patch })
@@ -241,6 +252,46 @@ describe('a recorded request, tried again', () => {
     expect(elsewhere.replay).toBeUndefined()
     const present = patchForm(replay, { existing: 'store' })
     expect(present.replay?.resource).toBeUndefined()
+  })
+
+  it('reads the bucket now for a request that recorded no file or time', () => {
+    // An upload the Files page judged before sending it: the identity's
+    // token and the proposed file, nothing recorded.
+    const authorization = `Bearer ${token({ sub: 'u1', user_id: 'u1', email: 'ada@example.test' })}`
+    const judged = formFromRequest({
+      method: 'create',
+      bucket: BUCKET,
+      path: 'users/u1/secret.txt',
+      authorization,
+      proposed: { size: 210, contentType: 'text/plain' },
+    })
+    expect(judged.replay).toBeUndefined()
+    expect(judged.existing).toBe('store')
+    expect(judged.who).toEqual({ kind: 'recorded', auth: null, authorization })
+    expect(describeForm(judged, BUCKET)).toBe(
+      'create users/u1/secret.txt as ada@example.test · 210 B text/plain',
+    )
+    const built = toEvaluateRequest(judged, 'demo', BUCKET)
+    if ('error' in built) throw new Error(built.error)
+    expect(built.request.authorization).toBe(authorization)
+    expect(built.request.resource).toBeUndefined()
+    // A refusal the engine did not record a decision for still replays its file.
+    expect(formFromRequest({ ...recorded }, null).replay).toEqual({
+      resource: null,
+      requestResource: recorded.requestResource,
+      time: recorded.time,
+    })
+  })
+
+  it('names who a token is from: its email, else its uid', () => {
+    expect(tokenWho(`Bearer ${token({ sub: 'u1', email: 'ada@example.test' })}`)).toBe(
+      'ada@example.test',
+    )
+    expect(tokenWho(`Firebase ${token({ sub: 'u1', user_id: 'u1' })}`)).toBe('u1')
+    expect(tokenWho(`Bearer ${token({ sub: 'u_é' })}`)).toBe('u_é')
+    expect(tokenWho('Bearer owner')).toBeUndefined()
+    expect(tokenWho('Bearer a.not-json.')).toBeUndefined()
+    expect(tokenWho('Basic dXNlcjpwYXNz')).toBeUndefined()
   })
 
   it('takes a decision the engine no longer keeps from what the feed recorded', () => {

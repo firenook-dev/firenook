@@ -1,6 +1,8 @@
 // The playground's request and its last run, kept outside the panel so a
-// decision's "Try in the playground" and a saved test's "Open in the
-// playground" can fill it, and so switching panels and back keeps it.
+// decision's "Try in the playground", a saved test's "Open in the
+// playground" and a refusal on the Files page can fill it, and so switching
+// panels (or pages) and back keeps it. A request handed over to be tried
+// waits as `pending` until the playground has the rules to run it against.
 
 import { create } from 'zustand'
 import type { StorageEvaluateRequest } from '@/api/generated/storage/StorageEvaluateRequest'
@@ -20,8 +22,13 @@ interface PlaygroundState {
   run: PlaygroundRun | undefined
   /** The engine refused to run it: a draft that does not compile, a request it cannot read. */
   failure: string | undefined
+  /** Run the form as soon as the playground can: it was handed over to be tried. */
+  pending: boolean
   setForm: (patch: Partial<PlaygroundForm>) => void
-  load: (form: PlaygroundForm) => void
+  /** A new request; `run` tries it at once, against the rules in the editor once they are there. */
+  load: (form: PlaygroundForm, options?: { run?: boolean }) => void
+  /** The pending run has started. */
+  takePending: () => void
   setRun: (run: PlaygroundRun | undefined, failure?: string) => void
 }
 
@@ -59,7 +66,10 @@ export const usePlayground = create<PlaygroundState>((set) => ({
   form: EMPTY_FORM,
   run: undefined,
   failure: undefined,
+  pending: false,
   setForm: (patch) => set((state) => ({ form: patchForm(state.form, patch) })),
-  load: (form) => set({ form, run: undefined, failure: undefined }),
+  load: (form, options) =>
+    set({ form, run: undefined, failure: undefined, pending: options?.run ?? false }),
+  takePending: () => set({ pending: false }),
   setRun: (run, failure) => set({ run, failure }),
 }))

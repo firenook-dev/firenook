@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  FILES_DEFAULTS,
-  bucketPatch,
-  filesSearch,
-  pathPatch,
-  sortOf,
-  storageRulesSearch,
-} from './search'
+import { FILES_DEFAULTS, bucketPatch, filesSearch, pathPatch, sortOf } from './search'
 
 describe('the Files page’s search params', () => {
   it('read every param, folders ending in one slash and empty segments kept', () => {
@@ -79,14 +72,5 @@ describe('the Files page’s search params', () => {
     expect(sortOf(undefined)).toEqual({ column: 'name', direction: 'asc' })
     expect(sortOf('size:desc')).toEqual({ column: 'size', direction: 'desc' })
     expect(sortOf('nonsense')).toEqual({ column: 'name', direction: 'asc' })
-  })
-})
-
-describe('the Rules page’s search params', () => {
-  it('are the rules kit’s, with the bucket as their scope and a line', () => {
-    expect(
-      storageRulesSearch.parse({ bucket: 'demo-media', panel: 'folders', decision: 's7', line: 6 }),
-    ).toEqual({ bucket: 'demo-media', panel: 'folders', decision: 's7', line: 6 })
-    expect(storageRulesSearch.safeParse({ panel: 'collections' }).success).toBe(false)
   })
 })

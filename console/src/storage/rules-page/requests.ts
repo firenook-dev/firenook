@@ -59,10 +59,11 @@ export interface PlaygroundForm {
   existing: 'store' | 'missing'
   /** `request.time` as a local `datetime-local` value; empty is now. */
   time: string
-  /** From a recorded decision: the files and the time it was decided with. */
+  /** From a recorded request: the files and the time it was decided with. */
   replay?:
     | {
-        decisionId: string
+        /** The decision it was, when the engine recorded one. */
+        decisionId?: string | undefined
         /** The file as it was then; null: it did not exist. Absent: read the bucket now. */
         resource?: StorageRulesObjectView | null | undefined
         /** The proposed file exactly as recorded (its hashes and generation too). */
@@ -230,10 +231,16 @@ function rowsOf(metadata: Record<string, string | null> | undefined): KeyValueRo
   }))
 }
 
-/** A recorded request as the playground's form, so it can be tried again and changed. */
+/**
+ * A recorded request as the playground's form, so it can be tried again and
+ * changed: a decision's, or a refusal the Files page met (`decisionId` when
+ * the engine recorded one). What it recorded of the files and the time is
+ * replayed as it was; a request that recorded none of them (an upload
+ * judged before any byte went) reads the bucket now, as it did itself.
+ */
 export function formFromRequest(
   request: StorageEvaluateRequest,
-  decisionId: string,
+  decisionId?: string | null,
 ): PlaygroundForm {
   const proposed = request.proposed ?? undefined
   const recordedSize = proposed?.size ?? request.requestResource?.size
@@ -247,6 +254,8 @@ export function formFromRequest(
       : request.method === 'create'
         ? (request.requestResource?.contentType ?? '')
         : ''
+  const recorded =
+    request.resource !== undefined || request.requestResource !== undefined || Boolean(request.time)
   return {
     method: request.method,
     bucket: request.bucket,
@@ -262,14 +271,18 @@ export function formFromRequest(
     metadata: rowsOf(proposed?.customMetadata),
     existing: request.resource === null ? 'missing' : 'store',
     time: '',
-    replay: {
-      decisionId,
-      ...(request.resource === undefined ? {} : { resource: request.resource }),
-      ...(request.requestResource === undefined
-        ? {}
-        : { requestResource: request.requestResource }),
-      ...(request.time ? { time: request.time } : {}),
-    },
+    ...(recorded
+      ? {
+          replay: {
+            ...(decisionId ? { decisionId } : {}),
+            ...(request.resource === undefined ? {} : { resource: request.resource }),
+            ...(request.requestResource === undefined
+              ? {}
+              : { requestResource: request.requestResource }),
+            ...(request.time ? { time: request.time } : {}),
+          },
+        }
+      : {}),
   }
 }
 
@@ -308,10 +321,35 @@ export function formFromDecision(decision: StorageDecision): PlaygroundForm {
   }
 }
 
+/**
+ * Who an `Authorization` header says is asking: the email or the uid of its
+ * ID token (the console's own and the Auth emulator's are both readable
+ * JWTs); undefined when it is not one.
+ */
+export function tokenWho(authorization: string): string | undefined {
+  const token = /^(?:Bearer|Firebase)\s+(\S+)$/i.exec(authorization.trim())?.[1]
+  const payload = token?.split('.')[1]
+  if (!payload) return undefined
+  try {
+    const padded = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
+    const text = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)))
+    const claims = JSON.parse(text) as Record<string, unknown>
+    for (const key of ['email', 'user_id', 'sub'])
+      if (typeof claims[key] === 'string' && claims[key] !== '') return claims[key]
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 /** Who a request is from, in a few words. */
 export function describeWho(who: Who): string {
   if (who.kind === 'recorded') {
-    if (!who.auth) return who.authorization ? 'as recorded' : 'not signed in'
+    if (!who.auth)
+      return who.authorization
+        ? (tokenWho(who.authorization) ?? 'the token it carried')
+        : 'not signed in'
     const email = who.auth.token.email
     return typeof email === 'string' ? email : who.auth.uid
   }

@@ -410,6 +410,71 @@ test('the playground tries an upload against the draft, and a saved test guards 
   await page.getByTestId('rules-revert').click()
 })
 
+test('a refusal on the Files page is tried in the playground, and runs on arrival', async ({
+  page,
+  engine,
+}) => {
+  const as = encodeURIComponent(`${ada.uid}:${ada.email}`)
+  const result = page.getByTestId('playground-result')
+  const why = page.getByTestId('refusal-detail')
+
+  // Ada lists Grace's folder: line 5 refuses it, and See why says so with values.
+  await page.goto(
+    `${engine.origin}/console/storage?path=${encodeURIComponent(`users/${grace.uid}/`)}&as=${as}`,
+  )
+  await expect(page.getByTestId('denied-panel')).toContainText('Line 5 refused it')
+  await page.getByTestId('denied-see-why').click()
+  await expect(why.getByTestId('explained-allow').first()).toContainText('line 5')
+  await why.getByTestId('refusal-try').click()
+
+  // The playground has the same list, as Ada, and has already run it.
+  await expect(page).toHaveURL(/\/console\/storage\/rules\?panel=playground$/)
+  await expect(page.getByRole('tab', { name: 'list' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('playground-path')).toHaveValue(`users/${grace.uid}/`)
+  await expect(page.getByTestId('playground-recorded')).toContainText(ada.email)
+  await expect(result.locator('[data-outcome]').first()).toHaveAttribute(
+    'data-outcome',
+    /deny|error/,
+  )
+  await expect(result.getByTestId('explained-allow').first()).toContainText('line 5')
+  await expect(lines(page).nth(4)).toHaveClass(/cm-line-(deny|error)/)
+
+  // An upload the rules refuse before any byte goes (text, not an image):
+  // tried as the create it proposed, with the file read from the bucket now.
+  await page.goto(
+    `${engine.origin}/console/storage?path=${encodeURIComponent(`users/${ada.uid}/`)}&as=${as}`,
+  )
+  await expect(page.getByTestId('upload-menu')).toBeVisible()
+  await page.getByTestId('upload-input').setInputFiles({
+    name: 'notes.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('not an image'),
+  })
+  const row = page.getByTestId('tray-row').filter({ hasText: 'notes.txt' })
+  await expect(row.getByTestId('tray-row-message')).toContainText('Refused by line 6 — not sent')
+  await row.getByTestId('tray-see-why').click()
+  await expect(why.getByTestId('explained-allow').first()).toContainText('line 6')
+  await why.getByTestId('refusal-try').click()
+  await expect(page).toHaveURL(/panel=playground/)
+  await expect(page.getByRole('tab', { name: 'create' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('playground-path')).toHaveValue(`users/${ada.uid}/notes.txt`)
+  await expect(page.getByTestId('playground-recorded')).toContainText(ada.email)
+  await expect(page.getByTestId('playground-size')).toHaveValue('12')
+  await expect(page.getByTestId('playground-type').getByRole('combobox')).toHaveValue('text/plain')
+  await expect(page.getByTestId('playground-existing')).toHaveText('Does not exist')
+  await expect(result.locator('[data-outcome]').first()).toHaveAttribute(
+    'data-outcome',
+    /deny|error/,
+  )
+  await expect(result.getByTestId('explained-allow').first()).toContainText('line 6')
+  // Nothing was sent: the file is not in the bucket.
+  const { default: bucket } = bucketsOf(engine)
+  const token = await tokenFor(engine, ada.uid)
+  expect(
+    (await getMetadata(engine, { bucket, name: `users/${ada.uid}/notes.txt`, token })).status,
+  ).toBe(404)
+})
+
 test('a draft that would deny what was allowed says so, and shows those decisions', async ({
   page,
   engine,

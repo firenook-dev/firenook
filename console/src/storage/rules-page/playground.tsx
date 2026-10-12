@@ -64,6 +64,7 @@ export function Playground({
   bucket,
   buckets,
   source,
+  ready,
   onReveal,
 }: {
   project: string
@@ -74,6 +75,8 @@ export function Playground({
   buckets: readonly StorageBucket[]
   /** The rules text in the editor, which every run is against. */
   source: string
+  /** The editor holds the rules (in force, or the draft kept for them): a run can start. */
+  ready: boolean
   onReveal: (line: number) => void
 }) {
   const form = usePlayground((state) => state.form)
@@ -81,6 +84,8 @@ export function Playground({
   const run = usePlayground((state) => state.run)
   const failure = usePlayground((state) => state.failure)
   const setRun = usePlayground((state) => state.setRun)
+  const pending = usePlayground((state) => state.pending)
+  const takePending = usePlayground((state) => state.takePending)
   const show = useOverlay((state) => state.show)
   const clear = useOverlay((state) => state.clear)
   const addTest = useTests((state) => state.add)
@@ -99,7 +104,7 @@ export function Playground({
       form.method !== 'list' &&
       settled !== '' &&
       !pathProblem(form.method, settled) &&
-      !form.replay,
+      form.replay?.resource === undefined,
   })
   // Types the folder already holds, offered first.
   const profile = useQuery({
@@ -157,6 +162,15 @@ export function Playground({
     )
     return () => globalThis.clearTimeout(timer)
   }, [source])
+
+  // A request handed over to be tried ("Try in the playground" on a
+  // decision, or on a refusal the Files page met): run it once the editor
+  // holds the rules, so its verdict and why are there on arrival.
+  useEffect(() => {
+    if (!pending || !ready) return
+    takePending()
+    void latest.current.execute(latest.current.form, source)
+  }, [pending, ready, source, takePending])
 
   // The last run, drawn into the editor over the text it ran against.
   useEffect(() => {

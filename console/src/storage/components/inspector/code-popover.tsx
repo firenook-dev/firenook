@@ -60,36 +60,36 @@ export function CodePopover({
   return (
     <Popover>
       <Tooltip content="This file as code" render={<Popover.Trigger render={trigger} />} />
-      <Popover.Content
-        className="grid w-[560px] max-w-[calc(100vw-2rem)] gap-2"
-        data-testid="code-popover"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <PanelTitle>Copy as code</PanelTitle>
-          <Tabs
-            size="sm"
-            variant="segmented"
-            value={variant}
-            onValueChange={(next) => setVariant(next as CodeVariant)}
-            tabs={[
-              { value: 'read', label: 'Read' },
-              { value: 'upload', label: 'Upload' },
-            ]}
+      <Popover.Content className="grid w-[560px] max-w-[calc(100vw-2rem)] gap-2">
+        {/* Kumo's Popover.Content passes no data attributes on: the test id sits inside. */}
+        <div className="contents" data-testid="code-popover">
+          <div className="flex items-center justify-between gap-3">
+            <PanelTitle>Copy as code</PanelTitle>
+            <Tabs
+              size="sm"
+              variant="segmented"
+              value={variant}
+              onValueChange={(next) => setVariant(next as CodeVariant)}
+              tabs={[
+                { value: 'read', label: 'Read' },
+                { value: 'upload', label: 'Upload' },
+              ]}
+            />
+          </div>
+          <CodeBlock
+            value={dialect}
+            onValueChange={setDialect}
+            dialects={DIALECTS.map((entry) => ({
+              id: entry.id,
+              label: entry.label,
+              code: objectAsCode(entry.id, variant, forCode, address),
+            }))}
+            testId="code-block"
           />
+          {dialect === 'rest' && address && (
+            <span className="text-[11px] text-kumo-subtle">For an app connected to {address}</span>
+          )}
         </div>
-        <CodeBlock
-          value={dialect}
-          onValueChange={setDialect}
-          dialects={DIALECTS.map((entry) => ({
-            id: entry.id,
-            label: entry.label,
-            code: objectAsCode(entry.id, variant, forCode, address),
-          }))}
-          testId="code-block"
-        />
-        {dialect === 'rest' && address && (
-          <span className="text-[11px] text-kumo-subtle">For an app connected to {address}</span>
-        )}
       </Popover.Content>
     </Popover>
   )
