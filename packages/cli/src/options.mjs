@@ -16,7 +16,7 @@ export const DEFAULT_PORTS = {firestore:8080, auth:9099, storage:9199, functions
 export const LOOPBACK = ['localhost', '127.0.0.1', '::1', '[::1]'];
 export const VERBOSITIES = ['DEBUG', 'INFO', 'QUIET', 'SILENT', 'WARN', 'ERROR'];
 
-const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database']);
+const values = new Set(['project', 'config', 'import', 'only', 'state-dir', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'instance', 'data', 'event-data', 'params', 'auth', 'resource', 'event-type', 'region', 'method', 'log-verbosity', 'alias', 'add', 'unalias', 'database']);
 const durabilities = new Set(['write-behind', 'per-commit']);
 const switches = new Set(['resume-state', 'no-diagnostics', 'help', 'offline', 'non-interactive', 'json', 'force', 'debug', 'ui', 'adopt', 'dry-run', 'recursive', 'shallow', 'all-collections', 'clear', 'functions', 'no-functions']);
 // Optional-value options: a bare flag or --name=value.
@@ -227,6 +227,22 @@ export function inspectProject(options, cwd = process.cwd()) {
   const functionsConfigured = has('functions') || has('extensions');
   const minimumFunctions = options['minimum-functions'] !== undefined ? String(options['minimum-functions']) : (services.includes('functions') && functionsConfigured ? '1' : '0');
   return {config, directory, rc, data, project, demo, configured, services, skipped, ui, uiExplicit, singleProjectMode, host, ports, imported, exported, state, minimumFunctions, errors, warnings};
+}
+
+// What the engine is told about this launch (--launch-context), so the
+// console can say why a section is absent and how to turn it on: why each of
+// the five data services is not started (`not-configured` when firebase.json
+// does not configure it, `excluded-by-only` when --only left it out), the
+// firebase.json emulator entries skipped because Firenook does not emulate
+// them, and the command line as typed, which a fix reprints with one name
+// added to --only. The engine shows it; it never runs it.
+export function launchContext(project, {command = 'firenook emulators:start', args = []} = {}) {
+  const services = {};
+  for (const name of SERVICES) {
+    if (project.services.includes(name)) continue;
+    services[name] = project.configured.includes(name) ? 'excluded-by-only' : 'not-configured';
+  }
+  return {services, skipped:[...project.skipped], command, args:[...args]};
 }
 
 export function loadProject(options, cwd = process.cwd()) {

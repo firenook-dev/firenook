@@ -13,6 +13,7 @@ mod service;
 mod timestamp_json;
 mod write_stream;
 
+pub use codec::decode_document;
 pub use service::{FirestoreService, ResponseStream};
 pub use timestamp_json::utc_as_z;
 

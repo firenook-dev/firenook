@@ -45,9 +45,10 @@ Common options: -P/--project ID, -c/--config firebase.json, --json (doctor, expo
   --non-interactive (accepted; Firenook never prompts, destructive commands need --force).
 Start/exec: --only auth,functions,firestore,storage,pubsub (extensions=functions; eventarc/tasks/hub/ui/
   logging follow their parent), --import DIR, --export-on-exit[=DIR], --state-dir DIR, --resume-state,
-  --storage-bucket target=bucket (repeatable), --host HOST, --ui, --minimum-functions N,
-  --inspect-functions[=PORT], --offline, --durability write-behind|per-commit, --no-diagnostics,
-  --firestore-websocket-port N, --hub-port N, --logging-port N, --eventarc-port N, --tasks-port N.
+  --storage-bucket target=bucket (repeatable), --host HOST, --allowed-hosts NAME,..., --ui,
+  --minimum-functions N, --inspect-functions[=PORT], --offline, --durability write-behind|per-commit,
+  --no-diagnostics, --firestore-websocket-port N, --hub-port N, --logging-port N, --eventarc-port N,
+  --tasks-port N.
 
 firebase.json service subsets, storage {rules} or targets, several Firestore databases, ui.enabled and
 singleProjectMode are honoured; database/hosting/dataconnect/apphosting entries are skipped with a
@@ -58,7 +59,7 @@ deploy/login command (never intercepted). Disk/WAL state by default; runs are ke
 `;
 
 const common = ['project', 'config', 'help', 'non-interactive', 'json', 'debug', 'log-verbosity'];
-const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'host', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui'];
+const launch = [...common, 'import', 'export-on-exit', 'only', 'state-dir', 'resume-state', 'host', 'allowed-hosts', 'minimum-functions', 'storage-bucket', 'inspect-functions', 'offline', 'firestore-websocket-port', 'logging-port', 'eventarc-port', 'tasks-port', 'hub-port', 'durability', 'no-diagnostics', 'ui'];
 const accepted = {
   doctor:[...launch, 'instance'], 'emulators:start':launch, 'emulators:exec':launch, 'ext:vendor':[...common, 'instance', 'offline'],
   'emulators:export':[...common, 'force', 'only', 'hub-port'],
@@ -136,7 +137,7 @@ async function main() {
   const diagnostic = await diagnose(options);
   if (action === 'doctor') { console.log(JSON.stringify(diagnostic, null, 2)); return 0; }
   if (action === 'ext:vendor') return vendorExtensions(diagnostic.binary, diagnostic.project, options.instance);
-  return supervise(prepareLaunch(diagnostic, options, action === 'emulators:exec' ? 'exec' : 'start'), testCommand);
+  return supervise(prepareLaunch(diagnostic, options, action === 'emulators:exec' ? 'exec' : 'start', args), testCommand);
 }
 try { process.exitCode = await main(); }
 catch (error) { console.error(`Firenook: ${error.message}`); process.exitCode = 1; }
