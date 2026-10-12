@@ -91,6 +91,7 @@ pub use rules::{
     RulesDiagnostic, RulesDocument, RulesEditor, RulesFileStatus, RulesInstalled, RulesLintCode,
     RulesMap, RulesOperation, RulesOrigin, RulesOutline, RulesSeverity, RulesVersion, UnusedMatch,
 };
+pub use rules::{RulesClaimRead, RulesClaimReadForm};
 pub use rules_eval::{
     AllowTrace, DecisionDetail, EvaluateAuth, EvaluateFieldReference, EvaluateOrder, EvaluateQuery,
     EvaluateRequest, EvaluateResult, ExplainStep, FirestoreRestValue, ImpactFlip, RecordedResource,

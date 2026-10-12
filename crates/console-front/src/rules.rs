@@ -113,6 +113,61 @@ pub struct RulesDiagnostic {
     pub code: Option<RulesLintCode>,
 }
 
+/// One place a ruleset reads a claim of the caller's ID token, for "read by
+/// your rules" beside a user's custom claims.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesClaimRead {
+    /// The top-level claim (`org` for a read of `org.role`); `null` when the
+    /// key is computed at run time, so the rule may read any claim.
+    pub key: Option<String>,
+    pub form: RulesClaimReadForm,
+    /// One-based line of the reading expression.
+    #[ts(type = "number")]
+    pub line: usize,
+    /// UTF-16 offset where the expression starts.
+    #[ts(type = "number")]
+    pub from: usize,
+    /// Exclusive UTF-16 end.
+    #[ts(type = "number")]
+    pub to: usize,
+}
+
+/// How a rule spells a claim read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum RulesClaimReadForm {
+    /// A member access of the token.
+    Member,
+    /// An index with a literal key.
+    Index,
+    /// A `get` with a default.
+    Get,
+    /// An `in` test, or `keys().hasAny`.
+    In,
+    /// An index with a computed key.
+    Dynamic,
+}
+
+impl From<&firenook_rules_engine::ClaimRead> for RulesClaimRead {
+    /// A rules-engine claim read as the console shows it.
+    fn from(read: &firenook_rules_engine::ClaimRead) -> Self {
+        Self {
+            key: read.key.clone(),
+            form: match read.form {
+                firenook_rules_engine::ClaimReadForm::Member => RulesClaimReadForm::Member,
+                firenook_rules_engine::ClaimReadForm::Index => RulesClaimReadForm::Index,
+                firenook_rules_engine::ClaimReadForm::Get => RulesClaimReadForm::Get,
+                firenook_rules_engine::ClaimReadForm::In => RulesClaimReadForm::In,
+                firenook_rules_engine::ClaimReadForm::Dynamic => RulesClaimReadForm::Dynamic,
+            },
+            line: read.range.line,
+            from: read.range.from,
+            to: read.range.to,
+        }
+    }
+}
+
 /// The rules a database is being served with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
