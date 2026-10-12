@@ -156,6 +156,37 @@ describe('the filter field', () => {
     )
   })
 
+  it('says what the engine refused of a text the same way, while the field holds it', async () => {
+    const user = userEvent.setup()
+    const refusal = {
+      text: 'ada /(?=x)/',
+      message: 'This regular expression uses look-around `(?=`.',
+      from: 4,
+      to: 11,
+    }
+    render(
+      <FilterField
+        value="ada /(?=x)/"
+        onChange={() => undefined}
+        fields={FIELDS}
+        regex
+        refusal={refusal}
+        placeholder="Filter lines"
+        ariaLabel="Filter lines"
+        testId="lines"
+      />,
+    )
+    expect(screen.getByTestId('lines-error')).toHaveTextContent(refusal.message)
+    expect(screen.getByTestId('lines-box')).toHaveAttribute('data-invalid', 'true')
+    expect(screen.getByTestId('lines').querySelector('.decoration-wavy')?.textContent).toBe(
+      '/(?=x)/',
+    )
+    await user.click(screen.getByTestId('lines-input'))
+    await user.keyboard('{End} ')
+    await user.click(document.body)
+    expect(screen.queryByTestId('lines-error')).not.toBeInTheDocument()
+  })
+
   it('takes a value from elsewhere, and ignores its own echo', async () => {
     const user = userEvent.setup()
     render(<Users />)
