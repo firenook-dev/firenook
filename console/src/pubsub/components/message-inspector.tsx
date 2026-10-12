@@ -22,7 +22,7 @@ import { KeyValueList, type KeyValueItem } from '@/components/console/key-value-
 import { OutcomeChip } from '@/components/console/outcome-chip'
 import { PayloadView } from '@/components/console/payload-view'
 import { RelativeTime, exactTime } from '@/components/console/relative-time'
-import { Kbd, StatusDot } from '@/components/kit'
+import { StatusDot } from '@/components/kit'
 import { useNow } from '@/lib/clock'
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
 import { linkToLogs } from '@/lib/sections/logs'
@@ -140,12 +140,7 @@ export function FunctionDelivery({
         </LogsLink>
         {onRunAgain && (
           <Tooltip
-            content={
-              <span className="flex items-center gap-1.5">
-                Run {row.functionName} again with this message
-                <Kbd>r</Kbd>
-              </span>
-            }
+            content={`Run ${row.functionName} again with this message, and nothing else: it asks first`}
             render={
               <Button
                 ref={again}
