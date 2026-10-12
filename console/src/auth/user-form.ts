@@ -24,6 +24,31 @@ export const NEW_USER_KINDS: readonly { id: NewUserKind; label: string }[] = [
   { id: 'custom', label: 'Custom uid' },
 ]
 
+/** A field only some kinds ask for; the rest (name, photo, disabled, claims) every kind has. */
+export type KindField = 'email' | 'password' | 'phone' | 'uid' | 'provider'
+
+/**
+ * Whether a kind asks for a field. What the dialog shows and what is sent
+ * are the same thing: a value typed under one kind and left behind when
+ * the kind changed is neither checked nor sent under another (an email
+ * typed for Email & password never makes a phone user's create refused
+ * with EMAIL_EXISTS).
+ */
+export function kindHas(kind: NewUserKind, field: KindField): boolean {
+  switch (field) {
+    case 'email':
+      return kind === 'password' || kind === 'federated' || kind === 'custom'
+    case 'password':
+      return kind === 'password' || kind === 'custom'
+    case 'phone':
+      return kind === 'phone' || kind === 'custom'
+    case 'uid':
+      return kind !== 'anonymous'
+    case 'provider':
+      return kind === 'federated'
+  }
+}
+
 export interface NewUserForm {
   email: string
   emailVerified: boolean
@@ -72,7 +97,7 @@ export function e164(phone: string): string {
 /** What is wrong with the form for this kind, by field. */
 export function formProblems(kind: NewUserKind, form: NewUserForm): FormProblems {
   const problems: FormProblems = {}
-  const email = form.email.trim()
+  const email = kindHas(kind, 'email') ? form.email.trim() : ''
   const needsEmail = kind === 'password'
   if (needsEmail && email === '') problems.email = 'An email address is needed for this kind.'
   else if (email !== '' && !EMAIL.test(email))
@@ -81,13 +106,14 @@ export function formProblems(kind: NewUserKind, form: NewUserForm): FormProblems
     problems.password = 'At least 6 characters, as Firebase requires.'
   if (kind === 'custom' && form.password !== '' && form.password.length < 6)
     problems.password = 'At least 6 characters, as Firebase requires.'
-  const phone = e164(form.phone)
+  const phone = kindHas(kind, 'phone') ? e164(form.phone) : ''
   if (kind === 'phone' && phone === '') problems.phone = 'A phone number is needed for this kind.'
   else if (phone !== '' && !/^\+[1-9]\d{1,14}$/.test(phone))
     problems.phone = 'A phone number is + then the country code and number (E.164), like +15550100.'
   if (kind === 'custom' && form.uid.trim() === '')
     problems.uid = 'A custom uid is what this kind is for.'
-  if (form.uid.length > 128) problems.uid = 'A uid holds at most 128 characters.'
+  if (kindHas(kind, 'uid') && form.uid.length > 128)
+    problems.uid = 'A uid holds at most 128 characters.'
   if (kind === 'federated') {
     if (form.providerId.trim() === '') problems.providerId = 'Which provider, like google.com.'
     else if (['password', 'phone', 'anonymous'].includes(form.providerId.trim()))
@@ -148,18 +174,17 @@ export function createPlan(
     return plan
   }
   const body: Record<string, unknown> = {}
-  const email = form.email.trim()
+  const email = kindHas(kind, 'email') ? form.email.trim() : ''
   if (email) {
     body.email = email
     body.emailVerified = form.emailVerified
   }
-  if (form.password !== '' && kind !== 'phone' && kind !== 'federated')
-    body.password = form.password
+  if (form.password !== '' && kindHas(kind, 'password')) body.password = form.password
   if (form.displayName.trim()) body.displayName = form.displayName.trim()
   if (form.photoUrl.trim()) body.photoUrl = form.photoUrl.trim()
-  const phone = e164(form.phone)
+  const phone = kindHas(kind, 'phone') ? e164(form.phone) : ''
   if (phone !== '') body.phoneNumber = phone
-  if (form.uid.trim()) body.localId = form.uid.trim()
+  if (kindHas(kind, 'uid') && form.uid.trim()) body.localId = form.uid.trim()
   if (form.disabled) body.disabled = true
   if (kind === 'federated')
     followUps.push({
@@ -190,7 +215,7 @@ export function createPlan(
 export function createErrorText(code: string, message: string): string {
   switch (code) {
     case 'EMAIL_EXISTS':
-      return 'Another user already has this email. Turn on Allow multiple accounts per email in Settings, or use another.'
+      return 'Another user already has this email, and an email-and-password account never shares one, whatever the settings. Use another email, or open that user.'
     case 'PHONE_NUMBER_EXISTS':
       return 'Another user already has this phone number. Use another.'
     case 'INVALID_PHONE_NUMBER':

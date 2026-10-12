@@ -17,12 +17,14 @@ import { refusal } from '../user-actions'
 import {
   type CreatePlan,
   EMPTY_FORM,
+  type KindField,
   NEW_USER_KINDS,
   type NewUserForm,
   type NewUserKind,
   createErrorText,
   createPlan,
   formProblems,
+  kindHas,
   nextForm,
 } from '../user-form'
 import { triggerSentence, useAccountTriggers } from '../user-triggers'
@@ -151,20 +153,7 @@ export function CreateUserDialog({
     kind === 'anonymous'
       ? `Signs in anonymously, as signInAnonymously() does, so your blocking functions run for it.${sentence ? ` ${sentence}` : ''}`
       : `Created as createUser() does${sentence ? `: ${sentence.charAt(0).toLowerCase()}${sentence.slice(1, -1)}` : ''}; blocking functions do not run — they run for sign-ups from a client.`
-  const has = (field: 'email' | 'password' | 'phone' | 'uid' | 'provider') => {
-    switch (field) {
-      case 'email':
-        return kind === 'password' || kind === 'federated' || kind === 'custom'
-      case 'password':
-        return kind === 'password' || kind === 'custom'
-      case 'phone':
-        return kind === 'phone' || kind === 'custom'
-      case 'uid':
-        return kind !== 'anonymous'
-      case 'provider':
-        return kind === 'federated'
-    }
-  }
+  const has = (field: KindField) => kindHas(kind, field)
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog size="lg" className="p-6 sm:w-[720px]">

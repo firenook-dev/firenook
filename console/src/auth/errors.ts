@@ -157,7 +157,7 @@ export const EXPLANATIONS: Readonly<Record<(typeof ENGINE_CODES)[number], Explan
   },
   DUPLICATE_EMAIL: {
     what: 'Two accounts in one import carry the same email while one account per email is on.',
-    fix: 'Give each account its own email, or turn on Allow multiple accounts per email in Settings.',
+    fix: 'Give each account its own email, or turn off One account per email address in Settings.',
     settings: true,
   },
   DUPLICATE_LOCAL_ID: {
@@ -173,8 +173,8 @@ export const EXPLANATIONS: Readonly<Record<(typeof ENGINE_CODES)[number], Explan
     fix: 'Link each provider account once.',
   },
   EMAIL_EXISTS: {
-    what: 'Another user already has this email.',
-    fix: 'Turn on Allow multiple accounts per email in Settings, or use another email.',
+    what: 'Another account already has this email.',
+    fix: 'Use another email, or sign in to that account: an email-and-password account never shares its email, whatever the settings. For Google and other providers, One account per email address in Settings decides whether a second account may.',
     settings: true,
   },
   EMAIL_NOT_FOUND: {

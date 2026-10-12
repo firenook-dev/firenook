@@ -99,6 +99,43 @@ describe('the New user form', () => {
     })
   })
 
+  it('sends and checks only what the kind asks for, whatever another kind left typed', () => {
+    const left = {
+      ...EMPTY_FORM,
+      email: 'taken@journey.test',
+      password: 'password-1',
+      phone: '+15550100',
+      uid: 'u_typed',
+    }
+    expect(createPlan('phone', left, undefined).create.body).toEqual({
+      phoneNumber: '+15550100',
+      localId: 'u_typed',
+    })
+    expect(createPlan('password', left, undefined).create.body).toEqual({
+      email: 'taken@journey.test',
+      emailVerified: false,
+      password: 'password-1',
+      localId: 'u_typed',
+    })
+    expect(createPlan('federated', left, undefined).create.body).toEqual({
+      email: 'taken@journey.test',
+      emailVerified: false,
+      localId: 'u_typed',
+    })
+    // A bad value under a hidden field never blocks the kind in view.
+    expect(
+      formProblems('phone', { ...EMPTY_FORM, phone: '+15550100', email: 'not an email' }),
+    ).toEqual({})
+    expect(
+      formProblems('password', {
+        ...EMPTY_FORM,
+        email: 'a@b.test',
+        password: 'password-1',
+        phone: '12',
+      }),
+    ).toEqual({})
+  })
+
   it('keeps the kind’s choices for the next user and explains refusals', () => {
     expect(
       nextForm({ ...EMPTY_FORM, email: 'x@y', emailVerified: true, providerId: 'github.com' }),
@@ -107,9 +144,10 @@ describe('the New user form', () => {
       emailVerified: true,
       providerId: 'github.com',
     })
-    expect(createErrorText('EMAIL_EXISTS', 'EMAIL_EXISTS')).toMatch(
-      /Allow multiple accounts per email/,
-    )
+    // The official emulator refuses a second account with an email whatever
+    // allowDuplicateEmails says, so the fix is never a switch.
+    expect(createErrorText('EMAIL_EXISTS', 'EMAIL_EXISTS')).toMatch(/never shares one/)
+    expect(createErrorText('EMAIL_EXISTS', 'EMAIL_EXISTS')).not.toMatch(/Settings/)
     expect(createErrorText('SOMETHING', 'SOMETHING : why')).toBe('SOMETHING : why')
   })
 })
