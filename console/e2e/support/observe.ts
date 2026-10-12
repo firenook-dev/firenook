@@ -293,15 +293,34 @@ export const part = (row: Locator, name: 'time' | 'level' | 'source' | 'message'
   row.locator(`[data-part="${name}"]`)
 
 /**
- * Opens `/console/logs` with `search` and waits for its first page: a line,
- * an edge of the log, or a state that says why there is none.
+ * A search value as the console's router writes it: a text that would read
+ * as JSON (a quoted phrase, `true`, a number) is written as a JSON string,
+ * since the router parses every value as JSON first. A link the console
+ * builds carries `?q="\"Cart is empty\""`; a bare `?q="Cart is empty"` would
+ * arrive as the words `Cart is empty`.
+ */
+function routerValue(value: string): string {
+  try {
+    JSON.parse(value)
+    return JSON.stringify(value)
+  } catch {
+    return value
+  }
+}
+
+/**
+ * Opens `/console/logs` with `search` (as a link the console builds) and
+ * waits for its first page: a line, an edge of the log, or a state that
+ * says why there is none.
  */
 export async function openLogs(
   page: Page,
   engine: ObservedEngine,
   search: Record<string, string> = {},
 ): Promise<void> {
-  const params = new URLSearchParams(search)
+  const params = new URLSearchParams(
+    Object.entries(search).map(([key, value]): [string, string] => [key, routerValue(value)]),
+  )
   await page.goto(`${engine.origin}/console/logs${params.size > 0 ? `?${params}` : ''}`)
   // The first open loads the page's chunk from a debug engine on a shared host.
   await expect(page.getByTestId('logs-page')).toBeVisible({ timeout: 15_000 })

@@ -73,9 +73,12 @@ test('history arrives first, then each new line as it is logged', async ({ page,
 
   if (await attributesInvocations(engine)) {
     // Each line names the function that printed it, and the call ends with one line.
-    await expect(part(loading, 'source')).toHaveText('hello')
-    await expect(part(empty, 'source')).toHaveText('hello')
-    await expect(logRow(page, /Finished "us-central1-hello"/).last()).toBeVisible()
+    const end = logRow(page, /Finished "us-central1-hello"/).last()
+    await expect(end).toBeVisible()
+    for (const row of [begin, loading, empty, end])
+      await expect(part(row, 'source')).toHaveText('hello')
+    // The start line says which request it answers.
+    await expect(begin.getByTestId('log-row-request')).toHaveText(`GET /?uid=${uid}`)
   }
 })
 
@@ -181,7 +184,9 @@ test('the feed follows, freezes the moment you scroll, and catches up on End', a
   await page.keyboard.press('End')
   await expect(page.getByTestId('logs-pause')).toHaveText('Pause')
   await expect.poll(() => new URL(page.url()).searchParams.get('paused')).toBeNull()
-  await expect(logRows(page).last()).toContainText('burst line 4999 of 5000')
+  // The burst's last line is in view (an attributing engine ends the call
+  // with its Finished line, under it).
+  await expect(logRow(page, 'burst line 4999 of 5000')).toBeInViewport()
   await expect(logRows(page).last()).toBeInViewport()
 
   // `p` pauses and resumes the same way.
@@ -447,7 +452,9 @@ test('a Google Emulator UI link opens the same view; foreign params are not read
     for (const text of await logRows(page).allInnerTexts()) expect(text).toContain('hello')
     // The link other sections build (`linkToLogs`): one invocation.
     await logRow(page, 'loading cart for').last().click()
-    const execution = (await page.getByTestId('fact-execution').innerText()).split(/\s/)[0] ?? ''
+    const execution =
+      /[0-9a-f]{6}-\d+/.exec(await page.getByTestId('fact-execution').innerText())?.[0] ?? ''
+    expect(execution).not.toBe('')
     await page.goto(
       `${engine.origin}/console/logs?q=${encodeURIComponent(
         `function:us-central1-hello execution:${execution}`,
@@ -541,7 +548,8 @@ test('a link to a line opens it among its neighbours, paused', async ({ page, en
 
   await page.getByTestId('logs-back-to-latest').click()
   await expect(page.getByTestId('logs-pause')).toHaveText('Pause')
-  await expect(logRows(page).last()).toContainText('burst line 1499 of 1500')
+  await expect(logRow(page, 'burst line 1499 of 1500')).toBeInViewport()
+  await expect(logRows(page).last()).toBeInViewport()
 })
 
 test('problems survive a flood that the rest of the log does not', async ({ page, engine }) => {
@@ -595,7 +603,8 @@ test('a hidden tab takes nothing, and catches up when it is shown', async ({ pag
   page.off('request', onRequest)
 
   await setVisibility(page, 'visible')
-  await expect(logRows(page).last()).toContainText('burst line 19999 of 20000')
+  await expect(logRow(page, 'burst line 19999 of 20000')).toBeInViewport()
+  await expect(logRows(page).last()).toBeInViewport()
   await cdp.detach()
 })
 

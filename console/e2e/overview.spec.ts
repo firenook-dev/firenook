@@ -124,6 +124,8 @@ test('recent problems: a failure lands on the page, and opens in Logs', async ({
     .first()
   await expect(row).toBeVisible()
   await expect(row).toHaveAttribute('data-level', 'error')
+  // Its source is the function, by its short name.
+  await expect(row).toContainText('stalls')
 
   // It opens in Logs: that line, centred, in the inspector, the feed paused around it.
   await row.getByTestId('overview-problem-open').click()
@@ -141,11 +143,11 @@ test('recent problems: a failure lands on the page, and opens in Logs', async ({
     // A handler's own error, by its message.
     await page.goto(`${engine.origin}/console`)
     await callFunction(engine, 'fails')
-    await expect(
-      page
-        .getByTestId('overview-problem')
-        .filter({ hasText: "TypeError: cannot read 'id' of undefined" }),
-    ).toBeVisible()
+    const thrown = page
+      .getByTestId('overview-problem')
+      .filter({ hasText: "TypeError: cannot read 'id' of undefined" })
+    await expect(thrown).toBeVisible()
+    await expect(thrown).toContainText('fails')
   }
   // "Open logs" is every problem.
   await page.goto(`${engine.origin}/console`)

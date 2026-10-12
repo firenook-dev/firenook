@@ -230,14 +230,24 @@ dedicated.describe('the Overview with engines of their own', () => {
     'resetting everything asks for the project id, and leaves every section empty',
     async ({ page, dedicatedEngine }) => {
       const engine = await dedicatedEngine('observe')
+      // Something to delete beside Firestore's seed: a Pub/Sub topic.
+      const topic = await fetch(
+        `http://127.0.0.1:${engine.ports.pubsub}/v1/projects/${engine.project}/topics/reset-everything`,
+        { method: 'PUT' },
+      )
+      expect(topic.ok, `topic → ${topic.status}`).toBe(true)
       await page.goto(`${engine.origin}/console`)
       await expect(page.getByTestId('overview-reset')).toBeVisible()
-      const rows = page.getByTestId('overview-reset-rows').locator('[data-testid$="-open"]')
+      const rows = page.getByTestId('overview-reset-rows').locator(':scope > [data-testid]')
       await expect(rows.first()).toBeVisible()
+      const sections = (await rows.evaluateAll((found) =>
+        found.map((row) => row.getAttribute('data-testid')?.replace(/^overview-reset-/, '') ?? ''),
+      )) as string[]
       dedicated.skip(
-        (await rows.count()) < 2,
+        sections.length < 2,
         'only one section of this engine can be reset from the console so far (each stream lands its clear with its pages)',
       )
+      // The project id, typed exactly, is the only way to the button.
       await page.getByTestId('overview-reset-everything').click()
       const confirm = page.getByTestId('reset-dialog-confirm')
       await expect(confirm).toBeDisabled()
@@ -247,13 +257,24 @@ dedicated.describe('the Overview with engines of their own', () => {
       await expect(confirm).toBeEnabled()
       await confirm.click()
       await expect(page.getByText(/^Clear .+: done$/)).toBeVisible({ timeout: 60_000 })
-      for (const figure of await page.locator('[data-testid^="overview-figure-"]').all()) {
-        const id = (await figure.getAttribute('data-testid')) ?? ''
-        if (id.startsWith('overview-figure-logs-')) continue
-        await expect(figure).toHaveText('0')
+      await page.keyboard.press('Escape')
+      // Every section it named holds nothing now, on its row and its card.
+      for (const id of sections) {
+        await expect(page.getByTestId(`overview-reset-${id}`)).toContainText('Empty', {
+          timeout: 10_000,
+        })
+        await expect(page.locator(`[data-testid^="overview-figure-${id}-"]`).first()).toHaveText(
+          '0',
+        )
       }
-      const markers = await facetsOf(engine, { q: 'kind:data.reset' })
-      expect(markers.matched).toBe(await rows.count())
+      // One marker per section in Logs, each saying what it deleted.
+      await expect
+        .poll(async () => (await facetsOf(engine, { q: 'kind:data.reset' })).matched)
+        .toBe(sections.length)
+      await openLogs(page, engine)
+      const markers = page.locator('[data-testid="log-marker-line"][data-kind="data.reset"]')
+      await expect(markers).toHaveCount(sections.length)
+      await expect(markers.first()).toContainText('Firestore reset from the console:')
     },
   )
 
