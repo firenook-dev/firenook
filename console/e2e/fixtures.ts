@@ -99,14 +99,23 @@ export const dedicated = test.extend<{
   // oxlint-disable-next-line no-empty-pattern
   dedicatedEngine: async ({}, use) => {
     const started: Engine[] = []
+    const directories: Array<() => Promise<void>> = []
     await use(async (profile, options) => {
-      const engine = engineOf(
-        await startEngine({ profile, ...options, env: { ...RELEASE_ENV, ...options?.env } }),
-      )
+      // A journey may start an engine on what an earlier one saved, so the
+      // directories outlive each stop and go once the journey is over.
+      const launched = await startEngine({
+        profile,
+        ...options,
+        keepDirectory: true,
+        env: { ...RELEASE_ENV, ...options?.env },
+      })
+      directories.push(launched.remove)
+      const engine = engineOf(launched)
       started.push(engine)
       return engine
     })
     await Promise.allSettled(started.map((engine) => engine.stop()))
+    await Promise.allSettled(directories.map((remove) => remove()))
   },
 })
 

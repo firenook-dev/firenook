@@ -1,8 +1,10 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { seed as seedFirestore } from '../scripts/seed/firestore.mjs'
-import { ENGINE_REVISION } from './engine'
+import { startEngine } from '../scripts/synthetic-engine.mjs'
+import { ENGINE_REVISION, RELEASE_ENV } from './engine'
 import { dedicated, expect } from './fixtures'
 import { ownerFetch } from './support/api'
 import { badgeOf, commit, documentsOf, firestoreReads, freePort, text } from './support/shell'
@@ -320,3 +322,44 @@ dedicated.describe('with engines of their own', () => {
     },
   )
 })
+
+dedicated(
+  'the synthetic engine leaves no project directory behind, started, failed or kept',
+  async () => {
+    // Engines start their projects in the temp directory; this journey
+    // gives them one of their own to count in.
+    const before = process.env.TMPDIR
+    const scratch = mkdtempSync(join(tmpdir(), 'firenook-engine-dirs-'))
+    const projects = () =>
+      readdirSync(scratch).filter((name) => name.startsWith('firenook-console-'))
+    process.env.TMPDIR = scratch
+    try {
+      const engine = await startEngine({ profile: 'data', seed: false, env: RELEASE_ENV })
+      expect(projects()).toHaveLength(1)
+      await engine.stop()
+      expect(projects()).toEqual([])
+
+      // A start that fails takes its directory with it.
+      await expect(
+        startEngine({ profile: 'data', seed: false, args: ['--no-such-option'] }),
+      ).rejects.toThrow(/exited early/)
+      expect(projects()).toEqual([])
+
+      // Kept for another engine to start on, it goes when the caller says.
+      const kept = await startEngine({
+        profile: 'data',
+        seed: false,
+        keepDirectory: true,
+        env: RELEASE_ENV,
+      })
+      await kept.stop()
+      expect(existsSync(join(kept.directory, 'firebase.json'))).toBe(true)
+      await kept.remove()
+      expect(projects()).toEqual([])
+    } finally {
+      if (before === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = before
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  },
+)

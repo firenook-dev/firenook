@@ -11,7 +11,7 @@
 // foundation's.
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -41,6 +41,22 @@ export const PROFILES = ['data', 'auth', 'storage', 'compute', 'messaging', 'obs
 
 /** How many times a start that lost a port to another process is tried again. */
 const PORT_ATTEMPTS = 3
+
+/**
+ * Set to keep every engine's project directory after it stops, to look at
+ * what an engine wrote (its state, its debug log) after a journey.
+ */
+const KEEP_DIRECTORIES = Boolean(process.env.FIRENOOK_KEEP_ENGINE_DIR)
+
+/**
+ * Removes an engine's project directory, unless FIRENOOK_KEEP_ENGINE_DIR is
+ * set. Each one is 15 to 75 MB (a Functions codebase, its SDK link, the
+ * state), and a suite run starts hundreds.
+ */
+export function removeDirectory(directory) {
+  if (KEEP_DIRECTORIES) return
+  rmSync(directory, { recursive: true, force: true, maxRetries: 3 })
+}
 
 /**
  * @typedef {{
@@ -207,6 +223,7 @@ function waitForEngine(child, wait, origin) {
  *   args?: string[],
  *   inherit?: boolean,
  *   uiPort?: number,
+ *   keepDirectory?: boolean,
  * }} [options]
  */
 export async function startEngine(options = {}) {
@@ -226,6 +243,29 @@ export async function startEngine(options = {}) {
   const fixtureEnv = { ...profile.fixtureEnv, ...options.fixtureEnv }
 
   const directory = mkdtempSync(join(tmpdir(), `firenook-console-${profileName}-`))
+  try {
+    return await launch(options, {
+      binary,
+      archive,
+      profile,
+      profileName,
+      project,
+      only,
+      fixtureEnv,
+      directory,
+    })
+  } catch (error) {
+    // A start that failed leaves nothing behind.
+    removeDirectory(directory)
+    throw error
+  }
+}
+
+/** Writes the project into `directory` and starts the engine on it; `startEngine` owns the directory. */
+async function launch(
+  options,
+  { binary, archive, profile, profileName, project, only, fixtureEnv, directory },
+) {
   // What a real project's firebase.json holds: an emulators entry for each
   // service the profile runs, then whatever each fixture adds.
   const firebaseJson = { emulators: { ui: { enabled: true } } }
@@ -299,9 +339,9 @@ export async function startEngine(options = {}) {
     process.once('exit', orphaned)
     child.once('exit', () => process.off('exit', orphaned))
     const origin = `http://${HOST}:${ports.ui}`
-    let stopped
-    const stop = () =>
-      (stopped ??= new Promise((done) => {
+    let exited
+    const halt = () =>
+      (exited ??= new Promise((done) => {
         if (child.exitCode !== null || child.signalCode !== null) return done()
         child.once('exit', () => done())
         child.kill('SIGINT')
@@ -309,10 +349,21 @@ export async function startEngine(options = {}) {
           if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
         }, 20_000).unref()
       }))
+    // Stopped, the engine's project directory goes too, unless the caller
+    // keeps it to start another engine on what this one saved
+    // (`keepDirectory`, then `remove()` once done with it).
+    let stopped
+    const stop = () =>
+      (stopped ??= halt().then(() => {
+        if (!options.keepDirectory) removeDirectory(directory)
+      }))
+    const remove = () => halt().then(() => removeDirectory(directory))
     try {
       if (!options.inherit) await waitForEngine(child, options.wait ?? 'ready', origin)
     } catch (error) {
-      await stop()
+      // The next attempt starts on the same directory; a final failure
+      // removes it in `startEngine`.
+      await halt()
       lastError = error
       if (error instanceof PortTaken && attempt < PORT_ATTEMPTS) continue
       throw error instanceof PortTaken
@@ -321,11 +372,17 @@ export async function startEngine(options = {}) {
           )
         : error
     }
-    const engine = { origin, project, ports, directory, profile: profileName, stop, child }
+    const engine = { origin, project, ports, directory, profile: profileName, stop, remove, child }
     if (options.seed !== false && !options.inherit) {
-      for (const name of profile.seeds) {
-        const seeder = await import(pathToFileURL(join(HERE, 'seed', `${name}.mjs`)).href)
-        await seeder.seed(engine)
+      try {
+        for (const name of profile.seeds) {
+          const seeder = await import(pathToFileURL(join(HERE, 'seed', `${name}.mjs`)).href)
+          await seeder.seed(engine)
+        }
+      } catch (error) {
+        // The engine stops before its directory goes (in `startEngine`).
+        await halt()
+        throw error
       }
     }
     return engine

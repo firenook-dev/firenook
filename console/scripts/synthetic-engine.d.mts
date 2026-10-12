@@ -52,6 +52,11 @@ export interface StartOptions {
   args?: string[]
   inherit?: boolean
   uiPort?: number
+  /**
+   * Keep the project directory when the engine stops (another engine starts
+   * on what it saved); `remove()` takes it away. Without it, `stop()` does.
+   */
+  keepDirectory?: boolean
 }
 
 export interface StartedEngine {
@@ -60,11 +65,16 @@ export interface StartedEngine {
   ports: Record<string, number>
   directory: string
   profile: EngineProfile
+  /** Stops the engine and, unless `keepDirectory` was asked, removes its project directory. */
   stop: () => Promise<void>
+  /** Stops the engine if it runs, and removes its project directory. */
+  remove: () => Promise<void>
   child: import('node:child_process').ChildProcess
 }
 
 export const PROFILES: readonly EngineProfile[]
+/** Removes an engine's project directory, unless FIRENOOK_KEEP_ENGINE_DIR is set. */
+export function removeDirectory(directory: string): void
 export function loadProfile(name: string): Promise<Profile>
 export function configures(firebaseJson: Record<string, unknown>, name: string): boolean
 export function launchContextFor(
