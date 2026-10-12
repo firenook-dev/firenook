@@ -8,6 +8,14 @@
 // The text is edited where it stands: a term is removed by its own span in
 // the filter, so everything else the developer typed — words, phrases,
 // other keys, their order — is left exactly as it was.
+//
+// A facet may also write more than one term, or a negated one: Auth's
+// "Unverified email" is `has:email -is:verified`, its "Never signed in"
+// `-has:sign-in`, the Inbox's "Unused" `-is:used`. Such a compound facet is
+// pressed when every one of its terms is in the filter as written, and
+// pressing it writes the missing ones (taking out any term it contradicts,
+// `is:verified` for `-is:verified`) or takes all of them out. It is its own
+// negation already, so it offers neither Only nor Hide.
 
 import { cn } from '@cloudflare/kumo'
 import { CheckIcon } from '@phosphor-icons/react'
@@ -52,8 +60,49 @@ function same(term: FilterTerm, facet: { key: string; value: string }): boolean 
   return term.key.toLowerCase() === facet.key && term.value.toLowerCase() === facet.value
 }
 
+/** One term a compound facet writes, as it is compared, and where it stands in the facet's text. */
+interface FacetPart {
+  key: string
+  value: string
+  negated: boolean
+  text: string
+}
+
+/**
+ * The terms of a compound facet — several, or a negated one — or
+ * `undefined` for a facet of one plain term, which keeps the rules above.
+ */
+function compoundParts(term: string): FacetPart[] | undefined {
+  const parsed = parseFilter(term, false)
+  if (!parsed.ok) return undefined
+  const { terms, words, regexes } = parsed.query
+  if (words.length > 0 || regexes.length > 0 || terms.some((part) => part.op !== 'eq'))
+    return undefined
+  if (terms.length < 2 && !terms.some((part) => part.negated)) return undefined
+  return terms.map((part) => ({
+    key: part.key.toLowerCase(),
+    value: part.value.toLowerCase(),
+    negated: part.negated,
+    text: term.slice(part.from, part.to),
+  }))
+}
+
+/** Whether a facet writes several terms or a negated one (no Only, no Hide). */
+export function isCompoundFacet(term: string): boolean {
+  return compoundParts(term) !== undefined
+}
+
+function holds(present: readonly FilterTerm[], part: FacetPart, negated = part.negated): boolean {
+  return present.some((candidate) => same(candidate, part) && candidate.negated === negated)
+}
+
 /** Whether `q` holds the facet's term, its negation, or neither. */
 export function facetState(q: string, term: string): FacetState {
+  const parts = compoundParts(term)
+  if (parts) {
+    const present = termsOf(q)
+    return parts.every((part) => holds(present, part)) ? 'on' : 'off'
+  }
   const facet = split(term)
   const found = termsOf(q).filter((candidate) => same(candidate, facet))
   if (found.some((candidate) => !candidate.negated)) return 'on'
@@ -77,8 +126,32 @@ function append(q: string, term: string): string {
   return base ? `${base} ${term}` : term
 }
 
-/** Pressing a facet: off → its term is added; on → its term goes; hidden → its negation goes. */
+/**
+ * Pressing a facet: off → its term is added; on → its term goes; hidden →
+ * its negation goes. A compound facet that is on loses all its terms; one
+ * that is off gains the terms it lacks, and the terms they contradict go.
+ */
 export function toggleFacet(q: string, term: string): string {
+  const parts = compoundParts(term)
+  if (parts) {
+    const present = termsOf(q)
+    if (parts.every((part) => holds(present, part)))
+      return removeSpans(
+        q,
+        present.filter((candidate) =>
+          parts.some((part) => same(candidate, part) && candidate.negated === part.negated),
+        ),
+      )
+    const kept = removeSpans(
+      q,
+      present.filter((candidate) =>
+        parts.some((part) => same(candidate, part) && candidate.negated !== part.negated),
+      ),
+    )
+    return parts
+      .filter((part) => !holds(present, part))
+      .reduce((text, part) => append(text, part.text), kept)
+  }
   const facet = split(term)
   const terms = termsOf(q).filter((candidate) => same(candidate, facet))
   const state = facetState(q, term)
@@ -130,6 +203,7 @@ export function FacetList({
           <span className="px-2 pb-0.5 text-[11px] text-kumo-subtle">{group.label}</span>
           {group.facets.map((facet) => {
             const state = facetState(value, facet.term)
+            const excludable = exclusions && !isCompoundFacet(facet.term)
             return (
               <div
                 key={facet.term}
@@ -173,7 +247,7 @@ export function FacetList({
                     <span
                       className={cn(
                         'shrink-0 font-mono text-[11px] tabular-nums',
-                        exclusions &&
+                        excludable &&
                           'group-hover/facet:invisible group-focus-within/facet:invisible',
                         facet.tone === 'danger'
                           ? 'text-kumo-danger'
@@ -186,7 +260,7 @@ export function FacetList({
                     </span>
                   )}
                 </button>
-                {exclusions && (
+                {excludable && (
                   // Over the count, on the row's own ground: the two words
                   // that change the group, where the figure was.
                   <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 group-focus-within/facet:pointer-events-auto group-focus-within/facet:opacity-100 group-hover/facet:pointer-events-auto group-hover/facet:opacity-100">
