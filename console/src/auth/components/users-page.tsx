@@ -19,7 +19,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '@/api/client'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import type { AuthUserFacets } from '@/api/generated/auth/AuthUserFacets'
-import { BuildingsIcon } from '@phosphor-icons/react'
+import {
+  BuildingsIcon,
+  DownloadSimpleIcon,
+  TrashIcon,
+  UploadSimpleIcon,
+  UserPlusIcon,
+  UsersThreeIcon,
+} from '@phosphor-icons/react'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { EmptyState } from '@/components/console/empty-state'
 import type { DataTableSort } from '@/components/console/data-table'
@@ -30,7 +37,7 @@ import { MatchCount } from '@/components/console/match-count'
 import { PanelHeader } from '@/components/console/panel'
 import { SectionBanner } from '@/components/console/section-banner'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
-import { SectionToolbar, ToolbarRow } from '@/components/console/toolbar'
+import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
 import { useCursorRows } from '@/components/console/use-cursor-rows'
 import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
 import { checkFilter } from '@/lib/filter'
@@ -57,6 +64,7 @@ import { type RecentUser, recentsKey, recentsOf, useRecentUsers } from '../recen
 import {
   type TenantScope,
   projectParam,
+  queryTarget,
   tenantKey,
   tenantParam,
   tenantScope,
@@ -66,6 +74,14 @@ import { deleteUser, refusal } from '../user-actions'
 import { useAccountTriggers } from '../user-triggers'
 import { USERS_DEFAULTS, useUsersSearch } from '../users-search'
 import { useUsersLive } from '../users-live'
+import { AuthJobs } from './auth-jobs'
+import { useUserBulk } from './bulk-bar'
+import { BulkDeleteDialog } from './bulk-delete-dialog'
+import { CreateUserDialog } from './create-user-dialog'
+import { ExportUsersDialog } from './export-users-dialog'
+import { ImportUsersDialog } from './import-users-dialog'
+import { type NewChoice, NewUserMenu } from './new-user-menu'
+import { SampleUsersDialog } from './sample-users-dialog'
 import { TenantPicker } from './tenant-picker'
 import { UserInspector } from './user-inspector'
 import { UsersGrid } from './users-grid'
@@ -239,6 +255,41 @@ export function UsersPage() {
   const setScope = (next: TenantScope) =>
     update({ tenant: tenantParam('users', next), user: undefined })
 
+  // ------------------------------------------------------------ ticked rows
+  // A selection belongs to one list: another scope or filter starts with none.
+  const listKey = `${project}\u0000${slot}\u0000${q}`
+  const [selection, setSelection] = useState<{
+    key: string
+    checked: ReadonlySet<string>
+    everything: boolean
+  }>({ key: listKey, checked: new Set(), everything: false })
+  if (selection.key !== listKey)
+    setSelection({ key: listKey, checked: new Set(), everything: false })
+  const clearSelection = () => setSelection({ key: listKey, checked: new Set(), everything: false })
+  const bulk = useUserBulk({
+    project,
+    scope,
+    q,
+    selection,
+    total: figures.data?.total,
+    onClear: clearSelection,
+    onSelectEverything: () =>
+      setSelection({
+        key: listKey,
+        checked: new Set(rows.rows.map((row) => row.uid)),
+        everything: true,
+      }),
+    onExport: () => update({ dialog: 'export' }),
+    blocked,
+  })
+
+  // ------------------------------------------------------------ making users, files
+  const choose = (choice: NewChoice) => update({ new: choice })
+  const closeDialog = () => update({ new: undefined, dialog: undefined }, { replace: true })
+  const [named, setNamed] = useState<{ kind: 'all' | 'sample'; jobId: string | undefined } | null>(
+    null,
+  )
+
   // ------------------------------------------------------------ deleting one user
   const [deleting, setDeleting] = useState<AuthUserRow | null>(null)
   const deleteTriggers = useAccountTriggers(tenant, 'user.delete')
@@ -275,6 +326,33 @@ export function UsersPage() {
     onOpenRecent: (recent: RecentUser) => update({ user: recent.uid }),
     unfrozen,
     onFreeze: freeze,
+    actions: [
+      {
+        id: 'auth.export-users',
+        title: 'Export users',
+        keywords: 'download accounts.json csv',
+        icon: <DownloadSimpleIcon size={16} />,
+        run: () => update({ dialog: 'export' }),
+      },
+      ...(blocked
+        ? []
+        : [
+            {
+              id: 'auth.delete-sample',
+              title: 'Delete sample users…',
+              keywords: 'remove sample is:sample',
+              icon: <UsersThreeIcon size={16} />,
+              run: () => setNamed({ kind: 'sample', jobId: undefined }),
+            },
+            {
+              id: 'auth.delete-all',
+              title: tenant ? `Delete all users in tenant ${tenant}…` : 'Delete all project users…',
+              keywords: 'remove clear everyone reset',
+              icon: <TrashIcon size={16} />,
+              run: () => setNamed({ kind: 'all', jobId: undefined }),
+            },
+          ]),
+    ],
   })
 
   // A link to New tenant on this page: the dialog lives with the tenants, in Settings.
@@ -295,7 +373,26 @@ export function UsersPage() {
       run: (event) => {
         if (isTyping(event.target)) (event.target as HTMLElement).blur()
         else if (search.user !== undefined) update({ user: undefined })
+        else if (selection.everything || selection.checked.size > 0) clearSelection()
       },
+    },
+    {
+      key: 'n',
+      label: 'New user',
+      when: () => blocked === undefined,
+      run: () => choose('user'),
+    },
+    {
+      key: 'Delete',
+      label: 'Delete the ticked users',
+      when: () => selection.everything || selection.checked.size > 0,
+      run: bulk.deleteSelected,
+    },
+    {
+      key: 'Backspace',
+      label: 'Delete the ticked users',
+      when: () => selection.everything || selection.checked.size > 0,
+      run: bulk.deleteSelected,
     },
   ])
 
@@ -355,8 +452,10 @@ export function UsersPage() {
             onRetry={() => liveChannel.retry()}
             testId="users-live"
           />
+          <ToolbarDivider />
+          <NewUserMenu onChoose={choose} blocked={blocked} />
         </ToolbarRow>
-        <ToolbarRow variant="line" testId="users-row-two">
+        <ToolbarRow variant="line" testId="users-row-two" overlay={bulk.overlay}>
           <FilterField
             value={q}
             onChange={(text) => setFilter(text, 'typed')}
@@ -382,6 +481,7 @@ export function UsersPage() {
           />
         </ToolbarRow>
       </SectionToolbar>
+      <AuthJobs />
       {tenantState === 'missing' && tenant !== undefined && (
         <SectionBanner
           tone="danger"
@@ -450,6 +550,51 @@ export function UsersPage() {
               rowMenu={rowMenu}
               flashes={flashes}
               onScope={setScope}
+              selection={{
+                checked: selection.checked,
+                everything: selection.everything,
+                onChange: (checked, everything) =>
+                  setSelection({ key: listKey, checked, everything }),
+              }}
+              emptyActions={
+                blocked ? undefined : (
+                  <>
+                    <Button
+                      variant="primary"
+                      icon={<UserPlusIcon />}
+                      onClick={() => choose('user')}
+                      data-testid="empty-new-user"
+                    >
+                      New user
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      icon={<UsersThreeIcon />}
+                      onClick={() => choose('sample')}
+                    >
+                      Sample users
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      icon={<UploadSimpleIcon />}
+                      onClick={() => choose('import')}
+                    >
+                      Import
+                    </Button>
+                  </>
+                )
+              }
+              footerActions={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<DownloadSimpleIcon />}
+                  onClick={() => update({ dialog: 'export' })}
+                  data-testid="users-export"
+                >
+                  Export
+                </Button>
+              }
             />
           )}
         </div>
@@ -473,6 +618,70 @@ export function UsersPage() {
           />
         )}
       </SectionBody>
+      {bulk.dialogs}
+      <CreateUserDialog
+        open={search.new === 'user'}
+        onOpenChange={(next) => {
+          if (!next) closeDialog()
+        }}
+        project={project}
+        tenant={tenant}
+        blocked={blocked}
+        onCreated={(uid, done) => {
+          if (done) update({ new: undefined, user: uid }, { replace: true })
+        }}
+      />
+      <ImportUsersDialog
+        open={search.new === 'import'}
+        onOpenChange={(next) => {
+          if (!next) closeDialog()
+        }}
+        project={project}
+        tenant={tenant}
+        blocked={blocked}
+      />
+      <SampleUsersDialog
+        open={search.new === 'sample'}
+        onOpenChange={(next) => {
+          if (!next) closeDialog()
+        }}
+        project={project}
+        tenant={tenant}
+        blocked={blocked}
+        onDone={() => setFilter('is:sample', 'now')}
+      />
+      <ExportUsersDialog
+        open={search.dialog === 'export'}
+        onOpenChange={(next) => {
+          if (!next) closeDialog()
+        }}
+        project={project}
+        tenant={tenant}
+        q={q}
+        total={figures.data?.total}
+        scopeTotal={figures.data?.scopeTotal}
+        selected={[...selection.checked]}
+      />
+      <BulkDeleteDialog
+        open={named !== null}
+        onOpenChange={(next) => {
+          if (!next) setNamed(null)
+        }}
+        project={project}
+        tenant={tenant}
+        target={queryTarget(scope, named?.kind === 'sample' ? 'is:sample' : '')}
+        count={named?.kind === 'sample' ? (facets?.sample ?? 0) : (figures.data?.scopeTotal ?? 0)}
+        title={
+          named?.kind === 'sample'
+            ? 'Delete sample users'
+            : tenant
+              ? `Delete all users in tenant ${tenant}`
+              : 'Delete all project users'
+        }
+        jobId={named?.jobId}
+        onStarted={(jobId) => setNamed((current) => (current ? { ...current, jobId } : current))}
+        testId="named-delete"
+      />
       <DangerConfirm
         open={deleting !== null}
         onOpenChange={(next) => {
