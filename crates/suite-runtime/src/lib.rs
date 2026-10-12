@@ -2083,7 +2083,7 @@ async fn start_functions_runtime(
     logging: &LoggingRuntime,
     console: FunctionsConsoleOptions,
 ) -> Result<FunctionsRuntime, SuiteRuntimeError> {
-    let FunctionsConsoleOptions {} = console;
+    let FunctionsConsoleOptions { compute: _compute } = console;
     let firebase_json: serde_json::Value = serde_json::from_slice(
         &tokio::fs::read(&config.firebase_json)
             .await
