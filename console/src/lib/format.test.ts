@@ -103,6 +103,13 @@ describe('times', () => {
     expect(relativeTime('2024-09-20T09:00:00Z', now)).toBe('2 y ago')
   })
 
+  it('never says "in 1 min" of a time in the current minute, behind a minute clock', () => {
+    // The minute clock floors to the minute: a line logged at :59 is 59 s ahead of it.
+    expect(relativeTime('2026-09-20T09:00:59Z', now)).toBe('just now')
+    expect(relativeTime('2026-09-20T09:00:46Z', now)).toBe('just now')
+    expect(relativeTime('2026-09-20T09:01:30Z', now)).toBe('in 2 min')
+  })
+
   it('takes the machinery out of a timestamp', () => {
     expect(compactIso('2026-09-20T09:00:00.123456Z')).toBe('2026-09-20 09:00:00')
     expect(compactIso('2026-09-20T09:00:00Z')).toBe('2026-09-20 09:00:00')

@@ -97,6 +97,9 @@ export function relativeTime(iso: string, now = Date.now()): string {
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return iso
   const seconds = Math.round((now - then) / 1000)
+  // A clock held to the minute (`useNow('minute')`) is up to 59 s behind,
+  // so a time from the current minute can read as the future: it is now.
+  if (seconds < 0 && seconds > -60) return 'just now'
   const future = seconds < 0
   const abs = Math.abs(seconds)
   const text =
