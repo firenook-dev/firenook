@@ -22,6 +22,14 @@ export function jobProgress(job: Job): string {
   return parts.join(' · ')
 }
 
+/**
+ * Why a job failed: the engine's own reason for the whole job ("The engine
+ * stopped."), else its first failed item's, else how far it got.
+ */
+export function jobFailure(job: Job): string {
+  return job.message ?? job.errors[0]?.message ?? jobProgress(job)
+}
+
 export function JobsWatch() {
   const jobs = useJobs('suite')
   // What this tab has said about each job: its state and progress.
@@ -55,7 +63,7 @@ export function JobsWatch() {
         toast({
           key,
           title: `${job.title}: failed`,
-          description: job.errors[0]?.message ?? jobProgress(job),
+          description: jobFailure(job),
           tone: 'danger',
         })
       }

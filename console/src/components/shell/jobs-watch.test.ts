@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Job } from '@/lib/jobs'
-import { jobProgress } from './jobs-watch'
+import { jobFailure, jobProgress } from './jobs-watch'
 
 const job = (overrides: Partial<Job>): Job => ({
   id: 'j1',
@@ -25,5 +25,18 @@ describe('a job’s progress line', () => {
       '1,204 of 5,000 · 3 skipped · 2 failed',
     )
     expect(jobProgress(job({ total: null, done: 7 }))).toBe('7 done')
+  })
+})
+
+describe('why a job failed', () => {
+  it('gives the engine’s reason for the job first, then the first failed item’s', () => {
+    const failed = job({
+      state: 'failed',
+      errorCount: 1,
+      errors: [{ key: 'users/u1', message: 'Permission denied.' }],
+    })
+    expect(jobFailure({ ...failed, message: 'The engine stopped.' })).toBe('The engine stopped.')
+    expect(jobFailure(failed)).toBe('Permission denied.')
+    expect(jobFailure(job({ state: 'failed' }))).toBe('1,204 of 5,000')
   })
 })
