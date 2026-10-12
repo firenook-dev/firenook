@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "name": "auth-claims-length",
+  "frozen": true,
+  "frozenAt": "2026-10-12T06:20:00+08:00",
+  "plan": "conformance/src/auth/claims-length-plan.ts",
+  "purpose": "Custom claims are measured against the 1,000 limit as the official Auth emulator measures them (JavaScript string length, UTF-16 code units), not in UTF-8 bytes",
+  "toolchain": {
+    "node": "24.20.0",
+    "firebaseToolsAuthOracle": "15.22.0",
+    "firebaseToolsAuthSourceSha256": {
+      "lib/emulator/auth/apiSpec.js": "9014b6512f2adf4cc72ed244946bb942857a09d12dd77cd6c65bb7ce27ba76c8",
+      "lib/emulator/auth/cloudFunctions.js": "2647a6af6ee6a9915f256f499df9b6136161645d73482fec063441f52dea1368",
+      "lib/emulator/auth/errors.js": "b69b6c6d85f8d709337ba2c111070e39f55f141af0cf75b770ec03f927ef2586",
+      "lib/emulator/auth/handlers.js": "b228707e1a8dcab02ef8acb261a3b5f8b670589c3887d5a4fba02cba78e07853",
+      "lib/emulator/auth/index.js": "6f46a45892a0c6fc2da4066409deddd0b2c844b70a4839f6f8d83b9b4140f84e",
+      "lib/emulator/auth/operations.js": "dbc71e2a7919458709528c4a20ea051143032eded7ef1a39f75221be7c46b322",
+      "lib/emulator/auth/server.js": "40f4d7c16aca84829ee502f4bfebc84fb50ad2893650011f268c0b6e1f27c1a7",
+      "lib/emulator/auth/state.js": "79b3d0333f69448ec32217c513503bbb6dfe6e16fe1f5a274af3ac5a917b7fb5",
+      "lib/emulator/auth/utils.js": "c2885f813a44486e34cbb61334bc555ca4f1cceeca49bd40a2f09f4d47a67035",
+      "lib/emulator/auth/widget_ui.js": "188cb9d4379d412561ab35df0ab68f1ace2447e6c8ec13622c0897b076893b64"
+    }
+  },
+  "oracle": {
+    "emulator": "official-firebase-tools-auth-emulator-15.22.0",
+    "bootstrap": "AuthEmulator in process with the Phase I1 recording functions stub (blocking-function calls observed)",
+    "javaRequired": false,
+    "officialSource": "lib/emulator/auth/operations.js validateSerializedCustomClaims: claims.length <= CUSTOM_ATTRIBUTES_MAX_LENGTH (1000)"
+  },
+  "capture": {
+    "fixture": "conformance/fixtures/auth-claims-length-v1",
+    "command": "FIREBASE_TOOLS_15_22_ROOT=<firebase-tools 15.22.0> npm run capture:auth:claims-length --prefix conformance",
+    "programs": 1,
+    "steps": 18,
+    "recordings": 2,
+    "recordingsIdenticalAfterNormalization": true,
+    "requiredFixtures": [
+      "README.md",
+      "emulator-programs.json",
+      "SHA256SUMS"
+    ],
+    "fixturesFrozen": true,
+    "frozenFixtureSha256": {
+      "README.md": "55ef96a5d80b1815fbab4621e7a9fbe53d3239d37e68b278404e67ff3054e0bb",
+      "emulator-programs.json": "c3d9aba4fd09b3e3fad22da320aed998a568977d8044644114072928b186c94c"
+    }
+  },
+  "gates": {
+    "emulatorReplay": {
+      "test": "conformance/src/auth/replay-firenook.ts (npm run replay:auth -- --binary <firenook>) replays this corpus after auth-v1; --corpus=auth-claims-length-v1 replays it alone",
+      "allowedUnexplainedStatusDivergences": 0,
+      "allowedUnexplainedBodyDivergences": 0,
+      "functionsCallsMustMatch": true
+    },
+    "rustTests": "crates/auth-front: custom_claims_length_counts_utf16_code_units, custom_claims_of_a_thousand_accented_characters_are_stored_and_minted"
+  },
+  "results": {
+    "beforeFix": {
+      "measure": "UTF-8 bytes (str::len)",
+      "programs": 1,
+      "steps": 18,
+      "mismatches": 59,
+      "stepsMismatched": 11
+    },
+    "afterFix": {
+      "measure": "UTF-16 code units (str::encode_utf16().count())",
+      "programs": 1,
+      "steps": 18,
+      "valuesCompared": 350,
+      "mismatches": 0,
+      "namedDivergences": 0
+    },
+    "authV1Unchanged": {
+      "programs": 61,
+      "steps": 1068,
+      "mismatches": 0
+    }
+  }
+}

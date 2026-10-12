@@ -126,6 +126,7 @@ describe('patching rows from a batch read', () => {
       {
         items: [
           { key: 'new', row: { id: 'new', value: 1.5 }, page: 0 },
+          { key: 'newer', row: { id: 'newer', value: 1.6 }, page: 0 },
           { key: 'far', row: { id: 'far', value: 999 }, page: null },
         ],
       },
@@ -133,6 +134,7 @@ describe('patching rows from a batch read', () => {
     )
     expect(result.data).toBe(data)
     expect(result.refetch).toEqual([0])
+    expect([...result.arriving]).toEqual([[0, 2]])
   })
 
   it('asks with the window’s page starts, its end, filter and order', () => {
@@ -151,12 +153,13 @@ describe('patching rows from a batch read', () => {
 })
 
 /** An engine list in memory: positions as cursors, a batch read that places rows in pages. */
-function fakeEngine(count: number, size = 100) {
+function fakeEngine(count: number, pageSize = 100) {
   const all: Row[] = Array.from({ length: count }, (_, index) => ({
     id: `r${String(index).padStart(5, '0')}`,
     value: index,
   }))
   const fetchPage = vi.fn(async (param: CursorPageParam): Promise<Page<Row>> => {
+    const size = param.limit ?? pageSize
     let start = 0
     let end = size
     if (param.cursor !== undefined) {
@@ -274,6 +277,29 @@ describe('useCursorRows', () => {
     expect(result.current.flashes.get('r00149b')).toBe('created')
   })
 
+  it('reads a page that gained rows with them, so none falls before the next page', async () => {
+    const engine = fakeEngine(250)
+    const { result } = mount(engine)
+    await waitFor(() => expect(result.current.rows).toHaveLength(100))
+    act(() => result.current.loadMore())
+    await waitFor(() => expect(result.current.rows).toHaveLength(200))
+    // Two rows land in the first page, above every row the reader sees.
+    engine.all.unshift({ id: 'a-new', value: -1 }, { id: 'b-new', value: -0.5 })
+    act(() => result.current.applyKeys(['a-new', 'b-new']))
+    await waitFor(() => expect(result.current.rows).toHaveLength(202))
+    // Its rows, the two new ones and the second page's first row, where they meet.
+    expect(engine.fetchPage.mock.calls.at(-1)?.[0]).toEqual({ limit: 103 })
+    // The row the first page held last is still there, before the second page.
+    expect(result.current.rows.slice(99, 103).map(rowKey)).toEqual([
+      'r00097',
+      'r00098',
+      'r00099',
+      'r00100',
+    ])
+    expect(new Set(result.current.rows.map(rowKey)).size).toBe(202)
+    expect(result.current.flashes.get('a-new')).toBe('created')
+  })
+
   it('starts again from page one past a thousand keys', async () => {
     const engine = fakeEngine(2_500)
     const { result } = mount(engine)
@@ -307,9 +333,10 @@ describe('useCursorRows', () => {
     const ids = result.current.rows.map(rowKey)
     expect(new Set(ids).size).toBe(291)
     expect(ids).toEqual(engine.ids())
-    // The first page from its start, and the rows just above the second.
+    // The first page from its start (asking for its new rows too, which this
+    // engine ignores), and the rows just above the second.
     expect(engine.fetchPage.mock.calls.slice(fetched).map((call) => call[0])).toEqual([
-      {},
+      { limit: 142 },
       { before: 'r00100' },
     ])
     expect(result.current.hasMore).toBe(false)

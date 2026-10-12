@@ -733,8 +733,47 @@ served until every section has landed.
   destructive action sets off, and empty states that hand over the exact
   snippet to connect an app. An empty Firestore collection now shows that
   snippet too.
-- [ ] Authentication: users table with actions, the codes-and-links inbox,
-  sign-in timeline, providers and tenants; users in ⌘K.
+- [x] Authentication. The users table reads the engine, not the whole
+  user list: a page is one request whatever the user count, filtering and
+  sorting run in the engine over an index it keeps beside the accounts and
+  reads outside the data lock, so the console never slows the app's own
+  Auth calls, and the filters panel counts disabled, anonymous,
+  custom-token, MFA, claims, unverified, never-signed-in and per-provider
+  users exactly. Sign-ups and sign-ins appear without a reload and without
+  moving the row being read, and a token refresh costs the console nothing.
+  A user opens onto every field the emulator stores — the password it
+  keeps recoverably included — with the account actions the Admin SDK has;
+  the claims editor checks what Firebase checks as it is typed, measures
+  the 1,000-character limit the way Firebase does, shows the ID token those
+  claims produce, and says on which line your rules read each claim. "Sign
+  in as" mints the token a real sign-in would — tenant, provider and second
+  factor, beforeSignIn on request — without signing in, and says what
+  still differs; Firestore's "view as" and every identity picker now take
+  their token from the engine the same way, re-mint it before it expires
+  and drop it as soon as a change to the account would change it. Every link and code the
+  emulator would have sent is in an inbox, live, with the action it stands
+  for one click away, and ⌘K copies the latest SMS code or opens the latest
+  email link from anywhere. Every call to the Auth emulator is in Activity
+  with its exact error, the name the SDK gives it, what to change, and what
+  it caused: the blocking functions it ran (with their own messages), the
+  triggers it queued, the codes it sent and the accounts it changed; a
+  call can be copied as curl or replayed, and any sign-in method — codes
+  and second factor included — can be tried from the console. A pasted
+  token is decoded and judged the way the rules, the emulator and the
+  Admin SDK would judge it. Tenants (with the id you choose), one account
+  per email, email enumeration protection, blocking functions and the
+  lifecycle listeners are on one settings page; bulk changes run as jobs
+  you can preview and cancel, users import (streamed) and export in the
+  emulator's own format, and sample users fill a project in seconds and
+  leave as cleanly. Users are in ⌘K. Found and fixed on the way: the suite
+  gave Auth no origin, so a code requested through the console linked to
+  the console's address; every mutating Auth request — every token refresh
+  included — rewrote the whole state, pretty-printed, under the lock, which
+  is now snapshotted in O(1) and written off the request path; an engine
+  started without a state file saved it under the older layout's version,
+  so tenants, codes and proofs were lost on the next restart; custom claims
+  were measured in UTF-8 bytes where Firebase counts UTF-16 code units; and
+  `batchGet` cloned every account for each page.
 - [x] Storage. Every bucket and folder with the files under it, counted
   and sized exactly by an index the engine keeps beside the objects and
   updates one write at a time, so the folder tree and the counts stay

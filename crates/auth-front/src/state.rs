@@ -4,11 +4,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
+use std::sync::Arc;
+
+use im::OrdMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
+use crate::console::index::UserIndex;
 use crate::error::{ApiError, ensure};
+use crate::observe::{
+    ConfigChange, MessageKind, MessageMeta, MessageRecord, Notice, SmsPurpose, UserChange,
+};
 use crate::util::{
     is_valid_phone, mirror_field, now_millis, random_base64url, random_digits, random_id,
     str_field, truthy, truthy_str,
@@ -84,16 +91,22 @@ pub struct TemporaryProof {
 }
 
 /// Accounts and codes of one project or tenant.
+///
+/// The persisted maps are `im` persistent maps (the same JSON map on disk),
+/// so the state can be snapshotted under the data lock in O(1) and encoded
+/// outside it (`persist.rs`), and a console read can hold one account's
+/// record without copying it. The accessors keep their signatures: a lookup
+/// still answers an owned [`UserRecord`].
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ProjectState {
     #[serde(default)]
-    pub users: BTreeMap<String, UserRecord>,
+    pub users: OrdMap<String, Arc<UserRecord>>,
     #[serde(default)]
-    pub oobs: BTreeMap<String, OobRecord>,
+    pub oobs: OrdMap<String, OobRecord>,
     #[serde(default, rename = "verificationCodes")]
-    pub verification_codes: BTreeMap<String, VerificationRecord>,
+    pub verification_codes: OrdMap<String, VerificationRecord>,
     #[serde(default, rename = "temporaryProofs")]
-    pub temporary_proofs: BTreeMap<String, TemporaryProof>,
+    pub temporary_proofs: OrdMap<String, TemporaryProof>,
     // Indexes are derived; rebuilt after deserialization.
     #[serde(skip)]
     local_id_for_email: BTreeMap<String, String>,
@@ -111,6 +124,14 @@ pub struct ProjectState {
     pending_local_ids: BTreeSet<String>,
     #[serde(skip)]
     pub events: Vec<(Lifecycle, UserRecord)>,
+    /// What changed since the last drain, for the console's record of the
+    /// call (`observe`); drained after every change, observer or not.
+    #[serde(skip)]
+    pub(crate) notices: Vec<Notice>,
+    /// What the console reads: a digest of every account, kept beside the
+    /// maps above (`console::index`).
+    #[serde(skip)]
+    user_index: UserIndex,
     /// Bumped by every persisted-state mutation, so a request that only read
     /// the state is not written back to disk. Never serialized.
     #[serde(skip)]
@@ -140,6 +161,11 @@ impl ProjectState {
         self.mutations = self.mutations.wrapping_add(1);
     }
 
+    /// The console's index of these accounts.
+    pub(crate) const fn user_index(&self) -> &UserIndex {
+        &self.user_index
+    }
+
     /// Rebuilds the derived indexes after loading persisted records.
     pub fn rebuild_indexes(&mut self) {
         self.local_id_for_email.clear();
@@ -148,10 +174,11 @@ impl ProjectState {
         self.local_ids_for_provider_email.clear();
         self.user_for_provider_raw_id.clear();
         self.local_id_for_passkey.clear();
-        let users: Vec<UserRecord> = self.users.values().cloned().collect();
+        let users: Vec<Arc<UserRecord>> = self.users.values().cloned().collect();
         for user in users {
             self.index_user(&user);
         }
+        self.user_index = UserIndex::build(&self.users);
     }
 
     fn index_user(&mut self, user: &UserRecord) {
@@ -216,18 +243,25 @@ impl ProjectState {
         }
         let mut record = UserRecord::new();
         record.insert("localId".to_owned(), json!(local_id));
-        self.users.insert(local_id.to_owned(), record);
+        self.users.insert(local_id.to_owned(), Arc::new(record));
         self.pending_local_ids.remove(local_id);
         let providers = provider_infos_of(props);
-        let user = self.update_user_by_local_id(
-            local_id,
-            props,
-            UpdateOptions {
-                upsert_providers: providers,
-                delete_providers: Vec::new(),
-            },
-        )?;
+        let user = self
+            .apply_update(
+                local_id,
+                props,
+                UpdateOptions {
+                    upsert_providers: providers,
+                    delete_providers: Vec::new(),
+                },
+            )
+            .inspect_err(|_| self.reindex(local_id))?;
         self.events.push((Lifecycle::Create, user.clone()));
+        self.notices.push(Notice::User {
+            uid: local_id.to_owned(),
+            change: UserChange::Created,
+            fields: Vec::new(),
+        });
         Ok(Some(user))
     }
 
@@ -238,9 +272,12 @@ impl ProjectState {
         props: &UserRecord,
     ) -> Result<UserRecord, ApiError> {
         self.mutated();
-        if let Some(before) = self.users.get(local_id).cloned() {
+        let existed = if let Some(before) = self.users.get(local_id).cloned() {
             self.remove_user_from_index(&before);
-        }
+            true
+        } else {
+            false
+        };
         let now = now_millis();
         let mut record = UserRecord::new();
         record.insert("localId".to_owned(), json!(local_id));
@@ -253,16 +290,41 @@ impl ProjectState {
                 .unwrap_or_else(|| json!(now.to_string())),
         );
         record.insert("lastLoginAt".to_owned(), json!(now.to_string()));
-        self.users.insert(local_id.to_owned(), record);
+        self.users.insert(local_id.to_owned(), Arc::new(record));
         let providers = provider_infos_of(props);
-        self.update_user_by_local_id(
-            local_id,
-            props,
-            UpdateOptions {
-                upsert_providers: providers,
-                delete_providers: Vec::new(),
-            },
-        )
+        let user = self
+            .apply_update(
+                local_id,
+                props,
+                UpdateOptions {
+                    upsert_providers: providers,
+                    delete_providers: Vec::new(),
+                },
+            )
+            .inspect_err(|_| self.reindex(local_id))?;
+        self.notices.push(if existed {
+            Notice::User {
+                uid: local_id.to_owned(),
+                change: UserChange::Updated,
+                fields: props.keys().cloned().collect(),
+            }
+        } else {
+            Notice::User {
+                uid: local_id.to_owned(),
+                change: UserChange::Created,
+                fields: Vec::new(),
+            }
+        });
+        Ok(user)
+    }
+
+    /// Brings the console's digest of `local_id` up to date with the map,
+    /// for the paths that leave a record behind when an update fails.
+    fn reindex(&mut self, local_id: &str) {
+        match self.users.get(local_id) {
+            Some(record) => self.user_index.upsert(local_id, record),
+            None => self.user_index.remove(local_id),
+        }
     }
 
     /// `deleteUser`: removes the record and dispatches `delete`.
@@ -270,13 +332,84 @@ impl ProjectState {
         self.mutated();
         let local_id = str_field(user, "localId").unwrap_or_default().to_owned();
         self.users.remove(&local_id);
+        self.user_index.remove(&local_id);
         self.remove_user_from_index(user);
         self.events.push((Lifecycle::Delete, user.clone()));
+        self.notices.push(Notice::User {
+            uid: local_id,
+            change: UserChange::Deleted,
+            fields: Vec::new(),
+        });
+    }
+
+    /// Removes the record without a lifecycle event: the emulator's own
+    /// delete-all semantics, for the console's deletes without triggers.
+    /// `false` when there was no such account.
+    pub fn delete_user_quietly(&mut self, local_id: &str) -> bool {
+        let Some(user) = self.users.get(local_id).cloned() else {
+            return false;
+        };
+        self.mutated();
+        self.users.remove(local_id);
+        self.user_index.remove(local_id);
+        self.remove_user_from_index(&user);
+        self.notices.push(Notice::User {
+            uid: local_id.to_owned(),
+            change: UserChange::Deleted,
+            fields: Vec::new(),
+        });
+        true
+    }
+
+    /// Removes these accounts without a lifecycle event or a notice each:
+    /// the console's clear, which says once that the scope was cleared
+    /// ([`ProjectState::note_cleared`]). Answers how many were removed.
+    pub(crate) fn remove_users_quietly(&mut self, uids: &[Arc<str>]) -> u64 {
+        let mut removed = 0;
+        for uid in uids {
+            let Some(user) = self.users.get(&**uid).cloned() else {
+                continue;
+            };
+            self.users.remove(&**uid);
+            self.user_index.remove(uid);
+            self.remove_user_from_index(&user);
+            removed += 1;
+        }
+        if removed > 0 {
+            self.mutated();
+        }
+        removed
+    }
+
+    /// Every account of this scope was deleted (for the console's record).
+    pub(crate) fn note_cleared(&mut self) {
+        self.notices.push(Notice::Cleared);
     }
 
     /// `updateUserByLocalId`: mirrors every field of `fields` (a `null`
     /// value deletes), then maintains indexes and provider entries.
     pub fn update_user_by_local_id(
+        &mut self,
+        local_id: &str,
+        fields: &UserRecord,
+        options: UpdateOptions<'_>,
+    ) -> Result<UserRecord, ApiError> {
+        let user = self.apply_update(local_id, fields, options)?;
+        // An update that sets nothing (a blocking function that changed
+        // nothing) is not a change the console reports.
+        if !fields.is_empty() {
+            self.notices.push(Notice::User {
+                uid: local_id.to_owned(),
+                change: UserChange::Updated,
+                fields: fields.keys().cloned().collect(),
+            });
+        }
+        Ok(user)
+    }
+
+    /// The update itself, without the notice: creation and imports say
+    /// what they did themselves.
+    fn apply_update(
         &mut self,
         local_id: &str,
         fields: &UserRecord,
@@ -289,7 +422,7 @@ impl ProjectState {
             .iter()
             .map(|provider| (*provider).to_owned())
             .collect();
-        let mut user = self.users.get(local_id).cloned().ok_or_else(|| {
+        let mut user = owned(self.users.get(local_id)).ok_or_else(|| {
             ApiError::internal(
                 format!("Internal assertion error: trying to update nonexistent user: {local_id}"),
                 "INTERNAL",
@@ -369,9 +502,10 @@ impl ProjectState {
         if let Some(enrollments) = user.get("mfaInfo").and_then(JsonValue::as_array) {
             validate_mfa_enrollments(enrollments)?;
         }
-        self.users.insert(local_id.to_owned(), user.clone());
         let updated = self.update_user_provider_info(user, upsert_providers, &delete_providers);
-        self.users.insert(local_id.to_owned(), updated.clone());
+        self.user_index.upsert(local_id, &updated);
+        self.users
+            .insert(local_id.to_owned(), Arc::new(updated.clone()));
         Ok(updated)
     }
 
@@ -483,6 +617,13 @@ impl ProjectState {
 
     #[must_use]
     pub fn get_user_by_local_id(&self, local_id: &str) -> Option<UserRecord> {
+        owned(self.users.get(local_id))
+    }
+
+    /// The stored record of `local_id`, shared: an O(1) clone that a console
+    /// read takes under the lock and reads after releasing it.
+    #[must_use]
+    pub fn shared_user(&self, local_id: &str) -> Option<Arc<UserRecord>> {
         self.users.get(local_id).cloned()
     }
 
@@ -490,24 +631,21 @@ impl ProjectState {
     pub fn get_user_by_email(&self, email: &str) -> Option<UserRecord> {
         self.local_id_for_email
             .get(email)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
     pub fn get_user_by_initial_email(&self, email: &str) -> Option<UserRecord> {
         self.local_id_for_initial_email
             .get(email)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
     pub fn get_user_by_phone_number(&self, phone: &str) -> Option<UserRecord> {
         self.local_id_for_phone
             .get(phone)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
@@ -515,16 +653,14 @@ impl ProjectState {
         self.user_for_provider_raw_id
             .get(provider)
             .and_then(|map| map.get(raw_id))
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     #[must_use]
     pub fn get_user_by_passkey_credential_id(&self, credential: &str) -> Option<UserRecord> {
         self.local_id_for_passkey
             .get(credential)
-            .and_then(|id| self.users.get(id))
-            .cloned()
+            .and_then(|id| owned(self.users.get(id)))
     }
 
     /// `getUsersByEmailOrProviderEmail`: the account owning the email first,
@@ -536,7 +672,7 @@ impl ProjectState {
         if let Some(id) = self.local_id_for_email.get(email)
             && let Some(user) = self.users.get(id)
         {
-            users.push(user.clone());
+            users.push(UserRecord::clone(user));
             seen.insert(id.clone());
         }
         if let Some(ids) = self.local_ids_for_provider_email.get(email) {
@@ -544,7 +680,7 @@ impl ProjectState {
                 if seen.insert(id.clone())
                     && let Some(user) = self.users.get(id)
                 {
-                    users.push(user.clone());
+                    users.push(UserRecord::clone(user));
                 }
             }
         }
@@ -577,6 +713,7 @@ impl ProjectState {
         new_email: Option<&str>,
         request_type: &str,
         link: impl FnOnce(&str) -> String,
+        message: MessageMeta,
     ) -> OobRecord {
         self.mutated();
         let code = random_base64url(54);
@@ -588,7 +725,25 @@ impl ProjectState {
             oob_code: code.clone(),
         };
         self.oobs.insert(code, record.clone());
+        let uid = message.uid.clone().or_else(|| self.uid_for_email(email));
+        let text = match message.delivery {
+            crate::observe::Delivery::Sent => {
+                crate::ops::oob::oob_message_text(&record).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        self.notices.push(Notice::Message(Box::new(oob_message(
+            &record, message, uid, text,
+        ))));
         record
+    }
+
+    /// The account an email names: its current email, else its first one.
+    pub(crate) fn uid_for_email(&self, email: &str) -> Option<String> {
+        self.local_id_for_email
+            .get(email)
+            .or_else(|| self.local_id_for_initial_email.get(email))
+            .cloned()
     }
 
     #[must_use]
@@ -598,7 +753,11 @@ impl ProjectState {
 
     pub fn delete_oob_code(&mut self, code: &str) {
         self.mutated();
-        self.oobs.remove(code);
+        if self.oobs.remove(code).is_some() {
+            self.notices.push(Notice::Used {
+                key: code.to_owned(),
+            });
+        }
     }
 
     #[must_use]
@@ -606,7 +765,12 @@ impl ProjectState {
         self.oobs.values().cloned().collect()
     }
 
-    pub fn create_verification_code(&mut self, phone: &str) -> VerificationRecord {
+    pub fn create_verification_code(
+        &mut self,
+        phone: &str,
+        purpose: SmsPurpose,
+        message: MessageMeta,
+    ) -> VerificationRecord {
         self.mutated();
         let session = random_base64url(226);
         let record = VerificationRecord {
@@ -615,6 +779,28 @@ impl ProjectState {
             session_info: session.clone(),
         };
         self.verification_codes.insert(session, record.clone());
+        let uid = message.uid.or_else(|| match purpose {
+            SmsPurpose::SignIn => self.local_id_for_phone.get(phone).cloned(),
+            SmsPurpose::MfaEnrollment | SmsPurpose::MfaSignIn => None,
+        });
+        let text = crate::observe::sms_message_text(purpose, phone, &record.code);
+        self.notices.push(Notice::Message(Box::new(MessageRecord {
+            id: message.id,
+            project: String::new(),
+            tenant: None,
+            kind: purpose.kind(),
+            to: phone.to_owned(),
+            new_email: None,
+            uid,
+            code: record.code.clone(),
+            link: None,
+            continue_url: None,
+            delivery: message.delivery,
+            origin: None,
+            key: record.session_info.clone(),
+            text,
+            at_millis: Some(now_millis()),
+        })));
         record
     }
 
@@ -625,7 +811,72 @@ impl ProjectState {
 
     pub fn delete_verification_code(&mut self, session: &str) {
         self.mutated();
-        self.verification_codes.remove(session);
+        if self.verification_codes.remove(session).is_some() {
+            self.notices.push(Notice::Used {
+                key: session.to_owned(),
+            });
+        }
+    }
+
+    /// Every code this scope holds, as found (no time, `Restored`), with
+    /// fresh message ids from `next_id`: what the console's inbox shows for
+    /// codes from saved state.
+    pub(crate) fn saved_messages(&self, next_id: &mut dyn FnMut() -> u64) -> Vec<MessageRecord> {
+        let mut messages = Vec::new();
+        for record in self.oobs.values() {
+            let meta = MessageMeta {
+                id: next_id(),
+                delivery: crate::observe::Delivery::Restored,
+                continue_url: continue_url_of(&record.oob_link),
+                uid: None,
+            };
+            let uid = self.uid_for_email(&record.email);
+            let text = crate::ops::oob::oob_message_text(record).unwrap_or_default();
+            let mut message = oob_message(record, meta, uid, text);
+            message.at_millis = None;
+            messages.push(message);
+        }
+        for record in self.verification_codes.values() {
+            // A code's purpose is not stored: a number some account has
+            // enrolled as a second factor is taken for an MFA sign-in.
+            let enrolled = self.users.values().find(|user| {
+                user.get("mfaInfo")
+                    .and_then(JsonValue::as_array)
+                    .is_some_and(|enrollments| {
+                        enrollments.iter().any(|enrollment| {
+                            enrollment
+                                .get("unobfuscatedPhoneInfo")
+                                .and_then(JsonValue::as_str)
+                                == Some(record.phone_number.as_str())
+                        })
+                    })
+            });
+            let (purpose, uid) = match enrolled {
+                Some(user) => (SmsPurpose::MfaSignIn, crate::observe::uid_of(user)),
+                None => (
+                    SmsPurpose::SignIn,
+                    self.local_id_for_phone.get(&record.phone_number).cloned(),
+                ),
+            };
+            messages.push(MessageRecord {
+                id: next_id(),
+                project: String::new(),
+                tenant: None,
+                kind: purpose.kind(),
+                to: record.phone_number.clone(),
+                new_email: None,
+                uid,
+                code: record.code.clone(),
+                link: None,
+                continue_url: None,
+                delivery: crate::observe::Delivery::Restored,
+                origin: None,
+                key: record.session_info.clone(),
+                text: crate::observe::sms_message_text(purpose, &record.phone_number, &record.code),
+                at_millis: None,
+            });
+        }
+        messages
     }
 
     #[must_use]
@@ -656,7 +907,9 @@ impl ProjectState {
     /// `deleteAllAccounts`: users and their indexes; codes stay.
     pub fn delete_all_accounts(&mut self) {
         self.mutated();
+        self.notices.push(Notice::Cleared);
         self.users.clear();
+        self.user_index.clear();
         self.local_id_for_email.clear();
         self.local_id_for_phone.clear();
         self.local_ids_for_provider_email.clear();
@@ -669,141 +922,57 @@ impl ProjectState {
         self.users.len()
     }
 
-    /// Up to `limit` accounts matching `text`, for an identity picker: an
-    /// email prefix (lowercased) and a uid prefix as ranges over the maps
-    /// this state keeps anyway, then, only while fewer than `limit` matched,
-    /// a display-name or email substring scanned within `budget` (which one
-    /// search shares across the project and its tenants). Empty `text`: the
-    /// first `limit` accounts by uid. Each account appears once, best match
-    /// first.
-    #[must_use]
-    pub fn search_identities(
-        &self,
-        text: &str,
-        limit: usize,
-        budget: &mut IdentityBudget,
-    ) -> Vec<&UserRecord> {
-        let mut found: Vec<&UserRecord> = Vec::new();
-        let mut seen: BTreeSet<&str> = BTreeSet::new();
-        if text.is_empty() {
-            for user in self.users.values().take(limit) {
-                budget.read += 1;
-                found.push(user);
-            }
-            return found;
-        }
-        let lower = text.to_lowercase();
-        let emails = self
-            .local_id_for_email
-            .range::<str, _>((Bound::Included(lower.as_str()), Bound::Unbounded))
-            .take_while(|(email, _)| email.starts_with(lower.as_str()));
-        for (_, local_id) in emails {
-            if found.len() >= limit {
-                return found;
-            }
-            if let Some((id, user)) = self.users.get_key_value(local_id.as_str()) {
-                budget.read += 1;
-                if seen.insert(id.as_str()) {
-                    found.push(user);
-                }
-            }
-        }
-        let uids = self
-            .users
-            .range::<str, _>((Bound::Included(text), Bound::Unbounded))
-            .take_while(|(id, _)| id.starts_with(text));
-        for (id, user) in uids {
-            if found.len() >= limit {
-                return found;
-            }
-            budget.read += 1;
-            if seen.insert(id.as_str()) {
-                found.push(user);
-            }
-        }
-        for (id, user) in &self.users {
-            if found.len() >= limit {
-                break;
-            }
-            if budget.remaining == 0 {
-                budget.exhausted = true;
-                break;
-            }
-            budget.remaining -= 1;
-            budget.examined += 1;
-            budget.read += 1;
-            if seen.contains(id.as_str()) {
-                continue;
-            }
-            let matches = |field: &str| {
-                str_field(user, field).is_some_and(|value| value.to_lowercase().contains(&lower))
-            };
-            if matches("displayName") || matches("email") {
-                seen.insert(id.as_str());
-                found.push(user);
-            }
-        }
-        found
-    }
-
     /// `queryUsers`: every account after `start_token`, sorted by localId.
+    ///
+    /// The map is keyed by `localId`, so its order is already the sort; the
+    /// accounts are cloned once, in order, and never re-sorted. A
+    /// descending answer is read forwards and turned round: im 15.1's
+    /// iterators lose entries when run backwards across a node.
     #[must_use]
     pub fn query_users(&self, order: QueryOrder, start_token: Option<&str>) -> Vec<UserRecord> {
-        let mut users: Vec<UserRecord> = self
-            .users
-            .values()
-            .filter(|user| {
-                start_token
-                    .is_none_or(|token| str_field(user, "localId").unwrap_or_default() > token)
-            })
-            .cloned()
-            .collect();
-        users.sort_by(|a, b| str_field(a, "localId").cmp(&str_field(b, "localId")));
+        let mut users: Vec<UserRecord> = self.users_after(start_token).cloned().collect();
         if order == QueryOrder::Desc {
             users.reverse();
         }
         users
     }
-}
 
-/// How far one identity search may scan for substrings, shared by the
-/// project and every tenant it searches.
-#[derive(Debug)]
-pub struct IdentityBudget {
-    remaining: usize,
-    examined: u64,
-    read: u64,
-    exhausted: bool,
-}
-
-impl IdentityBudget {
-    /// A budget of `accounts` scanned for substrings.
+    /// One `batchGet` page: at most `max_results` accounts after
+    /// `start_token` in localId order (every account when `None`), and the
+    /// `nextPageToken` the official emulator answers with — the last
+    /// account's id whenever the page is full, even when nothing follows it.
+    /// A ranged read of the ordered map: only the page's accounts are cloned.
     #[must_use]
-    pub const fn new(accounts: usize) -> Self {
-        Self {
-            remaining: accounts,
-            examined: 0,
-            read: 0,
-            exhausted: false,
-        }
+    pub fn query_users_page(
+        &self,
+        start_token: Option<&str>,
+        max_results: Option<usize>,
+    ) -> (Vec<UserRecord>, Option<String>) {
+        let after = self.users_after(start_token);
+        let Some(max_results) = max_results else {
+            return (after.cloned().collect(), None);
+        };
+        let users: Vec<UserRecord> = after.take(max_results).cloned().collect();
+        let next_page_token = if max_results > 0 && users.len() == max_results {
+            users
+                .last()
+                .and_then(|user| str_field(user, "localId"))
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        (users, next_page_token)
     }
 
-    /// Accounts the substring scan examined.
-    #[must_use]
-    pub const fn examined(&self) -> u64 {
-        self.examined
-    }
-
-    /// Accounts read in all, by the prefix ranges and the scan.
-    #[must_use]
-    pub const fn read(&self) -> u64 {
-        self.read
-    }
-
-    /// Whether the scan stopped because the budget ran out.
-    #[must_use]
-    pub const fn exhausted(&self) -> bool {
-        self.exhausted
+    /// The accounts whose localId sorts after `start_token`, in order.
+    fn users_after<'a>(
+        &'a self,
+        start_token: Option<&'a str>,
+    ) -> impl Iterator<Item = &'a UserRecord> {
+        let lower = start_token.map_or(Bound::Unbounded, Bound::Excluded);
+        self.users
+            .range::<_, str>((lower, Bound::Unbounded))
+            .map(|(_, user)| user.as_ref())
     }
 }
 
@@ -834,6 +1003,46 @@ pub fn validate_mfa_enrollments(enrollments: &[JsonValue]) -> Result<(), ApiErro
         ids.insert(id);
     }
     Ok(())
+}
+
+/// An owned copy of a shared record.
+fn owned(user: Option<&Arc<UserRecord>>) -> Option<UserRecord> {
+    user.map(|user| UserRecord::clone(user))
+}
+
+/// The inbox's view of an out-of-band code.
+fn oob_message(
+    record: &OobRecord,
+    meta: MessageMeta,
+    uid: Option<String>,
+    text: String,
+) -> MessageRecord {
+    MessageRecord {
+        id: meta.id,
+        project: String::new(),
+        tenant: None,
+        kind: MessageKind::of_request_type(&record.request_type),
+        to: record.email.clone(),
+        new_email: record.new_email.clone(),
+        uid,
+        code: record.oob_code.clone(),
+        link: Some(record.oob_link.clone()),
+        continue_url: meta.continue_url,
+        delivery: meta.delivery,
+        origin: None,
+        key: record.oob_code.clone(),
+        text,
+        at_millis: Some(now_millis()),
+    }
+}
+
+/// The `continueUrl` a link carries.
+fn continue_url_of(link: &str) -> Option<String> {
+    url::Url::parse(link).ok().and_then(|url| {
+        url.query_pairs()
+            .find(|(key, _)| key == "continueUrl")
+            .map(|(_, value)| value.into_owned())
+    })
 }
 
 /// `providerUserInfo` entries of a record.
@@ -911,6 +1120,9 @@ pub struct AgentState {
     /// Configuration and tenant mutations; see [`ProjectState::mutations`].
     #[serde(skip)]
     mutations: u64,
+    /// Configuration changes since the last drain (`observe`).
+    #[serde(skip)]
+    pub(crate) notices: Vec<Notice>,
 }
 
 impl Default for AgentState {
@@ -920,6 +1132,7 @@ impl Default for AgentState {
             config: default_config(),
             tenants: BTreeMap::new(),
             mutations: 0,
+            notices: Vec::new(),
         }
     }
 }
@@ -974,6 +1187,10 @@ impl AgentState {
             return None;
         }
         self.mutated();
+        self.notices.push(Notice::Config {
+            tenant: Some(tenant_id.to_owned()),
+            what: ConfigChange::TenantCreated,
+        });
         config.insert(
             "name".to_owned(),
             json!(format!("projects/{project_id}/tenants/{tenant_id}")),
@@ -1062,6 +1279,10 @@ impl AgentState {
         update_mask: Option<&str>,
     ) -> JsonMap<String, JsonValue> {
         self.mutated();
+        self.notices.push(Notice::Config {
+            tenant: None,
+            what: ConfigChange::Project,
+        });
         match update_mask {
             None => {
                 let allow_duplicates = truthy(
@@ -1201,6 +1422,33 @@ impl AuthData {
         self.projects.entry(project_id.to_owned()).or_default()
     }
 
+    /// Drains what changed from every project and tenant, with the scope it
+    /// happened in, filling in each message's project and tenant.
+    pub(crate) fn take_notices(&mut self) -> Vec<(String, Option<String>, Notice)> {
+        let mut notices = Vec::new();
+        for (project_id, agent) in &mut self.projects {
+            for notice in agent.notices.drain(..) {
+                notices.push((project_id.clone(), None, notice));
+            }
+            let scopes = std::iter::once((None, &mut agent.project)).chain(
+                agent
+                    .tenants
+                    .iter_mut()
+                    .map(|(id, tenant)| (Some(id.as_str()), &mut tenant.project)),
+            );
+            for (tenant, project) in scopes {
+                for mut notice in project.notices.drain(..) {
+                    if let Notice::Message(message) = &mut notice {
+                        message.project.clone_from(project_id);
+                        message.tenant = tenant.map(str::to_owned);
+                    }
+                    notices.push((project_id.clone(), tenant.map(str::to_owned), notice));
+                }
+            }
+        }
+        notices
+    }
+
     /// Drains lifecycle events from every project and tenant.
     pub fn take_events(&mut self) -> Vec<(String, Lifecycle, UserRecord)> {
         let mut events = Vec::new();
@@ -1319,6 +1567,10 @@ impl<'a> Scope<'a> {
         {
             state.config = config;
             self.agent.mutated();
+            self.agent.notices.push(Notice::Config {
+                tenant: Some(tenant.clone()),
+                what: ConfigChange::TenantUpdated,
+            });
         }
     }
 
@@ -1327,6 +1579,10 @@ impl<'a> Scope<'a> {
             && self.agent.tenants.remove(tenant).is_some()
         {
             self.agent.mutated();
+            self.agent.notices.push(Notice::Config {
+                tenant: Some(tenant.clone()),
+                what: ConfigChange::TenantDeleted,
+            });
         }
     }
 
@@ -1408,107 +1664,5 @@ impl<'a> Scope<'a> {
     #[must_use]
     pub fn forward_credential(&self, kind: &str) -> bool {
         self.agent.forward_credential(kind)
-    }
-}
-
-#[cfg(test)]
-mod identity_search_tests {
-    use super::*;
-
-    fn user(state: &mut ProjectState, uid: &str, email: Option<&str>, name: Option<&str>) {
-        let mut props = UserRecord::new();
-        if let Some(email) = email {
-            props.insert("email".to_owned(), json!(email));
-        }
-        if let Some(name) = name {
-            props.insert("displayName".to_owned(), json!(name));
-        }
-        state
-            .create_user_with_local_id(uid, &props)
-            .expect("created")
-            .expect("new");
-    }
-
-    fn uids(found: &[&UserRecord]) -> Vec<String> {
-        found
-            .iter()
-            .map(|user| str_field(user, "localId").unwrap_or_default().to_owned())
-            .collect()
-    }
-
-    /// 10,000 accounts and three that match `ada` by email.
-    fn crowd() -> ProjectState {
-        let mut state = ProjectState::default();
-        for index in 0..10_000 {
-            user(
-                &mut state,
-                &format!("u{index:05}"),
-                Some(&format!("person{index}@example.test")),
-                None,
-            );
-        }
-        user(&mut state, "a1", Some("ada@example.test"), Some("Ada"));
-        user(&mut state, "a2", Some("ada.l@example.test"), None);
-        user(&mut state, "a3", Some("adams@example.test"), None);
-        state
-    }
-
-    #[test]
-    fn an_email_prefix_is_a_range_that_reads_no_other_account() {
-        let state = crowd();
-        let mut budget = IdentityBudget::new(20_000);
-        let found = state.search_identities("ADA", 3, &mut budget);
-        // In email order: `ada.l@` sorts before `ada@`.
-        assert_eq!(uids(&found), ["a2", "a1", "a3"]);
-        assert_eq!(budget.read(), 3, "only the accounts in the range were read");
-        assert_eq!(budget.examined(), 0, "no scan was needed");
-    }
-
-    #[test]
-    fn a_uid_prefix_is_a_range_too() {
-        let state = crowd();
-        let mut budget = IdentityBudget::new(20_000);
-        let found = state.search_identities("u0999", 10, &mut budget);
-        assert_eq!(found.len(), 10);
-        assert_eq!(uids(&found)[0], "u09990");
-        assert_eq!(budget.read(), 10);
-    }
-
-    #[test]
-    fn a_substring_scans_only_while_more_are_wanted_and_stops_at_the_budget() {
-        let mut state = crowd();
-        user(
-            &mut state,
-            "zz",
-            Some("z@example.test"),
-            Some("Lovelace, Ada"),
-        );
-        let mut budget = IdentityBudget::new(20_000);
-        let found = state.search_identities("lovelace", 5, &mut budget);
-        assert_eq!(uids(&found), ["zz"]);
-        assert_eq!(budget.examined(), 10_004, "every account once");
-        assert!(!budget.exhausted());
-        let mut small = IdentityBudget::new(100);
-        let found = state.search_identities("lovelace", 5, &mut small);
-        assert_eq!(found.len(), 0);
-        assert!(small.exhausted());
-        assert_eq!(small.examined(), 100);
-        // A budget spent is spent for the next scope too.
-        let found = state.search_identities("lovelace", 5, &mut small);
-        assert_eq!(found.len(), 0);
-        assert_eq!(small.examined(), 100);
-        // Matches by prefix come first, then substrings, each once.
-        let mut budget = IdentityBudget::new(20_000);
-        let found = state.search_identities("ada", 5, &mut budget);
-        assert_eq!(uids(&found), ["a2", "a1", "a3", "zz"]);
-    }
-
-    #[test]
-    fn no_text_lists_the_first_accounts_by_uid() {
-        let state = crowd();
-        let mut budget = IdentityBudget::new(20_000);
-        let found = state.search_identities("", 3, &mut budget);
-        assert_eq!(uids(&found), ["a1", "a2", "a3"]);
-        assert_eq!(budget.read(), 3);
     }
 }

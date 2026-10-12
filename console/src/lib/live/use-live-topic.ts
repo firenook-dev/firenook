@@ -8,6 +8,7 @@ import type { ApiErrorDetail } from '@/api/generated/ApiErrorDetail'
 import type { ResetReason } from '@/api/generated/live/ResetReason'
 import {
   type LiveChannel,
+  type SubscribeOptions,
   type SubscriptionState,
   type SubscriptionStatus,
   type TopicListener,
@@ -36,31 +37,42 @@ function handlerName(event: string): string {
 /**
  * The subscription under both hooks: subscribes while `params` is not null,
  * again when the topic or parameters change (by value, not identity), and
- * answers this subscription's status.
+ * answers this subscription's status. `start` is read when a subscription
+ * begins; changing it alone never resubscribes.
  */
 function useSubscription(
   topic: string,
   params: object | null,
   listener: { readonly current: Omit<TopicListener, 'onState'> },
   channel: LiveChannel,
+  start?: SubscribeOptions,
 ): SubscriptionStatus {
   const key = params === null ? null : topicKey(topic, params)
   const [own, setOwn] = useState<{ key: string | null; state: SubscriptionState }>({
     key: null,
     state: 'pending',
   })
+  const begin = useRef(start)
+  useLayoutEffect(() => {
+    begin.current = start
+  })
   useEffect(() => {
     if (key === null) return undefined
     // The parameters as the key holds them: equal by value is the same
     // subscription, whatever object the caller built this render.
     const wire = JSON.parse(key.slice(topic.length + 1)) as Record<string, unknown>
-    return channel.subscribe(topic, wire, {
-      onEvent: (name, data, cursor) => listener.current.onEvent(name, data, cursor),
-      onReset: (reason, missed) => listener.current.onReset(reason, missed),
-      onEnd: (error) => listener.current.onEnd(error),
-      onRefused: (error) => listener.current.onRefused?.(error),
-      onState: (state) => setOwn({ key, state }),
-    })
+    return channel.subscribe(
+      topic,
+      wire,
+      {
+        onEvent: (name, data, cursor) => listener.current.onEvent(name, data, cursor),
+        onReset: (reason, missed) => listener.current.onReset(reason, missed),
+        onEnd: (error) => listener.current.onEnd(error),
+        onRefused: (error) => listener.current.onRefused?.(error),
+        onState: (state) => setOwn({ key, state }),
+      },
+      begin.current?.after ? { after: begin.current.after } : undefined,
+    )
   }, [channel, topic, key, listener])
   const status = useLiveStatus((state) => state.status)
   if (key === null) return status
@@ -68,12 +80,17 @@ function useSubscription(
   return state === 'ended' || state === 'refused' ? state : status
 }
 
-/** Holds a subscription while mounted. `params: null` means not now. Handlers are read through a ref. */
+/**
+ * Holds a subscription while mounted. `params: null` means not now. Handlers are read through a ref.
+ * `start.after` resumes a new subscription after a feed position the page already read (a list's
+ * `liveAfter`), so a feed page that loaded its first page is not sent the whole ring again.
+ */
 export function useLiveTopic<K extends TopicName>(
   topic: K,
   params: NoInfer<TopicMap[K]['params']> | null,
   handlers: NoInfer<Handlers<K>>,
   channel: LiveChannel = liveChannel,
+  start?: SubscribeOptions,
 ): SubscriptionStatus {
   const latest = useRef(handlers)
   useLayoutEffect(() => {
@@ -92,7 +109,7 @@ export function useLiveTopic<K extends TopicName>(
       latest.current.onEnd?.(error)
     },
   })
-  return useSubscription(topic, params, listener, channel)
+  return useSubscription(topic, params, listener, channel, start)
 }
 
 /**

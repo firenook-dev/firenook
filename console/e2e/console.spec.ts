@@ -69,9 +69,8 @@ test('the theme is light, dark or the system\u2019s, and it is remembered', asyn
 })
 
 test('client routes deep-link through the engine and navigate in place', async ({ page }) => {
-  await page.goto(`${origin()}/console/auth`)
-  await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()
-  await expect(page.getByText('running', { exact: true })).toBeVisible()
+  await page.goto(`${origin()}/console/firestore/rules`)
+  await expect(page.getByTestId('rules-source')).toBeVisible()
   // Firestore is a heading over its two pages; Data is where its grid is.
   await page.getByTestId('nav-page-data').click()
   await expect(page).toHaveURL(/\/console\/firestore$/)
@@ -83,7 +82,7 @@ test('client routes deep-link through the engine and navigate in place', async (
 })
 
 test('the navigation collapses to icons that peek on hover, and remembers it', async ({ page }) => {
-  await page.goto(`${origin()}/console/auth`)
+  await page.goto(`${origin()}/console/tasks`)
   const nav = page.locator('aside[data-sidebar="sidebar"]')
   await expect(nav).toHaveAttribute('data-state', 'expanded')
   await expect(page.getByTestId('nav-toggle')).toHaveAttribute('aria-expanded', 'true')
@@ -92,7 +91,7 @@ test('the navigation collapses to icons that peek on hover, and remembers it', a
   await page.getByTestId('nav-toggle').click()
   await expect(nav).toHaveAttribute('data-state', 'collapsed')
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Cloud Tasks', level: 1 })).toBeVisible()
   await expect(nav).toHaveAttribute('data-state', 'collapsed')
 
   // Collapsed, the labels slide out over the page while the pointer is on
@@ -100,7 +99,7 @@ test('the navigation collapses to icons that peek on hover, and remembers it', a
   await nav.locator('[data-sidebar="peek-zone"]').hover()
   await expect(nav).toHaveAttribute('data-state', 'peeking')
   await expect(nav.getByRole('link', { name: 'Functions' })).toBeVisible()
-  await page.getByRole('heading', { name: 'Authentication', level: 1 }).hover()
+  await page.getByRole('heading', { name: 'Cloud Tasks', level: 1 }).hover()
   await expect(nav).toHaveAttribute('data-state', 'collapsed')
 
   // `[` flips it; ⌘K offers the same.

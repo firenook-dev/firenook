@@ -14,13 +14,13 @@ use tower::ServiceExt as _;
 use super::*;
 use crate::util::decode_jwt;
 
-fn test_runtime() -> AuthRuntime {
+pub(crate) fn test_runtime() -> AuthRuntime {
     let registry = TriggerRegistry::default();
     let (observer, _receiver) = TriggerObserver::channel(registry.clone());
     AuthRuntime::new("demo-auth", observer.queue(), registry, None).expect("runtime")
 }
 
-async fn call(
+pub(crate) async fn call(
     runtime: &AuthRuntime,
     method: Method,
     uri: &str,
@@ -854,7 +854,11 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
+    // Changes reach the file off the request path; a flush writes them now.
+    runtime.flush().expect("flush");
     let after_signup = modified().expect("sign-up persists the state");
+    let encodes = || runtime.runtime().persist_stats().expect("persists").encodes;
+    let first_writes = encodes();
     let id_token = body["idToken"].as_str().expect("id token").to_owned();
     let local_id = body["localId"].as_str().expect("local id").to_owned();
     std::thread::sleep(std::time::Duration::from_millis(20));
@@ -889,11 +893,13 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
     )
     .await;
     assert_eq!(status, 200);
+    runtime.flush().expect("flush");
     assert_eq!(
         modified().expect("state file"),
         after_signup,
         "reads must not rewrite the state file"
     );
+    assert_eq!(encodes(), first_writes, "reads are never encoded");
 
     // A mutation persists again.
     let (status, body) = call(
@@ -904,6 +910,7 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
+    runtime.flush().expect("flush");
     assert_ne!(modified().expect("state file"), after_signup);
     let persisted: JsonValue =
         serde_json::from_slice(&std::fs::read(&state_file).expect("state bytes")).expect("json");
@@ -912,6 +919,302 @@ async fn reads_never_rewrite_the_state_file_and_writes_still_do() {
         "Reader"
     );
     let _ = std::fs::remove_dir_all(&directory);
+}
+
+// ------------------------------------------------------------------
+// `batchGet` and `queryAccounts` read the ordered account map by range
+// instead of cloning and sorting every account per call; their answers are
+// those of the clone-and-sort algorithm they replace.
+
+/// A small deterministic generator (xorshift64*), so a failing state can be
+/// reproduced from its seed.
+pub(crate) struct Lcg(u64);
+
+impl Lcg {
+    pub(crate) fn new(seed: u64) -> Self {
+        Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
+    }
+
+    pub(crate) fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    pub(crate) fn below(&mut self, bound: usize) -> usize {
+        usize::try_from(self.next() % u64::try_from(bound.max(1)).unwrap_or(1)).unwrap_or(0)
+    }
+
+    pub(crate) fn chance(&mut self, percent: usize) -> bool {
+        self.below(100) < percent
+    }
+
+    pub(crate) fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below(items.len())]
+    }
+}
+
+/// The `queryUsers` the ranged read replaced: every account cloned,
+/// filtered, sorted by its `localId` field.
+fn query_users_by_cloning(
+    project: &state::ProjectState,
+    order: state::QueryOrder,
+    start_token: Option<&str>,
+) -> Vec<UserRecord> {
+    let mut users: Vec<UserRecord> = project
+        .users
+        .values()
+        .filter(|user| {
+            start_token.is_none_or(|token| str_field(user, "localId").unwrap_or_default() > token)
+        })
+        .map(|user| UserRecord::clone(user))
+        .collect();
+    users.sort_by(|a, b| str_field(a, "localId").cmp(&str_field(b, "localId")));
+    if order == state::QueryOrder::Desc {
+        users.reverse();
+    }
+    users
+}
+
+/// The page `batchGet` cut from that list before.
+fn batch_get_by_cloning(
+    project: &state::ProjectState,
+    start_token: Option<&str>,
+    max_results: i64,
+) -> (Vec<UserRecord>, Option<String>) {
+    let mut users = query_users_by_cloning(project, state::QueryOrder::Asc, start_token);
+    let mut next_page_token = None;
+    if max_results >= 0 && i64::try_from(users.len()).unwrap_or(i64::MAX) >= max_results {
+        users.truncate(usize::try_from(max_results).unwrap_or(0));
+        if let Some(last) = users.last() {
+            next_page_token = str_field(last, "localId").map(str::to_owned);
+        }
+    }
+    (users, next_page_token)
+}
+
+/// Local ids with shared prefixes, mixed case, digits and non-ASCII
+/// characters, so the order is exercised where byte and character order
+/// could disagree.
+fn random_local_id(random: &mut Lcg) -> String {
+    const PARTS: &[&str] = &[
+        "a", "b", "A", "z", "Z", "0", "9", "_", "-", "é", "ß", "🔥", "user", "user1", "u",
+        "sample-",
+    ];
+    if random.chance(40) {
+        return crate::util::random_id(28);
+    }
+    let parts = 1 + random.below(4);
+    (0..parts).map(|_| *random.pick(PARTS)).collect()
+}
+
+#[test]
+fn ranged_batch_get_pages_equal_the_clone_and_sort_answer() {
+    let mut random = Lcg::new(17);
+    for state_index in 0..200 {
+        let mut project = state::ProjectState::default();
+        // Every 50th state is three levels of im's B-tree deep (past about
+        // 2,100 accounts), its ids made in order as an import makes them:
+        // the shape in which im's iterators lose entries when run backwards.
+        let large = state_index % 50 == 0;
+        let users = if large {
+            2_500 + random.below(1_500)
+        } else {
+            random.below(40)
+        };
+        let mut ids = Vec::new();
+        for index in 0..users {
+            let local_id = if large {
+                format!("sample-{index:05}")
+            } else {
+                random_local_id(&mut random)
+            };
+            let mut props = UserRecord::new();
+            if random.chance(50) {
+                props.insert(
+                    "displayName".to_owned(),
+                    json!(format!("User {}", random.below(1000))),
+                );
+            }
+            if project
+                .create_user_with_local_id(&local_id, &props)
+                .expect("create")
+                .is_some()
+            {
+                ids.push(local_id);
+            }
+        }
+        if random.chance(30) && !ids.is_empty() {
+            let victim = ids.swap_remove(random.below(ids.len()));
+            let record = project.get_user_by_local_id(&victim).expect("victim");
+            project.delete_user(&record);
+        }
+        let mut tokens: Vec<Option<String>> = vec![None, Some(String::new())];
+        tokens.extend(ids.iter().take(4).cloned().map(Some));
+        tokens.push(Some(random_local_id(&mut random)));
+        let length = i64::try_from(ids.len()).unwrap_or(0);
+        for token in &tokens {
+            for max_results in [-1, 1, 2, 3, 20, 1000, length, length + 1] {
+                let expected = batch_get_by_cloning(&project, token.as_deref(), max_results);
+                let actual =
+                    project.query_users_page(token.as_deref(), usize::try_from(max_results).ok());
+                assert_eq!(
+                    actual, expected,
+                    "state {state_index}, token {token:?}, maxResults {max_results}"
+                );
+            }
+            for order in [state::QueryOrder::Asc, state::QueryOrder::Desc] {
+                assert_eq!(
+                    project.query_users(order, token.as_deref()),
+                    query_users_by_cloning(&project, order, token.as_deref()),
+                    "state {state_index}, token {token:?}, {order:?}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn batch_get_pages_through_every_account_once() {
+    let runtime = test_runtime();
+    let mut created = Vec::new();
+    for index in 0..7 {
+        let (status, body) = call(
+            &runtime,
+            Method::POST,
+            "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts",
+            &json!({ "localId": format!("user-{index}"), "email": format!("user{index}@example.test") }),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        created.push(format!("user-{index}"));
+    }
+    let mut seen = Vec::new();
+    let mut token: Option<String> = None;
+    let mut pages = 0;
+    loop {
+        let uri = match &token {
+            None => "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchGet?maxResults=3".to_owned(),
+            Some(token) => format!(
+                "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchGet?maxResults=3&nextPageToken={token}"
+            ),
+        };
+        let (status, body) = call(&runtime, Method::GET, &uri, &JsonValue::Null).await;
+        assert_eq!(status, 200, "{body}");
+        pages += 1;
+        for user in body["users"].as_array().into_iter().flatten() {
+            seen.push(user["localId"].as_str().expect("localId").to_owned());
+        }
+        match body["nextPageToken"].as_str() {
+            Some(next) => token = Some(next.to_owned()),
+            None => break,
+        }
+    }
+    // 7 accounts in pages of 3: 3, 3, 1 — the third page is not full, so it
+    // ends the listing.
+    assert_eq!(pages, 3);
+    assert_eq!(seen, created);
+}
+
+// ------------------------------------------------------------------
+// Custom claims are measured as the official emulator measures them:
+// `claims.length`, UTF-16 code units, not UTF-8 bytes. The captured case is
+// `conformance/fixtures/auth-claims-length-v1`.
+
+/// `{"k":"é…é<last>"}` of exactly `length` UTF-16 code units.
+fn claims_of_length(length: usize, last: &str) -> String {
+    let fill = length - r#"{"k":""}"#.len() - last.encode_utf16().count();
+    let claims = json!({ "k": format!("{}{last}", "é".repeat(fill)) }).to_string();
+    assert_eq!(claims.encode_utf16().count(), length);
+    claims
+}
+
+#[test]
+fn custom_claims_length_counts_utf16_code_units() {
+    assert_eq!(ops::custom_claims_length("é"), 1);
+    assert_eq!(ops::custom_claims_length("🔥"), 2);
+    assert_eq!(ops::custom_claims_length(r#"{"a":1}"#), 7);
+    let accented = claims_of_length(1000, "");
+    assert!(
+        accented.len() > 1900,
+        "about 1,990 UTF-8 bytes: {}",
+        accented.len()
+    );
+    assert!(ops::validate_serialized_custom_claims(&accented).is_ok());
+    let refused = ops::validate_serialized_custom_claims(&claims_of_length(1001, ""))
+        .expect_err("1,001 code units");
+    assert_eq!(refused.message, "CLAIMS_TOO_LARGE");
+    // 🔥 is two code units: 999 characters that measure 1,001.
+    let emoji = claims_of_length(1001, "🔥");
+    assert_eq!(emoji.chars().count(), 1000);
+    assert!(ops::validate_serialized_custom_claims(&emoji).is_err());
+    assert!(ops::validate_serialized_custom_claims(&claims_of_length(1000, "🔥")).is_ok());
+}
+
+#[tokio::test]
+async fn custom_claims_of_a_thousand_accented_characters_are_stored_and_minted() {
+    let runtime = test_runtime();
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts",
+        &json!({ "localId": "claims-length", "email": "claims@example.test", "password": "password1" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let update = |claims: String| json!({ "localId": "claims-length", "customAttributes": claims });
+    let uri = "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:update";
+    let accented = claims_of_length(1000, "");
+    let (status, body) = call(&runtime, Method::POST, uri, &update(accented.clone())).await;
+    assert_eq!(status, 200, "1,000 code units are accepted: {body}");
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        uri,
+        &update(claims_of_length(1001, "")),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"]["message"], "CLAIMS_TOO_LARGE");
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        uri,
+        &update(claims_of_length(1001, "🔥")),
+    )
+    .await;
+    assert_eq!(status, 400, "🔥 counts two: {body}");
+    // The stored claims are the accepted ones, and a sign-in mints them.
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake",
+        &json!({ "email": "claims@example.test", "password": "password1", "returnSecureToken": true }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (_, payload) = decode_jwt(body["idToken"].as_str().expect("id token")).expect("JWT");
+    let stored: JsonValue = serde_json::from_str(&accented).expect("claims");
+    assert_eq!(payload["k"], stored["k"]);
+    // batchCreate validates each user the same way.
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/projects/demo-auth/accounts:batchCreate",
+        &json!({ "users": [
+            { "localId": "imported-1000", "customAttributes": claims_of_length(1000, "🔥") },
+            { "localId": "imported-1001", "customAttributes": claims_of_length(1001, "🔥") },
+        ] }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["error"],
+        json!([{ "index": 1, "message": "Custom claims provided are too large." }])
+    );
 }
 
 #[tokio::test]
@@ -977,4 +1280,92 @@ async fn lifecycle_events_name_their_user_and_paused_ones_are_counted() {
         "nothing is sent while paused"
     );
     assert_eq!(registry.dropped().counts, [(DroppedService::Auth, 1)]);
+}
+
+// ------------------------------------------------------------------
+// The console's hooks card: which blocking functions would run, and a tick
+// whenever that may have changed.
+
+struct Registered(BlockingFunctions);
+
+impl BlockingResolver for Registered {
+    fn resolve(&self) -> Pin<Box<dyn Future<Output = BlockingFunctions> + Send + '_>> {
+        let functions = self.0.clone();
+        Box::pin(async move { functions })
+    }
+}
+
+#[tokio::test]
+async fn blocking_targets_resolve_config_first_and_changes_tick() {
+    let runtime = test_runtime();
+    let handle = runtime.runtime();
+    let mut changes = runtime.blocking_changes();
+    assert_eq!(
+        handle.blocking_targets("demo-auth").await,
+        BlockingTargets::default()
+    );
+    assert!(
+        handle.read(|data| data.projects.is_empty()),
+        "resolving creates nothing"
+    );
+
+    // The Functions emulator registers both; installing it ticks.
+    runtime.set_blocking_functions(Arc::new(Registered(BlockingFunctions {
+        before_create: Some("http://127.0.0.1:5001/demo-auth/us-central1/beforeCreate".to_owned()),
+        before_sign_in: Some("http://127.0.0.1:5001/demo-auth/us-central1/beforeSignIn".to_owned()),
+        forward_id_token: true,
+        ..BlockingFunctions::default()
+    })));
+    assert!(changes.has_changed().expect("open"));
+    changes.borrow_and_update();
+    let targets = handle.blocking_targets("demo-auth").await;
+    assert_eq!(
+        targets.before_create.as_ref().map(|hook| hook.source),
+        Some(HookSource::Functions)
+    );
+    assert!(targets.forward_id_token);
+
+    // The project's configuration wins for its event, and ticks.
+    let (status, body) = call(
+        &runtime,
+        Method::PATCH,
+        "/identitytoolkit.googleapis.com/v2/projects/demo-auth/config?updateMask=blockingFunctions",
+        &json!({ "blockingFunctions": { "triggers": { "beforeCreate": { "functionUri": "http://localhost:9999/custom" } } } }),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(changes.has_changed().expect("open"));
+    changes.borrow_and_update();
+    let targets = handle.blocking_targets("demo-auth").await;
+    assert_eq!(
+        targets.before_create,
+        Some(HookTarget {
+            uri: "http://localhost:9999/custom".to_owned(),
+            source: HookSource::Config
+        })
+    );
+    assert_eq!(
+        targets.before_sign_in.as_ref().map(|hook| hook.source),
+        Some(HookSource::Functions)
+    );
+    assert!(
+        !targets.forward_id_token,
+        "the configuration's forwarding applies"
+    );
+
+    // A sign-up is not a change of the blocking functions.
+    let (status, body) = call(
+        &runtime,
+        Method::POST,
+        "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake",
+        &json!({}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "anonymous sign-ups call no blocking function: {body}"
+    );
+    assert!(!changes.has_changed().expect("open"));
+    runtime.blocking_changed();
+    assert!(changes.has_changed().expect("open"));
 }

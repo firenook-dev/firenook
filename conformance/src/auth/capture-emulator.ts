@@ -1,7 +1,8 @@
-// Phase I1: record every program in `emulator-plan.ts` against the official
-// Auth emulator (firebase-tools 15.22.0 `AuthEmulator`, in process) with a
-// recording HTTP server registered as the Functions emulator, so that
-// lifecycle multicasts and blocking-function calls are observed too.
+// Phase I1: record every program of one corpus (`corpora.ts`; the
+// `emulator-plan.ts` corpus by default, another with `--corpus=<id>`) against
+// the official Auth emulator (firebase-tools 15.22.0 `AuthEmulator`, in
+// process) with a recording HTTP server registered as the Functions emulator,
+// so that lifecycle multicasts and blocking-function calls are observed too.
 //
 // Requires FIREBASE_TOOLS_15_22_ROOT. Every program runs on a fresh emulator
 // instance. Everything recorded is synthetic.
@@ -10,7 +11,8 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { API_KEY, PROGRAMS, PROJECT_ID, type Program } from "./emulator-plan.ts";
+import { DEFAULT_CORPUS, corpusById } from "./corpora.ts";
+import { API_KEY, PROJECT_ID, type Program } from "./emulator-plan.ts";
 import { Registry, UNORDERED_ARRAYS } from "./normalize.ts";
 import { operationFor } from "./operations.ts";
 import {
@@ -27,7 +29,8 @@ import {
 } from "./runner.ts";
 
 const FIREBASE_TOOLS_VERSION = "15.22.0";
-const outputRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/auth-v1");
+const corpus = corpusById(process.argv.find((argument) => argument.startsWith("--corpus="))?.slice("--corpus=".length) ?? DEFAULT_CORPUS);
+const outputRoot = resolve(dirname(fileURLToPath(import.meta.url)), `../../fixtures/${corpus.id}`);
 
 interface RecordedProgram {
   readonly id: string;
@@ -89,7 +92,7 @@ registryModule.EmulatorRegistry.set("functions", {
 });
 
 const constants = new Set<string>([PROJECT_ID, API_KEY]);
-collectConstants(PROGRAMS, constants);
+collectConstants(corpus.programs, constants);
 
 const recordedPrograms: RecordedProgram[] = [];
 let totalSteps = 0;
@@ -98,7 +101,7 @@ const onlyPrograms = process.argv.find((argument) => argument.startsWith("--prog
 const debug = process.argv.includes("--debug");
 
 try {
-  for (const program of PROGRAMS) {
+  for (const program of corpus.programs) {
     if (onlyPrograms && !onlyPrograms.includes(program.id)) continue;
     recordedPrograms.push(await runProgram(program));
     console.log(`recorded ${program.id}: ${program.steps.length} steps`);
@@ -168,11 +171,8 @@ for (const file of sourceFiles) sourceHashes[file] = sha256(await readFile(join(
 const categories: Record<string, number> = {};
 for (const program of recordedPrograms) categories[program.category] = (categories[program.category] ?? 0) + 1;
 
-// Operation coverage against the gate's inventory of what the official
-// emulator implements.
-const gate = JSON.parse(await readFile(resolve(outputRoot, "../../../benchmarks/phase-i-auth.json"), "utf8")) as {
-  readonly inventory: { readonly officialImplementedOperations: readonly string[]; readonly officialNotImplementedOperations: readonly string[] };
-};
+// Operation coverage: the operations each program exercised and, for a corpus
+// that claims it, the gate's inventory of what the official emulator implements.
 const operations: Record<string, { steps: number; programs: string[]; official: string }> = {};
 for (const program of recordedPrograms) {
   for (const step of program.steps) {
@@ -182,19 +182,26 @@ for (const program of recordedPrograms) {
     if (!entry.programs.includes(program.id)) entry.programs.push(program.id);
   }
 }
-const officialImplementedMissing = gate.inventory.officialImplementedOperations.filter((id) => operations[id] === undefined);
-const officialNotImplementedMissing = gate.inventory.officialNotImplementedOperations.filter((id) => operations[id] === undefined);
-const coverage = {
-  officialImplemented: gate.inventory.officialImplementedOperations.length,
-  officialImplementedCovered: gate.inventory.officialImplementedOperations.length - officialImplementedMissing.length,
-  officialImplementedMissing,
-  officialNotImplemented: gate.inventory.officialNotImplementedOperations.length,
-  officialNotImplementedCovered: gate.inventory.officialNotImplementedOperations.length - officialNotImplementedMissing.length,
-  officialNotImplementedMissing,
-  pagesCovered: Object.values(operations).filter((entry) => entry.official === "page").length,
-  operations: Object.fromEntries(Object.entries(operations).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
-};
-if (officialImplementedMissing.length > 0) console.warn(`not covered: ${officialImplementedMissing.join(", ")}`);
+const sortedOperations = Object.fromEntries(Object.entries(operations).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+let coverage: Record<string, unknown> = { operations: sortedOperations };
+if (corpus.coversInventory) {
+  const gate = JSON.parse(await readFile(resolve(outputRoot, "../../../benchmarks/phase-i-auth.json"), "utf8")) as {
+    readonly inventory: { readonly officialImplementedOperations: readonly string[]; readonly officialNotImplementedOperations: readonly string[] };
+  };
+  const officialImplementedMissing = gate.inventory.officialImplementedOperations.filter((id) => operations[id] === undefined);
+  const officialNotImplementedMissing = gate.inventory.officialNotImplementedOperations.filter((id) => operations[id] === undefined);
+  coverage = {
+    officialImplemented: gate.inventory.officialImplementedOperations.length,
+    officialImplementedCovered: gate.inventory.officialImplementedOperations.length - officialImplementedMissing.length,
+    officialImplementedMissing,
+    officialNotImplemented: gate.inventory.officialNotImplementedOperations.length,
+    officialNotImplementedCovered: gate.inventory.officialNotImplementedOperations.length - officialNotImplementedMissing.length,
+    officialNotImplementedMissing,
+    pagesCovered: Object.values(operations).filter((entry) => entry.official === "page").length,
+    operations: sortedOperations,
+  };
+  if (officialImplementedMissing.length > 0) console.warn(`not covered: ${officialImplementedMissing.join(", ")}`);
+}
 
 const fixture = {
   schemaVersion: 1,
@@ -204,8 +211,7 @@ const fixture = {
   apiKey: API_KEY,
   capturedAt: startedAt,
   completedAt: new Date().toISOString(),
-  hypothesis:
-    "Every operation the official Auth emulator implements, recorded as raw HTTP programs on fresh emulator state with lifecycle multicasts and blocking-function calls observed",
+  hypothesis: corpus.hypothesis,
   credentialsStored: false,
   accessTokensStored: false,
   realUserDataStored: false,

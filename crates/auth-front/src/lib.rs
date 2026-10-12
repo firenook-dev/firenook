@@ -17,10 +17,12 @@ use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 use std::path::{Path as FilePath, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::Instant;
 
 use axum::Router;
-use axum::body::{Body, to_bytes};
+use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -30,10 +32,13 @@ use firenook_functions_bridge::{
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 pub mod blocking;
+pub mod console;
 pub mod error;
 pub mod legacy;
+pub mod observe;
 pub mod ops;
 pub mod pages;
+mod persist;
 pub mod spec;
 pub mod state;
 pub mod token;
@@ -41,7 +46,13 @@ pub mod util;
 
 use blocking::{BlockingContext, BlockingOutcome, BlockingTarget, OauthTokens};
 use error::ApiError;
+use observe::{
+    ACTIVITY_HEADER, AuthObserver, Body as RecordedBody, CallError, CallRecord, ConsoleOrigin,
+    Description, Notice, Step, Trace, TriggerOutcome,
+};
 use ops::Ctx;
+pub use persist::PersistStats;
+use persist::Persister;
 use state::{AuthData, BlockingEvent, Lifecycle, Scope, UpdateOptions, UserRecord};
 use util::{decode_jwt, now_iso, random_uuid, str_field};
 
@@ -61,13 +72,74 @@ pub struct BlockingFunctions {
     pub forward_refresh_token: bool,
 }
 
+/// The blocking functions a project would call now (`Runtime::blocking_targets`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockingTargets {
+    pub before_create: Option<HookTarget>,
+    pub before_sign_in: Option<HookTarget>,
+    pub forward_id_token: bool,
+    pub forward_access_token: bool,
+    pub forward_refresh_token: bool,
+}
+
+/// One blocking function and where its registration comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookTarget {
+    pub uri: String,
+    pub source: HookSource,
+}
+
+/// Where a blocking function's registration comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookSource {
+    /// Set with `updateConfig` (`blockingFunctions.triggers`).
+    Config,
+    /// Discovered by the Functions emulator.
+    Functions,
+}
+
 /// Resolves the current blocking-function configuration at sign-in time.
 pub trait BlockingResolver: Send + Sync {
     fn resolve(&self) -> Pin<Box<dyn Future<Output = BlockingFunctions> + Send + '_>>;
 }
 
-/// Receives the emulator's log lines (`BULLET`, `WARN`, ...).
+/// Receives the emulator's log lines (`BULLET`, `WARN`, ...) as text.
 pub type LogSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
+/// Receives the emulator's log lines with what they are about: a code or a
+/// link carries the message it printed, so the console can link the line to
+/// its inbox entry and its user.
+pub type LineSink = Arc<dyn Fn(&AuthLogLine<'_>) + Send + Sync>;
+
+/// One line the emulator prints.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthLogLine<'a> {
+    /// `BULLET`, `SUCCESS`, `WARN` or `ERROR`.
+    pub kind: &'a str,
+    /// The text exactly as the official emulator prints it.
+    pub text: &'a str,
+    /// The code or link the line prints, when it prints one.
+    pub message: Option<&'a AuthMessageRef>,
+}
+
+/// The message a log line prints: its inbox id and whom it is for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthMessageRef {
+    pub id: u64,
+    pub project: String,
+    pub tenant: Option<String>,
+    pub uid: Option<String>,
+}
+
+/// Where log lines go: text only, or with what they are about.
+#[derive(Clone)]
+enum Sink {
+    Text(LogSink),
+    Lines(LineSink),
+}
+
+/// The console's observer and whether it keeps bodies.
+type Observer = (Arc<dyn AuthObserver>, bool);
 
 /// Builds a Firebase Auth router backed by in-memory state.
 ///
@@ -100,17 +172,26 @@ impl std::error::Error for AuthError {}
 
 struct Inner {
     default_project: String,
-    data: Mutex<AuthData>,
-    /// Serializes state-file writes issued outside the data lock, so two
-    /// requests cannot publish their snapshots out of order.
-    state_write: Mutex<()>,
-    state_file: Option<PathBuf>,
+    /// The state, shared with the state file's writer thread.
+    data: Arc<Mutex<AuthData>>,
+    /// Writes the state file off the request path; absent without one.
+    persister: Option<Persister>,
     queue: DispatchQueue,
     background: TriggerRegistry,
     blocking: RwLock<Option<Arc<dyn BlockingResolver>>>,
-    log: RwLock<Option<LogSink>>,
+    log: RwLock<Option<Sink>>,
     origin: RwLock<Option<String>>,
     client: reqwest::Client,
+    /// The console's record of every call, when it listens.
+    observer: RwLock<Option<Observer>>,
+    /// Call ids, drawn when a request arrives.
+    next_call: AtomicU64,
+    /// Message ids, drawn when a code is created (or found in saved state).
+    next_message: AtomicU64,
+    /// Moves when the blocking functions may have changed: a resolver was
+    /// installed, the Functions emulator reloaded, the project's
+    /// configuration changed.
+    blocking_changes: tokio::sync::watch::Sender<u64>,
 }
 
 /// Cloneable handle to the shared state, used by every operation.
@@ -131,18 +212,26 @@ impl AuthRuntime {
         let mut data = state_file
             .as_deref()
             .map_or_else(|| Ok(AuthData::default()), load_state)?;
+        data.version = STATE_VERSION;
         data.rebuild_indexes();
+        let data = Arc::new(Mutex::new(data));
+        let persister = state_file
+            .map(|file| Persister::start(file, data.clone()))
+            .transpose()?;
         let runtime = Runtime {
             inner: Arc::new(Inner {
                 default_project: project.to_owned(),
-                data: Mutex::new(data),
-                state_write: Mutex::new(()),
-                state_file,
+                data,
+                persister,
                 queue,
                 background,
                 blocking: RwLock::new(None),
                 log: RwLock::new(None),
                 origin: RwLock::new(None),
+                observer: RwLock::new(None),
+                next_call: AtomicU64::new(1),
+                next_message: AtomicU64::new(1),
+                blocking_changes: tokio::sync::watch::Sender::new(0),
                 client: reqwest::Client::builder().build().map_err(|error| {
                     AuthError(format!(
                         "failed to build the blocking-function client: {error}"
@@ -163,12 +252,44 @@ impl AuthRuntime {
         if let Ok(mut slot) = self.runtime.inner.blocking.write() {
             *slot = Some(resolver);
         }
+        self.blocking_changed();
     }
 
-    /// Receives log lines the official emulator prints (action links, codes).
+    /// Ticks when the blocking functions may have changed (see
+    /// [`Runtime::blocking_changes`]).
+    #[must_use]
+    pub fn blocking_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.runtime.blocking_changes()
+    }
+
+    /// The blocking functions may have changed: the Functions emulator
+    /// reloaded its inventory.
+    pub fn blocking_changed(&self) {
+        self.runtime.blocking_changed();
+    }
+
+    /// Receives log lines the official emulator prints (action links, codes)
+    /// as text. The last sink set, of either kind, receives every line.
     pub fn set_log_sink(&self, sink: LogSink) {
         if let Ok(mut slot) = self.runtime.inner.log.write() {
-            *slot = Some(sink);
+            *slot = Some(Sink::Text(sink));
+        }
+    }
+
+    /// Receives log lines with the message each one prints, when any. The
+    /// last sink set, of either kind, receives every line.
+    pub fn set_line_sink(&self, sink: LineSink) {
+        if let Ok(mut slot) = self.runtime.inner.log.write() {
+            *slot = Some(Sink::Lines(sink));
+        }
+    }
+
+    /// The console's record of every call: `observer` receives one
+    /// [`CallRecord`] per finished call; `keep_bodies` keeps request and
+    /// response bodies up to 16 KiB each (diagnostics on).
+    pub fn set_observer(&self, observer: Arc<dyn AuthObserver>, keep_bodies: bool) {
+        if let Ok(mut slot) = self.runtime.inner.observer.write() {
+            *slot = Some((observer, keep_bodies));
         }
     }
 
@@ -193,7 +314,14 @@ impl AuthRuntime {
 
     /// Publishes native state, including an intentionally empty Auth database.
     pub fn checkpoint_native_state(&self) -> Result<(), AuthError> {
-        self.runtime.persist(&lock(&self.runtime.inner.data))
+        self.runtime.write_state(true)
+    }
+
+    /// Writes the state file now if anything changed since the last write.
+    /// Changes otherwise reach the file within 250 ms, written off the
+    /// request path; a test that reads the file flushes first.
+    pub fn flush(&self) -> Result<(), AuthError> {
+        self.runtime.flush()
     }
 
     /// Number of users in the configured project.
@@ -262,7 +390,9 @@ impl AuthRuntime {
             imported += 1;
         }
         project.events.clear();
-        self.runtime.persist(&data)?;
+        drop(data);
+        self.runtime.mark_dirty();
+        self.runtime.flush()?;
         Ok(imported)
     }
 
@@ -319,7 +449,9 @@ impl AuthRuntime {
                     },
                 );
             }
-            self.runtime.persist(&data)?;
+            drop(data);
+            self.runtime.mark_dirty();
+            self.runtime.flush()?;
         }
         Ok(imported)
     }
@@ -348,11 +480,105 @@ impl Runtime {
 
     /// Emits a log line the way the official emulator's logger would.
     pub fn log(&self, kind: &str, text: &str) {
-        if let Ok(slot) = self.inner.log.read()
-            && let Some(sink) = slot.as_ref()
-        {
-            sink(kind, text);
+        self.log_line(&AuthLogLine {
+            kind,
+            text,
+            message: None,
+        });
+    }
+
+    /// Emits the line that prints a code or a link, with its message.
+    pub fn log_message(&self, kind: &str, text: &str, message: &AuthMessageRef) {
+        self.log_line(&AuthLogLine {
+            kind,
+            text,
+            message: Some(message),
+        });
+    }
+
+    fn log_line(&self, line: &AuthLogLine<'_>) {
+        let sink = self.inner.log.read().ok().and_then(|slot| slot.clone());
+        match sink {
+            Some(Sink::Text(sink)) => sink(line.kind, line.text),
+            Some(Sink::Lines(sink)) => sink(line),
+            None => {}
         }
+    }
+
+    /// A fresh message id: what the inbox, the log line and the
+    /// `auth.message` key name a code by.
+    #[must_use]
+    pub fn next_message_id(&self) -> u64 {
+        self.inner.next_message.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Ticks when the blocking functions may have changed: a resolver was
+    /// installed, the Functions emulator reloaded, or a project's
+    /// configuration changed. The value counts the changes.
+    #[must_use]
+    pub fn blocking_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.inner.blocking_changes.subscribe()
+    }
+
+    /// Moves [`Runtime::blocking_changes`].
+    pub fn blocking_changed(&self) {
+        self.inner
+            .blocking_changes
+            .send_modify(|changes| *changes = changes.wrapping_add(1));
+    }
+
+    /// A fresh call id.
+    #[must_use]
+    pub fn next_call_id(&self) -> u64 {
+        self.inner.next_call.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// The console's observer, when one listens.
+    fn observer(&self) -> Option<Observer> {
+        self.inner
+            .observer
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+
+    /// Hands a finished call to the observer, when one listens.
+    pub fn record(&self, record: CallRecord) {
+        if let Some((observer, _)) = self.observer() {
+            observer.call(record);
+        }
+    }
+
+    /// Whether an observer listens, and whether it keeps bodies.
+    #[must_use]
+    pub fn observed(&self) -> Option<bool> {
+        self.observer().map(|(_, keep)| keep)
+    }
+
+    /// Every code the state holds, as found when the engine started
+    /// (`Restored`, no time), each with a fresh message id: the inbox's
+    /// first entries.
+    #[must_use]
+    pub fn saved_messages(&self) -> Vec<observe::MessageRecord> {
+        let data = lock(&self.inner.data);
+        let mut next = || self.next_message_id();
+        let mut messages = Vec::new();
+        for (project_id, agent) in &data.projects {
+            let scopes = std::iter::once((None, &agent.project)).chain(
+                agent
+                    .tenants
+                    .iter()
+                    .map(|(id, tenant)| (Some(id.as_str()), &tenant.project)),
+            );
+            for (tenant, project) in scopes {
+                for mut message in project.saved_messages(&mut next) {
+                    message.project.clone_from(project_id);
+                    message.tenant = tenant.map(str::to_owned);
+                    messages.push(message);
+                }
+            }
+        }
+        messages
     }
 
     /// Runs `body` against the request's project or tenant under the state
@@ -362,7 +588,7 @@ impl Runtime {
         ctx: &Ctx,
         body: impl FnOnce(&mut Scope<'_>) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
-        self.update(|data| {
+        self.update_traced(&ctx.trace, |data| {
             let mut scope = Scope::new(data, &ctx.project_id, ctx.tenant_id.as_deref());
             body(&mut scope)
         })
@@ -376,35 +602,113 @@ impl Runtime {
         body(&lock(&self.inner.data))
     }
 
-    /// Changes the state under its lock, writes it when it changed and
-    /// dispatches the lifecycle events it queued, as an operation's scope
-    /// does, without resolving (or creating) a project or tenant first. For
-    /// writes beside the emulator's own operations (the console minting a
-    /// token for an existing account).
+    /// Changes the state under its lock, marks it for writing when it
+    /// changed and dispatches the lifecycle events it queued, as an
+    /// operation's scope does, without resolving (or creating) a project or
+    /// tenant first. For writes beside the emulator's own operations (the
+    /// console minting a token for an existing account).
     pub fn update<T>(&self, body: impl FnOnce(&mut AuthData) -> T) -> Result<T, AuthError> {
-        // The state is serialized under the lock only when the request
-        // changed it, and the file is written after the lock is released, so
-        // a lookup never rewrites the state and a write never stalls readers
-        // on disk I/O.
-        let (result, events, encoded) = {
+        self.update_traced(&Trace::default(), body)
+    }
+
+    /// [`Runtime::update`] for the call `trace` follows: what the change
+    /// caused (accounts, codes, configuration, lifecycle events) becomes its
+    /// steps when it records.
+    pub fn update_traced<T>(
+        &self,
+        trace: &Trace,
+        body: impl FnOnce(&mut AuthData) -> T,
+    ) -> Result<T, AuthError> {
+        // Nothing is encoded here: a change only marks the state dirty, and
+        // the writer snapshots it in O(1) and encodes it off the request
+        // path, so a lookup never rewrites the state and a write never waits
+        // for an encode, whatever the number of users.
+        let (result, events, notices, changed) = {
             let mut data = lock(&self.inner.data);
             let before = data.generation();
             let result = body(&mut data);
             let events = data.take_events();
-            let encoded = if data.generation() == before {
-                None
-            } else {
-                self.encode_state(&data)?
-            };
-            (result, events, encoded)
+            // Always drained, so the lists never grow without an observer.
+            let notices = data.take_notices();
+            (result, events, notices, data.generation() != before)
         };
-        if let Some(encoded) = encoded {
-            self.write_state(&encoded)?;
+        if changed {
+            self.mark_dirty();
+        }
+        // A project's configuration holds its blocking functions.
+        if notices.iter().any(|(_, _, notice)| {
+            matches!(
+                notice,
+                Notice::Config {
+                    tenant: None,
+                    what: observe::ConfigChange::Project
+                }
+            )
+        }) {
+            self.blocking_changed();
+        }
+        if trace.recording() {
+            for (_, tenant, notice) in notices {
+                trace.push(match notice {
+                    Notice::User {
+                        uid,
+                        change,
+                        fields,
+                    } => Step::User {
+                        tenant,
+                        uid,
+                        change,
+                        fields,
+                    },
+                    Notice::Cleared => Step::UsersCleared { tenant },
+                    Notice::Message(mut message) => {
+                        message.origin = trace.origin();
+                        Step::MessageSent(*message)
+                    }
+                    Notice::Used { key } => Step::MessageUsed { key },
+                    Notice::Config { tenant, what } => Step::Config { tenant, what },
+                });
+            }
         }
         for (project_id, kind, user) in events {
-            self.dispatch_lifecycle(&project_id, kind, &user);
+            let outcome = self.dispatch_lifecycle(&project_id, kind, &user);
+            if trace.recording() {
+                trace.push(Step::Trigger {
+                    event: match kind {
+                        Lifecycle::Create => "user.create",
+                        Lifecycle::Delete => "user.delete",
+                    },
+                    uid: observe::uid_of(&user).unwrap_or_default(),
+                    outcome,
+                });
+            }
         }
         Ok(result)
+    }
+
+    /// Writes the state file now if anything changed since the last write.
+    pub fn flush(&self) -> Result<(), AuthError> {
+        self.write_state(false)
+    }
+
+    /// How the state file's writer has done, when the runtime persists.
+    #[must_use]
+    pub fn persist_stats(&self) -> Option<PersistStats> {
+        self.inner.persister.as_ref().map(Persister::stats)
+    }
+
+    fn mark_dirty(&self) {
+        if let Some(persister) = &self.inner.persister {
+            persister.mark_dirty();
+        }
+    }
+
+    /// Writes the state when it changed (or always, with `force`).
+    fn write_state(&self, force: bool) -> Result<(), AuthError> {
+        match &self.inner.persister {
+            Some(persister) => persister.flush(&self.inner.data, force),
+            None => Ok(()),
+        }
     }
 
     /// `fetchBlockingFunction` for `event`, resolved from the project
@@ -417,6 +721,24 @@ impl Runtime {
         context: &BlockingContext,
         oauth: &OauthTokens,
     ) -> Result<BlockingOutcome, ApiError> {
+        self.blocking_reported(ctx, event, user, context, oauth)
+            .await
+            .0
+    }
+
+    /// [`Runtime::blocking`], and how the call went when a function was
+    /// called (its step is already on the trace).
+    pub(crate) async fn blocking_reported(
+        &self,
+        ctx: &Ctx,
+        event: BlockingEvent,
+        user: &UserRecord,
+        context: &BlockingContext,
+        oauth: &OauthTokens,
+    ) -> (
+        Result<BlockingOutcome, ApiError>,
+        Option<blocking::BlockingReport>,
+    ) {
         let configured = {
             let mut data = lock(&self.inner.data);
             let scope = Scope::new(&mut data, &ctx.project_id, ctx.tenant_id.as_deref());
@@ -454,41 +776,127 @@ impl Runtime {
         } else {
             None
         };
-        blocking::fetch_blocking_function(&self.inner.client, target, event, user, context, oauth)
-            .await
+        let (result, report) = blocking::fetch_blocking_function(
+            &self.inner.client,
+            target,
+            event,
+            user,
+            context,
+            oauth,
+            ctx.trace.id(),
+        )
+        .await;
+        if let Some(report) = report.clone().filter(|_| ctx.trace.recording()) {
+            let outcome = result.as_ref().ok();
+            let updates = outcome.map(|outcome| &outcome.updates);
+            ctx.trace.push(Step::Blocking {
+                event: event.name(),
+                function: observe::function_of(&report.uri),
+                uri: report.uri,
+                duration: report.duration,
+                invocation: report.invocation,
+                changed: updates
+                    .map(|updates| {
+                        updates
+                            .keys()
+                            .filter(|key| key.as_str() != "customAttributes")
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                custom_claims: observe::object_keys_of_text(
+                    updates.and_then(|updates| str_field(updates, "customAttributes")),
+                ),
+                session_claims: outcome
+                    .and_then(|outcome| outcome.extra_claims.as_ref())
+                    .map(|claims| claims.keys().cloned().collect())
+                    .unwrap_or_default(),
+                failure: report.failure,
+            });
+        }
+        (result, report)
     }
 
-    fn persist(&self, data: &AuthData) -> Result<(), AuthError> {
-        match self.encode_state(data)? {
-            Some(encoded) => self.write_state(&encoded),
-            None => Ok(()),
+    /// The blocking functions a sign-up and a sign-in of `project` would
+    /// call now, resolved as [`Runtime::blocking`] resolves them (the
+    /// project's configuration first, then the Functions emulator's
+    /// registration), without calling anything or creating the project.
+    pub async fn blocking_targets(&self, project: &str) -> BlockingTargets {
+        let configured = {
+            let data = lock(&self.inner.data);
+            data.projects.get(project).map(|agent| {
+                (
+                    agent.blocking_uri(BlockingEvent::BeforeCreate),
+                    agent.blocking_uri(BlockingEvent::BeforeSignIn),
+                    [
+                        agent.forward_credential("idToken"),
+                        agent.forward_credential("accessToken"),
+                        agent.forward_credential("refreshToken"),
+                    ],
+                )
+            })
+        };
+        let (create, sign_in, forward) = configured.unwrap_or((None, None, [false; 3]));
+        let resolver = self
+            .inner
+            .blocking
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone());
+        let registered = match (&create, &sign_in, resolver) {
+            (Some(_), Some(_), _) | (_, _, None) => None,
+            (_, _, Some(resolver)) => Some(resolver.resolve().await),
+        };
+        let hook = |configured: Option<String>, registered: Option<String>| {
+            configured
+                .map(|uri| HookTarget {
+                    uri,
+                    source: HookSource::Config,
+                })
+                .or_else(|| {
+                    registered.map(|uri| HookTarget {
+                        uri,
+                        source: HookSource::Functions,
+                    })
+                })
+        };
+        let any_configured = create.is_some() || sign_in.is_some();
+        let forward = match (&registered, any_configured) {
+            (Some(functions), false) => [
+                functions.forward_id_token,
+                functions.forward_access_token,
+                functions.forward_refresh_token,
+            ],
+            _ => forward,
+        };
+        BlockingTargets {
+            before_create: hook(
+                create,
+                registered
+                    .as_ref()
+                    .and_then(|functions| functions.before_create.clone()),
+            ),
+            before_sign_in: hook(
+                sign_in,
+                registered
+                    .as_ref()
+                    .and_then(|functions| functions.before_sign_in.clone()),
+            ),
+            forward_id_token: forward[0],
+            forward_access_token: forward[1],
+            forward_refresh_token: forward[2],
         }
     }
 
-    /// The state's on-disk bytes, or `None` when persistence is disabled.
-    fn encode_state(&self, data: &AuthData) -> Result<Option<Vec<u8>>, AuthError> {
-        match &self.inner.state_file {
-            Some(_) => serde_json::to_vec_pretty(data)
-                .map(Some)
-                .map_err(|error| AuthError(format!("failed to serialize Auth state: {error}"))),
-            None => Ok(None),
-        }
-    }
-
-    fn write_state(&self, encoded: &[u8]) -> Result<(), AuthError> {
-        match &self.inner.state_file {
-            Some(path) => {
-                let _guard = lock(&self.inner.state_write);
-                write_atomic_bytes(path, encoded)
-            }
-            None => Ok(()),
-        }
-    }
-
-    fn dispatch_lifecycle(&self, project_id: &str, kind: Lifecycle, user: &UserRecord) {
+    fn dispatch_lifecycle(
+        &self,
+        project_id: &str,
+        kind: Lifecycle,
+        user: &UserRecord,
+    ) -> TriggerOutcome {
         if !self.inner.background.background_enabled() {
             self.inner.background.note_dropped(DroppedService::Auth);
-            return;
+            return TriggerOutcome::DeliveryOff;
         }
         let event_type = match kind {
             Lifecycle::Create => "providers/firebase.auth/eventTypes/user.create",
@@ -518,12 +926,15 @@ impl Runtime {
                 headers.insert(header.to_owned(), cause::encode(value));
             }
         }
-        let _ = self.inner.queue.enqueue(DispatchRequest {
+        match self.inner.queue.enqueue(DispatchRequest {
             path: format!("/functions/projects/{project_id}/trigger_multicast"),
             headers,
             body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
             event_id,
-        });
+        }) {
+            Ok(()) => TriggerOutcome::Queued,
+            Err(error) => TriggerOutcome::Failed(error.to_string()),
+        }
     }
 }
 
@@ -616,6 +1027,29 @@ fn api_json(status: StatusCode, value: &JsonValue) -> Response {
     (status, [(header::CONTENT_TYPE, "application/json")], text).into_response()
 }
 
+/// What `route` learned of a call, for its record.
+#[derive(Default)]
+struct RouteFacts {
+    /// The operation id, once the route matched one.
+    operation: Option<String>,
+    project: Option<String>,
+    tenant: Option<String>,
+    /// The request body as read.
+    request: Bytes,
+    query: Vec<(String, String)>,
+    description: Description,
+}
+
+/// Paths that are not calls: readiness, the API document, the static
+/// popup frame.
+fn recorded(method: &Method, path: &str) -> bool {
+    !(*method == Method::GET
+        && matches!(
+            path,
+            "/" | "/emulator/openapi.json" | "/emulator/auth/iframe"
+        ))
+}
+
 async fn handle(State(runtime): State<Runtime>, request: Request) -> Response {
     let origin = request.headers().get(header::ORIGIN).cloned();
     let private_network = request
@@ -624,7 +1058,73 @@ async fn handle(State(runtime): State<Runtime>, request: Request) -> Response {
     if request.method() == Method::OPTIONS {
         return preflight(&request, origin.as_ref(), private_network);
     }
-    let mut response = route(&runtime, request).await;
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let asked = request.headers().contains_key(observe::CONSOLE_HEADER);
+    let console = ConsoleOrigin::of(request.headers());
+    let id = runtime.next_call_id();
+    let observer = runtime.observer().filter(|_| recorded(&method, &path));
+    let trace = Trace::new(id, console, observer.is_some());
+    // What the record keeps of the request, read before it is consumed.
+    let kept = observer.as_ref().map(|_| {
+        let headers = request.headers();
+        let query_key = request.uri().query().is_some_and(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .any(|(name, value)| name == "key" && !value.is_empty())
+        });
+        (
+            observe::caller_of(&path, headers, query_key),
+            observe::client_of(headers),
+            observe::kept_headers(headers),
+        )
+    });
+    let at_millis = util::now_millis();
+    let started = Instant::now();
+    let mut facts = RouteFacts::default();
+    let mut response = route(&runtime, request, &trace, &mut facts).await;
+    let duration = started.elapsed();
+    if let (Some((observer, keep)), Some(((caller, credential), client, headers))) =
+        (observer, kept)
+    {
+        // The body was built in memory: collecting it hands back the same
+        // buffer, which the record keeps as a handle.
+        let (parts, body) = response.into_parts();
+        let bytes = to_bytes(body, usize::MAX).await.unwrap_or_default();
+        let status = parts.status.as_u16();
+        let operation = facts.operation.unwrap_or_default();
+        observer.call(CallRecord {
+            id,
+            at_millis,
+            duration,
+            project: facts
+                .project
+                .unwrap_or_else(|| runtime.default_project().to_owned()),
+            tenant: facts.tenant,
+            caller,
+            origin: console,
+            credential,
+            client,
+            method: method.as_str().to_owned(),
+            path,
+            kind: observe::kind_of(&operation),
+            operation,
+            identifier: facts.description.identifier,
+            provider: facts.description.provider,
+            uid: facts.description.uid,
+            new_user: facts.description.new_user,
+            status,
+            error: CallError::of_response(status, &bytes),
+            request: RecordedBody::of(&facts.request, keep),
+            response: RecordedBody::of(&bytes, keep),
+            query: facts.query,
+            headers,
+            steps: trace.take(),
+        });
+        response = Response::from_parts(parts, Body::from(bytes));
+    }
+    if asked && let Ok(value) = HeaderValue::from_str(&id.to_string()) {
+        response.headers_mut().insert(ACTIVITY_HEADER, value);
+    }
     if let Some(origin) = origin {
         response
             .headers_mut()
@@ -675,13 +1175,21 @@ fn query_pairs(query: Option<&str>) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-async fn route(runtime: &Runtime, request: Request) -> Response {
+async fn route(
+    runtime: &Runtime,
+    request: Request,
+    trace: &Trace,
+    facts: &mut RouteFacts,
+) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
     let path = uri.path().to_owned();
     let query = uri.query().map(str::to_owned);
     let pairs = query_pairs(query.as_deref());
     let query_map: BTreeMap<String, String> = pairs.iter().cloned().collect();
+    if trace.recording() {
+        facts.query.clone_from(&pairs);
+    }
     let headers = request.headers().clone();
     let host = headers
         .get(header::HOST)
@@ -692,8 +1200,27 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
     match (method.clone(), path.as_str()) {
         (Method::GET, "/") => return pages::readiness(),
         (Method::GET, "/emulator/openapi.json") => return pages::openapi("http", host.as_deref()),
-        (Method::GET, "/emulator/action") => return pages::action(runtime, &pairs),
-        (Method::GET, "/emulator/auth/handler") => return pages::handler(runtime, &query_map),
+        (Method::GET, "/emulator/action") => {
+            facts.operation = Some(format!(
+                "emulator.action.{}",
+                query_map.get("mode").map_or("unknown", String::as_str)
+            ));
+            facts.tenant = query_map
+                .get("tenantId")
+                .filter(|tenant| !tenant.is_empty())
+                .cloned();
+            return pages::action(runtime, &pairs, trace);
+        }
+        (Method::GET, "/emulator/auth/handler") => {
+            facts.operation = Some("emulator.accountPicker".to_owned());
+            facts.tenant = query_map
+                .get("tenantId")
+                .or_else(|| query_map.get("tid"))
+                .filter(|tenant| !tenant.is_empty())
+                .cloned();
+            facts.description.provider = query_map.get("providerId").cloned();
+            return pages::handler(runtime, &query_map, trace);
+        }
         (Method::GET, "/emulator/auth/iframe") => return pages::iframe(),
         _ => {}
     }
@@ -717,6 +1244,9 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
     let Ok(body_bytes) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
         return ApiError::bad_request("request body too large").into_response();
     };
+    if trace.recording() {
+        facts.request = body_bytes.clone();
+    }
 
     // Legacy relyingparty rewrites.
     let mut method = method;
@@ -772,6 +1302,9 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
     let Some(matched) = spec::SPEC.match_route(method.as_str(), &path) else {
         return ApiError::not_found().into_response();
     };
+    if let Some(operation) = &matched.operation {
+        facts.operation = Some(operation.operation_id.clone());
+    }
     let Some(operation) = matched.operation else {
         let original = match &query {
             Some(query) => format!("{path}?{query}"),
@@ -893,8 +1426,20 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
         body,
         query: query_values,
         emulator_url: runtime.emulator_url(host.as_deref()),
+        trace: trace.clone(),
     };
-    match dispatch(runtime, &operation.operation_id, &ctx).await {
+    let result = dispatch(runtime, &operation.operation_id, &ctx).await;
+    if trace.recording() {
+        facts.project = Some(ctx.project_id.clone());
+        facts.tenant.clone_from(&ctx.tenant_id);
+        facts.description = observe::describe(
+            &operation.operation_id,
+            &ctx.body,
+            &pairs,
+            result.as_ref().ok(),
+        );
+    }
+    match result {
         Ok(value) => api_json(StatusCode::OK, &value),
         Err(error) => {
             log_server_error(runtime, &error);
@@ -1162,21 +1707,49 @@ fn validate_project(project: &str) -> Result<(), AuthError> {
     Ok(())
 }
 
+/// The layout of the state file this engine writes: per project its users,
+/// codes, proofs, configuration and tenants.
+const STATE_VERSION: u32 = 2;
+
+/// What `load_state` reads first to tell the layouts apart, skipping
+/// everything else.
+#[derive(serde::Deserialize)]
+struct LayoutProbe {
+    #[serde(default)]
+    version: Option<u64>,
+    #[serde(default)]
+    projects: BTreeMap<String, AgentProbe>,
+}
+
+#[derive(serde::Deserialize)]
+struct AgentProbe {
+    #[serde(default)]
+    tenants: Option<serde::de::IgnoredAny>,
+}
+
 fn load_state(path: &FilePath) -> Result<AuthData, AuthError> {
     if !path.is_file() {
         return Ok(AuthData::default());
     }
     let bytes = std::fs::read(path)
         .map_err(|error| AuthError(format!("failed to read Auth state: {error}")))?;
-    let value: JsonValue = serde_json::from_slice(&bytes)
+    let probe: LayoutProbe = serde_json::from_slice(&bytes)
         .map_err(|error| AuthError(format!("invalid Auth state JSON: {error}")))?;
-    if value.get("version").and_then(JsonValue::as_u64) == Some(2) {
-        return serde_json::from_value(value)
+    // Engines before this one wrote the current layout with `version: 0`
+    // when they started without a state file; every project they wrote
+    // carries `tenants`, which the older layout never had.
+    let current = probe.version == Some(u64::from(STATE_VERSION))
+        || (probe.version.is_none_or(|version| version == 0)
+            && !probe.projects.is_empty()
+            && probe.projects.values().all(|agent| agent.tenants.is_some()));
+    if current {
+        return serde_json::from_slice(&bytes)
             .map_err(|error| AuthError(format!("invalid Auth state: {error}")));
     }
+    let value: JsonValue = serde_json::from_slice(&bytes)
+        .map_err(|error| AuthError(format!("invalid Auth state JSON: {error}")))?;
     // The next.7 layout: `projects.<id>.{users, config}` with a flat config.
     let mut data = AuthData::default();
-    data.version = 2;
     for (project_id, project) in value
         .get("projects")
         .and_then(JsonValue::as_object)
@@ -1191,7 +1764,10 @@ fn load_state(path: &FilePath) -> Result<AuthData, AuthError> {
             .flatten()
         {
             if let Some(record) = user.as_object() {
-                agent.project.users.insert(local_id.clone(), record.clone());
+                agent
+                    .project
+                    .users
+                    .insert(local_id.clone(), Arc::new(record.clone()));
             }
         }
         if let Some(config) = project.get("config").and_then(JsonValue::as_object) {
@@ -1242,6 +1818,15 @@ fn write_atomic_bytes(path: &FilePath, bytes: &[u8]) -> Result<(), AuthError> {
     std::fs::rename(&temporary, path)
         .map_err(|error| AuthError(format!("failed to publish Auth state: {error}")))?;
     Ok(())
+}
+
+impl Drop for Inner {
+    /// The last handle is gone: stop the writer and write what is left.
+    fn drop(&mut self) {
+        if let Some(persister) = &self.persister {
+            persister.stop(&self.data);
+        }
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PaletteGroup, PaletteItem } from '@/lib/palette'
 import type { SectionLink } from '@/lib/services'
+import { auth } from '@/lib/sections/auth'
 import { sectionEntry, testStatus } from '@/test/status'
+import { whileUnbuilt } from '@/test/unbuilt'
 import { engineGroups, mergeGroups } from './command-palette'
 
 // Storage stands in for a built section whose `q` is a text filter, so the
@@ -71,7 +73,7 @@ describe('what ⌘K shows of the engine’s search', () => {
     ).toBe(false)
   })
 
-  it('drops hits of a section that is not built, or that the engine does not run', () => {
+  it('drops hits of a section that is not built, or that the engine does not run', async () => {
     const results = {
       partial: false,
       groups: [
@@ -87,11 +89,13 @@ describe('what ⌘K shows of the engine’s search', () => {
         },
       ],
     }
-    expect(engineGroups(results, 'ada', status, go).map((group) => group.label)).toEqual([
-      'Collections',
-    ])
-    const absent = testStatus({ sections: [sectionEntry('firestore', { state: 'absent' })] })
-    expect(engineGroups(results, 'ada', absent, go)).toEqual([])
+    await whileUnbuilt(auth, () => {
+      expect(engineGroups(results, 'ada', status, go).map((group) => group.label)).toEqual([
+        'Collections',
+      ])
+      const absent = testStatus({ sections: [sectionEntry('firestore', { state: 'absent' })] })
+      expect(engineGroups(results, 'ada', absent, go)).toEqual([])
+    })
   })
 
   it('shows nothing before the engine answered, or when it has no search', () => {

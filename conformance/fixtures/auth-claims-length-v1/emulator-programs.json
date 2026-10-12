@@ -1,0 +1,1208 @@
+{
+  "schemaVersion": 1,
+  "target": "official-firebase-tools-auth-emulator",
+  "targetVersion": "15.22.0",
+  "targetProject": "fireside-auth-oracle",
+  "apiKey": "fake-api-key",
+  "capturedAt": "2026-10-11T22:04:46.474Z",
+  "completedAt": "2026-10-11T22:04:50.576Z",
+  "hypothesis": "The official Auth emulator measures serialized custom claims in UTF-16 code units (JavaScript string length) against its 1,000 limit, on accounts:update, batchCreate and a beforeCreate function's customClaims",
+  "credentialsStored": false,
+  "accessTokensStored": false,
+  "realUserDataStored": false,
+  "syntheticOnly": true,
+  "freshEmulatorPerProgram": true,
+  "sourceHashes": {
+    "lib/emulator/auth/apiSpec.js": "9014b6512f2adf4cc72ed244946bb942857a09d12dd77cd6c65bb7ce27ba76c8",
+    "lib/emulator/auth/cloudFunctions.js": "2647a6af6ee6a9915f256f499df9b6136161645d73482fec063441f52dea1368",
+    "lib/emulator/auth/errors.js": "b69b6c6d85f8d709337ba2c111070e39f55f141af0cf75b770ec03f927ef2586",
+    "lib/emulator/auth/handlers.js": "b228707e1a8dcab02ef8acb261a3b5f8b670589c3887d5a4fba02cba78e07853",
+    "lib/emulator/auth/index.js": "6f46a45892a0c6fc2da4066409deddd0b2c844b70a4839f6f8d83b9b4140f84e",
+    "lib/emulator/auth/operations.js": "dbc71e2a7919458709528c4a20ea051143032eded7ef1a39f75221be7c46b322",
+    "lib/emulator/auth/server.js": "40f4d7c16aca84829ee502f4bfebc84fb50ad2893650011f268c0b6e1f27c1a7",
+    "lib/emulator/auth/state.js": "79b3d0333f69448ec32217c513503bbb6dfe6e16fe1f5a274af3ac5a917b7fb5",
+    "lib/emulator/auth/utils.js": "c2885f813a44486e34cbb61334bc555ca4f1cceeca49bd40a2f09f4d47a67035",
+    "lib/emulator/auth/widget_ui.js": "188cb9d4379d412561ab35df0ab68f1ace2447e6c8ec13622c0897b076893b64"
+  },
+  "templates": {
+    "origin": "{{origin}}",
+    "functionsOrigin": "{{functionsOrigin}}",
+    "kinds": [
+      "localId",
+      "token",
+      "refresh",
+      "cookie",
+      "pending",
+      "oob",
+      "sessionInfo",
+      "code",
+      "temporaryProof",
+      "enrollmentId",
+      "salt",
+      "sessionId",
+      "tenantId",
+      "challenge"
+    ],
+    "time": "{{time}}",
+    "eventId": "{{eventId}}"
+  },
+  "unorderedArrays": [
+    "users",
+    "userInfo",
+    "oobCodes",
+    "verificationCodes",
+    "tenants"
+  ],
+  "recordedHeaders": [
+    "content-type",
+    "location",
+    "access-control-allow-origin",
+    "access-control-allow-credentials",
+    "access-control-allow-methods",
+    "access-control-allow-headers",
+    "access-control-allow-private-network",
+    "access-control-expose-headers"
+  ],
+  "programCount": 1,
+  "stepCount": 18,
+  "categories": {
+    "claims": 1
+  },
+  "coverage": {
+    "operations": {
+      "identitytoolkit.accounts.signInWithPassword": {
+        "steps": 1,
+        "programs": [
+          "custom-claims-length"
+        ],
+        "official": "implemented"
+      },
+      "identitytoolkit.accounts.signUp": {
+        "steps": 3,
+        "programs": [
+          "custom-claims-length"
+        ],
+        "official": "implemented"
+      },
+      "identitytoolkit.projects.accounts (create)": {
+        "steps": 1,
+        "programs": [
+          "custom-claims-length"
+        ],
+        "official": "implemented"
+      },
+      "identitytoolkit.projects.accounts.batchCreate": {
+        "steps": 1,
+        "programs": [
+          "custom-claims-length"
+        ],
+        "official": "implemented"
+      },
+      "identitytoolkit.projects.accounts.lookup": {
+        "steps": 4,
+        "programs": [
+          "custom-claims-length"
+        ],
+        "official": "implemented"
+      },
+      "identitytoolkit.projects.accounts.update": {
+        "steps": 7,
+        "programs": [
+          "custom-claims-length"
+        ],
+        "official": "implemented"
+      },
+      "identitytoolkit.projects.updateConfig": {
+        "steps": 1,
+        "programs": [
+          "custom-claims-length"
+        ],
+        "official": "implemented"
+      }
+    }
+  },
+  "programs": [
+    {
+      "id": "custom-claims-length",
+      "category": "claims",
+      "title": "custom claims are measured in UTF-16 code units: é counts one, 🔥 counts two, at 999 to 1,001",
+      "steps": [
+        {
+          "id": "create",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "email": "claims-length@example.com",
+              "password": "password1"
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "claims-length@example.com",
+              "kind": "identitytoolkit#SignupNewUserResponse",
+              "localId": "claims-length"
+            }
+          },
+          "logs": [],
+          "functionsCalls": [
+            {
+              "path": "/functions/projects/fireside-auth-oracle/trigger_multicast",
+              "body": {
+                "data": {
+                  "customClaims": {},
+                  "email": "claims-length@example.com",
+                  "emailVerified": false,
+                  "metadata": {
+                    "creationTime": "{{time}}",
+                    "lastSignInTime": "{{time}}"
+                  },
+                  "providerData": [
+                    {
+                      "email": "claims-length@example.com",
+                      "federatedId": "claims-length@example.com",
+                      "providerId": "password",
+                      "rawId": "claims-length@example.com"
+                    }
+                  ],
+                  "uid": "claims-length"
+                },
+                "eventId": "{{eventId}}",
+                "eventType": "providers/firebase.auth/eventTypes/user.create",
+                "params": {},
+                "resource": {
+                  "name": "projects/fireside-auth-oracle",
+                  "service": "firebaseauth.googleapis.com"
+                },
+                "timestamp": "{{time}}"
+              }
+            }
+          ]
+        },
+        {
+          "id": "ascii-1000",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:update",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "customAttributes": "{\"k\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}"
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "claims-length@example.com",
+              "emailVerified": false,
+              "kind": "identitytoolkit#SetAccountInfoResponse",
+              "localId": "claims-length",
+              "passwordHash": "fakeHash:salt={{salt:claims-length}}:password=password1",
+              "providerUserInfo": [
+                {
+                  "email": "claims-length@example.com",
+                  "federatedId": "claims-length@example.com",
+                  "providerId": "password",
+                  "rawId": "claims-length@example.com"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "ascii-1001",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:update",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "customAttributes": "{\"k\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}"
+            }
+          },
+          "response": {
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8"
+            },
+            "body": {
+              "error": {
+                "code": 400,
+                "errors": [
+                  {
+                    "domain": "global",
+                    "message": "CLAIMS_TOO_LARGE",
+                    "reason": "invalid"
+                  }
+                ],
+                "message": "CLAIMS_TOO_LARGE"
+              }
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "accented-999",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:update",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "customAttributes": "{\"k\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}"
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "claims-length@example.com",
+              "emailVerified": false,
+              "kind": "identitytoolkit#SetAccountInfoResponse",
+              "localId": "claims-length",
+              "passwordHash": "fakeHash:salt={{salt:claims-length}}:password=password1",
+              "providerUserInfo": [
+                {
+                  "email": "claims-length@example.com",
+                  "federatedId": "claims-length@example.com",
+                  "providerId": "password",
+                  "rawId": "claims-length@example.com"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "accented-1000",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:update",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}"
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "claims-length@example.com",
+              "emailVerified": false,
+              "kind": "identitytoolkit#SetAccountInfoResponse",
+              "localId": "claims-length",
+              "passwordHash": "fakeHash:salt={{salt:claims-length}}:password=password1",
+              "providerUserInfo": [
+                {
+                  "email": "claims-length@example.com",
+                  "federatedId": "claims-length@example.com",
+                  "providerId": "password",
+                  "rawId": "claims-length@example.com"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "accented-1001",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:update",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "customAttributes": "{\"k\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}"
+            }
+          },
+          "response": {
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8"
+            },
+            "body": {
+              "error": {
+                "code": 400,
+                "errors": [
+                  {
+                    "domain": "global",
+                    "message": "CLAIMS_TOO_LARGE",
+                    "reason": "invalid"
+                  }
+                ],
+                "message": "CLAIMS_TOO_LARGE"
+              }
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "lookup-accented",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:lookup",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": [
+                "claims-length"
+              ]
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "kind": "identitytoolkit#GetAccountInfoResponse",
+              "users": [
+                {
+                  "createdAt": "{{time}}",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}",
+                  "email": "claims-length@example.com",
+                  "emailVerified": false,
+                  "lastLoginAt": "{{time}}",
+                  "localId": "claims-length",
+                  "passwordHash": "fakeHash:salt={{salt:claims-length}}:password=password1",
+                  "passwordUpdatedAt": "{{time}}",
+                  "providerUserInfo": [
+                    {
+                      "email": "claims-length@example.com",
+                      "federatedId": "claims-length@example.com",
+                      "providerId": "password",
+                      "rawId": "claims-length@example.com"
+                    }
+                  ],
+                  "salt": "{{salt:claims-length}}",
+                  "validSince": "{{time}}"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "emoji-1000",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:update",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥\"}"
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "claims-length@example.com",
+              "emailVerified": false,
+              "kind": "identitytoolkit#SetAccountInfoResponse",
+              "localId": "claims-length",
+              "passwordHash": "fakeHash:salt={{salt:claims-length}}:password=password1",
+              "providerUserInfo": [
+                {
+                  "email": "claims-length@example.com",
+                  "federatedId": "claims-length@example.com",
+                  "providerId": "password",
+                  "rawId": "claims-length@example.com"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "emoji-1001",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:update",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": "claims-length",
+              "customAttributes": "{\"k\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥\"}"
+            }
+          },
+          "response": {
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8"
+            },
+            "body": {
+              "error": {
+                "code": 400,
+                "errors": [
+                  {
+                    "domain": "global",
+                    "message": "CLAIMS_TOO_LARGE",
+                    "reason": "invalid"
+                  }
+                ],
+                "message": "CLAIMS_TOO_LARGE"
+              }
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "lookup-emoji",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:lookup",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": [
+                "claims-length"
+              ]
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "kind": "identitytoolkit#GetAccountInfoResponse",
+              "users": [
+                {
+                  "createdAt": "{{time}}",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥\"}",
+                  "email": "claims-length@example.com",
+                  "emailVerified": false,
+                  "lastLoginAt": "{{time}}",
+                  "localId": "claims-length",
+                  "passwordHash": "fakeHash:salt={{salt:claims-length}}:password=password1",
+                  "passwordUpdatedAt": "{{time}}",
+                  "providerUserInfo": [
+                    {
+                      "email": "claims-length@example.com",
+                      "federatedId": "claims-length@example.com",
+                      "providerId": "password",
+                      "rawId": "claims-length@example.com"
+                    }
+                  ],
+                  "salt": "{{salt:claims-length}}",
+                  "validSince": "{{time}}"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "signin-carries-claims",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key",
+            "body": {
+              "email": "claims-length@example.com",
+              "password": "password1",
+              "returnSecureToken": true
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "claims-length@example.com",
+              "expiresIn": "3600",
+              "idToken": {
+                "$jwt": {
+                  "header": {
+                    "alg": "none",
+                    "typ": "JWT"
+                  },
+                  "payload": {
+                    "aud": "fireside-auth-oracle",
+                    "auth_time": "{{time}}",
+                    "email": "claims-length@example.com",
+                    "email_verified": false,
+                    "exp": "{{time}}",
+                    "firebase": {
+                      "identities": {
+                        "email": [
+                          "claims-length@example.com"
+                        ]
+                      },
+                      "sign_in_provider": "password"
+                    },
+                    "iat": "{{time}}",
+                    "iss": "https://securetoken.google.com/fireside-auth-oracle",
+                    "k": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥",
+                    "sub": "claims-length",
+                    "user_id": "claims-length"
+                  }
+                }
+              },
+              "kind": "identitytoolkit#VerifyPasswordResponse",
+              "localId": "claims-length",
+              "refreshToken": {
+                "$b64json": {
+                  "_AuthEmulatorRefreshToken": "DO NOT MODIFY",
+                  "extraClaims": {},
+                  "localId": "claims-length",
+                  "projectId": "fireside-auth-oracle",
+                  "provider": "password"
+                }
+              },
+              "registered": true
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "import",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:batchCreate",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "users": [
+                {
+                  "localId": "imp-accented-1000",
+                  "email": "imp-accented-1000@example.com",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}"
+                },
+                {
+                  "localId": "imp-accented-1001",
+                  "email": "imp-accented-1001@example.com",
+                  "customAttributes": "{\"k\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}"
+                },
+                {
+                  "localId": "imp-emoji-1000",
+                  "email": "imp-emoji-1000@example.com",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥\"}"
+                },
+                {
+                  "localId": "imp-emoji-1001",
+                  "email": "imp-emoji-1001@example.com",
+                  "customAttributes": "{\"k\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥\"}"
+                }
+              ]
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "error": [
+                {
+                  "index": 1,
+                  "message": "Custom claims provided are too large."
+                },
+                {
+                  "index": 3,
+                  "message": "Custom claims provided are too large."
+                }
+              ],
+              "kind": "identitytoolkit#UploadAccountResponse"
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "imported",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:lookup",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "localId": [
+                "imp-accented-1000",
+                "imp-accented-1001",
+                "imp-emoji-1000",
+                "imp-emoji-1001"
+              ]
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "kind": "identitytoolkit#GetAccountInfoResponse",
+              "users": [
+                {
+                  "createdAt": "{{time}}",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}",
+                  "disabled": false,
+                  "email": "imp-accented-1000@example.com",
+                  "emailVerified": false,
+                  "localId": "imp-accented-1000",
+                  "validSince": "{{time}}"
+                },
+                {
+                  "createdAt": "{{time}}",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥\"}",
+                  "disabled": false,
+                  "email": "imp-emoji-1000@example.com",
+                  "emailVerified": false,
+                  "localId": "imp-emoji-1000",
+                  "validSince": "{{time}}"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "configure-blocking",
+          "request": {
+            "method": "PATCH",
+            "path": "/identitytoolkit.googleapis.com/v2/projects/fireside-auth-oracle/config",
+            "query": {
+              "updateMask": "blockingFunctions"
+            },
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "blockingFunctions": {
+                "triggers": {
+                  "beforeCreate": {
+                    "functionUri": "{{functionsOrigin}}/blocking/beforeCreate"
+                  }
+                }
+              }
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "blockingFunctions": {
+                "triggers": {
+                  "beforeCreate": {
+                    "functionUri": "{{functionsOrigin}}/blocking/beforeCreate"
+                  }
+                }
+              },
+              "emailPrivacyConfig": {
+                "enableImprovedEmailPrivacy": false
+              },
+              "signIn": {
+                "allowDuplicateEmails": false
+              }
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        },
+        {
+          "id": "blocking-accented-1000",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key",
+            "body": {
+              "email": "blocking-1000@example.com",
+              "password": "password1",
+              "returnSecureToken": true
+            }
+          },
+          "functions": {
+            "beforeCreate": {
+              "body": {
+                "userRecord": {
+                  "updateMask": "customClaims",
+                  "customClaims": {
+                    "k": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+                  }
+                }
+              }
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "blocking-1000@example.com",
+              "expiresIn": "3600",
+              "idToken": {
+                "$jwt": {
+                  "header": {
+                    "alg": "none",
+                    "typ": "JWT"
+                  },
+                  "payload": {
+                    "aud": "fireside-auth-oracle",
+                    "auth_time": "{{time}}",
+                    "email": "blocking-1000@example.com",
+                    "email_verified": false,
+                    "exp": "{{time}}",
+                    "firebase": {
+                      "identities": {
+                        "email": [
+                          "blocking-1000@example.com"
+                        ]
+                      },
+                      "sign_in_provider": "password"
+                    },
+                    "iat": "{{time}}",
+                    "iss": "https://securetoken.google.com/fireside-auth-oracle",
+                    "k": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+                    "sub": "{{localId:blocking-accented-1000}}",
+                    "user_id": "{{localId:blocking-accented-1000}}"
+                  }
+                }
+              },
+              "kind": "identitytoolkit#SignupNewUserResponse",
+              "localId": "{{localId:blocking-accented-1000}}",
+              "refreshToken": {
+                "$b64json": {
+                  "_AuthEmulatorRefreshToken": "DO NOT MODIFY",
+                  "extraClaims": {},
+                  "localId": "{{localId:blocking-accented-1000}}",
+                  "projectId": "fireside-auth-oracle",
+                  "provider": "password"
+                }
+              }
+            }
+          },
+          "logs": [],
+          "functionsCalls": [
+            {
+              "path": "/blocking/beforeCreate",
+              "body": {
+                "data": {
+                  "jwt": {
+                    "$jwt": {
+                      "header": {
+                        "alg": "none",
+                        "typ": "JWT"
+                      },
+                      "payload": {
+                        "aud": "{{functionsOrigin}}/blocking/beforeCreate",
+                        "event_id": "{{eventId}}",
+                        "event_type": "beforeCreate",
+                        "exp": "{{time}}",
+                        "iat": "{{time}}",
+                        "ip_address": "127.0.0.1",
+                        "iss": "https://securetoken.google.com/fireside-auth-oracle",
+                        "locale": "en",
+                        "sign_in_method": "password",
+                        "sub": "{{localId:blocking-accented-1000}}",
+                        "user_agent": "NotYetSupportedInFirebaseAuthEmulator",
+                        "user_record": {
+                          "custom_claims": {},
+                          "email": "blocking-1000@example.com",
+                          "email_verified": false,
+                          "metadata": {
+                            "creation_time": "{{time}}",
+                            "last_sign_in_time": "{{time}}"
+                          },
+                          "provider_data": [],
+                          "uid": "{{localId:blocking-accented-1000}}"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "path": "/functions/projects/fireside-auth-oracle/trigger_multicast",
+              "body": {
+                "data": {
+                  "customClaims": {
+                    "k": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+                  },
+                  "email": "blocking-1000@example.com",
+                  "emailVerified": false,
+                  "metadata": {
+                    "creationTime": "{{time}}",
+                    "lastSignInTime": "{{time}}"
+                  },
+                  "providerData": [
+                    {
+                      "email": "blocking-1000@example.com",
+                      "federatedId": "blocking-1000@example.com",
+                      "providerId": "password",
+                      "rawId": "blocking-1000@example.com"
+                    }
+                  ],
+                  "uid": "{{localId:blocking-accented-1000}}"
+                },
+                "eventId": "{{eventId}}",
+                "eventType": "providers/firebase.auth/eventTypes/user.create",
+                "params": {},
+                "resource": {
+                  "name": "projects/fireside-auth-oracle",
+                  "service": "firebaseauth.googleapis.com"
+                },
+                "timestamp": "{{time}}"
+              }
+            }
+          ]
+        },
+        {
+          "id": "blocking-emoji-1000",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key",
+            "body": {
+              "email": "blocking-emoji-1000@example.com",
+              "password": "password1",
+              "returnSecureToken": true
+            }
+          },
+          "functions": {
+            "beforeCreate": {
+              "body": {
+                "userRecord": {
+                  "updateMask": "customClaims",
+                  "customClaims": {
+                    "k": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥"
+                  }
+                }
+              }
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "email": "blocking-emoji-1000@example.com",
+              "expiresIn": "3600",
+              "idToken": {
+                "$jwt": {
+                  "header": {
+                    "alg": "none",
+                    "typ": "JWT"
+                  },
+                  "payload": {
+                    "aud": "fireside-auth-oracle",
+                    "auth_time": "{{time}}",
+                    "email": "blocking-emoji-1000@example.com",
+                    "email_verified": false,
+                    "exp": "{{time}}",
+                    "firebase": {
+                      "identities": {
+                        "email": [
+                          "blocking-emoji-1000@example.com"
+                        ]
+                      },
+                      "sign_in_provider": "password"
+                    },
+                    "iat": "{{time}}",
+                    "iss": "https://securetoken.google.com/fireside-auth-oracle",
+                    "k": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥",
+                    "sub": "{{localId:blocking-emoji-1000}}",
+                    "user_id": "{{localId:blocking-emoji-1000}}"
+                  }
+                }
+              },
+              "kind": "identitytoolkit#SignupNewUserResponse",
+              "localId": "{{localId:blocking-emoji-1000}}",
+              "refreshToken": {
+                "$b64json": {
+                  "_AuthEmulatorRefreshToken": "DO NOT MODIFY",
+                  "extraClaims": {},
+                  "localId": "{{localId:blocking-emoji-1000}}",
+                  "projectId": "fireside-auth-oracle",
+                  "provider": "password"
+                }
+              }
+            }
+          },
+          "logs": [],
+          "functionsCalls": [
+            {
+              "path": "/blocking/beforeCreate",
+              "body": {
+                "data": {
+                  "jwt": {
+                    "$jwt": {
+                      "header": {
+                        "alg": "none",
+                        "typ": "JWT"
+                      },
+                      "payload": {
+                        "aud": "{{functionsOrigin}}/blocking/beforeCreate",
+                        "event_id": "{{eventId}}",
+                        "event_type": "beforeCreate",
+                        "exp": "{{time}}",
+                        "iat": "{{time}}",
+                        "ip_address": "127.0.0.1",
+                        "iss": "https://securetoken.google.com/fireside-auth-oracle",
+                        "locale": "en",
+                        "sign_in_method": "password",
+                        "sub": "{{localId:blocking-emoji-1000}}",
+                        "user_agent": "NotYetSupportedInFirebaseAuthEmulator",
+                        "user_record": {
+                          "custom_claims": {},
+                          "email": "blocking-emoji-1000@example.com",
+                          "email_verified": false,
+                          "metadata": {
+                            "creation_time": "{{time}}",
+                            "last_sign_in_time": "{{time}}"
+                          },
+                          "provider_data": [],
+                          "uid": "{{localId:blocking-emoji-1000}}"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "path": "/functions/projects/fireside-auth-oracle/trigger_multicast",
+              "body": {
+                "data": {
+                  "customClaims": {
+                    "k": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥"
+                  },
+                  "email": "blocking-emoji-1000@example.com",
+                  "emailVerified": false,
+                  "metadata": {
+                    "creationTime": "{{time}}",
+                    "lastSignInTime": "{{time}}"
+                  },
+                  "providerData": [
+                    {
+                      "email": "blocking-emoji-1000@example.com",
+                      "federatedId": "blocking-emoji-1000@example.com",
+                      "providerId": "password",
+                      "rawId": "blocking-emoji-1000@example.com"
+                    }
+                  ],
+                  "uid": "{{localId:blocking-emoji-1000}}"
+                },
+                "eventId": "{{eventId}}",
+                "eventType": "providers/firebase.auth/eventTypes/user.create",
+                "params": {},
+                "resource": {
+                  "name": "projects/fireside-auth-oracle",
+                  "service": "firebaseauth.googleapis.com"
+                },
+                "timestamp": "{{time}}"
+              }
+            }
+          ]
+        },
+        {
+          "id": "blocking-emoji-1001",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/accounts:signUp?key=fake-api-key",
+            "body": {
+              "email": "blocking-emoji-1001@example.com",
+              "password": "password1",
+              "returnSecureToken": true
+            }
+          },
+          "functions": {
+            "beforeCreate": {
+              "body": {
+                "userRecord": {
+                  "updateMask": "customClaims",
+                  "customClaims": {
+                    "k": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥"
+                  }
+                }
+              }
+            }
+          },
+          "response": {
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8"
+            },
+            "body": {
+              "error": {
+                "code": 400,
+                "errors": [
+                  {
+                    "domain": "global",
+                    "message": "CLAIMS_TOO_LARGE",
+                    "reason": "invalid"
+                  }
+                ],
+                "message": "CLAIMS_TOO_LARGE"
+              }
+            }
+          },
+          "logs": [],
+          "functionsCalls": [
+            {
+              "path": "/blocking/beforeCreate",
+              "body": {
+                "data": {
+                  "jwt": {
+                    "$jwt": {
+                      "header": {
+                        "alg": "none",
+                        "typ": "JWT"
+                      },
+                      "payload": {
+                        "aud": "{{functionsOrigin}}/blocking/beforeCreate",
+                        "event_id": "{{eventId}}",
+                        "event_type": "beforeCreate",
+                        "exp": "{{time}}",
+                        "iat": "{{time}}",
+                        "ip_address": "127.0.0.1",
+                        "iss": "https://securetoken.google.com/fireside-auth-oracle",
+                        "locale": "en",
+                        "sign_in_method": "password",
+                        "sub": "{{localId:blocking-emoji-1001}}",
+                        "user_agent": "NotYetSupportedInFirebaseAuthEmulator",
+                        "user_record": {
+                          "custom_claims": {},
+                          "email": "blocking-emoji-1001@example.com",
+                          "email_verified": false,
+                          "metadata": {
+                            "creation_time": "{{time}}",
+                            "last_sign_in_time": "{{time}}"
+                          },
+                          "provider_data": [],
+                          "uid": "{{localId:blocking-emoji-1001}}"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "lookup-blocking",
+          "request": {
+            "method": "POST",
+            "path": "/identitytoolkit.googleapis.com/v1/projects/fireside-auth-oracle/accounts:lookup",
+            "headers": {
+              "Authorization": "Bearer owner"
+            },
+            "body": {
+              "email": [
+                "blocking-1000@example.com",
+                "blocking-emoji-1000@example.com",
+                "blocking-emoji-1001@example.com"
+              ]
+            }
+          },
+          "response": {
+            "status": 200,
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body": {
+              "kind": "identitytoolkit#GetAccountInfoResponse",
+              "users": [
+                {
+                  "createdAt": "{{time}}",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}",
+                  "email": "blocking-1000@example.com",
+                  "emailVerified": false,
+                  "lastLoginAt": "{{time}}",
+                  "lastRefreshAt": "{{time}}",
+                  "localId": "{{localId:blocking-accented-1000}}",
+                  "passwordHash": "fakeHash:salt={{salt:blocking-accented-1000}}:password=password1",
+                  "passwordUpdatedAt": "{{time}}",
+                  "providerUserInfo": [
+                    {
+                      "email": "blocking-1000@example.com",
+                      "federatedId": "blocking-1000@example.com",
+                      "providerId": "password",
+                      "rawId": "blocking-1000@example.com"
+                    }
+                  ],
+                  "salt": "{{salt:blocking-accented-1000}}",
+                  "validSince": "{{time}}"
+                },
+                {
+                  "createdAt": "{{time}}",
+                  "customAttributes": "{\"k\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé🔥\"}",
+                  "email": "blocking-emoji-1000@example.com",
+                  "emailVerified": false,
+                  "lastLoginAt": "{{time}}",
+                  "lastRefreshAt": "{{time}}",
+                  "localId": "{{localId:blocking-emoji-1000}}",
+                  "passwordHash": "fakeHash:salt={{salt:blocking-emoji-1000}}:password=password1",
+                  "passwordUpdatedAt": "{{time}}",
+                  "providerUserInfo": [
+                    {
+                      "email": "blocking-emoji-1000@example.com",
+                      "federatedId": "blocking-emoji-1000@example.com",
+                      "providerId": "password",
+                      "rawId": "blocking-emoji-1000@example.com"
+                    }
+                  ],
+                  "salt": "{{salt:blocking-emoji-1000}}",
+                  "validSince": "{{time}}"
+                }
+              ]
+            }
+          },
+          "logs": [],
+          "functionsCalls": []
+        }
+      ]
+    }
+  ]
+}

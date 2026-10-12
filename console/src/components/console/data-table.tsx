@@ -570,9 +570,17 @@ export function DataTable<Row>({
             key: 'Enter',
             label: 'Open the row',
             group: 'Table',
-            when: onRow,
+            when: loaded,
+            // A table just focused has no row under the cursor yet: Enter
+            // opens the first, as ↓ would put the cursor there.
             run: () => {
               if (cursorRow) onOpen?.(cursorRow)
+              else {
+                const first = rows[0]
+                if (first === undefined) return
+                moveTo(0)
+                onOpen?.(first)
+              }
             },
           },
         ]

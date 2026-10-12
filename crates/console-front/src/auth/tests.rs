@@ -39,10 +39,11 @@ fn fixture() -> Fixture {
     let blocking = Arc::new(AtomicUsize::new(0));
     auth.set_blocking_functions(Arc::new(CountingResolver(Arc::clone(&blocking))));
     let router = console_router(ConsoleServices {
-        auth: Some(crate::AuthConsole {
-            native: auth.application(),
-            runtime: auth.runtime(),
-        }),
+        auth: Some(crate::AuthConsole::attach(
+            &auth,
+            true,
+            firenook_suite_front::LoggingRuntime::new(),
+        )),
         ..crate::tests::directory_services()
     });
     Fixture {
@@ -319,10 +320,15 @@ async fn a_token_is_the_emulators_own_with_no_sign_in_recorded() {
     .expect("RFC 3339");
     assert_eq!(expires.unix_timestamp(), exp);
     assert_eq!(last_login(&fixture, "u_ada"), before, "no sign-in recorded");
-    assert_eq!(
-        fixture.blocking.load(Ordering::SeqCst),
-        0,
-        "no blocking function ran"
+    // The blocking functions are looked up once, to say whether a real
+    // sign-in would call beforeSignIn; none is called.
+    assert!(
+        fixture.blocking.load(Ordering::SeqCst) <= 1,
+        "looked up at most once"
+    );
+    assert!(
+        token["beforeSignIn"].is_null(),
+        "no blocking function ran: {token}"
     );
     // A tenant's user.
     let (status, token) = post(
@@ -367,7 +373,7 @@ async fn a_token_for_nobody_is_not_found_and_the_body_is_checked() {
     let (status, body) = post(
         &fixture,
         "/api/v1/auth/tokens",
-        &json!({ "uid": "u_ada", "claims": {} }),
+        &json!({ "uid": "u_ada", "nonsense": {} }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");

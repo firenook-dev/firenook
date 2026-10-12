@@ -2,13 +2,15 @@
 import type { RulesClaimReadForm } from "./RulesClaimReadForm";
 
 /**
- * One place a ruleset reads a claim of the caller's ID token, for "read by
- * your rules" beside a user's custom claims.
+ * One place a ruleset reads a claim of the caller's ID token
+ * (`request.auth.token.role`), for "read by your rules" beside a user's
+ * custom claims.
  */
 export type RulesClaimRead = { 
 /**
  * The top-level claim (`org` for a read of `org.role`); `null` when the
- * key is computed at run time, so the rule may read any claim.
+ * key is computed at run time (`token[name]`), so the rule may read any
+ * claim.
  */
 key: string | null, form: RulesClaimReadForm, 
 /**
@@ -16,7 +18,7 @@ key: string | null, form: RulesClaimReadForm,
  */
 line: number, 
 /**
- * UTF-16 offset where the expression starts.
+ * Zero-based UTF-16 offset where the expression starts.
  */
 from: number, 
 /**

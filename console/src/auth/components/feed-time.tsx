@@ -1,0 +1,52 @@
+// A feed row's time, in the console-wide clock format (`lib/format.ts`:
+// `14:02:11.348`, `3 s ago` or the UTC instant), with the other forms a hover
+// away. One shared clock turns "3 s ago" over every second; the other two
+// forms never change, so they ask for the minute clock only.
+
+import { Tooltip, cn } from '@cloudflare/kumo'
+import { useNow } from '@/lib/clock'
+import { compactIso, formatClock, relativeTime, useClockFormat } from '@/lib/format'
+
+/** The forms a row's time is not shown in, for its tooltip. */
+export function otherForms(iso: string, now: number): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return `${formatClock(iso, 'time', now)} local · ${compactIso(date.toISOString())} UTC · ${relativeTime(iso, now)}`
+}
+
+export function FeedTime({
+  iso,
+  className,
+  testId,
+}: {
+  /** RFC 3339; absent for a code found in saved state, which has no time. */
+  iso: string | null
+  className?: string
+  testId?: string
+}) {
+  const { format } = useClockFormat()
+  const now = useNow(format === 'relative' ? 'second' : 'minute')
+  if (iso === null)
+    return (
+      <span className={cn('text-[12px] text-kumo-subtle', className)} data-testid={testId}>
+        saved state
+      </span>
+    )
+  return (
+    <Tooltip
+      content={otherForms(iso, now)}
+      render={
+        <time
+          dateTime={iso}
+          className={cn(
+            'cursor-default font-mono text-[12px] whitespace-nowrap text-kumo-subtle tabular-nums',
+            className,
+          )}
+          data-testid={testId}
+        >
+          {formatClock(iso, format, now)}
+        </time>
+      }
+    />
+  )
+}

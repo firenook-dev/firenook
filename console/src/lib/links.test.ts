@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { SectionStatus } from '@/api/generated/SectionStatus'
 import { sectionEntry, testStatus } from '@/test/status'
+import { whileUnbuilt } from '@/test/unbuilt'
 import { linkTo } from './links'
+import { auth } from './sections/auth'
 
 const status = (sections: Array<Pick<SectionStatus, 'id' | 'state'>>) =>
   testStatus({ sections: sections.map(({ id, state }) => sectionEntry(id, { state })) })
@@ -28,8 +30,11 @@ describe('links between sections', () => {
     ).not.toBeNull()
   })
 
-  it('are plain text into a section that is not built yet', () => {
-    expect(linkTo({ kind: 'auth.user', key: '|u_9f3k2' }, ready)).toBeNull()
+  it('are plain text into a section that is not built yet', async () => {
+    const running = status([{ id: 'auth', state: 'ready' }])
+    await whileUnbuilt(auth, () =>
+      expect(linkTo({ kind: 'auth.user', key: '|u_9f3k2' }, running)).toBeNull(),
+    )
     expect(linkTo({ kind: 'logs.entry', key: 'c1' }, ready)).toBeNull()
   })
 

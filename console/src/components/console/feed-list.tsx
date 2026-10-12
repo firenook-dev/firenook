@@ -210,13 +210,18 @@ export function FeedList<T>({
   const seen = useRef<{ version: number; follow: boolean } | null>(null)
   useLayoutEffect(() => {
     const element = scrollRef.current
-    const moved = seen.current?.version !== version || seen.current.follow !== follow
+    const before = seen.current
+    const moved = before?.version !== version || before.follow !== follow
     seen.current = { version, follow }
     if (!element || !moved) return
     if (follow) {
       toEdge(element)
       return
     }
+    // Paused just now (the button, `p`), nothing new drawn yet: the row the
+    // reader is on is held from here. A view that never scrolled — a
+    // newest-first list read at its top — has recorded no row of its own.
+    if (before?.follow === true && before.version === version) recordAnchor()
     const held = anchor.current
     if (!held) return
     const display = displayOf(store.indexOf(held.key))
@@ -249,6 +254,14 @@ export function FeedList<T>({
     if (size > 0 && hasMore && nearOlderEdge) loadMore?.()
   }, [size, hasMore, nearOlderEdge, loadMore])
 
+  // A scroll is the reader's when it follows their own wheel, touch, key or
+  // press; the list's own moves (following, anchoring, placing a row the
+  // URL names) never pause it or follow again.
+  const intent = useRef(0)
+  const noteIntent = () => {
+    intent.current = Date.now()
+  }
+
   // A row asked for by the URL: put in view once it is in the store, once.
   const placed = useRef<string | undefined>(undefined)
   useLayoutEffect(() => {
@@ -263,6 +276,9 @@ export function FeedList<T>({
     // cancel before it lands.
     const start = virtualizer.measurementsCache[display]?.start ?? display * rowHeight
     const tall = virtualizer.measurementsCache[display]?.size ?? rowHeight
+    // The press that opened the row is not a scroll: a row placed at the
+    // live edge must not resume a paused feed.
+    intent.current = 0
     element.scrollTop = Math.max(
       0,
       scrollToKey.align === 'start' ? start : start - (element.clientHeight - tall) / 2,
@@ -271,12 +287,6 @@ export function FeedList<T>({
     recordAnchor()
   })
 
-  // A scroll is the reader's when it follows their own wheel, touch, key or
-  // press; the list's own moves (following, anchoring) never pause it.
-  const intent = useRef(0)
-  const noteIntent = () => {
-    intent.current = Date.now()
-  }
   const onScroll = () => {
     const element = scrollRef.current
     if (!element) return

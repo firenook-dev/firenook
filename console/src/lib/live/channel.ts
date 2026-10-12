@@ -63,9 +63,28 @@ export interface TopicListener {
   onState?(state: SubscriptionState): void
 }
 
+/** How a new subscription starts. */
+export interface SubscribeOptions {
+  /**
+   * The feed position the page's data already reaches (a list's
+   * `liveAfter`, read with its first page): the subscription resumes after
+   * it, so the engine replays only what is newer instead of the whole
+   * ring. Only the first offer uses it; the subscription's own cursor
+   * takes over from its first event. Topics shared across the browser
+   * (`compare`, `none`) join the subscription already held, and keep its
+   * cursor.
+   */
+  after?: string | undefined
+}
+
 export interface LiveChannel {
   /** Subscribes (connecting on first use); returns the unsubscribe. */
-  subscribe(topic: string, params: object, listener: TopicListener): () => void
+  subscribe(
+    topic: string,
+    params: object,
+    listener: TopicListener,
+    options?: SubscribeOptions,
+  ): () => void
   /** Called once per engine restart, after every query was invalidated. */
   onEngineRestart(callback: () => void): () => void
   /**
@@ -1036,14 +1055,15 @@ export function createLiveChannel(
   return {
     tab,
     status: store,
-    subscribe(topic, params, listener) {
+    subscribe(topic, params, listener, start) {
       localSerial += 1
       const local: LocalSub = {
         id: `${tab}.s${localSerial}`,
         topic,
         params: wireParams(params),
         listener,
-        cursor: undefined,
+        // A page that read its data first resumes after what it read.
+        cursor: start?.after || undefined,
         state: 'pending',
         attempt: 0,
         retry: undefined,
@@ -1151,7 +1171,8 @@ function page(): LiveChannelInstance {
 
 /** The page's channel, created on first use. */
 export const liveChannel: LiveChannel = {
-  subscribe: (topic, params, listener) => page().subscribe(topic, params, listener),
+  subscribe: (topic, params, listener, options) =>
+    page().subscribe(topic, params, listener, options),
   onEngineRestart: (callback) => page().onEngineRestart(callback),
   retry: () => page().retry(),
 }
