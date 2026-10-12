@@ -23,9 +23,9 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
-use firenook_functions_bridge::{DispatchQueue, DroppedService, TriggerRegistry};
 #[cfg(test)]
 use firenook_functions_bridge::DispatchRequest;
+use firenook_functions_bridge::{DispatchQueue, DroppedService, TriggerRegistry};
 use futures_util::{StreamExt as _, TryStreamExt as _};
 use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
@@ -35,32 +35,45 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
+mod archive;
 mod changes;
 mod console;
 mod decisions;
 mod download;
 mod dry_run;
 mod events;
+mod filter;
 mod folder_index;
 mod listing;
 mod log;
 mod metadata;
 mod rules;
 mod rules_manager;
+mod search;
+mod sniff;
 mod staging;
 mod tasks;
+mod thumbnails;
+mod view_cache;
+pub use archive::{ARCHIVE_ENTRIES, ArchiveEntry, ArchiveListing};
 pub use changes::{
     Actor, ChangeContext, ChangeEvent, EventDelivery, ObjectChangeKind, ObjectChangeRecord,
 };
 use changes::{ChangeFeed, via_console};
-pub use console::{StorageConsoleApi, StorageSummaryCounts};
+pub use console::{
+    BucketInfo, Buckets, ConsoleError, ConsoleListQuery, EXISTS_NAMES, INDEX_WAIT, Identity,
+    ListResult, ListTotals, ObjectView, PROFILE_OBJECTS, Profile, StorageConsoleApi,
+    StorageSummaryCounts,
+};
 pub use decisions::{DecisionLog, RE_RUNNABLE_BYTES, RE_RUNNABLE_DECISIONS, StorageDecisionRecord};
 use decisions::{RulesCheck, judge};
+pub use download::MediaMode;
 use download::file_response;
 pub use dry_run::{
     DOCUMENT_ACCESS_LIMIT, DecisionAllow, DryRunRequest, DryRunResult, ProposedObject,
     RecordedObject, RulesAuth, RulesObjectView,
 };
+pub use filter::{FilterClause, FilterPredicate, HasField, MetaCompare, StorageFilter};
 pub use firenook_rules_runtime::coverage::CoverageError;
 pub use firenook_rules_runtime::{DecisionOutcome, InstalledVersion, LoadError, RulesOrigin};
 use folder_index::{FolderIndex, IndexControl};
@@ -70,6 +83,9 @@ pub use folder_index::{
 #[cfg(test)]
 use listing::ObjectListPage;
 use listing::list_objects;
+pub use listing::{
+    FileEntry, FolderEntry, ListCursor, ListEntry, ListKind, ListOrder, Phase, SortColumn,
+};
 use log::LogHandle;
 pub use log::{LogSink, StorageLogLevel, StorageLogLine};
 pub use rules::{
@@ -81,11 +97,18 @@ pub use rules_manager::{
     ACCESS_NAMES, ACCESS_OPERATIONS, AccessRow, AccessVerdict, ConsoleRefusal, DecisionDetail,
     FolderRules, Impact, ImpactFlip, StorageRulesHandle, StorageRulesMap,
 };
+pub use search::{SearchFound, SearchKind, SearchOutcome};
+pub use sniff::{SniffFamily, Sniffed};
 pub use staging::InFlight;
 use staging::{StagedFile, StagingGauge, staging_path};
 use tasks::ConsoleTasks;
+pub use thumbnails::{
+    THUMBNAIL_SOURCE_BYTES, THUMBNAIL_SOURCE_PIXELS, THUMBNAIL_WIDTHS, Thumbnail,
+};
 #[cfg(test)]
 mod changes_tests;
+#[cfg(test)]
+mod console_read_tests;
 #[cfg(test)]
 mod encoding_tests;
 #[cfg(test)]
@@ -226,6 +249,8 @@ impl StorageRuntime {
             tasks: Arc::new(ConsoleTasks::default()),
             index: Arc::new(IndexControl::default()),
             shapes: Arc::default(),
+            views: Arc::default(),
+            thumbnails: Arc::new(thumbnails::ThumbnailCache::new()),
         };
         let mut write_behind = None;
         if let StorageDurability::WriteBehind { interval } = config_durability(&state) {
@@ -422,6 +447,10 @@ struct StorageState {
     index: Arc<IndexControl>,
     /// Folder shapes the rules map last walked, per bucket.
     shapes: Arc<Mutex<std::collections::HashMap<String, rules_manager::CachedShapes>>>,
+    /// Sorted and filtered views of folders.
+    views: Arc<view_cache::ViewCache>,
+    /// Thumbnails made, by generation.
+    thumbnails: Arc<thumbnails::ThumbnailCache>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -1572,6 +1601,7 @@ async fn internal_reset(
         persist_state(&state, &data)?;
         files
     };
+    state.views.clear();
     for file in files {
         let _ = tokio::fs::remove_file(state.config.data_dir.join(file)).await;
     }

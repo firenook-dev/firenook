@@ -28,6 +28,7 @@ time.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util"] }
 tokio-util.workspace = true
 url.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }

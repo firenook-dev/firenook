@@ -120,13 +120,126 @@ pub(super) async fn file_response(
     Ok(response)
 }
 
+/// How the console's media route serves an object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaMode {
+    /// For a preview: `inline`.
+    Inline,
+    /// For a download: `attachment`, named as the object.
+    Attachment,
+}
+
+/// The sandbox every console media response but a PDF's runs in, so user
+/// bytes (an HTML or SVG upload) opened from the console's origin never run
+/// script with the console's privileges.
+pub(crate) const MEDIA_SANDBOX: &str = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'";
+
+/// The console's media response: the object's bytes with the disposition
+/// the console asks for (never the object's own), `nosniff`, a sandbox CSP
+/// (a PDF excepted: browsers refuse to render one in a sandboxed document),
+/// and an immutable cache only when the URL names the object's current
+/// generation. Ranges as the protocol serves them, except for a
+/// gzip-encoded object, which is always decoded here, whatever the request
+/// accepts, and never ranged: a media element's range request would
+/// otherwise decode and stream the whole object for a preview.
+pub(super) async fn media_response(
+    state: &StorageState,
+    object: &StoredObject,
+    request: &HeaderMap,
+    mode: MediaMode,
+    current_generation: bool,
+) -> Result<Response, StorageApiError> {
+    let mut file = tokio::fs::File::open(state.config.data_dir.join(&object.data_file))
+        .await
+        .map_err(io_error)?;
+    let gzip = object.content_encoding.as_deref() == Some("gzip");
+    let range = (!gzip)
+        .then(|| {
+            request
+                .get(header::RANGE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| byte_range(value, object.size))
+        })
+        .flatten();
+    let body = if gzip {
+        decoded_body(file.into_std().await)
+    } else if let Some((start, end)) = range {
+        file.seek(SeekFrom::Start(start)).await.map_err(io_error)?;
+        Body::from_stream(ReaderStream::new(file.take(end - start + 1)))
+    } else {
+        Body::from_stream(ReaderStream::new(file))
+    };
+    let mut response = Response::new(body);
+    *response.status_mut() = if range.is_some() {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
+    let content_type = object
+        .content_type
+        .as_deref()
+        .unwrap_or("application/octet-stream");
+    let headers = response.headers_mut();
+    insert(headers, "content-type", content_type);
+    insert(
+        headers,
+        "content-disposition",
+        &format!(
+            "{}; filename*=UTF-8''{}",
+            match mode {
+                MediaMode::Inline => "inline",
+                MediaMode::Attachment => "attachment",
+            },
+            percent_encode(file_name(&object.name))
+        ),
+    );
+    insert(headers, "x-content-type-options", "nosniff");
+    let pdf = content_type
+        .split(';')
+        .next()
+        .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/pdf"));
+    if !pdf {
+        insert(headers, "content-security-policy", MEDIA_SANDBOX);
+    }
+    insert(
+        headers,
+        "cache-control",
+        if current_generation {
+            "private, max-age=31536000, immutable"
+        } else {
+            "no-store"
+        },
+    );
+    insert(headers, "etag", &object.etag);
+    if gzip {
+        insert(headers, "accept-ranges", "none");
+    } else {
+        insert(headers, "accept-ranges", "bytes");
+        insert(
+            headers,
+            "content-length",
+            &range
+                .map_or(object.size, |(start, end)| end - start + 1)
+                .to_string(),
+        );
+        if let Some((start, end)) = range {
+            insert(
+                headers,
+                "content-range",
+                &format!("bytes {start}-{end}/{}", object.size),
+            );
+        }
+    }
+    Ok(response)
+}
+
 fn insert(headers: &mut HeaderMap, name: &'static str, value: &str) {
     if let Ok(value) = HeaderValue::from_str(value) {
         headers.insert(name, value);
     }
 }
 
-fn decoded_body(file: std::fs::File) -> Body {
+pub(crate) fn decoded_body(file: std::fs::File) -> Body {
     // Bounded channel backpressure: <= 8 * 64 KiB, independent of object size.
     // Dropping the response closes the receiver and terminates the worker.
     let (sender, receiver) = tokio::sync::mpsc::channel(8);

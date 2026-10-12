@@ -1,6 +1,6 @@
-//! Work the console starts and the service owns: the folder index walk now,
-//! and every later long task of the console (exports, thumbnail decodes,
-//! the session sweep). None is ever detached: stopping the service flips one
+//! Work the console starts and the service owns: the folder index walk,
+//! sorted views, thumbnail decodes, archive listings, export streams and the
+//! session sweep. None is ever detached: stopping the service flips one
 //! flag and awaits them all, so nothing still runs when the final flush
 //! makes the metadata durable.
 
@@ -50,6 +50,20 @@ impl ConsoleTasks {
         while set.try_join_next().is_some() {}
         set.spawn_blocking_on(work, &handle);
         true
+    }
+
+    /// Runs `work` on the blocking pool and hands back its answer. `None`
+    /// once the service is stopping (or outside a runtime).
+    pub(crate) fn run_blocking<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Option<tokio::sync::oneshot::Receiver<T>> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.spawn_blocking(move || {
+            // Nobody waiting any more (the request went away) is fine.
+            let _ = sender.send(work());
+        })
+        .then_some(receiver)
     }
 
     /// Asks every task to stop and waits for each to end. Later spawns are

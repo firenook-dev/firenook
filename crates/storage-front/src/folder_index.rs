@@ -336,6 +336,34 @@ impl FolderIndex {
         (shapes, grouped)
     }
 
+    /// The direct subfolders of `prefix` (empty for the bucket root, else
+    /// ending in `/`), segment (`'a/'`) to figures, in name order; `None`
+    /// when it has none.
+    pub(crate) fn children(
+        &self,
+        bucket: &str,
+        prefix: &str,
+    ) -> Option<&BTreeMap<String, FolderStats>> {
+        self.buckets.get(bucket)?.children.get(prefix)
+    }
+
+    /// Every folder of `bucket` as its parent prefix, its segment (`'a/'`)
+    /// and its figures, in no particular order.
+    pub(crate) fn folders<'a>(
+        &'a self,
+        bucket: &str,
+    ) -> impl Iterator<Item = (&'a str, &'a str, &'a FolderStats)> + 'a {
+        self.buckets
+            .get(bucket)
+            .into_iter()
+            .flat_map(|index| index.children.iter())
+            .flat_map(|(parent, children)| {
+                children
+                    .iter()
+                    .map(move |(segment, stats)| (parent.as_str(), segment.as_str(), stats))
+            })
+    }
+
     /// Every bucket holding something, with its root's figures.
     pub(crate) fn roots(&self) -> impl Iterator<Item = (&str, &FolderStats)> {
         self.buckets
@@ -467,7 +495,7 @@ fn shift(value: &mut u64, delta: i128) {
 /// Unix milliseconds of an RFC 3339 time. The UTC form the service writes
 /// (`2026-10-01T08:00:00.123456789Z`) is read by hand, because the walk
 /// reads a million of them; anything else goes through the full parser.
-fn rfc3339_millis(value: &str) -> Option<i64> {
+pub(crate) fn rfc3339_millis(value: &str) -> Option<i64> {
     let bytes = value.as_bytes();
     let digits = |range: std::ops::Range<usize>| -> Option<i64> {
         let mut number = 0_i64;
