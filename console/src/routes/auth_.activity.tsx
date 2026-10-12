@@ -22,8 +22,21 @@ const searchSchema = z.object({
   console: zFlag,
   /** The feed is paused (stored only while paused). */
   paused: zFlag,
-  /** The side panel of tools. */
-  panel: z.enum(['inspect']).optional(),
+  /** The side panel of tools: Try a sign-in or Inspect a token. */
+  panel: z.enum(['try', 'inspect']).optional(),
+  /** Try a sign-in's method. */
+  method: z
+    .enum([
+      'password',
+      'signUp',
+      'anonymous',
+      'emailLink',
+      'phone',
+      'customToken',
+      'federated',
+      'refresh',
+    ])
+    .optional(),
 })
 
 export const Route = createFileRoute('/auth_/activity')({
