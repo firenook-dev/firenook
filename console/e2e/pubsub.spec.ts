@@ -34,12 +34,6 @@ import { ownerFetch } from './support/api'
 
 const enc = encodeURIComponent
 
-// The section shows to a browser that asks for a preview until every one of
-// its pages is built; these journeys are that browser.
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('firenook.console.preview', 'pubsub'))
-})
-
 /** The Topics page at `search` (`topic=orders&view=settings`). */
 async function openTopics(page: Page, origin: string, search = '') {
   await page.goto(`${origin}/console/pubsub${search ? `?${search}` : ''}`)

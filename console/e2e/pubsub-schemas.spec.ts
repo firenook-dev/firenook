@@ -18,12 +18,6 @@ import {
 
 const enc = encodeURIComponent
 
-// The section shows to a browser that asks for a preview until every one of
-// its pages is built; these journeys are that browser.
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('firenook.console.preview', 'pubsub'))
-})
-
 /** An Avro record of an order: its id, and an amount of `amount`'s type. */
 const order = (amount: string) =>
   JSON.stringify({

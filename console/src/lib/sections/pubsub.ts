@@ -3,9 +3,7 @@
 // schedule topic, so a run, its message and its delivery are one story on
 // one page), its badges, its ⌘K actions, and where a topic, subscription,
 // schema, message or schedule opens when ⌘K finds one or another section's
-// payload points at one. `built` stays false, and every page shows the
-// placeholder, until the section's journeys pass (a browser asking for a
-// preview, as the journeys do, sees what is built).
+// payload points at one.
 
 import {
   ArrowsDownUpIcon,
@@ -22,20 +20,6 @@ import {
 } from '@/messaging/links'
 import type { ConsoleSection, SectionLink } from '../services'
 
-/**
- * Whether this browser asked to see the section before its journeys have
- * all passed: `firenook.console.preview` holding `pubsub` (the section's
- * own journeys set it; nobody else does). Read once, in try/catch, since
- * storage may refuse. Removed when the section is built for everyone.
- */
-function previewing(id: string): boolean {
-  try {
-    return (localStorage.getItem('firenook.console.preview') ?? '').split(',').includes(id)
-  } catch {
-    return false
-  }
-}
-
 /** The page itself when a key is not one this section knows. */
 function open(to: string, search: Record<string, string>): SectionLink {
   return Object.keys(search).length === 0 ? { to } : { to, search }
@@ -48,9 +32,8 @@ export const pubsub: ConsoleSection = {
   services: ['pubsub'],
   area: 'messaging',
   icon: BroadcastIcon,
-  // The Topics page is built and its journeys pass; Schemas and Schedules
-  // are still on their way, so the section shows to the journeys only.
-  built: previewing('pubsub'),
+  // Every page's journeys pass (messaging spec §11, commit 18).
+  built: true,
   summary:
     'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them, pull, replay and snapshots, Avro schemas with revisions, and the scheduled functions with run now and pause.',
   pages: [
