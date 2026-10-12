@@ -2,11 +2,13 @@
 //! emulator calls them: the JWT it sends, the HTTP contract and how the
 //! response updates the account.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use firenook_functions_bridge::cause;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 use crate::error::{ApiError, ensure};
+use crate::observe::{BlockingFailure, EXECUTION_HEADER, function_message};
 use crate::state::{BlockingEvent, PROVIDER_PHONE, UserRecord, provider_infos};
 use crate::util::{
     coerce_primitive_to_string, now_seconds, random_base64url, str_field, truthy, unsigned_jwt,
@@ -51,7 +53,23 @@ pub struct BlockingTarget {
     pub tenant_id: Option<String>,
 }
 
+/// How one blocking-function call went, for the call's record.
+#[derive(Debug, Clone)]
+pub struct BlockingReport {
+    pub uri: String,
+    pub duration: Duration,
+    /// The invocation id the Functions runtime answered with
+    /// (`x-firenook-execution`).
+    pub invocation: Option<String>,
+    /// Why it refused or failed.
+    pub failure: Option<BlockingFailure>,
+}
+
 /// `fetchBlockingFunction`: `None` target means no function is configured.
+/// `call` (when not 0) is the Auth call that runs it, sent as the
+/// `x-firenook-cause-auth-call` header so the Functions runtime records
+/// what caused the invocation. The report says how the call went whenever a
+/// function was called.
 pub async fn fetch_blocking_function(
     client: &reqwest::Client,
     target: Option<BlockingTarget>,
@@ -59,51 +77,110 @@ pub async fn fetch_blocking_function(
     user: &UserRecord,
     context: &BlockingContext,
     oauth: &OauthTokens,
-) -> Result<BlockingOutcome, ApiError> {
+    call: u64,
+) -> (Result<BlockingOutcome, ApiError>, Option<BlockingReport>) {
     let Some(target) = target else {
-        return Ok(BlockingOutcome::default());
+        return (Ok(BlockingOutcome::default()), None);
     };
-    let jwt = generate_blocking_jwt(&target, event, user, context, oauth);
+    let started = Instant::now();
+    let mut report = BlockingReport {
+        uri: target.uri.clone(),
+        duration: Duration::ZERO,
+        invocation: None,
+        failure: None,
+    };
+    let result = call_function(
+        client,
+        &target,
+        event,
+        user,
+        context,
+        oauth,
+        call,
+        &mut report,
+    )
+    .await;
+    report.duration = started.elapsed();
+    if let Err(error) = &result
+        && report.failure.is_none()
+    {
+        // Refused by the engine after the function answered (a missing
+        // updateMask, claims Firebase refuses): the engine's own words.
+        report.failure = Some(BlockingFailure {
+            message: error.message.clone(),
+            status: None,
+            raw: error.message.clone(),
+        });
+    }
+    (result, Some(report))
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the official fetchBlockingFunction's inputs and the report it fills"
+)]
+async fn call_function(
+    client: &reqwest::Client,
+    target: &BlockingTarget,
+    event: BlockingEvent,
+    user: &UserRecord,
+    context: &BlockingContext,
+    oauth: &OauthTokens,
+    call: u64,
+    report: &mut BlockingReport,
+) -> Result<BlockingOutcome, ApiError> {
+    let jwt = generate_blocking_jwt(target, event, user, context, oauth);
     let body = json!({ "data": { "jwt": jwt } });
-    let response = client
+    let mut request = client
         .post(&target.uri)
         .header("content-type", "application/json")
-        .timeout(Duration::from_millis(TIMEOUT_MS))
+        .timeout(Duration::from_millis(TIMEOUT_MS));
+    if call != 0 {
+        request = request.header(cause::AUTH_CALL, cause::encode(&call.to_string()));
+    }
+    let response = request
         .body(serde_json::to_vec(&body).unwrap_or_default())
         .send()
         .await;
     let response = match response {
         Ok(response) => response,
-        Err(error) if error.is_timeout() => {
-            return Err(ApiError::internal(
-                format!(
-                    "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Deadline exceeded making request to {}.))",
-                    target.uri
-                ),
-                &error.to_string(),
-            ));
-        }
         Err(error) => {
-            return Err(ApiError::internal(
-                format!(
-                    "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Failed to make request to {}.))",
-                    target.uri
-                ),
-                &error.to_string(),
-            ));
+            let sentence = if error.is_timeout() {
+                format!("Deadline exceeded making request to {}.", target.uri)
+            } else {
+                format!("Failed to make request to {}.", target.uri)
+            };
+            let message = format!("BLOCKING_FUNCTION_ERROR_RESPONSE : (({sentence}))");
+            report.failure = Some(BlockingFailure {
+                message: sentence,
+                status: None,
+                raw: message.clone(),
+            });
+            return Err(ApiError::internal(message, &error.to_string()));
         }
     };
     let status = response.status();
+    report.invocation = response
+        .headers()
+        .get(EXECUTION_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(cause::decode)
+        .filter(|id| !id.is_empty());
     let text = response.text().await.unwrap_or_default();
-    ensure!(
-        status.is_success(),
-        format!(
+    if !status.is_success() {
+        let message = format!(
             "BLOCKING_FUNCTION_ERROR_RESPONSE : ((HTTP request to {} returned HTTP error {}: {}))",
             target.uri,
             status.as_u16(),
             text
-        )
-    );
+        );
+        report.failure = Some(BlockingFailure {
+            message: function_message(&text),
+            status: Some(status.as_u16()),
+            raw: message.clone(),
+        });
+        return Err(ApiError::bad_request(message));
+    }
     let parsed: JsonValue = serde_json::from_str(&text).map_err(|error| {
         ApiError::internal(
             "BLOCKING_FUNCTION_ERROR_RESPONSE : ((Response body is not valid JSON.))",

@@ -4,13 +4,19 @@
 use serde_json::{Value as JsonValue, json};
 
 use super::{Ctx, PASSWORD_MIN_LENGTH, fake_salt, hash_password};
-use crate::Runtime;
 use crate::error::{ApiError, ensure, require};
+use crate::observe::{Delivery, MessageMeta};
 use crate::state::{OobRecord, Scope, UserRecord, provider_infos};
 use crate::token::parse_id_token;
 use crate::util::{canonicalize_email, is_absolute_uri, now_millis, now_seconds, str_field};
+use crate::{AuthMessageRef, Runtime};
 
-/// `createOobRecord`: the code and its `/emulator/action` link.
+/// `createOobRecord`: the code and its `/emulator/action` link. `message`
+/// says how it leaves the emulator, for the console's inbox.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the official createOobRecord's inputs and the inbox's message"
+)]
 pub fn create_oob_record(
     scope: &mut Scope<'_>,
     email: &str,
@@ -19,12 +25,15 @@ pub fn create_oob_record(
     mode: &str,
     continue_url: Option<&str>,
     new_email: Option<&str>,
+    message: MessageMeta,
 ) -> OobRecord {
     let tenant = scope.tenant_id.clone();
     let base = emulator_url.to_owned();
-    scope
-        .project()
-        .create_oob(email, new_email, request_type, |code| {
+    scope.project().create_oob(
+        email,
+        new_email,
+        request_type,
+        move |code| {
             let Ok(mut url) =
                 url::Url::parse(&base).or_else(|_| url::Url::parse("http://unknown/"))
             else {
@@ -45,14 +54,17 @@ pub fn create_oob_record(
                 }
             }
             url.to_string()
-        })
+        },
+        message,
+    )
 }
 
-/// `logOobMessage`.
-pub fn log_oob_message(rt: &Runtime, record: &OobRecord) {
+/// The line `logOobMessage` prints for `record`, when its type has one.
+#[must_use]
+pub fn oob_message_text(record: &OobRecord) -> Option<String> {
     let link = &record.oob_link;
     let email = &record.email;
-    let message = match record.request_type.as_str() {
+    match record.request_type.as_str() {
         "EMAIL_SIGNIN" => Some(format!("To sign in as {email}, follow this link: {link}")),
         "PASSWORD_RESET" => Some(format!(
             "To reset the password for {email}, follow this link: {link}&newPassword=NEW_PASSWORD_HERE"
@@ -68,9 +80,23 @@ pub fn log_oob_message(rt: &Runtime, record: &OobRecord) {
             "To reset your email address to {email}, follow this link: {link}"
         )),
         _ => None,
-    };
-    if let Some(message) = message {
-        rt.log("BULLET", &message);
+    }
+}
+
+/// `logOobMessage`, with the message the line prints (`id`, and the scope
+/// and account it is for).
+pub fn log_oob_message(rt: &Runtime, scope: &Scope<'_>, record: &OobRecord, id: u64) {
+    if let Some(text) = oob_message_text(record) {
+        rt.log_message(
+            "BULLET",
+            &text,
+            &AuthMessageRef {
+                id,
+                project: scope.project_id.clone(),
+                tenant: scope.tenant_id.clone(),
+                uid: scope.project_ref().uid_for_email(&record.email),
+            },
+        );
     }
 }
 
@@ -154,6 +180,7 @@ pub fn send_oob_code(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
         if ctx.body_truthy("canHandleCodeInApp") {
             rt.log("WARN", "canHandleCodeInApp is unsupported in Auth Emulator. All OOB operations will complete via web.");
         }
+        let id = rt.next_message_id();
         let record = create_oob_record(
             scope,
             &email,
@@ -162,6 +189,12 @@ pub fn send_oob_code(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
             mode,
             ctx.body_truthy_str("continueUrl"),
             new_email.as_deref(),
+            MessageMeta {
+                id,
+                delivery: if return_link { Delivery::Returned } else { Delivery::Sent },
+                continue_url: ctx.body_truthy_str("continueUrl").map(str::to_owned),
+                uid: None,
+            },
         );
         if return_link {
             return Ok(json!({
@@ -171,7 +204,7 @@ pub fn send_oob_code(rt: &Runtime, ctx: &Ctx) -> Result<JsonValue, ApiError> {
                 "oobLink": record.oob_link,
             }));
         }
-        log_oob_message(rt, &record);
+        log_oob_message(rt, scope, &record, id);
         Ok(json!({ "kind": "identitytoolkit#GetOobConfirmationCodeResponse", "email": email }))
     })
 }

@@ -51,6 +51,8 @@ pub struct Ctx {
     pub query: BTreeMap<String, JsonValue>,
     /// `authEmulatorUrl(req)`: `http://<host header>`.
     pub emulator_url: String,
+    /// The call this operation runs for, and what it caused.
+    pub trace: crate::observe::Trace,
 }
 
 impl Ctx {

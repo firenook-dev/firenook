@@ -13,6 +13,9 @@ use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 use crate::console::index::UserIndex;
 use crate::error::{ApiError, ensure};
+use crate::observe::{
+    ConfigChange, MessageKind, MessageMeta, MessageRecord, Notice, SmsPurpose, UserChange,
+};
 use crate::util::{
     is_valid_phone, mirror_field, now_millis, random_base64url, random_digits, random_id,
     str_field, truthy, truthy_str,
@@ -121,6 +124,10 @@ pub struct ProjectState {
     pending_local_ids: BTreeSet<String>,
     #[serde(skip)]
     pub events: Vec<(Lifecycle, UserRecord)>,
+    /// What changed since the last drain, for the console's record of the
+    /// call (`observe`); drained after every change, observer or not.
+    #[serde(skip)]
+    pub(crate) notices: Vec<Notice>,
     /// What the console reads: a digest of every account, kept beside the
     /// maps above (`console::index`).
     #[serde(skip)]
@@ -240,7 +247,7 @@ impl ProjectState {
         self.pending_local_ids.remove(local_id);
         let providers = provider_infos_of(props);
         let user = self
-            .update_user_by_local_id(
+            .apply_update(
                 local_id,
                 props,
                 UpdateOptions {
@@ -250,6 +257,11 @@ impl ProjectState {
             )
             .inspect_err(|_| self.reindex(local_id))?;
         self.events.push((Lifecycle::Create, user.clone()));
+        self.notices.push(Notice::User {
+            uid: local_id.to_owned(),
+            change: UserChange::Created,
+            fields: Vec::new(),
+        });
         Ok(Some(user))
     }
 
@@ -260,9 +272,12 @@ impl ProjectState {
         props: &UserRecord,
     ) -> Result<UserRecord, ApiError> {
         self.mutated();
-        if let Some(before) = self.users.get(local_id).cloned() {
+        let existed = if let Some(before) = self.users.get(local_id).cloned() {
             self.remove_user_from_index(&before);
-        }
+            true
+        } else {
+            false
+        };
         let now = now_millis();
         let mut record = UserRecord::new();
         record.insert("localId".to_owned(), json!(local_id));
@@ -277,15 +292,30 @@ impl ProjectState {
         record.insert("lastLoginAt".to_owned(), json!(now.to_string()));
         self.users.insert(local_id.to_owned(), Arc::new(record));
         let providers = provider_infos_of(props);
-        self.update_user_by_local_id(
-            local_id,
-            props,
-            UpdateOptions {
-                upsert_providers: providers,
-                delete_providers: Vec::new(),
-            },
-        )
-        .inspect_err(|_| self.reindex(local_id))
+        let user = self
+            .apply_update(
+                local_id,
+                props,
+                UpdateOptions {
+                    upsert_providers: providers,
+                    delete_providers: Vec::new(),
+                },
+            )
+            .inspect_err(|_| self.reindex(local_id))?;
+        self.notices.push(if existed {
+            Notice::User {
+                uid: local_id.to_owned(),
+                change: UserChange::Updated,
+                fields: props.keys().cloned().collect(),
+            }
+        } else {
+            Notice::User {
+                uid: local_id.to_owned(),
+                change: UserChange::Created,
+                fields: Vec::new(),
+            }
+        });
+        Ok(user)
     }
 
     /// Brings the console's digest of `local_id` up to date with the map,
@@ -305,11 +335,56 @@ impl ProjectState {
         self.user_index.remove(&local_id);
         self.remove_user_from_index(user);
         self.events.push((Lifecycle::Delete, user.clone()));
+        self.notices.push(Notice::User {
+            uid: local_id,
+            change: UserChange::Deleted,
+            fields: Vec::new(),
+        });
+    }
+
+    /// Removes the record without a lifecycle event: the emulator's own
+    /// delete-all semantics, for the console's deletes without triggers.
+    /// `false` when there was no such account.
+    pub fn delete_user_quietly(&mut self, local_id: &str) -> bool {
+        let Some(user) = self.users.get(local_id).cloned() else {
+            return false;
+        };
+        self.mutated();
+        self.users.remove(local_id);
+        self.user_index.remove(local_id);
+        self.remove_user_from_index(&user);
+        self.notices.push(Notice::User {
+            uid: local_id.to_owned(),
+            change: UserChange::Deleted,
+            fields: Vec::new(),
+        });
+        true
     }
 
     /// `updateUserByLocalId`: mirrors every field of `fields` (a `null`
     /// value deletes), then maintains indexes and provider entries.
     pub fn update_user_by_local_id(
+        &mut self,
+        local_id: &str,
+        fields: &UserRecord,
+        options: UpdateOptions<'_>,
+    ) -> Result<UserRecord, ApiError> {
+        let user = self.apply_update(local_id, fields, options)?;
+        // An update that sets nothing (a blocking function that changed
+        // nothing) is not a change the console reports.
+        if !fields.is_empty() {
+            self.notices.push(Notice::User {
+                uid: local_id.to_owned(),
+                change: UserChange::Updated,
+                fields: fields.keys().cloned().collect(),
+            });
+        }
+        Ok(user)
+    }
+
+    /// The update itself, without the notice: creation and imports say
+    /// what they did themselves.
+    fn apply_update(
         &mut self,
         local_id: &str,
         fields: &UserRecord,
@@ -613,6 +688,7 @@ impl ProjectState {
         new_email: Option<&str>,
         request_type: &str,
         link: impl FnOnce(&str) -> String,
+        message: MessageMeta,
     ) -> OobRecord {
         self.mutated();
         let code = random_base64url(54);
@@ -624,7 +700,25 @@ impl ProjectState {
             oob_code: code.clone(),
         };
         self.oobs.insert(code, record.clone());
+        let uid = message.uid.clone().or_else(|| self.uid_for_email(email));
+        let text = match message.delivery {
+            crate::observe::Delivery::Sent => {
+                crate::ops::oob::oob_message_text(&record).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        self.notices.push(Notice::Message(Box::new(oob_message(
+            &record, message, uid, text,
+        ))));
         record
+    }
+
+    /// The account an email names: its current email, else its first one.
+    pub(crate) fn uid_for_email(&self, email: &str) -> Option<String> {
+        self.local_id_for_email
+            .get(email)
+            .or_else(|| self.local_id_for_initial_email.get(email))
+            .cloned()
     }
 
     #[must_use]
@@ -634,7 +728,11 @@ impl ProjectState {
 
     pub fn delete_oob_code(&mut self, code: &str) {
         self.mutated();
-        self.oobs.remove(code);
+        if self.oobs.remove(code).is_some() {
+            self.notices.push(Notice::Used {
+                key: code.to_owned(),
+            });
+        }
     }
 
     #[must_use]
@@ -642,7 +740,12 @@ impl ProjectState {
         self.oobs.values().cloned().collect()
     }
 
-    pub fn create_verification_code(&mut self, phone: &str) -> VerificationRecord {
+    pub fn create_verification_code(
+        &mut self,
+        phone: &str,
+        purpose: SmsPurpose,
+        message: MessageMeta,
+    ) -> VerificationRecord {
         self.mutated();
         let session = random_base64url(226);
         let record = VerificationRecord {
@@ -651,6 +754,28 @@ impl ProjectState {
             session_info: session.clone(),
         };
         self.verification_codes.insert(session, record.clone());
+        let uid = message.uid.or_else(|| match purpose {
+            SmsPurpose::SignIn => self.local_id_for_phone.get(phone).cloned(),
+            SmsPurpose::MfaEnrollment | SmsPurpose::MfaSignIn => None,
+        });
+        let text = crate::observe::sms_message_text(purpose, phone, &record.code);
+        self.notices.push(Notice::Message(Box::new(MessageRecord {
+            id: message.id,
+            project: String::new(),
+            tenant: None,
+            kind: purpose.kind(),
+            to: phone.to_owned(),
+            new_email: None,
+            uid,
+            code: record.code.clone(),
+            link: None,
+            continue_url: None,
+            delivery: message.delivery,
+            origin: None,
+            key: record.session_info.clone(),
+            text,
+            at_millis: Some(now_millis()),
+        })));
         record
     }
 
@@ -661,7 +786,72 @@ impl ProjectState {
 
     pub fn delete_verification_code(&mut self, session: &str) {
         self.mutated();
-        self.verification_codes.remove(session);
+        if self.verification_codes.remove(session).is_some() {
+            self.notices.push(Notice::Used {
+                key: session.to_owned(),
+            });
+        }
+    }
+
+    /// Every code this scope holds, as found (no time, `Restored`), with
+    /// fresh message ids from `next_id`: what the console's inbox shows for
+    /// codes from saved state.
+    pub(crate) fn saved_messages(&self, next_id: &mut dyn FnMut() -> u64) -> Vec<MessageRecord> {
+        let mut messages = Vec::new();
+        for record in self.oobs.values() {
+            let meta = MessageMeta {
+                id: next_id(),
+                delivery: crate::observe::Delivery::Restored,
+                continue_url: continue_url_of(&record.oob_link),
+                uid: None,
+            };
+            let uid = self.uid_for_email(&record.email);
+            let text = crate::ops::oob::oob_message_text(record).unwrap_or_default();
+            let mut message = oob_message(record, meta, uid, text);
+            message.at_millis = None;
+            messages.push(message);
+        }
+        for record in self.verification_codes.values() {
+            // A code's purpose is not stored: a number some account has
+            // enrolled as a second factor is taken for an MFA sign-in.
+            let enrolled = self.users.values().find(|user| {
+                user.get("mfaInfo")
+                    .and_then(JsonValue::as_array)
+                    .is_some_and(|enrollments| {
+                        enrollments.iter().any(|enrollment| {
+                            enrollment
+                                .get("unobfuscatedPhoneInfo")
+                                .and_then(JsonValue::as_str)
+                                == Some(record.phone_number.as_str())
+                        })
+                    })
+            });
+            let (purpose, uid) = match enrolled {
+                Some(user) => (SmsPurpose::MfaSignIn, crate::observe::uid_of(user)),
+                None => (
+                    SmsPurpose::SignIn,
+                    self.local_id_for_phone.get(&record.phone_number).cloned(),
+                ),
+            };
+            messages.push(MessageRecord {
+                id: next_id(),
+                project: String::new(),
+                tenant: None,
+                kind: purpose.kind(),
+                to: record.phone_number.clone(),
+                new_email: None,
+                uid,
+                code: record.code.clone(),
+                link: None,
+                continue_url: None,
+                delivery: crate::observe::Delivery::Restored,
+                origin: None,
+                key: record.session_info.clone(),
+                text: crate::observe::sms_message_text(purpose, &record.phone_number, &record.code),
+                at_millis: None,
+            });
+        }
+        messages
     }
 
     #[must_use]
@@ -692,6 +882,7 @@ impl ProjectState {
     /// `deleteAllAccounts`: users and their indexes; codes stay.
     pub fn delete_all_accounts(&mut self) {
         self.mutated();
+        self.notices.push(Notice::Cleared);
         self.users.clear();
         self.user_index.clear();
         self.local_id_for_email.clear();
@@ -910,6 +1101,41 @@ fn owned(user: Option<&Arc<UserRecord>>) -> Option<UserRecord> {
     user.map(|user| UserRecord::clone(user))
 }
 
+/// The inbox's view of an out-of-band code.
+fn oob_message(
+    record: &OobRecord,
+    meta: MessageMeta,
+    uid: Option<String>,
+    text: String,
+) -> MessageRecord {
+    MessageRecord {
+        id: meta.id,
+        project: String::new(),
+        tenant: None,
+        kind: MessageKind::of_request_type(&record.request_type),
+        to: record.email.clone(),
+        new_email: record.new_email.clone(),
+        uid,
+        code: record.oob_code.clone(),
+        link: Some(record.oob_link.clone()),
+        continue_url: meta.continue_url,
+        delivery: meta.delivery,
+        origin: None,
+        key: record.oob_code.clone(),
+        text,
+        at_millis: Some(now_millis()),
+    }
+}
+
+/// The `continueUrl` a link carries.
+fn continue_url_of(link: &str) -> Option<String> {
+    url::Url::parse(link).ok().and_then(|url| {
+        url.query_pairs()
+            .find(|(key, _)| key == "continueUrl")
+            .map(|(_, value)| value.into_owned())
+    })
+}
+
 /// `providerUserInfo` entries of a record.
 #[must_use]
 pub fn provider_infos(user: &UserRecord) -> Vec<ProviderInfo> {
@@ -985,6 +1211,9 @@ pub struct AgentState {
     /// Configuration and tenant mutations; see [`ProjectState::mutations`].
     #[serde(skip)]
     mutations: u64,
+    /// Configuration changes since the last drain (`observe`).
+    #[serde(skip)]
+    pub(crate) notices: Vec<Notice>,
 }
 
 impl Default for AgentState {
@@ -994,6 +1223,7 @@ impl Default for AgentState {
             config: default_config(),
             tenants: BTreeMap::new(),
             mutations: 0,
+            notices: Vec::new(),
         }
     }
 }
@@ -1048,6 +1278,10 @@ impl AgentState {
             return None;
         }
         self.mutated();
+        self.notices.push(Notice::Config {
+            tenant: Some(tenant_id.to_owned()),
+            what: ConfigChange::TenantCreated,
+        });
         config.insert(
             "name".to_owned(),
             json!(format!("projects/{project_id}/tenants/{tenant_id}")),
@@ -1136,6 +1370,10 @@ impl AgentState {
         update_mask: Option<&str>,
     ) -> JsonMap<String, JsonValue> {
         self.mutated();
+        self.notices.push(Notice::Config {
+            tenant: None,
+            what: ConfigChange::Project,
+        });
         match update_mask {
             None => {
                 let allow_duplicates = truthy(
@@ -1275,6 +1513,33 @@ impl AuthData {
         self.projects.entry(project_id.to_owned()).or_default()
     }
 
+    /// Drains what changed from every project and tenant, with the scope it
+    /// happened in, filling in each message's project and tenant.
+    pub(crate) fn take_notices(&mut self) -> Vec<(String, Option<String>, Notice)> {
+        let mut notices = Vec::new();
+        for (project_id, agent) in &mut self.projects {
+            for notice in agent.notices.drain(..) {
+                notices.push((project_id.clone(), None, notice));
+            }
+            let scopes = std::iter::once((None, &mut agent.project)).chain(
+                agent
+                    .tenants
+                    .iter_mut()
+                    .map(|(id, tenant)| (Some(id.as_str()), &mut tenant.project)),
+            );
+            for (tenant, project) in scopes {
+                for mut notice in project.notices.drain(..) {
+                    if let Notice::Message(message) = &mut notice {
+                        message.project.clone_from(project_id);
+                        message.tenant = tenant.map(str::to_owned);
+                    }
+                    notices.push((project_id.clone(), tenant.map(str::to_owned), notice));
+                }
+            }
+        }
+        notices
+    }
+
     /// Drains lifecycle events from every project and tenant.
     pub fn take_events(&mut self) -> Vec<(String, Lifecycle, UserRecord)> {
         let mut events = Vec::new();
@@ -1393,6 +1658,10 @@ impl<'a> Scope<'a> {
         {
             state.config = config;
             self.agent.mutated();
+            self.agent.notices.push(Notice::Config {
+                tenant: Some(tenant.clone()),
+                what: ConfigChange::TenantUpdated,
+            });
         }
     }
 
@@ -1401,6 +1670,10 @@ impl<'a> Scope<'a> {
             && self.agent.tenants.remove(tenant).is_some()
         {
             self.agent.mutated();
+            self.agent.notices.push(Notice::Config {
+                tenant: Some(tenant.clone()),
+                what: ConfigChange::TenantDeleted,
+            });
         }
     }
 

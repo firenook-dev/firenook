@@ -17,10 +17,12 @@ use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 use std::path::{Path as FilePath, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::Instant;
 
 use axum::Router;
-use axum::body::{Body, to_bytes};
+use axum::body::{Body, Bytes, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -33,6 +35,7 @@ pub mod blocking;
 pub mod console;
 pub mod error;
 pub mod legacy;
+pub mod observe;
 pub mod ops;
 pub mod pages;
 mod persist;
@@ -43,6 +46,10 @@ pub mod util;
 
 use blocking::{BlockingContext, BlockingOutcome, BlockingTarget, OauthTokens};
 use error::ApiError;
+use observe::{
+    ACTIVITY_HEADER, AuthObserver, Body as RecordedBody, CallError, CallRecord, ConsoleOrigin,
+    Description, Notice, Step, Trace, TriggerOutcome,
+};
 use ops::Ctx;
 pub use persist::PersistStats;
 use persist::Persister;
@@ -70,8 +77,43 @@ pub trait BlockingResolver: Send + Sync {
     fn resolve(&self) -> Pin<Box<dyn Future<Output = BlockingFunctions> + Send + '_>>;
 }
 
-/// Receives the emulator's log lines (`BULLET`, `WARN`, ...).
+/// Receives the emulator's log lines (`BULLET`, `WARN`, ...) as text.
 pub type LogSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
+/// Receives the emulator's log lines with what they are about: a code or a
+/// link carries the message it printed, so the console can link the line to
+/// its inbox entry and its user.
+pub type LineSink = Arc<dyn Fn(&AuthLogLine<'_>) + Send + Sync>;
+
+/// One line the emulator prints.
+#[derive(Clone, Copy, Debug)]
+pub struct AuthLogLine<'a> {
+    /// `BULLET`, `SUCCESS`, `WARN` or `ERROR`.
+    pub kind: &'a str,
+    /// The text exactly as the official emulator prints it.
+    pub text: &'a str,
+    /// The code or link the line prints, when it prints one.
+    pub message: Option<&'a AuthMessageRef>,
+}
+
+/// The message a log line prints: its inbox id and whom it is for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthMessageRef {
+    pub id: u64,
+    pub project: String,
+    pub tenant: Option<String>,
+    pub uid: Option<String>,
+}
+
+/// Where log lines go: text only, or with what they are about.
+#[derive(Clone)]
+enum Sink {
+    Text(LogSink),
+    Lines(LineSink),
+}
+
+/// The console's observer and whether it keeps bodies.
+type Observer = (Arc<dyn AuthObserver>, bool);
 
 /// Builds a Firebase Auth router backed by in-memory state.
 ///
@@ -111,9 +153,15 @@ struct Inner {
     queue: DispatchQueue,
     background: TriggerRegistry,
     blocking: RwLock<Option<Arc<dyn BlockingResolver>>>,
-    log: RwLock<Option<LogSink>>,
+    log: RwLock<Option<Sink>>,
     origin: RwLock<Option<String>>,
     client: reqwest::Client,
+    /// The console's record of every call, when it listens.
+    observer: RwLock<Option<Observer>>,
+    /// Call ids, drawn when a request arrives.
+    next_call: AtomicU64,
+    /// Message ids, drawn when a code is created (or found in saved state).
+    next_message: AtomicU64,
 }
 
 /// Cloneable handle to the shared state, used by every operation.
@@ -150,6 +198,9 @@ impl AuthRuntime {
                 blocking: RwLock::new(None),
                 log: RwLock::new(None),
                 origin: RwLock::new(None),
+                observer: RwLock::new(None),
+                next_call: AtomicU64::new(1),
+                next_message: AtomicU64::new(1),
                 client: reqwest::Client::builder().build().map_err(|error| {
                     AuthError(format!(
                         "failed to build the blocking-function client: {error}"
@@ -172,10 +223,28 @@ impl AuthRuntime {
         }
     }
 
-    /// Receives log lines the official emulator prints (action links, codes).
+    /// Receives log lines the official emulator prints (action links, codes)
+    /// as text. The last sink set, of either kind, receives every line.
     pub fn set_log_sink(&self, sink: LogSink) {
         if let Ok(mut slot) = self.runtime.inner.log.write() {
-            *slot = Some(sink);
+            *slot = Some(Sink::Text(sink));
+        }
+    }
+
+    /// Receives log lines with the message each one prints, when any. The
+    /// last sink set, of either kind, receives every line.
+    pub fn set_line_sink(&self, sink: LineSink) {
+        if let Ok(mut slot) = self.runtime.inner.log.write() {
+            *slot = Some(Sink::Lines(sink));
+        }
+    }
+
+    /// The console's record of every call: `observer` receives one
+    /// [`CallRecord`] per finished call; `keep_bodies` keeps request and
+    /// response bodies up to 16 KiB each (diagnostics on).
+    pub fn set_observer(&self, observer: Arc<dyn AuthObserver>, keep_bodies: bool) {
+        if let Ok(mut slot) = self.runtime.inner.observer.write() {
+            *slot = Some((observer, keep_bodies));
         }
     }
 
@@ -366,11 +435,90 @@ impl Runtime {
 
     /// Emits a log line the way the official emulator's logger would.
     pub fn log(&self, kind: &str, text: &str) {
-        if let Ok(slot) = self.inner.log.read()
-            && let Some(sink) = slot.as_ref()
-        {
-            sink(kind, text);
+        self.log_line(&AuthLogLine {
+            kind,
+            text,
+            message: None,
+        });
+    }
+
+    /// Emits the line that prints a code or a link, with its message.
+    pub fn log_message(&self, kind: &str, text: &str, message: &AuthMessageRef) {
+        self.log_line(&AuthLogLine {
+            kind,
+            text,
+            message: Some(message),
+        });
+    }
+
+    fn log_line(&self, line: &AuthLogLine<'_>) {
+        let sink = self.inner.log.read().ok().and_then(|slot| slot.clone());
+        match sink {
+            Some(Sink::Text(sink)) => sink(line.kind, line.text),
+            Some(Sink::Lines(sink)) => sink(line),
+            None => {}
         }
+    }
+
+    /// A fresh message id: what the inbox, the log line and the
+    /// `auth.message` key name a code by.
+    #[must_use]
+    pub fn next_message_id(&self) -> u64 {
+        self.inner.next_message.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// A fresh call id.
+    #[must_use]
+    pub fn next_call_id(&self) -> u64 {
+        self.inner.next_call.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// The console's observer, when one listens.
+    fn observer(&self) -> Option<Observer> {
+        self.inner
+            .observer
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+
+    /// Hands a finished call to the observer, when one listens.
+    pub fn record(&self, record: CallRecord) {
+        if let Some((observer, _)) = self.observer() {
+            observer.call(record);
+        }
+    }
+
+    /// Whether an observer listens, and whether it keeps bodies.
+    #[must_use]
+    pub fn observed(&self) -> Option<bool> {
+        self.observer().map(|(_, keep)| keep)
+    }
+
+    /// Every code the state holds, as found when the engine started
+    /// (`Restored`, no time), each with a fresh message id: the inbox's
+    /// first entries.
+    #[must_use]
+    pub fn saved_messages(&self) -> Vec<observe::MessageRecord> {
+        let data = lock(&self.inner.data);
+        let mut next = || self.next_message_id();
+        let mut messages = Vec::new();
+        for (project_id, agent) in &data.projects {
+            let scopes = std::iter::once((None, &agent.project)).chain(
+                agent
+                    .tenants
+                    .iter()
+                    .map(|(id, tenant)| (Some(id.as_str()), &tenant.project)),
+            );
+            for (tenant, project) in scopes {
+                for mut message in project.saved_messages(&mut next) {
+                    message.project.clone_from(project_id);
+                    message.tenant = tenant.map(str::to_owned);
+                    messages.push(message);
+                }
+            }
+        }
+        messages
     }
 
     /// Runs `body` against the request's project or tenant under the state
@@ -380,7 +528,7 @@ impl Runtime {
         ctx: &Ctx,
         body: impl FnOnce(&mut Scope<'_>) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
-        self.update(|data| {
+        self.update_traced(&ctx.trace, |data| {
             let mut scope = Scope::new(data, &ctx.project_id, ctx.tenant_id.as_deref());
             body(&mut scope)
         })
@@ -400,22 +548,68 @@ impl Runtime {
     /// tenant first. For writes beside the emulator's own operations (the
     /// console minting a token for an existing account).
     pub fn update<T>(&self, body: impl FnOnce(&mut AuthData) -> T) -> Result<T, AuthError> {
+        self.update_traced(&Trace::default(), body)
+    }
+
+    /// [`Runtime::update`] for the call `trace` follows: what the change
+    /// caused (accounts, codes, configuration, lifecycle events) becomes its
+    /// steps when it records.
+    pub fn update_traced<T>(
+        &self,
+        trace: &Trace,
+        body: impl FnOnce(&mut AuthData) -> T,
+    ) -> Result<T, AuthError> {
         // Nothing is encoded here: a change only marks the state dirty, and
         // the writer snapshots it in O(1) and encodes it off the request
         // path, so a lookup never rewrites the state and a write never waits
         // for an encode, whatever the number of users.
-        let (result, events, changed) = {
+        let (result, events, notices, changed) = {
             let mut data = lock(&self.inner.data);
             let before = data.generation();
             let result = body(&mut data);
             let events = data.take_events();
-            (result, events, data.generation() != before)
+            // Always drained, so the lists never grow without an observer.
+            let notices = data.take_notices();
+            (result, events, notices, data.generation() != before)
         };
         if changed {
             self.mark_dirty();
         }
+        if trace.recording() {
+            for (_, tenant, notice) in notices {
+                trace.push(match notice {
+                    Notice::User {
+                        uid,
+                        change,
+                        fields,
+                    } => Step::User {
+                        tenant,
+                        uid,
+                        change,
+                        fields,
+                    },
+                    Notice::Cleared => Step::UsersCleared { tenant },
+                    Notice::Message(mut message) => {
+                        message.origin = trace.origin();
+                        Step::MessageSent(*message)
+                    }
+                    Notice::Used { key } => Step::MessageUsed { key },
+                    Notice::Config { tenant, what } => Step::Config { tenant, what },
+                });
+            }
+        }
         for (project_id, kind, user) in events {
-            self.dispatch_lifecycle(&project_id, kind, &user);
+            let outcome = self.dispatch_lifecycle(&project_id, kind, &user);
+            if trace.recording() {
+                trace.push(Step::Trigger {
+                    event: match kind {
+                        Lifecycle::Create => "user.create",
+                        Lifecycle::Delete => "user.delete",
+                    },
+                    uid: observe::uid_of(&user).unwrap_or_default(),
+                    outcome,
+                });
+            }
         }
         Ok(result)
     }
@@ -492,14 +686,56 @@ impl Runtime {
         } else {
             None
         };
-        blocking::fetch_blocking_function(&self.inner.client, target, event, user, context, oauth)
-            .await
+        let (result, report) = blocking::fetch_blocking_function(
+            &self.inner.client,
+            target,
+            event,
+            user,
+            context,
+            oauth,
+            ctx.trace.id(),
+        )
+        .await;
+        if let Some(report) = report.filter(|_| ctx.trace.recording()) {
+            let outcome = result.as_ref().ok();
+            let updates = outcome.map(|outcome| &outcome.updates);
+            ctx.trace.push(Step::Blocking {
+                event: event.name(),
+                function: observe::function_of(&report.uri),
+                uri: report.uri,
+                duration: report.duration,
+                invocation: report.invocation,
+                changed: updates
+                    .map(|updates| {
+                        updates
+                            .keys()
+                            .filter(|key| key.as_str() != "customAttributes")
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                custom_claims: observe::object_keys_of_text(
+                    updates.and_then(|updates| str_field(updates, "customAttributes")),
+                ),
+                session_claims: outcome
+                    .and_then(|outcome| outcome.extra_claims.as_ref())
+                    .map(|claims| claims.keys().cloned().collect())
+                    .unwrap_or_default(),
+                failure: report.failure,
+            });
+        }
+        result
     }
 
-    fn dispatch_lifecycle(&self, project_id: &str, kind: Lifecycle, user: &UserRecord) {
+    fn dispatch_lifecycle(
+        &self,
+        project_id: &str,
+        kind: Lifecycle,
+        user: &UserRecord,
+    ) -> TriggerOutcome {
         if !self.inner.background.background_enabled() {
             self.inner.background.note_dropped(DroppedService::Auth);
-            return;
+            return TriggerOutcome::DeliveryOff;
         }
         let event_type = match kind {
             Lifecycle::Create => "providers/firebase.auth/eventTypes/user.create",
@@ -529,12 +765,15 @@ impl Runtime {
                 headers.insert(header.to_owned(), cause::encode(value));
             }
         }
-        let _ = self.inner.queue.enqueue(DispatchRequest {
+        match self.inner.queue.enqueue(DispatchRequest {
             path: format!("/functions/projects/{project_id}/trigger_multicast"),
             headers,
             body: serde_json::to_vec(&body).expect("JSON serialization cannot fail"),
             event_id,
-        });
+        }) {
+            Ok(()) => TriggerOutcome::Queued,
+            Err(error) => TriggerOutcome::Failed(error.to_string()),
+        }
     }
 }
 
@@ -627,6 +866,29 @@ fn api_json(status: StatusCode, value: &JsonValue) -> Response {
     (status, [(header::CONTENT_TYPE, "application/json")], text).into_response()
 }
 
+/// What `route` learned of a call, for its record.
+#[derive(Default)]
+struct RouteFacts {
+    /// The operation id, once the route matched one.
+    operation: Option<String>,
+    project: Option<String>,
+    tenant: Option<String>,
+    /// The request body as read.
+    request: Bytes,
+    query: Vec<(String, String)>,
+    description: Description,
+}
+
+/// Paths that are not calls: readiness, the API document, the static
+/// popup frame.
+fn recorded(method: &Method, path: &str) -> bool {
+    !(*method == Method::GET
+        && matches!(
+            path,
+            "/" | "/emulator/openapi.json" | "/emulator/auth/iframe"
+        ))
+}
+
 async fn handle(State(runtime): State<Runtime>, request: Request) -> Response {
     let origin = request.headers().get(header::ORIGIN).cloned();
     let private_network = request
@@ -635,7 +897,73 @@ async fn handle(State(runtime): State<Runtime>, request: Request) -> Response {
     if request.method() == Method::OPTIONS {
         return preflight(&request, origin.as_ref(), private_network);
     }
-    let mut response = route(&runtime, request).await;
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let asked = request.headers().contains_key(observe::CONSOLE_HEADER);
+    let console = ConsoleOrigin::of(request.headers());
+    let id = runtime.next_call_id();
+    let observer = runtime.observer().filter(|_| recorded(&method, &path));
+    let trace = Trace::new(id, console, observer.is_some());
+    // What the record keeps of the request, read before it is consumed.
+    let kept = observer.as_ref().map(|_| {
+        let headers = request.headers();
+        let query_key = request.uri().query().is_some_and(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .any(|(name, value)| name == "key" && !value.is_empty())
+        });
+        (
+            observe::caller_of(&path, headers, query_key),
+            observe::client_of(headers),
+            observe::kept_headers(headers),
+        )
+    });
+    let at_millis = util::now_millis();
+    let started = Instant::now();
+    let mut facts = RouteFacts::default();
+    let mut response = route(&runtime, request, &trace, &mut facts).await;
+    let duration = started.elapsed();
+    if let (Some((observer, keep)), Some(((caller, credential), client, headers))) =
+        (observer, kept)
+    {
+        // The body was built in memory: collecting it hands back the same
+        // buffer, which the record keeps as a handle.
+        let (parts, body) = response.into_parts();
+        let bytes = to_bytes(body, usize::MAX).await.unwrap_or_default();
+        let status = parts.status.as_u16();
+        let operation = facts.operation.unwrap_or_default();
+        observer.call(CallRecord {
+            id,
+            at_millis,
+            duration,
+            project: facts
+                .project
+                .unwrap_or_else(|| runtime.default_project().to_owned()),
+            tenant: facts.tenant,
+            caller,
+            origin: console,
+            credential,
+            client,
+            method: method.as_str().to_owned(),
+            path,
+            kind: observe::kind_of(&operation),
+            operation,
+            identifier: facts.description.identifier,
+            provider: facts.description.provider,
+            uid: facts.description.uid,
+            new_user: facts.description.new_user,
+            status,
+            error: CallError::of_response(status, &bytes),
+            request: RecordedBody::of(&facts.request, keep),
+            response: RecordedBody::of(&bytes, keep),
+            query: facts.query,
+            headers,
+            steps: trace.take(),
+        });
+        response = Response::from_parts(parts, Body::from(bytes));
+    }
+    if asked && let Ok(value) = HeaderValue::from_str(&id.to_string()) {
+        response.headers_mut().insert(ACTIVITY_HEADER, value);
+    }
     if let Some(origin) = origin {
         response
             .headers_mut()
@@ -686,13 +1014,21 @@ fn query_pairs(query: Option<&str>) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-async fn route(runtime: &Runtime, request: Request) -> Response {
+async fn route(
+    runtime: &Runtime,
+    request: Request,
+    trace: &Trace,
+    facts: &mut RouteFacts,
+) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
     let path = uri.path().to_owned();
     let query = uri.query().map(str::to_owned);
     let pairs = query_pairs(query.as_deref());
     let query_map: BTreeMap<String, String> = pairs.iter().cloned().collect();
+    if trace.recording() {
+        facts.query.clone_from(&pairs);
+    }
     let headers = request.headers().clone();
     let host = headers
         .get(header::HOST)
@@ -703,8 +1039,27 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
     match (method.clone(), path.as_str()) {
         (Method::GET, "/") => return pages::readiness(),
         (Method::GET, "/emulator/openapi.json") => return pages::openapi("http", host.as_deref()),
-        (Method::GET, "/emulator/action") => return pages::action(runtime, &pairs),
-        (Method::GET, "/emulator/auth/handler") => return pages::handler(runtime, &query_map),
+        (Method::GET, "/emulator/action") => {
+            facts.operation = Some(format!(
+                "emulator.action.{}",
+                query_map.get("mode").map_or("unknown", String::as_str)
+            ));
+            facts.tenant = query_map
+                .get("tenantId")
+                .filter(|tenant| !tenant.is_empty())
+                .cloned();
+            return pages::action(runtime, &pairs, trace);
+        }
+        (Method::GET, "/emulator/auth/handler") => {
+            facts.operation = Some("emulator.accountPicker".to_owned());
+            facts.tenant = query_map
+                .get("tenantId")
+                .or_else(|| query_map.get("tid"))
+                .filter(|tenant| !tenant.is_empty())
+                .cloned();
+            facts.description.provider = query_map.get("providerId").cloned();
+            return pages::handler(runtime, &query_map, trace);
+        }
         (Method::GET, "/emulator/auth/iframe") => return pages::iframe(),
         _ => {}
     }
@@ -728,6 +1083,9 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
     let Ok(body_bytes) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
         return ApiError::bad_request("request body too large").into_response();
     };
+    if trace.recording() {
+        facts.request = body_bytes.clone();
+    }
 
     // Legacy relyingparty rewrites.
     let mut method = method;
@@ -783,6 +1141,9 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
     let Some(matched) = spec::SPEC.match_route(method.as_str(), &path) else {
         return ApiError::not_found().into_response();
     };
+    if let Some(operation) = &matched.operation {
+        facts.operation = Some(operation.operation_id.clone());
+    }
     let Some(operation) = matched.operation else {
         let original = match &query {
             Some(query) => format!("{path}?{query}"),
@@ -904,8 +1265,20 @@ async fn route(runtime: &Runtime, request: Request) -> Response {
         body,
         query: query_values,
         emulator_url: runtime.emulator_url(host.as_deref()),
+        trace: trace.clone(),
     };
-    match dispatch(runtime, &operation.operation_id, &ctx).await {
+    let result = dispatch(runtime, &operation.operation_id, &ctx).await;
+    if trace.recording() {
+        facts.project = Some(ctx.project_id.clone());
+        facts.tenant.clone_from(&ctx.tenant_id);
+        facts.description = observe::describe(
+            &operation.operation_id,
+            &ctx.body,
+            &pairs,
+            result.as_ref().ok(),
+        );
+    }
+    match result {
         Ok(value) => api_json(StatusCode::OK, &value),
         Err(error) => {
             log_server_error(runtime, &error);

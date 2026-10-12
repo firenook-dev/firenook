@@ -9,6 +9,7 @@ use axum::response::{IntoResponse, Response};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
 use crate::error::ApiError;
+use crate::observe::Trace;
 use crate::ops::oob::reset_password;
 use crate::ops::update::set_account_info_impl;
 use crate::{Runtime, pretty_json};
@@ -56,7 +57,7 @@ fn redirect(location: &str) -> Response {
 }
 
 /// `GET /emulator/action`.
-pub fn action(rt: &Runtime, pairs: &[(String, String)]) -> Response {
+pub fn action(rt: &Runtime, pairs: &[(String, String)], trace: &Trace) -> Response {
     let get = |name: &str| {
         pairs
             .iter()
@@ -92,6 +93,7 @@ pub fn action(rt: &Runtime, pairs: &[(String, String)]) -> Response {
         body: JsonMap::new(),
         query: BTreeMap::new(),
         emulator_url: rt.emulator_url(None),
+        trace: trace.clone(),
     };
     match get("mode") {
         Some("recoverEmail") => {
@@ -275,7 +277,7 @@ pub fn action(rt: &Runtime, pairs: &[(String, String)]) -> Response {
 }
 
 /// `GET /emulator/auth/handler`: the account picker for a provider.
-pub fn handler(rt: &Runtime, query: &BTreeMap<String, String>) -> Response {
+pub fn handler(rt: &Runtime, query: &BTreeMap<String, String>, trace: &Trace) -> Response {
     let get = |name: &str| {
         query
             .get(name)
@@ -304,6 +306,7 @@ pub fn handler(rt: &Runtime, query: &BTreeMap<String, String>) -> Response {
         body: JsonMap::new(),
         query: BTreeMap::new(),
         emulator_url: rt.emulator_url(None),
+        trace: trace.clone(),
     };
     let infos = rt
         .scope(&ctx, |scope| {
