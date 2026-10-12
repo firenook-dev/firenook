@@ -795,6 +795,9 @@ impl PubsubRuntime {
         }
         let functions = u32::try_from(targets.len()).unwrap_or(u32::MAX);
         let mut fanouts = Vec::with_capacity(published.messages.len());
+        // Before anything is queued: no invocation of these dispatches can
+        // have begun earlier (the console's queued / no longer kept rule).
+        let at = SystemTime::now();
         let skipped = if self.inner.background.background_enabled() {
             for message in &published.messages {
                 let mut fanout = Vec::with_capacity(targets.len());
@@ -804,6 +807,7 @@ impl PubsubRuntime {
                         function_id: target.function().id.clone(),
                         event_id: dispatch.event_id.clone(),
                         redelivery: false,
+                        at,
                     });
                     let _ = self.inner.queue.enqueue(dispatch);
                 }
@@ -829,6 +833,7 @@ impl PubsubRuntime {
                             0,
                         ),
                         redelivery: false,
+                        at,
                     })
                     .collect();
                 fanouts.push((message.id, fanout));
@@ -837,7 +842,7 @@ impl PubsubRuntime {
         };
         self.inner
             .broker
-            .record_fanout(&published.topic, SystemTime::now(), skipped, fanouts);
+            .record_fanout(&published.topic, at, skipped, fanouts);
         FanoutSummary {
             functions,
             skipped: if skipped.is_some() { functions } else { 0 },
@@ -950,6 +955,7 @@ impl PubsubRuntime {
         let redelivery = self.inner.redeliveries.fetch_add(1, Ordering::Relaxed) + 1;
         let dispatch = build_dispatch_with(topic, &target, &message, redelivery);
         let event = dispatch.event_id.clone();
+        let at = SystemTime::now();
         self.inner
             .queue
             .enqueue(dispatch)
@@ -961,6 +967,7 @@ impl PubsubRuntime {
                 function_id: function_id.to_owned(),
                 event_id: event.clone(),
                 redelivery: true,
+                at,
             },
         );
         Ok(event)

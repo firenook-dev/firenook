@@ -106,6 +106,11 @@ pub struct FanoutTarget {
     pub event_id: String,
     /// A console redelivery, not the publish's own.
     pub redelivery: bool,
+    /// Taken just before the dispatch was queued, so no invocation of it
+    /// began earlier: the publish's own targets share the fanout's time, a
+    /// redelivery has its own. Compute's record is read against it to tell
+    /// a dispatch still queued from one whose invocation is no longer kept.
+    pub at: SystemTime,
 }
 
 /// What the Pub/Sub runtime did with a message for the functions on its
@@ -124,7 +129,7 @@ impl Fanout {
         let targets: usize = self
             .targets
             .iter()
-            .map(|target| target.function_id.len() + target.event_id.len() + 8)
+            .map(|target| target.function_id.len() + target.event_id.len() + 24)
             .sum();
         u64::try_from(targets + 32).unwrap_or(u64::MAX)
     }
@@ -3608,7 +3613,7 @@ impl Broker {
         let mut slot = lock(&entry.history[position].fanout);
         let removed = slot.as_ref().map_or(0, Fanout::bytes);
         let fanout = slot.get_or_insert_with(|| Fanout {
-            at: SystemTime::now(),
+            at: target.at,
             targets: Vec::new(),
             skipped: None,
             sequence,

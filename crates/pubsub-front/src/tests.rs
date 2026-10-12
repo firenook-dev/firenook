@@ -3373,6 +3373,7 @@ mod console {
         let id: u64 = outcome.ids[0].parse().expect("id");
         let original = deliveries.recv().await.expect("dispatch");
         let function = "us-central1-topicEcho";
+        tokio::time::sleep(Duration::from_millis(2)).await;
         let first = runtime.redeliver(&topic, id, function).expect("redeliver");
         let second = runtime.redeliver(&topic, id, function).expect("redeliver");
         assert_ne!(first, second);
@@ -3405,6 +3406,8 @@ mod console {
                 (second.as_str(), true)
             ]
         );
+        assert_eq!(fanout.targets[0].at, fanout.at, "the publish's own time");
+        assert!(fanout.targets[1].at > fanout.at, "a redelivery's own time");
         // The deliveries view's records: this message, with every target.
         let records = runtime.broker().fanouts(&topic).expect("records");
         assert_eq!(records.len(), 1);
