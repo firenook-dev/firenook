@@ -1058,15 +1058,23 @@ for (const scheme of ['light', 'dark'] as const)
       expect(await cutRings(page, true), `Tab ${step + 1}`).toEqual([])
     }
 
-    // Row one and row two keep their controls apart at every width.
+    // Row one and row two keep their controls apart at every width. The
+    // walk may have left focus in the filter, whose completions open over
+    // the page: nothing is focused or open while they are measured.
+    await page.locator('body').evaluate((body) => {
+      const focused = body.ownerDocument.activeElement as { blur?: () => void } | null
+      focused?.blur?.()
+    })
+    await page.mouse.move(720, 890)
+    await expect(page.getByTestId('users-filter-completions')).toHaveCount(0)
+    await expect(page.locator('.kumo-tooltip-popup')).toHaveCount(0)
     for (const width of [1440, 1280, 1152, 1024]) {
       await page.setViewportSize({ width, height: 900 })
-      for (const control of [
-        page.getByTestId('new-users-menu'),
-        page.getByTestId('users-filter-input'),
-        page.getByTestId('users-count'),
-      ])
-        expect(await paintedAtItsOwnCentre(control), `${width}px`).toBe(true)
+      for (const id of ['new-users-menu', 'users-filter-input', 'users-count']) {
+        const control = page.getByTestId(id)
+        await settled(control)
+        expect(await paintedAtItsOwnCentre(control), `${id} at ${width}px`).toBe(true)
+      }
     }
 
     // Panel labels are sentence case, never capitals.
