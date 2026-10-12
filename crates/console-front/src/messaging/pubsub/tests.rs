@@ -1221,6 +1221,22 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
     assert_eq!(row["queueDepth"], Value::Null);
     assert_eq!(delivery(&page, &second.event_id)["mark"], "failed");
     assert_eq!(delivery(&page, &resent)["mark"], "delivered");
+    // Each delivery's own request: the run again carries its own event id.
+    let (_, body) = suite
+        .call(
+            Method::GET,
+            &format!(
+                "/api/v1/pubsub/dispatch?topic={}&id={paused}&function=us-central1-onOrderPlaced&event={resent}",
+                encoded(ORDERS)
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(body["rebuilt"], false);
+    assert_eq!(
+        body["body"].as_str().map(str::as_bytes),
+        Some(resent_dispatch.body.as_slice())
+    );
     assert_eq!(page["counts"]["all"], 4);
     assert_eq!(page["counts"]["delivered"], 1);
     assert_eq!(
