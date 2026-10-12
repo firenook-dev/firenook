@@ -244,6 +244,34 @@ export interface TopicLiveHandlers {
   onReset?: () => void
 }
 
+/** What a message list following a topic does with a `published` event. */
+export type PublishedStep =
+  /** Read the head page again; the ids above the newest drawn flash. */
+  | { kind: 'read-head' }
+  /** Scrolled away: `added` more wait above, counted on the `newAbove` pill. */
+  | { kind: 'count'; added: number }
+  /** Scrolled away under a filter: the engine says which of `ids` match, and those are counted. */
+  | { kind: 'match'; ids: string[] }
+
+/**
+ * The list's answer to new messages (U-06). At the head — no earlier page
+ * dropped and at most two pages read — the head is read again; so is a
+ * list whose first page is still on its way (it may have been read before
+ * this message). Scrolled away, nothing moves under the reader: the new
+ * messages are counted above, every one of them when the list is
+ * unfiltered (or the event overflowed and names no ids), else only those
+ * the engine says match.
+ */
+export function publishedStep(
+  list: { loaded: boolean; atHead: boolean; filtered: boolean },
+  published: Pick<PubsubPublished, 'added' | 'ids' | 'overflow'>,
+): PublishedStep {
+  if (!list.loaded || list.atHead) return { kind: 'read-head' }
+  if (published.overflow || !list.filtered || published.ids.length === 0)
+    return { kind: 'count', added: published.added }
+  return { kind: 'match', ids: [...published.ids] }
+}
+
 /**
  * Holds `pubsub.topic` for the topic in view (and the subscription in view,
  * whose backlog rows it names). Message details and the snapshots list are

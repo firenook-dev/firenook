@@ -286,6 +286,21 @@ describe('the other Pub/Sub topics (U-06)', () => {
     expect(onPublished).toHaveBeenCalledWith(published)
   })
 
+  it('pubsub.topic resets and ends send the tables back to page one', () => {
+    const onReset = vi.fn()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    renderHook(() => live.useTopicLive(PROJECT, ORDERS, undefined, { onReset }), { wrapper })
+    const held = subscribed('pubsub.topic')
+    expect(held.params).toEqual({ project: PROJECT, topic: ORDERS })
+    act(() => (held.handlers.onReset as () => void)())
+    expect(onReset).toHaveBeenCalledTimes(1)
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: pubsubKeys.topicMessageDetails(PROJECT, ORDERS),
+    })
+    act(() => (held.handlers.onEnd as () => void)())
+    expect(onReset).toHaveBeenCalledTimes(2)
+  })
+
   it('pubsub.push upserts streaks in place', () => {
     const { result } = renderHook(() => live.usePushFeed(PROJECT, WORKER), { wrapper })
     const onAttempts = subscribed('pubsub.push').handlers.onAttempts as (batch: {
@@ -366,5 +381,44 @@ describe('the other Pub/Sub topics (U-06)', () => {
     expect(patched.items[0]).toMatchObject({ paused: true, runs: 2, nextRunAt: 'later' })
     expect(patched.items[1]).toBe(page.items[1])
     expect(live.applySchedulesFrame(page, { revision: 5, schedules: [] })).toBe(page)
+  })
+})
+
+/** A `published` event naming `ids`. */
+const publishedOf = (ids: string[], added = ids.length, overflow = false) => ({
+  added,
+  ids,
+  overflow,
+})
+
+describe('a message list following its topic (U-06)', () => {
+  const away = { loaded: true, atHead: false, filtered: false }
+
+  it('at the head, or before its first page has landed, reads the head again', () => {
+    expect(live.publishedStep({ ...away, atHead: true }, publishedOf(['12', '11']))).toEqual({
+      kind: 'read-head',
+    })
+    expect(
+      live.publishedStep({ ...away, loaded: false, filtered: true }, publishedOf(['12'])),
+    ).toEqual({ kind: 'read-head' })
+  })
+
+  it('scrolled away, counts what arrived above, never moving the rows read', () => {
+    expect(live.publishedStep(away, publishedOf(['14', '13', '12']))).toEqual({
+      kind: 'count',
+      added: 3,
+    })
+    // Past a hundred, the event names no ids: every one is counted.
+    expect(live.publishedStep({ ...away, filtered: true }, publishedOf([], 250, true))).toEqual({
+      kind: 'count',
+      added: 250,
+    })
+  })
+
+  it('scrolled away under a filter, asks the engine which of the new ids match', () => {
+    expect(live.publishedStep({ ...away, filtered: true }, publishedOf(['14', '13']))).toEqual({
+      kind: 'match',
+      ids: ['14', '13'],
+    })
   })
 })

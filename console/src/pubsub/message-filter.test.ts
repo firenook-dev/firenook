@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { batchGetMessages, getMessages, messagesExportUrl } from './api'
 import { MESSAGE_FIELDS, deadLetterExpression, messageFields } from './filters'
 import cases from './message-filter-cases.json'
 
@@ -43,5 +44,41 @@ describe('the message filter (U-03)', () => {
     expect(deadLetterExpression('orders-worker', 'demo')).toBe(
       'attributes.CloudPubSubDeadLetterSourceSubscription = "orders-worker" AND attributes.CloudPubSubDeadLetterSourceSubscriptionProject = "demo"',
     )
+  })
+})
+
+describe('the expression field (U-03)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  const topic = 'projects/demo/topics/orders'
+  // The subscription filter language, which the console never reads through
+  // its own grammar: whatever is typed reaches the engine as it is.
+  const expr = 'attributes.Region = "eu" AND NOT hasPrefix(attributes.k, "a b") -key:x'
+
+  it('reaches the engine untouched, beside the filter text', async () => {
+    const fetchMock = vi.fn(
+      async (_url: string) =>
+        new Response(
+          JSON.stringify({ items: [], nextCursor: null, prevCursor: null, total: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const sent = (call: number) =>
+      new URL(fetchMock.mock.calls[call]?.[0] ?? '', 'http://console.test').searchParams
+
+    await getMessages({ topic, q: 'key:cust-*', expr })
+    expect(sent(0).get('expr')).toBe(expr)
+    expect(sent(0).get('q')).toBe('key:cust-*')
+    expect(sent(0).get('topic')).toBe(topic)
+
+    await batchGetMessages({ topic, expr }, { keys: ['12'], pageStarts: [] })
+    expect(sent(1).get('expr')).toBe(expr)
+
+    const exported = new URL(
+      messagesExportUrl({ topic, expr, format: 'ndjson' }),
+      'http://console.test',
+    ).searchParams
+    expect(exported.get('expr')).toBe(expr)
+    expect(exported.get('format')).toBe('ndjson')
   })
 })

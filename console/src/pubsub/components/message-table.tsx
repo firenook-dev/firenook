@@ -59,7 +59,7 @@ import type { SubscriptionStatus } from '@/lib/live/channel'
 import { toast } from '@/lib/toasts'
 import { compareIds, dedupeRows, idsAbove } from '@/messaging/rows'
 import { MESSAGE_FIELDS, MESSAGE_FILTER_PLACEHOLDER, messageFields } from '../filters'
-import { useTopicLive } from '../live'
+import { publishedStep, useTopicLive } from '../live'
 import { shortName } from '../names'
 import { previewText } from '../payload'
 import { messagesExportUrl } from '../api'
@@ -410,29 +410,27 @@ export function MessagesView({
   const live = useTopicLive(project, topic, undefined, {
     onPublished: (published) => {
       const data = queryClient.getQueryData<CursorPages<PubsubMessageRow>>(list.queryKey)
-      // The first page is still on its way and may have been read before
-      // this message: read it again, so it cannot land without it.
-      if (!data) {
+      const step = publishedStep(
+        {
+          // The first page may still be on its way, read before this message.
+          loaded: data !== undefined,
+          atHead: !cursor.hasPrevious && (data?.pages.length ?? 0) <= 2,
+          filtered: expr !== undefined || q !== undefined,
+        },
+        published,
+      )
+      if (step.kind === 'read-head') {
         void readHead()
         return
       }
-      const atHead = !cursor.hasPrevious && data.pages.length <= 2
-      if (atHead) {
-        void readHead()
-        return
-      }
-      if (
-        published.overflow ||
-        (expr === undefined && q === undefined) ||
-        published.ids.length === 0
-      ) {
-        setNewAbove((count) => count + published.added)
+      if (step.kind === 'count') {
+        setNewAbove((count) => count + step.added)
         return
       }
       // A filter is in force: the engine says which of the new ones match.
       void list
         .batchGet(
-          { keys: published.ids, ...(q ? { q } : {}), pageStarts: [] },
+          { keys: step.ids, ...(q ? { q } : {}), pageStarts: [] },
           new AbortController().signal,
         )
         .then((answer) => {
