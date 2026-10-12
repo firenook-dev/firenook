@@ -93,10 +93,13 @@ impl<'a> HookContext<'a> {
     }
 }
 
-/// Options the Functions runtime takes from the console (the compute stream
-/// adds its `Monitor`).
+/// Options the Functions runtime takes from the console.
 #[derive(Default)]
-pub(crate) struct FunctionsConsoleOptions {}
+pub(crate) struct FunctionsConsoleOptions {
+    /// Compute's parts: the runtime records into their `Monitor`, and the
+    /// Extensions instances it starts with are handed over through them.
+    pub(crate) compute: Option<ComputeParts>,
+}
 
 /// The services are prepared; the console is not built yet.
 pub(crate) fn prepared(context: &HookContext<'_>) {

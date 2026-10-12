@@ -881,6 +881,7 @@ name = "firenook-extensions"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "firenook-functions-bridge",
  "firenook-functions-runtime",
  "regex",
  "reqwest",
@@ -927,6 +928,7 @@ dependencies = [
  "serde_json",
  "serde_norway",
  "sha2",
+ "tempfile",
  "time",
  "tokio",
  "tokio-util",
