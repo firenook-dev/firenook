@@ -135,7 +135,8 @@ pub struct DecisionLog {
     feed: broadcast::Sender<Arc<StorageDecisionRecord>>,
     retention: Mutex<Retention>,
     omitted: AtomicU64,
-    console_lists: Mutex<HashMap<ConsoleListKey, Instant>>,
+    /// When each console list was last recorded, and its decision's id.
+    console_lists: Mutex<HashMap<ConsoleListKey, (Instant, String)>>,
     pub(crate) coverage: CoverageRecorder,
 }
 
@@ -197,27 +198,30 @@ impl DecisionLog {
         lock(&self.retention).entries.iter().cloned().collect()
     }
 
-    /// A console list judged as the same identity, folder and outcome
-    /// within the last minute stands for this one.
-    fn console_list_seen(&self, key: ConsoleListKey) -> bool {
-        let now = Instant::now();
+    /// The decision of a console list judged as the same identity, folder
+    /// and outcome within the last minute: it stands for this one.
+    fn console_list_standing(&self, key: &ConsoleListKey) -> Option<String> {
+        let seen = lock(&self.console_lists);
+        seen.get(key)
+            .filter(|(at, _)| at.elapsed() < CONSOLE_LIST_WINDOW)
+            .map(|(_, id)| id.clone())
+    }
+
+    /// Remembers a console list's decision for the minute it stands.
+    fn console_list_recorded(&self, key: ConsoleListKey, id: &str) {
         let mut seen = lock(&self.console_lists);
-        if let Some(at) = seen.get(&key)
-            && now.duration_since(*at) < CONSOLE_LIST_WINDOW
-        {
-            return true;
-        }
         if seen.len() >= CONSOLE_LIST_KEYS {
             seen.clear();
         }
-        seen.insert(key, now);
-        false
+        seen.insert(key, (Instant::now(), id.to_owned()));
     }
 
     /// Records one decision: its context retained (unless the log is busy),
-    /// then its summary published. `None` when a console list decision was
-    /// not recorded because an identical one stands for it.
-    pub(crate) fn record(&self, decided: &Decided<'_>) -> Option<String> {
+    /// then its summary published, and returns its id. A console list judged
+    /// as one recorded in the last minute is not recorded again: the id is
+    /// that decision's, which stands for it (so a refusal the page reads
+    /// again still names a decision to open).
+    pub(crate) fn record(&self, decided: &Decided<'_>) -> String {
         let claims = decided.request.auth.as_ref().map(|auth| &auth.token);
         let claim = |name: &str| match claims.and_then(|claims| claims.get("firebase")) {
             Some(Value::Map(firebase)) => match firebase.get(name) {
@@ -238,18 +242,23 @@ impl DecisionLog {
             .map_or(DecisionOutcome::Error, |(result, _)| {
                 DecisionOutcome::of(result)
             });
-        if decided.via_console
-            && decided.operation == Operation::List
-            && self.console_list_seen(ConsoleListKey {
+        let console_list =
+            (decided.via_console && decided.operation == Operation::List).then(|| ConsoleListKey {
                 identity: (uid.clone(), tenant.clone(), anonymous),
                 bucket: decided.bucket.to_owned(),
                 prefix: decided.name.to_owned(),
                 outcome: outcome.as_str(),
-            })
+            });
+        if let Some(standing) = console_list
+            .as_ref()
+            .and_then(|key| self.console_list_standing(key))
         {
-            return None;
+            return standing;
         }
         let id = format!("s{}", self.sequence.fetch_add(1, Ordering::Relaxed) + 1);
+        if let Some(key) = console_list {
+            self.console_list_recorded(key, &id);
+        }
         let proposed = decided.request.storage_request_resource.as_ref();
         let record = Arc::new(StorageDecisionRecord {
             id: id.clone(),
@@ -284,7 +293,7 @@ impl DecisionLog {
         self.retain(&record, decided.request, decided.rules);
         // No subscriber is the usual case outside a console session.
         let _ = self.feed.send(record);
-        Some(id)
+        id
     }
 
     fn retain(
@@ -480,13 +489,13 @@ pub(crate) fn judge(
     let Some(rules_in_force) = &installed else {
         return Judged {
             verdict: Verdict::NoRuleset,
-            decision: log.record(&decided(None, Some(NO_RULESET_MESSAGE))),
+            decision: Some(log.record(&decided(None, Some(NO_RULESET_MESSAGE)))),
         };
     };
     if check.operation == Operation::List && rules_in_force.ruleset.rules_version() < 2 {
         return Judged {
             verdict: Verdict::Denied(Some(LIST_V1_MESSAGE.to_owned())),
-            decision: log.record(&decided(None, Some(LIST_V1_MESSAGE))),
+            decision: Some(log.record(&decided(None, Some(LIST_V1_MESSAGE)))),
         };
     }
     let (result, trace) = log.coverage.evaluate(
@@ -495,7 +504,7 @@ pub(crate) fn judge(
         &request,
         &rules.access(),
     );
-    let decision = log.record(&decided(Some((&result, &trace)), None));
+    let decision = Some(log.record(&decided(Some((&result, &trace)), None)));
     Judged {
         verdict: if result.allowed {
             Verdict::Allowed
@@ -553,7 +562,7 @@ mod tests {
         request: &EvaluationRequest,
         operation: Operation,
         via_console: bool,
-    ) -> Option<String> {
+    ) -> String {
         let (result, trace) = rules
             .ruleset
             .evaluate_with_trace(request, &firenook_rules_engine::EmptyDocumentAccess);
@@ -576,7 +585,7 @@ mod tests {
         let get = request(RequestOperation::Get, 0);
         let mut feed = log.subscribe();
         for _ in 0..2_500 {
-            assert!(record(&log, &rules, &get, Operation::Get, false).is_some());
+            record(&log, &rules, &get, Operation::Get, false);
         }
         assert_eq!(log.re_runnable(), RE_RUNNABLE_DECISIONS);
         assert_eq!(
@@ -612,7 +621,7 @@ mod tests {
         let held = log.retention.lock().expect("retention");
         let id = record(&log, &rules, &get, Operation::Get, false);
         drop(held);
-        assert!(id.is_some(), "the decision is still published");
+        assert_eq!(id, "s1", "the decision is still published");
         assert_eq!(log.omitted(), 1);
         assert_eq!(log.re_runnable(), 0);
     }
@@ -622,17 +631,27 @@ mod tests {
         let log = DecisionLog::default();
         let rules = rules();
         let list = request(RequestOperation::List, 0);
+        let mut feed = log.subscribe();
+        let ids = (0..30)
+            .map(|_| record(&log, &rules, &list, Operation::List, true))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            ids.len(),
+            1,
+            "one console list stands for the minute: {ids:?}"
+        );
+        let standing = ids.into_iter().next().expect("the decision's id");
+        assert_eq!(feed.try_recv().expect("recorded once").id, standing);
+        assert!(feed.try_recv().is_err(), "and only once");
         let recorded = (0..30)
-            .filter_map(|_| record(&log, &rules, &list, Operation::List, true))
-            .count();
-        assert_eq!(recorded, 1, "one console list stands for the minute");
-        let recorded = (0..30)
-            .filter_map(|_| record(&log, &rules, &list, Operation::List, false))
-            .count();
+            .map(|_| record(&log, &rules, &list, Operation::List, false))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
         assert_eq!(recorded, 30, "every app list is recorded");
         // Another identity of the same folder is recorded on its own.
         let mut other = list.clone();
         other.auth.as_mut().expect("auth").uid = Some("u2".to_owned());
-        assert!(record(&log, &rules, &other, Operation::List, true).is_some());
+        let own = record(&log, &rules, &other, Operation::List, true);
+        assert_ne!(own, standing);
     }
 }
