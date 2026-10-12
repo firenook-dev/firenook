@@ -13,9 +13,11 @@
 // - 40 messages on `orders` (regions eu and us, ordering keys cust-1 to
 //   cust-5) and 5 on `payments`.
 //
-// FIRENOOK_SEED_SCALE=large adds the perf dataset: 2,000 topics
-// `load-0000`…`load-1999`, and `bulk` (one hour of retention) holding
-// 50,000 messages, published in batches of 1,000. Everything is synthetic.
+// FIRENOOK_SEED_SCALE=large (or `{ large: true }`, which the scale
+// journeys pass so the shared engine never carries the load) adds the perf
+// dataset: 2,000 topics `load-0000`…`load-1999`, and `bulk` (one hour of
+// retention) holding 50,000 messages, published in batches of 1,000.
+// Everything is synthetic.
 
 import { largeScale } from './identities.mjs'
 
@@ -25,8 +27,11 @@ const OTHER_PROJECT = 'demo-elsewhere'
 /** Requests the large dataset keeps in flight at once. */
 const PARALLEL = 32
 
-/** @param {{ origin: string, project: string, ports: Record<string, number> }} engine */
-export async function seed(engine) {
+/**
+ * @param {{ origin: string, project: string, ports: Record<string, number> }} engine
+ * @param {{ large?: boolean }} [options] `large` defaults to FIRENOOK_SEED_SCALE=large
+ */
+export async function seed(engine, options = {}) {
   const pubsub = pubsubPort(engine)
   const { project } = engine
   const topic = (id) => topicName(project, id)
@@ -79,7 +84,7 @@ export async function seed(engine) {
     })),
   )
 
-  if (largeScale()) await seedLarge(pubsub, project)
+  if (options.large ?? largeScale()) await seedLarge(pubsub, project)
 }
 
 /** 2,000 topics, and `bulk` with 50,000 messages in its one-hour retention. */

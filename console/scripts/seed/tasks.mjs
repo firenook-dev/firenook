@@ -3,7 +3,8 @@
 // and every journey enqueues its own tasks (into its own client queue when
 // it changes one), so no journey depends on another's leftovers.
 //
-// FIRENOOK_SEED_SCALE=large fills `sendEmail` for the perf journeys: the
+// FIRENOOK_SEED_SCALE=large (or `{ large: true }`, which the scale journeys
+// pass on an engine of their own) fills `sendEmail` for the perf journeys: the
 // queue is paused through the console API (the Tasks port has no pause),
 // then 10,000 tasks — the emulator's capacity for one queue — are enqueued
 // through the Tasks port as the Admin SDK sends them, 32 requests in
@@ -18,9 +19,12 @@ const LOCATION = 'us-central1'
 const CAPACITY = 10_000
 const PARALLEL = 32
 
-/** @param {{ origin: string, project: string, ports: Record<string, number> }} engine */
-export async function seed(engine) {
-  if (!largeScale()) return
+/**
+ * @param {{ origin: string, project: string, ports: Record<string, number> }} engine
+ * @param {{ large?: boolean }} [options] `large` defaults to FIRENOOK_SEED_SCALE=large
+ */
+export async function seed(engine, options = {}) {
+  if (!(options.large ?? largeScale())) return
   const queue = 'sendEmail'
   const key = `queue:${engine.project}-${LOCATION}-${queue}`
   const paused = await fetch(`${engine.origin}/console/api/v1/tasks/queue/pause`, {

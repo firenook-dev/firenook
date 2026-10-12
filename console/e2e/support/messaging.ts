@@ -3,7 +3,7 @@
 // read, never changed), publish and enqueue the way an app does — over the
 // Pub/Sub and Tasks ports — and wait for a job the console started.
 
-import { expect } from '@playwright/test'
+import { type Locator, expect } from '@playwright/test'
 import type { Engine } from '../fixtures'
 import { ownerFetch } from './api'
 
@@ -565,4 +565,56 @@ export async function waitForJob(engine: Engine, id: string, timeout = 30_000): 
     .not.toBe('running')
   if (!job) throw new Error(`job ${id} was never read`)
   return job
+}
+
+// The scale journeys walk a virtualized list from top to bottom the way a
+// person holding the scrollbar does, in the page, a screen a frame, while
+// counting what the list draws: the proof that a list of thousands keeps a
+// screenful in the DOM. Nothing waits for a fixed time; the walk ends when
+// the row it is after is drawn and the list can scroll no further.
+
+export interface ScrollWalk {
+  /** The most rows (`rows`) drawn at once, at any frame of the walk. */
+  most: number
+  /** Frames the walk took. */
+  frames: number
+}
+
+/**
+ * Scrolls `scroller` down a screen each frame until a `want` element has
+ * been drawn and the scroller sits at its end (a paged list's end arrives
+ * with its last page, so the wanted row is what proves the end is the
+ * list's), counting the `rows` it holds at every frame.
+ */
+export function scrollToEnd(
+  scroller: Locator,
+  walk: { rows: string; want: string; timeout?: number },
+): Promise<ScrollWalk> {
+  return scroller.evaluate(
+    (node, { rows, want, timeout }) =>
+      new Promise<ScrollWalk>((resolve, reject) => {
+        const view = node.ownerDocument.defaultView!
+        const started = view.performance.now()
+        let most = 0
+        let frames = 0
+        let seen = false
+        const step = () => {
+          frames += 1
+          most = Math.max(most, node.querySelectorAll(rows).length)
+          if (node.querySelector(want)) seen = true
+          const atEnd = node.scrollTop + node.clientHeight >= node.scrollHeight - 1
+          if (seen && atEnd) return resolve({ most, frames })
+          if (view.performance.now() - started > timeout)
+            return reject(
+              new Error(
+                `${want} was ${seen ? 'drawn, but the end was not reached' : 'not drawn'} in ${timeout} ms (scrollTop ${node.scrollTop} of ${node.scrollHeight})`,
+              ),
+            )
+          node.scrollTop += node.clientHeight
+          view.requestAnimationFrame(step)
+        }
+        view.requestAnimationFrame(step)
+      }),
+    { timeout: 240_000, ...walk },
+  )
 }
