@@ -6,7 +6,7 @@
 import { Button, Tooltip } from '@cloudflare/kumo'
 import { WarningCircleIcon } from '@phosphor-icons/react'
 import { useNavigate } from '@tanstack/react-router'
-import { type ReactNode, useState } from 'react'
+import { useState } from 'react'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { FunctionsSnapshot } from '@/api/generated/compute/FunctionsSnapshot'
 import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
@@ -14,7 +14,6 @@ import type { InvocationSummary } from '@/api/generated/compute/InvocationSummar
 import { EmptyState } from '@/components/console/empty-state'
 import { PauseButton } from '@/components/console/pause-button'
 import { RequiresNotice } from '@/components/console/requires-notice'
-import type { RowMenuItem } from '@/components/console/row-menu'
 import { SectionBanner } from '@/components/console/section-banner'
 import { SectionBody } from '@/components/console/section-page'
 import { SectionToolbar, ToolbarRow } from '@/components/console/toolbar'
@@ -29,7 +28,15 @@ import { receivesWhat, serviceSection, statusReasonText } from '../trigger-text'
 import { copyText, functionUrl, useFunctionsAddress, useLogsLink } from '../use-functions'
 import { CodebaseBanners, useReloadCodebase } from './codebase-banners'
 import { FunctionToolbar } from './function-toolbar'
-import { InvocationList, invocationKey, useInvocationFeed } from './invocation-list'
+import { useInvocationActions } from './invocation-actions'
+import { InvocationDetail } from './invocation-detail'
+import {
+  InvocationList,
+  invocationKey,
+  kept,
+  neighbour,
+  useInvocationFeed,
+} from './invocation-list'
 import { RestartWorkerDialog } from './restart-worker-dialog'
 import { RunSidePanel, RunTab } from './run-side-panel'
 import { SummaryStrip } from './summary-strip'
@@ -66,18 +73,12 @@ export function FunctionWorkbench({
   summary,
   search,
   update,
-  invocationMenu,
-  invocationDetail,
 }: {
   project: string
   snapshot: FunctionsSnapshot
   summary: FunctionSummary
   search: FunctionsSearch
   update: (patch: Partial<FunctionsSearch>, options?: { replace?: boolean }) => void
-  /** The row menu of one invocation. */
-  invocationMenu?: ((invocation: InvocationSummary) => readonly RowMenuItem[]) | undefined
-  /** The inspector for one invocation (`invocation=`). */
-  invocationDetail?: ((id: string) => ReactNode) | undefined
 }) {
   const navigate = useNavigate()
   const address = useFunctionsAddress()
@@ -95,6 +96,16 @@ export function FunctionWorkbench({
   })
   const paused = search.paused === true
   const pending = useFeedPending(feed.store, paused, invocationKey)
+
+  const actions = useInvocationActions({ onOpen: (id) => update({ invocation: id }) })
+  const newer = search.invocation ? neighbour(feed.store, search.invocation, 1) : undefined
+  const older = search.invocation ? neighbour(feed.store, search.invocation, -1) : undefined
+  const selected = () => kept(feed.store, search.invocation)
+  const onSelected = (act: (invocation: InvocationSummary) => void) => () => {
+    const invocation = selected()
+    if (invocation) act(invocation)
+  }
+  const has = () => selected() !== undefined
 
   const tab: FunctionTab | undefined = search.tab
   const inspectorOpen = tab !== undefined || search.invocation !== undefined
@@ -145,6 +156,15 @@ export function FunctionWorkbench({
       key: 'i',
       label: 'Open the Run tab',
       run: () => openTab(primaryTab),
+    },
+    { key: 'r', label: 'Replay the invocation', when: has, run: onSelected(actions.askReplay) },
+    { key: 'Shift+R', label: 'Edit and replay', when: has, run: onSelected(actions.editAndReplay) },
+    { key: 'c', label: 'Copy the invocation id', when: has, run: onSelected(actions.copyId) },
+    {
+      key: 'Shift+C',
+      label: 'Copy the invocation as JSON',
+      when: has,
+      run: onSelected(actions.copyJson),
     },
     ...(logs
       ? [
@@ -254,10 +274,9 @@ export function FunctionWorkbench({
           follow={!paused}
           onFollowChange={(follow) => update({ paused: !follow }, { replace: true })}
           selected={search.invocation}
-          onSelect={
-            invocationDetail ? (invocation) => update({ invocation: invocation.id }) : undefined
-          }
-          menu={invocationMenu ?? (() => [])}
+          onSelect={(invocation) => update({ invocation: invocation.id })}
+          onOpenTarget={actions.openCause}
+          menu={actions.menu}
           empty={
             <EmptyState
               icon={WarningCircleIcon}
@@ -276,8 +295,18 @@ export function FunctionWorkbench({
           testId="function-invocations"
         />
         {inspectorOpen &&
-          (search.invocation && invocationDetail ? (
-            invocationDetail(search.invocation)
+          (search.invocation ? (
+            <InvocationDetail
+              key={search.invocation}
+              project={project}
+              id={search.invocation}
+              widthKey="functions.function"
+              actions={actions}
+              onClose={() => update({ tab: undefined, invocation: undefined })}
+              onBack={() => update({ invocation: undefined, tab: tab ?? primaryTab })}
+              onPrev={newer ? () => update({ invocation: newer.id }, { replace: true }) : undefined}
+              onNext={older ? () => update({ invocation: older.id }, { replace: true }) : undefined}
+            />
           ) : (
             <RunSidePanel
               project={project}
@@ -289,6 +318,7 @@ export function FunctionWorkbench({
             />
           ))}
       </SectionBody>
+      {actions.dialog}
       <RestartWorkerDialog
         open={restarting}
         onOpenChange={setRestarting}

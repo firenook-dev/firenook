@@ -64,7 +64,7 @@ export function FormRow({
 export function RunFooter({ tools, primary }: { tools?: ReactNode; primary: ReactNode }) {
   return (
     <footer
-      className="flex h-12 shrink-0 items-center gap-1 border-t border-kumo-line px-5"
+      className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-1 gap-y-1.5 border-t border-kumo-line px-5 py-2"
       data-testid="run-footer"
     >
       <div className="flex min-w-0 items-center gap-1">{tools}</div>

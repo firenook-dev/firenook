@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
 import { codebase, snapshot, summary, trigger } from './fixtures.test-support'
+import cases from './invocation-filter-cases.json'
 import {
   exactMatches,
+  invocationFields,
   filterOverview,
   hasFailedOnly,
   overviewRows,
@@ -84,4 +87,13 @@ describe('the invocation filter text', () => {
     expect(scopeOf('function:a function:b')).toBeUndefined()
     expect(scopeOf('function:us-*')).toBeUndefined()
   })
+})
+
+describe("the invocation filter is the engine's", () => {
+  it('declares the fields the engine validates with', () => {
+    expect(invocationFields({}).map(({ suggest: _suggest, ...field }) => field)).toEqual(
+      cases.fields,
+    )
+  })
+  runGoldenCases(cases as GoldenFile)
 })

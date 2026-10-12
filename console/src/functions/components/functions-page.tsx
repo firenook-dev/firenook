@@ -12,7 +12,6 @@ import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import type { FunctionCodebaseEntry } from '@/api/generated/compute/FunctionCodebaseEntry'
 import type { FunctionsSnapshot } from '@/api/generated/compute/FunctionsSnapshot'
-import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
 import {
   EmptyState,
   QueryError,
@@ -51,12 +50,6 @@ import { FunctionsPanel } from './functions-panel'
 import { FunctionsOverview, overviewCount } from './overview'
 import { RestartWorkerDialog } from './restart-worker-dialog'
 
-/** What the pages built on top of this one add: invocation rows' menus and detail. */
-export interface FunctionsPageParts {
-  invocationMenu?: ((invocation: InvocationSummary) => readonly RowMenuItem[]) | undefined
-  invocationDetail?: ((id: string) => ReactNode) | undefined
-}
-
 /** The overview's fields, with the codebases of this engine offered after `codebase:`. */
 function overviewFields(snapshot: FunctionsSnapshot): FilterFieldSpec[] {
   const ids = snapshot.codebases.map((entry) => entry.codebase.id)
@@ -81,9 +74,7 @@ function PlainToolbar({ title }: { title: string }) {
   )
 }
 
-const NO_PARTS: FunctionsPageParts = {}
-
-export function FunctionsPage({ parts = NO_PARTS }: { parts?: FunctionsPageParts }) {
+export function FunctionsPage() {
   const { search, update } = useRouteSearch<FunctionsSearch>('/functions', '/functions')
   const navigate = useNavigate()
   const project = useFunctionsProject()
@@ -201,8 +192,6 @@ export function FunctionsPage({ parts = NO_PARTS }: { parts?: FunctionsPageParts
         summary={summary}
         search={search}
         update={update}
-        invocationMenu={parts.invocationMenu}
-        invocationDetail={parts.invocationDetail}
       />
     ) : (
       <>

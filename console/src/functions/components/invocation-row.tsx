@@ -26,6 +26,11 @@ export const ORIGIN_WORDS: Readonly<Record<InvocationSummary['origin'], string>>
   client: 'client',
 }
 
+/** `us-central1-api` → `us-central1`. */
+export function regionOfId(id: string): string {
+  return /^([a-z]+-[a-z]+\d+)-/.exec(id)?.[1] ?? ''
+}
+
 /** `us-central1-api` → `api`. */
 export function shortFunction(id: string): string {
   return id.replace(/^[a-z]+-[a-z]+\d+-/, '')
@@ -110,7 +115,7 @@ function InvocationRowInner({
   return (
     <RowMenu items={menu}>
       <div
-        className="group flex h-8 min-w-0 flex-1 items-center gap-3 px-3"
+        className="group @container flex h-8 min-w-0 flex-1 items-center gap-3 px-3"
         data-testid="invocation-row"
         data-id={invocation.id}
         data-outcome={invocation.outcomeClass}
@@ -129,16 +134,16 @@ function InvocationRowInner({
               }
             />
             <span
-              className="w-[150px] shrink-0 truncate font-mono text-[12px] text-kumo-default"
+              className="w-[112px] shrink-0 truncate font-mono text-[12px] text-kumo-default @min-[860px]:w-[150px]"
               data-testid="invocation-function"
             >
               {shortFunction(invocation.functionId)}
             </span>
-            <span className="flex w-[78px] shrink-0">
+            <span className="hidden w-[78px] shrink-0 @min-[760px]:flex">
               <KindBadge kind={invocation.kind} tooltip={false} />
             </span>
             <Summary invocation={invocation} />
-            {origin}
+            <span className="hidden @min-[680px]:contents">{origin}</span>
             {chip}
             {duration}
           </>
@@ -164,14 +169,14 @@ export const InvocationRow = memo(InvocationRowInner)
 export function InvocationsHeader() {
   return (
     <div
-      className="flex h-8 items-center gap-3 px-3 text-[12px] text-kumo-strong"
+      className="@container flex h-8 items-center gap-3 px-3 text-[12px] text-kumo-strong"
       data-testid="invocations-header"
     >
       <span className="w-[92px] shrink-0">Time</span>
-      <span className="w-[150px] shrink-0">Function</span>
-      <span className="w-[78px] shrink-0">Kind</span>
-      <span className="min-w-0 flex-1">Summary</span>
-      <span className="w-[64px] shrink-0">Origin</span>
+      <span className="w-[112px] shrink-0 @min-[860px]:w-[150px]">Function</span>
+      <span className="hidden w-[78px] shrink-0 @min-[760px]:block">Kind</span>
+      <span className="min-w-0 flex-1 truncate">Summary</span>
+      <span className="hidden w-[64px] shrink-0 @min-[680px]:block">Origin</span>
       <span className="w-[124px] shrink-0">Outcome</span>
       <span className="w-[84px] shrink-0 text-right">Duration</span>
     </div>

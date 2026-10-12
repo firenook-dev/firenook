@@ -181,3 +181,32 @@ fn events_filter_by_type_prefix_delivery_origin_and_words() {
         error.message
     );
 }
+
+const INVOCATION_CASES: &str =
+    include_str!("../../../../console/src/functions/invocation-filter-cases.json");
+
+/// The console's invocation filter cases hold on the engine's fields, and
+/// the file declares exactly those fields.
+#[test]
+fn the_console_invocation_filter_cases_hold_here() {
+    let cases: serde_json::Value = serde_json::from_str(INVOCATION_CASES).expect("cases");
+    let declared: Vec<&str> = cases["fields"]
+        .as_array()
+        .expect("fields")
+        .iter()
+        .filter_map(|field| field["key"].as_str())
+        .collect();
+    let infos = INVOCATION_FIELDS.infos();
+    let engine: Vec<&str> = infos.iter().map(|info| info.key.as_str()).collect();
+    assert_eq!(declared, engine);
+    for (field, info) in cases["fields"]
+        .as_array()
+        .expect("fields")
+        .iter()
+        .zip(&infos)
+    {
+        assert_eq!(field["kind"], info.kind.as_str());
+        assert_eq!(field["help"], info.help.as_str());
+    }
+    assert!(crate::filter::golden::run(INVOCATION_CASES) >= 30);
+}

@@ -49,10 +49,13 @@ export function useInvocationFeed({
   project,
   q,
   params,
+  toasts = false,
 }: {
   project: string
   q: string
   params: FunctionsEventsParams
+  /** Raise the reload toasts from this subscription (the page has no other). */
+  toasts?: boolean
 }): InvocationFeed {
   // One store for the list's life: a new filter reseeds it from its own first page.
   const [store] = useState(() =>
@@ -75,7 +78,7 @@ export function useInvocationFeed({
     older !== null && older.for === seeded ? older.cursor : (seeded?.page.nextCursor ?? null)
   const live = useFunctionsEvents(seeded ? params : null, {
     after: seeded?.liveCursor ?? undefined,
-    toasts: false,
+    toasts,
     onItems: (items) => store.upsert(items),
     onBurst: (count) =>
       store.marker({
@@ -199,4 +202,29 @@ export function InvocationList({
       )}
     </div>
   )
+}
+
+/** The invocation `step` rows from `key` in the store (+1 newer, -1 older), skipping marker and gap rows. */
+export function neighbour(
+  store: FeedStore<InvocationSummary>,
+  key: string,
+  step: 1 | -1,
+): InvocationSummary | undefined {
+  const from = store.indexOf(key)
+  if (from === -1) return undefined
+  for (let at = from + step; at >= 0 && at < store.size(); at += step) {
+    const row = store.at(at)
+    if (row?.kind === 'item') return row.item
+  }
+  return undefined
+}
+
+/** The kept invocation with this id, if the store holds it. */
+export function kept(
+  store: FeedStore<InvocationSummary>,
+  key: string | undefined,
+): InvocationSummary | undefined {
+  if (key === undefined) return undefined
+  const row = store.at(store.indexOf(key))
+  return row?.kind === 'item' ? row.item : undefined
 }

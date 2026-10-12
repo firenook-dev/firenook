@@ -10,12 +10,13 @@ import { ApiError } from '@/api/client'
 import type { FunctionBrokerResult } from '@/api/generated/compute/FunctionBrokerResult'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
-import { EntityLink } from '@/components/console/entity-link'
 import { OutcomeChip, elapsedText } from '@/components/console/outcome-chip'
 import { exactTime } from '@/components/console/relative-time'
 import { RequiresNotice } from '@/components/console/requires-notice'
 import { SendButton } from '@/components/console/request/send-button'
+import { Link } from '@tanstack/react-router'
 import { useNow } from '@/lib/clock'
+import { useLinkTo } from '@/lib/links'
 import { formatClock } from '@/lib/format'
 import { functionKeys, runSchedule } from '../api'
 import { lastSegment } from '../trigger-text'
@@ -75,6 +76,7 @@ export function ScheduleForm({
       void client.invalidateQueries({ queryKey: functionKeys.detail(project, summary.id) })
   }, [awaited, client, project, summary.id])
 
+  const scheduleLink = useLinkTo(schedule?.scheduleRef ?? undefined)
   const last = summary.stats.last
   const direct = run.data?.transport === 'direct' ? (run.data.invocation ?? undefined) : undefined
   const shown = direct ?? awaited
@@ -138,16 +140,17 @@ export function ScheduleForm({
           <Text size="xs" variant="secondary">
             Runs through Pub/Sub topic{' '}
             <span className="font-mono">{lastSegment(schedule.topic)}</span>.
-            {schedule.scheduleRef && (
+            {scheduleLink && (
               <>
                 {' '}
-                In Pub/Sub:{' '}
-                <EntityLink
-                  entity={{
-                    ...schedule.scheduleRef,
-                    label: schedule.paused ? 'paused there' : 'its schedule',
-                  }}
-                />
+                <Link
+                  to={scheduleLink.to as never}
+                  search={scheduleLink.search as never}
+                  className="text-kumo-link hover:underline"
+                  data-testid="schedule-link"
+                >
+                  {schedule.paused ? 'Paused in Pub/Sub ›' : 'Open in Pub/Sub ›'}
+                </Link>
               </>
             )}
           </Text>
