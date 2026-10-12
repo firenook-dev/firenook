@@ -10,6 +10,9 @@ import {
   formatRate,
   relativeTime,
   shortId,
+  utcStamp,
+  whenParts,
+  whenText,
 } from './format'
 
 describe('numbers and counts', () => {
@@ -113,6 +116,30 @@ describe('times', () => {
   it('takes the machinery out of a timestamp', () => {
     expect(compactIso('2026-09-20T09:00:00.123456Z')).toBe('2026-09-20 09:00:00')
     expect(compactIso('2026-09-20T09:00:00Z')).toBe('2026-09-20 09:00:00')
+  })
+
+  it('keeps the zone on a UTC stamp shown without a local clock beside it', () => {
+    expect(utcStamp('2026-10-12T20:10:20.123Z')).toBe('2026-10-12 20:10:20 UTC')
+    // An offset instant is written in UTC, never as the wall time it was given in.
+    expect(utcStamp('2026-10-13T04:10:20+08:00')).toBe('2026-10-12 20:10:20 UTC')
+    expect(utcStamp('not a time')).toBe('not a time')
+  })
+
+  it('says when in one way for every inspector: local clock, the instant, how long ago', () => {
+    const at = new Date(2026, 9, 13, 4, 10, 27, 670)
+    const later = at.getTime() + 13 * 60_000
+    const parts = whenParts(at.toISOString(), later)
+    expect(parts).toEqual({
+      local: 'Today 04:10:27.670',
+      instant: at.toISOString(),
+      ago: '13 min ago',
+    })
+    expect(whenText(at.toISOString(), later)).toBe(
+      `Today 04:10:27.670 local · ${at.toISOString()} · 13 min ago`,
+    )
+    const nextDay = at.getTime() + 26 * 3_600_000
+    expect(whenParts(at.toISOString(), nextDay)?.local).toBe('Oct 13 04:10:27.670')
+    expect(whenText('nope')).toBe('nope')
   })
 
   it('cuts long ids in the middle and leaves short ones whole', () => {

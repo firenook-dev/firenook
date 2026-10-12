@@ -30,9 +30,9 @@ import {
 } from '@/components/console/inspector'
 import { JsonTree } from '@/components/console/json-tree'
 import { KeyValueList, type KeyValueItem } from '@/components/console/key-value-list'
-import { exactTime } from '@/components/console/relative-time'
 import { defaultConnectHost, hostLiteral } from '@/lib/connect'
-import { formatNumber } from '@/lib/format'
+import { useNow } from '@/lib/clock'
+import { formatNumber, whenText } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { useTriggersFor } from '@/lib/triggers'
 import {
@@ -181,8 +181,9 @@ function DetailBody({
   onOpenUser: (call: AuthActivitySummary) => void
 }) {
   const client = clientLabel(call.client)
+  const now = useNow('second')
   const facts: KeyValueItem[] = [
-    { label: 'When', value: exactTime(call.at), mono: false, testId: 'call-when' },
+    { label: 'When', value: whenText(call.at, now), mono: false, testId: 'call-when' },
     {
       label: 'Caller',
       value: client ? `${callerChip(call)} · ${client.label}` : callerChip(call),

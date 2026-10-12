@@ -20,7 +20,7 @@ import { InspectorSection } from '@/components/console/inspector'
 import { MaskedValue } from '@/components/console/masked-value'
 import { RelativeTime } from '@/components/console/relative-time'
 import { PanelTitle } from '@/components/kit'
-import { compactIso, relativeTime } from '@/lib/format'
+import { relativeTime, utcStamp } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { providerGlyph, providerLabel } from '../providers'
 import {
@@ -474,7 +474,7 @@ export function InspectorDetails({
               <Shown value={null} />
             ) : (
               <span className="flex h-8 items-center gap-2 font-mono text-[12px]">
-                {compactIso(new Date(detail.lastRefreshAt).toISOString())}
+                {utcStamp(new Date(detail.lastRefreshAt).toISOString())}
                 <RelativeTime
                   iso={new Date(detail.lastRefreshAt).toISOString()}
                   className="text-kumo-subtle"
@@ -625,7 +625,7 @@ function SecuritySection({
         </FieldLine>
         <FieldLine label="Tokens valid since" wrap>
           <span className="flex min-h-8 shrink-0 items-center font-mono text-[12px] whitespace-nowrap">
-            {validSince ? compactIso(validSince.toISOString()) : 'the account’s creation'}
+            {validSince ? utcStamp(validSince.toISOString()) : 'the account’s creation'}
           </span>
           <span className="flex-1" />
           <Popover>

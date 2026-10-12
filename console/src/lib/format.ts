@@ -133,6 +133,44 @@ export function compactIso(iso: string): string {
 }
 
 /**
+ * An instant in UTC that says so: `2026-10-12 20:10:20 UTC`. `compactIso`
+ * drops the zone, which is right beside a local clock that already says
+ * "local", and wrong on its own: on a UTC+8 machine a bare
+ * `2026-10-12 20:10:20` reads as eight in the evening here.
+ */
+export function utcStamp(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return `${compactIso(date.toISOString())} UTC`
+}
+
+/**
+ * When something happened, as every inspector says it: the local clock
+ * with its day, the instant as the engine wrote it, and how long ago —
+ * `Today 04:10:27.670 local · 2026-10-12T20:10:27.670Z · 13 min ago`.
+ */
+export function whenParts(
+  iso: string,
+  now = Date.now(),
+): { local: string; instant: string; ago: string } | undefined {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return undefined
+  const today = new Date(now).toDateString() === date.toDateString()
+  const day = today ? 'Today' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return {
+    local: `${day} ${formatClock(iso, 'time', now)}`,
+    instant: date.toISOString(),
+    ago: relativeTime(iso, now),
+  }
+}
+
+/** `whenParts` as one line. */
+export function whenText(iso: string, now = Date.now()): string {
+  const parts = whenParts(iso, now)
+  return parts ? `${parts.local} local · ${parts.instant} · ${parts.ago}` : iso
+}
+
+/**
  * An id cut in the middle for a narrow cell: the start says what kind of
  * id it is and the end tells two of them apart. Short ids stay whole.
  */

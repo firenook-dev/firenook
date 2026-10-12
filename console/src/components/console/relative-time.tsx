@@ -5,7 +5,7 @@
 
 import { Tooltip, cn } from '@cloudflare/kumo'
 import { useNow } from '@/lib/clock'
-import { compactIso, relativeTime } from '@/lib/format'
+import { relativeTime, utcStamp } from '@/lib/format'
 
 /** "Monday 12 October 2026, 14:02:11 local · 2026-10-12 06:02:11 UTC". */
 export function exactTime(iso: string): string {
@@ -20,7 +20,7 @@ export function exactTime(iso: string): string {
     minute: '2-digit',
     second: '2-digit',
   })
-  return `${local} local · ${compactIso(date.toISOString())} UTC`
+  return `${local} local · ${utcStamp(iso)}`
 }
 
 export function RelativeTime({

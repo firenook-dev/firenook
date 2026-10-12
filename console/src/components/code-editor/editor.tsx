@@ -49,6 +49,7 @@ import {
 } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { useEffect, useRef } from 'react'
+import { hangingIndent } from './hanging-indent'
 import { isPreviewLanguage, loadPreviewLanguage } from './languages'
 import { jsonKeySource } from './json-keys'
 import type { CodeEditorProps, CodeGutterNote, CodeInlineValue, CodeLineMark } from './props'
@@ -625,6 +626,7 @@ export default function CodeEditor({
           highlightSelectionMatches(),
           lintGutter(),
           EditorView.lineWrapping,
+          hangingIndent,
           keymap.of([
             ...closeBracketsKeymap,
             ...defaultKeymap,

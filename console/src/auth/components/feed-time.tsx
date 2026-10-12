@@ -5,13 +5,13 @@
 
 import { Tooltip, cn } from '@cloudflare/kumo'
 import { useNow } from '@/lib/clock'
-import { compactIso, formatClock, relativeTime, useClockFormat } from '@/lib/format'
+import { formatClock, relativeTime, useClockFormat, utcStamp } from '@/lib/format'
 
 /** The forms a row's time is not shown in, for its tooltip. */
 export function otherForms(iso: string, now: number): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
-  return `${formatClock(iso, 'time', now)} local · ${compactIso(date.toISOString())} UTC · ${relativeTime(iso, now)}`
+  return `${formatClock(iso, 'time', now)} local · ${utcStamp(iso)} · ${relativeTime(iso, now)}`
 }
 
 export function FeedTime({

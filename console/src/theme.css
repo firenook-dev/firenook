@@ -193,3 +193,36 @@
 [role='listbox'] [role='option'][data-highlighted] {
   background-color: var(--color-firenook-hover);
 }
+
+/*
+ * Every underline tab bar sits in a band that draws the row's rule (a
+ * rules page's side panel, a topic, a queue, an instance). Kumo's list
+ * draws a hairline of its own as well, which stopped at the last tab a few
+ * pixels above the band's: two rules, one of them partial. The band's is
+ * the one kept; the active tab keeps its brand underline.
+ */
+.kumo-tabs-list.border-b {
+  border-bottom-width: 0;
+}
+
+/*
+ * Kumo's neutral switch in dark mode paints its track and its knob within
+ * a step of the page's ground, so a switch that is off was nearly
+ * invisible and on and off differed only by where the knob sat. Here it
+ * mirrors light mode: off is a recessed track with a visible edge and a
+ * quiet knob; on is a light track with the page's ground as its knob.
+ */
+[data-mode='dark'] [data-kumo-component='Switch'][data-unchecked] {
+  background-color: var(--color-kumo-recessed);
+  --tw-ring-color: var(--color-kumo-line);
+}
+[data-mode='dark'] [data-kumo-component='Switch'][data-unchecked] > div {
+  background-color: var(--text-color-kumo-inactive);
+}
+[data-mode='dark'] [data-kumo-component='Switch'][data-checked] {
+  background-color: var(--text-color-kumo-subtle);
+  --tw-ring-color: var(--text-color-kumo-subtle);
+}
+[data-mode='dark'] [data-kumo-component='Switch'][data-checked] > div {
+  background-color: var(--color-kumo-base);
+}

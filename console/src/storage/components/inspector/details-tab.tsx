@@ -11,7 +11,7 @@ import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectD
 import { InspectorSection } from '@/components/console/inspector'
 import { KeyValueList } from '@/components/console/key-value-list'
 import { exactTime } from '@/components/console/relative-time'
-import { compactIso, formatNumber } from '@/lib/format'
+import { formatNumber, utcStamp } from '@/lib/format'
 import { contentTypeMismatch, describeSignature, withArticle } from '../../content'
 import { downloadUrl } from '../../code'
 import { encodeObjectPath, gsUrl } from '../../paths'
@@ -64,13 +64,13 @@ export function DetailsTab({
       : []),
     {
       label: 'created',
-      value: compactIso(object.timeCreated),
+      value: utcStamp(object.timeCreated),
       hint: exactTime(object.timeCreated),
       copy: object.timeCreated,
     },
     {
       label: 'updated',
-      value: compactIso(object.updated),
+      value: utcStamp(object.updated),
       hint: exactTime(object.updated),
       copy: object.updated,
     },

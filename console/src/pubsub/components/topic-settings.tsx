@@ -14,7 +14,7 @@ import { CopyField } from '@/components/console/copy-button'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { EntityLink } from '@/components/console/entity-link'
 import { RelativeTime } from '@/components/console/relative-time'
-import { compactIso, formatBytes, formatNumber } from '@/lib/format'
+import { formatBytes, formatNumber, utcStamp } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { deleteTopic, updateTopic } from '../api'
 import { shortName } from '../names'
@@ -141,7 +141,7 @@ export function TopicSettings({
           </SettingsRow>
           <SettingsRow label="Created">
             <span className="text-[12px] text-kumo-default">
-              <span className="font-mono">{compactIso(detail.createdAt)} UTC</span> ·{' '}
+              <span className="font-mono">{utcStamp(detail.createdAt)}</span> ·{' '}
               <RelativeTime iso={detail.createdAt} />
             </span>
           </SettingsRow>
