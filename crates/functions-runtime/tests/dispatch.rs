@@ -483,3 +483,58 @@ async fn a_reload_stops_the_worker_and_removes_what_it_dropped() {
     assert_eq!(page.items[0].outcome, Some(InvocationOutcome::Removed));
     harness.stop().await;
 }
+
+// A handler that holds the worker's event loop for a moment, as a real one
+// writing to Firestore does: while it runs the worker accepts no
+// connection, so a burst piles up in its listen queue.
+const BURST_INDEX: &str = "
+exports.onBurst = (data, context) => {
+  const until = Date.now() + 2;
+  while (Date.now() < until) {}
+};
+";
+
+/// Deliveries fired at once: several times the 128 connections macOS
+/// queues for a listening socket.
+const BURST: usize = 600;
+
+const BURST_MANIFEST: &str = "specVersion: v1alpha1
+endpoints:
+  onBurst:
+    entryPoint: onBurst
+    platform: gcfv1
+    eventTrigger:
+      eventType: google.pubsub.topic.publish
+      eventFilters:
+        resource: projects/demo-dispatch/topics/b
+";
+
+#[tokio::test]
+async fn a_burst_of_deliveries_waits_its_turn_and_none_crashes() {
+    // A seeder uploading hundreds of objects fires a trigger per object at
+    // once; every one reaches the worker, in turns, and succeeds.
+    let harness = match Harness::start(BURST_INDEX, BURST_MANIFEST, LogDelivery::Attributed).await {
+        Ok(harness) => harness,
+        Err(reason) => {
+            eprintln!("skipped: {reason}");
+            return;
+        }
+    };
+    let deliveries = (0..BURST).map(|index| {
+        harness.call_text(trigger(
+            "us-central1-onBurst-0",
+            pubsub_event(&format!("burst-{index}"), "b"),
+        ))
+    });
+    let answers = futures_util::future::join_all(deliveries).await;
+    let crashed: Vec<String> = (0..BURST)
+        .filter_map(|index| {
+            let summary = harness.monitor.by_event_id(&format!("burst-{index}"))?;
+            (summary.outcome != Some(InvocationOutcome::Succeeded))
+                .then(|| format!("burst-{index}: {:?} {:?}", summary.outcome, summary.error))
+        })
+        .collect();
+    assert_eq!(crashed, Vec::<String>::new());
+    assert!(answers.iter().all(|(response, _)| response.status() == 200));
+    harness.stop().await;
+}

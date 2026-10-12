@@ -474,6 +474,13 @@ pub(crate) async fn dispatch(
             ));
         }
     };
+    // A turn on the worker, held until its answer's head arrives (a
+    // background handler's whole run); the start line and the timeout
+    // count from when the request is really sent.
+    let Ok(_turn) = backend.in_flight.clone().acquire_owned().await else {
+        // The semaphore is never closed; a closed one would mean shutdown.
+        return respond(proxy_failure());
+    };
     let label = format!("functions[{function_id}]");
     let start_detail = if matches!(kind, FunctionKind::Http | FunctionKind::Callable) {
         json!({ "method": parts.method.as_str(), "path": path })

@@ -282,7 +282,18 @@ struct Backend {
     /// The env files the console just wrote, by name, with the hash they
     /// now hold (`None`: removed), so the env watcher ignores them.
     self_writes: std::sync::Mutex<BTreeMap<String, Option<[u8; 32]>>>,
+    /// Requests on their way to the worker at once ([`WORKER_IN_FLIGHT`]).
+    in_flight: Arc<tokio::sync::Semaphore>,
 }
+
+/// The most requests the runtime sends one worker at the same time; more
+/// wait their turn. A burst (a seeder uploading a thousand objects, each
+/// firing a finalize trigger) otherwise opened a connection per event at
+/// once, past what the worker's listen queue takes (macOS holds 128), and
+/// the refused ones were recorded as crashed invocations. Kept well above
+/// any real app's concurrency, so a function calling another on the same
+/// worker never waits on itself.
+pub(crate) const WORKER_IN_FLIGHT: usize = 100;
 
 /// A backend's swappable part.
 #[derive(Debug, Clone)]
@@ -465,6 +476,7 @@ impl FunctionsRuntime {
                 recheck_pending: Arc::new(AtomicBool::new(false)),
                 edit: tokio::sync::Mutex::new(()),
                 self_writes: std::sync::Mutex::new(BTreeMap::new()),
+                in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
             }));
             order.push((backends.len() - 1, true));
         }
@@ -504,6 +516,7 @@ impl FunctionsRuntime {
                 recheck_pending: Arc::new(AtomicBool::new(false)),
                 edit: tokio::sync::Mutex::new(()),
                 self_writes: std::sync::Mutex::new(BTreeMap::new()),
+                in_flight: Arc::new(tokio::sync::Semaphore::new(WORKER_IN_FLIGHT)),
             }));
             order.push((backends.len() - 1, false));
         }
