@@ -105,11 +105,17 @@ function figure(value: number | null | undefined, danger = false) {
   )
 }
 
+/**
+ * Default widths: 880 px in all, so with the check cell (44) and the column
+ * menu (40) the table fits the page beside the open panel at 1440 px, with
+ * room left for a classic scrollbar, and every header reads whole (a header
+ * takes about 35 px for its padding and sort arrow).
+ */
 const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'name',
     header: 'Function',
-    width: 200,
+    width: 208,
     pinned: true,
     sortable: true,
     copy: (row) => (row.kind === 'notLoaded' ? row.entry.id : row.summary.id),
@@ -136,7 +142,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'kind',
     header: 'Kind',
-    width: 88,
+    width: 84,
     sortable: true,
     cell: (row) =>
       row.kind === 'notLoaded' ? (
@@ -148,7 +154,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'trigger',
     header: 'Trigger',
-    width: 236,
+    width: 200,
     sortable: true,
     copy: (row) => (row.kind === 'notLoaded' ? row.entry.eventType : triggerText(row.summary)),
     cell: (row) => {
@@ -181,7 +187,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'codebase',
     header: 'Codebase',
-    width: 100,
+    width: 96,
     sortable: true,
     cell: (row) => {
       const extension = row.kind === 'function' && row.summary.extensionInstance !== null
@@ -196,7 +202,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'lastRun',
     header: 'Last run',
-    width: 92,
+    width: 88,
     sortable: true,
     copy: (row) => (row.kind === 'function' ? (row.summary.stats.last?.startedAt ?? '') : ''),
     cell: (row) => {
@@ -222,7 +228,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'runs',
     header: 'Runs',
-    width: 60,
+    width: 68,
     align: 'end',
     sortable: true,
     cell: (row) => figure(row.kind === 'function' ? row.summary.stats.runs : undefined),
@@ -230,7 +236,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'errors',
     header: 'Errors',
-    width: 64,
+    width: 72,
     align: 'end',
     sortable: true,
     cell: (row) => figure(row.kind === 'function' ? row.summary.stats.failures : undefined, true),
@@ -238,7 +244,7 @@ const COLUMNS: readonly DataTableColumn<OverviewRow>[] = [
   {
     id: 'p95',
     header: 'p95',
-    width: 72,
+    width: 64,
     align: 'end',
     sortable: true,
     cell: (row) =>
