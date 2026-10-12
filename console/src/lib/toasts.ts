@@ -27,6 +27,8 @@ export interface ToastOptions {
   echo?: boolean | undefined
 }
 
+type ToastAction = { children: string; onClick: () => void; variant: 'secondary'; size: 'sm' }
+
 /** What the policy needs of a toast manager; Kumo's has it. */
 export interface ToastSink {
   add(options: {
@@ -34,10 +36,25 @@ export interface ToastSink {
     title: string
     description?: string | undefined
     variant?: 'default' | 'success' | 'error' | 'warning' | 'info'
-    actions?: Array<{ children: string; onClick: () => void; variant: 'secondary'; size: 'sm' }>
+    actions?: ToastAction[]
     onClose?: () => void
   }): unknown
   close(id: string): void
+  /**
+   * Changes what a toast on screen says. Kumo's `add` with the id of a
+   * toast still showing only bumps it, keeping its old title, description
+   * and actions (a finished job's toast went on reading "0 of 1" with
+   * Cancel), so a replacement is written here first.
+   */
+  update?(
+    id: string,
+    options: {
+      title: string
+      description: string | undefined
+      variant: 'default' | 'success' | 'error' | 'warning' | 'info'
+      actions: ToastAction[] | undefined
+    },
+  ): unknown
 }
 
 const VARIANT = {
@@ -57,6 +74,17 @@ export function createToastPolicy(sink: ToastSink, limit = TOAST_LIMIT) {
 
   return function show(options: ToastOptions): void {
     if (options.replayed || options.echo) return
+    const variant = options.tone ? VARIANT[options.tone] : 'default'
+    const actions: ToastAction[] | undefined = options.action
+      ? [
+          {
+            children: options.action.label,
+            onClick: options.action.run,
+            variant: 'secondary',
+            size: 'sm',
+          },
+        ]
+      : undefined
     const existing = open.findIndex((entry) => entry.key === options.key)
     let id: string
     if (existing === -1) {
@@ -67,28 +95,24 @@ export function createToastPolicy(sink: ToastSink, limit = TOAST_LIMIT) {
       serial += 1
       id = `${options.key}#${serial}`
     } else {
-      // The same toast again: refreshed where it is, and the newest now.
+      // The same toast again: refreshed where it is, and the newest now,
+      // saying what the new one says (an action it no longer has goes).
       const [entry] = open.splice(existing, 1)
       id = entry?.id ?? options.key
+      sink.update?.(id, {
+        title: options.title,
+        description: options.description,
+        variant,
+        actions,
+      })
     }
     open.push({ key: options.key, id })
     sink.add({
       id,
       title: options.title,
       description: options.description,
-      variant: options.tone ? VARIANT[options.tone] : 'default',
-      ...(options.action
-        ? {
-            actions: [
-              {
-                children: options.action.label,
-                onClick: options.action.run,
-                variant: 'secondary' as const,
-                size: 'sm' as const,
-              },
-            ],
-          }
-        : {}),
+      variant,
+      ...(actions ? { actions } : {}),
       onClose: () => {
         const at = open.findIndex((entry) => entry.id === id)
         if (at !== -1) open.splice(at, 1)

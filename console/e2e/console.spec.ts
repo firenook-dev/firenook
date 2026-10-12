@@ -8,14 +8,20 @@ const origin = () => {
 }
 const project = () => process.env.FIRENOOK_CONSOLE_PROJECT ?? 'demo-console-e2e'
 
-test('the overview lists the running services from the engine', async ({ page }) => {
+test('the overview shows what the engine runs, where, and what it does not', async ({ page }) => {
   await page.goto(`${origin()}/console`)
   await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
-  await expect(page.getByText(project()).first()).toBeVisible()
-  const table = page.getByRole('table')
-  await expect(table.getByText('Firestore', { exact: true })).toBeVisible()
-  await expect(table.getByText('Authentication', { exact: true })).toBeVisible()
-  await expect(table.getByText('Emulator hub', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('overview-project')).toHaveText(project())
+  // A card per running section, each with the address an app connects to.
+  const firestore = page.getByTestId('overview-card-firestore')
+  await expect(firestore.getByTestId('overview-card-firestore-address')).toHaveText(
+    /^127\.0\.0\.1:\d+$/,
+  )
+  await expect(firestore.getByTestId('overview-card-firestore-health')).toHaveText('Running')
+  await expect(page.getByTestId('overview-card-auth')).toBeVisible()
+  await expect(page.getByTestId('overview-infrastructure')).toContainText('Hub')
+  // This profile starts Firestore and Authentication only: Storage says why it is missing.
+  await expect(page.getByTestId('overview-absent-storage')).toBeVisible()
   // The release the launcher declared, not the placeholder crate version:
   // the engine is built from a pinned commit and cannot know what it ships
   // as, so a wrong number here means the handoff is broken.
@@ -25,7 +31,9 @@ test('the overview lists the running services from the engine', async ({ page })
     'title',
     `Firenook ${RELEASE_VERSION}, engine source ${ENGINE_REVISION.slice(0, 12)}`,
   )
-  await expect(page.getByText(`on Firenook ${RELEASE_VERSION}`)).toBeVisible()
+  await expect(page.getByTestId('overview-engine')).toHaveText(
+    `Firenook ${RELEASE_VERSION} (engine ${ENGINE_REVISION.slice(0, 12)})`,
+  )
 })
 
 test('the theme is light, dark or the system\u2019s, and it is remembered', async ({ browser }) => {
@@ -61,7 +69,8 @@ test('the theme is light, dark or the system\u2019s, and it is remembered', asyn
 
   // The palette offers the same three and says which is in force.
   await page.keyboard.press('ControlOrMeta+k')
-  await page.getByRole('combobox').fill('theme')
+  // The palette's own field: the Overview has a combobox of its own (the host picker).
+  await page.getByTestId('palette-input').fill('theme')
   await expect(page.getByRole('option', { name: /Dark theme/ })).toBeVisible()
   await page.getByRole('option', { name: /Light theme/ }).click()
   await expect(page.locator('html')).toHaveAttribute('data-mode', 'light')
