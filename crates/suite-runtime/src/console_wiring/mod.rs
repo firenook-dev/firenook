@@ -31,16 +31,20 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use firenook_auth_front::AuthRuntime;
+use firenook_console_front::Shutdown;
 use firenook_console_front::{
     AbsentKind, AbsentReason, ComputeParts, ForeignProjects, JobRegistry, SectionFix,
     SectionFixKind, UnsupportedService,
 };
+use firenook_core_store::Store;
 use firenook_functions_bridge::{FunctionsInventory, TriggerRegistry};
 use firenook_functions_runtime::FunctionsRuntime;
 use firenook_pubsub_front::PubsubRuntime;
+use firenook_rules_runtime::RulesRuntime;
 use firenook_storage_front::StorageRuntime;
-use firenook_suite_front::LoggingRuntime;
+use firenook_suite_front::{ExportCommand, LoggingRuntime};
 use firenook_tasks_front::TasksRuntime;
+use tokio::sync::mpsc;
 
 use crate::SuiteConfig;
 use crate::launch::{LaunchContext, LaunchReason};
@@ -66,6 +70,17 @@ pub(crate) struct HookContext<'a> {
     pub(crate) inventory: Option<&'a FunctionsInventory>,
     pub(crate) pubsub: Option<&'a PubsubRuntime>,
     pub(crate) tasks: Option<&'a TasksRuntime>,
+    /// The Firestore store (every database), from `prepared` on.
+    pub(crate) store: Option<&'a Store>,
+    /// The Firestore rules every front evaluates against, from `prepared`
+    /// on, when Firestore runs.
+    pub(crate) firestore_rules: Option<&'a RulesRuntime>,
+    /// The suite's stop signal, from `prepared` on: whatever a hook spawns
+    /// ends on it.
+    pub(crate) shutdown: Option<&'a Shutdown>,
+    /// The suite exporter's channel (the one the hub's export uses), from
+    /// `prepared` on.
+    pub(crate) exporter: Option<&'a mpsc::Sender<ExportCommand>>,
 }
 
 impl<'a> HookContext<'a> {
@@ -89,6 +104,10 @@ impl<'a> HookContext<'a> {
             inventory: None,
             pubsub: None,
             tasks: None,
+            store: None,
+            firestore_rules: None,
+            shutdown: None,
+            exporter: None,
         }
     }
 }

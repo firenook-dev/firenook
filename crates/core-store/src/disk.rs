@@ -637,6 +637,13 @@ impl DiskSnapshot {
             .collect()
     }
 
+    /// Whether `database` has at least one visible document: the key-only
+    /// cursor's first step, one seek merged with the overlay, which hides
+    /// pending deletions and adds restored documents.
+    pub(crate) fn has_documents(&self, database: &DatabaseName) -> bool {
+        self.key_cursor(database, "").next().is_some()
+    }
+
     /// Databases of `project` with at least one visible document. Stored keys
     /// are `[project][database][path]` with length-prefixed identifiers, so
     /// each stored database costs one seek: the scan jumps to the successor

@@ -10,6 +10,10 @@
 // input (the `Grows` technique), so `-is:disabled` reads as one thing and
 // typing is still typing into a plain input.
 //
+// What only the engine can check (the regex syntax a section compiles) is
+// said the same way: a refusal of the text, with its span, given back as
+// `refusal` and shown while the field still holds that text.
+//
 // Completions hang under it in a portal: at a key, the list's keys with
 // their help lines; after `key:`, that field's values — an enum's, a
 // boolean's, a few times and sizes to start from, and whatever `suggest`
@@ -178,6 +182,15 @@ export function applyCompletion(
   return { text: next, caret: before.length + item.insert.length + 1 }
 }
 
+/**
+ * The engine's refusal of a filter text the browser could not check — a
+ * regex its syntax lacks — with the message and the UTF-16 span it gave.
+ */
+export interface FilterRefusal extends FilterError {
+  /** The text the engine refused; shown only while the field holds it. */
+  text: string
+}
+
 /** Whether an error belongs to the item the caret is still typing. */
 function underCaret(error: FilterError, caret: number): boolean {
   return error.from <= caret && caret <= error.to
@@ -200,6 +213,7 @@ export function FilterField({
   placeholder,
   ariaLabel,
   regex = false,
+  refusal,
   testId,
 }: {
   /** The URL's `q`: the truth. */
@@ -213,6 +227,8 @@ export function FilterField({
   ariaLabel: string
   /** `/regex/` items are items in this list (Logs). */
   regex?: boolean | undefined
+  /** What the engine refused of a text that parses here (Logs' regexes): shown as a parse error is. */
+  refusal?: FilterRefusal | undefined
   testId?: string | undefined
 }) {
   const ids = testId ?? 'filter-field'
@@ -245,7 +261,11 @@ export function FilterField({
   })
 
   const result = checkFilter(draft, { fields, regex })
-  const error = result.ok ? undefined : result.error
+  const refused =
+    refusal && refusal.text === draft
+      ? { message: refusal.message, from: refusal.from, to: refusal.to }
+      : undefined
+  const error = result.ok ? refused : result.error
   // While an item is still being typed its error waits; the ring and the
   // message come back the moment the caret leaves it or the field.
   const shownError = error && !(focused && underCaret(error, caret)) ? error : undefined

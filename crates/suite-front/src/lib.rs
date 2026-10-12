@@ -9,12 +9,18 @@
 pub mod console_input;
 pub mod entity;
 mod logging;
+pub mod overview_input;
 mod release;
 pub mod replay;
 mod requests;
 pub use console_input::{Audience, ConsoleSink, LogInput, LogLevel, kinds};
 pub use entity::EntityRef;
 pub use logging::LoggingRuntime;
+pub use overview_input::{
+    OverviewConnection, OverviewEngineConfig, OverviewEngineDetails, OverviewEnvSource,
+    OverviewEnvVariable, OverviewNotice, OverviewNoticeLevel, SnapshotFreeSpace, SnapshotPort,
+    SnapshotSize, SnapshotStaging,
+};
 pub use replay::{Cursor, Entry, Follow, ReplayRing, RingBudget, RingLimits, RingSize};
 #[cfg(test)]
 mod logging_tests;

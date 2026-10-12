@@ -13,6 +13,8 @@
 // - Message: 12 px in the data face, one line and cut at rest; expanded
 //   (→) or in wrap mode it wraps whole, never cut, and the lines after the
 //   first are fainter, the way a stack trace reads.
+// - Highlight: the page's search marks in the message (`highlight`), on the
+//   first line and on the rest alike.
 // - Trail: `+14 lines` for a message with more lines than the one shown,
 //   `×12` for a repeated group, then whatever the caller adds (a payload
 //   caret, the primary link).
@@ -82,6 +84,8 @@ export interface LogLineProps extends Omit<ComponentPropsWithRef<'div'>, 'childr
   wrap?: boolean | undefined
   /** Shown under the message while expanded (a payload tree). */
   detail?: ReactNode
+  /** Marks the page's search in the message: given each part of it, returns it marked. */
+  highlight?: ((text: string) => ReactNode) | undefined
 }
 
 export function LogLine({
@@ -99,6 +103,7 @@ export function LogLine({
   expanded = false,
   wrap = false,
   detail,
+  highlight,
   className,
   ...rest
 }: LogLineProps) {
@@ -169,8 +174,10 @@ export function LogLine({
           )}
           data-part="message"
         >
-          {first}
-          {after && <span className="text-kumo-subtle">{after}</span>}
+          {highlight ? highlight(first) : first}
+          {after && (
+            <span className="text-kumo-subtle">{highlight ? highlight(after) : after}</span>
+          )}
         </span>
         {expanded && detail}
       </span>

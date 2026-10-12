@@ -617,16 +617,24 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
         background_sender,
         foreign,
     } = prepared;
+    let (shutdown, _) = watch::channel(false);
+    let hook_shutdown = Shutdown::new(shutdown.subscribe());
+    let firestore_rules = console_firestore
+        .as_ref()
+        .map(|parts| parts.rules_runtime.clone());
     // What every console lifecycle hook can read; the later services are
     // filled in at each call.
     let hooks = HookContext {
         auth: auth.as_ref(),
         storage: storage.as_ref(),
+        store: Some(&store),
+        firestore_rules: firestore_rules.as_ref(),
+        shutdown: Some(&hook_shutdown),
+        exporter: Some(&export_sender),
         ..HookContext::new(&config, &logging, &foreign, &triggers)
     };
     console_wiring::prepared(&hooks);
     let mut listeners = bind_listeners(&config).await?;
-    let (shutdown, _) = watch::channel(false);
     // Each configured rules file reloads on change, as the official CLI's
     // watcher does, until the suite stops; whichever services run.
     let rules_targets =
@@ -695,7 +703,7 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                 compute: compute_parts.clone(),
                 pubsub: pubsub_late.clone(),
                 tasks: tasks_late.clone(),
-                observe: console_wiring::observe::observe_console(&logging, &config),
+                observe: console_wiring::observe::observe_console(&hooks),
                 absent: console_wiring::absent_reasons(
                     &config,
                     config.launch.as_ref(),
@@ -1028,8 +1036,19 @@ async fn ui_application(
     .map_err(|error| failure(format!("UI failed to start: {error}")))?;
     Ok(official.route(
         concat!("/console", "/"),
-        get(|| async { Redirect::permanent(CONSOLE_PATH) }),
+        get(|uri: axum::http::Uri| async move { console_slash_redirect(&uri) }),
     ))
+}
+
+/// `/console/` sent to the console's canonical address with its query kept:
+/// the router writes the Overview's links that way (`/console/?connect=env`,
+/// `/console/?dialog=snapshot`), so a reload or a pasted link opens the same
+/// view instead of a bare page.
+fn console_slash_redirect(uri: &axum::http::Uri) -> Redirect {
+    match uri.query() {
+        Some(query) if !query.is_empty() => Redirect::permanent(&format!("{CONSOLE_PATH}?{query}")),
+        _ => Redirect::permanent(CONSOLE_PATH),
+    }
 }
 
 async fn prepare_suite(config: &SuiteConfig) -> Result<PreparedSuite, SuiteRuntimeError> {
@@ -1150,6 +1169,11 @@ fn forward_auth_log(auth: &AuthRuntime, logging: &LoggingRuntime) {
 /// The log runtime with the `--debug-log` sink and the startup lines.
 fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeError> {
     let logging = LoggingRuntime::new();
+    // The console keeps every line as a structured entry, from the startup
+    // lines on; without the console (`--no-ui`) nothing is kept for it.
+    if config.ui_enabled {
+        firenook_console_front::ObserveConsole::install_log(&logging);
+    }
     if let Some(path) = &config.debug_log {
         logging.set_file_sink(path).map_err(|error| {
             failure(format!(
@@ -1159,7 +1183,7 @@ fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeE
         })?;
     }
     for message in startup_log_messages(config) {
-        logging.record("INFO", Some("hub"), message);
+        logging.emit(console_wiring::observe::configured_input(message));
     }
     for (level, message) in startup_banner(config) {
         if level == "WARN" {
@@ -1167,7 +1191,7 @@ fn prepare_logging(config: &SuiteConfig) -> Result<LoggingRuntime, SuiteRuntimeE
         } else {
             println!("firenook: {message}");
         }
-        logging.record(level, Some("hub"), message);
+        logging.emit(console_wiring::observe::banner_input(level, message));
     }
     Ok(logging)
 }
@@ -1205,16 +1229,25 @@ fn prepare_firestore(
         service.clone(),
     )
     .merge(webchannel_router(FirestoreBackend::new(service.clone())));
+    // The official clear route is logged for the console.
+    let firestore_http =
+        console_wiring::observe::firestore_cleared_layer(firestore_http, logging, store);
     let schema = SchemaIndex::attach(store, &config.project_id);
     let console = ConsoleFirestoreParts {
-        rest: rest_router(
-            store.clone(),
-            query_policy,
-            None,
-            firestore_rules,
-            triggers.clone(),
-            service.clone(),
-        ),
+        // Its evaluations, reads and writes, report the console as their
+        // origin, so a "View as" denial is told apart from one an app caused.
+        rest: {
+            let console_rules =
+                firestore_rules.with_origin(firenook_rules_runtime::DenialOrigin::Console);
+            rest_router(
+                store.clone(),
+                query_policy,
+                None,
+                console_rules.clone(),
+                triggers.clone(),
+                service.with_rules(console_rules),
+            )
+        },
         changes: ChangeFeed::attach(store),
         schema: schema.clone(),
         databases: DatabaseCatalog::new(
@@ -2639,6 +2672,28 @@ mod tests {
     use firenook_query_engine::{FieldFilter, FieldOperator, FieldPath, Filter, Query, QueryScope};
 
     use super::*;
+
+    #[test]
+    fn the_slashed_console_address_keeps_its_query() {
+        use axum::response::IntoResponse as _;
+        let location = |uri: &str| {
+            let response = console_slash_redirect(&uri.parse().expect("uri")).into_response();
+            assert_eq!(
+                response.status(),
+                axum::http::StatusCode::PERMANENT_REDIRECT
+            );
+            response.headers()[axum::http::header::LOCATION]
+                .to_str()
+                .expect("location")
+                .to_owned()
+        };
+        assert_eq!(location("/console/"), CONSOLE_PATH);
+        assert_eq!(location("/console/?"), CONSOLE_PATH);
+        assert_eq!(
+            location("/console/?connect=env&dialog=snapshot"),
+            format!("{CONSOLE_PATH}?connect=env&dialog=snapshot")
+        );
+    }
 
     #[test]
     fn suite_indexes_are_validated_but_queries_remain_emulator_permissive() {

@@ -506,7 +506,7 @@ defaults never in the URL):
 | `tasks.queue` | `{ project?, queue }` | `stale`, `finished` | none |
 | `tasks.attempts` | `{ project?, queue?, task? }` | `attempts` | replay |
 | `logs.entries` | `{ q?, from?, to? }` | `entries` | replay |
-| `overview` | `{}` | `snapshot` | compare |
+| `overview` | `{}` | `state` | compare |
 
 **Badges** (no badge outside this table):
 
@@ -3148,7 +3148,113 @@ is still in a closing popover or dialog is skipped, so wait for the overlay to
 go. `DataTable` draws only the rows on screen: count with the `MatchCount` or
 the footer. The design-system cards are `console/design-system/src/cards/messaging.tsx`.
 
-## Logs and the overview (on the way, `src/logs/`, `src/overview/`)
+## Logs and the overview (built, `src/logs/`, `src/overview/`)
+
+Where things are. Engine: `crates/console-front/src/observe/` (`log.rs` the
+console log, `fields.rs` the Logs filter fields, `logs.rs` the routes and the
+`logs.entries` topic, `overview.rs` the state and the engine details,
+`firestore_data.rs` Firestore's summary and clear, `snapshots.rs` the snapshot
+job and its file). Producers write `LogInput` (`suite-front`
+`console_input.rs`, kinds declared once in `kinds`); the suite's wiring is
+`suite-runtime/src/console_wiring/observe.rs`. Console: `src/logs/` (the page),
+`src/overview/` (`/`), `src/observe/` (only what those two share: the topic
+declarations, kinds, `LevelWord`, `SourceChip`, the level series and
+`LevelStrip`), the registry `src/lib/sections/logs.ts` (badge, routes, the
+suite-wide ⌘K actions, `linkToLogs`). Journeys: `e2e/logs.spec.ts`,
+`e2e/overview*.spec.ts`, helpers `e2e/support/observe.ts`, profile `observe`.
+
+- **The log ring.** One `ReplayRing` of 20,000 lines / 16 MiB, and a problem
+  ring of 2,000 / 2 MiB holding the same entries (shared, not copied); a
+  filter that can only match problems (`is:problem`, `level:error`, a problem
+  `kind:`) reads both — because a flood would otherwise erase the error it
+  was caused by. The last Functions reload is remembered outside the rings.
+  Everything a filter reads (the JSON, the search text, interned labels, the
+  problem, marker and internal flags) is computed once when the line
+  arrives; readers snapshot the rings and filter outside every lock.
+  Batching, lag recovery and resume are `replay_topic`'s; never write them
+  again for a feed.
+- **The open sequence.** `GET /logs/entries` (the newest 500) → subscribe
+  `logs.entries` with `after: page.tail`: no gap, no duplicate. Cursors carry
+  the epoch, so a restart can never resume at an old number (`entry=` from
+  another run says so); `older` is passed as `before`, `newer` as `after`.
+  Pages are fetched by the feed into its store, never cached as queries: a
+  cached page is a stale second copy of what the store holds.
+- **Paused freezes.** `FeedList pausedMode="freeze"`: nothing is appended
+  while paused; `PauseButton` and the pill count what arrived. Resume
+  replays up to 1,000 lines, or reopens at the newest page under "1,204
+  lines arrived while paused" — because trimming under a reader with
+  measured rows jumps the view, and an unbounded paused buffer grows without
+  limit. `FeedList` freezes the store in its own effect, which runs before
+  the page's: the feed writes a page while paused through
+  `resume(); push(); pause()`.
+- **Hidden tabs parse nothing.** The Logs subscription is given back at once
+  on `visibilitychange` (the channel's own release waits 20 s) and taken
+  again from its cursor when shown — because rAF does not run in a
+  background tab and a buffer would flush hundreds of thousands of lines in
+  one frame.
+- **Counts come from the engine.** `MatchCount`, the facets and the volume
+  strip are refetched (trailing, at most every 1.5 s, only while lines
+  arrive), never patched in the browser — because the ring evicts and a
+  patched count only ever grows.
+- **Attribution is compute's.** `functions_input` maps compute's `LogEvent`
+  to a `LogInput` and calls compute's structured-line parser; the legacy
+  feed stays one record per printed line with today's levels. A line that
+  names its function only in its terminal label (`functions[us-central1-hello]`)
+  is filtered by that label as a phrase — the source chip writes that, never
+  a `function:` that would match nothing.
+- **Kinds are the mechanism.** Badges, recent problems and facets are views
+  over entries and their totals: to make a line countable, emit it with a
+  kind through `LogInput` from the stream that owns the crate (declared once
+  in `kinds`, `LOG_KINDS` generated, a facet plural in `src/observe/kinds.ts`)
+  and declare a badge in the registry. A kind without a label fails a test.
+- **Every `Section::summary` is lock-free and O(1).** Never
+  `Snapshot::databases()` or `object_bytes()` on a status tick. Firestore's
+  figure walks this project's keys once (the blocking pool, first Overview
+  read) and then moves by each commit's delta; commits in other projects
+  move a separate count by revision, so an app writing to another project
+  id never inflates this project's card.
+- **Data actions are foundation jobs.** Never run a reset or an export inside
+  a request: a snapshot is a `suite.snapshot` job, a reset `/suite/clear`,
+  and the registry's one-`suite.*`-job rule keeps them apart (the next is
+  `409`). The snapshot's id is `job.result.snapshot` (128 random bits), not
+  the job id; the engine keeps the newest one for 10 minutes or until it is
+  downloaded, and only the tab that started it downloads it by itself.
+- **A reset is maintenance.** Firestore's clear commits through
+  `commit_maintenance`: listeners and the change feed see it, the trigger
+  observer does not (unless `runTriggers`), and open Firestore pages reload
+  once at its start and once at its end (`announce_rebuilt`; two in 100 ms
+  are one). Every new trigger-like `CommitObserver` must ignore
+  `CommitOrigin::Maintenance`.
+- **The data cards draw from what they are given.** `DataCards` takes the
+  status and a `SnapshotView`; `DataSection` keeps the hooks (the jobs topic)
+  and the three dialogs. Keep it that way: a design-system card cannot
+  subscribe, so a component that both subscribes and draws cannot be shown
+  there.
+- **Figures above 14 px.** The Overview's headline figures are 16 px mono
+  medium — the only figures above 14 px, because each is its card's
+  subject; their labels are 12 px sans. A card without figures says what its
+  section holds in one line (`cardHolds`), never a made-up zero.
+- **Import `@/observe/live` for its effect.** `import '@/observe/live'`, never
+  `import type` alone: the `declareTopic` calls would not run and `overview`
+  would resume as `replay` (one engine subscription per subscriber, no
+  state for a newcomer).
+
+Gotchas: a log line's refs are `EntityRef`s built with the foundation's
+constructors, never by hand, so their keys match the registry's `routes`; a
+refused collection-group list carries `firestore.collection` `**/orders`,
+which Firestore's route opens as the group. The console's REST mount is a
+separate `rest_router` with a `with_origin(Console)` rules handle: a new
+console data route must use it, or its denials count as the app's (and raise
+the Rules badge). The engine refuses a bad regex with `span` beside `error`;
+`logs/api.ts` reads it itself (`LogsRequestError`), because the client's
+`ApiError` keeps code, message and fix only. TanStack's default
+`parseSearch` JSON-parses every value, so a hand-typed `?q="Cart is empty"`
+arrives as words; links the console writes are encoded right. Pass
+`LogLine` a `SourceChip`, not a string: a string source truncates inside a
+flex box with no ellipsis. A value derived from `useSyncExternalStore` must
+take the store's version as an input, or the compiled hook keeps its first
+answer (`useNotices`). Kumo's `Button` turns `title` into a tooltip on a
+disabled button; that is how a data control says why it waits.
 
 ## Repository rules that apply here too
 

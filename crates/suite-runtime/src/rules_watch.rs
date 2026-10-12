@@ -235,15 +235,15 @@ pub(crate) fn spawn(
     let report: Report = Arc::new(move |service, level, message| {
         let line = format!("firenook {service}: {message}");
         match level {
-            Level::Info => {
-                println!("{line}");
-                sink.record("INFO", Some(service), message);
-            }
-            Level::Warn => {
-                eprintln!("{line}");
-                sink.record("WARN", Some(service), message);
-            }
+            Level::Info => println!("{line}"),
+            Level::Warn => eprintln!("{line}"),
         }
+        // The same record as always, with its kind for the console.
+        sink.emit(crate::console_wiring::observe::rules_file_input(
+            service,
+            level == Level::Warn,
+            message,
+        ));
     });
     match RulesWatcher::start(targets, Arc::clone(&report)) {
         Ok(watcher) => {

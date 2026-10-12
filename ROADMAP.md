@@ -937,10 +937,48 @@ served until every section has landed.
   the console's. Found and fixed on the way: dispatch responses were never
   read, refused queue registrations left only a log line, and the
   statistics windows grew until someone asked for them.
-- [ ] Logs.
-- [ ] Overview.
-- [ ] Parity checklist against the Google UI, then remove the archive and
-  `setup`.
+- [x] Logs: one stream for every service. The engine keeps the latest 20,000
+  lines as structured entries beside the official Logging feed, which is
+  unchanged, and keeps the last 2,000 errors, failures and denials longer,
+  so a flood of output does not erase the error it was caused by. The
+  console pages back through them, follows new lines and freezes the moment
+  you scroll, filters with the console's one filter language — level,
+  service, function, extension instance, codebase, kind, invocation, payload
+  field, words, regular expressions, and `-` to exclude any of them — with
+  live counts per value and a volume strip to pick a time from, opens any
+  line with the lines around it, and downloads exactly what the filter
+  shows. Notable engine events are lines of their own: a refused rules
+  decision with a link to why (told apart from the console's own "view as"
+  reads), rules applied from the console or reloaded from their file, a
+  rules file that stopped compiling, the official Firestore clear, a reset
+  from the console, background triggers paused and resumed. Found on the
+  way: the official feed writes levels in lower case and Firenook wrote them
+  in capitals, and the debug log dropped any line longer than 8 KiB.
+- [x] Overview: what runs, where, and whether it is healthy — each section's
+  address, its live figures once the section counts them, its current
+  problems, why a section is not running and the exact fix, the recent errors, failures and denials over
+  the last hour, the code to connect an app on every platform with the host
+  it sees, the engine's own configuration and what the console's buffers
+  cost. The suite's own warnings — an app writing to another project id,
+  background triggers left paused by a test harness — lead the page in the
+  same words every page uses; configuration the terminal prints once (a
+  project that is not a demo, a public listen address, emulators missing
+  while Functions run, diagnostics off) stays until it is dismissed.
+- [x] Snapshots and resets from the console, as engine jobs: download the
+  emulators' data as a standard export (the zip unpacks into a folder
+  `--import` reads), save one on the engine's machine, or reset a section's
+  data — each section's reset lands with its pages, Firestore's first — or
+  every resettable section at once. One data job runs at a time, shows its
+  progress in every tab, survives the tab that started it, and is cancelled
+  cleanly before the engine exits. A Firestore reset runs no Functions
+  triggers unless asked to — it commits as maintenance, which the trigger
+  observer ignores and every listener still sees — and open Firestore pages
+  reload once at its start and once at its end.
+- [ ] Parity checklist against the Google UI (`support/console-parity.md`):
+  every feature of the 1.15 bundle with the console screen that covers it.
+  When every row is ticked, remove the archive and `setup` (the root `/`
+  keeps serving the Google UI until then; its index is pinned by the
+  `ui-config-logging-and-websocket` fixture).
 - [ ] A write log, and perhaps an undo with it. Built and then taken out
   again, which is the useful part of the entry: the engine can keep a
   bounded window of commits with the document as it was and as it became,

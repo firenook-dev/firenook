@@ -12,8 +12,9 @@
 // mixed type in the grid.
 //
 // Pointing at a row brings up its strip — copy the path as JavaScript
-// writes it, copy the value — floating over the end of the line rather than
-// reserving it. Masked values (`mask`) are hidden until asked for, never
+// writes it, copy the value, and where the page can narrow its list to a
+// value (Logs' `payload.<path>:<value>`), filter by it — floating over the
+// end of the line rather than reserving it. Masked values (`mask`) are hidden until asked for, never
 // searched, and copied only once shown; references to things another
 // section shows (`refs`) are links into it.
 //
@@ -50,7 +51,7 @@ import {
   valueAt,
 } from './json-tree-model'
 import { MaskedValue } from './masked-value'
-import { CopyStripButton } from './strip-button'
+import { CopyStripButton, StripButton } from './strip-button'
 
 /** One line of the tree: the code editor's own line height. */
 export const TREE_ROW = 20
@@ -88,6 +89,12 @@ export interface JsonTreeProps {
   mask?: ((path: JsonPath) => boolean) | undefined
   /** Values that are references another section shows, drawn as links into it. */
   refs?: ((path: JsonPath, value: unknown) => EntityRef | undefined) | undefined
+  /**
+   * A leaf's strip offers "filter": the page narrows its list to what holds
+   * this value at this path (Logs adds `payload.<path>:<value>` to its
+   * filter, the Google UI's click-to-filter). Never offered on a masked value.
+   */
+  onFilter?: ((path: JsonPath, value: unknown) => void) | undefined
   ariaLabel: string
   testId?: string | undefined
 }
@@ -102,6 +109,7 @@ export function JsonTree({
   height,
   mask,
   refs,
+  onFilter,
   ariaLabel,
   testId,
 }: JsonTreeProps) {
@@ -164,6 +172,7 @@ export function JsonTree({
       height={height}
       mask={mask}
       refs={refs}
+      onFilter={onFilter}
       whole={whole}
       revealed={revealed}
       onToggle={toggle}
@@ -199,6 +208,7 @@ function TreeRows({
   height,
   mask,
   refs,
+  onFilter,
   whole,
   revealed,
   onToggle,
@@ -217,6 +227,7 @@ function TreeRows({
   height: number | 'fill' | undefined
   mask: ((path: JsonPath) => boolean) | undefined
   refs: ((path: JsonPath, value: unknown) => EntityRef | undefined) | undefined
+  onFilter: ((path: JsonPath, value: unknown) => void) | undefined
   whole: ReadonlySet<string>
   revealed: ReadonlySet<string>
   onToggle: (row: NodeRow, open?: boolean) => void
@@ -371,6 +382,11 @@ function TreeRows({
                 onReveal={onReveal}
                 onPick={() => setCursor(row.id)}
                 copyValue={row.kind === 'node' ? () => copyValue(row) : undefined}
+                filter={
+                  onFilter && row.kind === 'node' && row.container === null && !masked(row)
+                    ? () => onFilter(row.path, valueOf(row.path))
+                    : undefined
+                }
                 testId={testId}
               />
             </div>
@@ -419,6 +435,7 @@ function Row({
   onReveal,
   onPick,
   copyValue,
+  filter,
   testId,
 }: {
   row: JsonRow
@@ -438,6 +455,8 @@ function Row({
   onReveal: (key: string, open: boolean) => void
   onPick: () => void
   copyValue: (() => string | undefined) | undefined
+  /** The page's "filter by this value", for a leaf it can filter on. */
+  filter: (() => void) | undefined
   testId: string | undefined
 }) {
   const indent = INSET + row.depth * INDENT
@@ -614,6 +633,17 @@ function Row({
             >
               value
             </CopyStripButton>
+          )}
+          {filter && (
+            <StripButton
+              label={`Filter by ${path || 'this value'}`}
+              title="Show only what holds this value here"
+              tabIndex={-1}
+              onClick={filter}
+              testId={testId && `${testId}-filter`}
+            >
+              filter
+            </StripButton>
           )}
         </span>
       )}

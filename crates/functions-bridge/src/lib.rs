@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use firenook_core_store::{Change, CommitObservation, CommitObserver, Document, DocumentKey};
+use firenook_core_store::{
+    Change, CommitObservation, CommitObserver, CommitOrigin, Document, DocumentKey,
+};
 use firenook_grpc_front::google::firestore::v1 as firestore_proto;
 use prost::Message as _;
 use serde_json::{Value as JsonValue, json};
@@ -1337,7 +1339,14 @@ impl TriggerObserver {
 }
 
 impl CommitObserver for TriggerObserver {
+    /// Queues every trigger a client commit's changes match. Housekeeping
+    /// commits (`Store::commit_maintenance`, such as the console's reset)
+    /// fire no trigger: they are neither delivered nor counted as dropped
+    /// while background triggers are paused.
     fn committed(&self, observation: &CommitObservation) {
+        if observation.origin == CommitOrigin::Maintenance {
+            return;
+        }
         for (change_index, change) in observation.changes.iter().enumerate() {
             for trigger in self.registry.matching(change) {
                 if let Ok(request) = build_dispatch(&trigger, observation, change_index) {
@@ -2262,6 +2271,76 @@ mod tests {
                 fields: Fields::new(),
             }])
             .expect("disabled create");
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn housekeeping_commits_fire_no_trigger_and_count_no_drop() {
+        let (v1, v2) = registration_bodies();
+        let registry = TriggerRegistry::default();
+        registry
+            .register_v1(
+                "demo-fireside-phase4-trigger-oracle",
+                "us-central1-v1Created",
+                &v1,
+            )
+            .expect("v1 registration");
+        registry
+            .register_v2(
+                "demo-fireside-phase4-trigger-oracle",
+                "us-central1-v2Created",
+                &v2,
+            )
+            .expect("v2 registration");
+        let (observer, mut receiver) = TriggerObserver::channel(registry.clone());
+        let store = Store::default();
+        store.add_commit_observer(observer);
+        let database = DatabaseName::new("demo-fireside-phase4-trigger-oracle", "(default)")
+            .expect("database");
+        let create = |path: &str| Write::Create {
+            key: DocumentKey::new(database.clone(), path).expect("key"),
+            fields: Fields::new(),
+        };
+        store
+            .commit_maintenance(&[create("phase4Triggers/housekeeping")])
+            .expect("maintenance create");
+        assert!(receiver.try_recv().is_err());
+
+        // The same change from a client still dispatches to both triggers.
+        store
+            .commit(&[create("phase4Triggers/client")])
+            .expect("client create");
+        receiver.recv().await.expect("first dispatch");
+        receiver.recv().await.expect("second dispatch");
+        assert!(receiver.try_recv().is_err());
+
+        // Paused delivery counts what a client commit would have fired, and
+        // nothing for a housekeeping one.
+        registry.set_background_enabled(false);
+        store
+            .commit_maintenance(&[create("phase4Triggers/paused-housekeeping")])
+            .expect("paused maintenance create");
+        assert_eq!(
+            registry
+                .dropped()
+                .counts
+                .iter()
+                .map(|(_, count)| count)
+                .sum::<u64>(),
+            0
+        );
+        store
+            .commit(&[create("phase4Triggers/paused-client")])
+            .expect("paused client create");
+        assert!(
+            registry
+                .dropped()
+                .counts
+                .iter()
+                .map(|(_, count)| count)
+                .sum::<u64>()
+                > 0
+        );
         assert!(receiver.try_recv().is_err());
     }
 

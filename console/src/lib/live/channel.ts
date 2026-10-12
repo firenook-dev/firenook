@@ -67,14 +67,16 @@ export interface TopicListener {
 export interface SubscribeOptions {
   /**
    * The feed position the page's data already reaches: a list's
-   * `liveAfter`, read with its first page, or a snapshot's `liveCursor`,
-   * which the engine read in the same lock as the state the snapshot holds.
-   * The subscription resumes after it, so the engine replays only what is
-   * newer instead of the whole ring, nothing the page already has is sent
-   * again, and nothing it missed is lost while the GET and the subscription
-   * race. A cursor the engine no longer holds is answered with `reset`, as
-   * any resume is. Only the first offer uses it; the subscription's own
-   * cursor takes over from its first event. Feeds (`replay` topics) only:
+   * `liveAfter`, read with its first page, a feed's history read first
+   * (`GET /logs/entries` → `tail`), or a snapshot's `liveCursor`, which the
+   * engine read in the same lock as the state the snapshot holds. The
+   * subscription resumes after it, so the engine replays only what is newer
+   * instead of the whole ring, nothing the page already has is sent again,
+   * and nothing it missed is lost while the GET and the subscription race.
+   * A cursor the engine no longer holds is answered with `reset`, as any
+   * resume is. Only the first offer uses it; the subscription's own cursor
+   * takes over from its first event, and an engine restart drops it (the
+   * new run's cursors mean nothing old). Feeds (`replay` topics) only:
    * topics shared across the browser (`compare`, `none`) join the
    * subscription already held, and keep its cursor.
    */

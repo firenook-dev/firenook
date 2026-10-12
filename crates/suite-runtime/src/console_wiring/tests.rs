@@ -208,13 +208,17 @@ async fn the_console_reports_the_suites_reasons_and_late_sections_until_they_are
         ..selection("firestore,auth,functions,pubsub")
     };
     let logging = LoggingRuntime::new();
+    let triggers = TriggerRegistry::default();
+    let foreign = firenook_console_front::ForeignProjects::default();
     let parts = compute::parts(&config);
     let tasks = Late::pending("Cloud Tasks");
     let router = console_router(ConsoleServices {
         compute: Some(parts.clone()),
         tasks: Some(tasks.clone()),
         pubsub: Some(Late::pending("Pub/Sub")),
-        observe: observe::observe_console(&logging, &config),
+        observe: observe::observe_console(&HookContext::new(
+            &config, &logging, &foreign, &triggers,
+        )),
         absent: absent_reasons(&config, config.launch.as_ref(), true),
         unsupported: unsupported(config.launch.as_ref()),
         ..ConsoleServices::new(directory(), running())

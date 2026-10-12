@@ -39,6 +39,9 @@ tokio-stream = { workspace = true, features = ["net", "sync"] }
 tonic.workspace = true
 zip.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
 tokio-tungstenite = "0.30.0"

@@ -81,7 +81,7 @@ fn log_limits_cover_serialized_escaping_and_all_retained_records() {
     for encoded in history.iter().map(|entry| &entry.json) {
         assert!(encoded.len() <= logging::MAXIMUM_RECORD_BYTES);
         let record: LogRecord = serde_json::from_str(encoded).unwrap();
-        assert_eq!(record.level, "WARN");
+        assert_eq!(record.level, "warn");
         assert!(record.message.contains("omitted"));
         assert!(!encoded.contains("hidden label"));
     }
@@ -321,8 +321,8 @@ fn record_writes_todays_record_and_hands_the_console_the_same_line() {
     assert_eq!(
         official_records(&logging),
         [
-            r#"{"level":"INFO","data":{"metadata":{"emulator":{"name":"functions"},"message":"x"}},"timestamp":"<time>","message":"x"}"#,
-            r#"{"level":"WARN","data":{},"timestamp":"<time>","message":"m"}"#,
+            r#"{"level":"info","data":{"metadata":{"emulator":{"name":"functions"},"message":"x"}},"timestamp":"<time>","message":"x"}"#,
+            r#"{"level":"warn","data":{},"timestamp":"<time>","message":"m"}"#,
         ]
     );
     assert_eq!(
@@ -405,8 +405,8 @@ fn function_output_carries_the_keys_the_official_ui_reads() {
     assert_eq!(
         official_records(&logging),
         [
-            r#"{"level":"WARN","data":{"metadata":{"emulator":{"name":"functions"},"extension":{"instanceId":"resize"},"function":{"name":"ext-resize-generate"},"message":"extensions[resize]: resize failed"},"user":{"tags":["a"],"width":64}},"timestamp":"<time>","message":"extensions[resize]: resize failed"}"#,
-            r#"{"level":"INFO","data":{"metadata":{"emulator":{"name":"functions"},"message":"delivered"}},"timestamp":"<time>","message":"delivered"}"#,
+            r#"{"level":"warn","data":{"metadata":{"emulator":{"name":"functions"},"extension":{"instanceId":"resize"},"function":{"name":"ext-resize-generate"},"message":"extensions[resize]: resize failed"},"user":{"tags":["a"],"width":64}},"timestamp":"<time>","message":"extensions[resize]: resize failed"}"#,
+            r#"{"level":"info","data":{"metadata":{"emulator":{"name":"functions"},"message":"delivered"}},"timestamp":"<time>","message":"delivered"}"#,
         ]
     );
     let lines = console.take();
@@ -442,7 +442,8 @@ fn a_multi_line_functions_line_matches_todays_records_byte_for_byte() {
         ..LogInput::default()
     });
     // Captured from the suite before lines carried structure: one record
-    // and one debug-log line per printed line.
+    // and one debug-log line per printed line (the feed's levels since
+    // written in lower case, as the official feed writes them).
     let golden_records = include_str!("../tests/golden/multiline-console-log.ws.ndjson")
         .lines()
         .collect::<Vec<_>>();
@@ -502,4 +503,46 @@ fn without_a_console_sink_nothing_is_kept_for_the_console() {
     let lines = console.take();
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].message, "after");
+}
+
+#[test]
+fn levels_reach_the_feed_in_lower_case_as_the_official_feed_writes_them() {
+    let fixture: JsonValue = serde_json::from_str(include_str!(
+        "../../../conformance/fixtures/firebase-suite-v1/ui-config-logging-and-websocket/fixture.json"
+    ))
+    .unwrap();
+    let captured = fixture["websocketMessages"].as_array().unwrap();
+    assert_eq!(captured.len(), 3);
+    let log = DebugLog::new("lower-case");
+    let logging = LoggingRuntime::new();
+    logging.set_file_sink(&log.0).unwrap();
+    // Each captured record, written the way the suite's producers name
+    // their levels: `INFO`, `WARN`.
+    for message in captured {
+        let level = message["level"].as_str().unwrap().to_ascii_uppercase();
+        let emulator = message["data"]["metadata"]["emulator"]["name"].as_str();
+        logging.record(&level, emulator, message["message"].as_str().unwrap());
+    }
+    let written: Vec<JsonValue> = logging
+        .state
+        .history
+        .snapshot()
+        .iter()
+        .map(|entry| serde_json::from_str(&entry.json).unwrap())
+        .collect();
+    for (written, captured) in written.iter().zip(captured) {
+        let mut written = written.clone();
+        written["timestamp"] = captured["timestamp"].clone();
+        assert_eq!(&written, captured);
+    }
+    // The debug log keeps its own upper-case format.
+    let lines = log.lines();
+    assert!(lines[0].starts_with("[INFO] "), "{lines:?}");
+    assert!(lines[1].starts_with("[WARN] "), "{lines:?}");
+}
+
+#[test]
+fn the_official_feeds_history_has_a_name_of_its_own_in_the_memory_report() {
+    let logging = LoggingRuntime::new();
+    assert_eq!(logging.state.history.name(), "logging");
 }

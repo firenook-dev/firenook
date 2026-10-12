@@ -121,11 +121,12 @@ pub(crate) async fn before_finish(context: &HookContext<'_>) {
 /// Functions reloaded and routing was refreshed for the inventory.
 pub(crate) fn inventory_refreshed(_context: &HookContext<'_>, _inventory: &FunctionsInventory) {}
 
-/// The Functions runtime's log as the suite prints and records it: every
-/// event as it would have been before lines were attributed (a worker's
-/// `console` line at its stream's level, one per line; nothing for a
-/// console-only line), so the terminal and the official records do not
-/// change while the console reads the attributed events from the Monitor.
+/// The Functions runtime's log as the suite prints and records it. The
+/// terminal shows every event as it would have before lines were attributed
+/// (a worker's `console` line at its stream's level, one per line; nothing
+/// for a console-only line); observe's `functions_input` turns the
+/// attributed event into the console's entry and the official records,
+/// which keep today's text and level.
 pub(crate) fn functions_log(logging: &LoggingRuntime) -> LogSink {
     let logging = logging.clone();
     LogSink::new(move |event: LogEvent| {
@@ -136,8 +137,8 @@ pub(crate) fn functions_log(logging: &LoggingRuntime) -> LogSink {
                 "DEBUG" => {}
                 _ => println!("firenook {line}"),
             }
-            logging.record(&printed.level, Some("functions"), line);
         }
+        logging.emit(super::observe::functions_input(&event));
     })
 }
 

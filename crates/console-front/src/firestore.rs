@@ -21,12 +21,12 @@ use std::sync::{Arc, OnceLock};
 
 use axum::Router;
 use firenook_core_store::{
-    Change, CommitObservation, CommitObserver, DocumentKey, Store, Timestamp,
+    Change, CommitObservation, CommitObserver, CommitOrigin, DocumentKey, Store, Timestamp,
 };
 use firenook_suite_front::replay::random_epoch;
 use firenook_suite_front::{Cursor, Entry, ReplayRing, RingBudget, RingLimits};
 use futures_util::future::BoxFuture;
-use futures_util::stream::{self, StreamExt as _};
+use futures_util::stream::{self, BoxStream, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -39,6 +39,7 @@ use crate::jobs::JobHandle;
 use crate::live::badges::{BadgeKind, BadgeNoun};
 use crate::live::replay::{ReplayOptions, replay_topic};
 use crate::live::{LiveTopic, ResetReason, TopicEvent, TopicStream, topic_params};
+use crate::observe::firestore_data::FirestoreData;
 use crate::rules::RulesEditor;
 use crate::rules_eval::RulesEvaluator;
 use crate::schema::SchemaIndex;
@@ -147,9 +148,15 @@ pub enum ChangeKind {
     Deleted,
 }
 
-/// Records store commits for the `firestore.changes` topic.
+/// Records store commits for the `firestore.changes` topic. Housekeeping
+/// commits (a reset's batches) are not recorded: the reset announces the
+/// database rebuilt once when it starts and once when it ends instead, so an
+/// open page reloads twice rather than once per batch.
 #[derive(Clone)]
 pub struct ChangeFeed {
+    /// Firestore's figures for the Overview, kept from the same commits.
+    data: FirestoreData,
+    store: Store,
     /// Path-only batches, recorded from the first subscription on.
     recorded: ReplayRing<ChangeMeta>,
     recording: Arc<AtomicBool>,
@@ -171,6 +178,8 @@ enum Touched {
     Many(Arc<[(DocumentKey, ChangeKind)]>),
     /// A commit over [`KEYS_PER_BATCH`] documents: its collections.
     Collections(Arc<[(Arc<str>, String)]>),
+    /// The database was rewritten in bulk: whoever shows it reloads.
+    Rebuilt(Arc<str>),
 }
 
 impl Touched {
@@ -188,6 +197,7 @@ impl Touched {
                 .iter()
                 .map(|(database, path)| database.len() + path.len() + OVERHEAD)
                 .sum(),
+            Self::Rebuilt(database) => database.len() + OVERHEAD,
         }
     }
 }
@@ -218,6 +228,8 @@ impl ChangeFeed {
     #[must_use]
     pub fn attach(store: &Store) -> Self {
         let feed = Self {
+            data: FirestoreData::default(),
+            store: store.clone(),
             recorded: ReplayRing::new(
                 "firestore.changes",
                 CHANGE_RING,
@@ -233,6 +245,37 @@ impl ChangeFeed {
     /// The `firestore.changes` topic over this feed.
     pub(crate) fn topic(&self) -> ChangesTopic {
         ChangesTopic { feed: self.clone() }
+    }
+
+    /// Firestore's figures for the Overview, kept from this feed's commits.
+    pub(crate) const fn data(&self) -> &FirestoreData {
+        &self.data
+    }
+
+    /// The store this feed observes.
+    pub(crate) const fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// Tells every open view of `database` (and every view of all
+    /// databases) to reload what it shows: its documents were rewritten in
+    /// bulk by commits this feed does not record one by one (a reset). A
+    /// subscriber that resumes from a cursor before the announcement is
+    /// told too.
+    pub fn announce_rebuilt(&self, database: &str) {
+        if self.recording.load(Ordering::Relaxed) {
+            let touched = Touched::Rebuilt(Arc::from(database));
+            let weight = touched.weight();
+            self.recorded.push_weighted(
+                ChangeMeta {
+                    revision: self.store.revision().get(),
+                    commit_time: now(),
+                    touched,
+                },
+                no_json(),
+                weight,
+            );
+        }
     }
 
     /// Records one commit's keys, cheaply: one ring push under a short lock,
@@ -278,6 +321,10 @@ impl ChangeFeed {
 
 impl CommitObserver for ChangeFeed {
     fn committed(&self, observation: &CommitObservation) {
+        self.data.committed(observation);
+        if observation.origin == CommitOrigin::Maintenance {
+            return;
+        }
         // Nothing at all until a console first subscribes: a headless run
         // pays one relaxed load per commit.
         if self.recording.load(Ordering::Relaxed) {
@@ -325,6 +372,7 @@ impl ChangeScope {
             Touched::Collections(collections) => collections
                 .iter()
                 .any(|(database, path)| self.matches_collection(database, path)),
+            Touched::Rebuilt(database) => self.wants_database(database),
         }
     }
 }
@@ -409,6 +457,15 @@ impl LiveTopic for ChangesTopic {
                     reason: ResetReason::Lagged,
                     missed: None,
                 },
+                // A database rebuilt in bulk: reload what is shown.
+                TopicEvent::Event {
+                    name: "change",
+                    data,
+                    ..
+                } if Arc::ptr_eq(&data, &rebuilt()) => TopicEvent::Reset {
+                    reason: ResetReason::Rebuilt,
+                    missed: None,
+                },
                 other => other,
             },
         );
@@ -442,6 +499,25 @@ fn burst() -> Arc<str> {
     BURST.get_or_init(|| Arc::from("null")).clone()
 }
 
+/// The marker a window's shaper answers when its scope's database was
+/// rebuilt.
+fn rebuilt() -> Arc<str> {
+    static REBUILT: OnceLock<Arc<str>> = OnceLock::new();
+    REBUILT.get_or_init(|| Arc::from("null")).clone()
+}
+
+/// Now, as a store timestamp (the time a rebuild was announced).
+fn now() -> Timestamp {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    Timestamp::new(
+        i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX),
+        elapsed.subsec_nanos(),
+    )
+    .unwrap_or_else(|_| Timestamp::new(0, 0).expect("the epoch is a valid timestamp"))
+}
+
 /// One subscriber's window as one batch: every document its scope matches,
 /// once, with what happened to it across the window; the window's last
 /// revision and commit time. Past [`KEYS_PER_BATCH`] documents the batch
@@ -449,6 +525,11 @@ fn burst() -> Arc<str> {
 /// is a burst, and the subscriber reloads.
 fn merge(entries: &[Entry<ChangeMeta>], scope: &ChangeScope) -> Option<Arc<str>> {
     let last = &entries.last()?.meta;
+    if entries.iter().any(|entry| {
+        matches!(&entry.meta.touched, Touched::Rebuilt(database) if scope.wants_database(database))
+    }) {
+        return Some(rebuilt());
+    }
     let mut documents = MergedDocuments::default();
     let mut collections: BTreeSet<(&str, &str)> = BTreeSet::new();
     for entry in entries {
@@ -466,6 +547,7 @@ fn merge(entries: &[Entry<ChangeMeta>], scope: &ChangeScope) -> Option<Arc<str>>
                     }
                 }
             }
+            Touched::Rebuilt(_) => {}
         }
     }
     let documents = documents.order;
@@ -607,8 +689,12 @@ impl Section for FirestoreSection {
         )))
     }
 
+    fn status_changes(&self) -> Option<BoxStream<'static, ()>> {
+        Some(crate::observe::firestore_data::status_changes(&self.0))
+    }
+
     fn summary(&self, _id: &str) -> Option<SectionSummary> {
-        crate::observe::firestore_data::summary(&self.0)
+        Some(crate::observe::firestore_data::summary(&self.0))
     }
 
     fn clear(
@@ -720,6 +806,54 @@ mod tests {
 
     fn open(feed: &ChangeFeed, params: &Value, after: Option<&str>) -> TopicStream {
         feed.topic().open(params, after).expect("opened")
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn housekeeping_commits_send_no_batch_and_a_rebuild_resets_that_database_only() {
+        let store = Store::default();
+        let feed = ChangeFeed::attach(&store);
+        let mut every = open(&feed, &json!({}), None);
+        let mut default = open(&feed, &json!({ "database": "(default)" }), None);
+        let mut other = open(&feed, &json!({ "database": "other" }), None);
+        for stream in [&mut every, &mut default, &mut other] {
+            assert!(matches!(next(stream).await, Told::Tick(_)));
+        }
+        // A reset's batches: no change reaches anyone.
+        store
+            .commit_maintenance(&[set("users/a"), set("users/b")])
+            .expect("maintenance");
+        feed.announce_rebuilt("(default)");
+        assert!(matches!(
+            next(&mut every).await,
+            Told::Reset(ResetReason::Rebuilt, None)
+        ));
+        assert!(matches!(
+            next(&mut default).await,
+            Told::Reset(ResetReason::Rebuilt, None)
+        ));
+        // A client commit afterwards is a batch as always.
+        commit(&store, &[set_in("other", "x/1")]);
+        match next(&mut other).await {
+            Told::Change(_, batch) => {
+                assert_eq!(paths(&batch), [("x/1".to_owned(), "created".to_owned())]);
+            }
+            told => panic!("the other database hears only its own change, not {told:?}"),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_subscriber_resuming_from_before_a_rebuild_is_told_to_reload() {
+        let store = Store::default();
+        let feed = ChangeFeed::attach(&store);
+        let cursor = position(&feed, json!({ "database": "(default)" })).await;
+        feed.announce_rebuilt("(default)");
+        let mut resumed = open(&feed, &json!({ "database": "(default)" }), Some(&cursor));
+        assert!(matches!(
+            next(&mut resumed).await,
+            Told::Reset(ResetReason::Rebuilt, None)
+        ));
+        let mut elsewhere = open(&feed, &json!({ "database": "other" }), Some(&cursor));
+        assert!(matches!(next(&mut elsewhere).await, Told::Tick(_)));
     }
 
     /// Subscribes, takes the position it is given, and lets it go: what a

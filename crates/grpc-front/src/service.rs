@@ -191,6 +191,18 @@ impl FirestoreService {
         }
     }
 
+    /// The same service (its transactions, read pool, commit notifications
+    /// and disk write queue are shared) evaluating requests with `rules`:
+    /// the console's REST mount uses a handle of the rules runtime that
+    /// reports its denials as the console's own.
+    #[must_use]
+    pub fn with_rules(&self, rules: RulesRuntime) -> Self {
+        Self {
+            rules,
+            ..self.clone()
+        }
+    }
+
     /// Runs a CPU-bound read on the service's bounded read pool; see
     /// [`ReadPool`]. The REST front shares the pool through this method.
     pub async fn run_read<T, F>(&self, operation: F) -> Result<T, Status>
@@ -2434,6 +2446,29 @@ mod tests {
     };
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    #[test]
+    fn a_service_with_other_rules_shares_its_transactions_and_reads() {
+        let rules = RulesRuntime::default();
+        let service = FirestoreService::new_with_query_policy_and_rules(
+            Store::default(),
+            QueryPolicy::new(DatabaseEdition::Standard),
+            rules.clone(),
+        );
+        let console =
+            service.with_rules(rules.with_origin(firenook_rules_runtime::DenialOrigin::Console));
+        assert_eq!(
+            console.rules.origin(),
+            firenook_rules_runtime::DenialOrigin::Console
+        );
+        assert_eq!(
+            service.rules.origin(),
+            firenook_rules_runtime::DenialOrigin::App
+        );
+        assert!(Arc::ptr_eq(&service.transactions, &console.transactions));
+        assert!(Arc::ptr_eq(&service.next_id, &console.next_id));
+        assert!(Arc::ptr_eq(&service.reads.permits, &console.reads.permits));
+    }
 
     #[tokio::test]
     async fn standard_edition_rejects_pipeline_execution() {
