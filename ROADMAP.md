@@ -739,8 +739,54 @@ served until every section has landed.
 - [ ] Functions.
 - [ ] Extensions.
 - [ ] Eventarc.
-- [ ] Pub/Sub.
-- [ ] Cloud Tasks.
+- [x] Pub/Sub. Topics with their subscriptions and the functions they
+  trigger, in a tree that also flags topics written under another project
+  id than the emulator's, and publishes the emulator refused because the
+  topic does not exist — with the topic you probably meant. The messages a
+  topic received stay readable (the engine keeps the newest 5,000 of each
+  topic and 16 MiB, or the topic's own retention window up to 100,000),
+  filtered by key, id, text or the same filter expression a subscription
+  takes, exported as NDJSON or JSON and published again, ticked rows or a
+  file at a time. Each message shows, for every subscription and function,
+  what became of it: waiting, leased, acknowledged, dead-lettered, filtered
+  out, queued for a function, delivered, or failed with the handler's error;
+  a topic's Deliveries list every function's outcome with the exact request
+  it received, and a function can be run again with one message alone. A
+  composer publishes JSON, text, bytes or Avro with attributes and an
+  ordering key, up to a thousand at a time with templated ids, or on an
+  interval that keeps going when the tab is closed, and checks data against
+  the topic's schema as it is typed. A backlog can be read in the order the
+  next pull takes it, without leasing it, or pulled, acked, nacked and
+  extended; subscriptions replay to a time or a snapshot, push subscriptions
+  show every outcome with its count, dead letters have their own list, and
+  filters say where they fail to parse. A whole setup — topics,
+  subscriptions, schemas — exports to a file and imports into another run
+  or project. Schemas have an editor with revisions, diffs, rollback and a
+  message tester. Scheduled functions show their next runs and their runs'
+  outcomes, run now, pause, and run in the time zone they declare. Found and
+  fixed on the way: every published message and every acknowledged one was
+  kept for the life of the process, and the acknowledged ones were visited
+  by the 50 ms timer; every pull sorted the whole backlog; dead-lettered
+  messages never reached a function on the dead-letter topic, whose
+  subscription then grew for ever; cron schedules fired at UTC hours
+  whatever zone they declared, and a daily schedule with a zone never fired;
+  the Pub/Sub timer outlived the suite.
+- [x] Cloud Tasks. Every queue with its configuration in force and where each
+  value came from, live counters (pending, held, running, in backoff, slots
+  and a token bucket that refills on screen), every pending and running
+  task with its first and latest attempts, the handler's responses and the
+  next retry, with the emulator's `maxAttempts` + 1 said where the figure
+  shows, every attempt of a queue as it happens, and the last thousand
+  finished tasks with their outcome. Tasks can be enqueued by hand exactly
+  as the Admin SDK sends them, run now, stopped, deleted (auto-named ones
+  too, which the API cannot), re-enqueued from history; queues pause,
+  resume, purge, and can hold scheduled tasks until their time. Refused
+  enqueues are listed with where the queue really is, and a queue
+  re-registered because its options changed says what it dropped instead
+  of losing it silently. The Tasks port is unchanged: these controls are
+  the console's. Found and fixed on the way: dispatch responses were never
+  read, refused queue registrations left only a log line, and the
+  statistics windows grew until someone asked for them.
 - [ ] Logs.
 - [ ] Overview.
 - [ ] Parity checklist against the Google UI, then remove the archive and

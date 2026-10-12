@@ -17,8 +17,8 @@ this repository. A passing fixture is evidence for its recorded scope only.
 | auth-front / storage-front | Local Auth APIs/browser helpers and Storage metadata/byte APIs |
 | functions-bridge / suite-runtime | Trigger dispatch, owned child lifecycle and complete-suite startup/shutdown |
 | functions-runtime / extensions | Owned Functions runtime (discovery, Node workers, routing, delivery, reload, blocking Auth functions) and the Extensions loader (parameters, specs, registry, source cache, vendoring) |
-| pubsub-front | Pub/Sub broker (leases, redelivery, dead-lettering, ordering keys, filters, seek/snapshots, push, Avro schemas) behind the `google.pubsub.v1` gRPC services and the HTTP/JSON transcoder on one port; function delivery and `onSchedule` ticks |
-| tasks-front | Cloud Tasks emulator: queue registry (one queue per `onTaskDispatched` export, plus caller registration), the official four routes with Express-shaped answers, the dispatcher (token bucket, dispatch slots, `X-CloudTasks-*` headers, retry ladder, dispatch deadline) and `/queueStats` |
+| pubsub-front | Pub/Sub broker (leases, redelivery, dead-lettering, ordering keys, filters, seek/snapshots, push, Avro schemas) behind the `google.pubsub.v1` gRPC services and the HTTP/JSON transcoder on one port; function delivery and `onSchedule` ticks (the scheduler and its `ScheduleControl`); the console's history rings, read models and controls |
+| tasks-front | Cloud Tasks emulator: queue registry (one queue per `onTaskDispatched` export, plus caller registration), the official four routes with Express-shaped answers, the dispatcher (token bucket, dispatch slots, `X-CloudTasks-*` headers, retry ladder, dispatch deadline) and `/queueStats`; the console's attempt logs, history, read models and controls |
 | suite-front | Hub/UI/control adapters |
 | console-front | The Console API and the embedded console (the emulator's own client-only UI, built from `console/`), mounted under `/console` on the UI port |
 | capture-proxy | Synthetic oracle traffic capture with credential redaction; not an application gateway |
@@ -617,7 +617,8 @@ emulator), replayed by `npm run replay:functions:runtime`:
   and path-pattern v2 filters, `withAuthContext` variants, `us-central1`
   location), fans Auth and Storage multicasts out to matching records,
   serves Pub/Sub and schedules through `pubsub-front` (generation-keyed
-  topics, implicit `emulator-sub-*` subscriptions, UTC cron), and answers
+  topics, implicit `emulator-sub-*` subscriptions, cron and daily schedules
+  in their declared zone with the IANA database bundled), and answers
   blocking Auth functions from `auth-front` with the official JWT payload
   and `BLOCKING_FUNCTION_ERROR_RESPONSE` wording.
 - **Lifecycle**: a debounced source watcher reloads the codebase in place
@@ -660,6 +661,86 @@ CLI's own OAuth client with `FIREBASE_TOKEN` or the CLI's stored login;
 that credential never reaches a worker's environment. `firenook ext:vendor`
 copies resolved sources into the project and records how unpinned refs
 resolved, which is the recommended path for CI.
+
+## Pub/Sub and Cloud Tasks for the console
+
+The console reads both emulators from the engines' own models; nothing it
+shows is rebuilt in the browser, and nothing it controls is reachable from a
+client protocol.
+
+**pubsub-front.** Every change of a tracked message goes through one
+transition that keeps the subscription's counts and its indexes in step:
+available messages in delivery order, leases and pushes by due time, ack ids
+and leased ordering keys. A pull walks the available index and stops at its
+maximum, an ack is one lookup, and the 50 ms timer visits only due leases and
+pushes. The broker has two watches: `changed` is deliverability, which wakes
+waiting pulls, and `console` is the revision every console view reads; a
+console-only change on `changed` would make every waiting pull spin. Each
+topic keeps a history ring of what it received, each entry with the outcome
+every subscription gave it when it let go (acknowledged, dead-lettered,
+drained by the functions consumer) and the functions it was handed to, so a
+message's marks stay answerable after the backlog moved on. The read models
+(`broker::inspect`) page the ring, a backlog in the order the next pull takes
+it and the deliveries by cursor; a search that reads data examines at most
+20,000 messages or 64 MiB per request, and the last 8 searches are cached.
+`console_delta` reports counters, moved backlog rows and new fanouts since a
+cursor, with a ring of 1,000 changed keys per scope; a cursor past it gets a
+reset. The scheduler is keyed by function id and is the one compute's Run now
+calls through `ScheduleControl`: run now, pause, the next five ticks, the
+first run and the nineteen latest. Cron, daily, weekly and window cadences
+evaluate in the declared zone with jiff and its bundled IANA database
+(tzdata 2026e, `tzdb-bundle-always`, so a host without `/usr/share/zoneinfo`
+fires at the same instants); a civil time a daylight-saving change skips fires
+right after the gap and a repeated one fires once, at its first occurrence.
+Intervals ignore the zone, and a zone the database does not know leaves the
+schedule "not automatic" with that reason.
+
+**tasks-front.** Each task has a runtime-wide id, its enqueue time and origin
+(the wire or the console). A slot keeps an attempt log: the first attempt, the
+nine latest and the count between, each with the first KiB of the response
+(read for at most 500 ms, after the outcome is written). Beside each queue
+the runtime keeps its configuration's sources, the console's controls, its
+registrations and the last replacement, and a history of finished tasks that
+survives re-registration (a replaced queue's waiting tasks go to it as
+`replaced`). The controls — pause, hold scheduled tasks, run now, stop
+retrying, delete by id, purge, enqueue again — never touch the Tasks port; a
+paused queue or one holding only future tasks is idle, so the ticker sleeps
+instead of polling every 5 ms. The retry plan the console shows runs through
+the dispatcher's own `updateMetadata` and `shouldStopRetrying`, so it cannot
+disagree with what happens.
+
+**Memory.** Everything the console makes the engines keep is bounded:
+
+| What | Bound |
+| --- | --- |
+| A topic's history ring | the newest 5,000 messages and 16 MiB, or with topic retention its window up to 100,000 and 256 MiB; 512 MiB across topics, taken first from topics without retention (never below 100 each) |
+| Retained acknowledged messages | the subscription's retention, at most 100,000 per subscription, pruned each second |
+| Other acknowledged messages | none once nothing can bring them back (below) |
+| Push streaks (console ring) | 20,000 streaks, 16 MiB |
+| Recent fanouts per topic, changed keys per scope | 1,000 each |
+| Schedule runs | the first and the nineteen latest per schedule |
+| Refused requests (Pub/Sub, Tasks) | 200 each, coalesced with a count |
+| Tasks history | 1,000 tasks and 32 MiB per queue, 256 MiB in all |
+| Task attempt log | the first and the nine latest, 1 KiB of response each |
+| Attempts (console ring) | 10,000 attempts, 8 MiB |
+| Tasks statistics windows | five minutes, trimmed each second |
+
+The unacknowledged backlog is not bounded (it is the data, as on the official
+emulator), and reserved task names stay until a clear, as the official
+emulator keeps them.
+
+**Deliberate divergences**, each following production or the official
+architecture where the recorded corpus is silent: an acknowledged message is
+dropped once nothing can bring it back — the subscription retains acknowledged
+messages, a snapshot lists or predates it, or another subscription of the
+topic still holds it — so turning `retainAckedMessages` on later does not
+revive earlier acknowledgements for a seek, where the official emulator kept
+every message for the life of the process; topic retention seeds a new
+subscription from the bounded history ring, so a topic whose retention was set
+later seeds only what the ring kept while it was off; and a message forwarded
+to a dead-letter topic reaches the functions listening there (and drains their
+`emulator-sub-*` subscription), as any publish does, until a capture of the
+official emulator confirms or corrects it.
 
 ## Distribution and trust boundaries
 
