@@ -43,9 +43,14 @@ pub(crate) struct LevelWalk<'a> {
     bucket_len: usize,
     prefix_len: usize,
     delimiter: Option<&'a str>,
-    /// The key of the group just emitted (`bucket\0<group>`), while keys
-    /// continuing it with [`LAST_SCALAR`] may remain after the seek.
+    /// The key of the last group emitted (`bucket\0<group>`), while keys
+    /// continuing it with [`LAST_SCALAR`] may remain after the seek. It is
+    /// never reset: a group's keys are contiguous, so once a key past them
+    /// is seen no later key starts with it, and keeping the buffer saves an
+    /// allocation per group.
     group: Option<String>,
+    /// The seek key, reused from group to group.
+    seek: String,
 }
 
 impl<'a> LevelWalk<'a> {
@@ -70,6 +75,7 @@ impl<'a> LevelWalk<'a> {
             scope,
             delimiter,
             group: None,
+            seek: String::new(),
         }
     }
 }
@@ -94,6 +100,7 @@ impl<'a> LevelWalk<'a> {
             prefix_len: prefix.len(),
             delimiter,
             group,
+            seek: String::new(),
         }
     }
 }
@@ -119,11 +126,10 @@ impl<'a> Iterator for LevelWalk<'a> {
                 self.range = btree_map::Range::default();
                 return None;
             }
-            if let Some(group) = &self.group {
-                if key.starts_with(group.as_str()) {
-                    continue;
-                }
-                self.group = None;
+            if let Some(group) = &self.group
+                && key.starts_with(group.as_str())
+            {
+                continue;
             }
             // The key is `bucket\0name`; slicing it keeps the borrow on the
             // map rather than on this walk.
@@ -133,13 +139,19 @@ impl<'a> Iterator for LevelWalk<'a> {
             };
             let group = &name[..end];
             let group_key = &key[..self.bucket_len + 1 + end];
-            let mut seek = String::with_capacity(group_key.len() + LAST_SCALAR.len_utf8());
-            seek.push_str(group_key);
-            seek.push(LAST_SCALAR);
+            self.seek.clear();
+            self.seek.push_str(group_key);
+            self.seek.push(LAST_SCALAR);
             self.range = self
                 .objects
-                .range::<str, _>((Bound::Excluded(seek.as_str()), Bound::Unbounded));
-            self.group = Some(group_key.to_owned());
+                .range::<str, _>((Bound::Excluded(self.seek.as_str()), Bound::Unbounded));
+            match &mut self.group {
+                Some(last) => {
+                    last.clear();
+                    last.push_str(group_key);
+                }
+                None => self.group = Some(group_key.to_owned()),
+            }
             return Some(LevelEntry::Group(group));
         }
     }
@@ -182,6 +194,11 @@ pub(crate) struct ObjectListPage<'a> {
 /// prefix of the level on every page, sorted; the direct items from
 /// `page_token` when it names one (from the first item otherwise); and the
 /// name of the item past `maximum` as the next token.
+///
+/// One walk of the level gathers both: groups are seeked past, so a level
+/// of 50,000 folders costs 50,000 seeks once rather than twice. Without a
+/// delimiter there are no groups, so the walk starts at the token and stops
+/// at the item past the page.
 pub(crate) fn list_objects<'a>(
     data: &'a StorageData,
     bucket: &str,
@@ -191,12 +208,6 @@ pub(crate) fn list_objects<'a>(
     maximum: usize,
 ) -> ObjectListPage<'a> {
     let objects = &data.objects;
-    let prefixes = LevelWalk::new(objects, bucket, prefix, delimiter, None)
-        .filter_map(|entry| match entry {
-            LevelEntry::Group(group) => Some(group.to_owned()),
-            LevelEntry::Item(_) => None,
-        })
-        .collect();
     // A token resumes only when it names a direct item of this level; any
     // other value starts from the first item, as the official emulator does.
     let start = page_token.filter(|token| {
@@ -206,17 +217,29 @@ pub(crate) fn list_objects<'a>(
                 .is_some_and(|object| object.bucket == bucket)
             && group_end(token, prefix.len(), delimiter).is_none()
     });
+    let walk_from = if delimiter.is_none() { start } else { None };
+    let mut prefixes = Vec::new();
     let mut items = Vec::with_capacity(maximum.min(1_000));
     let mut next_page_token = None;
-    for entry in LevelWalk::new(objects, bucket, prefix, delimiter, start) {
-        let LevelEntry::Item(object) = entry else {
-            continue;
-        };
-        if items.len() == maximum {
-            next_page_token = Some(object.name.clone());
-            break;
+    for entry in LevelWalk::new(objects, bucket, prefix, delimiter, walk_from) {
+        match entry {
+            LevelEntry::Group(group) => prefixes.push(group.to_owned()),
+            LevelEntry::Item(object) => {
+                if next_page_token.is_some()
+                    || start.is_some_and(|start| object.name.as_str() < start)
+                {
+                    continue;
+                }
+                if items.len() == maximum {
+                    next_page_token = Some(object.name.clone());
+                    if delimiter.is_none() {
+                        break;
+                    }
+                    continue;
+                }
+                items.push(object);
+            }
         }
-        items.push(object);
     }
     ObjectListPage {
         items,
@@ -413,6 +436,7 @@ fn files_forward<'a>(
         scope,
         delimiter: Some("/"),
         group: None,
+        seek: String::new(),
     };
     walk.filter_map(move |entry| match entry {
         LevelEntry::Item(object) if !(object.name == prefix && is_marker(object)) => Some(object),
@@ -529,6 +553,7 @@ fn folders_forward<'a>(
             seek.pop();
             seek
         }),
+        seek: String::new(),
     };
     Box::new(walk.filter_map(move |entry| match entry {
         LevelEntry::Group(group) => Some(Walked::Folder {
