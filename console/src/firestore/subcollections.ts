@@ -18,6 +18,7 @@ import { API_BASE, ApiError } from '@/api/client'
 import type { Subcollection } from '@/api/generated/Subcollection'
 import type { SubcollectionsSnapshot } from '@/api/generated/SubcollectionsSnapshot'
 import { FS } from './queries'
+import { type FirestoreScope, countQuery, keySlot, listCollectionIds } from './rest'
 
 export type { Subcollection }
 
@@ -117,3 +118,34 @@ export const subcollectionsQuery = (database: string, path: string) =>
     staleTime: 60_000,
     retry: false,
   })
+
+/**
+ * Another project's subcollections of one document (`?project=`): the
+ * engine's index covers the emulator's own project only, so they are read
+ * over REST as the owner, each counted.
+ */
+export const foreignSubcollectionsQuery = (ownerScope: FirestoreScope, path: string) =>
+  queryOptions({
+    queryKey: [FS, keySlot(ownerScope), 'subcollections', path],
+    queryFn: async (): Promise<Subcollection[]> => {
+      const ids = await listCollectionIds(ownerScope, path)
+      return Promise.all(
+        ids.map(async (id) => ({
+          id,
+          documents: (await countQuery(ownerScope, path, { from: [{ collectionId: id }] })).count,
+        })),
+      )
+    },
+    staleTime: 60_000,
+    retry: false,
+  })
+
+/** The subcollections the workbench reads: batched from the engine, or another project's over REST. */
+export function workbenchSubcollectionsQuery(
+  workbench: { database: string; foreign: boolean; ownerScope: FirestoreScope },
+  path: string,
+) {
+  return workbench.foreign
+    ? foreignSubcollectionsQuery(workbench.ownerScope, path)
+    : subcollectionsQuery(workbench.database, path)
+}

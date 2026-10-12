@@ -15,10 +15,10 @@
 //!
 //! The text can change under the console too: the rules file is watched,
 //! another tab saves, a test reloads the project's rules. So the editor also
-//! answers what governed a database over time (`/rules/history`), streams
+//! answers what governed a database over time (`/rules/history`), tells of
 //! every change (the live channel's `firestore.rules` topic), says why the
-//! file on disk is not what is in
-//! force when it did not compile, and checks a draft without installing it
+//! file on disk is not what is in force when it did not compile, and checks
+//! a draft without installing it
 //! (`/rules/check`): compiler errors, lints, an outline, and which match
 //! blocks govern each collection the data holds.
 //!
@@ -31,8 +31,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{FromRef, Query, State};
-use axum::response::IntoResponse;
+use axum::extract::{Query, State};
 use firenook_core_store::DatabaseName;
 use firenook_rules_engine::{
     Diagnostic, DiagnosticSeverity, GoverningMap, LintCode, RequestOperation,
@@ -50,7 +49,7 @@ use crate::blocking::blocking;
 use crate::live::badges::{BadgeHandle, BadgeTone};
 use crate::live::{LiveTopic, TopicEvent, TopicStream, topic_params};
 use crate::schema::{SchemaIndex, SchemaNode};
-use crate::sse::{Shutdown, json_event, sse_response};
+use crate::sse::Shutdown;
 
 /// The largest ruleset the console will accept, matching the engine's own
 /// compiler limit closely enough to refuse early with a clear message.
@@ -363,7 +362,7 @@ pub struct RulesVersion {
     pub installed_at: String,
 }
 
-/// What governs a database changed (`event: rules` on `/rules/live`).
+/// What governs a database changed (`rules` on the `firestore.rules` topic).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RulesChanged {
@@ -374,7 +373,8 @@ pub struct RulesChanged {
     pub origin: RulesOrigin,
 }
 
-/// The rules file watcher finished a pass (`event: file` on `/rules/live`).
+/// The rules file watcher finished a pass (`file` on the `firestore.rules`
+/// topic).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RulesFileStatus {
@@ -392,27 +392,6 @@ pub struct RulesEditor {
     files: Arc<BTreeMap<String, PathBuf>>,
     /// The console's schema index, which a check maps the rules against.
     schema: Option<SchemaIndex>,
-}
-
-/// The editor's routes' state: the editor, and the stop signal its live
-/// stream ends on. The signal is required to build the routes at all, so no
-/// stream can be opened that never ends.
-#[derive(Clone)]
-struct RulesRoutes {
-    editor: RulesEditor,
-    shutdown: Shutdown,
-}
-
-impl FromRef<RulesRoutes> for RulesEditor {
-    fn from_ref(routes: &RulesRoutes) -> Self {
-        routes.editor.clone()
-    }
-}
-
-impl FromRef<RulesRoutes> for Shutdown {
-    fn from_ref(routes: &RulesRoutes) -> Self {
-        routes.shutdown.clone()
-    }
 }
 
 impl RulesEditor {
@@ -493,18 +472,14 @@ impl RulesEditor {
         });
     }
 
-    /// The editor's routes. Live streams end when `shutdown` fires, so a
-    /// console tab never holds the listener's graceful shutdown open.
-    pub(crate) fn router(self, shutdown: Shutdown) -> axum::Router {
+    /// The editor's routes. None of them streams: what changes is told on
+    /// the live channel's `firestore.rules` topic ([`Self::topic`]).
+    pub(crate) fn router(self) -> axum::Router {
         axum::Router::new()
             .route("/rules", axum::routing::get(read_rules).put(write_rules))
             .route("/rules/check", axum::routing::post(check_rules))
             .route("/rules/history", axum::routing::get(rules_history))
-            .route("/rules/live", axum::routing::get(rules_live))
-            .with_state(RulesRoutes {
-                editor: self,
-                shutdown,
-            })
+            .with_state(self)
     }
 
     fn database(&self, database_id: &str) -> Result<DatabaseName, ApiError> {
@@ -849,35 +824,6 @@ async fn rules_history(
     ))
 }
 
-/// `GET /rules/live?database=(default)`: a server-sent event stream. `hello`
-/// once; `rules` whenever what governs the database changes, from any
-/// origin; `file` after every rules file check for it. Ends when the suite
-/// stops, like `/changes`.
-async fn rules_live(
-    State(editor): State<RulesEditor>,
-    State(shutdown): State<Shutdown>,
-    Query(request): Query<ReadRules>,
-) -> Result<impl IntoResponse, ApiError> {
-    let database_id = request.database.unwrap_or_else(|| "(default)".to_owned());
-    let database = editor.database(&database_id)?;
-    // Subscribe before reading what is in force, so no change can fall
-    // between the two; a change already read is then not repeated.
-    let receiver = editor.rules.subscribe();
-    let seen = editor
-        .rules
-        .current_version(&database)
-        .map(|version| version.hash);
-    let first = stream::once(async { json_event("hello", &serde_json::json!({})) });
-    let mut news = RulesNews::new(editor.rules.clone(), database, database_id, seen);
-    let rest = BroadcastStream::new(receiver).flat_map(move |item| {
-        stream::iter(news.after(&item).into_iter().map(|told| match told {
-            Told::Rules(changed) => json_event("rules", &changed),
-            Told::File(status) => json_event("file", &status),
-        }))
-    });
-    Ok(sse_response(first.chain(rest), shutdown))
-}
-
 /// What a rules subscriber is told.
 enum Told {
     Rules(RulesChanged),
@@ -1044,7 +990,6 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use firenook_core_store::{DocumentKey, Fields, Store, Write};
-    use futures_util::Stream;
     use tokio::sync::watch;
     use tower::ServiceExt as _;
 
@@ -1099,11 +1044,7 @@ mod tests {
         editor: RulesEditor,
         request: Request<Body>,
     ) -> (StatusCode, serde_json::Value) {
-        let response = editor
-            .router(crate::tests::running())
-            .oneshot(request)
-            .await
-            .expect("response");
+        let response = editor.router().oneshot(request).await.expect("response");
         let status = response.status();
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1303,7 +1244,6 @@ mod tests {
         for request_to in [
             get("/rules?database=has/a/slash"),
             get("/rules/history?database=has/a/slash"),
-            get("/rules/live?database=has/a/slash"),
             check(&serde_json::json!({ "database": "has/a/slash", "source": allow(true) })),
         ] {
             let (status, _) = request(editor.clone(), request_to).await;
@@ -1478,22 +1418,6 @@ mod tests {
         );
     }
 
-    /// Reads the stream until `pattern` appears or five seconds pass.
-    async fn read_until(
-        body: &mut (impl Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin),
-        seen: &mut String,
-        pattern: &str,
-    ) {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !seen.contains(pattern) {
-                let chunk = body.next().await.expect("a chunk").expect("bytes");
-                seen.push_str(&String::from_utf8_lossy(&chunk));
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("{pattern:?} never arrived: {seen}"));
-    }
-
     /// What the `firestore.rules` topic says next: name, cursor, data.
     async fn told(stream: &mut TopicStream) -> (&'static str, String, serde_json::Value) {
         match tokio::time::timeout(Duration::from_secs(5), stream.next())
@@ -1612,52 +1536,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_live_stream_tells_of_every_change_and_ends_with_the_suite() {
+    async fn a_reload_that_now_governs_the_database_is_told_with_its_origin() {
         let (runtime, editor) = editor(None);
-        let (stop, shutdown) = watch::channel(false);
-        let response = editor
-            .clone()
-            .router(Shutdown::new(shutdown))
-            .oneshot(get("/rules/live?database=(default)"))
-            .await
-            .expect("response");
-        assert_eq!(response.status(), StatusCode::OK);
-        let mut body = response.into_body().into_data_stream();
-        let mut seen = String::new();
-        read_until(&mut body, &mut seen, "event: hello").await;
-        assert!(seen.contains("data: {}"), "{seen}");
-
-        let (status, _) = request(editor, put(&allow(true), false)).await;
-        assert_eq!(status, StatusCode::OK);
-        read_until(&mut body, &mut seen, "event: rules").await;
-        let hash = firenook_rules_runtime::source_hash(&allow(true));
-        read_until(&mut body, &mut seen, &hash).await;
-        assert!(seen.contains(r#""origin":"console""#), "{seen}");
-
-        // Another database's install says nothing here; a reload that now
-        // governs this one does.
-        let other = DatabaseName::new(PROJECT, "other").expect("database");
+        let mut stream = editor
+            .topic()
+            .open(&serde_json::json!({ "database": "(default)" }), None)
+            .expect("opened");
+        assert_eq!(told(&mut stream).await.0, "file");
+        let reloaded = allow(false).replace("false", "1 == 1");
+        runtime.install_project(PROJECT, &reloaded).expect("reload");
+        let (name, cursor, data) = told(&mut stream).await;
+        assert_eq!(name, "rules");
+        assert_eq!(cursor, firenook_rules_runtime::source_hash(&reloaded));
+        assert_eq!(data["origin"], "reload");
+        // Installing the same text again moves no hash: nothing to tell.
         runtime
-            .install_database(&other, &allow(false))
-            .expect("other");
-        runtime
-            .install_project(PROJECT, &allow(false).replace("false", "1 == 1"))
-            .expect("reload");
-        read_until(&mut body, &mut seen, r#""origin":"reload""#).await;
-        assert_eq!(seen.matches("event: rules").count(), 2, "{seen}");
-
+            .install_project(PROJECT, &reloaded)
+            .expect("reload again");
         runtime.set_file_problems(&database(), Some(LoadError::unreadable("gone")));
-        read_until(&mut body, &mut seen, "event: file").await;
-        read_until(&mut body, &mut seen, "gone").await;
-
-        stop.send(true).expect("a stream is listening");
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while let Some(chunk) = body.next().await {
-                chunk.expect("bytes");
-            }
-        })
-        .await
-        .expect("the stream ended after shutdown");
+        let (name, _, data) = told(&mut stream).await;
+        assert_eq!(name, "file", "{data}");
     }
 
     #[tokio::test]

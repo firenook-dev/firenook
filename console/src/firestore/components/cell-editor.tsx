@@ -48,6 +48,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { CodeEditor } from '@/components/code-editor'
+import { useEditing } from '@/lib/shortcuts'
 import type { InferredColumn } from '../columns'
 import {
   type DraftNode,
@@ -66,7 +67,7 @@ import { commit, documentRoot, quoteFieldSegment } from '../rest'
 import { type FsDocument, type FsValue, encodeValue, isPartial } from '../value'
 import { type FieldEditing, FieldEditingProvider } from './field-context'
 import { COLUMNS, FieldRows } from './field-row'
-import { StripButton } from './strip-button'
+import { StripButton } from '@/components/console/strip-button'
 import { TypeMenu } from './type-menu'
 import { ValueControls, ValueEditor, valueIsRegion } from './value-editors'
 import { useWorkbench } from './workbench-context'
@@ -139,6 +140,13 @@ export function CellEditor({
   onDone: () => void
 }) {
   const workbench = useWorkbench()
+  // While the editor is open, single-key shortcuts — the workbench's `f`
+  // and Escape, the grid's arrows — stand aside wherever focus is in it.
+  useEffect(() => {
+    const { setEditing } = useEditing.getState()
+    setEditing(true)
+    return () => setEditing(false)
+  }, [])
   const stored = document.fields[field]
   // A grid page is a preview: a long string arrives as its first bytes and a
   // big map as its first entries. Saving what arrived would write the
@@ -231,7 +239,7 @@ function Editing({
       ]),
     onSuccess: () => {
       closed.current = true
-      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
+      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
       onDone()
     },
     onError: (failure) => {

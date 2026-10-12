@@ -7,9 +7,8 @@ import { queryOptions } from '@tanstack/react-query'
 import { inferColumns } from '../columns'
 import { EMPTY_QUERY, toStructuredQuery } from '../query'
 import { FS } from '../queries'
-import { type FirestoreScope, documentRoot, runQuery } from '../rest'
+import { documentRoot, firestoreScope, runQuery } from '../rest'
 import type { FirestoreValueType, FsDocument } from '../value'
-import { OWNER_AUTHORIZATION } from '../view-as'
 
 export interface FieldSample {
   /** A top-level field, or `map.key` one level into a map. */
@@ -63,7 +62,7 @@ export const fieldsQuery = (project: string, database: string, pattern: string) 
   queryOptions({
     queryKey: [FS, database, 'rules-fields', pattern],
     queryFn: async (): Promise<FieldSample[]> => {
-      const scope: FirestoreScope = { project, database, authorization: OWNER_AUTHORIZATION }
+      const scope = firestoreScope({ project, database, identity: { kind: 'owner' } })
       const id = pattern.slice(pattern.lastIndexOf('/') + 1)
       // Read as the owner: the shape of the data is not a question of
       // who may read it.

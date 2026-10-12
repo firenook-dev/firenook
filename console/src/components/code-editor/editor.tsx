@@ -478,7 +478,13 @@ function languageFor(
       // from the keyboard; claimed here, the key reaches the page alone.
       Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => true }])),
     ]
-  return [json(), linter(jsonParseLinter(), { delay: 150 })]
+  return [
+    json(),
+    linter(jsonParseLinter(), { delay: 150 }),
+    // The same for JSON: ⌘↵ is a composer's Send, and a request body
+    // gained a blank line with every send from the keyboard.
+    Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => true }])),
+  ]
 }
 
 /**

@@ -10,6 +10,7 @@ import { API_BASE, ApiError } from '@/api/client'
 import type { SchemaNode } from '@/api/generated/SchemaNode'
 import type { SchemaSnapshot } from '@/api/generated/SchemaSnapshot'
 import { FS } from './queries'
+import { type FirestoreScope, countQuery, keySlot, listCollectionIds } from './rest'
 
 export type { SchemaNode, SchemaSnapshot }
 
@@ -28,6 +29,61 @@ export const schemaQuery = (database: string) =>
     staleTime: 30_000,
     retry: false,
   })
+
+/**
+ * Root collections whose documents another project's shallow tree counts;
+ * the rest are listed with no figure.
+ */
+const FOREIGN_COUNTS = 50
+
+/**
+ * The shape of another project the app used (`?project=`). The engine's
+ * schema index covers the emulator's own project only, so this tree is
+ * read over REST as the owner: the root collections, each counted — a
+ * shallow tree, which is what a project an app wrote to by mistake holds.
+ */
+export const foreignSchemaQuery = (ownerScope: FirestoreScope) =>
+  queryOptions({
+    queryKey: [FS, keySlot(ownerScope), 'schema'],
+    queryFn: async (): Promise<SchemaSnapshot> => {
+      const ids = await listCollectionIds(ownerScope, '')
+      const counts = await Promise.all(
+        ids.map((id, index) =>
+          index < FOREIGN_COUNTS
+            ? countQuery(ownerScope, '', { from: [{ collectionId: id }] }).then(
+                (answer) => answer.count,
+              )
+            : Promise.resolve(0),
+        ),
+      )
+      const collections: SchemaNode[] = ids.map((id, index) => ({
+        id,
+        pattern: id,
+        documents: counts[index] ?? 0,
+        parents: null,
+        children: [],
+      }))
+      return {
+        database: ownerScope.database,
+        revision: 0,
+        documents: counts.reduce((sum, count) => sum + count, 0),
+        collections,
+      }
+    },
+    staleTime: 30_000,
+    retry: false,
+  })
+
+/** The schema the workbench reads: the engine's index, or another project's shallow tree. */
+export function workbenchSchemaQuery(workbench: {
+  database: string
+  foreign: boolean
+  ownerScope: FirestoreScope
+}) {
+  return workbench.foreign
+    ? foreignSchemaQuery(workbench.ownerScope)
+    : schemaQuery(workbench.database)
+}
 
 /**
  * The pattern a path belongs to: document ids become `*`, and a document

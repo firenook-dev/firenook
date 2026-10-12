@@ -24,11 +24,10 @@ import { statusQuery } from '@/api/queries'
 import { PanelTitle } from '@/components/kit'
 import { useMemo, useState } from 'react'
 import { useCreateDialog } from '../create'
-import { type CodeTarget, documentAsCode } from '../query'
+import { CODE_TARGETS, type CodeTarget, documentAsCode } from '../query'
 import { documentQuery } from '../queries'
 import { commit, documentRoot, quoteFieldSegment } from '../rest'
-import { CODE_LABEL_AT, clampWidth, INSPECTOR_MIN, useInspectorWidth } from './inspector-width'
-import { type Subcollection, subcollectionsQuery } from '../subcollections'
+import { type Subcollection, workbenchSubcollectionsQuery } from '../subcollections'
 import {
   type DraftNode,
   diffDocument,
@@ -46,67 +45,19 @@ import {
   encodeValue,
   relativeTime,
 } from '../value'
-import { CodeBlock, firestoreOrigin } from './code-block'
+import { CodeBlock } from '@/components/console/code-block'
+import { CODE_LABEL_AT, useInspectorWidth } from '@/components/console/inspector-width'
+import { WidthHandle } from '@/components/console/width-handle'
 import { FieldsPanel } from './field-editor'
 import { useKnownFields } from './known-fields'
 import { useWorkbench } from './workbench-context'
 
-/**
- * The panel's left edge, which is also the grip for its width. A hairline
- * at rest that lights under the pointer: the edge is already there, so the
- * control is a place rather than a thing added to the panel.
- */
-function WidthHandle() {
-  const { width, setWidth, remember, reset } = useInspectorWidth()
-  const nudge = (by: number) => {
-    const panel = document.querySelector('[data-testid="inspector"]')
-    const available = panel?.parentElement?.getBoundingClientRect().width ?? width
-    setWidth(clampWidth(width + by, available))
-    remember()
-  }
-  return (
-    <Tooltip
-      content="Drag to resize · double-click to reset"
-      side="left"
-      render={
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Inspector width"
-          aria-valuenow={Math.round(width)}
-          aria-valuemin={INSPECTOR_MIN}
-          tabIndex={0}
-          data-testid="inspector-resize"
-          className="group/grip absolute inset-y-0 -left-1 z-30 w-2 cursor-col-resize outline-none"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            event.currentTarget.setPointerCapture(event.pointerId)
-          }}
-          onPointerMove={(event) => {
-            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-            const panel = event.currentTarget.parentElement
-            const available = panel?.parentElement?.getBoundingClientRect().width
-            if (!panel || available === undefined) return
-            setWidth(clampWidth(panel.getBoundingClientRect().right - event.clientX, available))
-          }}
-          onPointerUp={(event) => {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-            remember()
-          }}
-          onKeyDown={(event) => {
-            const step = event.shiftKey ? 64 : 16
-            if (event.key === 'ArrowLeft') nudge(step)
-            else if (event.key === 'ArrowRight') nudge(-step)
-            else return
-            event.preventDefault()
-          }}
-          onDoubleClick={reset}
-        >
-          <span className="pointer-events-none absolute inset-y-0 left-1 w-px group-hover/grip:bg-kumo-brand group-focus-visible/grip:bg-kumo-brand" />
-        </div>
-      }
-    />
-  )
+/** Where an app sends REST calls: the Firestore port the engine advertises. */
+function firestoreOrigin(
+  services: ReadonlyArray<{ name: string; host: string; port: number }> | undefined,
+): string {
+  const firestore = services?.find((service) => service.name === 'firestore')
+  return firestore ? `http://${firestore.host}:${firestore.port}` : window.location.origin
 }
 
 /** A draft's size as the header says it. */
@@ -117,7 +68,7 @@ function readSize(path: string, nodes: readonly DraftNode[]): SizeReading {
 
 export function Inspector({ path, onDelete }: { path: string; onDelete: (path: string) => void }) {
   const workbench = useWorkbench()
-  const width = useInspectorWidth((state) => state.width)
+  const { width } = useInspectorWidth('firestore')
   const document = useQuery(documentQuery(workbench.scope, path))
   // The editor below holds the draft; the header up here says how big it
   // is. What the editor last reported is kept against the editor it came
@@ -134,7 +85,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
   const size = drafted?.key === editorKey ? drafted.reading : stored
   // Names and counts in one request, shared with the grid's column: the
   // row the inspector was opened from has usually asked already.
-  const subcollections = useQuery(subcollectionsQuery(workbench.database, path))
+  const subcollections = useQuery(workbenchSubcollectionsQuery(workbench, path))
 
   return (
     <aside
@@ -151,7 +102,7 @@ export function Inspector({ path, onDelete }: { path: string; onDelete: (path: s
       style={{ width }}
       data-testid="inspector"
     >
-      <WidthHandle />
+      <WidthHandle widthKey="firestore" />
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-kumo-line pr-3 pl-5">
         {/* Kumo's monospace variants are fixed at 13 px; the face is asked
             for here and the size comes from the scale. */}
@@ -390,7 +341,7 @@ function DocumentEditor({
   const [codeTarget, setCodeTarget] = useState<CodeTarget>('web')
   // The footer is as wide as the panel, so the panel's own width is the
   // footer's measurement and no observer of its own is needed.
-  const roomForTheWord = useInspectorWidth((state) => state.width) >= CODE_LABEL_AT
+  const roomForTheWord = useInspectorWidth('firestore').width >= CODE_LABEL_AT
   // Every change to the draft goes through here, so the size the header
   // shows moves as you type rather than after Save — which is the only
   // moment it can save you anything.
@@ -424,7 +375,7 @@ function DocumentEditor({
       return changed
     },
     onSuccess: (count) => {
-      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.database] })
+      void queryClient.invalidateQueries({ queryKey: ['fs', workbench.slot] })
       toasts.add({
         title: 'Document saved',
         description: `${document.path} · ${count} field${count === 1 ? '' : 's'}`,
@@ -513,14 +464,18 @@ function DocumentEditor({
             />
             <Popover.Content className="w-[560px] max-w-[calc(100vw-2rem)]">
               <CodeBlock
-                title="This document as code"
-                target={codeTarget}
-                setTarget={setCodeTarget}
-                code={documentAsCode(codeTarget, document.path, forCode, {
-                  project: workbench.project,
-                  database: workbench.database,
-                  origin: firestoreOrigin(status.data?.services),
-                })}
+                label="This document as code"
+                value={codeTarget}
+                onValueChange={(id) => setCodeTarget(id as CodeTarget)}
+                dialects={CODE_TARGETS.map((target) => ({
+                  id: target.id,
+                  label: target.label,
+                  code: documentAsCode(target.id, document.path, forCode, {
+                    project: workbench.project,
+                    database: workbench.database,
+                    origin: firestoreOrigin(status.data?.services),
+                  }),
+                }))}
               />
             </Popover.Content>
           </Popover>
