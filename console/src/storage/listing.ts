@@ -8,7 +8,8 @@
 // and a new name refetches only the page it falls in. Any other order, or a
 // filter, is a view the engine built: it is never rebuilt under the app's
 // writes; it counts the names they touched inside its scope and offers
-// Refresh (`MatchCount`'s `stale`). A window too big to name (`truncated`)
+// Refresh (`MatchCount`'s `stale`), which asks the engine for the view as
+// the folder is now. A window too big to name (`truncated`)
 // covering the listing starts it again from page one.
 
 import { useInfiniteQuery } from '@tanstack/react-query'
@@ -20,7 +21,7 @@ import { type CursorRows, useCursorRows } from '@/components/console/use-cursor-
 import { type StorageListScope, isFastPath } from './api'
 import type { FilesState } from './files-state'
 import { type ListScope, resetsList, touchedCount, touchedRows } from './live'
-import { objectsList } from './queries'
+import { objectsList, readFreshNext } from './queries'
 
 export interface Listing {
   scope: StorageListScope
@@ -73,8 +74,15 @@ export function useListing(files: FilesState): Listing {
   const listScope: ListScope = { prefix: scope.prefix, flat: scope.flat ?? false }
   const refresh = () => {
     setStale({ key: viewKey, count: 0 })
+    // The engine rebuilds the view now rather than serve the one it has,
+    // stale, for up to 2 s after a write.
+    readFreshNext(list.queryKey)
     rows.reset()
   }
+  // A first page the engine served from a view writes have moved since
+  // (within its 2 s window) says so: its changes count as this view's.
+  const first = query.data?.pages[0] as StorageListPage | undefined
+  const served = !fast && first?.stale ? first.changesSince : 0
   const apply = (batch: StorageObjectsChanged) => {
     if (resetsList(batch, listScope)) {
       refresh()
@@ -96,12 +104,12 @@ export function useListing(files: FilesState): Listing {
   return {
     scope,
     rows,
-    page: query.data?.pages[0] as StorageListPage | undefined,
+    page: first,
     pages: (query.data?.pages ?? NO_PAGES) as readonly StorageListPage[],
     pending: query.isPending,
     error: query.error,
     fast,
-    stale: staleCount,
+    stale: Math.max(staleCount, served),
     refresh,
     apply,
     retry: () => void query.refetch(),

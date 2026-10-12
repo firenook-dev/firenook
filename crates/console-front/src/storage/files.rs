@@ -937,6 +937,10 @@ pub(crate) struct StorageListParams {
     flat: bool,
     #[serde(default)]
     kind: StorageListKind,
+    /// Rebuild a sorted or filtered view the app's writes have moved,
+    /// instead of serving it stale for up to 2 s (the console's Refresh).
+    #[serde(default)]
+    fresh: bool,
 }
 
 /// What `GET /storage/objects/meta` says.
@@ -962,6 +966,7 @@ fn list_query(
     flat: bool,
     kind: StorageListKind,
     paging: &PageQuery,
+    fresh: bool,
 ) -> Result<ConsoleListQuery, ApiError> {
     let order = match paging.sort(&list_meta())? {
         None => ListOrder::default(),
@@ -995,6 +1000,7 @@ fn list_query(
         after: paging.after::<ListCursor>()?,
         before: paging.before::<ListCursor>()?,
         limit: paging.limit(DEFAULT_LIMIT, MAX_LIMIT),
+        fresh,
     })
 }
 
@@ -1060,6 +1066,7 @@ pub(crate) async fn objects(
         params.flat,
         params.kind,
         &paging,
+        params.fresh,
     )?;
     let backwards = query.before.is_some();
     let result = routes
@@ -1111,7 +1118,14 @@ pub(crate) async fn batch_get(
         sort: body.request.sort.clone(),
         ..PageQuery::default()
     };
-    let scope = list_query(body.bucket, body.prefix, body.flat, body.kind, &paging)?;
+    let scope = list_query(
+        body.bucket,
+        body.prefix,
+        body.flat,
+        body.kind,
+        &paging,
+        false,
+    )?;
     let (starts, end) = body.request.window::<ListCursor>()?;
     let rows = routes.api.batch_get(
         &scope,

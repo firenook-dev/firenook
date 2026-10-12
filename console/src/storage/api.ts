@@ -238,10 +238,20 @@ export function isFastPath(scope: Pick<StorageListScope, 'sort' | 'q'>): boolean
   return (scope.sort ?? DEFAULT_SORT) === DEFAULT_SORT && !scope.q?.trim()
 }
 
-/** One page of a listing: `cursor` for the page after, `before` for the page above. */
+/**
+ * One page of a listing: `cursor` for the page after, `before` for the page
+ * above. `fresh` asks the engine for a sorted or filtered view as the folder
+ * is now, where it would otherwise serve the view it has, marked stale, for
+ * up to 2 s after a write: what Refresh sends.
+ */
 export function listObjects(
   scope: StorageListScope,
-  page: { cursor?: string | undefined; before?: string | undefined; limit?: number | undefined },
+  page: {
+    cursor?: string | undefined
+    before?: string | undefined
+    limit?: number | undefined
+    fresh?: boolean | undefined
+  },
   options?: CallOptions,
 ): Promise<StorageListPage> {
   return get(
@@ -256,6 +266,7 @@ export function listObjects(
       cursor: page.cursor,
       before: page.before,
       limit: page.limit,
+      fresh: page.fresh ? true : undefined,
     },
     options,
   )

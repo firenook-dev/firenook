@@ -350,6 +350,16 @@ async fn listing_pages_both_ways_with_totals_and_meta() {
         ["docs/sub/", "docs/f6.txt"],
         "folders first, then files"
     );
+    // Refresh asks for the view as the folder is now; the answer is never stale.
+    let (status, refreshed) = harness
+        .get(
+            &format!("/objects?bucket={BUCKET}&prefix=docs/&sort=name:desc&limit=2&fresh=true"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    assert_eq!(names(&refreshed), names(&sorted));
+    assert_eq!(refreshed["stale"], false);
     let (_, filtered) = harness
         .get(&format!("/objects?bucket={BUCKET}&prefix=docs/&q=f3"), None)
         .await;

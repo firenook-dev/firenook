@@ -23,7 +23,8 @@
 //! is served, marked stale with the number of changes since, for up to 2 s
 //! after the move was first seen; after that the next request rebuilds it.
 //! So a folder under constant writes is rebuilt at most once every 2 s per
-//! view, never once per page.
+//! view, never once per page. A request that asks for a fresh view (the
+//! console's Refresh) has it rebuilt at once.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -416,13 +417,15 @@ fn stamp_of(stats: Option<&FolderStats>, subtree: bool) -> (u64, u64) {
     })
 }
 
-/// The view for `key` with `filter`, fresh or within its stale window,
-/// built (once, however many requests ask) when needed. The folder index
-/// must be built.
+/// The view for `key` with `filter`, fresh or within its stale window
+/// (never stale when `fresh` asks for the folder as it is now), built
+/// (once, however many requests ask) when needed. The folder index must be
+/// built.
 pub(crate) async fn view(
     state: &StorageState,
     key: &ViewKey,
     filter: Option<&StorageFilter>,
+    fresh: bool,
 ) -> Result<Served, String> {
     let cache = &state.views;
     let (stamp, changes, subtree_stamp) = {
@@ -449,7 +452,7 @@ pub(crate) async fn view(
                 });
             }
             let since = *slot.stale_since.get_or_insert_with(Instant::now);
-            if since.elapsed() < STALE_FOR {
+            if !fresh && since.elapsed() < STALE_FOR {
                 slot.used = tick;
                 return Ok(Served {
                     view: Arc::clone(&slot.view),

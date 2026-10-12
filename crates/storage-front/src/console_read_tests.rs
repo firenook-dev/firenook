@@ -148,6 +148,7 @@ fn query(prefix: &str) -> ConsoleListQuery {
         after: None,
         before: None,
         limit: 100,
+        fresh: false,
     }
 }
 
@@ -523,6 +524,58 @@ async fn views_are_reused_rebuilt_and_single_flight() {
         views.bases_built.load(std::sync::atomic::Ordering::Relaxed),
         bases
     );
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fresh_request_rebuilds_a_moved_view_at_once() {
+    let harness = start("fresh").await;
+    for file in 0..50 {
+        harness.put(&format!("v/f{file:03}.bin"), file);
+    }
+    harness.ready().await;
+    let console = harness.runtime.console();
+    let by_size = ConsoleListQuery {
+        order: ListOrder {
+            column: SortColumn::Size,
+            descending: true,
+        },
+        limit: 10,
+        ..query("v/")
+    };
+    let views = &harness.runtime.state.views;
+    let built = || views.views_built.load(std::sync::atomic::Ordering::Relaxed);
+    console
+        .list(&by_size, &Identity::Admin, true)
+        .await
+        .expect("first");
+    assert_eq!(built(), 1);
+    // A write moves the folder: served stale within the window ...
+    harness.put("v/biggest.bin", 30_000);
+    let stale = console
+        .list(&by_size, &Identity::Admin, true)
+        .await
+        .expect("stale");
+    assert!(stale.stale);
+    assert_eq!(built(), 1);
+    // ... but Refresh does not wait the window out: rebuilt at once.
+    let fresh = ConsoleListQuery {
+        fresh: true,
+        ..by_size.clone()
+    };
+    let refreshed = console
+        .list(&fresh, &Identity::Admin, true)
+        .await
+        .expect("refreshed");
+    assert!(!refreshed.stale);
+    assert_eq!(keys(&refreshed)[0], "v/biggest.bin");
+    assert_eq!(built(), 2);
+    // Nothing moved since: a fresh request reuses the view it just built.
+    console
+        .list(&fresh, &Identity::Admin, true)
+        .await
+        .expect("again");
+    assert_eq!(built(), 2);
     harness.finish().await;
 }
 

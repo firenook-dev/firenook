@@ -5,6 +5,7 @@ import {
   ALL_BUCKETS,
   entryKey,
   objectsList,
+  readFreshNext,
   rulesScope,
   scopeBucket,
   storageKeys,
@@ -117,6 +118,32 @@ describe('a listing as the rows hook takes it', () => {
       flat: false,
       kind: 'all',
     })
+  })
+})
+
+describe('Refresh', () => {
+  it('reads the next first page fresh, once, and never a later page', async () => {
+    const requests = answering({ items: [] })
+    const list = objectsList(
+      'demo',
+      { bucket: 'b', prefix: 'v/', sort: 'size:desc' },
+      {
+        kind: 'owner',
+      },
+    )
+    const signal = new AbortController().signal
+    readFreshNext(list.queryKey)
+    await list.fetchPage({ cursor: 'v1.next' }, signal)
+    await list.fetchPage({}, signal)
+    await list.fetchPage({}, signal)
+    const fresh = requests.map((request) =>
+      new URL(request.url, 'http://x').searchParams.get('fresh'),
+    )
+    expect(fresh).toEqual([null, 'true', null])
+    // Another listing's Refresh is its own.
+    readFreshNext(['storage', 'demo', 'b', 'objects', 'other/'])
+    await list.fetchPage({}, signal)
+    expect(new URL(requests.at(-1)?.url ?? '', 'http://x').searchParams.get('fresh')).toBeNull()
   })
 })
 

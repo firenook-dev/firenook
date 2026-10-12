@@ -163,6 +163,7 @@ fn query(prefix: &str) -> ConsoleListQuery {
         after: None,
         before: None,
         limit: 100,
+        fresh: false,
     }
 }
 

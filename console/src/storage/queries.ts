@@ -191,6 +191,18 @@ export function entryKey(entry: StorageEntry): string {
   return entry.type === 'folder' ? entry.prefix : entry.name
 }
 
+/** Listings (by query key) whose next first page is read fresh. */
+const freshFirstPages = new Set<string>()
+
+/**
+ * The next first page of this listing is read fresh, once: the engine
+ * rebuilds a sorted or filtered view the app's writes have moved instead of
+ * serving it, marked stale, for up to 2 s (what Refresh wants).
+ */
+export function readFreshNext(queryKey: QueryKey): void {
+  freshFirstPages.add(JSON.stringify(queryKey))
+}
+
 /**
  * A listing as `useCursorRows` takes it: the key, the infinite query's
  * options (a sliding window of 20 pages), the page fetcher, and the batch
@@ -205,13 +217,16 @@ export function objectsList(project: string, scope: StorageListScope, viewAs: Vi
     as: identityKey(viewAs),
   }
   const queryKey = storageKeys.objects(project, scope.bucket, scope.prefix, view)
-  const fetchPage = (page: CursorPageParam, signal: AbortSignal): Promise<StorageListPage> =>
-    asIdentity(
+  const fetchPage = (page: CursorPageParam, signal: AbortSignal): Promise<StorageListPage> => {
+    const first = page.cursor === undefined && page.before === undefined
+    const fresh = first && freshFirstPages.delete(JSON.stringify(queryKey))
+    return asIdentity(
       viewAs,
       project,
-      (authorization) => listObjects(scope, page, { authorization, signal }),
+      (authorization) => listObjects(scope, { ...page, fresh }, { authorization, signal }),
       signal,
     )
+  }
   const batchGet = (
     request: BatchGetRequest,
     signal: AbortSignal,

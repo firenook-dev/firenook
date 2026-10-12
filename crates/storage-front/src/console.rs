@@ -197,6 +197,9 @@ pub struct ConsoleListQuery {
     pub after: Option<ListCursor>,
     pub before: Option<ListCursor>,
     pub limit: usize,
+    /// A view whose folder moved is rebuilt now instead of served stale
+    /// within its window: what an explicit Refresh asks for.
+    pub fresh: bool,
 }
 
 impl ConsoleListQuery {
@@ -720,9 +723,14 @@ impl StorageConsoleApi {
                 "The folder index is still being built, so this sorted or filtered view cannot be made yet; try again in a moment.".to_owned(),
             ));
         }
-        let served = view_cache::view(&self.state, &query.view_key(), query.filter.as_ref())
-            .await
-            .map_err(ConsoleError::Unavailable)?;
+        let served = view_cache::view(
+            &self.state,
+            &query.view_key(),
+            query.filter.as_ref(),
+            query.fresh,
+        )
+        .await
+        .map_err(ConsoleError::Unavailable)?;
         let (range, more_after, more_before) =
             served
                 .view
@@ -1055,6 +1063,7 @@ impl StorageConsoleApi {
             after: None,
             before: None,
             limit,
+            fresh: false,
         };
         let data = lock(&self.state.inner);
         fast_page(&data, &query.scope(), None, None, limit)
