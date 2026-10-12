@@ -528,6 +528,9 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     topics::FunctionsLiveBatch::export_all(config).expect("TypeScript bindings written");
     functions::InvocationsResult::export_all(config).expect("TypeScript bindings written");
     functions::InvocationView::export_all(config).expect("TypeScript bindings written");
+    // The `functions.invocation` topic's `chunk` event: no root type holds it.
+    firenook_functions_runtime::monitor::FunctionResponseChunk::export_all(config)
+        .expect("TypeScript bindings written");
     eventarc::EventarcSnapshot::export_all(config).expect("TypeScript bindings written");
     eventarc::EventarcEventsResult::export_all(config).expect("TypeScript bindings written");
     eventarc::EventarcEventView::export_all(config).expect("TypeScript bindings written");
