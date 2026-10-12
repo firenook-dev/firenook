@@ -185,10 +185,24 @@ async fn engine(State(api): State<OverviewApi>) -> Json<OverviewEngineDetails> {
 /// minute turns, at most twice a second.
 pub(crate) struct OverviewTopic {
     pub(crate) api: OverviewApi,
+    /// The wall clock, in milliseconds since the epoch. A generation names
+    /// the minute, so a test that waits for quiet pins it: with the real
+    /// clock, a minute turning inside the wait is (rightly) news.
+    pub(crate) now: fn() -> i64,
+}
+
+impl OverviewTopic {
+    pub(crate) fn new(api: OverviewApi) -> Self {
+        Self {
+            api,
+            now: now_millis,
+        }
+    }
 }
 
 struct Following {
     api: OverviewApi,
+    now: fn() -> i64,
     changes: Option<watch::Receiver<u64>>,
     /// The generation the subscriber has.
     seen: Option<String>,
@@ -208,6 +222,7 @@ impl LiveTopic for OverviewTopic {
         let OverviewParams {} = topic_params(params)?;
         let following = Following {
             api: self.api.clone(),
+            now: self.now,
             changes: self.api.log.as_ref().map(ConsoleLog::changes),
             seen: after.map(str::to_owned),
             sent: false,
@@ -217,9 +232,9 @@ impl LiveTopic for OverviewTopic {
                 if following.sent {
                     tokio::time::sleep(STATE_EVERY).await;
                 }
-                let generation = following.api.generation(now_millis());
+                let generation = following.api.generation((following.now)());
                 if following.seen.as_deref() != Some(generation.as_str()) {
-                    let state = following.api.state(now_millis());
+                    let state = following.api.state((following.now)());
                     following.seen = Some(generation.clone());
                     following.sent = true;
                     return Some((
@@ -228,7 +243,7 @@ impl LiveTopic for OverviewTopic {
                     ));
                 }
                 // Nothing new: wait for a line or the next minute.
-                let now = now_millis();
+                let now = (following.now)();
                 let next_minute = Instant::now()
                     + Duration::from_millis(
                         u64::try_from(60_000 - now.rem_euclid(60_000)).unwrap_or(60_000),

@@ -140,9 +140,7 @@ impl Section for ObserveSection {
             Arc::new(logs::LogsTopic {
                 log: self.0.log.clone(),
             }),
-            Arc::new(overview::OverviewTopic {
-                api: self.overview(),
-            }),
+            Arc::new(overview::OverviewTopic::new(self.overview())),
         ]
     }
 

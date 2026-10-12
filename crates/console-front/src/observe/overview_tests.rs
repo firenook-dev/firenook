@@ -217,11 +217,20 @@ async fn next_state(stream: &mut TopicStream) -> (String, Value) {
     }
 }
 
+/// Half a minute into a minute, whenever the test runs: a generation names
+/// the minute, so with the wall clock a minute turning inside the quiet
+/// window below sent a new state, and the test failed one run in a hundred.
+fn mid_minute() -> i64 {
+    // 1_700_000_040_000 is a whole minute.
+    1_700_000_070_000
+}
+
 #[tokio::test]
 async fn the_topic_sends_the_state_then_each_change_and_resumes_by_comparing() {
     let log = log();
     let topic = OverviewTopic {
         api: api(Some(&log)),
+        now: mid_minute,
     };
     let mut stream = topic.open(&json!({}), None).expect("opened");
     let (generation, state) = next_state(&mut stream).await;
@@ -243,4 +252,26 @@ async fn the_topic_sends_the_state_then_each_change_and_resumes_by_comparing() {
         .expect("refused");
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     assert_eq!(topic.name(), "overview");
+}
+
+/// A tenth of a second before a whole minute (`1_700_000_040_000`).
+static TURNING: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1_700_000_039_900);
+
+fn turning() -> i64 {
+    TURNING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[tokio::test]
+async fn a_minute_turning_sends_the_state_again_with_no_new_line() {
+    let log = log();
+    let topic = OverviewTopic {
+        api: api(Some(&log)),
+        now: turning,
+    };
+    let mut stream = topic.open(&json!({}), None).expect("opened");
+    let (first, _) = next_state(&mut stream).await;
+    TURNING.store(1_700_000_040_100, std::sync::atomic::Ordering::SeqCst);
+    let (second, state) = next_state(&mut stream).await;
+    assert_ne!(first, second, "the hour's buckets moved on");
+    assert_eq!(state["logs"]["entries"], 0);
 }
