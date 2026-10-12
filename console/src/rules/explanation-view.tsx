@@ -131,7 +131,12 @@ export function ExplanationView({
                 {outcomeWord(allow.outcome)}
               </span>
             </button>
-            <code className="block rounded bg-kumo-control px-2 py-1.5 font-mono text-[12px] break-words whitespace-pre-wrap text-kumo-default">
+            {/* The condition keeps the shape it has in the rules; a long line
+                scrolls inside the block rather than widening the panel. */}
+            <code
+              className="block overflow-x-auto rounded bg-kumo-control [scrollbar-width:thin] px-2 py-1.5 font-mono text-[12px] whitespace-pre text-kumo-default"
+              data-testid="explained-condition"
+            >
               {rules.slice(allow.from, allow.to)}
             </code>
             {own.length > 0 && <Steps steps={own} rules={rules} />}
@@ -175,20 +180,24 @@ function Steps({
 }) {
   return (
     <dl className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 text-[12px]">
-      {steps.map((step) => (
-        <span key={`${step.from}:${step.to}`} className="contents">
-          <dt className="min-w-0 truncate font-mono text-kumo-subtle">
-            {lines ? `${lineOf(rules, step.from)}: ` : ''}
-            {rules.slice(step.from, step.to)}
-          </dt>
-          <dd
-            className={`max-w-[16rem] truncate text-right font-mono ${valueTone(step.value, step.error ?? false)}`}
-            data-step-value
-          >
-            {step.value}
-          </dd>
-        </span>
-      ))}
+      {steps.map((step) => {
+        // Both sides truncate in a narrow panel; the whole text is a hover away.
+        const expression = `${lines ? `${lineOf(rules, step.from)}: ` : ''}${rules.slice(step.from, step.to)}`
+        return (
+          <span key={`${step.from}:${step.to}`} className="contents">
+            <dt className="min-w-0 truncate font-mono text-kumo-subtle" title={expression}>
+              {expression}
+            </dt>
+            <dd
+              className={`max-w-[16rem] truncate text-right font-mono ${valueTone(step.value, step.error ?? false)}`}
+              title={step.value}
+              data-step-value
+            >
+              {step.value}
+            </dd>
+          </span>
+        )
+      })}
     </dl>
   )
 }

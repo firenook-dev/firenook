@@ -363,6 +363,12 @@ test('the playground tries an upload against the draft, and a saved test guards 
   await expect(result.getByTestId('explained-allow').first()).toContainText('line 6')
   await expect(result).toContainText('7340032')
   await expect(lines(page).nth(5)).toHaveClass(/cm-line-(deny|error)/)
+  // The whole result keeps to the panel: the request wraps, the condition
+  // scrolls inside its block, the save row folds onto two lines.
+  await expect(page.getByTestId('playground-verdict')).toContainText(`as ${ada.email}`)
+  await expect
+    .poll(() => page.getByTestId('playground').evaluate((el) => el.scrollWidth - el.clientWidth))
+    .toBe(0)
 
   // Saved as a test that should deny: it passes against the rules in force.
   await page.getByTestId('playground-save-test').click()

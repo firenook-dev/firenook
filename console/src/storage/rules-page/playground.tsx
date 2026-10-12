@@ -21,7 +21,7 @@ import { linesFromAllows, useOverlay } from '@/rules/overlay'
 import { RULES_METHODS } from '@/rules/search'
 import { RulesCompileError } from '@/rules/text'
 import { useDebounced } from '@/rules/use-debounced'
-import { Verdict } from '@/rules/verdict'
+import { VerdictLine } from '@/rules/verdict'
 import { evaluateRules } from '../api'
 import { objectQuery, profileQuery, scopeBucket } from '../queries'
 import { STORAGE_READS } from './decision-detail'
@@ -443,12 +443,7 @@ export function Playground({
           className="grid grid-cols-[minmax(0,1fr)] gap-3 px-3 py-3"
           data-testid="playground-result"
         >
-          <div className="flex items-center gap-2">
-            <Verdict outcome={run.result.outcome} />
-            <span className="min-w-0 truncate font-mono text-[12px] text-kumo-subtle">
-              {describeForm(run.form, bucket)}
-            </span>
-          </div>
+          <VerdictLine outcome={run.result.outcome} request={describeForm(run.form, bucket)} />
           <SaveAsTest
             name={describeForm(run.form, bucket)}
             outcome={run.result.outcome === 'allow' ? 'allow' : 'deny'}
@@ -517,32 +512,36 @@ function SaveAsTest({
     setExpected(outcome)
   }
   return (
-    <div className="flex items-center gap-2" data-testid="playground-save">
+    // The name has the panel's width to itself (it is the whole request, and
+    // the panel is 440 px, 380 below 1280); the verdict and the button follow.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-2" data-testid="playground-save">
       <Input
         size="sm"
         value={name}
         onChange={(event) => setName(event.target.value)}
         aria-label="Test name"
-        className="min-w-0 flex-1 font-mono"
+        className="w-full font-mono"
         data-testid="playground-test-name"
       />
-      <Select
-        size="sm"
-        value={expected}
-        onValueChange={(next) => setExpected(next as 'allow' | 'deny')}
-        items={{ allow: 'should allow', deny: 'should deny' }}
-        aria-label="Expected verdict"
-        className="w-32"
-      />
-      <Button
-        variant="secondary"
-        size="sm"
-        icon={<FlaskIcon />}
-        onClick={() => onSave(name.trim() || suggested, expected)}
-        data-testid="playground-save-test"
-      >
-        Save as a test
-      </Button>
+      <div className="flex items-center gap-2">
+        <Select
+          size="sm"
+          value={expected}
+          onValueChange={(next) => setExpected(next as 'allow' | 'deny')}
+          items={{ allow: 'should allow', deny: 'should deny' }}
+          aria-label="Expected verdict"
+          className="w-32"
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<FlaskIcon />}
+          onClick={() => onSave(name.trim() || suggested, expected)}
+          data-testid="playground-save-test"
+        >
+          Save as a test
+        </Button>
+      </div>
     </div>
   )
 }
