@@ -237,6 +237,14 @@ describe('DataTable', () => {
     expect(grid()).toHaveAttribute('aria-multiselectable', 'true')
   })
 
+  it('opens the first row on Enter when no row is under the cursor yet', () => {
+    const onOpen = vi.fn()
+    render(<Harness rows={users(30)} onOpen={onOpen} />)
+    key('Enter')
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ uid: 'u0000' }))
+    expect(rowsInDom()[0]).toHaveAttribute('data-cursor', '')
+  })
+
   it('ticks a range with shift, and the header box ticks or clears every loaded row', () => {
     render(<Harness rows={users(10)} select />)
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select u0002' }))
