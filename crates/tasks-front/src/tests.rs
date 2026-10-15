@@ -1867,18 +1867,6 @@ mod console {
         }
     }
 
-    fn attempts(
-        runtime: &TasksRuntime,
-    ) -> (crate::runtime::AttemptSink, Arc<Mutex<Vec<AttemptRecord>>>) {
-        let seen: Arc<Mutex<Vec<AttemptRecord>>> = Arc::default();
-        let sink_seen = Arc::clone(&seen);
-        let sink: crate::runtime::AttemptSink = Arc::new(move |record| {
-            sink_seen.lock().unwrap().push(record);
-        });
-        runtime.set_attempt_sink(Arc::clone(&sink));
-        (sink, seen)
-    }
-
     fn attempt(queue: &str, task_id: u64, attempt: u32) -> AttemptRecord {
         AttemptRecord {
             queue_key: queue.to_owned(),
@@ -1949,7 +1937,6 @@ mod console {
         let server = TestServer::start(|_, _| (500, Duration::ZERO)).await;
         server.respond_with("card declined");
         let (runtime, _) = runtime("http://127.0.0.1:5001");
-        let (_sink, seen) = attempts(&runtime);
         let key = client_queue(
             &runtime,
             "declines",
@@ -1979,25 +1966,10 @@ mod console {
         assert_eq!(log.omitted, 4);
         let kept: Vec<u32> = log.records().map(|record| record.attempt).collect();
         assert_eq!(kept, [1, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
-        wait_until(
-            "every attempt to reach the sink",
-            Duration::from_secs(5),
-            || seen.lock().unwrap().len() == 14,
-        )
-        .await;
-        // Snippets are attached to the kept attempts and the sink's copies.
         assert!(log.records().all(|record| record.status == Some(500)
             && !record.counted_execution
             && record.retry_count == record.attempt - 1));
-        let seen = seen.lock().unwrap().clone();
-        assert!(
-            seen.iter()
-                .all(|record| record.response.as_deref() == Some("card declined"))
-        );
-        assert_eq!(
-            seen.iter().map(|record| record.attempt).collect::<Vec<_>>(),
-            (1..=14).collect::<Vec<_>>()
-        );
+        // Snippets are attached to the kept attempts.
         wait_until(
             "the last snippet in the history",
             Duration::from_secs(2),
@@ -3313,14 +3285,11 @@ mod inspect {
     }
 
     #[tokio::test]
-    async fn console_delta_follows_a_queue_and_its_attempts() {
+    async fn console_delta_follows_a_queue_and_its_finished_tasks() {
         let server = TestServer::ok().await;
         let (runtime, _) = runtime("http://127.0.0.1:5001");
         let key = client_queue(&runtime, "watched", &json!({"defaultUri": server.url})).await;
         let other = client_queue(&runtime, "other", &json!({"defaultUri": server.url})).await;
-        let records: Arc<Mutex<Vec<crate::queue::AttemptRecord>>> = Arc::default();
-        let sink = Arc::clone(&records);
-        runtime.set_attempt_sink(Arc::new(move |record| sink.lock().unwrap().push(record)));
         runtime.set_paused(&key, true).unwrap();
         let counters = TasksScope {
             project: Some(PROJECT.to_owned()),
@@ -3391,12 +3360,9 @@ mod inspect {
         assert_eq!(finished.added, 1);
         assert_eq!(finished.ids.len(), 1);
         assert!(delta.changes.contains(&TaskChange::Row(RowKey::slotted(a))));
-        // Every finished attempt reaches the sink once.
-        wait_until("one attempt record", Duration::from_secs(2), || {
-            records.lock().unwrap().len() == 1
-        })
-        .await;
-        let attempt = records.lock().unwrap()[0].clone();
+        // The finished task keeps its one attempt: the 204 it answered.
+        let detail = runtime.task_view(&key, a).expect("a's detail");
+        let attempt = detail.attempts.last().cloned().expect("an attempt");
         assert_eq!(
             (attempt.task_id, attempt.attempt, attempt.status),
             (a, 1, Some(204))

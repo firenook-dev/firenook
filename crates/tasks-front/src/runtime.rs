@@ -98,10 +98,6 @@ where
     }
 }
 
-/// Receives every finished attempt inline, once its response snippet is
-/// read; it must not block.
-pub type AttemptSink = Arc<dyn Fn(AttemptRecord) + Send + Sync>;
-
 /// The dispatch resolution; the official loop runs on a zero timeout while
 /// any queue is active and sleeps a second when none is.
 /// The official controller re-arms `listen()` immediately while any queue is
@@ -380,7 +376,6 @@ struct Inner {
     /// Replaced once the console builds its sink (`set_log_sink`).
     log: Mutex<LogSink>,
     ticker: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    attempt_sink: Mutex<Option<AttemptSink>>,
     /// Wakes the ticker early after a console control that frees work.
     wake: tokio::sync::Notify,
     /// The console revision, announced when it moved.
@@ -742,7 +737,6 @@ impl TasksRuntime {
                 http,
                 log: Mutex::new(log),
                 ticker: Mutex::new(None),
-                attempt_sink: Mutex::new(None),
                 wake: tokio::sync::Notify::new(),
                 revision: tokio::sync::watch::channel(0).0,
             }),
@@ -1191,12 +1185,6 @@ impl TasksRuntime {
         Ok((u32::try_from(removed).unwrap_or(u32::MAX), stopped))
     }
 
-    /// Hands every finished attempt to `sink` from now on (the console's
-    /// attempts feed), once its response snippet is read.
-    pub fn set_attempt_sink(&self, sink: AttemptSink) {
-        *lock(&self.inner.attempt_sink) = Some(sink);
-    }
-
     /// `getStatistics`: every queue's statistics in registration order.
     #[must_use]
     pub fn statistics(&self) -> OrderedJson {
@@ -1432,8 +1420,7 @@ impl TasksRuntime {
 
     /// `runTask`'s request, its outcome written back into the slot (or into
     /// the task's history entry when it left the slot meanwhile), then the
-    /// first 1 KiB of the response attached and the attempt handed to the
-    /// attempt sink.
+    /// first 1 KiB of the response attached.
     async fn run(&self, request: RunRequest) {
         let started_at = SystemTime::now();
         let started = Instant::now();
@@ -1467,7 +1454,7 @@ impl TasksRuntime {
                     queue.complete(request.dispatch_id, outcome, record.clone(), now)
                 });
             if !completed
-                && state.attach_to_history(&request.queue_key, request.dispatch_id, record.clone())
+                && state.attach_to_history(&request.queue_key, request.dispatch_id, record)
             {
                 state.stamp(&request.queue_key);
             }
@@ -1482,40 +1469,32 @@ impl TasksRuntime {
             Some(response) => read_snippet(response).await,
             None => None,
         };
-        let record = match snippet {
-            Some(text) => self
-                .attach_response(&request, text.clone())
-                .unwrap_or(AttemptRecord {
-                    response: Some(text),
-                    ..record
-                }),
-            None => record,
-        };
-        let sink = lock(&self.inner.attempt_sink).clone();
-        if let Some(sink) = sink {
-            sink(record);
+        if let Some(text) = snippet {
+            self.attach_response(&request, text);
         }
     }
 
     /// Attaches a response snippet to the attempt, in its slot or in its
     /// task's history entry.
-    fn attach_response(&self, request: &RunRequest, text: String) -> Option<AttemptRecord> {
+    fn attach_response(&self, request: &RunRequest, text: String) {
         let mut state = lock(&self.inner.state);
         let text = match state.queues.get_mut(&request.queue_key) {
             Some(queue) => {
                 match queue.attach_response(request.dispatch_id, request.attempt, text) {
-                    Ok(record) => {
+                    Ok(()) => {
                         self.finish(state);
-                        return Some(record);
+                        return;
                     }
                     Err(text) => text,
                 }
             }
             None => text,
         };
-        let entry = state.history_entry(&request.queue_key, request.dispatch_id)?;
+        let Some(entry) = state.history_entry(&request.queue_key, request.dispatch_id) else {
+            return;
+        };
         let task = entry.finished.task.id;
-        let record = entry
+        entry
             .finished
             .attempts
             .attach_response(request.attempt, text);
@@ -1532,7 +1511,6 @@ impl TasksRuntime {
         }
         state.stamp(&request.queue_key);
         self.finish(state);
-        record
     }
 
     /// Logs a dispatch failure with its queue and task.

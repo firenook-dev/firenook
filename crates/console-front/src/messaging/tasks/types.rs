@@ -567,25 +567,3 @@ pub(crate) struct TasksFinishedBatch {
     pub ids: Vec<String>,
     pub overflow: bool,
 }
-
-/// One attempt, as `tasks.attempts` sends it.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct TasksAttemptEvent {
-    /// The queue key.
-    pub queue: String,
-    pub task_id: String,
-    pub task_name: String,
-    pub attempt: TasksAttempt,
-}
-
-/// `tasks.attempts` `attempts` (the shape the topic writes from the ring's
-/// serialized attempts).
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[allow(dead_code, reason = "the topic joins the ring's JSON into this shape")]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct TasksAttempts {
-    pub items: Vec<TasksAttemptEvent>,
-}

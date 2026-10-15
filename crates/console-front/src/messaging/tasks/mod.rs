@@ -618,8 +618,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::TasksQueuesChanged,
         types::TasksStale,
         types::TasksFinishedBatch,
-        types::TasksAttemptEvent,
-        types::TasksAttempts,
     );
 }
 
