@@ -12,6 +12,7 @@ use std::time::{Duration, Instant, SystemTime};
 use axum::http::header::{ACCEPT, USER_AGENT};
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use firenook_functions_bridge::FunctionsInventory;
+use firenook_suite_front::window::{SecondCounts, TenSecondCounts};
 use indexmap::IndexMap;
 
 use crate::config::{QUEUE_CAPACITY, QueueConfig};
@@ -127,86 +128,15 @@ const CHANGE_RING: usize = 1_000;
 /// Refused requests kept.
 const REFUSED_CAPACITY: usize = 200;
 
-/// Counts per bucket, `SLOTS` buckets of `WIDTH` seconds ending at the
-/// newest bucket an event fell in, so a view can age it without a frame.
-#[derive(Debug, Clone)]
-pub(crate) struct Buckets<const SLOTS: usize, const WIDTH: u64> {
-    counts: [u32; SLOTS],
-    /// The newest bucket, as seconds since the epoch divided by `WIDTH`.
-    newest: u64,
-}
-
-impl<const SLOTS: usize, const WIDTH: u64> Default for Buckets<SLOTS, WIDTH> {
-    fn default() -> Self {
-        Self {
-            counts: [0; SLOTS],
-            newest: 0,
-        }
-    }
-}
-
-impl<const SLOTS: usize, const WIDTH: u64> Buckets<SLOTS, WIDTH> {
-    fn slot(bucket: u64) -> usize {
-        usize::try_from(bucket % SLOTS as u64).unwrap_or(0)
-    }
-
-    pub(crate) fn record(&mut self, at: SystemTime, count: u32) {
-        let bucket = at
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            / WIDTH;
-        if bucket > self.newest {
-            for step in 1..=(bucket - self.newest).min(SLOTS as u64) {
-                self.counts[Self::slot(self.newest + step)] = 0;
-            }
-            self.newest = bucket;
-        } else if bucket + SLOTS as u64 <= self.newest {
-            return;
-        }
-        let slot = Self::slot(bucket);
-        self.counts[slot] = self.counts[slot].saturating_add(count);
-    }
-
-    /// The window: when its newest bucket ends, and `(buckets before it,
-    /// count)` for the non-zero buckets, newest first.
-    pub(crate) fn window(&self) -> StampedWindow {
-        let buckets = (0..SLOTS)
-            .filter_map(|age| {
-                let age = u8::try_from(age).ok()?;
-                let bucket = self.newest.checked_sub(u64::from(age))?;
-                let count = self.counts[Self::slot(bucket)];
-                (count > 0).then_some((age, count))
-            })
-            .collect();
-        StampedWindow {
-            ends_at: std::time::UNIX_EPOCH + Duration::from_secs((self.newest + 1) * WIDTH - 1),
-            width_seconds: u32::try_from(WIDTH).unwrap_or(1),
-            buckets,
-        }
-    }
-}
-
-/// A count over time that a view ages on its own clock: it sends nothing
-/// while traffic stops, and the bars decay as `ends_at` grows old.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StampedWindow {
-    /// The last whole second the newest bucket covers.
-    pub ends_at: SystemTime,
-    /// One bucket's width: 1 or 10 seconds.
-    pub width_seconds: u32,
-    /// `(buckets before the newest, count)` for the non-zero buckets,
-    /// newest first.
-    pub buckets: Vec<(u8, u32)>,
-}
+pub use firenook_suite_front::window::StampedWindow;
 
 /// A queue's stamped windows.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct QueueWindows {
     /// Attempts sent, per second over a minute.
-    pub dispatched: Buckets<60, 1>,
+    pub dispatched: SecondCounts,
     /// Tasks that ran out of retries, per ten seconds over five minutes.
-    pub failed: Buckets<30, 10>,
+    pub failed: TenSecondCounts,
 }
 
 /// A request the Tasks port refused, coalesced by operation, queue, status
