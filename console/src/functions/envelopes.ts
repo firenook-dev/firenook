@@ -67,7 +67,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 
 /** UTF-8 text as base64 (the CLI's `Buffer.from(text).toString('base64')`). */
-export function utf8Base64(text: string): string {
+function utf8Base64(text: string): string {
   const bytes = new TextEncoder().encode(text)
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)

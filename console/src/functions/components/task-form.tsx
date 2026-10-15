@@ -1,7 +1,8 @@
 // Enqueue, for a task queue function: the queue as the Cloud Tasks emulator
 // holds it (its key, retries, rate limits, why it refused the queue when it
 // did, a link to it in Cloud Tasks) and a task with a JSON payload, enqueued
-// through Cloud Tasks so the retries and headers are the real ones. There is
+// through Cloud Tasks' console path so the retries and headers are the real
+// ones. There is
 // no delay field unless the queue holds scheduled tasks: Cloud Tasks here
 // runs a task at once whatever its schedule time, as the official emulator.
 
@@ -15,7 +16,7 @@ import { EntityLink } from '@/components/console/entity-link'
 import { JsonField, parseJsonText } from '@/components/console/json-field'
 import { RequiresNotice } from '@/components/console/requires-notice'
 import { SendButton } from '@/components/console/request/send-button'
-import { enqueueTask } from '../api'
+import { enqueue as enqueueTask } from '@/tasks/api'
 import { type TaskDraft, useRunDraft } from '../run-drafts'
 import { statusReasonText } from '../trigger-text'
 import { FormRow, RunAnswer, RunError, RunFooter, useNextInvocation } from './run-parts'
@@ -56,24 +57,36 @@ export function TaskForm({
     : runAfter !== null && (!Number.isInteger(runAfter) || runAfter < 0)
       ? 'Run after is a whole number of seconds.'
       : undefined
+  // Cloud Tasks' own console enqueue (`POST /tasks/tasks`): the task the
+  // Admin SDK's `enqueue(payload)` sends, held to the wire's limits.
   const enqueue = useMutation({
-    mutationFn: () =>
-      enqueueTask(summary.id, {
-        payload: parsed.ok ? parsed.value : null,
-        runAfterSeconds: queue?.holdScheduled ? runAfter : null,
-      }),
-    onSuccess: (result) => {
-      const name = result.task ?? ''
-      const short = name.slice(name.lastIndexOf('/') + 1)
+    mutationFn: () => {
+      if (!queue) throw new Error('This function has no task queue.')
+      return enqueueTask({
+        queue: queue.queue,
+        data: JSON.stringify(parsed.ok ? parsed.value : null),
+        scheduleDelaySeconds: queue.holdScheduled && runAfter ? runAfter : null,
+      })
+    },
+    onSuccess: (row) => {
+      const short = row.shortName
       setAwaiting(
         () => (invocation: InvocationSummary) =>
           invocation.cause.type === 'task' &&
-          (short === '' ||
-            invocation.cause.task === short ||
-            invocation.cause.task.endsWith(`/${short}`)),
+          (invocation.cause.task === short || invocation.cause.task.endsWith(`/${short}`)),
       )
     },
   })
+  // The task in Cloud Tasks: its key is the queue's parts and the task's id.
+  const enqueued = enqueue.data
+  const taskRef =
+    enqueued && queue?.queueRef
+      ? {
+          kind: 'tasks.task',
+          key: `${queue.queueRef.key}|${enqueued.id}`,
+          label: enqueued.shortName,
+        }
+      : undefined
   if (summary.status === 'ignored')
     return (
       <div className="px-5 py-4" data-testid="task-form-ignored">
@@ -169,23 +182,16 @@ export function TaskForm({
             fix={enqueue.error instanceof ApiError ? enqueue.error.fix : undefined}
           />
         )}
-        {enqueue.data && (
+        {enqueued && (
           <p
             className="m-0 flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-kumo-default"
             data-testid="task-result"
           >
             Enqueued task
-            {enqueue.data.target ? (
-              <EntityLink
-                entity={{
-                  ...enqueue.data.target,
-                  label: enqueue.data.task
-                    ? enqueue.data.task.slice(enqueue.data.task.lastIndexOf('/') + 1)
-                    : enqueue.data.target.key,
-                }}
-              />
+            {taskRef ? (
+              <EntityLink entity={taskRef} />
             ) : (
-              <span className="font-mono text-[12px]">{enqueue.data.task}</span>
+              <span className="font-mono text-[12px]">{enqueued.shortName}</span>
             )}
             {!awaited && <span className="text-kumo-subtle">Waiting for the dispatch…</span>}
           </p>
@@ -197,7 +203,7 @@ export function TaskForm({
             label="Enqueue"
             onSend={() => enqueue.mutate()}
             pending={enqueue.isPending}
-            disabled={problem !== undefined}
+            disabled={problem !== undefined || !queue}
             testId="task-enqueue"
           />
         }

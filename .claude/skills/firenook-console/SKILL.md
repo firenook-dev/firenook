@@ -3058,8 +3058,11 @@ Generated types in `src/api/generated/compute/`.
   (`entity.rs` constructors); filtered Logs go through `linkToLogs`.
   Compute exports no link builder. Task causes link the task by
   `task_id(queue, task)` and the queue; Run now goes through messaging's
-  `ScheduleControl::run` and Enqueue through `TasksConsole::enqueue_console`
-  (a reserved name or a full queue is a conflict, said in the form).
+  `ScheduleControl::run`. The Run tab has no broker routes of its own:
+  "Publish to <topic>" is Pub/Sub's console publish (`POST
+  /pubsub/topic/publish`, `publish_from_console`, so a refusal is never
+  counted as the app's) and Enqueue is Cloud Tasks' (`POST /tasks/tasks`,
+  its refusals and fixes said in the form).
 - **"Which functions fire here" has one matcher**: `GET
   /functions/triggers` (through `useTriggersFor`, `'unknown'` while
   starting, one reference-counted `functions.events {changesOnly}`

@@ -4,7 +4,6 @@ import { triggersKey } from '@/lib/triggers'
 import {
   clearInvocations,
   editEnv,
-  enqueueTask,
   functionKeys,
   getCodebaseLog,
   getFunction,
@@ -13,7 +12,6 @@ import {
   getInvocations,
   invocationBodyUrl,
   matchTriggers,
-  publishMessage,
   reloadCodebase,
   restartWorker,
   revealHeader,
@@ -173,23 +171,8 @@ describe('changes', () => {
     })
   })
 
-  it('publish, enqueue and run now through the brokers', async () => {
+  it('run now through the scheduler', async () => {
     answer = { status: 200, body: { transport: 'pubsub' } }
-    await publishMessage('us-central1-onEmail', {
-      data: '{"to":"ada"}',
-      encoding: 'text',
-      attributes: { kind: 'welcome' },
-      orderingKey: null,
-    })
-    expect(last()).toMatchObject({
-      url: '/console/api/v1/functions/us-central1-onEmail/publish',
-      body: { data: '{"to":"ada"}', attributes: { kind: 'welcome' } },
-    })
-    await enqueueTask('us-central1-resize', { payload: { url: 'a.png' }, runAfterSeconds: null })
-    expect(last()).toMatchObject({
-      url: '/console/api/v1/functions/us-central1-resize/enqueue',
-      body: { payload: { url: 'a.png' }, runAfterSeconds: null },
-    })
     await runSchedule('us-central1-nightly')
     expect(last()).toMatchObject({
       url: '/console/api/v1/functions/us-central1-nightly/run',
@@ -203,8 +186,7 @@ describe('changes', () => {
       body: {
         error: {
           code: 'conflict',
-          message:
-            'Background triggers are paused, so Pub/Sub would accept this message and deliver it to no function.',
+          message: 'Background triggers are paused, so the tick was not published.',
           fix: 'Resume background triggers.',
         },
       },

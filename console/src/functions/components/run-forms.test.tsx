@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { BackendDefinition } from '../envelopes'
 import { composedUser } from './blocking-form'
 import { callableHeaders, recordedData } from './callable-form'
-import { documentPattern, eventInput, fixedChange, restFields, startingData } from './event-form'
+import {
+  documentPattern,
+  eventInput,
+  fixedChange,
+  publishBody,
+  restFields,
+  startingData,
+} from './event-form'
 import { countdownText } from './schedule-form'
 import { optionsText } from './task-form'
 
@@ -55,6 +62,30 @@ describe('the Run forms', () => {
       n: { integerValue: '2' },
       list: { arrayValue: { values: [{ integerValue: '3' }] } },
       map: { mapValue: { fields: { m: { doubleValue: 1.5 } } } },
+    })
+  })
+
+  it("publish a function's message through Pub/Sub's own console publish", () => {
+    const topic = 'projects/p/topics/emails'
+    expect(
+      publishBody(topic, {
+        data: { to: 'ada' },
+        attributes: { kind: 'welcome' },
+        orderingKey: 'u1',
+      }),
+    ).toEqual({
+      topic,
+      messages: [
+        { data: { text: '{"to":"ada"}' }, attributes: { kind: 'welcome' }, orderingKey: 'u1' },
+      ],
+    })
+    expect(publishBody(topic, { data: 'plain' }).messages[0]).toEqual({
+      data: { text: 'plain' },
+      attributes: {},
+      orderingKey: null,
+    })
+    expect(publishBody(topic, { attributes: { only: 'this' } }).messages[0]?.data).toEqual({
+      text: '',
     })
   })
 

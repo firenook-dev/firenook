@@ -5,6 +5,7 @@ import { type Engine, expect, test } from './fixtures'
 import { readClipboard } from './support/clipboard'
 import {
   ENGINE_SENTINEL,
+  type InvocationSummary,
   callFunction,
   codebaseOf,
   consoleJson,
@@ -602,6 +603,36 @@ test('enqueue a task through Cloud Tasks and follow its attempt', async ({ page,
   expect(view.refs.some((ref) => ref.kind === 'tasks.task' || ref.kind === 'tasks.queue')).toBe(
     true,
   )
+})
+
+test("publish to a Pub/Sub function's topic for real, through Pub/Sub's own publish", async ({
+  page,
+  engine,
+}) => {
+  const to = unique('ada')
+  await openFunction(page, engine, 'onEmail', 'run')
+  await page
+    .getByTestId('event-data')
+    .fill(`{"data": {"to": "${to}"}, "attributes": {"kind": "welcome"}}`)
+  await page.getByTestId('event-publish').click()
+  await expect(page.getByTestId('event-real-result')).toContainText('Published message')
+  await expect(page.getByTestId('event-real-result')).toContainText('to emails.')
+  await expect(page.getByTestId('run-outcome')).toContainText('Succeeded')
+  // The delivery, found by the topic that caused it, ran the handler with
+  // the message as published: Pub/Sub delivered it like an app's publish.
+  let delivered: InvocationSummary | undefined
+  await expect
+    .poll(async () => {
+      for (const candidate of await invocations(engine, 'topic:emails outcome:succeeded')) {
+        const view = await invocationOf(engine, candidate.id)
+        if (view.detail.logs.some((line) => line.message.includes(`email to ${to}`)))
+          delivered = candidate
+      }
+      return delivered !== undefined
+    })
+    .toBe(true)
+  expect(delivered?.origin).toBe('emulator')
+  expect(delivered?.cause.type).toBe('pubsub')
 })
 
 test('a blocking function decides a sign-up, tested and for real', async ({ page, engine }) => {

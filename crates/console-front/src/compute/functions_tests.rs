@@ -461,72 +461,137 @@ async fn calls_and_test_events_stream_their_frames_and_are_recorded() {
     suite.stop().await;
 }
 
-#[tokio::test]
-async fn publish_goes_through_the_pubsub_emulator() {
-    let (native, seen) = stub(StatusCode::OK, json!({"messageIds": ["42"]}));
-    let suite = Suite::running(Setup {
-        pubsub: Some(pubsub(native)),
-        ..Setup::default()
-    })
-    .await;
-    let (status, body) = suite
-        .post(
-            "/functions/us-central1-onEmail/publish",
-            json!({"data": "hi", "encoding": "text", "attributes": {"kind": "welcome"}, "orderingKey": "u1"}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["transport"], "pubsub");
-    assert_eq!(body["messageId"], "42");
-    assert_eq!(body["topic"], "projects/demo-compute/topics/emails");
-    assert_eq!(
-        body["target"],
-        serde_json::to_value(EntityRef::pubsub_message(
-            "projects/demo-compute/topics/emails",
-            "42"
-        ))
-        .expect("json")
-    );
-    let (path, request) = seen.lock().expect("seen")[0].clone();
-    assert_eq!(path, "/v1/projects/demo-compute/topics/emails:publish");
-    assert_eq!(request["messages"][0]["data"], BASE64.encode("hi"));
-    assert_eq!(request["messages"][0]["attributes"]["kind"], "welcome");
-    assert_eq!(request["messages"][0]["orderingKey"], "u1");
-    let (status, body) = suite
-        .post("/functions/us-central1-onEmail/publish", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    let (status, _) = suite
-        .post(
-            "/functions/us-central1-api/publish",
-            json!({"data": "x", "encoding": "text"}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    suite.triggers.set_background_enabled(false);
-    let (status, body) = suite
-        .post(
-            "/functions/us-central1-onEmail/publish",
-            json!({"data": "x", "encoding": "text"}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"]["fix"], "Resume background triggers.");
-    suite.stop().await;
+/// One request to `router`, JSON in and out (no console guard: a test
+/// router).
+async fn call(router: &Router, method: Method, uri: &str, body: Value) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(body.to_string()))
+        .expect("request");
+    let response = router.clone().oneshot(request).await.expect("response");
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
 
-    let suite = Suite::running(Setup::default()).await;
-    let (status, body) = suite
-        .post(
-            "/functions/us-central1-onEmail/publish",
-            json!({"data": "x", "encoding": "text"}),
+/// "Publish to emails" on a Pub/Sub function's Run tab is Pub/Sub's own
+/// console publish (`POST /pubsub/topic/publish`, `publish_from_console`),
+/// not the wire path an app takes: a refused publish is answered to the
+/// console and never counted among the app's refused publishes (audit A2,
+/// when Functions had its own `/functions/{id}/publish` over the wire).
+#[tokio::test]
+async fn the_run_tabs_publish_is_the_consoles_not_an_apps() {
+    let inventory = firenook_functions_bridge::FunctionsInventory::from_backends_json(
+        &json!({"backends": [{"codebase": "default", "functionTriggers": [{
+            "id": "us-central1-onEmail",
+            "name": "onEmail",
+            "region": "us-central1",
+            "entryPoint": "onEmail",
+            "platform": "gcfv1",
+            "eventTrigger": {
+                "eventType": "google.pubsub.topic.publish",
+                "resource": "projects/demo-compute/topics/emails",
+            },
+        }]}]}),
+        0,
+    )
+    .expect("an inventory");
+    let background = firenook_functions_bridge::TriggerRegistry::default();
+    let (observer, _deliveries) =
+        firenook_functions_bridge::TriggerObserver::channel(background.clone());
+    let runtime =
+        firenook_pubsub_front::router(PROJECT, &inventory, observer.queue(), background.clone());
+    let pubsub = PubsubConsole::new(runtime.application(), runtime, None);
+    let late = Late::pending("Pub/Sub");
+    late.set(pubsub.clone());
+    let router = crate::console_router(crate::ConsoleServices {
+        pubsub: Some(late),
+        ..crate::ConsoleServices::new(
+            firenook_suite_front::SuiteDirectory::new(
+                PROJECT,
+                [firenook_suite_front::ServiceInfo::listening(
+                    "hub",
+                    "127.0.0.1",
+                    34_400,
+                )],
+            )
+            .expect("a directory"),
+            crate::tests::running(),
         )
-        .await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(body["error"]["code"], "unavailable");
-    assert_eq!(
-        body["error"]["fix"],
-        "Use Send to this function only, or start the suite with Pub/Sub."
-    );
+    });
+    let publish = |topic: &str| {
+        json!({
+            "topic": topic,
+            "messages": [{"data": {"text": "{\"to\":\"ada\"}"}, "attributes": {"kind": "welcome"}}],
+        })
+    };
+    let emails = "projects/demo-compute/topics/emails";
+
+    // Delivered to the function, as an app's publish would be.
+    let (status, published) = call(
+        &router,
+        Method::POST,
+        "/api/v1/pubsub/topic/publish",
+        publish(emails),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+    assert_eq!(published["messageIds"].as_array().map(Vec::len), Some(1));
+    assert_eq!(published["functions"], 1);
+    assert_eq!(published["functionsSkipped"], 0);
+    // Paused: Pub/Sub keeps the message and says no function got it.
+    background.set_background_enabled(false);
+    let (status, published) = call(
+        &router,
+        Method::POST,
+        "/api/v1/pubsub/topic/publish",
+        publish(emails),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+    assert_eq!(published["functionsSkipped"], 1);
+    background.set_background_enabled(true);
+
+    // A topic the app deleted: refused to the console, not recorded.
+    let gone = "projects/demo-compute/topics/gone";
+    let (status, refused) = call(
+        &router,
+        Method::POST,
+        "/api/v1/pubsub/topic/publish",
+        publish(gone),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
+    assert_eq!(pubsub.runtime.refusals_total(), 0);
+    let (_, rejected) = call(&router, Method::GET, "/api/v1/pubsub/rejected", Value::Null).await;
+    assert_eq!(rejected["items"], json!([]), "{rejected}");
+    // The wire path, which the Run tab used to take, is an app's refusal.
+    let (status, _) = call(
+        &pubsub.native,
+        Method::POST,
+        &format!("/v1/{gone}:publish"),
+        json!({"messages": [{"data": BASE64.encode("{}")}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(pubsub.runtime.refusals_total(), 1);
+
+    // Functions has no publish or enqueue route of its own any more.
+    let suite = Suite::running(Setup::default()).await;
+    for uri in [
+        "/functions/us-central1-onEmail/publish",
+        "/functions/us-central1-resize/enqueue",
+    ] {
+        let (status, _) = suite.post(uri, json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+    }
     suite.stop().await;
 }
 
@@ -555,8 +620,12 @@ fn tasks_with_resize() -> Late<TasksConsole> {
     late
 }
 
+/// A task queue function's detail says how its queue holds tasks, and an
+/// attempt of a task (enqueued through Cloud Tasks' console path, as the
+/// Run tab's Enqueue does with `POST /tasks/tasks`) links to the task, by
+/// the console's id, and to its queue.
 #[tokio::test]
-async fn enqueue_goes_through_the_cloud_tasks_console_path_and_names_the_task() {
+async fn a_task_attempt_links_to_its_task_and_queue() {
     let tasks = tasks_with_resize();
     let suite = Suite::running(Setup {
         tasks: Some(tasks.clone()),
@@ -564,38 +633,21 @@ async fn enqueue_goes_through_the_cloud_tasks_console_path_and_names_the_task() 
     })
     .await;
     let queue = "queue:demo-compute-us-central1-resize";
-    let (status, body) = suite
-        .post(
-            "/functions/us-central1-resize/enqueue",
-            json!({"payload": {"image": "a.png"}}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["transport"], "tasks");
-    assert_eq!(body["queue"], queue);
-    let name = body["task"].as_str().expect("a task name").to_owned();
     let console = tasks.get().expect("Cloud Tasks");
-    let id = console.task_id(queue, &name).expect("the console's id");
-    assert_eq!(
-        body["target"],
-        serde_json::to_value(EntityRef::tasks_task(
-            "demo-compute",
-            "us-central1",
-            "resize",
-            &id
-        ))
-        .expect("json")
-    );
-
-    // A delay only where the queue holds scheduled tasks.
-    let (status, body) = suite
-        .post(
-            "/functions/us-central1-resize/enqueue",
-            json!({"payload": {}, "runAfterSeconds": 30}),
+    let enqueued = console
+        .enqueue_console(
+            queue,
+            firenook_tasks_front::ConsoleTask {
+                data: Some("{\"image\":\"a.png\"}".to_owned()),
+                ..firenook_tasks_front::ConsoleTask::default()
+            },
         )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        .expect("enqueued");
+    let name = enqueued.name;
+    let id = console.task_id(queue, &name).expect("the console's id");
+
     let (_, detail) = suite.get("/functions/us-central1-resize").await;
+    assert_eq!(detail["taskQueue"]["queue"], queue, "{detail}");
     assert_eq!(detail["taskQueue"]["holdScheduled"], false, "{detail}");
     assert_eq!(detail["taskQueue"]["refused"], Value::Null, "{detail}");
     console
@@ -604,13 +656,6 @@ async fn enqueue_goes_through_the_cloud_tasks_console_path_and_names_the_task() 
         .expect("a queue");
     let (_, detail) = suite.get("/functions/us-central1-resize").await;
     assert_eq!(detail["taskQueue"]["holdScheduled"], true, "{detail}");
-    let (status, body) = suite
-        .post(
-            "/functions/us-central1-resize/enqueue",
-            json!({"payload": {}, "runAfterSeconds": 30}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
 
     // An attempt of the task links to the task, by the console's id, and its queue.
     let monitor = suite.monitor();
@@ -667,10 +712,6 @@ async fn enqueue_goes_through_the_cloud_tasks_console_path_and_names_the_task() 
         ]
     );
 
-    let (status, _) = suite
-        .post("/functions/us-central1-api/enqueue", json!({"payload": {}}))
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
     suite.stop().await;
 }
 
