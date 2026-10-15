@@ -15,11 +15,13 @@ in it may assume localhost, a port number or an anonymous operator.
 
 React 19, TypeScript strict, Vite 8 (Rolldown) with the React Compiler
 (`react({ compiler: true })`), TanStack Router (file routes, typed search
-params), TanStack Query (server state), TanStack Table + Virtual (grids),
-TanStack Form + zod (editors), Zustand (ephemeral UI state), Kumo on Base UI
-(components), Tailwind 4 with Kumo's semantic tokens, Phosphor icons. Not
-used: TanStack Start (there is no JavaScript server; the Rust binary serves
-the app), TanStack DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
+params), TanStack Query (server state), TanStack Virtual (grids and feeds,
+under the kit's own `DataTable`), zod (search params and editors), Zustand
+(ephemeral UI state), Kumo on Base UI (components), Tailwind 4 with Kumo's
+semantic tokens, Phosphor icons. Not used: TanStack Start (there is no
+JavaScript server; the Rust binary serves the app), TanStack Table and Form
+(the kit's `DataTable` and plain controlled editors do their jobs), TanStack
+DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 
 ## Where state lives
 
