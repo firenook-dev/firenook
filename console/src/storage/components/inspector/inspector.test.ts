@@ -19,6 +19,7 @@ const change = (at: string, revision: number): StorageObjectChange => ({
   metadataKeys: [],
   actor: { kind: 'admin', uid: null, tenant: null, viaConsole: true },
   delivery: 'sent',
+  invocations: [],
 })
 const decision = (at: string, id: string): StorageDecision => ({
   id,

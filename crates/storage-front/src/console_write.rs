@@ -549,14 +549,16 @@ impl StorageConsoleApi {
             crate::now_millis(),
             crate::RESEND_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
-        Ok(state.dispatch_with(
-            match event {
-                ResendEvent::Finalize => StorageEvent::Finalize,
-                ResendEvent::MetadataUpdate => StorageEvent::Metadata,
-            },
-            &object,
-            Some(&nonce),
-        ))
+        Ok(state
+            .dispatch_with(
+                match event {
+                    ResendEvent::Finalize => StorageEvent::Finalize,
+                    ResendEvent::MetadataUpdate => StorageEvent::Metadata,
+                },
+                &object,
+                Some(&nonce),
+            )
+            .0)
     }
 
     /// Removes every object and unfinished upload session of every bucket

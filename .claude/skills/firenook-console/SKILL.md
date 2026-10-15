@@ -2779,8 +2779,11 @@ the reader had been. The Rules page reads the rules kit's schema,
 Files links to Rules only through `storage/rules-link.ts`
 (`useRulesPageLink`, `useTryInPlayground`), which offers a link only while
 the router knows `/storage_/rules`. Links out are `EntityRef`s through
-`EntityLink`/`linkTo` (an Auth user in Activity, a function a trigger
-reached), never hand-built URLs; Storage's own keys are pinned in
+`EntityLink`/`linkTo` (an Auth user in Activity; each invocation a
+change's event started, which the activity route joins from the
+Functions record by the event ids the change record keeps, or the
+functions its trigger names before they begin), never hand-built URLs;
+Storage's own keys are pinned in
 `entity.rs`: `storage.object` and `storage.folder` are `<bucket>|<path>`,
 `storage.decision` is `<bucket or *>|<id>`.
 

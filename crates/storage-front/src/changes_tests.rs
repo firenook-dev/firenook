@@ -347,9 +347,29 @@ async fn delivery_is_reported() {
         harness.upload("sent.txt", &[OWNER]).await.status(),
         StatusCode::OK
     );
-    assert_eq!(harness.drain_dispatches(), 2, "the v1 and the v2 request");
+    let mut sent = Vec::new();
+    while let Ok(request) = harness
+        .dispatches
+        .as_mut()
+        .expect("dispatch receiver")
+        .try_recv()
+    {
+        sent.push(request);
+    }
+    assert_eq!(sent.len(), 2, "the v1 and the v2 request");
     let (records, _) = harness.runtime.console().activity(BUCKET, "sent.txt");
     assert_eq!(records[0].delivery, EventDelivery::Sent);
+    // The record keeps the ids the requests carry, which every invocation
+    // they start is recorded by.
+    let carried = sent
+        .iter()
+        .map(|request| {
+            firenook_functions_bridge::cause::decode(
+                &request.headers[firenook_functions_bridge::cause::EVENT_ID],
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(records[0].event_ids, carried);
 
     harness.registry.set_background_enabled(false);
     assert_eq!(
@@ -359,6 +379,11 @@ async fn delivery_is_reported() {
     assert_eq!(harness.drain_dispatches(), 0);
     let (records, _) = harness.runtime.console().activity(BUCKET, "paused.txt");
     assert_eq!(records[0].delivery, EventDelivery::Paused);
+    assert_eq!(
+        records[0].event_ids,
+        Vec::<String>::new(),
+        "nothing was sent"
+    );
 
     harness.registry.set_background_enabled(true);
     drop(harness.dispatches.take());

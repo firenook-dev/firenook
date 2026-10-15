@@ -153,6 +153,9 @@ pub struct ObjectChangeRecord {
     pub actor: Actor,
     pub via_console: bool,
     pub delivery: EventDelivery,
+    /// Once the event was sent: its ids, the legacy `eventId` and then the
+    /// `CloudEvent` `id`, which each invocation it starts is recorded by.
+    pub event_ids: Vec<String>,
 }
 
 impl ObjectChangeRecord {
@@ -171,6 +174,7 @@ impl ObjectChangeRecord {
                 .iter()
                 .map(|key| key.len() + 24)
                 .sum::<usize>()
+            + self.event_ids.iter().map(|id| id.len() + 24).sum::<usize>()
             + actor
     }
 }
@@ -264,8 +268,8 @@ impl ChangeFeed {
 
     /// Records what happened to the event of the change at `revision`, once
     /// it was dispatched after the commit.
-    pub(crate) fn settle(&self, revision: u64, delivery: EventDelivery) {
-        self.ring().settle(revision, delivery);
+    pub(crate) fn settle(&self, revision: u64, delivery: EventDelivery, event_ids: Vec<String>) {
+        self.ring().settle(revision, delivery, event_ids);
     }
 
     /// The changes of one object, newest first, and when the ring's window
@@ -321,9 +325,13 @@ impl ActivityRing {
             .ok()
     }
 
-    fn settle(&mut self, revision: u64, delivery: EventDelivery) {
+    fn settle(&mut self, revision: u64, delivery: EventDelivery, event_ids: Vec<String>) {
         if let Some(index) = self.position(revision) {
-            self.records[index].delivery = delivery;
+            let record = &mut self.records[index];
+            let before = record.estimated_bytes();
+            record.delivery = delivery;
+            record.event_ids = event_ids;
+            self.bytes = (self.bytes + record.estimated_bytes()).saturating_sub(before);
         }
     }
 
@@ -444,6 +452,7 @@ impl StorageData {
             } else {
                 EventDelivery::Pending
             },
+            event_ids: Vec::new(),
         };
         let before = self.objects.insert(key, object);
         self.committed(record);
@@ -480,6 +489,7 @@ impl StorageData {
             } else {
                 EventDelivery::Pending
             },
+            event_ids: Vec::new(),
         };
         self.committed(record);
         Some(before)
@@ -720,6 +730,7 @@ mod tests {
                 actor: Actor::Anonymous,
                 via_console: false,
                 delivery: EventDelivery::Pending,
+                event_ids: Vec::new(),
             };
             if revision == 3 {
                 record.name = "evicted".to_owned();
@@ -742,10 +753,16 @@ mod tests {
             .map(|name| ring.activity(&object_key("b", name)).0.len())
             .sum::<usize>();
         assert_eq!(total, ACTIVITY_RECORDS);
-        ring.settle(ACTIVITY_RECORDS as u64, EventDelivery::Sent);
-        assert_eq!(
-            ring.records[ring.position(ACTIVITY_RECORDS as u64).expect("kept")].delivery,
-            EventDelivery::Sent
+        let bytes = ring.bytes;
+        ring.settle(
+            ACTIVITY_RECORDS as u64,
+            EventDelivery::Sent,
+            vec!["1234".to_owned(), "c-1".to_owned()],
         );
+        let settled = &ring.records[ring.position(ACTIVITY_RECORDS as u64).expect("kept")];
+        assert_eq!(settled.delivery, EventDelivery::Sent);
+        assert_eq!(settled.event_ids, ["1234", "c-1"]);
+        // The ids count in the ring's bytes, as eviction will take them out.
+        assert_eq!(ring.bytes, bytes + 4 + 24 + 3 + 24);
     }
 }

@@ -1593,8 +1593,10 @@ test('an upload reaches the app’s function, and its event can be sent again', 
   })
   const delivery = inspector(page).getByTestId('activity-delivery').first()
   await expect(delivery).toContainText('Sent to the Functions emulator')
-  // Named as a link to the function, in Functions.
-  await expect(delivery.getByRole('link', { name: 'storageFinalized' })).toBeVisible()
+  // Named as a link to the invocation it started, in Functions › Invocations.
+  const invocation = delivery.getByRole('link', { name: 'storageFinalized' })
+  await expect(invocation).toBeVisible()
+  await expect(invocation).toHaveAttribute('href', /\/functions\/invocations\?invocation=/)
   // The v1 body the function got names the same object, as the function recorded it.
   const payloads = inspector(page).getByTestId('event-payloads')
   await payloads.getByRole('tab', { name: 'Raw' }).click()

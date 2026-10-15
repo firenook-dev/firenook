@@ -108,6 +108,12 @@ pub(crate) fn bodies(
 }
 
 impl EventBodies {
+    /// The legacy `eventId` and the `CloudEvent` `id`: what the Functions
+    /// runtime records each invocation the event starts by.
+    pub(crate) fn ids(&self) -> Vec<String> {
+        vec![self.legacy_id.clone(), self.cloud_id.clone()]
+    }
+
     /// The two delivery requests (v1, then v2) the trigger multicast takes.
     pub(crate) fn requests(
         &self,

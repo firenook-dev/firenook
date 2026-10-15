@@ -11,15 +11,17 @@ use super::{FunctionsConsoleOptions, HookContext};
 use crate::SuiteConfig;
 
 /// Storage's console: the Storage emulator's own application, the
-/// service's console handle, and the suite's log for the `storage.denied`
-/// lines. `_compute` is the Functions record's, in a suite with Functions.
+/// service's console handle, the suite's log for the `storage.denied`
+/// lines, and in a suite with Functions the record Activity reads the
+/// invocations a file's events started from.
 pub(crate) fn storage_console(
     storage: &Arc<StorageRuntime>,
     _config: &SuiteConfig,
     logging: &LoggingRuntime,
-    _compute: Option<&ComputeParts>,
+    compute: Option<&ComputeParts>,
 ) -> StorageConsole {
     StorageConsole::new(storage.application(), storage.console(), logging.clone())
+        .with_monitor(compute.map(|parts| parts.monitor().clone()))
 }
 
 /// Storage's own log lines (rules runtime errors, failed flushes) as suite

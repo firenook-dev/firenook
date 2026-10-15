@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::routing::{get, post};
+use firenook_functions_runtime::Monitor;
 use firenook_storage_front::{BulkProgress, ConsoleRefusal, StorageConsoleApi, StorageRulesEvent};
 use firenook_suite_front::LoggingRuntime;
 use futures_util::future::BoxFuture;
@@ -59,6 +60,9 @@ pub struct StorageConsole {
     /// The suite's log, for the `storage.denied` lines the decision feed
     /// writes.
     pub logging: LoggingRuntime,
+    /// The Functions record, in a suite with Functions: Activity names the
+    /// invocations a file's events started.
+    pub monitor: Option<Monitor>,
     /// The feeds the section starts with its first context.
     feeds: OnceLock<Feeds>,
 }
@@ -72,8 +76,17 @@ impl StorageConsole {
             native,
             api,
             logging,
+            monitor: None,
             feeds: OnceLock::new(),
         }
+    }
+
+    /// The same console, reading the Functions record (`None` without
+    /// Functions).
+    #[must_use]
+    pub fn with_monitor(mut self, monitor: Option<Monitor>) -> Self {
+        self.monitor = monitor;
+        self
     }
 }
 
@@ -84,6 +97,8 @@ pub(crate) struct StorageRoutes {
     pub(crate) jobs: crate::jobs::JobRegistry,
     /// The decision feed; `None` without diagnostics.
     pub(crate) feed: Option<DecisionFeed>,
+    /// The Functions record; `None` without Functions.
+    pub(crate) monitor: Option<Monitor>,
 }
 
 /// The feeds a section builds once, from the first context it is given.
@@ -222,6 +237,7 @@ impl Section for StorageSection {
             api: self.0.api.clone(),
             jobs: context.jobs.clone(),
             feed: feeds.decisions.clone(),
+            monitor: self.0.monitor.clone(),
         };
         let api = Router::new()
             .route("/buckets", get(files::buckets))

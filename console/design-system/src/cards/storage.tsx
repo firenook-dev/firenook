@@ -1300,6 +1300,9 @@ const COVER_ACTIVITY: StorageActivity = {
       metadataKeys: ['caption'],
       actor: { kind: 'admin', uid: null, tenant: null, viaConsole: true },
       delivery: 'sent',
+      invocations: [
+        { kind: 'functions.invocation', key: 'a3f9c1-1290', label: 'us-central1-onCoverChanged' },
+      ],
     },
     {
       revision: 1_271,
@@ -1312,6 +1315,7 @@ const COVER_ACTIVITY: StorageActivity = {
       metadataKeys: [],
       actor: { kind: 'user', uid: ADA, tenant: null, viaConsole: false },
       delivery: 'sent',
+      invocations: [],
     },
     {
       revision: 412,
@@ -1324,6 +1328,7 @@ const COVER_ACTIVITY: StorageActivity = {
       metadataKeys: [],
       actor: { kind: 'user', uid: ADA, tenant: null, viaConsole: false },
       delivery: 'sent',
+      invocations: [],
     },
   ],
   decisions: DECISIONS.filter((item) => item.path === COVER.name).toReversed(),

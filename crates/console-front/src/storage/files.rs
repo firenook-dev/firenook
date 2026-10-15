@@ -8,13 +8,15 @@
 //! other value is a client), so the console meets the rules an app meets.
 //! The others are the operator's own reads.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use firenook_functions_runtime::Monitor;
+use firenook_functions_runtime::monitor::{InvocationQuery, InvocationSummary};
 use firenook_storage_front::{
     Actor, ConsoleListQuery, ConsoleUpload, EventDelivery, ExportSource, FileEntry, FolderEntry,
     FolderStats, Identity, ListCursor, ListEntry, ListKind, ListOrder, MediaMode, MetadataPatch,
@@ -32,6 +34,7 @@ use super::rules::StorageDecision;
 use super::rules::double_option as patch_field;
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
+use crate::entity::EntityRef;
 use crate::guard::{CONSOLE_HEADER, KEEP_TOKENS_HEADER, METADATA_HEADER};
 use crate::jobs::BulkTarget;
 use crate::json::ConsoleJson;
@@ -531,6 +534,10 @@ pub(crate) struct StorageObjectChange {
     pub metadata_keys: Vec<String>,
     pub actor: StorageActor,
     pub delivery: StorageEventDelivery,
+    /// The Functions invocations its event started, each labelled with its
+    /// function's id, while the Functions record keeps them: empty before
+    /// they begin, without Functions, and once they have rolled off.
+    pub invocations: Vec<EntityRef>,
 }
 
 /// `POST /storage/objects:batchGet`: the foundation's request plus the
@@ -781,7 +788,58 @@ fn folder_counts(bucket: &str, prefix: &str, stats: &FolderStats) -> StorageFold
     }
 }
 
-fn change(record: &ObjectChangeRecord) -> StorageObjectChange {
+/// The most invocations one Activity names.
+const ACTIVITY_INVOCATIONS: usize = 200;
+
+/// The invocations the events of `changes` started, with the event id each
+/// was delivered with: one pass over the Functions record, newest first,
+/// keeping the newest attempt per function and leaving out replays (those
+/// a developer started).
+pub(super) fn started_by(
+    monitor: Option<&Monitor>,
+    changes: &[ObjectChangeRecord],
+) -> Vec<(String, EntityRef)> {
+    let ids = changes
+        .iter()
+        .flat_map(|record| record.event_ids.iter().map(String::as_str))
+        .collect::<HashSet<_>>();
+    let Some(monitor) = monitor.filter(|_| !ids.is_empty()) else {
+        return Vec::new();
+    };
+    let wanted = |summary: &InvocationSummary| {
+        summary.replay_of.is_none()
+            && summary
+                .event_id
+                .as_deref()
+                .is_some_and(|id| ids.contains(id))
+    };
+    let page = monitor.invocations(
+        &InvocationQuery {
+            filter: Some(&wanted),
+            limit: ACTIVITY_INVOCATIONS,
+        },
+        None,
+    );
+    let mut seen = HashSet::new();
+    let mut started = page
+        .items
+        .into_iter()
+        .filter_map(|summary| {
+            let event = summary.event_id?;
+            seen.insert((event.clone(), summary.function_id.clone()))
+                .then(|| {
+                    (
+                        event,
+                        EntityRef::invocation(&summary.id).with_label(summary.function_id),
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    started.reverse();
+    started
+}
+
+fn change(record: &ObjectChangeRecord, started: &[(String, EntityRef)]) -> StorageObjectChange {
     let (kind, uid, tenant) = match &record.actor {
         Actor::Admin => (StorageActorKind::Admin, None, None),
         Actor::User { uid, tenant } => (StorageActorKind::User, Some(uid.clone()), tenant.clone()),
@@ -804,6 +862,11 @@ fn change(record: &ObjectChangeRecord) -> StorageObjectChange {
             via_console: record.via_console,
         },
         delivery: record.delivery.into(),
+        invocations: started
+            .iter()
+            .filter(|(event, _)| record.event_ids.contains(event))
+            .map(|(_, invocation)| invocation.clone())
+            .collect(),
     }
 }
 
@@ -1435,13 +1498,17 @@ pub(crate) async fn activity(
     Query(query): Query<ObjectQuery>,
 ) -> Json<StorageActivity> {
     let (changes, changes_since) = routes.api.activity(&query.bucket, &query.name);
+    let started = started_by(routes.monitor.as_ref(), &changes);
     let (mut decisions, decisions_since) =
         routes.feed.as_ref().map_or((Vec::new(), None), |feed| {
             (feed.of(&query.bucket, &query.name), feed.since())
         });
     decisions.reverse();
     Json(StorageActivity {
-        changes: changes.iter().map(change).collect(),
+        changes: changes
+            .iter()
+            .map(|record| change(record, &started))
+            .collect(),
         decisions,
         diagnostics: routes.feed.is_some(),
         changes_since: changes_since.and_then(|at| at.format(&Rfc3339).ok()),
