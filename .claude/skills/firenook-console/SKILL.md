@@ -559,7 +559,6 @@ defaults never in the URL):
 | `pubsub.counters` | `{ project?, throughput? }` | `counters`, `resources`, `rejected` | compare |
 | `pubsub.topic` | `{ project?, topic, subscription? }` | `published`, `stale` | none |
 | `pubsub.push` | `{ project?, subscription }` | `attempts` | replay |
-| `pubsub.deliveries` | `{ project?, topic }` | `changed` | none |
 | `pubsub.schedules` | `{ project? }` | `schedules` | compare |
 | `tasks.counters` | `{ project? }` | `counters`, `queues` | compare |
 | `tasks.queue` | `{ project?, queue }` | `stale`, `finished` | none |
