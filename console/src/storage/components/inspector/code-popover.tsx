@@ -42,16 +42,19 @@ export function FileCodePopover({
       label={labels}
       tabs={OBJECT_DIALECTS.map((id) => codeTab(id, objectAsCode(id, variant, forCode, address)))}
       header={
-        <Tabs
-          size="sm"
-          variant="segmented"
-          value={variant}
-          onValueChange={(next) => setVariant(next as CodeVariant)}
-          tabs={[
-            { value: 'read', label: 'Read' },
-            { value: 'upload', label: 'Upload' },
-          ]}
-        />
+        // As wide as its two words, not the popover: the dialect tabs below are the block's.
+        <div className="flex">
+          <Tabs
+            size="sm"
+            variant="segmented"
+            value={variant}
+            onValueChange={(next) => setVariant(next as CodeVariant)}
+            tabs={[
+              { value: 'read', label: 'Read' },
+              { value: 'upload', label: 'Upload' },
+            ]}
+          />
+        </div>
       }
       note={(tab) => (tab === 'rest' && address ? `For an app connected to ${address}` : undefined)}
       testId="inspector-code"

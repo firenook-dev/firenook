@@ -52,12 +52,12 @@ export function UploadOptionsFields({
             <span className="pt-0.5 font-mono text-[12px] text-kumo-subtle">contentType</span>
             <div className="grid gap-1.5">
               <Radio.Group
-                legend="contentType"
                 value={options.typeMode}
                 onValueChange={(value) => set({ typeMode: value as UploadOptions['typeMode'] })}
                 orientation="horizontal"
-                className="[&_legend]:sr-only"
               >
+                {/* The row already says contentType: the group's name is for a screen reader. */}
+                <Radio.Legend className="sr-only">contentType</Radio.Legend>
                 <Radio.Item label="From each file" value="auto" />
                 <Radio.Item label="One type for every file" value="fixed" />
               </Radio.Group>
