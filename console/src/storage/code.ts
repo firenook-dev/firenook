@@ -7,10 +7,13 @@
 // app connected to the emulator reaches), and says which it assumed.
 
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import type { CodeDialectId } from '@/components/console/request/as-code'
 import { defaultConnectHost, hostLiteral } from '@/lib/connect'
 import { encodeObjectPath } from './paths'
 
-export type CodeDialect = 'web' | 'admin' | 'rest'
+/** The dialects an object is written in, by the console's one list of dialect ids. */
+export const OBJECT_DIALECTS = ['web', 'node', 'rest'] as const satisfies readonly CodeDialectId[]
+export type ObjectDialect = (typeof OBJECT_DIALECTS)[number]
 export type CodeVariant = 'read' | 'upload'
 
 /** What an object's code is written from. */
@@ -161,13 +164,13 @@ function restCode(object: ObjectForCode, variant: CodeVariant, address: string):
 
 /** The object as code in one dialect and variant; REST needs the service's address. */
 export function objectAsCode(
-  dialect: CodeDialect,
+  dialect: ObjectDialect,
   variant: CodeVariant,
   object: ObjectForCode,
   address: string | undefined,
 ): string {
   if (dialect === 'web') return webCode(object, variant)
-  if (dialect === 'admin') return adminCode(object, variant)
+  if (dialect === 'node') return adminCode(object, variant)
   return address === undefined
     ? '# The Storage emulator is not running in this suite.'
     : restCode(object, variant, address)

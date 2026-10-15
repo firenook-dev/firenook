@@ -43,7 +43,7 @@ import { baseName, parentOf } from '../../paths'
 import { activityQuery, asIdentity, objectQuery, profileQuery, storageKeys } from '../../queries'
 import { RefusalDetail } from '../refusal-detail'
 import { ActivityTab } from './activity-tab'
-import { CodePopover } from './code-popover'
+import { FileCodePopover } from './code-popover'
 import { DetailsTab } from './details-tab'
 import { MetadataTab } from './metadata-tab'
 
@@ -286,7 +286,7 @@ export function FileInspector({
             testId="inspector-footer"
             tools={
               <>
-                <CodePopover object={object} defaultBucket={files.buckets.defaultBucket} />
+                <FileCodePopover object={object} defaultBucket={files.buckets.defaultBucket} />
                 {tools?.(object)}
               </>
             }

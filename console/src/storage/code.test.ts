@@ -35,11 +35,11 @@ describe('an object as code', () => {
     expect(objectAsCode('web', 'read', other, undefined)).toContain(
       `getStorage(app, 'gs://demo-media')`,
     )
-    expect(objectAsCode('admin', 'read', other, undefined)).toContain(`bucket('demo-media')`)
+    expect(objectAsCode('node', 'read', other, undefined)).toContain(`bucket('demo-media')`)
   })
 
   it('nests the Admin SDK’s custom keys one level down', () => {
-    const upload = objectAsCode('admin', 'upload', object, undefined)
+    const upload = objectAsCode('node', 'upload', object, undefined)
     expect(upload).toContain(`import { getStorage } from 'firebase-admin/storage'`)
     expect(upload).toContain(`  contentType: 'image/png',`)
     expect(upload).toContain(

@@ -65,7 +65,7 @@ import { ConflictDialog } from '@/storage/components/conflict-dialog'
 import { useFileActions } from '@/storage/components/file-actions'
 import { FileGrid } from '@/storage/components/file-grid'
 import { fileRows } from '@/storage/components/file-list'
-import { CodePopover } from '@/storage/components/inspector/code-popover'
+import { FileCodePopover } from '@/storage/components/inspector/code-popover'
 import { FileInspector } from '@/storage/components/inspector/file-inspector'
 import { MetadataTab } from '@/storage/components/inspector/metadata-tab'
 import { StoragePage } from '@/storage/components/storage-page'
@@ -1540,7 +1540,7 @@ function EditedMetadata() {
         noun="file"
         footer={
           <InspectorFooter
-            tools={<CodePopover object={COVER} defaultBucket={BUCKET} />}
+            tools={<FileCodePopover object={COVER} defaultBucket={BUCKET} />}
             primary={
               <>
                 {changes > 0 && (
