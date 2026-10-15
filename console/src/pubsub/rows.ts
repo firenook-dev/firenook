@@ -1,6 +1,6 @@
-// What the Pub/Sub and Cloud Tasks lists do to their rows before drawing
+// What Pub/Sub's message and backlog lists do to their rows before drawing
 // them. The engine pages live queues by a key the queue is ordered by —
-// message ids, backlog and task positions — so pages fetched at different
+// message ids and backlog positions — so pages fetched at different
 // moments never overlap or skip by position; but a row that moved between
 // two reads can still be in two pages for a moment (its old key not yet
 // patched away), and React keys must be unique. And a backlog's places are

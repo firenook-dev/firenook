@@ -3,70 +3,39 @@
 // its real bytes and attributes and the engine's own address — and Publish
 // again on the right, which opens the composer filled with it.
 
-import { Button, Popover, Text, Tooltip } from '@cloudflare/kumo'
-import { CodeIcon, PaperPlaneTiltIcon } from '@phosphor-icons/react'
+import { Button, Tooltip } from '@cloudflare/kumo'
+import { PaperPlaneTiltIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
 import type { PubsubMessageDetail } from '@/api/generated/messaging/PubsubMessageDetail'
 import { statusQuery } from '@/api/queries'
-import { CodeBlock } from '@/components/console/code-block'
+import { CodePopover } from '@/components/console/code-popover'
 import { InspectorFooter, useInspectorRoom } from '@/components/console/inspector'
 import { describeAddress, serviceAddress } from '@/components/console/request/address'
-import { CODE_DIALECTS, type CodeDialect, messageAsCode } from '../code'
+import { codeTab } from '@/components/console/request/as-code'
+import { MESSAGE_DIALECTS, messageAsCode } from '../code'
 
 export function MessageCode({ message }: { message: PubsubMessageDetail }) {
   const status = useQuery(statusQuery)
   const address = serviceAddress('pubsub', status.data)
-  const [dialect, setDialect] = useState<CodeDialect>('node')
   const { labels } = useInspectorRoom()
-  const trigger = labels ? (
-    <Button
-      variant="ghost"
-      size="sm"
-      icon={<CodeIcon />}
-      disabled={!address}
-      data-testid="message-code"
-    >
-      Code
-    </Button>
-  ) : (
-    <Button
-      variant="ghost"
-      size="sm"
-      shape="square"
-      icon={<CodeIcon />}
-      aria-label="Code"
-      disabled={!address}
-      data-testid="message-code"
-    />
-  )
   return (
-    <Popover>
-      <Tooltip
-        content="This message as the call that publishes it"
-        render={<Popover.Trigger render={trigger} />}
-      />
-      <Popover.Content className="w-[560px] max-w-[calc(100vw-2rem)]">
-        {address && (
-          <div className="grid gap-2" data-testid="message-code-popover">
-            <CodeBlock
-              label="This message as code"
-              value={dialect}
-              onValueChange={(id) => setDialect(id as CodeDialect)}
-              dialects={CODE_DIALECTS.map((item) => ({
-                id: item.id,
-                label: item.label,
-                code: messageAsCode(message, item.id, address.origin),
-              }))}
-              testId="message-code-block"
-            />
-            <Text size="xs" variant="secondary">
-              Sent to the Pub/Sub port at {describeAddress(address)}, not the console.
-            </Text>
-          </div>
-        )}
-      </Popover.Content>
-    </Popover>
+    <CodePopover
+      title="This message as code"
+      tabs={
+        address
+          ? MESSAGE_DIALECTS.map((id) => codeTab(id, messageAsCode(message, id, address.origin)))
+          : []
+      }
+      kind="pubsub.message"
+      note={
+        address
+          ? `Sent to the Pub/Sub port at ${describeAddress(address)}, not the console.`
+          : undefined
+      }
+      label={labels}
+      disabled={!address}
+      testId="message-code"
+    />
   )
 }
 

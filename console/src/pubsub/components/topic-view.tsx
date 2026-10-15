@@ -14,6 +14,7 @@ import { ApiError } from '@/api/client'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
 import type { PubsubTopicSummary } from '@/api/generated/messaging/PubsubTopicSummary'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
+import { SectionJobs } from '@/components/console/section-jobs'
 import { ToolbarRow } from '@/components/console/toolbar'
 import { formatNumber } from '@/lib/format'
 import { useLinkTo } from '@/lib/links'
@@ -22,7 +23,6 @@ import { useThroughput } from '../live'
 import { shortName } from '../names'
 import { topicQuery } from '../queries'
 import { Composer } from './composer'
-import { JobStrip } from './job-strip'
 import type { MessageTab } from './message-inspector'
 import { type MessagesSearch, MessagesView } from './message-table'
 import { SubscriptionsTable, subscriptionRows } from './subscriptions-table'
@@ -258,7 +258,18 @@ export function TopicView({
             ) : undefined
           }
           onEditAgain={editAgain}
-          above={<JobStrip />}
+          above={
+            // A publish that outlives its composer: every running
+            // `pubsub.publish` job, in every tab, until it ends.
+            <SectionJobs
+              section="pubsub"
+              filter={(job) => job.kind === 'pubsub.publish'}
+              verb={() => 'sent'}
+              cancelLabel="Stop"
+              summaryMs={0}
+              testId="pubsub-job"
+            />
+          }
           exportOpen={search.dialog === 'export'}
           onExportOpenChange={(open) =>
             update({ dialog: open ? 'export' : undefined }, { replace: !open })

@@ -616,13 +616,14 @@ test('J-PS-23 an interval job outlives the composer and the tab', async ({ page,
     await expect(page.getByTestId('composer-job-progress')).toContainText('of 20 · every 100 ms')
     await page.getByTestId('pubsub-composer-close').click()
 
-    const strip = page.getByTestId('pubsub-job')
+    // Another journey's job may still run: this topic's is the one.
+    const strip = page.getByTestId('pubsub-job').filter({ hasText: topic })
     await expect(strip).toContainText(`Publishing 20 messages to ${topic}`)
     await expect(page.getByTestId('nav-badge-pubsub')).toBeVisible()
-    const jobId = await strip.getAttribute('data-job')
+    const jobId = await strip.locator('[data-job]').getAttribute('data-job')
     await page.reload()
     await expect(strip).toContainText(`Publishing 20 messages to ${topic}`)
-    await strip.getByTestId('pubsub-job-stop').click()
+    await strip.getByTestId('pubsub-job-cancel').click()
     await expect(strip).toHaveCount(0)
     const stopped = await waitForJob(engine, jobId ?? '')
     expect(stopped.state).toBe('cancelled')
