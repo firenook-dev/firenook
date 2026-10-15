@@ -244,8 +244,8 @@ pub(crate) struct PubsubConsumers {
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubTopicDetail {
     pub summary: PubsubTopicSummary,
-    /// `functions.invocations`: every run of the functions the topic
-    /// triggers, in Functions › Invocations; null when none listens.
+    /// `functions.invocations`: every run a message of the topic started,
+    /// in Functions › Invocations (`topic:<name>`); null when none listens.
     pub invocations: Option<EntityRef>,
     pub labels: BTreeMap<String, String>,
     /// The topic's own message retention, seconds; `null` = none.

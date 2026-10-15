@@ -1110,12 +1110,12 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
     resent?.eventId ?? '',
   )
 
-  // Every run of the topic's function is an invocation in Functions.
+  // Every run the topic's messages started is an invocation in Functions.
   await page.keyboard.press('Escape')
   await page.getByTestId('pubsub-topic-runs').click()
   await expect(page).toHaveURL(/\/console\/functions\/invocations\?/)
   await expect(page.getByTestId('invocations-filter-input')).toHaveValue(
-    'function:us-central1-onOrderPlaced',
+    `topic:${topicName(engine, 'orders')}`,
   )
   await expect(
     page.getByTestId('invocations-list').getByTestId('invocation-row').first(),

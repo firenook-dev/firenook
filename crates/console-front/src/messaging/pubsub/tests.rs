@@ -981,7 +981,7 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
         ..MonitorLimits::default()
     });
     let mut suite = suite(Some(monitor.clone()));
-    // The topic links every run of its functions in Functions › Invocations.
+    // The topic links every run its messages started in Functions › Invocations.
     let (_, detail) = suite
         .call(
             Method::GET,
@@ -991,7 +991,7 @@ async fn deliveries_join_the_fanout_with_the_invocation_record() {
         .await;
     assert_eq!(
         detail["invocations"],
-        json!({ "kind": "functions.invocations", "key": format!("function:{ON_ORDER}") })
+        json!({ "kind": "functions.invocations", "key": format!("topic:{ORDERS}") })
     );
     let id = publish(&suite.pubsub, ORDERS, "{\"order\":1}");
     let dispatch = suite.deliveries.recv().await.expect("dispatch");

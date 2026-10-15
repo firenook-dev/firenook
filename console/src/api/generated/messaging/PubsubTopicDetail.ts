@@ -11,8 +11,8 @@ import type { PubsubTopicSummary } from "./PubsubTopicSummary";
  */
 export type PubsubTopicDetail = { summary: PubsubTopicSummary, 
 /**
- * `functions.invocations`: every run of the functions the topic
- * triggers, in Functions › Invocations; null when none listens.
+ * `functions.invocations`: every run a message of the topic started,
+ * in Functions › Invocations (`topic:<name>`); null when none listens.
  */
 invocations: EntityRef | null, labels: { [key in string]: string }, 
 /**
