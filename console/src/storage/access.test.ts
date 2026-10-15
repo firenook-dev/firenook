@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import type { StorageListPage } from '@/api/generated/storage/StorageListPage'
-import { accessGroups, mayRead } from './access'
+import { accessGroups } from './access'
 
 const file = (name: string): StorageEntry => ({
   type: 'file',
@@ -55,16 +55,5 @@ describe('the access check, batched', () => {
     ])
     expect(groups.map((group) => group.length)).toEqual([1, 200, 200, 50])
     expect(groups[0]).toEqual(['a'])
-  })
-
-  it('draws a file as Admin, and as a client only once the rules allow it', () => {
-    expect(mayRead(undefined, 'a')).toBe(true)
-    const access = new Map([
-      ['a', [{ method: 'get' as const, outcome: 'allow' as const, line: 4 }]],
-      ['b', [{ method: 'get' as const, outcome: 'deny' as const, line: 5 }]],
-    ])
-    expect(mayRead(access, 'a')).toBe(true)
-    expect(mayRead(access, 'b')).toBe(false)
-    expect(mayRead(access, 'c')).toBeUndefined()
   })
 })

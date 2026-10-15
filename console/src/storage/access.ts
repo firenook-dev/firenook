@@ -4,11 +4,11 @@
 // until the rules or the objects change — the live topics invalidate
 // `accessOf`. Admin bypasses the rules, so it asks nothing.
 //
-// The Access column reads it, and so does everything that would draw a
-// file's bytes as that identity: a tile, the inspector's preview, Quick
-// Look. A refused `get` draws a lock and the refusing line, never the
-// picture, because an `<img>` cannot carry the identity's token and the
-// media route is the operator's.
+// Each row carries its verdicts (`fileRows`): the Access column reads them,
+// and so does everything that would draw a file's bytes as that identity
+// (`rowRead`): a tile, the inspector's preview, Quick Look. A refused `get`
+// draws a lock and the refusing line, never the picture, because an `<img>`
+// cannot carry the identity's token and the media route is the operator's.
 
 import { useQueries } from '@tanstack/react-query'
 import type { StorageAccessVerdict } from '@/api/generated/storage/StorageAccessVerdict'
@@ -50,20 +50,4 @@ export function useAccess(
   for (const answer of answers)
     for (const result of answer.data?.results ?? []) map.set(result.name, result.verdicts)
   return map
-}
-
-/** One method's verdict for a name; `undefined` while it is not known yet. */
-export function verdictOf(
-  access: AccessMap | undefined,
-  name: string,
-  method: StorageAccessVerdict['method'],
-): StorageAccessVerdict | undefined {
-  return access?.get(name)?.find((verdict) => verdict.method === method)
-}
-
-/** Whether the identity may read the file's bytes: Admin always; a client once the check allows it. */
-export function mayRead(access: AccessMap | undefined, name: string): boolean | undefined {
-  if (access === undefined) return true
-  const verdict = verdictOf(access, name, 'get')
-  return verdict === undefined ? undefined : verdict.outcome === 'allow'
 }
