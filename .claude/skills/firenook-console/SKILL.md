@@ -655,7 +655,9 @@ stream, loaded by glob). A few behaviours worth knowing:
   the caller's words say what runs again; an `option` (Eventarc's "Keep the
   id") and the run's own pending and refusal (`errorText`) live in it.
   `useConfirmPopover().ask(request)` is the page's one popover for
-  whoever asks. `DangerConfirm` stays the dialog that deletes.
+  whoever asks. `DangerConfirm` stays the dialog that deletes; with
+  `tone: 'neutral'` (the primary button, no bin) it also asks before a
+  bulk change that destroys nothing, such as Auth's Disable or Verify.
 - A section's bulk work is `SectionJobs` (`components/console/section-jobs.tsx`)
   under its toolbar: `section`, an optional `filter`, the `verb` its items
   are counted with, Cancel (or `cancelLabel`), a bar while the total is

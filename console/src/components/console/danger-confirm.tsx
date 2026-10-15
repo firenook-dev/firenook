@@ -8,7 +8,9 @@
 // at all. While that answer is unknown — Functions starting, not answered
 // yet — there is no line: "No function listens" is only ever said
 // when the engine knows it. Bulk work is a job: its progress, skipped
-// items, failures and Cancel come from the job itself.
+// items, failures and Cancel come from the job itself. A bulk change that
+// destroys nothing (disable, verify) asks the same way with `tone:
+// 'neutral'`: the button is the primary one, without the bin.
 
 import { Button, Checkbox, Dialog, Input, Text } from '@cloudflare/kumo'
 import { TrashIcon, XIcon } from '@phosphor-icons/react'
@@ -64,6 +66,9 @@ export function jobProgress(
 
 const NO_CONSEQUENCES: readonly ReactNode[] = []
 
+/** `danger` deletes (the red button with the bin); `neutral` changes what can be changed back. */
+export type ConfirmTone = 'danger' | 'neutral'
+
 export function DangerConfirm({
   open,
   onOpenChange,
@@ -78,6 +83,7 @@ export function DangerConfirm({
   error,
   pending,
   onConfirm,
+  tone = 'danger',
   testId = 'danger-confirm',
 }: {
   open: boolean
@@ -99,6 +105,7 @@ export function DangerConfirm({
   error?: string
   pending: boolean
   onConfirm: () => void
+  tone?: ConfirmTone
   testId?: string
 }) {
   const status = useQuery(statusQuery)
@@ -156,6 +163,7 @@ export function DangerConfirm({
           cancelling={cancelling}
           onCancel={() => void cancel()}
           onConfirm={onConfirm}
+          tone={tone}
           testId={testId}
         />
       </Dialog>
@@ -186,6 +194,7 @@ export function DangerConfirmBody({
   cancelling = false,
   onCancel,
   onConfirm,
+  tone = 'danger',
   testId = 'danger-confirm',
 }: {
   /** Inside DangerConfirm's dialog (its title, description and close are the dialog's), or framed on its own. */
@@ -207,6 +216,7 @@ export function DangerConfirmBody({
   cancelling?: boolean
   onCancel?: () => void
   onConfirm?: () => void
+  tone?: ConfirmTone
   testId?: string
 }) {
   const [showErrors, setShowErrors] = useState(false)
@@ -354,8 +364,8 @@ export function DangerConfirmBody({
         </Button>
         {!finished && (
           <Button
-            variant="destructive"
-            icon={<TrashIcon />}
+            variant={tone === 'danger' ? 'destructive' : 'primary'}
+            {...(tone === 'danger' ? { icon: <TrashIcon /> } : {})}
             onClick={onConfirm}
             loading={running}
             disabled={!confirmed}
