@@ -19,6 +19,7 @@ import { JsonField, parseJsonText } from '@/components/console/json-field'
 import { RequiresNotice } from '@/components/console/requires-notice'
 import { SendButton } from '@/components/console/request/send-button'
 import { useLinkTo } from '@/lib/links'
+import { tasksQueueLink } from '@/lib/sections/tasks'
 import { enqueue as enqueueTask } from '@/tasks/api'
 import { type TaskDraft, useRunDraft } from '../run-drafts'
 import { statusReasonText } from '../trigger-text'
@@ -27,26 +28,28 @@ import { FormRow, RunAnswer, RunError, RunFooter, useNextInvocation } from './ru
 /**
  * Where the queue's own settings are: its configuration (retries and rate
  * limits, with where each value comes from) and Cloud Tasks' enqueue dialog,
- * which takes a task's name, headers and deadline too.
+ * which takes a task's name, headers and deadline too. Cloud Tasks builds
+ * both links (`tasksQueueLink`); nothing here while it does not run.
  */
 function QueueElsewhere({ queueRef }: { queueRef: EntityRef }) {
-  const link = useLinkTo(queueRef)
-  if (!link) return null
-  const at = (patch: Record<string, string>, text: string, testId: string) => (
-    <Link
-      to={link.to as never}
-      search={{ ...link.search, ...patch } as never}
-      className="text-kumo-link underline-offset-2 hover:underline"
-      data-testid={testId}
-    >
-      {text}
-    </Link>
-  )
+  if (!useLinkTo(queueRef)) return null
+  const at = (where: 'config' | 'enqueue', text: string, testId: string) => {
+    const link = tasksQueueLink(queueRef.key, where)
+    return (
+      <Link
+        to={link.to as never}
+        search={link.search as never}
+        className="text-kumo-link underline-offset-2 hover:underline"
+        data-testid={testId}
+      >
+        {text}
+      </Link>
+    )
+  }
   return (
     <>
-      Retries and rate limits: {at({ view: 'config' }, 'its configuration', 'task-queue-config')}. A
-      name, headers or a deadline:{' '}
-      {at({ new: 'task' }, 'Enqueue in Cloud Tasks', 'task-queue-enqueue')}.
+      Retries and rate limits: {at('config', 'its configuration', 'task-queue-config')}. A name,
+      headers or a deadline: {at('enqueue', 'Enqueue in Cloud Tasks', 'task-queue-enqueue')}.
     </>
   )
 }
