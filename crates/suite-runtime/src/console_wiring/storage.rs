@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use firenook_console_front::StorageConsole;
+use firenook_console_front::{ComputeParts, StorageConsole};
 use firenook_functions_bridge::FunctionsInventory;
 use firenook_storage_front::{LogSink, StorageLogLevel, StorageLogLine, StorageRuntime};
 use firenook_suite_front::{Audience, LogInput, LogLevel, LoggingRuntime};
@@ -12,11 +12,12 @@ use crate::SuiteConfig;
 
 /// Storage's console: the Storage emulator's own application, the
 /// service's console handle, and the suite's log for the `storage.denied`
-/// lines.
+/// lines. `_compute` is the Functions record's, in a suite with Functions.
 pub(crate) fn storage_console(
     storage: &Arc<StorageRuntime>,
     _config: &SuiteConfig,
     logging: &LoggingRuntime,
+    _compute: Option<&ComputeParts>,
 ) -> StorageConsole {
     StorageConsole::new(storage.application(), storage.console(), logging.clone())
 }

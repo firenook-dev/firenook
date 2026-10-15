@@ -698,7 +698,12 @@ pub async fn run(config: SuiteConfig) -> Result<SuiteOutcome, SuiteRuntimeError>
                     .as_ref()
                     .map(|auth| console_wiring::auth::auth_console(auth, &config, &logging)),
                 storage: storage.as_ref().map(|storage| {
-                    console_wiring::storage::storage_console(storage, &config, &logging)
+                    console_wiring::storage::storage_console(
+                        storage,
+                        &config,
+                        &logging,
+                        compute_parts.as_ref(),
+                    )
                 }),
                 compute: compute_parts.clone(),
                 pubsub: pubsub_late.clone(),
