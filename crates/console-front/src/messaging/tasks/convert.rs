@@ -15,7 +15,7 @@ use super::types::{
     TasksRejectedQueue, TasksReplaced, TasksTaskDetail, TasksTaskRow, TasksTaskState,
 };
 use crate::entity::EntityRef;
-use crate::messaging::shared::{millis, stamped_seconds, stamped_ten_seconds, time, time_of};
+use crate::messaging::shared::{millis, second_window, stamped_ten_seconds, time, time_of};
 
 pub(crate) fn state(state: TaskState) -> TasksTaskState {
     match state {
@@ -128,7 +128,7 @@ pub(crate) fn counters(counters: &QueueCounters) -> TasksQueueCounters {
         max_tokens: counters.max_tokens,
         refilled_at: time(counters.refilled_at),
         max_dispatches_per_second: counters.max_dispatches_per_second,
-        dispatched: stamped_seconds(&counters.dispatched),
+        dispatched: second_window(&counters.dispatched),
         failed: stamped_ten_seconds(&counters.failed),
         oldest_pending_at: time_of(counters.oldest_pending_at),
         history: counters.history,
