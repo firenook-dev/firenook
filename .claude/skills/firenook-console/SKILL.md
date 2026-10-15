@@ -3167,7 +3167,10 @@ by function id, `tasks.queue` by `<project>|<location>|<queue>` and
 for Tasks) and the page tidies what it does not need; a subscription link
 carries no topic, which the Topics page completes from its index. These pages
 link out only through `EntityLink`, `linkTo` and `linkToLogs`, and never
-write another section's URL.
+write another section's URL. Another section opens a queue's Configuration
+or the Enqueue dialog on it through the Cloud Tasks registry's
+`tasksQueueLink(<tasks.queue key>, 'config' | 'enqueue')` (the dialog's one
+parameter is `new=task`).
 
 **Topics, not streams.** Seven, declared in `src/pubsub/live.ts` and
 `src/tasks/live.ts`: `pubsub.counters`, `pubsub.schedules` and
@@ -3231,7 +3234,11 @@ gives up come from the engine (`TasksQueueCounters.outcomes`,
 `TasksQueueConfig.ladder`, the dispatcher's own rules), never from the
 browser. A newly enqueued task opens in the inspector. A real
 `onTaskDispatched` answers 204, and an `HttpsError` arrives in the attempt's
-response snippet, not its error.
+response snippet, not its error. Live traffic is Configuration's alone (the
+queue list says state, not rates), and the token bucket shows only while
+the rate limit is what holds tasks back (`rateLimiting` in
+`src/tasks/states.ts`, read from the engine's last figures so it does not
+blink); otherwise the rate is said in words.
 
 **Names travel whole in query strings**, never as path segments; a queue
 travels to the engine as its opaque key.
