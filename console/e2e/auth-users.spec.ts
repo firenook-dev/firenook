@@ -327,7 +327,7 @@ test('U5 the inspector opens from a row and follows the keyboard', async ({ page
   expect(await readClipboard(page)).toBe(firstUid)
 
   // Its tabs, each in the address.
-  for (const tab of ['Claims', 'Activity', 'Raw'] as const) {
+  for (const tab of ['Claims', 'Raw'] as const) {
     await inspector(page)
       .getByRole('tab', { name: new RegExp(`^${tab}`) })
       .click()
@@ -352,6 +352,16 @@ test('U5 the inspector opens from a row and follows the keyboard', async ({ page
   await page.keyboard.press('ArrowDown')
   await expect(page).toHaveURL(new RegExp(`user=${encodeURIComponent(secondUid ?? '')}`))
   await expect(inspector(page)).toContainText(secondUid ?? '')
+
+  // Its calls and its messages are a link away, filtered to it.
+  await expect(inspector(page).getByTestId('user-messages')).toHaveAttribute(
+    'href',
+    /\/console\/auth\/inbox\?.*q=uid%3A/,
+  )
+  await inspector(page).getByTestId('user-calls').click()
+  await expect(page).toHaveURL(/\/console\/auth\/activity\?.*q=uid%3A/)
+  await expect(page.getByTestId('auth-activity')).toBeVisible()
+  expect(new URL(page.url()).searchParams.get('q')).toBe(`uid:${secondUid ?? ''}`)
 })
 
 test('U6 an edit keeps its draft through a sign-in, and a real change raises a banner', async ({

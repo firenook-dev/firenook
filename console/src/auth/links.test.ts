@@ -17,6 +17,7 @@ import {
   rulesDecisionsLink,
   userLink,
   userRef,
+  userTraceLinks,
 } from './links'
 
 const route = (kind: string, key: string) => auth.routes?.[kind]?.(key)
@@ -112,6 +113,24 @@ describe('Auth refs and links', () => {
       search: { q: 'uid:u_1', tenant: 'acme' },
     })
     expect(activityLink({})).toEqual({ to: '/auth/activity' })
+  })
+
+  it('lead from a user to their calls, messages and rules decisions', () => {
+    expect(userTraceLinks({ tenant: undefined, uid: 'u_ada' })).toEqual({
+      calls: { to: '/auth/activity', search: { q: 'uid:u_ada', tenant: '(none)' } },
+      messages: { to: '/auth/inbox', search: { q: 'uid:u_ada', tenant: '(none)' } },
+      decisions: {
+        to: '/firestore/rules',
+        search: { db: undefined, panel: 'decisions', uid: 'u_ada' },
+      },
+    })
+    // A tenant's user, in another project, with a uid the grammar quotes.
+    const traced = userTraceLinks({ project: 'my-prod', tenant: 'acme', uid: 'a b' })
+    expect(traced.calls).toEqual({
+      to: '/auth/activity',
+      search: { q: 'uid:"a b"', tenant: 'acme', project: 'my-prod' },
+    })
+    expect(traced.messages.to).toBe('/auth/inbox')
   })
 })
 

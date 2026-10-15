@@ -9,11 +9,12 @@
 import type { EntityRef } from '@/api/generated/EntityRef'
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
 import { API_BASE } from '@/api/client'
+import { filterValueText } from '@/lib/filter'
 import { type ViewAs, serializeViewAs } from '@/lib/identity'
 import { auth } from '@/lib/sections/auth'
 import { linkToLogs } from '@/lib/sections/logs'
 import type { SectionLink } from '@/lib/services'
-import { userKey } from './tenant-scope'
+import { NO_TENANT, userKey } from './tenant-scope'
 
 // ------------------------------------------------------------------ Auth's own entities
 
@@ -59,17 +60,48 @@ export function messageLink(id: number): SectionLink {
   return route(messageRef(id))
 }
 
-/** Activity filtered: "Recent calls ↗" (`has:blocking`), a user's calls (`uid:…`). */
-export function activityLink(options: {
-  q?: string | undefined
-  tenant?: string | undefined
-}): SectionLink {
+/** A feed filtered: "Recent calls ↗" (`has:blocking`), a user's calls or messages (`uid:…`). */
+function feedLink(
+  to: '/auth/activity' | '/auth/inbox',
+  options: { q?: string | undefined; tenant?: string | undefined; project?: string | undefined },
+): SectionLink {
   const search: Record<string, string> = {}
   if (options.q) search.q = options.q
   if (options.tenant) search.tenant = options.tenant
-  return Object.keys(search).length > 0
-    ? { to: '/auth/activity', search }
-    : { to: '/auth/activity' }
+  if (options.project) search.project = options.project
+  return Object.keys(search).length > 0 ? { to, search } : { to }
+}
+
+/** Activity filtered: "Recent calls ↗" (`has:blocking`), "Calls in Activity" (`uid:…`). */
+export function activityLink(options: Parameters<typeof feedLink>[1]): SectionLink {
+  return feedLink('/auth/activity', options)
+}
+
+/** The Inbox filtered: "Messages in Inbox" (`uid:…`). */
+export function inboxLink(options: Parameters<typeof feedLink>[1]): SectionLink {
+  return feedLink('/auth/inbox', options)
+}
+
+/**
+ * Where one user's traces are, from the inspector: their calls in Activity
+ * and their codes and links in the Inbox (`uid:<uid>`, the project's own
+ * users as `(none)`), and their rules decisions on Firestore's rules page.
+ */
+export function userTraceLinks(user: {
+  project?: string | undefined
+  tenant: string | undefined
+  uid: string
+}): { calls: SectionLink; messages: SectionLink; decisions: SectionLink } {
+  const feed = {
+    q: `uid:${filterValueText(user.uid)}`,
+    tenant: user.tenant ?? NO_TENANT,
+    project: user.project,
+  }
+  return {
+    calls: activityLink(feed),
+    messages: inboxLink(feed),
+    decisions: rulesDecisionsLink(user.uid),
+  }
 }
 
 // ------------------------------------------------------------------ as this user, elsewhere

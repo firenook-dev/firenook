@@ -1,6 +1,7 @@
 // One user in full, beside the table: Details (every stored field, the
-// account actions), Claims (the editor that shows the token it produces),
-// Activity (this user's calls and messages) and Raw (the stored record).
+// account actions, and links to this user's calls and messages), Claims
+// (the editor that shows the token it produces) and Raw (the stored
+// record).
 //
 // Edits are a per-field draft (`user-draft.ts`): an app that keeps signing
 // the user in moves fields the draft does not hold, so it never interrupts
@@ -50,11 +51,10 @@ import { ClaimsEditor } from './claims-editor'
 import { InspectorDetails } from './inspector-details'
 import { RawRecord } from './raw-record'
 import { SignInAsMenu } from './sign-in-as-menu'
-import { UserActivity } from './user-activity'
 import { UserAvatar } from './user-avatar'
 import { UserCodeMenu } from './user-code-menu'
 
-export type InspectorTab = 'details' | 'claims' | 'activity' | 'raw'
+export type InspectorTab = 'details' | 'claims' | 'raw'
 
 const FIELDS: readonly DraftField[] = [
   'displayName',
@@ -229,7 +229,6 @@ export function UserInspector({
               items: [
                 { value: 'details', label: 'Details' },
                 { value: 'claims', label: 'Claims', count: data.row.claimKeys.length || undefined },
-                { value: 'activity', label: 'Activity' },
                 { value: 'raw', label: 'Raw' },
               ],
             }
@@ -335,7 +334,6 @@ export function UserInspector({
               onSave={doSave}
             />
           )}
-          {tab === 'activity' && <UserActivity project={project} scope={scope} uid={uid} />}
           {tab === 'raw' && <RawRecord detail={data} />}
         </>
       )}
