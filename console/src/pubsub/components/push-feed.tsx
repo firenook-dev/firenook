@@ -5,11 +5,10 @@
 // follows; `p` pauses, and a paused feed holds new streaks back while the
 // ones on screen still count up.
 
-import { Button, Input, Popover, Tooltip, cn } from '@cloudflare/kumo'
+import { Button, Tooltip, cn } from '@cloudflare/kumo'
 import { CopyIcon, DownloadSimpleIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ApiError } from '@/api/client'
 import type { PubsubPushStreak } from '@/api/generated/messaging/PubsubPushStreak'
 import { EmptyState } from '@/components/console/empty-state'
 import { FeedList, useFeedPending } from '@/components/console/feed-list'
@@ -21,7 +20,6 @@ import { formatNumber } from '@/lib/format'
 import type { FeedStore } from '@/lib/live/feed-store'
 import { toast } from '@/lib/toasts'
 import { setPushConfig } from '../api'
-import { endpointProblem } from './subscription-settings'
 import { pubsubKeys } from '../queries'
 
 const streakKey = (streak: PubsubPushStreak) => streak.streak
@@ -257,79 +255,5 @@ export function PushEnd({
         testId="pubsub-push-pause"
       />
     </span>
-  )
-}
-
-/** On a pull subscription's tabs: `Switch to push…` with the endpoint to push to. */
-export function SwitchToPush({ project, subscription }: { project: string; subscription: string }) {
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [endpoint, setEndpoint] = useState('')
-  const problem = endpoint.trim() ? endpointProblem(endpoint.trim()) : undefined
-  const toPush = useMutation({
-    mutationFn: () => setPushConfig({ subscription, endpoint: endpoint.trim() }),
-    onSuccess: () => {
-      setOpen(false)
-      void queryClient.invalidateQueries({
-        queryKey: pubsubKeys.subscription(project, subscription),
-      })
-      void queryClient.invalidateQueries({ queryKey: pubsubKeys.topics(project) })
-    },
-  })
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Popover.Trigger
-        render={
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<UploadSimpleIcon />}
-            data-testid="pubsub-to-push"
-          >
-            Switch to push…
-          </Button>
-        }
-      />
-      <Popover.Content className="w-96 p-3" align="end">
-        <form
-          className="grid gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (endpoint.trim() && !problem) toPush.mutate()
-          }}
-        >
-          <label className="text-[12px] text-kumo-subtle" htmlFor="pubsub-push-endpoint">
-            Push each message to
-          </label>
-          <Input
-            id="pubsub-push-endpoint"
-            size="sm"
-            value={endpoint}
-            onChange={(event) => setEndpoint(event.target.value)}
-            placeholder="http://localhost:8080/push"
-            spellCheck={false}
-            className="font-mono"
-            autoFocus
-            data-testid="pubsub-to-push-endpoint"
-          />
-          {(problem ?? (toPush.error instanceof ApiError ? toPush.error.message : undefined)) && (
-            <p className="m-0 text-[12px] text-kumo-danger">
-              {problem ?? (toPush.error as ApiError).message}
-            </p>
-          )}
-          <Button
-            variant="primary"
-            size="sm"
-            type="submit"
-            disabled={!endpoint.trim() || problem !== undefined}
-            loading={toPush.isPending}
-            className="justify-self-end"
-            data-testid="pubsub-to-push-submit"
-          >
-            Switch to push
-          </Button>
-        </form>
-      </Popover.Content>
-    </Popover>
   )
 }

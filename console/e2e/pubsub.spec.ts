@@ -777,85 +777,21 @@ test('J-PS-06 the backlog is read without leasing anything', async ({ page, engi
   expect(after.backlog).toBe(before.backlog)
 })
 
-test('J-PS-07 pull, ack, nack and extend from the Pull tab', async ({ page, engine }) => {
-  const topic = uniqueId('ps07')
-  const subscription = `${topic}-sub`
-  try {
-    await createTopic(engine, topic)
-    await createSubscription(engine, subscription, topic, { ackDeadlineSeconds: 30 })
-    const ids = (
-      await publishOverPort(
-        engine,
-        topic,
-        [1, 2, 3, 4, 5].map((n) => ({ data: { n } })),
-      )
-    ).messageIds
-    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
-    await page.getByTestId('pull-max').fill('3')
-    await page.getByTestId('pull-submit').click()
-    const rows = page.getByTestId('pubsub-pull-table').getByTestId('data-row')
-    await expect(rows).toHaveCount(3)
-    await expect(page.getByTestId('pull-summary')).toHaveText('3 received · 3 leased · 0 acked')
-    expect((await countersOf(engine, subscription)).outstanding).toBe(3)
-    const lease = (index: number) => rows.nth(index).locator('td[data-column="lease"]')
-
-    // a: acknowledged — the backlog is one shorter.
-    await rows.nth(0).click()
-    await page.keyboard.press('a')
-    await expect(lease(0)).toHaveText('acked')
-    await expect.poll(async () => (await countersOf(engine, subscription)).backlog).toBe(4)
-
-    // x: nacked — it goes back behind the others.
-    await rows.nth(1).click()
-    await page.keyboard.press('x')
-    await expect(lease(1)).toHaveText('nacked')
-
-    // e: the lease starts again from now.
-    // 30 s from the engine's clock, read a moment later on the browser's.
-    const left = Number((await lease(2).innerText()).match(/(\d+) s left/)?.[1])
-    expect(left).toBeLessThan(40)
-    await rows.nth(2).click()
-    await page.keyboard.press('e')
-    await expect(lease(2)).toHaveText(/^(1 m|5\d s) left$/)
-
-    // The backlog: the extended lease first, then #1, #2 never delivered, and
-    // the nacked one at #3 after its one delivery.
-    await page.getByRole('tab', { name: 'Backlog' }).click()
-    await expect(page.getByTestId('pubsub-backlog-table').getByTestId('data-row')).toHaveCount(4)
-    await expect(backlogRow(page, ids[2] ?? '')).toContainText('outstanding')
-    await expect(backlogRow(page, ids[3] ?? '').locator('td[data-column="place"]')).toHaveText('#1')
-    await expect(backlogRow(page, ids[4] ?? '').locator('td[data-column="place"]')).toHaveText('#2')
-    const nacked = backlogRow(page, ids[1] ?? '')
-    await expect(nacked.locator('td[data-column="place"]')).toHaveText('#3')
-    await expect(nacked.locator('td[data-column="attempts"]')).toHaveText('1')
-    await expect(page.getByTestId('backlog-state-outstanding')).toBeVisible()
-    const after = await countersOf(engine, subscription)
-    expect([after.outstanding, after.available]).toEqual([1, 3])
-  } finally {
-    await deleteTopic(engine, topic)
-  }
-})
-
-test('J-PS-08 a connected subscriber is said before a pull', async ({ page, engine }) => {
+test('J-PS-08 a connected subscriber is said in the tree', async ({ page, engine }) => {
   const topic = uniqueId('ps08')
   const subscription = `${topic}-sub`
   try {
     await createTopic(engine, topic)
     await createSubscription(engine, subscription, topic)
-    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
-    await expect(page.getByTestId('pull-submit')).toBeVisible()
-    await expect(page.getByTestId('pubsub-pull-consumers')).toHaveCount(0)
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)
+    await expect(page.getByTestId('pubsub-subscription-tabs')).toBeVisible()
     const held = holdPull(engine, subscription)
     try {
-      await expect(page.getByTestId('pubsub-pull-consumers')).toHaveText(
-        `1 subscriber is connected to ${subscription}. Pulling here takes messages away from it.`,
-      )
       await treeRow(page, subscription).hover()
       await expect(page.locator('.kumo-tooltip-popup')).toContainText('1 subscriber')
     } finally {
       await held.stop()
     }
-    await expect(page.getByTestId('pubsub-pull-consumers')).toHaveCount(0)
     expect((await countersOf(engine, subscription)).outstanding).toBe(0)
   } finally {
     await deleteTopic(engine, topic)
@@ -974,41 +910,40 @@ test('J-PS-11 push attempts: a streak in place, the pause, and the switch to pul
     await expect(streaks.first()).toContainText(second ?? '')
     await expect(streaks.first()).toBeInViewport()
 
-    // Its Pull tab says why a pull gets nothing; switched, it pulls.
-    await page.getByRole('tab', { name: 'Pull' }).click()
-    await expect(page.getByTestId('pubsub-pull-push-note')).toContainText(
-      'A push subscription delivers to its endpoint, so a pull here would get nothing.',
-    )
-    await page.getByTestId('pubsub-switch-to-pull').click()
-    await expect(page.getByTestId('pull-submit')).toBeVisible()
+    // Switched to pull, the Push tab goes and the backlog keeps what arrives.
+    await page.getByTestId('pubsub-push-to-pull').click()
     await expect(page.getByRole('tab', { name: 'Push' })).toHaveCount(0)
+    await expect(page.getByRole('tab', { name: 'Backlog', selected: true })).toBeVisible()
+    const [third] = (await publishOverPort(engine, topic, [{ data: { n: 3 } }])).messageIds
+    await expect(backlogRow(page, third ?? '')).toContainText('available')
   } finally {
     await deleteTopic(engine, topic)
   }
 })
 
-test('J-PS-13 an exactly-once ack on a lease returned elsewhere shows the engine refusal', async ({
+test('J-PS-13 a lease a subscriber holds is returned from the Backlog', async ({
   page,
   engine,
 }) => {
   const topic = uniqueId('ps13')
-  const subscription = `${topic}-once`
+  const subscription = `${topic}-sub`
   try {
     await createTopic(engine, topic)
-    await createSubscription(engine, subscription, topic, {
-      exactlyOnce: true,
-      ackDeadlineSeconds: 60,
-    })
+    await createSubscription(engine, subscription, topic, { ackDeadlineSeconds: 60 })
     const [id] = (await publishOverPort(engine, topic, [{ data: { n: 1 } }])).messageIds
-    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
-    await page.getByTestId('pull-max').fill('1')
-    await page.getByTestId('pull-submit').click()
-    const rows = page.getByTestId('pubsub-pull-table').getByTestId('data-row')
-    await expect(rows).toHaveCount(1)
-    await expect(rows.first().locator('td[data-column="lease"]')).toHaveText(/s left$/)
-
-    // Returned from the Backlog: the engine ends this tab's lease now.
-    await page.getByRole('tab', { name: 'Backlog' }).click()
+    // A subscriber pulls it over the port and holds its lease.
+    const pulled = (await (
+      await fetch(
+        `${portUrl(engine, 'pubsub')}/v1/projects/${engine.project}/subscriptions/${subscription}:pull`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ maxMessages: 1, returnImmediately: true }),
+        },
+      )
+    ).json()) as { receivedMessages?: unknown[] }
+    expect(pulled.receivedMessages).toHaveLength(1)
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)
     const row = backlogRow(page, id ?? '')
     await expect(row).toContainText('outstanding')
     await row.click({ button: 'right' })
@@ -1018,16 +953,7 @@ test('J-PS-13 an exactly-once ack on a lease returned elsewhere shows the engine
     )
     await page.getByTestId('pubsub-backlog-confirm-confirm').click()
     await expect(row).toContainText('available')
-
-    // Back in Pull the row says so, and acking it anyway shows the engine's answer.
-    await page.getByRole('tab', { name: 'Pull' }).click()
-    await expect(rows.first().locator('td[data-column="lease"]')).toHaveText('expired')
-    await rows.first().locator('td[data-check] [role="checkbox"]').click()
-    await page.getByTestId('pubsub-pull-selection-ack').click()
-    await expect(page.getByTestId('pull-error')).toContainText(
-      'The lease had expired or the message was already acknowledged, so another delivery may hold it.',
-    )
-    expect((await countersOf(engine, subscription)).backlog).toBe(1)
+    expect((await countersOf(engine, subscription)).outstanding).toBe(0)
   } finally {
     await deleteTopic(engine, topic)
   }

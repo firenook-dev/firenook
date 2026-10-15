@@ -23,7 +23,7 @@ pub(crate) mod types;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -36,8 +36,8 @@ use firenook_pubsub_front::broker::inspect::{BacklogCursor, MessageQuery};
 use firenook_pubsub_front::broker::{BacklogKey, StoredMessage};
 use firenook_pubsub_front::functions::topic_resource;
 use firenook_pubsub_front::google::pubsub::v1::{
-    DeadLetterPolicy, Encoding, ExpirationPolicy, PubsubMessage, PushConfig, RetryPolicy,
-    SchemaSettings, Subscription, Topic,
+    DeadLetterPolicy, Encoding, ExpirationPolicy, PushConfig, RetryPolicy, SchemaSettings,
+    Subscription, Topic,
 };
 use firenook_pubsub_front::pbjson_types;
 use firenook_pubsub_front::templates::{self, Draft, DraftData};
@@ -51,21 +51,20 @@ use self::convert::{Join, Targets};
 use self::errors::{functions_absent, pubsub_error, redeliver_error, schedule_error};
 use self::filters::message_query;
 use self::types::{
-    PubsubAckBody, PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody,
-    PubsubCreateSchemaBody, PubsubCreateSnapshotBody, PubsubCreateSubscriptionBody,
-    PubsubCreateTopicBody, PubsubData, PubsubDeleteRevisionBody, PubsubDeleteSubscriptions,
-    PubsubDeleteTopicBody, PubsubDeliveryCounts, PubsubDeliveryPage, PubsubDeliveryRow,
-    PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody, PubsubFunctionMark,
-    PubsubMessageActionBody, PubsubMessageCheck, PubsubMessageCheckBody, PubsubMessageDetail,
-    PubsubMessageRow, PubsubModifyDeadlineBody, PubsubNameBody, PubsubOutgoingMessage,
-    PubsubPreview, PubsubPublishBody, PubsubPublishResult, PubsubPullBody, PubsubPullResult,
-    PubsubPushConfigBody, PubsubReceived, PubsubRedeliverBody, PubsubRedelivery,
-    PubsubRejectedList, PubsubRollbackSchemaBody, PubsubSchedule, PubsubScheduleBody,
-    PubsubScheduleRun, PubsubSchemaBinding, PubsubSchemaCheck, PubsubSchemaCheckBody,
-    PubsubSchemaDetail, PubsubSchemaExample, PubsubSchemaExampleBody, PubsubSchemaProblem,
-    PubsubSchemaSummary, PubsubSeekBody, PubsubSeekResult, PubsubSnapshot,
-    PubsubSubscriptionDetail, PubsubSubscriptionSummary, PubsubTopicDetail, PubsubTopicIndex,
-    PubsubTopicSummary, PubsubUpdateSubscriptionBody, PubsubUpdateTopicBody,
+    PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody, PubsubCreateSchemaBody,
+    PubsubCreateSnapshotBody, PubsubCreateSubscriptionBody, PubsubCreateTopicBody, PubsubData,
+    PubsubDeleteRevisionBody, PubsubDeleteSubscriptions, PubsubDeleteTopicBody,
+    PubsubDeliveryCounts, PubsubDeliveryPage, PubsubDeliveryRow, PubsubDispatchBody,
+    PubsubFilterCheck, PubsubFilterCheckBody, PubsubFunctionMark, PubsubMessageActionBody,
+    PubsubMessageCheck, PubsubMessageCheckBody, PubsubMessageDetail, PubsubMessageRow,
+    PubsubNameBody, PubsubOutgoingMessage, PubsubPreview, PubsubPublishBody, PubsubPublishResult,
+    PubsubPushConfigBody, PubsubRedeliverBody, PubsubRedelivery, PubsubRejectedList,
+    PubsubRollbackSchemaBody, PubsubSchedule, PubsubScheduleBody, PubsubScheduleRun,
+    PubsubSchemaBinding, PubsubSchemaCheck, PubsubSchemaCheckBody, PubsubSchemaDetail,
+    PubsubSchemaExample, PubsubSchemaExampleBody, PubsubSchemaProblem, PubsubSchemaSummary,
+    PubsubSeekBody, PubsubSeekResult, PubsubSnapshot, PubsubSubscriptionDetail,
+    PubsubSubscriptionSummary, PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary,
+    PubsubUpdateSubscriptionBody, PubsubUpdateTopicBody,
 };
 use super::PubsubConsole;
 use super::shared::{time, u32_of, u64_of};
@@ -154,12 +153,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
                 .delete(delete_subscription),
         )
         .route("/pubsub/subscription/push-config", post(push_config))
-        .route("/pubsub/subscription/pull", post(pull))
-        .route("/pubsub/subscription/ack", post(acknowledge))
-        .route(
-            "/pubsub/subscription/modify-deadline",
-            post(modify_deadline),
-        )
         .route("/pubsub/subscription/seek", post(seek))
         .route("/pubsub/backlog", get(backlog))
         .route("/pubsub/backlog:batchGet", post(backlog_batch))
@@ -1272,100 +1265,6 @@ async fn push_config(
 }
 
 /// A received message's detail, from the proto message a pull answers.
-fn received_detail(topic: &str, message: &PubsubMessage) -> PubsubMessageDetail {
-    let published_at = message.publish_time.as_ref().map_or(UNIX_EPOCH, |at| {
-        UNIX_EPOCH
-            + Duration::from_secs(u64::try_from(at.seconds).unwrap_or(0))
-            + Duration::from_nanos(u64::try_from(at.nanos).unwrap_or(0))
-    });
-    let stored = StoredMessage {
-        id: message.message_id.parse().unwrap_or(0),
-        size: firenook_pubsub_front::broker::message_size(message),
-        message: message.clone(),
-        published: std::time::Instant::now(),
-        published_at,
-    };
-    convert::message_detail(topic, &stored, false, &[], Vec::new(), Vec::new())
-}
-
-async fn pull(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubPullBody>,
-) -> Answer<PubsubPullResult> {
-    let console = api.console()?;
-    if !(1..=1_000).contains(&body.max) {
-        return Err(ApiError::invalid(format!(
-            "A pull takes 1 to 1,000 messages, not {}.",
-            body.max
-        )));
-    }
-    let broker = console.runtime.broker();
-    let view = broker
-        .subscription_view(&body.subscription)
-        .ok_or_else(subscription_missing)?;
-    let received = broker
-        .pull(&body.subscription, body.max)
-        .map_err(pubsub_error)?;
-    let mut deadline = view.ack_deadline_seconds;
-    if let Some(seconds) = body
-        .ack_deadline_seconds
-        .filter(|seconds| *seconds != view.ack_deadline_seconds)
-        && !received.is_empty()
-    {
-        let ack_ids: Vec<String> = received
-            .iter()
-            .map(|message| message.ack_id.clone())
-            .collect();
-        broker
-            .modify_ack_deadline(&body.subscription, &ack_ids, seconds)
-            .map_err(pubsub_error)?;
-        deadline = seconds;
-    }
-    let lease_expires_at =
-        time(SystemTime::now() + Duration::from_secs(u64::try_from(deadline.max(0)).unwrap_or(0)));
-    let topic = view.summary.topic.clone().unwrap_or_default();
-    Ok(Json(PubsubPullResult {
-        received: received
-            .iter()
-            .filter_map(|received| {
-                let message = received.message.as_ref()?;
-                Some(PubsubReceived {
-                    ack_id: received.ack_id.clone(),
-                    delivery_attempt: received.delivery_attempt,
-                    lease_expires_at: lease_expires_at.clone(),
-                    message: received_detail(&topic, message),
-                })
-            })
-            .collect(),
-    }))
-}
-
-async fn acknowledge(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubAckBody>,
-) -> Result<StatusCode, ApiError> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .acknowledge(&body.subscription, &body.ack_ids)
-        .map_err(pubsub_error)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn modify_deadline(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubModifyDeadlineBody>,
-) -> Result<StatusCode, ApiError> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .modify_ack_deadline(&body.subscription, &body.ack_ids, body.seconds)
-        .map_err(pubsub_error)?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 fn timestamp(at: SystemTime) -> pbjson_types::Timestamp {
     let since = at.duration_since(UNIX_EPOCH).unwrap_or_default();
     pbjson_types::Timestamp {
@@ -2272,10 +2171,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubUpdateSubscriptionBody,
         types::PubsubNameBody,
         types::PubsubPushConfigBody,
-        types::PubsubPullBody,
-        types::PubsubPullResult,
-        types::PubsubAckBody,
-        types::PubsubModifyDeadlineBody,
         types::PubsubMessageActionBody,
         types::PubsubSeekBody,
         types::PubsubSeekResult,

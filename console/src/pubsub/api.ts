@@ -10,7 +10,6 @@ import type { BatchGetRequest } from '@/api/generated/BatchGetRequest'
 import type { BatchGetResponse } from '@/api/generated/BatchGetResponse'
 import type { Job } from '@/api/generated/Job'
 import type { Page } from '@/api/generated/Page'
-import type { PubsubAckBody } from '@/api/generated/messaging/PubsubAckBody'
 import type { PubsubBacklogJobBody } from '@/api/generated/messaging/PubsubBacklogJobBody'
 import type { PubsubBacklogRow } from '@/api/generated/messaging/PubsubBacklogRow'
 import type { PubsubBacklogState } from '@/api/generated/messaging/PubsubBacklogState'
@@ -32,14 +31,11 @@ import type { PubsubMessageCheck } from '@/api/generated/messaging/PubsubMessage
 import type { PubsubMessageCheckBody } from '@/api/generated/messaging/PubsubMessageCheckBody'
 import type { PubsubMessageDetail } from '@/api/generated/messaging/PubsubMessageDetail'
 import type { PubsubMessageRow } from '@/api/generated/messaging/PubsubMessageRow'
-import type { PubsubModifyDeadlineBody } from '@/api/generated/messaging/PubsubModifyDeadlineBody'
 import type { PubsubNameBody } from '@/api/generated/messaging/PubsubNameBody'
 import type { PubsubPreview } from '@/api/generated/messaging/PubsubPreview'
 import type { PubsubPublishBody } from '@/api/generated/messaging/PubsubPublishBody'
 import type { PubsubPublishJobBody } from '@/api/generated/messaging/PubsubPublishJobBody'
 import type { PubsubPublishResult } from '@/api/generated/messaging/PubsubPublishResult'
-import type { PubsubPullBody } from '@/api/generated/messaging/PubsubPullBody'
-import type { PubsubPullResult } from '@/api/generated/messaging/PubsubPullResult'
 import type { PubsubPushConfigBody } from '@/api/generated/messaging/PubsubPushConfigBody'
 import type { PubsubRedeliverBody } from '@/api/generated/messaging/PubsubRedeliverBody'
 import type { PubsubRedelivery } from '@/api/generated/messaging/PubsubRedelivery'
@@ -247,21 +243,6 @@ export function deleteSubscription(body: PubsubNameBody): Promise<void> {
 /** Switches a subscription to push (an endpoint) or back to pull (none). */
 export function setPushConfig(body: PubsubPushConfigBody): Promise<void> {
   return apiSend('POST', '/pubsub/subscription/push-config', body)
-}
-
-/** Pulls as a subscriber does: the messages are leased to this tab until acked, nacked or expired. */
-export function pull(body: PubsubPullBody): Promise<PubsubPullResult> {
-  return apiSend('POST', '/pubsub/subscription/pull', body)
-}
-
-/** Acknowledges messages this tab pulled, by their ack ids. */
-export function acknowledge(body: PubsubAckBody): Promise<void> {
-  return apiSend('POST', '/pubsub/subscription/ack', body)
-}
-
-/** Extends (or with 0 seconds, nacks) leases this tab holds. */
-export function modifyDeadline(body: PubsubModifyDeadlineBody): Promise<void> {
-  return apiSend('POST', '/pubsub/subscription/modify-deadline', body)
 }
 
 /** Replays a subscription to a time or a snapshot, or purges it (`now`). */

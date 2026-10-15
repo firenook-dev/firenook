@@ -21,7 +21,7 @@ import { pubsubKeys, subscriptionQuery } from '../queries'
 import { orphanedNote } from '../tree'
 import { SubscriptionSettings } from './subscription-settings'
 
-export type SubscriptionViewName = 'backlog' | 'pull' | 'push' | 'dead-letters' | 'settings'
+export type SubscriptionViewName = 'backlog' | 'push' | 'dead-letters' | 'settings'
 
 /** The tabs a subscription has: Push only when it pushes, Dead letters only with a policy. */
 export function subscriptionViews(
@@ -37,19 +37,12 @@ export function subscriptionViews(
 
 const LABELS: Record<SubscriptionViewName, string> = {
   backlog: 'Backlog',
-  pull: 'Pull',
   push: 'Push',
   'dead-letters': 'Dead letters',
   settings: 'Settings',
 }
 
-const ORDER: readonly SubscriptionViewName[] = [
-  'backlog',
-  'pull',
-  'push',
-  'dead-letters',
-  'settings',
-]
+const ORDER: readonly SubscriptionViewName[] = ['backlog', 'push', 'dead-letters', 'settings']
 
 /** The tab a `view` parameter names, among those the subscription has, or its first. */
 export function resolveSubscriptionView(

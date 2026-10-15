@@ -206,7 +206,7 @@ async fn pubsub_through_the_console() {
     assert_eq!(subscription["expirationTtlSeconds"], 86_400);
     assert_eq!(subscription["retry"]["maximumBackoffSeconds"], 60.5);
     assert_eq!(subscription["labels"]["team"], "billing");
-    // Pull, ack, nack, seek to now.
+    // The filter passed the eu message only: the backlog holds it alone.
     publish(&suite.pubsub, &invoices, "one");
     let message_with =
         |region: &str| json!({ "data": { "text": "x" }, "attributes": { "region": region } });
@@ -219,46 +219,17 @@ async fn pubsub_through_the_console() {
             ),
         )
         .await;
-    let (status, pulled) = suite
+    let (status, backlog) = suite
         .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/pull",
-            Some(json!({ "subscription": workers, "max": 10, "ackDeadlineSeconds": 60 })),
+            Method::GET,
+            &format!("/api/v1/pubsub/backlog?subscription={}", encoded(&workers)),
+            None,
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "{pulled}");
-    let received = pulled["received"].as_array().expect("received");
-    assert_eq!(received.len(), 1, "the filter passed the eu message only");
-    assert_eq!(received[0]["message"]["attributes"]["region"], "eu");
-    let ack_id = received[0]["ackId"].as_str().expect("ack id").to_owned();
-    let (status, _) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/modify-deadline",
-            Some(json!({ "subscription": workers, "ackIds": [ack_id], "seconds": 0 })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, pulled) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/pull",
-            Some(json!({ "subscription": workers, "max": 1 })),
-        )
-        .await;
-    let ack_id = pulled["received"][0]["ackId"]
-        .as_str()
-        .expect("again")
-        .to_owned();
-    assert_eq!(pulled["received"][0]["deliveryAttempt"], 2);
-    let (status, _) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/ack",
-            Some(json!({ "subscription": workers, "ackIds": [ack_id] })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::OK, "{backlog}");
+    let waiting = backlog["items"].as_array().expect("items");
+    assert_eq!(waiting.len(), 1, "the filter passed the eu message only");
+    assert_eq!(waiting[0]["attributes"]["region"], "eu");
     let (status, sought) = suite
         .call(
             Method::POST,
@@ -631,8 +602,8 @@ async fn request_bodies_have_their_limits_and_say_so() {
     let (status, _) = suite
         .call(
             Method::POST,
-            "/api/v1/pubsub/subscription/ack",
-            Some(json!({ "subscription": "x", "ackIds": [hundred.repeat(11)] })),
+            "/api/v1/pubsub/subscription/push-config",
+            Some(json!({ "subscription": "x", "endpoint": hundred.repeat(11) })),
         )
         .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);

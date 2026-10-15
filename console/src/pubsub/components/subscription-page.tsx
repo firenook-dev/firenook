@@ -1,7 +1,7 @@
 // A subscription in view: its tabs, each with its body and row two's end —
-// Backlog (read without leasing, with the state switch), Pull (as a
-// subscriber), Push (the attempts, live) for a push subscription, Dead
-// letters with a policy — and the snapshot dialog it opens. The Push feed's
+// Backlog (read without leasing, with the state switch), Push (the
+// attempts, live) for a push subscription, Dead letters with a policy — and
+// the snapshot dialog it opens. The Push feed's
 // store lives here, so the pause button at row two's end and the feed below
 // read the same rows.
 
@@ -21,8 +21,7 @@ import { BacklogSwitch, BacklogView } from './backlog-table'
 import { CreateSnapshotDialog } from './create-snapshot-dialog'
 import { DeadLetters } from './dead-letters'
 import { MessageInspector } from './message-inspector'
-import { PullView } from './pull-view'
-import { PushEnd, PushFeed, SwitchToPush } from './push-feed'
+import { PushEnd, PushFeed } from './push-feed'
 import { SubscriptionState } from './subscription-state'
 import {
   type SubscriptionViewName,
@@ -31,7 +30,7 @@ import {
 } from './subscription-view'
 
 /** The tabs this page offers besides Settings (Push and Dead letters only where they apply). */
-const TABS: readonly SubscriptionViewName[] = ['backlog', 'pull', 'push', 'dead-letters']
+const TABS: readonly SubscriptionViewName[] = ['backlog', 'push', 'dead-letters']
 
 interface TabContext {
   project: string
@@ -89,23 +88,6 @@ function tabContent(
             }
           />
         ),
-      }
-    case 'pull':
-      return {
-        body: (
-          <PullView
-            project={project}
-            subscription={subscription}
-            config={config}
-            counters={counters}
-          />
-        ),
-        end:
-          config.pushEndpoint === null ? (
-            <span className="ml-auto flex shrink-0 items-center">
-              <SwitchToPush project={project} subscription={subscription} />
-            </span>
-          ) : undefined,
       }
     case 'push':
       return {

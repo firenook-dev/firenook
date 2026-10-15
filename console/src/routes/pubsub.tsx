@@ -17,7 +17,7 @@ const text = z
   .optional()
 
 const topicView = z.enum(['messages', 'subscriptions', 'deliveries', 'snapshots', 'settings'])
-const subscriptionView = z.enum(['backlog', 'pull', 'push', 'dead-letters', 'settings'])
+const subscriptionView = z.enum(['backlog', 'push', 'dead-letters', 'settings'])
 
 const searchSchema = z.object({
   // The shell scope (useConsoleProject): the project whose topics are shown,

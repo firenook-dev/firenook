@@ -974,58 +974,6 @@ pub(crate) struct PubsubPushConfigBody {
     pub endpoint: Option<String>,
 }
 
-/// `POST /pubsub/subscription/pull`: an immediate pull (never the long
-/// poll).
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubPullBody {
-    pub subscription: String,
-    /// 1 to 1,000.
-    pub max: i32,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub ack_deadline_seconds: Option<i32>,
-}
-
-/// One message a console pull received.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubReceived {
-    pub ack_id: String,
-    pub delivery_attempt: i32,
-    pub lease_expires_at: String,
-    pub message: PubsubMessageDetail,
-}
-
-/// What a console pull received.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubPullResult {
-    pub received: Vec<PubsubReceived>,
-}
-
-/// `POST /pubsub/subscription/ack`: a subscriber's ack ids.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubAckBody {
-    pub subscription: String,
-    pub ack_ids: Vec<String>,
-}
-
-/// `POST /pubsub/subscription/modify-deadline` (0 seconds is a nack).
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubModifyDeadlineBody {
-    pub subscription: String,
-    pub ack_ids: Vec<String>,
-    pub seconds: i32,
-}
-
 /// `POST /pubsub/message/ack` and `/message/release`: one message at one
 /// subscription.
 #[derive(Clone, Debug, Deserialize, TS)]
