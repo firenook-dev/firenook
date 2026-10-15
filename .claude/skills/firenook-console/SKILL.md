@@ -653,6 +653,13 @@ stream, loaded by glob). A few behaviours worth knowing:
   id") and the run's own pending and refusal (`errorText`) live in it.
   `useConfirmPopover().ask(request)` is the page's one popover for
   whoever asks. `DangerConfirm` stays the dialog that deletes.
+- A section's bulk work is `SectionJobs` (`components/console/section-jobs.tsx`)
+  under its toolbar: `section`, an optional `filter`, the `verb` its items
+  are counted with, Cancel (or `cancelLabel`), a bar while the total is
+  known, a summary for `summaryMs` (4 s) once it ends, "See why" over the
+  failed items with the section's own `why(error)` beside each, and
+  `onEnded` to read lists again. Test ids: `<testId>s`, `<testId>`,
+  `-progress`, `-cancel`, `-see-why`.
 - `DangerConfirm` draws `DangerConfirmBody`, which is exported: a card (or
   any page that needs the confirmation at rest) draws the real body framed,
   handed a `Job` instead of subscribing. `TriggerLineItem` and
