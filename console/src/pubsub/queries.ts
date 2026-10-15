@@ -316,7 +316,7 @@ export const schemaCheckQuery = (project: string, kind: string, definition: stri
     gcTime: CHECK_GC_MS,
   })
 
-/** Whether a message passes a schema, a revision or an unsaved definition. */
+/** Whether a message passes a topic's bound schema revision. */
 export const messageCheckQuery = (project: string, body: PubsubMessageCheckBody) =>
   queryOptions({
     queryKey: pubsubKeys.check(project, 'message', JSON.stringify(body)),
@@ -326,7 +326,7 @@ export const messageCheckQuery = (project: string, body: PubsubMessageCheckBody)
     gcTime: CHECK_GC_MS,
   })
 
-/** An example message for a schema, a topic's bound revision or a definition. */
+/** An example message for a topic's bound revision or an unsaved definition. */
 export const schemaExampleQuery = (project: string, body: PubsubSchemaExampleBody) =>
   queryOptions({
     queryKey: pubsubKeys.check(project, 'example', JSON.stringify(body)),

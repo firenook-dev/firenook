@@ -17,7 +17,6 @@ import type { PubsubCommitSchemaBody } from '@/api/generated/messaging/PubsubCom
 import type { PubsubCreateSchemaBody } from '@/api/generated/messaging/PubsubCreateSchemaBody'
 import type { PubsubCreateSubscriptionBody } from '@/api/generated/messaging/PubsubCreateSubscriptionBody'
 import type { PubsubCreateTopicBody } from '@/api/generated/messaging/PubsubCreateTopicBody'
-import type { PubsubDeleteRevisionBody } from '@/api/generated/messaging/PubsubDeleteRevisionBody'
 import type { PubsubDeleteTopicBody } from '@/api/generated/messaging/PubsubDeleteTopicBody'
 import type { PubsubDeliveryPage } from '@/api/generated/messaging/PubsubDeliveryPage'
 import type { PubsubDeliveryRow } from '@/api/generated/messaging/PubsubDeliveryRow'
@@ -40,7 +39,6 @@ import type { PubsubPushConfigBody } from '@/api/generated/messaging/PubsubPushC
 import type { PubsubRedeliverBody } from '@/api/generated/messaging/PubsubRedeliverBody'
 import type { PubsubRedelivery } from '@/api/generated/messaging/PubsubRedelivery'
 import type { PubsubRejectedList } from '@/api/generated/messaging/PubsubRejectedList'
-import type { PubsubRollbackSchemaBody } from '@/api/generated/messaging/PubsubRollbackSchemaBody'
 import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
 import type { PubsubScheduleBody } from '@/api/generated/messaging/PubsubScheduleBody'
 import type { PubsubScheduleRun } from '@/api/generated/messaging/PubsubScheduleRun'
@@ -352,16 +350,6 @@ export function commitSchema(body: PubsubCommitSchemaBody): Promise<PubsubSchema
   return apiSend('POST', '/pubsub/schema/commit', body)
 }
 
-/** Rolls back to a revision (a new revision with its definition). */
-export function rollbackSchema(body: PubsubRollbackSchemaBody): Promise<PubsubSchemaDetail> {
-  return apiSend('POST', '/pubsub/schema/rollback', body)
-}
-
-/** Deletes one revision (never the last: the engine refuses it). */
-export function deleteSchemaRevision(body: PubsubDeleteRevisionBody): Promise<PubsubSchemaDetail> {
-  return apiSend('DELETE', '/pubsub/schema/revision', body)
-}
-
 export function deleteSchema(body: PubsubNameBody): Promise<void> {
   return apiSend('DELETE', '/pubsub/schema', body)
 }
@@ -374,7 +362,7 @@ export function checkSchema(
   return apiSend('POST', '/pubsub/schema/check', body, signal ? { signal } : {})
 }
 
-/** Whether a message passes a schema (or a revision), with the failing path when not. */
+/** Whether a message passes a schema revision (`name@revision`), with the failing path when not. */
 export function checkMessage(
   body: PubsubMessageCheckBody,
   signal?: AbortSignal,
@@ -382,7 +370,7 @@ export function checkMessage(
   return apiSend('POST', '/pubsub/schema/validate-message', body, signal ? { signal } : {})
 }
 
-/** An example message the engine builds from a definition, checked before it is answered. */
+/** An example message the engine builds for a topic's bound revision or a definition, checked before it is answered. */
 export function schemaExample(
   body: PubsubSchemaExampleBody,
   signal?: AbortSignal,

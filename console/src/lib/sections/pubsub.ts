@@ -28,7 +28,7 @@ export const pubsub: ConsoleSection = {
   area: 'messaging',
   icon: BroadcastIcon,
   summary:
-    'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them and purge, Avro schemas with revisions, and the scheduled functions with run now and pause.',
+    'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them and purge, Avro schemas checked as you type, and the scheduled functions with run now and pause.',
   pages: [
     {
       to: '/pubsub',
@@ -37,7 +37,7 @@ export const pubsub: ConsoleSection = {
       badges: ['pubsub.rejected', 'pubsub.dead-lettered'],
       keywords: 'subscriptions messages publish backlog purge push dead letters',
     },
-    { to: '/pubsub/schemas', label: 'Schemas', keywords: 'avro revisions' },
+    { to: '/pubsub/schemas', label: 'Schemas', keywords: 'avro definition' },
     { to: '/pubsub/schedules', label: 'Schedules', keywords: 'cron onSchedule scheduler' },
   ],
   // No badges of the section's own: its two counters are the Topics page's

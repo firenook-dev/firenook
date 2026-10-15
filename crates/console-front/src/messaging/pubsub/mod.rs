@@ -50,18 +50,17 @@ use self::errors::{functions_absent, pubsub_error, redeliver_error, schedule_err
 use self::filters::message_query;
 use self::types::{
     PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody, PubsubCreateSchemaBody,
-    PubsubCreateSubscriptionBody, PubsubCreateTopicBody, PubsubData, PubsubDeleteRevisionBody,
-    PubsubDeleteSubscriptions, PubsubDeleteTopicBody, PubsubDeliveryCounts, PubsubDeliveryPage,
-    PubsubDeliveryRow, PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody,
-    PubsubFunctionMark, PubsubMessageActionBody, PubsubMessageCheck, PubsubMessageCheckBody,
-    PubsubMessageDetail, PubsubMessageRow, PubsubNameBody, PubsubOutgoingMessage, PubsubPreview,
-    PubsubPublishBody, PubsubPublishResult, PubsubPurged, PubsubPushConfigBody,
-    PubsubRedeliverBody, PubsubRedelivery, PubsubRejectedList, PubsubRollbackSchemaBody,
-    PubsubSchedule, PubsubScheduleBody, PubsubScheduleRun, PubsubSchemaBinding, PubsubSchemaCheck,
-    PubsubSchemaCheckBody, PubsubSchemaDetail, PubsubSchemaExample, PubsubSchemaExampleBody,
-    PubsubSchemaProblem, PubsubSchemaSummary, PubsubSubscriptionDetail, PubsubSubscriptionSummary,
-    PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary, PubsubUpdateSubscriptionBody,
-    PubsubUpdateTopicBody,
+    PubsubCreateSubscriptionBody, PubsubCreateTopicBody, PubsubData, PubsubDeleteSubscriptions,
+    PubsubDeleteTopicBody, PubsubDeliveryCounts, PubsubDeliveryPage, PubsubDeliveryRow,
+    PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody, PubsubFunctionMark,
+    PubsubMessageActionBody, PubsubMessageCheck, PubsubMessageCheckBody, PubsubMessageDetail,
+    PubsubMessageRow, PubsubNameBody, PubsubOutgoingMessage, PubsubPreview, PubsubPublishBody,
+    PubsubPublishResult, PubsubPurged, PubsubPushConfigBody, PubsubRedeliverBody, PubsubRedelivery,
+    PubsubRejectedList, PubsubSchedule, PubsubScheduleBody, PubsubScheduleRun, PubsubSchemaBinding,
+    PubsubSchemaCheck, PubsubSchemaCheckBody, PubsubSchemaDetail, PubsubSchemaExample,
+    PubsubSchemaExampleBody, PubsubSchemaProblem, PubsubSchemaSummary, PubsubSubscriptionDetail,
+    PubsubSubscriptionSummary, PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary,
+    PubsubUpdateSubscriptionBody, PubsubUpdateTopicBody,
 };
 use super::PubsubConsole;
 use super::shared::{time, u32_of, u64_of};
@@ -158,11 +157,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
         .route("/pubsub/deliveries", get(deliveries))
         .route("/pubsub/deliveries:batchGet", post(deliveries_batch))
         .route("/pubsub/schema", get(schema_detail).delete(delete_schema))
-        .route("/pubsub/schema/rollback", post(rollback_schema))
-        .route(
-            "/pubsub/schema/revision",
-            axum::routing::delete(delete_revision),
-        )
         .route("/pubsub/filter/check", post(check_filter))
         .route("/pubsub/schedules", get(schedules))
         .route("/pubsub/schedule/run", post(run_schedule))
@@ -1686,32 +1680,6 @@ async fn commit_schema(
     Ok(Json(schema_detail_of(&console, &body.name)?))
 }
 
-async fn rollback_schema(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubRollbackSchemaBody>,
-) -> Answer<PubsubSchemaDetail> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .rollback_schema(&body.name, &body.revision_id)
-        .map_err(pubsub_error)?;
-    Ok(Json(schema_detail_of(&console, &body.name)?))
-}
-
-async fn delete_revision(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubDeleteRevisionBody>,
-) -> Answer<PubsubSchemaDetail> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .delete_schema_revision(&format!("{}@{}", body.name, body.revision))
-        .map_err(pubsub_error)?;
-    Ok(Json(schema_detail_of(&console, &body.name)?))
-}
-
 async fn delete_schema(
     State(api): State<PubsubApi>,
     ConsoleJson(body): ConsoleJson<PubsubNameBody>,
@@ -1777,30 +1745,16 @@ async fn validate_message(
     let encoding = encoding(&body.encoding)?;
     let bytes = data_bytes(&body.data)?;
     let broker = console.runtime.broker();
-    let (name, schema) = match (&body.schema, &body.definition) {
-        (Some(name), _) if !name.is_empty() => (Some(name.as_str()), None),
-        (_, Some(definition)) => (
-            None,
-            Some(firenook_pubsub_front::google::pubsub::v1::Schema {
-                r#type: firenook_pubsub_front::google::pubsub::v1::schema::Type::Avro as i32,
-                definition: definition.clone(),
-                ..Default::default()
-            }),
-        ),
-        _ => {
-            return Err(ApiError::invalid(
-                "Name a schema (optionally name@revision) or send a definition.",
-            ));
-        }
-    };
-    let engine = broker.validate_message(name, schema, &bytes, encoding);
+    if body.schema.is_empty() {
+        return Err(ApiError::invalid(
+            "Name a schema, optionally as name@revision.",
+        ));
+    }
+    let engine = broker.validate_message(Some(&body.schema), None, &bytes, encoding);
     let explained = if encoding == Encoding::Json && engine.is_err() {
-        let parsed = match (&body.schema, &body.definition) {
-            (Some(name), _) if !name.is_empty() => broker.schema_revision(name),
-            (_, Some(definition)) => avro::parse_definition(definition).ok().map(Arc::new),
-            _ => None,
-        };
-        parsed.and_then(|schema| avro::explain_json(&schema, &bytes).err().map(problem))
+        broker
+            .schema_revision(&body.schema)
+            .and_then(|schema| avro::explain_json(&schema, &bytes).err().map(problem))
     } else {
         None
     };
@@ -1825,11 +1779,7 @@ async fn example_schema(
 ) -> Answer<PubsubSchemaExample> {
     let console = api.console()?;
     let broker = console.runtime.broker();
-    let schema = if let Some(name) = body.schema.as_deref().filter(|name| !name.is_empty()) {
-        broker
-            .schema_revision(name)
-            .ok_or_else(|| pubsub_error(PubsubError::not_found("Schema not found")))?
-    } else if let Some(topic) = body.topic.as_deref().filter(|topic| !topic.is_empty()) {
+    let schema = if let Some(topic) = body.topic.as_deref().filter(|topic| !topic.is_empty()) {
         broker
             .topic_schema(topic)
             .map(|(schema, _)| schema)
@@ -1851,9 +1801,7 @@ async fn example_schema(
             }
         }
     } else {
-        return Err(ApiError::invalid(
-            "Name a schema, a topic, or send a definition.",
-        ));
+        return Err(ApiError::invalid("Name a topic, or send a definition."));
     };
     Ok(Json(match avro::example_json(&schema) {
         Ok(json) => PubsubSchemaExample {
@@ -2099,8 +2047,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubSchemaDetail,
         types::PubsubCreateSchemaBody,
         types::PubsubCommitSchemaBody,
-        types::PubsubRollbackSchemaBody,
-        types::PubsubDeleteRevisionBody,
         types::PubsubSchemaCheckBody,
         types::PubsubSchemaCheck,
         types::PubsubMessageCheckBody,

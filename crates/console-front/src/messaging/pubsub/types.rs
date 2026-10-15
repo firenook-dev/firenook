@@ -1078,24 +1078,6 @@ pub(crate) struct PubsubCommitSchemaBody {
     pub definition: String,
 }
 
-/// `POST /pubsub/schema/rollback`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubRollbackSchemaBody {
-    pub name: String,
-    pub revision_id: String,
-}
-
-/// `DELETE /pubsub/schema/revision`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeleteRevisionBody {
-    pub name: String,
-    pub revision: String,
-}
-
 /// `POST /pubsub/schema/check`.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1126,14 +1108,9 @@ pub(crate) struct PubsubSchemaCheck {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubMessageCheckBody {
-    /// A schema name, optionally `name@revision`.
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub schema: Option<String>,
-    /// Or a definition not yet saved.
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub definition: Option<String>,
+    /// A schema name, optionally `name@revision` (the composer names the
+    /// topic's bound revision).
+    pub schema: String,
     /// `JSON` or `BINARY`.
     pub encoding: String,
     pub data: PubsubData,
@@ -1161,16 +1138,12 @@ pub(crate) struct PubsubMessageCheck {
     pub problem: Option<PubsubSchemaProblem>,
 }
 
-/// `POST /pubsub/schema/example`: a schema name (optionally
-/// `name@revision`), a topic (its bound revision), or a definition not yet
-/// saved.
+/// `POST /pubsub/schema/example`: a topic (its bound revision), or a
+/// definition not yet saved.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubSchemaExampleBody {
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub schema: Option<String>,
     #[serde(default)]
     #[ts(optional = nullable)]
     pub topic: Option<String>,

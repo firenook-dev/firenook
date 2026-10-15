@@ -250,7 +250,7 @@ async fn pubsub_through_the_console() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
 
-    // Schemas: create, commit, roll back, delete a revision, delete.
+    // Schemas: create, commit, delete.
     let schema = format!("projects/{PROJECT}/schemas/order");
     let (status, created) = suite
         .call(
@@ -261,10 +261,6 @@ async fn pubsub_through_the_console() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     assert_eq!(created["revisions"].as_array().map(Vec::len), Some(1));
-    let first_revision = created["revisions"][0]["id"]
-        .as_str()
-        .expect("revision")
-        .to_owned();
     let (_, committed) = suite
         .call(
             Method::POST,
@@ -273,27 +269,6 @@ async fn pubsub_through_the_console() {
         )
         .await;
     assert_eq!(committed["revisions"].as_array().map(Vec::len), Some(2));
-    let (_, rolled) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/schema/rollback",
-            Some(json!({ "name": schema, "revisionId": first_revision })),
-        )
-        .await;
-    assert_eq!(rolled["revisions"].as_array().map(Vec::len), Some(3));
-    let second = rolled["revisions"][1]["id"]
-        .as_str()
-        .expect("second")
-        .to_owned();
-    let (status, trimmed) = suite
-        .call(
-            Method::DELETE,
-            "/api/v1/pubsub/schema/revision",
-            Some(json!({ "name": schema, "revision": second })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{trimmed}");
-    assert_eq!(trimmed["revisions"].as_array().map(Vec::len), Some(2));
     let (_, schemas) = suite
         .call(Method::GET, "/api/v1/pubsub/schemas", None)
         .await;
@@ -322,7 +297,7 @@ async fn pubsub_through_the_console() {
         .call(
             Method::POST,
             "/api/v1/pubsub/schema/example",
-            Some(json!({ "schema": schema })),
+            Some(json!({ "definition": AVRO })),
         )
         .await;
     let example_json: Value =
@@ -337,11 +312,20 @@ async fn pubsub_through_the_console() {
         )
         .await;
     assert_eq!(status, StatusCode::CREATED);
+    // The composer's Fill example: the bound revision's example.
+    let (_, example) = suite
+        .call(
+            Method::POST,
+            "/api/v1/pubsub/schema/example",
+            Some(json!({ "topic": bound })),
+        )
+        .await;
+    assert!(example["json"].is_string(), "{example}");
     let (status, published) = suite
         .call(
             Method::POST,
             "/api/v1/pubsub/topic/publish",
-            Some(json!({ "topic": bound, "messages": [{ "data": { "avroJson": "{\"id\":\"o2\",\"total\":1.0}" } }] })),
+            Some(json!({ "topic": bound, "messages": [{ "data": { "avroJson": "{\"id\":\"o2\",\"total\":1.0,\"note\":null}" } }] })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{published}");
