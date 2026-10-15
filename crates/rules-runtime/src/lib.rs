@@ -18,7 +18,7 @@ pub use dry_run::{
     prepare_dry_run,
 };
 pub use query::{query_candidate, query_policy};
-pub use retention::{DecisionOutcome, RetainedDecision};
+pub use retention::{DecisionOutcome, RETAINED_BYTES, RETAINED_DECISIONS, RetainedDecision};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
