@@ -525,7 +525,7 @@ defaults never in the URL):
 | `tab` | Only the inspector's tab |
 | `view` | The main area's tab of a scope |
 | `layout` | A display mode (Storage list / grid) |
-| `panel` | A side panel of tools (rules pages, Auth try/inspect) |
+| `panel` | A side panel of tools (rules pages, Auth's Inspect a token) |
 | `state`, `outcome` | A single-choice switch with counts, named after its field |
 | `db`, `bucket`, `codebase`, `channel`, `queue`, `location`, `topic`, `tenant` | The scope picker's value |
 | `path` | A path inside the scope |
@@ -599,7 +599,7 @@ Filtered Logs links are `linkToLogs({ function?, execution?, instance?,
 service?, level?, from?, to?, entry?, since? })`, never hand-spelled.
 
 **Headers** — one `x-firenook-*` family: `x-firenook-console` (every console
-request; Auth's `write`/`try`/`replay`), `x-firenook-cause-<kind>` (what made a
+request; Auth's `write`/`replay`), `x-firenook-cause-<kind>` (what made a
 function run), `x-firenook-activity` and `x-firenook-execution` (answers, only
 to a request that asked), Storage's `x-firenook-metadata`/`-keep-tokens`,
 Firestore's `x-firenook-preview`. All are stripped before user code.
@@ -754,7 +754,7 @@ stream, loaded by glob). A few behaviours worth knowing:
 | `crates/console-front/src/<stream>/` | That stream only |
 | `crates/suite-runtime/src/lib.rs`, `project_scope.rs` | Foundation only (the hooks are pre-placed: streams edit `console_wiring/<stream>.rs`) |
 | `crates/functions-bridge` | Foundation; compute#1 (`explain_match`, cause headers, `note_dropped`); observe's maintenance-commit rule |
-| `crates/rules-engine` | Storage in `analysis.rs`, auth in `claim_reads.rs`, `lib.rs` re-exports only |
+| `crates/rules-engine` | Storage in `analysis.rs`, `lib.rs` re-exports only |
 | Service crates | Their stream; another stream's one-liners only through compute#1 |
 | `console/src/{lib/*, components/console/*, components/kit/*, components/shell/*}` | Foundation only, except the isolated shared-component commits and compute's `lib/triggers.ts` |
 | `console/src/lib/sections/<id>.ts` | That section (Firestore's and Logs' as scheduled) |
@@ -2622,8 +2622,10 @@ section is project-scoped: every route and topic takes `project` from
 and `tab`; create dialogs open from `?new=` (`user`, `import`, `sample`;
 `tenant` goes to Settings, where the tenant dialog lives) and Export from
 `?dialog=export`; Inbox has `message`, Activity `entry`, `console` (the
-console's own edits shown), `panel=try|inspect` and `method`; Settings has
-`section`. A feed paused is `?paused=true`.
+console's own edits shown) and `panel=inspect`; Settings has `section`. A
+feed paused is `?paused=true`. The user inspector's tabs are Details,
+Claims and Raw; a user's calls and messages are links from Details into
+Activity and the Inbox (`q=uid:<uid>`), never a list of their own.
 
 **Links**: the registry's `routes` open `auth.user` (`<tenant>|<uid>`,
 split at the first bar; no bar is a project user), `auth.call` (call id)
@@ -2654,8 +2656,8 @@ subscription too.
 
 **Writes go through the official API**: `callAuthEmulator` (`auth/api.ts`)
 sends Identity Toolkit calls through the mount with `x-firenook-console:
-write` (`try` and `replay` for Try a sign-in and Replay), so every edit is
-recorded in Activity and behaves as the Admin SDK's. The answer carries
+write` (`replay` for Replay), so every edit is recorded in Activity and
+behaves as the Admin SDK's. The answer carries
 `x-firenook-activity: <call id>` only when the request carried the console
 header. Bulk changes (`POST /auth/users:<verb>`: disable, enable, verify,
 revoke, setClaims, removeClaims, delete) take a `BulkTarget` (keys or the
@@ -2664,6 +2666,9 @@ works in chunks of 2,000 and can be cancelled between them; imports upload
 first (`POST /auth/imports`, streamed), preview, then run as a job (`POST
 /auth/users:import`); export is `GET /auth/users:export` in the emulator's
 own format; `POST /auth/tenants` creates a tenant with the id you choose.
+Tenants are a plain list (`GET /auth/tenants`: the first 500 a filter
+matches, in id order, and how many it matches), read again on every
+`auth.config` event; a project has a handful of them, not pages.
 
 **Tokens come from the engine** through the foundation's
 `resolveAuthorization`: `POST /auth/tokens` mints what a sign-in would —
@@ -2676,7 +2681,13 @@ for every scope with a cached token and drops a token the moment its
 account's token fields change or it is deleted. `POST /auth/token/inspect`
 judges a pasted token for each consumer (the rules, the emulator's own
 calls, `verifyIdToken` with and without the revocation check, a sign-in)
-with a reason and a fix.
+with a reason and a fix. Inspect a token is the one place a token is
+viewed: Sign in as's "View the token…" hands its mint over
+(`auth/inspect-handoff.ts`, never the address) with what the engine said
+of it — for whom, beforeSignIn's run, `differences` — shown above the
+verdicts while that token is in the box. The claims preview shows the
+mint's `payload`, decoded by the engine as the inspection is; the
+console decodes no token itself.
 
 **Live**: topics on the one channel per browser — `auth.users` (keys with
 fields, coalesced in 100 ms windows, a refresh-only change sends nothing,
@@ -2693,8 +2704,8 @@ page's subscription ended; the channel's state is the top-bar badge.
 
 **Codes are fetched by call id, never raced**: `GET
 /auth/messages?activity=<call id>` returns what that call sent
-(`callMessagesQuery`). The observer records a call before its response is
-returned.
+(`sentMessageLink`, the "Open in inbox" of a code the console sent). The
+observer records a call before its response is returned.
 
 **Activity comes from the Auth app itself**: one `CallRecord` per finished
 call (the engine keeps the newest 10,000; messages 2,000) with its steps —
@@ -2703,8 +2714,9 @@ claims and the invocation id read from `x-firenook-execution` after
 sending `x-firenook-cause-auth-call`; triggers; messages sent and used;
 user changes; configuration. Bodies are kept as received and sent, at
 most 16 KiB each, and only with diagnostics on. `x-firenook-console:
-write` calls are hidden unless `?console=true`; `try` and `replay` are
-always shown; Replay asks first for operations that are not idempotent.
+write` calls are hidden unless `?console=true`; `replay` and `try` (the
+beforeSignIn run of Sign in as) are always shown; Replay asks first for
+operations that are not idempotent.
 Errors are explained from `auth/errors.ts` with the SDK's own code and
 sentence from `auth/sdk-errors.gen.ts`, which `scripts/auth-sdk-errors.mjs`
 regenerates from `@firebase/auth` (1.13.5); `operations.ts` must label
@@ -2717,15 +2729,19 @@ bar as a brand gradient, so a tone replaces the `from-`/`via-`/`to-` stops
 (a `bg-` colour never shows). Auth overwrites `email`, `email_verified`,
 `phone_number`, `provider_id`, `user_id` and `auth_time` in the token, and
 custom `name`/`picture` replace the profile's (`shadowed`, `overrides` on
-the minted token). Where rules read a claim comes from
-`Ruleset::claim_reads()` (`crates/rules-engine/src/claim_reads.rs`) on the
-rules documents (`claimReads`) — never a regex over rule text.
+the minted token).
 
 **Suite facts are not Auth's**: foreign projects (`ForeignProjects`, which
 Auth feeds at start), background triggers (`ConsoleStatus`), which
 functions listen (`useTriggersFor`), connection snippets (`lib/connect.ts`)
 and toasts (`lib/toasts.ts`) each have one owner; Auth draws no banner for
-them.
+them. Nor a second copy of what another page owns: Settings links to the
+Users page's Export, Import and Sample users dialogs, to the Overview's
+reset (every user of every tenant) and to the Overview's connect
+snippets; bulk jobs are `SectionJobs`, the user's Code is `CodePopover`.
+Sample users come 10, 100 or 1,000 at a time, one mix (email, phone,
+Google; some disabled, unverified, with MFA or claims), marked `sample-`
+on `sample.test`.
 
 **Persistence** is snapshotted under the lock and encoded off it
 (`crates/auth-front/src/persist.rs`): a change reaches `auth-state.json`
