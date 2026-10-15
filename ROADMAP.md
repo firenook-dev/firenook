@@ -926,10 +926,11 @@ served until every section has landed.
   the Pub/Sub timer outlived the suite.
 - [x] Cloud Tasks. Every queue with its configuration in force and where each
   value came from, live counters (pending, held, running, in backoff, slots
-  and a token bucket that refills on screen), every pending and running
-  task with its first and latest attempts, the handler's responses and the
-  next retry, with the emulator's `maxAttempts` + 1 said where the figure
-  shows, every attempt of a queue as it happens, and the last thousand
+  and, while the rate limit holds tasks back, a token bucket that refills
+  on screen), every pending and running task with its first and latest
+  attempts, the handler's responses and the next retry, with the emulator's
+  `maxAttempts` + 1 said where the figure shows, a queue's attempts as they
+  happen as its function's invocations in Functions, and the last thousand
   finished tasks with their outcome. Tasks can be enqueued by hand exactly
   as the Admin SDK sends them, run now, stopped, deleted (auto-named ones
   too, which the API cannot), re-enqueued from history; queues pause,

@@ -4,10 +4,9 @@
 // engine key (`['tasks', project, <queue key>, 'tasks' | 'history' | 'task', …]`),
 // so `tasks.queue` refreshes one queue's rows and nothing else.
 //
-// The queue list is the queue view's source too (it holds every queue's
-// configuration and counters, kept current by `tasks.counters`); a queue
-// detail adds only the official `/queueStats` figures, computed when read.
-// Task and History lists are cursor lists for `useCursorRows`, as Pub/Sub's.
+// The queue list is the queue view's source too: it holds every queue's
+// configuration and counters, kept current by `tasks.counters`. Task and
+// History lists are cursor lists for `useCursorRows`, as Pub/Sub's.
 
 import { queryOptions } from '@tanstack/react-query'
 import type { TasksOutcome } from '@/api/generated/messaging/TasksOutcome'
@@ -15,12 +14,10 @@ import type { TasksTaskState } from '@/api/generated/messaging/TasksTaskState'
 import { cursorPagesOptions } from '@/components/console/use-cursor-rows'
 import type { PageAt } from '@/messaging/api'
 import {
-  type TasksList,
   batchGetHistory,
   batchGetTasks,
   getHistory,
   getListMeta,
-  getQueue,
   getQueues,
   getTask,
   getTasks,
@@ -32,9 +29,6 @@ export const tasksKeys = {
   section: (project: string) => ['tasks', project] as const,
   /** The queue list (the panel, every queue's view). */
   queues: (project: string) => ['tasks', project, 'queues'] as const,
-  /** Every queue detail of the project (a prefix). */
-  queueDetails: (project: string) => ['tasks', project, 'queue'] as const,
-  queue: (project: string, queue: string) => ['tasks', project, 'queue', queue] as const,
   /** Everything of one queue: its task lists, history lists and task details (a prefix). */
   queueData: (project: string, queue: string) => ['tasks', project, queue] as const,
   tasks: (project: string, queue: string, state?: TasksTaskState, q = '') =>
@@ -47,7 +41,7 @@ export const tasksKeys = {
   queueHistory: (project: string, queue: string) => ['tasks', project, queue, 'history'] as const,
   history: (project: string, queue: string, outcome?: TasksOutcome, q = '') =>
     ['tasks', project, queue, 'history', outcome ?? 'all', q] as const,
-  meta: (project: string, list: TasksList) => ['tasks', project, 'meta', list] as const,
+  meta: (project: string) => ['tasks', project, 'meta'] as const,
 }
 
 /**
@@ -64,14 +58,6 @@ export const queuesQuery = (project: string) =>
     enabled: project !== '',
   })
 
-/** One queue with the official `/queueStats` figures, computed when read. */
-export const queueQuery = (project: string, queue: string) =>
-  queryOptions({
-    queryKey: tasksKeys.queue(project, queue),
-    queryFn: ({ signal }) => getQueue(queue, signal),
-    enabled: project !== '' && queue !== '',
-  })
-
 export const taskQuery = (project: string, queue: string, id: string) =>
   queryOptions({
     queryKey: tasksKeys.task(project, queue, id),
@@ -79,11 +65,11 @@ export const taskQuery = (project: string, queue: string, id: string) =>
     enabled: project !== '' && queue !== '' && id !== '',
   })
 
-/** A list's order and filter fields: fixed for the engine's life. */
-export const listMetaQuery = (project: string, list: TasksList) =>
+/** The task lists' order and filter fields: fixed for the engine's life. */
+export const listMetaQuery = (project: string) =>
   queryOptions({
-    queryKey: tasksKeys.meta(project, list),
-    queryFn: ({ signal }) => getListMeta(list, signal),
+    queryKey: tasksKeys.meta(project),
+    queryFn: ({ signal }) => getListMeta(signal),
     staleTime: Number.POSITIVE_INFINITY,
   })
 

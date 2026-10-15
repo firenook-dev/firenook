@@ -1,11 +1,9 @@
 // The queue list kept current by `tasks.counters` frames: each frame carries
 // the queues whose counters changed after the subscriber's revision (all of
 // the project's when it opens) and replaces their counters in the cached
-// list, only when it is newer than the list, which takes its revision. The
-// official `/queueStats` figures are computed when the list is read and
-// never streamed, so a frame keeps the list's. A frame naming a queue the
-// list does not hold says it registered meanwhile; the caller reads the
-// list again.
+// list, only when it is newer than the list, which takes its revision. A
+// frame naming a queue the list does not hold says it registered
+// meanwhile; the caller reads the list again.
 
 import type { TasksCountersFrame } from '@/api/generated/messaging/TasksCountersFrame'
 import type { TasksQueueCounters } from '@/api/generated/messaging/TasksQueueCounters'
@@ -32,10 +30,7 @@ export function applyQueueCounters(
     const counters = changed.get(queue.key)
     if (!counters) return queue
     seen.add(queue.key)
-    return {
-      ...queue,
-      counters: { ...counters, official: counters.official ?? queue.counters.official },
-    }
+    return { ...queue, counters }
   })
   const unknown = frame.queues.some((queue) => !seen.has(queue.key))
   return { list: { ...list, items, revision: frame.revision }, unknown }

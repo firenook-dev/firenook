@@ -1,13 +1,12 @@
 import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { SectionFrame } from '@/components/console/section-gate'
-import { zFlag } from '@/lib/search-params'
 import { TasksPage } from '@/tasks/components/tasks-page'
 import { TasksStarting } from '@/tasks/components/tasks-starting'
 
 // Every view of the Cloud Tasks page is a link: the queue, its tab, the
-// open task and its inspector tab, the switches, the filter, a paused feed
-// and an open dialog (messaging spec §4.2).
+// open task and its inspector tab, the switches, the filter and an open
+// dialog (messaging spec §4.2).
 
 // A task id is decimal, and the router reads `?task=12` as the number 12
 // (it parses every value as JSON first), so a value may arrive either way;
@@ -27,7 +26,7 @@ const searchSchema = z.object({
   queue: z.string().optional(),
   location: z.string().optional(),
   // The queue's tab.
-  view: z.enum(['tasks', 'attempts', 'history', 'config']).optional(),
+  view: z.enum(['tasks', 'history', 'config']).optional(),
   // The console's task id (decimal) open in the inspector, pending or finished.
   task: zText,
   // The inspector's tab.
@@ -37,8 +36,6 @@ const searchSchema = z.object({
   outcome: z.enum(['succeeded', 'failed', 'cancelled', 'deleted', 'purged', 'replaced']).optional(),
   // The shared grammar: name:, is:generated, is:console, words in the payload.
   q: zText,
-  // The Attempts feed is paused (absent: following).
-  paused: zFlag,
   // The Enqueue dialog.
   new: z.enum(['task']).optional(),
   // With new=task: the task (pending or finished) whose body and headers fill it.

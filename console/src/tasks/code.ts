@@ -26,12 +26,10 @@ export interface TaskForCode {
   data: string | null
 }
 
-export type TaskCodeDialect = 'admin-node' | 'curl'
+/** The dialects a task is written in, by the console's one list (`CODE_DIALECTS`). */
+export type TaskCodeDialect = 'node' | 'curl'
 
-export const TASK_CODE_DIALECTS: readonly { id: TaskCodeDialect; label: string }[] = [
-  { id: 'admin-node', label: 'Admin SDK (Node.js)' },
-  { id: 'curl', label: 'curl' },
-]
+export const TASK_CODE_DIALECTS: readonly TaskCodeDialect[] = ['node', 'curl']
 
 /** A JavaScript string literal in single quotes. */
 function quoteJs(text: string): string {

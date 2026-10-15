@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   REQUEST_LIMIT,
   base64Utf8,
@@ -9,8 +9,6 @@ import {
   draftFrom,
   emptyDraft,
   enqueueBody,
-  recentPayloads,
-  rememberPayload,
   requestSize,
   sizeProblem,
   taskIdProblem,
@@ -151,25 +149,5 @@ describe('the Admin SDK body (U-12)', () => {
     const raw = draftFrom(testDetail({ data: null, body: '[1,2]' }))
     expect(raw.sendAs).toBe('raw')
     expect(raw.text).toBe('[\n  1,\n  2\n]')
-  })
-})
-
-describe('recent payloads (TK-43)', () => {
-  beforeEach(() => localStorage.clear())
-
-  it('keep the ten newest per queue, the same text once', () => {
-    for (let index = 0; index < 12; index += 1)
-      rememberPayload('queue:a', { sendAs: 'data', text: `{"n":${index}}` }, NOW + index)
-    rememberPayload('queue:a', { sendAs: 'data', text: '{"n":5}' }, NOW + 20)
-    const kept = recentPayloads('queue:a')
-    expect(kept).toHaveLength(10)
-    expect(kept[0]?.text).toBe('{"n":5}')
-    expect(kept.filter((entry) => entry.text === '{"n":5}')).toHaveLength(1)
-    expect(recentPayloads('queue:b')).toEqual([])
-  })
-
-  it('ignore what another version stored', () => {
-    localStorage.setItem('firenook.console.tasks.payloads.queue:a', '{"not":"a list"}')
-    expect(recentPayloads('queue:a')).toEqual([])
   })
 })

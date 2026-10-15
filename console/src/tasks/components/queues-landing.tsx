@@ -1,17 +1,16 @@
 // Cloud Tasks with no queue picked (TK-01, TK-02, D-T10): every queue of
-// the project in one table — state, what waits, what holds a slot, its
-// limits and its traffic — the way the Cloud console lists queues, with
-// what the emulator refused above it. A project with no queue says how a
-// queue comes to be, with this engine's Tasks address.
+// the project in one table — its state, what waits, what runs, what is in
+// backoff and what failed for good — the way the Cloud console lists
+// queues, with what the emulator refused above it. Its traffic, limits and
+// function are the queue's own (Configuration, row one). A project with no
+// queue says how a queue comes to be, with this engine's Tasks address.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { LightningIcon, PlusIcon, QueueIcon } from '@phosphor-icons/react'
+import { PlusIcon, QueueIcon } from '@phosphor-icons/react'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import type { TasksQueueList } from '@/api/generated/messaging/TasksQueueList'
 import { DataTable, type DataTableColumn } from '@/components/console/data-table'
 import { EmptyState } from '@/components/console/empty-state'
-import { EntityLink } from '@/components/console/entity-link'
-import { RelativeTime } from '@/components/console/relative-time'
 import { SectionBanner } from '@/components/console/section-banner'
 import { SectionBody } from '@/components/console/section-page'
 import { TableFooter } from '@/components/console/table-footer'
@@ -24,36 +23,27 @@ import {
 import { PanelToggle } from '@/components/shell/section-panel'
 import { Kbd, StatusDot } from '@/components/kit'
 import { formatNumber } from '@/lib/format'
-import { useAgedCount } from '@/messaging/windows'
 import { queueLabel } from '../queue-address'
-import { maxAttemptsNote } from '../retry-plan'
 import { RefusedBanners } from './refused-banner'
 import { TasksConnect } from './tasks-connect'
 
 const NOUN = { one: 'queue', other: 'queues' }
 
-function Rate({
-  window,
-  span,
-  bucket,
-}: {
-  window: TasksQueue['counters']['dispatched']
-  span: number
-  bucket?: number
-}) {
-  return <Figure value={useAgedCount(window, span, bucket)} />
-}
-
 /**
  * A count in the table: a zero in the inactive ink, so the figures that are
- * not zero are the ones the eye finds — one rule for every count column,
- * the live rates and the queue's own counters alike.
+ * not zero are the ones the eye finds — one rule for every count column.
  */
-function Figure({ value, tone }: { value: number; tone?: 'warning' | undefined }) {
+function Figure({ value, tone }: { value: number; tone?: 'warning' | 'danger' | undefined }) {
   return (
     <span
       className={
-        value === 0 ? 'text-kumo-inactive' : tone === 'warning' ? 'text-kumo-warning' : undefined
+        value === 0
+          ? 'text-kumo-inactive'
+          : tone === 'warning'
+            ? 'text-kumo-warning'
+            : tone === 'danger'
+              ? 'text-kumo-danger'
+              : undefined
       }
     >
       {formatNumber(value)}
@@ -106,71 +96,12 @@ function columns(queues: readonly TasksQueue[]): DataTableColumn<TasksQueue>[] {
       cell: (queue) => <Figure value={queue.counters.backoff} tone="warning" />,
     },
     {
-      id: 'dispatched',
-      header: 'Sent / min',
-      width: 92,
-      align: 'end',
-      cell: (queue) => <Rate window={queue.counters.dispatched} span={60} />,
-    },
-    {
+      // Ran out of retries, as History counts them (its Failed switch).
       id: 'failed',
-      header: 'Failed / 5 min',
-      width: 108,
+      header: 'Failed',
+      width: 80,
       align: 'end',
-      cell: (queue) => <Rate window={queue.counters.failed} span={300} bucket={10} />,
-    },
-    {
-      id: 'target',
-      header: 'Target',
-      width: 200,
-      cell: (queue) =>
-        queue.function ? (
-          <span className="flex min-w-0 items-center gap-1.5">
-            <LightningIcon size={12} className="shrink-0 text-kumo-subtle" />
-            <EntityLink entity={{ ...queue.function.functionRef, label: queue.function.name }} />
-          </span>
-        ) : (
-          <span className="truncate font-sans text-kumo-subtle">registered by a client</span>
-        ),
-    },
-    {
-      id: 'oldest',
-      header: 'Oldest waiting',
-      width: 116,
-      cell: (queue) =>
-        queue.counters.oldestPendingAt ? (
-          <RelativeTime iso={queue.counters.oldestPendingAt} />
-        ) : (
-          <span className="text-kumo-inactive">—</span>
-        ),
-    },
-    {
-      id: 'limits',
-      header: 'Limits',
-      width: 120,
-      cell: (queue) => (
-        <Tooltip
-          content="maxDispatchesPerSecond · maxConcurrentDispatches"
-          render={
-            <span className="cursor-default truncate">
-              {formatNumber(queue.config.maxDispatchesPerSecond)}/s ·{' '}
-              {formatNumber(queue.config.maxConcurrentDispatches)} slots
-            </span>
-          }
-        />
-      ),
-    },
-    {
-      id: 'attempts',
-      header: 'Max attempts',
-      width: 104,
-      align: 'end',
-      cell: (queue) => (
-        <Tooltip
-          content={maxAttemptsNote(queue.config)}
-          render={<span className="cursor-default">{formatNumber(queue.config.maxAttempts)}</span>}
-        />
-      ),
+      cell: (queue) => <Figure value={queue.counters.outcomes.failed} tone="danger" />,
     },
   ]
 }

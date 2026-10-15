@@ -1867,18 +1867,6 @@ mod console {
         }
     }
 
-    fn attempts(
-        runtime: &TasksRuntime,
-    ) -> (crate::runtime::AttemptSink, Arc<Mutex<Vec<AttemptRecord>>>) {
-        let seen: Arc<Mutex<Vec<AttemptRecord>>> = Arc::default();
-        let sink_seen = Arc::clone(&seen);
-        let sink: crate::runtime::AttemptSink = Arc::new(move |record| {
-            sink_seen.lock().unwrap().push(record);
-        });
-        runtime.set_attempt_sink(Arc::clone(&sink));
-        (sink, seen)
-    }
-
     fn attempt(queue: &str, task_id: u64, attempt: u32) -> AttemptRecord {
         AttemptRecord {
             queue_key: queue.to_owned(),
@@ -1949,7 +1937,6 @@ mod console {
         let server = TestServer::start(|_, _| (500, Duration::ZERO)).await;
         server.respond_with("card declined");
         let (runtime, _) = runtime("http://127.0.0.1:5001");
-        let (_sink, seen) = attempts(&runtime);
         let key = client_queue(
             &runtime,
             "declines",
@@ -1979,25 +1966,10 @@ mod console {
         assert_eq!(log.omitted, 4);
         let kept: Vec<u32> = log.records().map(|record| record.attempt).collect();
         assert_eq!(kept, [1, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
-        wait_until(
-            "every attempt to reach the sink",
-            Duration::from_secs(5),
-            || seen.lock().unwrap().len() == 14,
-        )
-        .await;
-        // Snippets are attached to the kept attempts and the sink's copies.
         assert!(log.records().all(|record| record.status == Some(500)
             && !record.counted_execution
             && record.retry_count == record.attempt - 1));
-        let seen = seen.lock().unwrap().clone();
-        assert!(
-            seen.iter()
-                .all(|record| record.response.as_deref() == Some("card declined"))
-        );
-        assert_eq!(
-            seen.iter().map(|record| record.attempt).collect::<Vec<_>>(),
-            (1..=14).collect::<Vec<_>>()
-        );
+        // Snippets are attached to the kept attempts.
         wait_until(
             "the last snippet in the history",
             Duration::from_secs(2),
@@ -2070,35 +2042,65 @@ mod console {
             "the evicted one left the count"
         );
 
-        // 33 bodies of 1 MiB: the history keeps at most 32 MiB.
-        let heavy = client_queue(
-            &runtime,
-            "heavy",
-            &json!({"rateLimits": {"maxDispatchesPerSecond": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
-        )
-        .await;
+        // Five bodies of 1 MiB: a queue's history keeps at most 4 MiB.
         let body = format!("\"{}\"", "x".repeat(1024 * 1024));
-        for index in 0..33 {
-            runtime
-                .enqueue(
-                    &heavy,
-                    record(&format!("h{index}"), "http://127.0.0.1:1/x", &body),
+        let heavy = |name: String| {
+            let runtime = &runtime;
+            let body = &body;
+            async move {
+                let key = client_queue(
+                    runtime,
+                    &name,
+                    &json!({"rateLimits": {"maxDispatchesPerSecond": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
                 )
-                .unwrap();
-        }
-        runtime.purge(&heavy, false).unwrap();
-        let (bytes, kept, total) = runtime.with_state(|state| {
-            let console = &state.console[&heavy];
-            (
-                console.history_bytes,
-                console.history.len(),
-                state.history_bytes,
-            )
+                .await;
+                for index in 0..5 {
+                    runtime
+                        .enqueue(
+                            &key,
+                            record(&format!("{name}-{index}"), "http://127.0.0.1:1/x", body),
+                        )
+                        .unwrap();
+                }
+                runtime.purge(&key, false).unwrap();
+                key
+            }
+        };
+        let first = heavy("heavy0".to_owned()).await;
+        let (bytes, kept) = runtime.with_state(|state| {
+            let console = &state.console[&first];
+            (console.history_bytes, console.history.len())
         });
         assert!(bytes <= crate::runtime::HISTORY_BYTES);
-        assert_eq!(kept, 31, "33 MiB of bodies trimmed under 32 MiB");
-        assert!(total >= bytes);
-        assert_eq!(outcomes(&runtime, &heavy).purged, 31);
+        assert_eq!(kept, 3, "5 MiB of bodies trimmed under 4 MiB");
+        assert_eq!(outcomes(&runtime, &first).purged, 3);
+        assert_eq!(history(&runtime, &first)[0].finished.task.name, "heavy0-2");
+
+        // Eleven such queues hold about 33 MiB: every history together keeps
+        // at most 32 MiB, the oldest of the largest going first.
+        let mut keys = vec![first];
+        for index in 1..11 {
+            keys.push(heavy(format!("heavy{index}")).await);
+        }
+        let (total, each) = runtime.with_state(|state| {
+            let each: Vec<usize> = keys
+                .iter()
+                .map(|key| state.console[key].history_bytes)
+                .collect();
+            (state.history_bytes, each)
+        });
+        assert!(total <= crate::runtime::ALL_HISTORY_BYTES, "{total}");
+        assert!(
+            each.iter()
+                .all(|bytes| *bytes <= crate::runtime::HISTORY_BYTES)
+        );
+        assert!(
+            each.iter().any(|bytes| *bytes < 3 * 1024 * 1024),
+            "a queue gave up part of its history: {each:?}"
+        );
+        for key in &keys {
+            outcomes(&runtime, key);
+        }
         runtime.shutdown().await;
     }
 
@@ -3010,7 +3012,6 @@ mod inspect {
         assert!(value("timeoutSeconds").unused && !value("timeoutSeconds").provided);
         assert!(value("retry").unused);
         assert!(value("defaultUri").provided);
-        assert_eq!(view.counters.official.as_ref().unwrap().running_tasks, 1000);
         assert_eq!(view.history_capacity, 1000);
 
         runtime.shutdown().await;
@@ -3313,14 +3314,11 @@ mod inspect {
     }
 
     #[tokio::test]
-    async fn console_delta_follows_a_queue_and_its_attempts() {
+    async fn console_delta_follows_a_queue_and_its_finished_tasks() {
         let server = TestServer::ok().await;
         let (runtime, _) = runtime("http://127.0.0.1:5001");
         let key = client_queue(&runtime, "watched", &json!({"defaultUri": server.url})).await;
         let other = client_queue(&runtime, "other", &json!({"defaultUri": server.url})).await;
-        let records: Arc<Mutex<Vec<crate::queue::AttemptRecord>>> = Arc::default();
-        let sink = Arc::clone(&records);
-        runtime.set_attempt_sink(Arc::new(move |record| sink.lock().unwrap().push(record)));
         runtime.set_paused(&key, true).unwrap();
         let counters = TasksScope {
             project: Some(PROJECT.to_owned()),
@@ -3364,15 +3362,6 @@ mod inspect {
             .find(|queue| queue.key == key)
             .unwrap();
         assert_eq!(watched.pending, 2);
-        assert_eq!(
-            watched
-                .added
-                .buckets
-                .iter()
-                .map(|(_, count)| count)
-                .sum::<u32>(),
-            2
-        );
         // A task that takes a slot: its old and new keys.
         runtime.run_now(&key, a).unwrap();
         let delta = runtime.console_delta(&mut rows, &scoped);
@@ -3391,12 +3380,9 @@ mod inspect {
         assert_eq!(finished.added, 1);
         assert_eq!(finished.ids.len(), 1);
         assert!(delta.changes.contains(&TaskChange::Row(RowKey::slotted(a))));
-        // Every finished attempt reaches the sink once.
-        wait_until("one attempt record", Duration::from_secs(2), || {
-            records.lock().unwrap().len() == 1
-        })
-        .await;
-        let attempt = records.lock().unwrap()[0].clone();
+        // The finished task keeps its one attempt: the 204 it answered.
+        let detail = runtime.task_view(&key, a).expect("a's detail");
+        let attempt = detail.attempts.last().cloned().expect("an attempt");
         assert_eq!(
             (attempt.task_id, attempt.attempt, attempt.status),
             (a, 1, Some(204))

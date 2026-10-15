@@ -7,16 +7,21 @@ import {
   displayName,
   errorWord,
   executionText,
-  firstLine,
   lastResult,
-  responseSummary,
   outcomeChip,
+  rateLimiting,
   stateTone,
   stateWord,
 } from './states'
 import { NOW, testAttempt, testRow } from './fixtures.test-support'
 
 const at = (ms: number) => new Date(NOW + ms).toISOString()
+
+/** A queue as `rateLimiting` reads it: two slots, `busy` of them in use. */
+const queue = (pending: number, tokens: number, paused = false, busy = 0) => ({
+  paused,
+  counters: { pending, tokens, slots: 2, slotsInUse: busy },
+})
 
 describe('task states (U-16)', () => {
   it('say where a task is, with its place in the queue or its due time', () => {
@@ -99,17 +104,16 @@ describe('task states (U-16)', () => {
     )
   })
 
-  it('keep the first line of a response, or the message of an SDK error body', () => {
-    expect(firstLine('card declined\n    at handler (index.js:3)')).toBe('card declined')
-    expect(firstLine(null)).toBe('')
-    expect(responseSummary('{"error":{"message":"card declined","status":"INTERNAL"}}')).toBe(
-      'card declined',
-    )
-    expect(responseSummary('{"error":"Bad Request"}')).toBe('Bad Request')
-    expect(responseSummary('{"error":{"message":"cut at 1 Ki')).toBe(
-      '{"error":{"message":"cut at 1 Ki',
-    )
-    expect(responseSummary('attempt 2 refused\nmore')).toBe('attempt 2 refused')
+  it('say the rate limit holds a queue back only while tasks wait on an empty bucket, a slot free', () => {
+    expect(rateLimiting(queue(3, 0.4))).toBe(true)
+    // A full bucket: the slots, not the rate, hold whatever waits.
+    expect(rateLimiting(queue(3, 10))).toBe(false)
+    // Nothing waits: an empty bucket holds nothing back.
+    expect(rateLimiting(queue(0, 0))).toBe(false)
+    // Paused: the pause holds the tasks, whatever the bucket.
+    expect(rateLimiting(queue(3, 0, true))).toBe(false)
+    // Every slot busy: the slots hold them, and a refill sends nothing.
+    expect(rateLimiting(queue(3, 0, false, 2))).toBe(false)
   })
 
   it('give each outcome its word and tone, and say what replaced means', () => {

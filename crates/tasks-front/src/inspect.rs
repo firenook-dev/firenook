@@ -94,8 +94,6 @@ pub struct ConfigView {
     pub max_dispatches_per_second: f64,
     /// Every key of the stored document, in its order.
     pub values: Vec<ConfigValue>,
-    /// The `taskQueueConfig` document as stored.
-    pub document: String,
     /// The attempts a task that fails every time runs, from the first: the
     /// dispatcher's own backoff and stop rule (`retry_plan`), with requests
     /// that take no time.
@@ -199,26 +197,12 @@ pub struct QueueCounters {
     pub refilled_at: SystemTime,
     pub max_dispatches_per_second: f64,
     pub dispatched: StampedWindow,
-    pub succeeded: StampedWindow,
     pub failed: StampedWindow,
-    pub added: StampedWindow,
     pub oldest_pending_at: Option<SystemTime>,
     /// Finished tasks the history holds.
     pub history: u32,
     /// The same, by outcome.
     pub outcomes: OutcomeCounts,
-    /// What `/queueStats` answers for the queue, computed on request.
-    pub official: Option<OfficialStats>,
-}
-
-/// `/queueStats` for one queue, quirks included.
-#[derive(Debug, Clone, PartialEq)]
-pub struct OfficialStats {
-    pub number_of_tasks: i64,
-    pub tasks_added: f64,
-    pub completed_last_min: u32,
-    pub failed_tasks: f64,
-    pub running_tasks: u32,
 }
 
 /// Where a task is.
@@ -628,7 +612,6 @@ fn config_view(config: &QueueConfig) -> ConfigView {
         max_concurrent_dispatches: u32::try_from(config.slots).unwrap_or(u32::MAX),
         max_dispatches_per_second: config.max_dispatches_per_second,
         values,
-        document: config.document().stringify(),
         ladder: retry_plan(config, 1, Duration::ZERO, Duration::ZERO)
             .into_iter()
             .map(|step| LadderStep {
@@ -659,12 +642,7 @@ fn slot_state(dispatch: &Dispatch) -> TaskState {
     }
 }
 
-fn counters(
-    key: &str,
-    queue: &TaskQueue,
-    console: Option<&QueueConsole>,
-    official: Option<OfficialStats>,
-) -> QueueCounters {
+fn counters(key: &str, queue: &TaskQueue, console: Option<&QueueConsole>) -> QueueCounters {
     let (mut dispatching, mut running, mut backoff) = (0, 0, 0);
     for dispatch in queue.slotted() {
         match slot_state(dispatch) {
@@ -706,13 +684,10 @@ fn counters(
         refilled_at,
         max_dispatches_per_second: queue.config.max_dispatches_per_second,
         dispatched: window(|console| console.windows.dispatched.window()),
-        succeeded: window(|console| console.windows.succeeded.window()),
         failed: window(|console| console.windows.failed.window()),
-        added: window(|console| console.windows.added.window()),
         oldest_pending_at,
         history: console.map_or(0, |console| count(console.history.len())),
         outcomes: console.map_or_else(OutcomeCounts::default, |console| console.outcomes),
-        official,
     }
 }
 
@@ -1060,20 +1035,9 @@ fn ordered(queue: &TaskQueue) -> Vec<Entry<'_>> {
 }
 
 impl State {
-    fn queue_view(&mut self, key: &str, official: bool) -> Option<QueueView> {
-        let now = Instant::now();
+    fn queue_view(&self, key: &str) -> Option<QueueView> {
         let console = self.console.get(key)?;
-        let queue = self.queues.get_mut(key)?;
-        let stats = official.then(|| {
-            let stats = queue.statistics(now);
-            OfficialStats {
-                number_of_tasks: stats.number_of_tasks,
-                tasks_added: stats.tasks_added,
-                completed_last_min: count(stats.completed_last_min),
-                failed_tasks: stats.failed_tasks,
-                running_tasks: count(stats.running_tasks),
-            }
-        });
+        let queue = self.queues.get(key)?;
         Some(QueueView {
             key: key.to_owned(),
             parts: console.source.parts.clone(),
@@ -1090,7 +1054,7 @@ impl State {
             config: config_view(&queue.config),
             paused: console.controls.paused,
             hold_scheduled: console.controls.hold_scheduled,
-            counters: counters(key, queue, Some(console), stats),
+            counters: counters(key, queue, Some(console)),
             history_capacity: count(HISTORY_CAPACITY),
             history_dropped: console.dropped,
         })
@@ -1170,7 +1134,7 @@ impl TasksRuntime {
     /// registration order, with the refused registrations and requests.
     #[must_use]
     pub fn queues_view(&self, project: Option<&str>) -> QueueList {
-        let mut state = self.lock_state();
+        let state = self.lock_state();
         let keys: Vec<String> = state
             .queues
             .keys()
@@ -1186,7 +1150,7 @@ impl TasksRuntime {
             .collect();
         let queues = keys
             .iter()
-            .filter_map(|key| state.queue_view(key, true))
+            .filter_map(|key| state.queue_view(key))
             .collect();
         let mut projects: Vec<String> = state
             .console
@@ -1214,10 +1178,10 @@ impl TasksRuntime {
         }
     }
 
-    /// One queue with its figures and the official statistics.
+    /// One queue with its figures.
     #[must_use]
     pub fn queue_view(&self, key: &str) -> Option<QueueView> {
-        self.lock_state().queue_view(key, true)
+        self.lock_state().queue_view(key)
     }
 
     /// A page of the live task list: slotted tasks first, then pending and
@@ -1490,7 +1454,7 @@ impl TasksRuntime {
                     .into_iter()
                     .filter_map(|key| {
                         let queue = state.queues.get(key)?;
-                        Some(counters(key, queue, state.console.get(key), None))
+                        Some(counters(key, queue, state.console.get(key)))
                     })
                     .collect();
             }

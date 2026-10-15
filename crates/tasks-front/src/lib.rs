@@ -66,10 +66,9 @@ pub use queue::{
 };
 pub use queue::{RowKey, TaskChange};
 pub use runtime::{
-    AttemptSink, ConsoleTask, ControlError, EnqueueError, EnqueuedTask, FinishedTask, LOG_FAILED,
-    LOG_TASKS, LogSink, QueueFunction, QueueOrigin, QueueParts, QueueSource, Refused,
-    RejectedQueue, RemoveError, Replaced, StampedWindow, TasksLogLine, TasksResetCount,
-    TasksRuntime,
+    ConsoleTask, ControlError, EnqueueError, EnqueuedTask, FinishedTask, LOG_FAILED, LOG_TASKS,
+    LogSink, QueueFunction, QueueOrigin, QueueParts, QueueSource, Refused, RejectedQueue,
+    RemoveError, Replaced, StampedWindow, TasksLogLine, TasksResetCount, TasksRuntime,
 };
 
 #[cfg(test)]

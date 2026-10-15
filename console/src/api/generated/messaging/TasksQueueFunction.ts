@@ -8,4 +8,9 @@ export type TasksQueueFunction = { functionId: string, name: string, region: str
 /**
  * `functions.function`.
  */
-functionRef: EntityRef, };
+functionRef: EntityRef, 
+/**
+ * `functions.invocations` of this function: every attempt of the
+ * queue's tasks is one of them.
+ */
+invocationsRef: EntityRef, };

@@ -13,6 +13,7 @@ pub mod overview_input;
 mod release;
 pub mod replay;
 mod requests;
+pub mod window;
 pub use console_input::{Audience, ConsoleSink, LogInput, LogLevel, kinds};
 pub use entity::EntityRef;
 pub use logging::LoggingRuntime;

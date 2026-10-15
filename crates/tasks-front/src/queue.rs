@@ -161,19 +161,19 @@ impl AttemptLog {
         }
     }
 
-    /// Attaches a response snippet to attempt `attempt`, returning it.
-    pub(crate) fn attach_response(
-        &mut self,
-        attempt: u32,
-        response: String,
-    ) -> Option<AttemptRecord> {
-        let record = self
+    /// Attaches a response snippet to attempt `attempt`; `false` when the
+    /// log does not keep that attempt.
+    pub(crate) fn attach_response(&mut self, attempt: u32, response: String) -> bool {
+        let Some(record) = self
             .first
             .iter_mut()
             .chain(self.latest.iter_mut())
-            .find(|record| record.attempt == attempt)?;
+            .find(|record| record.attempt == attempt)
+        else {
+            return false;
+        };
         record.response = Some(response);
-        Some(record.clone())
+        true
     }
 
     /// The kept attempts, oldest first.
@@ -927,7 +927,7 @@ impl TaskQueue {
         dispatch_id: u64,
         attempt: u32,
         response: String,
-    ) -> Result<AttemptRecord, String> {
+    ) -> Result<(), String> {
         match self
             .slots
             .iter_mut()
@@ -935,10 +935,11 @@ impl TaskQueue {
             .find(|dispatch| dispatch.id == dispatch_id)
         {
             Some(dispatch) => {
-                let attached = dispatch
-                    .attempts
-                    .attach_response(attempt, response.clone())
-                    .ok_or(response);
+                let attached = if dispatch.attempts.attach_response(attempt, response.clone()) {
+                    Ok(())
+                } else {
+                    Err(response)
+                };
                 self.changes.push(TaskChange::Detail(dispatch.task.id));
                 attached
             }
