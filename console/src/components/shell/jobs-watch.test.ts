@@ -4,7 +4,9 @@ import {
   UNSTOPPABLE_JOBS,
   jobEndToast,
   jobFailure,
+  jobMark,
   jobProgress,
+  jobToast,
   savedTo,
   shortPath,
 } from './jobs-watch'
@@ -104,5 +106,34 @@ describe('how a job’s ending is said', () => {
     expect(shortPath('/a/a-folder-name-so-long-that-it-fills-the-room-alone')).toBe(
       '…/a-folder-name-so-long-that-it-fills-the-room-alone',
     )
+  })
+})
+
+describe('when a suite job is toasted', () => {
+  it('follows a running job in a toast, with Cancel, on every page but the Overview', () => {
+    const running = job({})
+    expect(jobToast(running, undefined, false)).toMatchObject({
+      key: 'job:j1',
+      title: 'Reset Firestore',
+      description: '1,204 of 5,000',
+      tone: 'info',
+      action: { label: 'Cancel' },
+    })
+    // The Overview's Reset card follows it there: shown once.
+    expect(jobToast(running, undefined, true)).toBeUndefined()
+    // Nothing moved since the last toast.
+    expect(jobToast(running, jobMark(running), false)).toBeUndefined()
+    // An export cannot be stopped.
+    expect(jobToast(job({ kind: 'suite.export' }), undefined, false)?.action).toBeUndefined()
+  })
+
+  it('says how it ended everywhere, but not a job that was over before this tab saw it', () => {
+    const running = job({})
+    const done = job({ state: 'done', done: 5000 })
+    expect(jobToast(done, jobMark(running), true)).toMatchObject({ title: 'Reset Firestore: done' })
+    expect(jobToast(done, jobMark(running), false)).toMatchObject({
+      title: 'Reset Firestore: done',
+    })
+    expect(jobToast(done, undefined, false)).toBeUndefined()
   })
 })

@@ -4,8 +4,12 @@
 // `GET /jobs?section=suite` and follows the `jobs` topic. One toast per
 // job, replaced in place as it moves, under the one toast policy. A job
 // that had already finished before this tab saw it is not announced: that
-// news is old.
+// news is old. A job's progress is shown once: on the Overview its Data
+// card follows it (with Cancel), so there it is not toasted while it runs;
+// on every other page the toast is where it is followed. How it ended is
+// toasted everywhere.
 
+import { useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
 import type { ExportResult } from '@/api/generated/ExportResult'
 import { copyToClipboard } from '@/lib/copy'
@@ -90,32 +94,47 @@ export function jobEndToast(job: Job): ToastOptions {
   return { key, title: `${job.title}: failed`, description: jobFailure(job), tone: 'danger' }
 }
 
+/** What a job's state is, as far as its toast goes: its state and progress. */
+export function jobMark(job: Job): string {
+  return `${job.state}:${job.done}:${job.skipped}:${job.errorCount}`
+}
+
+/**
+ * The toast for a job that moved, if any: `before` is the mark this tab
+ * last saw (`undefined` for a job it had not seen). A job already over when
+ * first seen is old news; a running one is not toasted on the Overview,
+ * whose Data cards follow it.
+ */
+export function jobToast(
+  job: Job,
+  before: string | undefined,
+  onOverview: boolean,
+): ToastOptions | undefined {
+  if (before === jobMark(job)) return undefined
+  if (job.state !== 'running') return before === undefined ? undefined : jobEndToast(job)
+  if (onOverview) return undefined
+  return {
+    key: `job:${job.id}`,
+    title: job.title,
+    description: jobProgress(job),
+    tone: 'info',
+    action: UNSTOPPABLE_JOBS.has(job.kind)
+      ? undefined
+      : { label: 'Cancel', run: () => void cancelJob(job.id) },
+  }
+}
+
 export function JobsWatch() {
   const jobs = useJobs('suite')
-  // What this tab has said about each job: its state and progress.
-  const said = useRef(new Map<string, string>())
+  const onOverview = useRouterState({ select: (state) => state.location.pathname === '/' })
+  // What this tab has seen of each job: its state and progress.
+  const seen = useRef(new Map<string, string>())
   useEffect(() => {
     for (const job of jobs) {
-      const mark = `${job.state}:${job.done}:${job.skipped}:${job.errorCount}`
-      const before = said.current.get(job.id)
-      if (before === mark) continue
-      said.current.set(job.id, mark)
-      if (before === undefined && job.state !== 'running') continue
-      const key = `job:${job.id}`
-      if (job.state === 'running') {
-        toast({
-          key,
-          title: job.title,
-          description: jobProgress(job),
-          tone: 'info',
-          action: UNSTOPPABLE_JOBS.has(job.kind)
-            ? undefined
-            : { label: 'Cancel', run: () => void cancelJob(job.id) },
-        })
-      } else {
-        toast(jobEndToast(job))
-      }
+      const said = jobToast(job, seen.current.get(job.id), onOverview)
+      seen.current.set(job.id, jobMark(job))
+      if (said) toast(said)
     }
-  }, [jobs])
+  }, [jobs, onOverview])
   return null
 }

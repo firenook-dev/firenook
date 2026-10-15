@@ -47,19 +47,27 @@ async function documentsOf(engine: ObservedEngine): Promise<number | null | unde
     ?.summary?.figures.find((figure) => figure.label === 'Documents')?.value
 }
 
-/** Opens Firestore's reset from the Overview's Reset card and presses Reset. */
+/**
+ * Opens Firestore's reset from the Overview's Reset card and presses Reset;
+ * the dialog hands the reset to the card once the engine has started it.
+ */
 async function resetFirestore(page: Page, options: { runTriggers?: boolean } = {}) {
   await page.getByTestId('overview-reset-firestore-open').click()
   const dialog = page.getByTestId('reset-dialog')
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('Every document in every database is deleted')
-  if (options.runTriggers)
+  if (options.runTriggers) {
     await dialog
       .getByRole('checkbox', { name: 'Run Functions triggers for deleted documents' })
       .check()
+    await expect(dialog).toContainText('Functions triggers run for each deleted document.')
+  }
   await page.getByTestId('reset-dialog-confirm').click()
-  return dialog
+  await expect(dialog).toHaveCount(0)
 }
+
+/** The job line on the Overview's Reset card. */
+const resetLine = (page: Page) => page.getByTestId('overview-reset').getByTestId('overview-job')
 
 /** Firestore reads a page makes: queries and collection listings. */
 function queriesOf(page: Page) {
@@ -193,10 +201,12 @@ dedicated.describe('the Overview with engines of their own', () => {
 
         const resetter = await context.newPage()
         await resetter.goto(`${engine.origin}/console`)
-        const dialog = await resetFirestore(resetter)
+        await resetFirestore(resetter)
         if (round === 'watched') {
-          // The tab that pressed Reset shows how far it got.
-          await expect(dialog.getByTestId('reset-dialog-progress')).toBeVisible()
+          // The tab that pressed Reset follows it on the Reset card, once:
+          // not again in a toast.
+          await expect(resetLine(resetter)).toContainText('Clear Firestore:')
+          await expect(resetter.getByText('Clear Firestore', { exact: true })).toHaveCount(0)
         } else {
           await resetter.close()
         }
@@ -226,9 +236,6 @@ dedicated.describe('the Overview with engines of their own', () => {
       const before = (await facetsOf(engine, { q: CART_TRIGGER })).matched
       await page.goto(`${engine.origin}/console`)
       await resetFirestore(page, { runTriggers: true })
-      await expect(page.getByTestId('reset-dialog')).toContainText(
-        'Functions triggers run for each deleted document.',
-      )
       // One delete trigger per seeded cart, logged as each runs.
       await expect
         .poll(async () => (await facetsOf(engine, { q: CART_TRIGGER })).matched - before, {
@@ -266,8 +273,8 @@ dedicated.describe('the Overview with engines of their own', () => {
       await page.getByTestId('reset-dialog-type').fill(engine.project)
       await expect(confirm).toBeEnabled()
       await confirm.click()
+      await expect(page.getByTestId('reset-dialog')).toHaveCount(0)
       await expect(page.getByText(/^Clear .+: done$/)).toBeVisible({ timeout: 60_000 })
-      await page.keyboard.press('Escape')
       // Every section it named holds nothing now, on its row and its card.
       for (const id of sections) {
         await expect(page.getByTestId(`overview-reset-${id}`)).toContainText('Empty', {
@@ -399,7 +406,7 @@ dedicated.describe('the Overview with engines of their own', () => {
     await seedBulk(engine, 50_000)
     await page.goto(`${engine.origin}/console`)
     await resetFirestore(page)
-    await expect(page.getByTestId('reset-dialog-progress')).toBeVisible()
+    await expect(resetLine(page)).toBeVisible()
     // A snapshot asked for meanwhile is refused, and says by what.
     const response = await ownerFetch(engine, '/overview/snapshots', {
       method: 'POST',
@@ -429,8 +436,11 @@ dedicated.describe('the Overview with engines of their own', () => {
       await starter.getByTestId('overview-snapshot-download').click()
       await expect(starter.getByTestId('overview-job')).toContainText('Preparing a snapshot…')
       await late.goto(`${engine.origin}/console`)
-      // The late tab re-attaches: the job's progress, then its result.
-      await expect(late.getByText('Prepare a snapshot').first()).toBeVisible({ timeout: 10_000 })
+      // The late tab re-attaches: the job's progress on its Snapshot card,
+      // then its result.
+      await expect(late.getByTestId('overview-job')).toContainText('Preparing a snapshot…', {
+        timeout: 10_000,
+      })
       await expect(late.getByText('Prepare a snapshot: done')).toBeVisible({ timeout: 120_000 })
       await expect(late.getByTestId('overview-snapshot-ready')).toContainText('Snapshot ready')
       await expect(late.getByTestId('overview-snapshot-ready-download')).toBeVisible()
