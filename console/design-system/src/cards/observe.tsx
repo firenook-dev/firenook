@@ -763,7 +763,7 @@ const OVERVIEW: OverviewState = {
     },
   ],
   hour: HISTOGRAM.buckets,
-  logs: { entries: 4_282, errors: 2, warnings: 35, problems: 10 },
+  problemsLogged: 10,
 }
 
 const RESET_JOB: Job = {

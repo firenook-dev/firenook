@@ -1,8 +1,9 @@
 // The Overview's server data: the engine's `overview` state (notices,
-// recent problems, the last hour, the log's totals), how the engine was
-// started, and the data jobs the page starts (a snapshot to download or to
-// save on the engine's machine, a reset). Section figures are not here:
-// they are each section's `SectionStatus.summary`, on the `shell` topic.
+// recent problems and how many were logged, the last hour), how the engine
+// was started, and the data jobs the page starts (a snapshot to download
+// or to save on the engine's machine, a reset). Section figures are not
+// here: they are each section's `SectionStatus.summary`, on the `shell`
+// topic.
 //
 // Nothing polls. The state is replaced by the `overview` topic while the
 // page is mounted; the engine details are fixed for an engine run; a job

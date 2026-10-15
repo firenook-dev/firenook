@@ -81,7 +81,7 @@ const state = (problems = 0): OverviewState => ({
   notices: [],
   problems: [],
   hour: [],
-  logs: { entries: 10, errors: problems, warnings: 0, problems },
+  problemsLogged: problems,
 })
 
 /** A channel that records subscriptions and lets a test speak for the engine. */

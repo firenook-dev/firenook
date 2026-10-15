@@ -47,7 +47,7 @@ const state = (overrides: Partial<OverviewState> = {}): OverviewState => ({
   notices: [],
   problems: [],
   hour: Array.from({ length: 60 }, () => ({ debug: 0, info: 2, warn: 0, error: 0 })),
-  logs: { entries: 120, errors: 0, warnings: 0, problems: 0 },
+  problemsLogged: 0,
   ...overrides,
 })
 
@@ -229,7 +229,7 @@ describe('recent problems', () => {
             state={answered(
               state({
                 generatedAt: '2026-10-12T04:06:58.900Z',
-                logs: { entries: 120, errors: 1, warnings: 0, problems: 1 },
+                problemsLogged: 1,
                 problems: [
                   {
                     cursor: 'e1.9',
@@ -262,7 +262,7 @@ describe('recent problems', () => {
           live="live"
           state={answered(
             state({
-              logs: { entries: 120, errors: 1, warnings: 1, problems: 2 },
+              problemsLogged: 2,
               problems: [
                 {
                   cursor: 'e1.9',

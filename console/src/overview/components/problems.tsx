@@ -93,9 +93,9 @@ export function RecentProblems({
             <span className="text-[12px] text-kumo-subtle">last hour</span>
           </div>
         )}
-        {data && data.logs.problems > 0 && (
+        {data && data.problemsLogged > 0 && (
           <span className="text-[12px] text-kumo-subtle" data-testid="overview-problems-total">
-            {formatCount(data.logs.problems, PROBLEM)} since the engine started
+            {formatCount(data.problemsLogged, PROBLEM)} since the engine started
           </span>
         )}
         <span className="ml-auto flex items-center gap-3">
