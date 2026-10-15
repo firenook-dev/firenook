@@ -1,7 +1,6 @@
 // Cloud Tasks' registry entry: one page (queues in the panel, the queue on
 // the right with its Tasks, Attempts, History and Configuration), its
-// badge, its ⌘K action, and where a queue or a task opens. Built: its
-// journeys (e2e/tasks.spec.ts) pass against the real engine.
+// badge, its ⌘K action, and where a queue or a task opens.
 
 import { PlusIcon, QueueIcon } from '@phosphor-icons/react'
 import { queueSearch, taskSearch } from '@/messaging/links'

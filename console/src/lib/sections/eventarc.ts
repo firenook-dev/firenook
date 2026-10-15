@@ -6,8 +6,6 @@
 // Firebase Alerts would add a third page, `/eventarc/alerts`, only together
 // with the engine delivering alerts (compute spec §3.5); this engine does
 // not yet, so there is no page, route or nav entry for it.
-//
-// Built: its journeys (`e2e/eventarc.spec.ts`) pass against a real engine.
 
 import { PaperPlaneTiltIcon, ShareNetworkIcon } from '@phosphor-icons/react'
 import type { ConsoleSection } from '../services'

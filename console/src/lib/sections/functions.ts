@@ -3,10 +3,6 @@
 // invocation or a codebase opens when another section's payload points at
 // one (an `EntityRef` the engine built) or ⌘K's engine search finds one.
 // Compute exports no link builder: every link here goes through `routes`.
-//
-// Built: its journeys (`e2e/functions*.spec.ts`) pass against a real engine,
-// so the nav opens its pages, a link into Functions opens there, and ⌘K
-// offers what it holds.
 
 import { LightningIcon, ListIcon } from '@phosphor-icons/react'
 import type { ConsoleSection } from '../services'
