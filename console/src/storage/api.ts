@@ -75,8 +75,6 @@ import { RulesCompileError } from '@/rules/text'
 
 /** Every Storage route is under this. */
 export const STORAGE_API = `${API_BASE}/storage`
-/** The Storage emulator's own API, on the console's origin (the protocol an app speaks). */
-export const STORAGE_NATIVE = `${STORAGE_API}/native`
 
 /** The header every console request carries; the engine records the request as the console's. */
 const CONSOLE_HEADER = 'x-firenook-console'
