@@ -38,9 +38,7 @@ import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
 import type { StorageBulkBody } from '@/api/generated/storage/StorageBulkBody'
 import type { StorageBulkPreview } from '@/api/generated/storage/StorageBulkPreview'
 import type { StorageCreateFolderBody } from '@/api/generated/storage/StorageCreateFolderBody'
-import type { StorageDecisionBatch } from '@/api/generated/storage/StorageDecisionBatch'
 import type { StorageDecisionDetail } from '@/api/generated/storage/StorageDecisionDetail'
-import type { StorageDecisionsParams } from '@/api/generated/storage/StorageDecisionsParams'
 import type { StorageDeleteObjectBody } from '@/api/generated/storage/StorageDeleteObjectBody'
 import type { StorageDiscardSessionBody } from '@/api/generated/storage/StorageDiscardSessionBody'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
@@ -656,19 +654,6 @@ export function evaluateRules(
   return call('POST', '/rules/evaluate', body, { signal })
 }
 
-/** The retained decisions the topic's parameters match: the first paint before the topic replays. */
-export function getDecisions(
-  params: StorageDecisionsParams,
-  signal?: AbortSignal,
-): Promise<StorageDecisionBatch> {
-  return get(
-    '/rules/decisions',
-    { ...params, denied: params.denied ? true : undefined },
-    { signal },
-  )
-}
-
-/** A decision, run again with every expression's value; `null` once it left the re-runnable window. */
 export async function getDecision(
   id: string,
   signal?: AbortSignal,

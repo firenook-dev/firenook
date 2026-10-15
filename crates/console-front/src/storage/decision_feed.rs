@@ -33,7 +33,7 @@ use super::rules::{StorageDecision, allow_trace, method_of};
 use crate::api_error::ApiError;
 use crate::live::replay::{ReplayOptions, replay_topic};
 use crate::live::{LiveTopic, TopicStream, topic_params};
-use crate::rules_eval::{RulesMethod, RulesOutcome};
+use crate::rules_eval::RulesMethod;
 use crate::sse::Shutdown;
 
 /// The decision summaries: 10,000, 8 MiB.
@@ -66,10 +66,14 @@ pub(crate) struct StorageDecisionsParams {
     pub method: Option<RulesMethod>,
 }
 
-/// `storage.decisions` `decisions`, and `GET /storage/rules/decisions`.
+/// `storage.decisions` `decisions`.
 #[derive(Clone, Debug, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "storage/")]
+#[allow(
+    dead_code,
+    reason = "the topic's event, written by its shaper from the ring's JSON; the type is the console's"
+)]
 pub(crate) struct StorageDecisionBatch {
     pub items: Vec<StorageDecision>,
     pub window: StorageDecisionWindow,
@@ -96,7 +100,6 @@ pub(crate) struct StorageDecisionWindow {
 /// the first paint.
 #[derive(Clone, Debug)]
 pub(crate) struct DecisionMeta {
-    decision: Arc<StorageDecision>,
     bucket: Arc<str>,
     path: Arc<str>,
     uid: Option<Arc<str>>,
@@ -276,7 +279,6 @@ impl DecisionFeed {
         let path: Arc<str> = Arc::from(record.name.as_str());
         let denied = record.outcome != DecisionOutcome::Allow;
         let meta = DecisionMeta {
-            decision: Arc::clone(&decision),
             bucket: Arc::clone(&bucket),
             path: Arc::clone(&path),
             uid: record.uid.as_deref().map(Arc::from),
@@ -286,8 +288,8 @@ impl DecisionFeed {
         let json: Arc<str> =
             Arc::from(serde_json::to_string(decision.as_ref()).unwrap_or_default());
         let mut index = lock(&self.inner.index);
-        // The summary lives twice, as JSON and as the value the first paint
-        // reads: both count against the ring's limits.
+        // The summary lives twice, as JSON and as the value the index keeps
+        // for one file's decisions: both count against the ring's limits.
         let extra = json.len();
         let cursor = self.inner.ring.push_weighted(meta, json, extra);
         let key = (bucket, path);
@@ -410,37 +412,6 @@ impl DecisionFeed {
             since: index.order.front().map(|(_, _, at)| rfc3339(*at)),
             re_runnable: u32::try_from(re_runnable).unwrap_or(u32::MAX),
             omitted: self.inner.omitted.load(Ordering::Relaxed),
-        }
-    }
-
-    /// The decisions the ring holds that pass `params`, oldest first.
-    pub(crate) fn snapshot(&self, params: &StorageDecisionsParams) -> StorageDecisionBatch {
-        let items = match (&params.bucket, &params.path) {
-            // One object: from the index.
-            (Some(bucket), Some(path)) if !path.is_empty() && !path.ends_with('/') => self
-                .of(bucket, path)
-                .into_iter()
-                .filter(|decision| {
-                    params
-                        .uid
-                        .as_deref()
-                        .is_none_or(|uid| decision.uid.as_deref() == Some(uid))
-                        && (!params.denied || decision.outcome != RulesOutcome::Allow)
-                        && params.method.is_none_or(|method| method == decision.method)
-                })
-                .collect(),
-            _ => self
-                .inner
-                .ring
-                .snapshot()
-                .into_iter()
-                .filter(|entry| params.keeps(&entry.meta))
-                .map(|entry| entry.meta.decision.as_ref().clone())
-                .collect(),
-        };
-        StorageDecisionBatch {
-            items,
-            window: self.window(),
         }
     }
 

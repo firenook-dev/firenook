@@ -1056,14 +1056,14 @@ async fn decisions_replay_filter_and_log_denials() {
     );
     assert_eq!(items.last().expect("one")["path"], "users/bob/no.txt");
     assert!(data["window"]["retained"].as_u64().expect("retained") >= 2);
-    // The exact name, from the index, and the first paint route.
-    let (status, exact) = harness
-        .get(
-            &format!("/rules/decisions?bucket={BUCKET}&path=users/ada/ok.txt"),
+    // One exact name, which no other file's decisions pass.
+    let mut exact = decisions
+        .open(
+            &json!({ "bucket": BUCKET, "path": "users/ada/ok.txt" }),
             None,
         )
-        .await;
-    assert_eq!(status, StatusCode::OK);
+        .expect("open");
+    let (_, _, exact) = event(&next(&mut exact).await);
     assert_eq!(exact["items"].as_array().expect("items").len(), 1);
     assert_eq!(exact["items"][0]["method"], "create");
     assert!(

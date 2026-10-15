@@ -26,7 +26,6 @@ use time::format_description::well_known::Rfc3339;
 use ts_rs::TS;
 
 use super::StorageRoutes;
-use super::decision_feed::{StorageDecisionBatch, StorageDecisionsParams};
 use super::files::StorageRulesMode;
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
@@ -997,18 +996,6 @@ pub(crate) async fn evaluate(
 fn diagnostics_off() -> ApiError {
     ApiError::unavailable("Storage rules decisions are not recorded in this engine.")
         .with_fix("Start the engine without --no-diagnostics to record them.")
-}
-
-/// `GET /storage/rules/decisions`: the decisions the feed holds that pass
-/// the topic's params, the first paint before the topic replays.
-pub(crate) async fn decisions(
-    State(routes): State<StorageRoutes>,
-    Query(params): Query<StorageDecisionsParams>,
-) -> Result<Json<StorageDecisionBatch>, ApiError> {
-    let feed = routes.feed.clone().ok_or_else(diagnostics_off)?;
-    blocking("the decisions task", move || Ok(feed.snapshot(&params)))
-        .await
-        .map(Json)
 }
 
 /// `GET /storage/rules/decisions/{id}`: one decision re-run with every

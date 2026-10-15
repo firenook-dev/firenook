@@ -16,7 +16,6 @@ import type { BatchGetRequest } from '@/api/generated/BatchGetRequest'
 import type { BatchGetResponse } from '@/api/generated/BatchGetResponse'
 import type { RulesMethod } from '@/api/generated/RulesMethod'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
-import type { StorageDecisionsParams } from '@/api/generated/storage/StorageDecisionsParams'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import type { StorageListPage } from '@/api/generated/storage/StorageListPage'
 import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
@@ -40,7 +39,6 @@ import {
   getArchive,
   getBuckets,
   getDecision,
-  getDecisions,
   getEventPayloads,
   getFolder,
   getImpact,
@@ -133,8 +131,6 @@ export const storageKeys = {
     [ST, project, scope, 'rules-impact', source] as const,
   rulesDecision: (project: string, scope: string, id: string) =>
     [ST, project, scope, 'rules-decision', id] as const,
-  rulesDecisions: (project: string, params: StorageDecisionsParams) =>
-    [ST, project, 'rules-decisions', params] as const,
 } satisfies Record<string, (...args: never[]) => QueryKey>
 
 /** The rules scope of a bucket: the bucket itself in per-bucket mode, `'*'` otherwise. */
@@ -408,15 +404,6 @@ export const storageDecisionQuery = (project: string, scope: string, id: string)
   queryOptions({
     queryKey: storageKeys.rulesDecision(project, scope, id),
     queryFn: ({ signal }) => getDecision(id, signal),
-    staleTime: FOREVER,
-    retry: false,
-  })
-
-/** The decisions the engine holds for the topic's parameters: the panel's first paint. */
-export const storageDecisionsQuery = (project: string, params: StorageDecisionsParams) =>
-  queryOptions({
-    queryKey: storageKeys.rulesDecisions(project, params),
-    queryFn: ({ signal }) => getDecisions(params, signal),
     staleTime: FOREVER,
     retry: false,
   })
