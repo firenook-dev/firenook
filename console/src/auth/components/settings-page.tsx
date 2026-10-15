@@ -1,7 +1,8 @@
 // Authentication's settings, as one document: how sign-in behaves (the
 // project's one-account-per-email and email enumeration protection, or a
 // tenant's sign-in methods and multi-factor state), the tenants, the
-// blocking functions and triggers, the section's data, how to connect an
+// blocking functions and triggers, where the section's data goes in and
+// out (the Users page's dialogs, the Overview's reset), how to connect an
 // app, and the production settings the emulator does not apply — stated as
 // facts, never as controls. Every change goes through the official API as
 // the Admin SDK makes it (`x-firenook-console: write`), and `auth.config`
@@ -10,7 +11,7 @@
 import { Button, LayerCard, Select, Switch, Text } from '@cloudflare/kumo'
 import { BuildingsIcon, EnvelopeSimpleIcon, PlusIcon, ShieldCheckIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import { DangerConfirm } from '@/components/console/danger-confirm'
@@ -36,7 +37,6 @@ import {
   updateTenant,
 } from '../tenants'
 import { ConnectCard } from './connect-card'
-import { DataCard } from './data-card'
 import { HooksCard } from './hooks-card'
 import { usePagePalette } from './page-palette'
 import { TenantDialog, type TenantDialogMode } from './tenant-dialog'
@@ -230,8 +230,11 @@ export function SettingsPage() {
               tenant={scope.kind === 'tenant' ? scope.tenant : undefined}
             />
           </Card>
-          <Card id="data" title="Data">
-            <DataCard project={project} scope={scope} />
+          <Card id="data" title="Data" plain>
+            <DataLinks
+              tenant={scope.kind === 'tenant' ? scope.tenant : undefined}
+              project={search.project}
+            />
           </Card>
           <Card id="connect" title="Connect your app">
             <ConnectCard />
@@ -273,6 +276,69 @@ export function SettingsPage() {
         testId="tenant-delete-confirm"
       />
     </SectionPage>
+  )
+}
+
+/** Where the Overview's Data part starts: its reset rows, Authentication's among them. */
+export const OVERVIEW_DATA = 'overview-data-title'
+
+/** A link in the page's sentences: the console's link colour, underlined on hover. */
+const TEXT_LINK =
+  'text-kumo-link underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none'
+
+/**
+ * Where the section's data goes in and out: the Users page's Export, Import
+ * and Sample users dialogs (for the tenant shown), and the Overview's
+ * reset, which deletes every user of every tenant as one suite job.
+ */
+function DataLinks({
+  tenant,
+  project,
+}: {
+  tenant: string | undefined
+  /** `?project=`, when the page shows another project. */
+  project: string | undefined
+}) {
+  const users = (open: { dialog: 'export' } | { new: 'import' | 'sample' }) => ({
+    ...open,
+    ...(tenant ? { tenant } : {}),
+    ...(project ? { project } : {}),
+  })
+  return (
+    <p className="m-0 text-[14px] text-kumo-subtle" data-testid="settings-data-links">
+      Users go in and out on the Users page:{' '}
+      <Link
+        to="/auth"
+        search={users({ dialog: 'export' }) as never}
+        className={TEXT_LINK}
+        data-testid="settings-export"
+      >
+        Export users
+      </Link>
+      ,{' '}
+      <Link
+        to="/auth"
+        search={users({ new: 'import' }) as never}
+        className={TEXT_LINK}
+        data-testid="settings-import"
+      >
+        Import users
+      </Link>{' '}
+      and{' '}
+      <Link
+        to="/auth"
+        search={users({ new: 'sample' }) as never}
+        className={TEXT_LINK}
+        data-testid="settings-sample"
+      >
+        Add sample users
+      </Link>
+      . To delete every user of every tenant, reset Authentication on the{' '}
+      <Link to="/" hash={OVERVIEW_DATA} className={TEXT_LINK} data-testid="settings-reset">
+        Overview ↗
+      </Link>
+      .
+    </p>
   )
 }
 

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { connectSnippet } from '@/lib/connect'
 import { testStatus } from '@/test/status'
 import { CONNECT_TABS, connectDialects } from './components/connect-card'
-import { retentionText } from './components/data-card'
 import { blockingFunctionId, forwarded } from './components/hooks-card'
 
 /** An engine on this machine running Auth on 39099. */
@@ -47,16 +46,5 @@ describe('the other Settings cards', () => {
     expect(
       forwarded({ forwardIdToken: false, forwardAccessToken: false, forwardRefreshToken: false }),
     ).toBeUndefined()
-  })
-
-  it('say what the engine keeps', () => {
-    expect(
-      retentionText({ messageCapacity: 2_000, activityCapacity: 10_000, bodiesRetained: true }),
-    ).toBe(
-      'The Inbox keeps the newest 2,000 messages and Activity the newest 10,000 calls; request bodies are kept, in memory only (--no-diagnostics turns that off).',
-    )
-    expect(
-      retentionText({ messageCapacity: 2_000, activityCapacity: 10_000, bodiesRetained: false }),
-    ).toContain('not kept')
   })
 })
