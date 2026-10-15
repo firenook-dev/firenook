@@ -5,6 +5,7 @@ import {
   changedFields,
   draftOf,
   draftProblems,
+  fieldSuggestions,
   patchOf,
   uploadMetadataOf,
 } from './metadata-draft'
@@ -82,5 +83,17 @@ describe('the metadata draft', () => {
       contentLanguage: undefined,
       customMetadata: { ownerUid: 'u1', source: 'camera' },
     })
+  })
+
+  it('suggests one list for each field wherever metadata is typed', () => {
+    expect(fieldSuggestions('cacheControl')).toContain('no-store')
+    expect(fieldSuggestions('contentDisposition')).toEqual(['inline', 'attachment'])
+    expect(fieldSuggestions('contentEncoding')).toEqual(['gzip', 'br', 'deflate', 'identity'])
+    expect(fieldSuggestions('contentLanguage')).toEqual([])
+    // Without a file, the common types alone; with one, its own first.
+    expect(fieldSuggestions('contentType')[0]).toBe('image/png')
+    expect(
+      fieldSuggestions('contentType', { name: 'notes.csv', sniffed: null }).slice(0, 2),
+    ).toEqual(['text/csv', 'image/png'])
   })
 })

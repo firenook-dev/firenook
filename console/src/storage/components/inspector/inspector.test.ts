@@ -4,7 +4,7 @@ import type { StorageObjectChange } from '@/api/generated/storage/StorageObjectC
 import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectDetail'
 import { activityEntries, deliveryText } from './activity-tab'
 import { resendSentence } from './event-payloads'
-import { fieldSuggestions } from './metadata-tab'
+import { fieldSuggestions } from '../../metadata-draft'
 import { mediaDuration } from './preview-media'
 import { editBlocked } from './preview-text'
 
