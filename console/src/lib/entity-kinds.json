@@ -44,6 +44,10 @@
     "key": "40406e-694"
   },
   {
+    "kind": "functions.invocations",
+    "key": "function:us-central1-onOrderCreated"
+  },
+  {
     "kind": "functions.codebase",
     "key": "default"
   },

@@ -149,6 +149,13 @@ impl EntityRef {
         Self::new("functions.invocation", id.to_owned())
     }
 
+    /// `functions.invocations`: `<an Invocations filter>`, the invocations it
+    /// keeps (`function:us-central1-processOrder`, every run of a function).
+    #[must_use]
+    pub fn invocations(filter: &str) -> Self {
+        Self::new("functions.invocations", filter.to_owned())
+    }
+
     /// `functions.codebase`: `<codebase>`.
     #[must_use]
     pub fn codebase(name: &str) -> Self {
@@ -304,6 +311,11 @@ mod tests {
             ),
             (EntityRef::invocation("i_1"), "functions.invocation", "i_1"),
             (
+                EntityRef::invocations("function:us-central1-hello"),
+                "functions.invocations",
+                "function:us-central1-hello",
+            ),
+            (
                 EntityRef::codebase("default"),
                 "functions.codebase",
                 "default",
@@ -426,6 +438,7 @@ mod tests {
             EntityRef::storage_decision(None, "d_204"),
             EntityRef::function("us-central1-onOrderCreated"),
             EntityRef::invocation("40406e-694"),
+            EntityRef::invocations("function:us-central1-onOrderCreated"),
             EntityRef::codebase("default"),
             EntityRef::extension_instance("greeter"),
             EntityRef::eventarc_event("40406e-12"),
