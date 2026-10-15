@@ -139,9 +139,12 @@ export function FilesWorkbench() {
     () => loadRecents(recentsKey(files.project, files.bucket)),
     [loadRecents, files.project, files.bucket],
   )
-  useEffect(() => recordRecent(files.prefix, 'folder'), [recordRecent, files.prefix])
+  useEffect(
+    () => recordRecent({ path: files.prefix, kind: 'folder' }),
+    [recordRecent, files.prefix],
+  )
   useEffect(() => {
-    if (files.object) recordRecent(files.object, 'file')
+    if (files.object) recordRecent({ path: files.object, kind: 'file' })
   }, [recordRecent, files.object])
 
   const access = useAccess(files.project, files.bucket, files.viewAs, listing.pages)

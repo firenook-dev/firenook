@@ -91,10 +91,12 @@ function WorkbenchBody() {
     [loadRecents, workbench.project, workbench.database],
   )
   useEffect(() => {
-    if (workbench.collectionPath) recordRecent(workbench.collectionPath, 'collection')
+    if (workbench.collectionPath)
+      recordRecent({ path: workbench.collectionPath, kind: 'collection' })
   }, [recordRecent, workbench.collectionPath])
   useEffect(() => {
-    if (workbench.selectedDocument) recordRecent(workbench.selectedDocument, 'document')
+    if (workbench.selectedDocument)
+      recordRecent({ path: workbench.selectedDocument, kind: 'document' })
   }, [recordRecent, workbench.selectedDocument])
 
   // The page's keys, through the console's one registry: they stand aside
