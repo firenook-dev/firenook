@@ -6,12 +6,12 @@
 import { Button, Tooltip } from '@cloudflare/kumo'
 import { WarningCircleIcon } from '@phosphor-icons/react'
 import { useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
-import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
+import { Suspense, useEffect, useState } from 'react'
 import type { FunctionsSnapshot } from '@/api/generated/compute/FunctionsSnapshot'
 import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
 import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
 import { EmptyState } from '@/components/console/empty-state'
+import { Inspector, InspectorTitle } from '@/components/console/inspector'
 import { PauseButton } from '@/components/console/pause-button'
 import { useSeededPending } from '@/compute/seeded-pending'
 import { RequiresNotice } from '@/components/console/requires-notice'
@@ -39,7 +39,7 @@ import {
   useInvocationFeed,
 } from './invocation-list'
 import { RestartWorkerDialog } from './restart-worker-dialog'
-import { RunSidePanel, RunTab } from './run-side-panel'
+import { RunSidePanel, preloadInspector } from './lazy-inspector'
 import { SummaryStrip } from './summary-strip'
 
 /** What the empty list says, by kind: how this function gets called. */
@@ -112,16 +112,14 @@ export function FunctionWorkbench({
   const inspectorOpen = tab !== undefined || search.invocation !== undefined
   const openTab = (next: FunctionTab) => update({ tab: next, invocation: undefined })
   const primaryTab: FunctionTab = 'run'
-  const run = (detail: FunctionDetail) => (
-    <RunTab
-      project={project}
-      detail={detail}
-      url={url}
-      prefill={search.prefill}
-      onPrefilled={() => update({ prefill: undefined }, { replace: true })}
-      onOpenInvocation={(id) => update({ invocation: id })}
-    />
-  )
+  const run = {
+    url,
+    prefill: search.prefill,
+    onPrefilled: () => update({ prefill: undefined }, { replace: true }),
+    onOpenInvocation: (id: string) => update({ invocation: id }),
+  }
+  // The inspector's code arrives with the function's detail, not on its first open.
+  useEffect(preloadInspector, [])
 
   const menu = functionMenu(summary, codebase?.codebase, {
     run: () => openTab(primaryTab),
@@ -309,14 +307,28 @@ export function FunctionWorkbench({
               onNext={older ? () => update({ invocation: older.id }, { replace: true }) : undefined}
             />
           ) : (
-            <RunSidePanel
-              project={project}
-              summary={summary}
-              tab={tab ?? primaryTab}
-              onTab={openTab}
-              onClose={() => update({ tab: undefined, invocation: undefined })}
-              run={run}
-            />
+            <Suspense
+              fallback={
+                <Inspector
+                  widthKey="functions.function"
+                  title={<InspectorTitle value={summary.id}>{summary.name}</InspectorTitle>}
+                  onClose={() => update({ tab: undefined, invocation: undefined })}
+                  closeLabel="Close the panel"
+                  testId="function-inspector-loading"
+                >
+                  <div aria-busy className="min-h-0 flex-1" />
+                </Inspector>
+              }
+            >
+              <RunSidePanel
+                project={project}
+                summary={summary}
+                tab={tab ?? primaryTab}
+                onTab={openTab}
+                onClose={() => update({ tab: undefined, invocation: undefined })}
+                run={run}
+              />
+            </Suspense>
           ))}
       </SectionBody>
       {actions.dialog}
