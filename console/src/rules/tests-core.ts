@@ -48,7 +48,6 @@ export interface TestsState<C extends TestCaseBase, R extends { outcome: RulesOu
   add: (test: Omit<C, 'id'>) => void
   update: (id: string, patch: Partial<Omit<C, 'id'>>) => void
   remove: (id: string) => void
-  replaceAll: (cases: C[]) => void
   setOutcomes: (source: string, outcomes: Record<string, TestOutcome<R>>) => void
   setRunning: (running: boolean, failure?: string) => void
 }
@@ -110,7 +109,6 @@ export function createTestsStore<C extends TestCaseBase, R extends { outcome: Ru
       update: (id, patch) =>
         save(get().cases.map((test) => (test.id === id ? Object.assign({}, test, patch) : test))),
       remove: (id) => save(get().cases.filter((test) => test.id !== id)),
-      replaceAll: (cases) => save(cases),
       setOutcomes: (source, outcomes) => set({ outcomes, ranSource: source }),
       setRunning: (running, failure) => set({ running, failure }),
     }

@@ -402,7 +402,6 @@ test('the playground tries an upload against the draft, and a saved test guards 
 
   // And it leaves as a rules-unit-testing file for CI.
   await page.getByRole('tab', { name: /Tests/ }).click()
-  await page.getByTestId('tests-share').click()
   const downloading = page.waitForEvent('download')
   await page.getByTestId('tests-download').click()
   const download = await downloading

@@ -1,12 +1,11 @@
 // What ⌘K offers on the Storage rules page: the things an edit ends in
 // (Apply, Save, Revert), History, coverage on or off, each panel beside the
-// editor, starter rules, and the saved tests as a file or as JSON.
+// editor, starter rules, and the saved tests as a rules-unit-testing file.
 
 import {
   ArrowCounterClockwiseIcon,
   ChartBarHorizontalIcon,
   ClockCounterClockwiseIcon,
-  CopyIcon,
   DownloadSimpleIcon,
   FloppyDiskIcon,
   FlaskIcon,
@@ -17,7 +16,6 @@ import {
   ScalesIcon,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo } from 'react'
-import { copyToClipboard } from '@/lib/copy'
 import {
   type PaletteGroup,
   type PaletteItem,
@@ -149,32 +147,17 @@ export function useStorageRulesPalette({
       },
     )
     if (cases.length > 0)
-      items.push(
-        {
-          id: 'storage-rules:export-tests',
-          title: 'Export tests as a rules-unit-testing file',
-          description: `${cases.length} test${cases.length === 1 ? '' : 's'}`,
-          keywords: 'download ci',
-          icon: <DownloadSimpleIcon size={16} />,
-          run: () => {
-            const exported = exportFile(cases)
-            saveText(exported.name, exported.text, 'text/typescript')
-          },
+      items.push({
+        id: 'storage-rules:export-tests',
+        title: 'Export tests as a rules-unit-testing file',
+        description: `${cases.length} test${cases.length === 1 ? '' : 's'}`,
+        keywords: 'download ci',
+        icon: <DownloadSimpleIcon size={16} />,
+        run: () => {
+          const exported = exportFile(cases)
+          saveText(exported.name, exported.text, 'text/typescript')
         },
-        {
-          id: 'storage-rules:export-json',
-          title: 'Copy tests as JSON',
-          description: `${cases.length} test${cases.length === 1 ? '' : 's'}`,
-          keywords: 'export clipboard',
-          icon: <CopyIcon size={16} />,
-          run: () => {
-            void copyToClipboard(JSON.stringify(cases, null, 2), {
-              title: `Copied ${cases.length} test${cases.length === 1 ? '' : 's'} as JSON`,
-              key: 'rules-tests',
-            })
-          },
-        },
-      )
+      })
     return (query: string): PaletteGroup[] => {
       const shown = items.filter((item) => matchesQuery(item, query))
       return shown.length > 0 ? [{ label: 'Storage rules', items: shown }] : []

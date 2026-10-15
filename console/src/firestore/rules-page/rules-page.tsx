@@ -59,7 +59,7 @@ import { describeForm } from './requests'
 import { type RulesPanel, useRulesSearch } from './rules-search'
 import { fieldsQuery } from './schema-fields'
 import { exportTests } from './tests-export'
-import { isTestCase, runTests, testsStore, useTestRunner, useTestSummary } from './tests-store'
+import { runTests, testsStore, useTestRunner, useTestSummary } from './tests-store'
 
 /** Where each version of a database's rules came from. */
 const ORIGINS: OriginLabels = {
@@ -345,7 +345,6 @@ function RulesBody({ project }: { project: string }) {
                   name: 'firestore.rules.test.ts',
                   text: exportTests(cases, { project, rulesFile: rulesFile ?? 'firestore.rules' }),
                 })}
-                isCase={isTestCase}
               />
             )}
             {panel === 'collections' && (

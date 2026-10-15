@@ -71,7 +71,6 @@ import { type StorageRulesPanel, useStorageRulesSearch } from './rules-search'
 import { exportTests } from './tests-export'
 import {
   type TestCase,
-  isTestCase,
   runTests,
   testsStore,
   useTestRunner,
@@ -478,7 +477,6 @@ function StorageRulesBody({
                   update({ panel: 'playground' })
                 }}
                 exportFile={exportFile}
-                isCase={isTestCase}
               />
             )}
             {panel === 'folders' && (

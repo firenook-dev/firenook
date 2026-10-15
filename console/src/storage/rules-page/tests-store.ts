@@ -32,8 +32,8 @@ export interface TestCase extends TestCaseBase {
 
 export type TestOutcome = KitOutcome<StorageEvaluateResult>
 
-/** Whether a stored or imported item is a case this page can run. */
-export function isTestCase(item: unknown): item is TestCase {
+/** Whether a stored item is a case this page can run. */
+function isTestCase(item: unknown): item is TestCase {
   if (!item || typeof item !== 'object') return false
   const { form, expected, name } = item as { form?: unknown; expected?: unknown; name?: unknown }
   return (

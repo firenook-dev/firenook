@@ -344,7 +344,6 @@ test('the playground tries a request against the draft, and a saved test guards 
   await expect(page.getByTestId('test-case')).toHaveAttribute('data-pass', 'true')
 
   // And it leaves as a rules-unit-testing file for CI.
-  await page.getByTestId('tests-share').click()
   const downloading = page.waitForEvent('download')
   await page.getByTestId('tests-download').click()
   const download = await downloading
