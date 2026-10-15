@@ -119,6 +119,19 @@ describe('a destructive confirmation', () => {
     )
   })
 
+  it('asks with the primary button, and no bin, for a change that destroys nothing', async () => {
+    const { ui, onConfirm } = dialog({ title: 'Disable 3 users', tone: 'neutral' })
+    await renderInConsole(ui, { status: testStatus() })
+    const confirm = screen.getByTestId('danger-confirm-confirm')
+    expect(confirm).toHaveTextContent('Disable 3 users')
+    expect(confirm.querySelector('svg')).toBeNull()
+    await userEvent.click(confirm)
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+    cleanup()
+    await renderInConsole(dialog().ui, { status: testStatus() })
+    expect(screen.getByTestId('danger-confirm-confirm').querySelector('svg')).not.toBeNull()
+  })
+
   it('gates the button on the exact text, case and all', async () => {
     const { ui, onConfirm } = dialog({ confirmText: 'demo.appspot.com' })
     await renderInConsole(ui, { status: testStatus() })
