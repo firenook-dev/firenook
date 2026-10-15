@@ -33,7 +33,6 @@ import { PanelToggle } from '@/components/shell/section-panel'
 import { formatBytes, formatNumber } from '@/lib/format'
 import { liveChannel } from '@/lib/live/channel'
 import { isTyping, useShortcuts } from '@/lib/shortcuts'
-import { toast } from '@/lib/toasts'
 import { useAccess } from '../access'
 import { StorageApiError, mediaUrl } from '../api'
 import { downloadUrl, storageAddress } from '../code'
@@ -48,10 +47,10 @@ import {
   dragSummary,
   filesFromDrop,
   filesFromInput,
-  pasteMeaning,
+  pastedImage,
   pastedName,
 } from '../drop'
-import { baseName, gsUrl, parentOf } from '../paths'
+import { gsUrl, parentOf } from '../paths'
 import { folderQuery, objectQuery, objectsMetaQuery, profileQuery, rulesScope } from '../queries'
 import { useStoragePalette } from '../palette'
 import { useStorageRecents, recentsKey } from '../recents'
@@ -202,31 +201,17 @@ export function FilesWorkbench() {
     if (dropped.length > 0) await flow.start(dropped, prefix)
   }
 
-  // A paste on the page: an image uploads here; a gs:// URL of this project
-  // offers a copy here, as a file manager's copy and paste does.
+  // An image pasted on the page uploads here, named by the moment.
   const onPaste = (event: ClipboardEvent) => {
     if (isTyping(event.target) || !event.clipboardData) return
-    const meaning = pasteMeaning(
-      { files: Array.from(event.clipboardData.files), text: event.clipboardData.getData('text') },
-      { buckets: files.buckets.buckets.map((entry) => entry.name), bucket: files.bucket },
-    )
-    if (meaning.kind === 'none') return
+    const image = pastedImage(Array.from(event.clipboardData.files))
+    if (!image) return
     event.preventDefault()
-    if (meaning.kind === 'image') {
-      const name = pastedName(new Date(), meaning.file.type)
-      void flow.start(
-        [{ file: new File([meaning.file], name, { type: meaning.file.type }), path: name }],
-        files.prefix,
-      )
-      return
-    }
-    const { bucket: from, path: name } = meaning.location
-    toast({
-      key: 'storage-paste',
-      title: `Copy ${baseName(name)} here?`,
-      description: `From gs://${from}/${name} into ${files.prefix || `gs://${files.bucket}`}.`,
-      action: { label: 'Copy here', run: () => fileActions.copyHere(from, name) },
-    })
+    const name = pastedName(new Date(), image.type)
+    void flow.start(
+      [{ file: new File([image], name, { type: image.type }), path: name }],
+      files.prefix,
+    )
   }
   const pasteRef = useRef(onPaste)
   useLayoutEffect(() => {
@@ -386,8 +371,6 @@ export function FilesWorkbench() {
     actions: {
       uploadFiles: () => filesInput.current?.click(),
       uploadFolder: () => folderInput.current?.click(),
-      showSessions: () =>
-        fileActions.showSessions(document.querySelector('[data-testid="storage-toolbar"]')),
       editSelection: selecting ? fileActions.editSelection : undefined,
       emptyBucket: fileActions.askEmpty,
     },
@@ -621,22 +604,7 @@ export function FilesWorkbench() {
               summary={drag.summary}
             />
           )}
-          <UploadTray
-            sessionsLine={
-              fileActions.unfinished > 0 ? (
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between border-t border-kumo-line px-3 py-1.5 text-left text-[12px] text-kumo-subtle hover:ink"
-                  onClick={(event) => fileActions.showSessions(event.currentTarget)}
-                  data-testid="tray-sessions"
-                >
-                  {formatNumber(fileActions.unfinished)} unfinished{' '}
-                  {fileActions.unfinished === 1 ? 'upload' : 'uploads'} from your app
-                  <span className="text-kumo-link">Show</span>
-                </button>
-              ) : undefined
-            }
-          />
+          <UploadTray />
         </div>
         {files.object !== undefined && (
           <FileInspector

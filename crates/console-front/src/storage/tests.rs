@@ -1346,3 +1346,98 @@ async fn rules_documents_carry_claim_reads() {
     assert_eq!(draft["claimReads"], document["claimReads"]);
     harness.finish().await;
 }
+
+#[test]
+fn activity_names_the_invocations_an_event_started() {
+    use axum::body::Bytes;
+    use axum::http::{HeaderMap, HeaderValue};
+    use firenook_functions_runtime::MonitorLimits;
+    use firenook_functions_runtime::monitor::{
+        FunctionKind, InvocationCause, InvocationOrigin, InvocationStart, InvocationTarget,
+    };
+    use firenook_storage_front::{Actor, EventDelivery, ObjectChangeKind, ObjectChangeRecord};
+
+    let monitor = Monitor::new(MonitorLimits::default());
+    let begin = |function: &str, event: &str, replay_of: Option<String>| {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-firenook-event-id",
+            HeaderValue::from_str(event).expect("header"),
+        );
+        monitor
+            .begin(InvocationStart {
+                function_id: function.to_owned(),
+                codebase: "default".to_owned(),
+                kind: FunctionKind::Storage,
+                origin: InvocationOrigin::Emulator,
+                cause: InvocationCause::Storage {
+                    event_type: "google.storage.object.finalize".to_owned(),
+                    bucket: BUCKET.to_owned(),
+                    object: "a.png".to_owned(),
+                    event_id: Some(event.to_owned()),
+                },
+                summary: "a.png finalized".to_owned(),
+                target: InvocationTarget::Trigger,
+                method: "POST".to_owned(),
+                path: "/".to_owned(),
+                headers,
+                body: Bytes::new(),
+                replay_of,
+                delivery: None,
+            })
+            .id
+            .to_string()
+    };
+    // The v1 id reached two v1 functions, the v2 id one v2 function; the
+    // first v1 function was retried, and the developer replayed one.
+    let first = begin("us-central1-thumbs", "111", None);
+    let other = begin("us-central1-audit", "111", None);
+    let retried = begin("us-central1-thumbs", "111", None);
+    let v2 = begin("us-central1-indexer", "c-2", None);
+    begin("us-central1-thumbs", "111", Some(first.clone()));
+    // Another file's event.
+    begin("us-central1-thumbs", "999", None);
+
+    let record = |revision: u64, event_ids: &[&str]| ObjectChangeRecord {
+        revision,
+        at: time::OffsetDateTime::now_utc(),
+        bucket: BUCKET.to_owned(),
+        name: "a.png".to_owned(),
+        kind: ObjectChangeKind::Created,
+        size: 1,
+        content_type: None,
+        metadata_keys: Vec::new(),
+        actor: Actor::Admin,
+        via_console: false,
+        delivery: EventDelivery::Sent,
+        event_ids: event_ids.iter().map(|id| (*id).to_owned()).collect(),
+    };
+    let changes = [record(2, &["111", "c-2"]), record(1, &[])];
+    let started = files::started_by(Some(&monitor), &changes);
+    let named = started
+        .iter()
+        .map(|(event, invocation)| {
+            (
+                event.as_str(),
+                invocation.key.as_str(),
+                invocation.label.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        named,
+        [
+            ("111", other.as_str(), Some("us-central1-audit")),
+            ("111", retried.as_str(), Some("us-central1-thumbs")),
+            ("c-2", v2.as_str(), Some("us-central1-indexer")),
+        ]
+    );
+    assert!(
+        started
+            .iter()
+            .all(|(_, invocation)| invocation.kind == "functions.invocation")
+    );
+    // Without Functions, or with no sent event, nothing is read.
+    assert_eq!(files::started_by(None, &changes), Vec::new());
+    assert_eq!(files::started_by(Some(&monitor), &changes[1..]), Vec::new());
+}

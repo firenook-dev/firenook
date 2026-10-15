@@ -6,7 +6,6 @@ const object: ObjectForCode = {
   bucket: 'demo.appspot.com',
   defaultBucket: 'demo.appspot.com',
   name: 'users/u1/avatar.png',
-  token: 'tok-1',
   contentType: 'image/png',
   cacheControl: 'public, max-age=3600',
   contentDisposition: null,
@@ -35,11 +34,11 @@ describe('an object as code', () => {
     expect(objectAsCode('web', 'read', other, undefined)).toContain(
       `getStorage(app, 'gs://demo-media')`,
     )
-    expect(objectAsCode('admin', 'read', other, undefined)).toContain(`bucket('demo-media')`)
+    expect(objectAsCode('node', 'read', other, undefined)).toContain(`bucket('demo-media')`)
   })
 
   it('nests the Admin SDK’s custom keys one level down', () => {
-    const upload = objectAsCode('admin', 'upload', object, undefined)
+    const upload = objectAsCode('node', 'upload', object, undefined)
     expect(upload).toContain(`import { getStorage } from 'firebase-admin/storage'`)
     expect(upload).toContain(`  contentType: 'image/png',`)
     expect(upload).toContain(
@@ -50,7 +49,9 @@ describe('an object as code', () => {
   it('writes REST against the service address, the name encoded', () => {
     const read = objectAsCode('rest', 'read', object, '127.0.0.1:9199')
     expect(read).toContain('http://127.0.0.1:9199/v0/b/demo.appspot.com/o/users%2Fu1%2Favatar.png')
-    expect(read).toContain('alt=media&token=tok-1')
+    // The bytes as Admin: the download URL with its token is Location's.
+    expect(read).toContain(`alt=media' -H 'Authorization: Bearer owner'`)
+    expect(read).not.toContain('token=')
     const upload = objectAsCode('rest', 'upload', object, '127.0.0.1:9199')
     expect(upload).toContain('o?name=users%2Fu1%2Favatar.png')
     expect(upload).toContain(`curl -X PATCH`)

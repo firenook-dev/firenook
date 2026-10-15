@@ -37,7 +37,6 @@ import {
   coverageUrl,
   getAccess,
   getActivity,
-  getArchive,
   getBuckets,
   getDecision,
   getDecisions,
@@ -50,7 +49,6 @@ import {
   getRules,
   getRulesHistory,
   listObjects,
-  listSessions,
   putRules,
 } from './api'
 
@@ -111,12 +109,9 @@ export const storageKeys = {
     [ST, project, bucket, 'events', name] as const,
   events: (project: string, bucket: string, name: string, generation: string) =>
     [ST, project, bucket, 'events', name, generation] as const,
-  archive: (project: string, bucket: string, name: string, generation: string) =>
-    [ST, project, bucket, 'archive', name, generation] as const,
   profilesOf: (project: string, bucket: string) => [ST, project, bucket, 'profile'] as const,
   profile: (project: string, bucket: string, prefix: string) =>
     [ST, project, bucket, 'profile', prefix] as const,
-  sessions: (project: string, bucket: string) => [ST, project, bucket, 'sessions'] as const,
   /** Every access check of a bucket. */
   accessOf: (project: string, bucket: string) => [ST, project, bucket, 'access'] as const,
   access: (project: string, bucket: string, as: string, names: readonly string[]) =>
@@ -320,22 +315,6 @@ export const eventsQuery = (project: string, bucket: string, name: string, gener
   queryOptions({
     queryKey: storageKeys.events(project, bucket, name, generation),
     queryFn: ({ signal }) => getEventPayloads(bucket, name, signal),
-    staleTime: FOREVER,
-  })
-
-export const archiveQuery = (project: string, bucket: string, name: string, generation: string) =>
-  queryOptions({
-    queryKey: storageKeys.archive(project, bucket, name, generation),
-    queryFn: ({ signal }) => getArchive(bucket, name, generation, undefined, signal),
-    staleTime: FOREVER,
-    retry: false,
-  })
-
-/** The first page of a bucket's unfinished resumable uploads (the popover's list). */
-export const sessionsQuery = (project: string, bucket: string) =>
-  queryOptions({
-    queryKey: storageKeys.sessions(project, bucket),
-    queryFn: ({ signal }) => listSessions(bucket, {}, signal),
     staleTime: FOREVER,
   })
 

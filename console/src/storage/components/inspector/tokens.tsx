@@ -1,11 +1,12 @@
 // An object's download tokens, Admin only as in the official API: each one
-// hidden until revealed, the download URL it makes copied without showing
-// it, revoked with a click; and a new one created. Both change the object's
-// metadata, so the tooltips say the triggers run. A download that carries a
-// valid token skips the rules, so such fetches never show as decisions.
+// hidden until revealed and copied, revoked with a click; and a new one
+// created. Both change the object's metadata, so the tooltips say the
+// triggers run. A download that carries a valid token skips the rules, so
+// such fetches never show as decisions. The download URL the first token
+// makes is Location's (and the row menu's), not repeated per token.
 
 import { Button, Tooltip } from '@cloudflare/kumo'
-import { LinkSimpleIcon, PlusIcon, XIcon } from '@phosphor-icons/react'
+import { PlusIcon, XIcon } from '@phosphor-icons/react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectDetail'
@@ -14,20 +15,9 @@ import { MaskedValue } from '@/components/console/masked-value'
 import { OWNER_AUTHORIZATION, identityKey } from '@/lib/identity'
 import { toast } from '@/lib/toasts'
 import { changeToken } from '../../api'
-import { downloadUrl } from '../../code'
-import { copyToClipboard } from '@/lib/copy'
 import { storageKeys } from '../../queries'
 
-export function Tokens({
-  object,
-  project,
-  address,
-}: {
-  object: StorageObjectDetail
-  project: string
-  /** The Storage emulator's address an app reaches, for the URLs. */
-  address: string | undefined
-}) {
+export function Tokens({ object, project }: { object: StorageObjectDetail; project: string }) {
   const queryClient = useQueryClient()
   const [pending, setPending] = useState<string | null>(null)
   if (!object.tokensVisible)
@@ -96,27 +86,6 @@ export function Tokens({
               <span className="min-w-0 flex-1 font-mono text-[12px]">
                 <MaskedValue value={token} label="Show the token" copyable testId="token-value" />
               </span>
-              {address && (
-                <Tooltip
-                  content="Copy the download URL with this token"
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      icon={<LinkSimpleIcon />}
-                      onClick={() =>
-                        void copyToClipboard(
-                          downloadUrl(address, object.bucket, object.name, token),
-                          { what: 'the download URL' },
-                        )
-                      }
-                      data-testid="token-copy-url"
-                    >
-                      Copy URL
-                    </Button>
-                  }
-                />
-              )}
               <Tooltip
                 content="Revokes this token; URLs that carry it stop working. Your onMetadataUpdated triggers run."
                 render={

@@ -104,8 +104,8 @@ The official files page (`components/Storage/*`).
 | Delete all | Storage › bucket menu › "Empty the bucket…" (the same delete job), and Overview › Data › Reset | storage | [ ] until a journey empties a bucket (the folder-delete journey covers the job path) |
 | Table: name, size, type, modified | Storage › the list: name, size, type, last changed, metadata keys, tokens (and Access as a client); folders first with their figures; sort and filter in the engine; the grid | storage | [x] |
 | Multiple selection | Storage › ticks, Shift ranges, ⌘A, "Select all N" for the whole listing | storage | [x] |
-| Side panel with a preview | Storage › the inspector's Details (every preview kind) and Quick Look | storage | [x] |
-| Location: path, URL, token copy and create | Storage › Details › Location (gs://, path, download URL for the app's address, REST) and Tokens (create, revoke, copy) | storage | [x] |
+| Side panel with a preview | Storage › the inspector's Details and Quick Look: images, video, audio, PDF, text, JSON, CSV and HTML; any other bytes, a zip among them, as hex with what their first bytes say | storage | [x] |
+| Location: path, URL, token copy and create | Storage › Details › Location (gs://, path, the download URL an app connected to the emulator gets, REST) and the row menu's "Copy download URL"; Tokens (create, reveal and copy, revoke) | storage | [x] |
 | Metadata | Storage › Metadata tab (standard fields, one counted Save, the stale-version band) | storage | [x] |
 | Custom metadata | Storage › Metadata tab's custom keys, and metadata for many files at once | storage | [x] |
 

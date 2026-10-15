@@ -5,7 +5,6 @@ import {
   foldersOf,
   gsUrl,
   normalizeFolder,
-  parentFolder,
   parentOf,
   parseLocation,
   relativeName,
@@ -20,14 +19,6 @@ describe('folders, as GCS has them', () => {
     expect(parentOf('avatar.png')).toBe('')
     expect(parentOf('a//b.png')).toBe('a//')
     expect(parentOf('/lead.png')).toBe('/')
-  })
-
-  it('go up one folder, and stop at the root', () => {
-    expect(parentFolder('users/u1/')).toBe('users/')
-    expect(parentFolder('users/')).toBe('')
-    expect(parentFolder('a//')).toBe('a/')
-    expect(parentFolder('/')).toBe('')
-    expect(parentFolder('')).toBe('')
   })
 
   it('end a folder in one slash, and leave the root and `//` alone', () => {

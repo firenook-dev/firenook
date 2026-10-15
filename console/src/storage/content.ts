@@ -18,7 +18,6 @@ export type PreviewKind =
   | 'json'
   | 'csv'
   | 'html'
-  | 'archive'
   | 'binary'
 
 /** What the content helpers read of an object. */
@@ -36,7 +35,7 @@ export function isGenericType(contentType: string | null | undefined): boolean {
   return type === '' || type === 'application/octet-stream' || type === 'binary/octet-stream'
 }
 
-/** A zip the console can list: a `.zip`, or a container that is one (`.docx`, `.xlsx`, `.epub`, `.jar`, `.apk`). */
+/** A zip: a `.zip`, or a container that is one (`.docx`, `.xlsx`, `.epub`, `.jar`, `.apk`). */
 function isZip(facts: ContentFacts): boolean {
   if (facts.sniffed?.mime === 'application/zip') return true
   const type = essence(facts.contentType) || typeFromName(facts.name) || ''
@@ -75,11 +74,10 @@ export function previewKind(facts: ContentFacts): PreviewKind {
     case 'text':
       return 'text'
     case 'archive':
-      return isZip(facts) ? 'archive' : 'binary'
+      return 'binary'
     case 'binary':
       // Valid UTF-8 with no signature reads as text.
-      if (sniffed?.family === 'text') return 'text'
-      return isZip(facts) ? 'archive' : 'binary'
+      return sniffed?.family === 'text' ? 'text' : 'binary'
   }
 }
 

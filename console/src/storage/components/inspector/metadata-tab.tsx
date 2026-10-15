@@ -1,18 +1,16 @@
 // The object's metadata as one draft: the standard fields as free text with
-// suggestions (a type, `public, max-age=600`, `attachment; filename="x.png"`
-// are typed, not picked — so Kumo's Autocomplete, not a Combobox that only
-// accepts its items) and the custom keys as rows with the add line always
-// there. A changed field carries the unsaved mark; Save in the inspector's
-// foot sends the smallest patch, guarded by the metageneration the draft
-// was made from.
+// suggestions (`MetadataField`, the box every place metadata is typed uses)
+// and the custom keys as rows with the add line always there. A changed
+// field carries the unsaved mark; Save in the inspector's foot sends the
+// smallest patch, guarded by the metageneration the draft was made from.
 
-import { Autocomplete, Input, Tooltip } from '@cloudflare/kumo'
+import { Tooltip } from '@cloudflare/kumo'
 import { CheckIcon, InfoIcon } from '@phosphor-icons/react'
 import type { ReactNode } from 'react'
 import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectDetail'
 import { InspectorSection } from '@/components/console/inspector'
 import { KeyValueEditor } from '@/components/console/key-value-editor'
-import { essence, typeFromName } from '../../mime'
+import { essence } from '../../mime'
 import {
   type MetadataDraft,
   type StandardField,
@@ -20,61 +18,7 @@ import {
   customKeyProblem,
   patchOf,
 } from '../../metadata-draft'
-import { baseName } from '../../paths'
-
-const COMMON_TYPES = [
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/svg+xml',
-  'application/json',
-  'text/plain',
-  'text/html',
-  'text/css',
-  'text/javascript',
-  'text/csv',
-  'application/pdf',
-  'video/mp4',
-  'audio/mpeg',
-  'application/zip',
-  'application/octet-stream',
-]
-const CACHE_PRESETS = [
-  'public, max-age=3600',
-  'public, max-age=31536000, immutable',
-  'private, max-age=0',
-  'no-cache',
-  'no-store',
-]
-const ENCODINGS = ['gzip', 'br', 'deflate', 'identity']
-
-/** Each value once, in order, the empty ones left out. */
-function unique(values: (string | undefined)[]): string[] {
-  return [...new Set(values.filter((value): value is string => Boolean(value)))]
-}
-
-/** The suggestions a standard field offers, the detected type first. */
-export function fieldSuggestions(
-  field: StandardField,
-  object: Pick<StorageObjectDetail, 'name' | 'sniffed'>,
-): string[] {
-  switch (field) {
-    case 'contentType':
-      return unique([
-        object.sniffed?.definite ? object.sniffed.mime : undefined,
-        typeFromName(object.name),
-        ...COMMON_TYPES,
-      ])
-    case 'cacheControl':
-      return CACHE_PRESETS
-    case 'contentDisposition':
-      return ['inline', 'attachment', `attachment; filename="${baseName(object.name)}"`]
-    case 'contentEncoding':
-      return ENCODINGS
-    case 'contentLanguage':
-      return []
-  }
-}
+import { MetadataField } from '../metadata-field'
 
 /** One field row: the name, the unsaved mark, the box, and what follows it. */
 function FieldRow({
@@ -109,37 +53,6 @@ function FieldRow({
       <span className="min-w-0">{children}</span>
       <span className="flex min-w-4 items-center">{after}</span>
     </label>
-  )
-}
-
-function SuggestField({
-  value,
-  onChange,
-  suggestions,
-  placeholder,
-}: {
-  value: string
-  onChange: (value: string) => void
-  suggestions: readonly string[]
-  placeholder?: string
-}) {
-  return (
-    <Autocomplete
-      items={[...suggestions]}
-      value={value}
-      onValueChange={(next) => onChange(String(next ?? ''))}
-    >
-      <Autocomplete.InputGroup size="sm" className="font-mono" placeholder={placeholder ?? ''} />
-      <Autocomplete.Content>
-        <Autocomplete.List>
-          {(item: string) => (
-            <Autocomplete.Item key={item} value={item}>
-              <span className="font-mono text-[12px]">{item}</span>
-            </Autocomplete.Item>
-          )}
-        </Autocomplete.List>
-      </Autocomplete.Content>
-    </Autocomplete>
   )
 }
 
@@ -186,11 +99,12 @@ export function MetadataTab({
               ) : null
             }
           >
-            <SuggestField
+            <MetadataField
+              field="contentType"
               value={draft.fields.contentType}
               onChange={(value) => set('contentType', value)}
-              suggestions={fieldSuggestions('contentType', object)}
               placeholder="application/octet-stream"
+              object={object}
             />
           </FieldRow>
           <FieldRow
@@ -198,10 +112,11 @@ export function MetadataTab({
             changed={changed.has('cacheControl')}
             testId="field-cacheControl"
           >
-            <SuggestField
+            <MetadataField
+              field="cacheControl"
               value={draft.fields.cacheControl}
               onChange={(value) => set('cacheControl', value)}
-              suggestions={fieldSuggestions('cacheControl', object)}
+              object={object}
             />
           </FieldRow>
           <FieldRow
@@ -209,10 +124,11 @@ export function MetadataTab({
             changed={changed.has('contentDisposition')}
             testId="field-contentDisposition"
           >
-            <SuggestField
+            <MetadataField
+              field="contentDisposition"
               value={draft.fields.contentDisposition}
               onChange={(value) => set('contentDisposition', value)}
-              suggestions={fieldSuggestions('contentDisposition', object)}
+              object={object}
             />
           </FieldRow>
           <FieldRow
@@ -232,10 +148,11 @@ export function MetadataTab({
               />
             }
           >
-            <SuggestField
+            <MetadataField
+              field="contentEncoding"
               value={draft.fields.contentEncoding}
               onChange={(value) => set('contentEncoding', value)}
-              suggestions={fieldSuggestions('contentEncoding', object)}
+              object={object}
             />
           </FieldRow>
           <FieldRow
@@ -243,15 +160,11 @@ export function MetadataTab({
             changed={changed.has('contentLanguage')}
             testId="field-contentLanguage"
           >
-            <Input
-              size="sm"
+            <MetadataField
+              field="contentLanguage"
               value={draft.fields.contentLanguage}
-              onChange={(event) => set('contentLanguage', event.target.value)}
-              aria-label="contentLanguage"
+              onChange={(value) => set('contentLanguage', value)}
               placeholder="en"
-              spellCheck={false}
-              autoComplete="off"
-              className="w-full font-mono"
             />
           </FieldRow>
         </div>

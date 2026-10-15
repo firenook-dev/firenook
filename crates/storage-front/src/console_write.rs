@@ -1,5 +1,5 @@
 //! The console handle's write half: uploads, metadata, tokens, folders,
-//! deletes, events sent again, upload sessions and clearing everything.
+//! deletes, events sent again and clearing everything.
 //!
 //! Every write goes through the write path's own pieces under the mutation
 //! guard, exactly as the protocol's do: a console upload mints a token,
@@ -18,7 +18,6 @@ use crate::decisions::RulesCheck;
 use crate::folder_index::FolderStats;
 use crate::listing::is_marker;
 use crate::rules::Operation;
-use crate::sessions::{SessionCursor, SessionPage};
 use crate::write::{self, Pending, TokenOp};
 use crate::{CommitSpec, StorageEvent, lock, persist_state, stream_to_staging};
 
@@ -550,32 +549,16 @@ impl StorageConsoleApi {
             crate::now_millis(),
             crate::RESEND_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
-        Ok(state.dispatch_with(
-            match event {
-                ResendEvent::Finalize => StorageEvent::Finalize,
-                ResendEvent::MetadataUpdate => StorageEvent::Metadata,
-            },
-            &object,
-            Some(&nonce),
-        ))
-    }
-
-    /// The upload sessions of `bucket` not yet finalized, newest activity
-    /// first.
-    #[must_use]
-    pub fn sessions(
-        &self,
-        bucket: &str,
-        after: Option<&SessionCursor>,
-        before: Option<&SessionCursor>,
-        limit: usize,
-    ) -> SessionPage {
-        crate::sessions::list(self.state_ref(), bucket, after, before, limit)
-    }
-
-    /// Removes an upload session and its staged bytes.
-    pub async fn discard_session(&self, bucket: &str, id: &str) -> Result<(), ConsoleError> {
-        crate::sessions::discard(self.state_ref(), bucket, id).await
+        Ok(state
+            .dispatch_with(
+                match event {
+                    ResendEvent::Finalize => StorageEvent::Finalize,
+                    ResendEvent::MetadataUpdate => StorageEvent::Metadata,
+                },
+                &object,
+                Some(&nonce),
+            )
+            .0)
     }
 
     /// Removes every object and unfinished upload session of every bucket

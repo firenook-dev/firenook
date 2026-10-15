@@ -7,8 +7,9 @@
 //! and sends one [`ChangeEvent`], so whoever observes the service sees the
 //! changes in exactly the order the object map took them, and a console
 //! never has to poll. Resumable upload sessions change through
-//! [`StorageData::put_session`] and [`StorageData::remove_session`] for the
-//! same reason.
+//! [`StorageData::put_session`] and [`StorageData::remove_session`], which
+//! keep the times the idle sweep reads; a session is not an object, so it
+//! announces nothing until it finishes as one.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
@@ -152,6 +153,9 @@ pub struct ObjectChangeRecord {
     pub actor: Actor,
     pub via_console: bool,
     pub delivery: EventDelivery,
+    /// Once the event was sent: its ids, the legacy `eventId` and then the
+    /// `CloudEvent` `id`, which each invocation it starts is recorded by.
+    pub event_ids: Vec<String>,
 }
 
 impl ObjectChangeRecord {
@@ -170,6 +174,7 @@ impl ObjectChangeRecord {
                 .iter()
                 .map(|key| key.len() + 24)
                 .sum::<usize>()
+            + self.event_ids.iter().map(|id| id.len() + 24).sum::<usize>()
             + actor
     }
 }
@@ -179,15 +184,13 @@ impl ObjectChangeRecord {
 /// never blocks, and with no subscriber it costs nothing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChangeEvent {
-    /// One committed mutation: a protocol write (one name), or an upload
-    /// session that started, advanced, finished or was discarded.
+    /// One committed mutation of the bucket's objects: a protocol write
+    /// (one name), or a bulk batch (its names).
     Committed {
         bucket: Arc<str>,
         /// The storage revision after the mutation.
         revision: u64,
         touches: Arc<[(Arc<str>, ObjectChangeKind)]>,
-        /// Upload sessions the mutation changed.
-        sessions: Arc<[String]>,
     },
     /// The folder index finished building: counts that were unknown are
     /// known now.
@@ -206,28 +209,16 @@ pub(crate) struct Batch {
 struct Touched {
     revision: u64,
     touches: Vec<(Arc<str>, ObjectChangeKind)>,
-    sessions: Vec<String>,
 }
 
 impl Batch {
-    fn touch(
-        &mut self,
-        bucket: &str,
-        revision: u64,
-        object: Option<(&str, ObjectChangeKind)>,
-        session: Option<String>,
-    ) {
+    fn touch(&mut self, bucket: &str, revision: u64, name: &str, kind: ObjectChangeKind) {
         if !self.buckets.contains_key(bucket) {
             self.buckets.insert(bucket.to_owned(), Touched::default());
         }
         let touched = self.buckets.get_mut(bucket).expect("bucket present");
         touched.revision = revision;
-        if let Some((name, kind)) = object {
-            touched.touches.push((Arc::from(name), kind));
-        }
-        if let Some(id) = session {
-            touched.sessions.push(id);
-        }
+        touched.touches.push((Arc::from(name), kind));
     }
 }
 
@@ -277,8 +268,8 @@ impl ChangeFeed {
 
     /// Records what happened to the event of the change at `revision`, once
     /// it was dispatched after the commit.
-    pub(crate) fn settle(&self, revision: u64, delivery: EventDelivery) {
-        self.ring().settle(revision, delivery);
+    pub(crate) fn settle(&self, revision: u64, delivery: EventDelivery, event_ids: Vec<String>) {
+        self.ring().settle(revision, delivery, event_ids);
     }
 
     /// The changes of one object, newest first, and when the ring's window
@@ -334,9 +325,13 @@ impl ActivityRing {
             .ok()
     }
 
-    fn settle(&mut self, revision: u64, delivery: EventDelivery) {
+    fn settle(&mut self, revision: u64, delivery: EventDelivery, event_ids: Vec<String>) {
         if let Some(index) = self.position(revision) {
-            self.records[index].delivery = delivery;
+            let record = &mut self.records[index];
+            let before = record.estimated_bytes();
+            record.delivery = delivery;
+            record.event_ids = event_ids;
+            self.bytes = (self.bytes + record.estimated_bytes()).saturating_sub(before);
         }
     }
 
@@ -457,6 +452,7 @@ impl StorageData {
             } else {
                 EventDelivery::Pending
             },
+            event_ids: Vec::new(),
         };
         let before = self.objects.insert(key, object);
         self.committed(record);
@@ -493,6 +489,7 @@ impl StorageData {
             } else {
                 EventDelivery::Pending
             },
+            event_ids: Vec::new(),
         };
         self.committed(record);
         Some(before)
@@ -502,12 +499,7 @@ impl StorageData {
     /// the announcement waits for the batch's end.
     fn committed(&mut self, record: ObjectChangeRecord) {
         if let Some(batch) = &mut self.batch {
-            batch.touch(
-                &record.bucket,
-                record.revision,
-                Some((&record.name, record.kind)),
-                None,
-            );
+            batch.touch(&record.bucket, record.revision, &record.name, record.kind);
             self.feed.ring().push(record);
             return;
         }
@@ -515,7 +507,6 @@ impl StorageData {
             bucket: Arc::from(record.bucket.as_str()),
             revision: record.revision,
             touches: Arc::from([(Arc::from(record.name.as_str()), record.kind)]),
-            sessions: Arc::from([]),
         };
         self.feed.ring().push(record);
         self.feed.announce(event);
@@ -524,8 +515,6 @@ impl StorageData {
     /// Starts a batch: until [`Self::end_batch`], changes are recorded at
     /// once but announced together, one [`ChangeEvent::Committed`] per
     /// bucket, so a bulk batch of 200 names is one live event, not 200.
-    /// Upload sessions that change meanwhile join the batch's event, so the
-    /// announced revisions keep their order.
     pub(crate) fn begin_batch(&mut self) {
         self.batch.get_or_insert_with(Batch::default);
     }
@@ -540,7 +529,6 @@ impl StorageData {
                 bucket: Arc::from(bucket.as_str()),
                 revision: touched.revision,
                 touches: Arc::from(touched.touches),
-                sessions: Arc::from(touched.sessions),
             });
         }
     }
@@ -562,37 +550,20 @@ impl StorageData {
     }
 
     /// The one way to record an upload session's new state (started,
-    /// advanced, refused, cancelled).
+    /// advanced, refused, cancelled): it is stamped with when it last moved,
+    /// which the idle sweep reads.
     pub(crate) fn put_session(&mut self, mut session: UploadSession) {
         let now = unix_millis(OffsetDateTime::now_utc());
         if session.started_at_ms == 0 {
             session.started_at_ms = now;
         }
         session.updated_at_ms = now;
-        let (bucket, id) = (session.bucket.clone(), session.id.clone());
-        self.uploads.insert(id.clone(), session);
-        self.session_committed(&bucket, id);
+        self.uploads.insert(session.id.clone(), session);
     }
 
-    /// The one way to forget an upload session (finished or discarded).
+    /// The one way to forget an upload session (finished or swept).
     pub(crate) fn remove_session(&mut self, id: &str) -> Option<UploadSession> {
-        let session = self.uploads.remove(id)?;
-        self.session_committed(&session.bucket, id.to_owned());
-        Some(session)
-    }
-
-    fn session_committed(&mut self, bucket: &str, id: String) {
-        self.revision += 1;
-        if let Some(batch) = &mut self.batch {
-            batch.touch(bucket, self.revision, None, Some(id));
-            return;
-        }
-        self.feed.announce(ChangeEvent::Committed {
-            bucket: Arc::from(bucket),
-            revision: self.revision,
-            touches: Arc::from([]),
-            sessions: Arc::from([id]),
-        });
+        self.uploads.remove(id)
     }
 }
 
@@ -759,6 +730,7 @@ mod tests {
                 actor: Actor::Anonymous,
                 via_console: false,
                 delivery: EventDelivery::Pending,
+                event_ids: Vec::new(),
             };
             if revision == 3 {
                 record.name = "evicted".to_owned();
@@ -781,10 +753,16 @@ mod tests {
             .map(|name| ring.activity(&object_key("b", name)).0.len())
             .sum::<usize>();
         assert_eq!(total, ACTIVITY_RECORDS);
-        ring.settle(ACTIVITY_RECORDS as u64, EventDelivery::Sent);
-        assert_eq!(
-            ring.records[ring.position(ACTIVITY_RECORDS as u64).expect("kept")].delivery,
-            EventDelivery::Sent
+        let bytes = ring.bytes;
+        ring.settle(
+            ACTIVITY_RECORDS as u64,
+            EventDelivery::Sent,
+            vec!["1234".to_owned(), "c-1".to_owned()],
         );
+        let settled = &ring.records[ring.position(ACTIVITY_RECORDS as u64).expect("kept")];
+        assert_eq!(settled.delivery, EventDelivery::Sent);
+        assert_eq!(settled.event_ids, ["1234", "c-1"]);
+        // The ids count in the ring's bytes, as eviction will take them out.
+        assert_eq!(ring.bytes, bytes + 4 + 24 + 3 + 24);
     }
 }

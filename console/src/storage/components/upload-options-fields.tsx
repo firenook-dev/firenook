@@ -4,65 +4,20 @@
 // contentDisposition (free text with suggestions) and custom keys. The
 // reserved token key is refused on its row.
 
-import { Autocomplete, Radio } from '@cloudflare/kumo'
+import { Radio } from '@cloudflare/kumo'
 import { CaretRightIcon } from '@phosphor-icons/react'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { KeyValueEditor } from '@/components/console/key-value-editor'
 import { customKeyProblem } from '../metadata-draft'
 import { type UploadOptions, optionsSummary } from '../upload-options'
+import { MetadataField } from './metadata-field'
 
-const TYPES = [
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'application/json',
-  'text/plain',
-  'text/csv',
-  'application/pdf',
-  'video/mp4',
-  'application/octet-stream',
-]
-const CACHE = [
-  'public, max-age=3600',
-  'public, max-age=31536000, immutable',
-  'private, max-age=0',
-  'no-cache',
-  'no-store',
-]
-const DISPOSITIONS = ['inline', 'attachment']
-
-function Suggest({
-  value,
-  onChange,
-  items,
-  placeholder,
-  label,
-}: {
-  value: string
-  onChange: (value: string) => void
-  items: readonly string[]
-  placeholder: string
-  label: string
-}) {
+/** A field's name and its box, as the conflict step and "Upload with options…" lay them out. */
+function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="grid grid-cols-[10rem_minmax(0,1fr)] items-center gap-2">
       <span className="font-mono text-[12px] text-kumo-subtle">{label}</span>
-      <Autocomplete
-        items={[...items]}
-        value={value}
-        onValueChange={(next) => onChange(String(next ?? ''))}
-      >
-        <Autocomplete.InputGroup size="sm" className="font-mono" placeholder={placeholder} />
-        <Autocomplete.Content>
-          <Autocomplete.List>
-            {(item: string) => (
-              <Autocomplete.Item key={item} value={item}>
-                <span className="font-mono text-[12px]">{item}</span>
-              </Autocomplete.Item>
-            )}
-          </Autocomplete.List>
-        </Autocomplete.Content>
-      </Autocomplete>
+      {children}
     </label>
   )
 }
@@ -97,53 +52,41 @@ export function UploadOptionsFields({
             <span className="pt-0.5 font-mono text-[12px] text-kumo-subtle">contentType</span>
             <div className="grid gap-1.5">
               <Radio.Group
-                legend="contentType"
                 value={options.typeMode}
                 onValueChange={(value) => set({ typeMode: value as UploadOptions['typeMode'] })}
                 orientation="horizontal"
-                className="[&_legend]:sr-only"
               >
+                {/* The row already says contentType: the group's name is for a screen reader. */}
+                <Radio.Legend className="sr-only">contentType</Radio.Legend>
                 <Radio.Item label="From each file" value="auto" />
                 <Radio.Item label="One type for every file" value="fixed" />
               </Radio.Group>
               {options.typeMode === 'fixed' && (
-                <Autocomplete
-                  items={TYPES}
+                <MetadataField
+                  field="contentType"
                   value={options.contentType}
-                  onValueChange={(next) => set({ contentType: String(next ?? '') })}
-                >
-                  <Autocomplete.InputGroup
-                    size="sm"
-                    className="font-mono"
-                    placeholder="image/png"
-                  />
-                  <Autocomplete.Content>
-                    <Autocomplete.List>
-                      {(item: string) => (
-                        <Autocomplete.Item key={item} value={item}>
-                          <span className="font-mono text-[12px]">{item}</span>
-                        </Autocomplete.Item>
-                      )}
-                    </Autocomplete.List>
-                  </Autocomplete.Content>
-                </Autocomplete>
+                  onChange={(contentType) => set({ contentType })}
+                  placeholder="image/png"
+                />
               )}
             </div>
           </div>
-          <Suggest
-            label="cacheControl"
-            value={options.cacheControl}
-            onChange={(cacheControl) => set({ cacheControl })}
-            items={CACHE}
-            placeholder="public, max-age=3600"
-          />
-          <Suggest
-            label="contentDisposition"
-            value={options.contentDisposition}
-            onChange={(contentDisposition) => set({ contentDisposition })}
-            items={DISPOSITIONS}
-            placeholder="inline"
-          />
+          <FieldRow label="cacheControl">
+            <MetadataField
+              field="cacheControl"
+              value={options.cacheControl}
+              onChange={(cacheControl) => set({ cacheControl })}
+              placeholder="public, max-age=3600"
+            />
+          </FieldRow>
+          <FieldRow label="contentDisposition">
+            <MetadataField
+              field="contentDisposition"
+              value={options.contentDisposition}
+              onChange={(contentDisposition) => set({ contentDisposition })}
+              placeholder="inline"
+            />
+          </FieldRow>
           <KeyValueEditor
             label="Custom metadata"
             rows={options.custom}

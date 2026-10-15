@@ -54,7 +54,6 @@ function state(update = vi.fn()): FilesState {
 const actions = {
   uploadFiles: vi.fn(),
   uploadFolder: vi.fn(),
-  showSessions: vi.fn(),
   emptyBucket: vi.fn(),
 }
 

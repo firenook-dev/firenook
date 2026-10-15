@@ -2779,8 +2779,11 @@ the reader had been. The Rules page reads the rules kit's schema,
 Files links to Rules only through `storage/rules-link.ts`
 (`useRulesPageLink`, `useTryInPlayground`), which offers a link only while
 the router knows `/storage_/rules`. Links out are `EntityRef`s through
-`EntityLink`/`linkTo` (an Auth user in Activity, a function a trigger
-reached), never hand-built URLs; Storage's own keys are pinned in
+`EntityLink`/`linkTo` (an Auth user in Activity; each invocation a
+change's event started, which the activity route joins from the
+Functions record by the event ids the change record keeps, or the
+functions its trigger names before they begin), never hand-built URLs;
+Storage's own keys are pinned in
 `entity.rs`: `storage.object` and `storage.folder` are `<bucket>|<path>`,
 `storage.decision` is `<bucket or *>|<id>`.
 
@@ -2836,8 +2839,9 @@ sends `nosniff` and a sandbox CSP (PDF excepted) with an inline
 disposition; HTML is shown as source or in a script-less `srcdoc` frame,
 never `<iframe src>`; "Open in new tab" stays on the console's origin.
 **Previews ask for what they draw**: 256 KB of text ("Load all" up to 16 MB),
-64 KB of hex, a zip's central directory, a 320 px thumbnail; a gzip-encoded
-object is read decoded and never by range (`media.ts`). Text up to 1 MB that
+64 KB of hex (a zip too, with what its first bytes say), a 320 px
+thumbnail; a gzip-encoded object is read decoded and never by range
+(`media.ts`). Text up to 1 MB that
 is valid UTF-8 and not gzip-encoded edits in place; Save writes it as one
 upload that keeps the metadata. The list draws type icons; only the grid
 and the inspector show pictures, and SVG, AVIF, ICO and images up to
@@ -2859,7 +2863,7 @@ the one way to stand in for XHR (tests, the design-system card).
 a file the access check (`POST /storage/rules/access`, `get` and `delete`
 for each page, recorded nowhere) refuses is a lock tile with its line, not a
 picture, since an `<img>` cannot carry a token. Tokens are Admin-only (the
-official API's rule), and so are Send again and Discard. A refusal is an
+official API's rule), and so is Send again. A refusal is an
 `ApiError` `permission-denied` with `decision`, `line`, `noRuleset`,
 `evaluation` and `request` extras, so `RefusalDetail` explains it ("See
 why") and hands it to the playground ("Try in the playground") even after

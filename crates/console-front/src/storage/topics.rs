@@ -72,9 +72,6 @@ pub(crate) struct StorageObjectsChanged {
     /// More than 1,000 names in the window, or a clear: reset what is under
     /// `folders`.
     pub truncated: bool,
-    /// Ids of upload sessions that started, advanced, finished or were
-    /// discarded.
-    pub sessions: Vec<String>,
     /// The folder index finished building in this window: counts that were
     /// null are known now.
     pub index_ready: bool,
@@ -108,7 +105,6 @@ pub(crate) struct ObjectsMeta {
     bucket: Option<Arc<str>>,
     revision: u64,
     touches: Arc<[(Arc<str>, ObjectChangeKind)]>,
-    sessions: Arc<[String]>,
     marker: Marker,
 }
 
@@ -138,8 +134,7 @@ impl ObjectsFeed {
             .touches
             .iter()
             .map(|(name, _)| name.len() + 8)
-            .sum::<usize>()
-            + meta.sessions.iter().map(|id| id.len() + 4).sum::<usize>();
+            .sum::<usize>();
         self.ring.push_weighted(meta, Arc::from(""), names + 48);
     }
 
@@ -148,7 +143,6 @@ impl ObjectsFeed {
             bucket: None,
             revision,
             touches: Arc::from([]),
-            sessions: Arc::from([]),
             marker: Marker::Everything,
         });
     }
@@ -175,19 +169,16 @@ impl ObjectsFeed {
                         bucket,
                         revision,
                         touches,
-                        sessions,
                     }) => feed.push(ObjectsMeta {
                         bucket: Some(bucket),
                         revision,
                         touches,
-                        sessions,
                         marker: Marker::Names,
                     }),
                     Ok(ChangeEvent::IndexReady) => feed.push(ObjectsMeta {
                         bucket: None,
                         revision: feed.api.revision(),
                         touches: Arc::from([]),
-                        sessions: Arc::from([]),
                         marker: Marker::IndexReady,
                     }),
                     // A lost window becomes a reset of what it touched,
@@ -210,12 +201,11 @@ fn parent(name: &str) -> &str {
 
 /// Folds what a window holds into one event: names deduplicated and their
 /// kinds folded (a deletion wins; a creation stays a creation; otherwise
-/// the last kind), sessions united, the last revision; past 1,000 names, or
+/// the last kind), the last revision; past 1,000 names, or
 /// for a clear, the touched folders instead.
 fn fold(entries: &[Entry<ObjectsMeta>]) -> StorageObjectsChanged {
     let mut names: BTreeMap<&str, ObjectChangeKind> = BTreeMap::new();
     let mut folders: BTreeSet<&str> = BTreeSet::new();
-    let mut sessions: BTreeSet<&str> = BTreeSet::new();
     let mut revision = 0;
     let mut everything = false;
     let mut index_ready = false;
@@ -244,7 +234,6 @@ fn fold(entries: &[Entry<ObjectsMeta>]) -> StorageObjectsChanged {
                 overflow = true;
             }
         }
-        sessions.extend(meta.sessions.iter().map(String::as_str));
     }
     let truncated = everything || overflow;
     StorageObjectsChanged {
@@ -268,7 +257,6 @@ fn fold(entries: &[Entry<ObjectsMeta>]) -> StorageObjectsChanged {
             folders.into_iter().map(str::to_owned).collect()
         },
         truncated,
-        sessions: sessions.into_iter().map(str::to_owned).collect(),
         index_ready,
     }
 }
@@ -487,7 +475,6 @@ mod tests {
                     .iter()
                     .map(|(name, kind)| (Arc::from(*name), *kind))
                     .collect(),
-                sessions: Arc::from([]),
                 marker,
             },
             json: Arc::from(""),

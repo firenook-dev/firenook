@@ -3,7 +3,7 @@ import {
   type EntryLike,
   filesFromEntries,
   isSystemFile,
-  pasteMeaning,
+  pastedImage,
   pastedName,
   withoutSystemFiles,
 } from './drop'
@@ -59,32 +59,13 @@ describe('what a drop holds', () => {
   })
 })
 
-describe('what a paste means', () => {
-  const context = { buckets: ['demo.appspot.com'], bucket: 'demo.appspot.com' }
-
-  it('uploads an image', () => {
+describe('what a paste brings', () => {
+  it('an image, which uploads', () => {
     const image = new File(['x'], 'image.png', { type: 'image/png' })
-    expect(pasteMeaning({ files: [image], text: '' }, context)).toEqual({
-      kind: 'image',
-      file: image,
-    })
-  })
-
-  it('offers a copy of a file of this project', () => {
-    expect(pasteMeaning({ files: [], text: 'gs://demo.appspot.com/users/a.png' }, context)).toEqual(
-      {
-        kind: 'location',
-        location: { bucket: 'demo.appspot.com', path: 'users/a.png' },
-      },
-    )
-  })
-
-  it('does nothing with other text, another project’s file or a folder', () => {
-    expect(pasteMeaning({ files: [], text: 'hello' }, context).kind).toBe('none')
-    expect(pasteMeaning({ files: [], text: 'gs://elsewhere/a.png' }, context).kind).toBe('none')
-    expect(pasteMeaning({ files: [], text: 'gs://demo.appspot.com/users/' }, context).kind).toBe(
-      'none',
-    )
+    const text = new File(['x'], 'notes.txt', { type: 'text/plain' })
+    expect(pastedImage([text, image])).toBe(image)
+    expect(pastedImage([text])).toBeUndefined()
+    expect(pastedImage([])).toBeUndefined()
   })
 
   it('names a pasted image by the moment', () => {

@@ -1,25 +1,27 @@
 //! The Files page's API: buckets, listings both ways, batch reads of the
 //! rows a live event named, one object (read, upload, metadata, tokens,
-//! delete), its bytes, thumbnail, archive entries, activity and event
-//! bodies, folders, upload sessions and zip downloads.
+//! delete), its bytes, thumbnail, activity and event bodies, folders and
+//! zip downloads.
 //!
 //! Routes marked as rules routes read the `Authorization` header exactly as
 //! the protocol does (owner credentials are Admin and skip the rules; any
 //! other value is a client), so the console meets the rules an app meets.
 //! The others are the operator's own reads.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use firenook_functions_runtime::Monitor;
+use firenook_functions_runtime::monitor::{InvocationQuery, InvocationSummary};
 use firenook_storage_front::{
     Actor, ConsoleListQuery, ConsoleUpload, EventDelivery, ExportSource, FileEntry, FolderEntry,
     FolderStats, Identity, ListCursor, ListEntry, ListKind, ListOrder, MediaMode, MetadataPatch,
-    ObjectChangeKind, ObjectChangeRecord, ObjectView, ResendEvent, SessionCursor, SessionState,
-    SniffFamily, SortColumn, TokenOp,
+    ObjectChangeKind, ObjectChangeRecord, ObjectView, ResendEvent, SniffFamily, SortColumn,
+    TokenOp,
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -32,6 +34,7 @@ use super::rules::StorageDecision;
 use super::rules::double_option as patch_field;
 use crate::api_error::ApiError;
 use crate::blocking::blocking;
+use crate::entity::EntityRef;
 use crate::guard::{CONSOLE_HEADER, KEEP_TOKENS_HEADER, METADATA_HEADER};
 use crate::jobs::BulkTarget;
 use crate::json::ConsoleJson;
@@ -531,6 +534,10 @@ pub(crate) struct StorageObjectChange {
     pub metadata_keys: Vec<String>,
     pub actor: StorageActor,
     pub delivery: StorageEventDelivery,
+    /// The Functions invocations its event started, each labelled with its
+    /// function's id, while the Functions record keeps them: empty before
+    /// they begin, without Functions, and once they have rolled off.
+    pub invocations: Vec<EntityRef>,
 }
 
 /// `POST /storage/objects:batchGet`: the foundation's request plus the
@@ -618,71 +625,6 @@ pub(crate) enum StorageResendEvent {
 pub(crate) struct StorageResendResult {
     pub sent: bool,
     pub delivery: StorageEventDelivery,
-}
-
-/// A resumable upload an app started and has not finished.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageUploadSession {
-    pub id: String,
-    pub bucket: String,
-    pub name: String,
-    #[ts(type = "number")]
-    pub received: u64,
-    /// The size the client declared, when it did.
-    #[ts(type = "number | null")]
-    pub total: Option<u64>,
-    pub started_at: Option<String>,
-    pub updated_at: Option<String>,
-    /// The uid of the session's Authorization; null for Admin or an
-    /// unauthenticated client.
-    pub uid: Option<String>,
-    pub admin: bool,
-    pub state: StorageSessionState,
-}
-
-/// Where a session stands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export_to = "storage/")]
-pub(crate) enum StorageSessionState {
-    Active,
-    Denied,
-    Cancelled,
-}
-
-/// `POST /storage/session/discard`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageDiscardSessionBody {
-    pub bucket: String,
-    pub id: String,
-}
-
-/// The first entries of a `.zip` object.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageArchive {
-    pub entries: Vec<StorageArchiveEntry>,
-    /// Entries in the whole archive.
-    pub total: u32,
-    pub truncated: bool,
-}
-
-/// One entry of an archive.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageArchiveEntry {
-    pub name: String,
-    #[ts(type = "number")]
-    pub size: u64,
-    #[ts(type = "number")]
-    pub compressed: u64,
-    pub directory: bool,
 }
 
 /// What a folder holds, for starter rules, completion and filter
@@ -846,7 +788,58 @@ fn folder_counts(bucket: &str, prefix: &str, stats: &FolderStats) -> StorageFold
     }
 }
 
-fn change(record: &ObjectChangeRecord) -> StorageObjectChange {
+/// The most invocations one Activity names.
+const ACTIVITY_INVOCATIONS: usize = 200;
+
+/// The invocations the events of `changes` started, with the event id each
+/// was delivered with: one pass over the Functions record, newest first,
+/// keeping the newest attempt per function and leaving out replays (those
+/// a developer started).
+pub(super) fn started_by(
+    monitor: Option<&Monitor>,
+    changes: &[ObjectChangeRecord],
+) -> Vec<(String, EntityRef)> {
+    let ids = changes
+        .iter()
+        .flat_map(|record| record.event_ids.iter().map(String::as_str))
+        .collect::<HashSet<_>>();
+    let Some(monitor) = monitor.filter(|_| !ids.is_empty()) else {
+        return Vec::new();
+    };
+    let wanted = |summary: &InvocationSummary| {
+        summary.replay_of.is_none()
+            && summary
+                .event_id
+                .as_deref()
+                .is_some_and(|id| ids.contains(id))
+    };
+    let page = monitor.invocations(
+        &InvocationQuery {
+            filter: Some(&wanted),
+            limit: ACTIVITY_INVOCATIONS,
+        },
+        None,
+    );
+    let mut seen = HashSet::new();
+    let mut started = page
+        .items
+        .into_iter()
+        .filter_map(|summary| {
+            let event = summary.event_id?;
+            seen.insert((event.clone(), summary.function_id.clone()))
+                .then(|| {
+                    (
+                        event,
+                        EntityRef::invocation(&summary.id).with_label(summary.function_id),
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    started.reverse();
+    started
+}
+
+fn change(record: &ObjectChangeRecord, started: &[(String, EntityRef)]) -> StorageObjectChange {
     let (kind, uid, tenant) = match &record.actor {
         Actor::Admin => (StorageActorKind::Admin, None, None),
         Actor::User { uid, tenant } => (StorageActorKind::User, Some(uid.clone()), tenant.clone()),
@@ -869,6 +862,11 @@ fn change(record: &ObjectChangeRecord) -> StorageObjectChange {
             via_console: record.via_console,
         },
         delivery: record.delivery.into(),
+        invocations: started
+            .iter()
+            .filter(|(event, _)| record.event_ids.contains(event))
+            .map(|(_, invocation)| invocation.clone())
+            .collect(),
     }
 }
 
@@ -1493,52 +1491,6 @@ pub(crate) async fn thumbnail(
     Ok(response)
 }
 
-/// `?bucket&name&g&limit`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ArchiveQuery {
-    bucket: String,
-    name: String,
-    #[allow(
-        dead_code,
-        reason = "the generation the URL names, for the browser's cache"
-    )]
-    g: Option<String>,
-    limit: Option<usize>,
-}
-
-/// `GET /storage/object/archive`: a zip's entries from its central
-/// directory.
-pub(crate) async fn archive(
-    State(routes): State<StorageRoutes>,
-    Query(query): Query<ArchiveQuery>,
-) -> Result<Json<StorageArchive>, ApiError> {
-    let listing = routes
-        .api
-        .archive(
-            &query.bucket,
-            &query.name,
-            query
-                .limit
-                .unwrap_or(firenook_storage_front::ARCHIVE_ENTRIES),
-        )
-        .await?;
-    Ok(Json(StorageArchive {
-        entries: listing
-            .entries
-            .into_iter()
-            .map(|entry| StorageArchiveEntry {
-                name: entry.name,
-                size: entry.size,
-                compressed: entry.compressed,
-                directory: entry.directory,
-            })
-            .collect(),
-        total: listing.total,
-        truncated: listing.truncated,
-    }))
-}
-
 /// `GET /storage/object/activity`: the object's changes and the decisions
 /// on its name, from the rings and their name indexes.
 pub(crate) async fn activity(
@@ -1546,13 +1498,17 @@ pub(crate) async fn activity(
     Query(query): Query<ObjectQuery>,
 ) -> Json<StorageActivity> {
     let (changes, changes_since) = routes.api.activity(&query.bucket, &query.name);
+    let started = started_by(routes.monitor.as_ref(), &changes);
     let (mut decisions, decisions_since) =
         routes.feed.as_ref().map_or((Vec::new(), None), |feed| {
             (feed.of(&query.bucket, &query.name), feed.since())
         });
     decisions.reverse();
     Json(StorageActivity {
-        changes: changes.iter().map(change).collect(),
+        changes: changes
+            .iter()
+            .map(|record| change(record, &started))
+            .collect(),
         decisions,
         diagnostics: routes.feed.is_some(),
         changes_since: changes_since.and_then(|at| at.format(&Rfc3339).ok()),
@@ -1576,89 +1532,6 @@ pub(crate) async fn events(
         metadata_update: bodies(payloads.metadata_update),
         delete: bodies(payloads.delete),
     }))
-}
-
-/// `?bucket&cursor&before&limit`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SessionsQuery {
-    bucket: String,
-    cursor: Option<String>,
-    before: Option<String>,
-    limit: Option<u32>,
-}
-
-/// `GET /storage/sessions`: resumable uploads not finished, newest
-/// activity first.
-pub(crate) async fn sessions(
-    State(routes): State<StorageRoutes>,
-    Query(query): Query<SessionsQuery>,
-) -> Result<Json<Page<StorageUploadSession>>, ApiError> {
-    let paging = PageQuery {
-        limit: query.limit,
-        cursor: query.cursor,
-        before: query.before,
-        ..PageQuery::default()
-    };
-    let after = paging.after::<SessionCursor>()?;
-    let before = paging.before::<SessionCursor>()?;
-    let found = routes.api.sessions(
-        &query.bucket,
-        after.as_ref(),
-        before.as_ref(),
-        paging.limit(DEFAULT_LIMIT, MAX_LIMIT),
-    );
-    let first = found
-        .sessions
-        .first()
-        .map(|(_, cursor)| encode_cursor(cursor));
-    let last = found
-        .sessions
-        .last()
-        .map(|(_, cursor)| encode_cursor(cursor));
-    Ok(Json(Page {
-        items: found
-            .sessions
-            .into_iter()
-            .map(|(session, _)| StorageUploadSession {
-                id: session.id,
-                bucket: session.bucket,
-                name: session.name,
-                received: session.received,
-                total: session.total,
-                started_at: rfc3339_millis(session.started_at_ms),
-                updated_at: rfc3339_millis(session.updated_at_ms),
-                uid: session.uid,
-                admin: session.admin,
-                state: match session.state {
-                    SessionState::Active => StorageSessionState::Active,
-                    SessionState::Denied => StorageSessionState::Denied,
-                    SessionState::Cancelled => StorageSessionState::Cancelled,
-                },
-            })
-            .collect(),
-        next_cursor: found.more_after.then_some(last).flatten(),
-        prev_cursor: found.more_before.then_some(first).flatten(),
-        total: None,
-        scanned: None,
-    }))
-}
-
-/// `POST /storage/session/discard`: removes a session and its staged
-/// bytes (Admin only).
-pub(crate) async fn discard_session(
-    State(routes): State<StorageRoutes>,
-    headers: HeaderMap,
-    ConsoleJson(body): ConsoleJson<StorageDiscardSessionBody>,
-) -> Result<StatusCode, ApiError> {
-    if identity(&headers) != Identity::Admin {
-        return Err(
-            ApiError::permission_denied("Only Admin can discard an upload session.")
-                .with_fix("Act as Admin to do this."),
-        );
-    }
-    routes.api.discard_session(&body.bucket, &body.id).await?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /storage/objects:export`: a selection becomes a download ticket.

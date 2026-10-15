@@ -4,11 +4,15 @@
 // is not sent, a field emptied is cleared (`null`), a renamed key is the old
 // one removed and the new one set. The Save button counts what the patch
 // changes; problems (an empty key, a key twice, a key over GCS's 1,024
-// bytes, the reserved token key) are said on the row they are on.
+// bytes, the reserved token key) are said on the row they are on. The
+// values each standard field suggests are here too, the one list every
+// place metadata is typed offers (`fieldSuggestions`).
 
 import type { StorageMetadataPatch } from '@/api/generated/storage/StorageMetadataPatch'
 import type { StorageObjectDetail } from '@/api/generated/storage/StorageObjectDetail'
 import { type KeyValueRow, rowId } from '@/components/console/key-value-editor'
+import { typeFromName } from './mime'
+import { baseName } from './paths'
 
 /** The standard fields the tab edits, in the order it shows them. */
 export const STANDARD_FIELDS = [
@@ -20,6 +24,67 @@ export const STANDARD_FIELDS = [
 ] as const
 
 export type StandardField = (typeof STANDARD_FIELDS)[number]
+
+const COMMON_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/svg+xml',
+  'application/json',
+  'text/plain',
+  'text/html',
+  'text/css',
+  'text/javascript',
+  'text/csv',
+  'application/pdf',
+  'video/mp4',
+  'audio/mpeg',
+  'application/zip',
+  'application/octet-stream',
+]
+const CACHE_PRESETS = [
+  'public, max-age=3600',
+  'public, max-age=31536000, immutable',
+  'private, max-age=0',
+  'no-cache',
+  'no-store',
+]
+const DISPOSITIONS = ['inline', 'attachment']
+const ENCODINGS = ['gzip', 'br', 'deflate', 'identity']
+
+/** Each value once, in order, the empty ones left out. */
+function unique(values: readonly (string | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))]
+}
+
+/**
+ * What a standard field's box suggests, wherever metadata is typed. Given
+ * the file it describes (the Metadata tab), the type its bytes say and the
+ * type of its name come first, and a disposition names the file.
+ */
+export function fieldSuggestions(
+  field: StandardField,
+  object?: Pick<StorageObjectDetail, 'name' | 'sniffed'>,
+): string[] {
+  switch (field) {
+    case 'contentType':
+      return unique([
+        object?.sniffed?.definite ? object.sniffed.mime : undefined,
+        object ? typeFromName(object.name) : undefined,
+        ...COMMON_TYPES,
+      ])
+    case 'cacheControl':
+      return CACHE_PRESETS
+    case 'contentDisposition':
+      return object
+        ? [...DISPOSITIONS, `attachment; filename="${baseName(object.name)}"`]
+        : DISPOSITIONS
+    case 'contentEncoding':
+      return ENCODINGS
+    case 'contentLanguage':
+      return []
+  }
+}
 
 export interface MetadataDraft {
   fields: Record<StandardField, string>

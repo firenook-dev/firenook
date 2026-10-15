@@ -15,7 +15,6 @@ function batch(names: string[], extra: Partial<StorageObjectsChanged> = {}): Sto
     changes: names.map((name) => ({ name, kind: 'created' })),
     folders: [],
     truncated: false,
-    sessions: [],
     indexReady: false,
     ...extra,
   }
@@ -107,12 +106,10 @@ describe('what a window refreshes besides the lists', () => {
     expect(has(keys, storageKeys.activity('demo', 'b', 'users/u1/avatar.png'))).toBe(true)
     expect(has(keys, storageKeys.eventsOf('demo', 'b', 'users/u1/avatar.png'))).toBe(true)
     expect(has(keys, storageKeys.accessOf('demo', 'b'))).toBe(true)
-    expect(has(keys, storageKeys.sessions('demo', 'b'))).toBe(false)
   })
 
-  it('the sessions when an upload session moved, and the counts once the index is built', () => {
-    const keys = invalidationKeys('demo', 'b', batch([], { sessions: ['s1'], indexReady: true }))
-    expect(has(keys, storageKeys.sessions('demo', 'b'))).toBe(true)
+  it('the counts once the index is built', () => {
+    const keys = invalidationKeys('demo', 'b', batch([], { indexReady: true }))
     expect(has(keys, storageKeys.objectsOf('demo', 'b'))).toBe(true)
     expect(has(keys, storageKeys.foldersOf('demo', 'b'))).toBe(true)
     expect(has(keys, storageKeys.treeOf('demo', 'b'))).toBe(true)

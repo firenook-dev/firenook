@@ -10,7 +10,6 @@
 import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
   ArrowsOutCardinalIcon,
-  CloudArrowUpIcon,
   CopyIcon,
   DownloadSimpleIcon,
   SlidersHorizontalIcon,
@@ -45,7 +44,6 @@ import { selectionTarget, useFileSelection } from '../selection'
 import { existingNames, keepBothName } from '../uploads'
 import { EditMetadataDialog, type MetadataRequest } from './edit-metadata-dialog'
 import { MoveDialog, type MoveRequest } from './move-dialog'
-import { UploadsInProgress, useSessions } from './uploads-in-progress'
 import { useToolLabels } from './inspector/room'
 
 type Confirm =
@@ -116,16 +114,10 @@ export interface FileActions {
   cancelRename: () => void
   /** Delete the ticked rows (⌫). */
   deleteTicked: () => void
-  /** Copy an object of this project here (a pasted gs:// URL). */
-  copyHere: (bucket: string, name: string) => void
   /** Asks to delete every object in the bucket. */
   askEmpty: () => void
   /** Edit the metadata of the ticked rows. */
   editSelection: () => void
-  /** Opens "Uploads in progress" beside an element. */
-  showSessions: (anchor: Element | null) => void
-  /** Resumable uploads the bucket holds. */
-  unfinished: number
   element: ReactNode
 }
 
@@ -146,8 +138,6 @@ export function useFileActions(selectionScope: {
   const checked = useFileSelection((state) => state.checked)
   const everything = useFileSelection((state) => state.everything)
   const clearSelection = useFileSelection((state) => state.clear)
-  const sessions = useSessions()
-  const [sessionsAnchor, setSessionsAnchor] = useState<Element | null>(null)
 
   const resource =
     confirm?.kind === 'file'
@@ -467,27 +457,6 @@ export function useFileActions(selectionScope: {
       .catch((thrown: unknown) => fail('Could not count the files', thrown))
   }
 
-  const copyHere = (bucket: string, name: string) => {
-    if (bucket !== files.bucket) {
-      toast({
-        key: 'storage-action',
-        title: 'Copies stay within a bucket here; open that bucket and use Copy… there.',
-        tone: 'warning',
-      })
-      return
-    }
-    void run('copy', {
-      bucket: files.bucket,
-      target: { by: 'keys', keys: [name] },
-      destination: { bucket: files.bucket, prefix: files.prefix },
-      onConflict: 'fail',
-    })
-      .then(() =>
-        toast({ key: 'storage-action', title: `Copying ${baseName(name)} here`, tone: 'success' }),
-      )
-      .catch((thrown: unknown) => fail(`Could not copy ${baseName(name)} here`, thrown))
-  }
-
   const selectionCount = everything ? undefined : checked.size
   const what =
     selectionCount === undefined
@@ -565,7 +534,6 @@ export function useFileActions(selectionScope: {
     </>
   )
 
-  const unfinished = sessions.data?.items.length ?? 0
   const bucketMenu = (
     <>
       <DropdownMenu.Item
@@ -574,13 +542,6 @@ export function useFileActions(selectionScope: {
         data-testid="bucket-download"
       >
         Download the bucket as .zip
-      </DropdownMenu.Item>
-      <DropdownMenu.Item
-        icon={CloudArrowUpIcon}
-        onClick={() => setSessionsAnchor(document.querySelector('[data-testid="bucket-menu"]'))}
-        data-testid="bucket-sessions"
-      >
-        Uploads in progress{unfinished > 0 ? ` · ${formatNumber(unfinished)}` : ''}
       </DropdownMenu.Item>
       <DropdownMenu.Separator />
       <DropdownMenu.Item
@@ -661,7 +622,6 @@ export function useFileActions(selectionScope: {
         onConfirm={() => void confirmDelete()}
         testId="storage-danger"
       />
-      <UploadsInProgress anchor={sessionsAnchor} onClose={() => setSessionsAnchor(null)} />
       <MoveDialog request={move} onCancel={() => setMove(undefined)} onConfirm={confirmMove} />
       <EditMetadataDialog
         request={metadata}
@@ -705,11 +665,8 @@ export function useFileActions(selectionScope: {
     commitRename,
     cancelRename: () => setRenaming(undefined),
     deleteTicked,
-    copyHere,
-    showSessions: setSessionsAnchor,
     askEmpty,
     editSelection: () => askMetadata(selected()),
-    unfinished,
     element,
   }
 }
