@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden.test-support'
 import { TASK_FIELDS } from './components/filter-line'
 import cases from './task-filter-cases.json'
 

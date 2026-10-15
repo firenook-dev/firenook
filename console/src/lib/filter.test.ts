@@ -14,7 +14,7 @@ import {
   printFilter,
 } from './filter'
 import cases from './filter-cases.json'
-import { type GoldenFile, runGoldenCases } from './filter-golden'
+import { type GoldenFile, runGoldenCases } from './filter-golden.test-support'
 
 const golden = cases as GoldenFile
 

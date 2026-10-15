@@ -5,7 +5,7 @@ import type { AuthMessageFacets } from '@/api/generated/auth/AuthMessageFacets'
 import type { AuthUserFacets } from '@/api/generated/auth/AuthUserFacets'
 import { type FacetGroup, facetState, toggleFacet } from '@/components/console/facet-list'
 import type { FilterFieldSpec } from '@/components/console/filter-field'
-import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden.test-support'
 import {
   ACTIVITY_FIELDS,
   CALLER_VALUES,

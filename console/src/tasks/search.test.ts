@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { tasksPaletteGroups } from './palette'
 import { idParam, readSearch, writeSearch } from './search'
-import { testQueue } from './test-data'
+import { testQueue } from './fixtures.test-support'
 
 describe('the page’s parameters', () => {
   it('read a task id the router parsed as a number back as text', () => {

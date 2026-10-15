@@ -9,7 +9,7 @@ import {
 import { EditorState } from '@codemirror/state'
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight'
 import { describe, expect, it } from 'vitest'
-import { RULES } from './fixture'
+import { RULES } from './fixture.test-support'
 import { documentPattern, enclosingMatchPath, rulesLanguage, wildcardsAt } from './index'
 import { rulesStreamLanguage } from './language'
 import { lex } from './scan'

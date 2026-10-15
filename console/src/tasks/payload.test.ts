@@ -16,7 +16,7 @@ import {
   taskIdProblem,
   urlProblem,
 } from './payload'
-import { NOW, testDetail } from './test-data'
+import { NOW, testDetail } from './fixtures.test-support'
 
 /** Base64 of a string's UTF-8 bytes, written independently of the code under test. */
 const b64 = (text: string) =>

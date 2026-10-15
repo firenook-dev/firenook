@@ -14,7 +14,7 @@ import {
   stateTone,
   stateWord,
 } from './states'
-import { NOW, testAttempt, testRow } from './test-data'
+import { NOW, testAttempt, testRow } from './fixtures.test-support'
 
 const at = (ms: number) => new Date(NOW + ms).toISOString()
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RULES } from './fixture'
+import { RULES } from './fixture.test-support'
 import { documentPattern, enclosingMatchPath, outline, wildcardsAt } from './outline'
 
 /** The offset just after the nth `needle`, or at its start with `before`. */

@@ -17,7 +17,8 @@
 //
 // The golden file `filter-cases.json` pins every case both sides must agree
 // on, messages and UTF-16 spans included; a grammar change edits it first,
-// and `filter-golden.ts` runs it here as `filter::golden::run` does there.
+// and `filter-golden.test-support.ts` runs it here as `filter::golden::run`
+// does there.
 // This file is the Rust module written again, line for line where it can
 // be: the parser walks Unicode scalar values (Rust's `char`), reports UTF-16
 // offsets, and copies its byte-level quirks (a ten-byte time is a date or

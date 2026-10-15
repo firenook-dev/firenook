@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { PROJECT, subscriptionSummary, topicIndex, topicSummary } from './test/index-fixture'
+import {
+  PROJECT,
+  subscriptionSummary,
+  topicIndex,
+  topicSummary,
+} from './index-fixture.test-support'
 import { mostBehind, orphanedNote, pathToCurrent, topicTree } from './tree'
 import { GROUP } from './tree-store'
 

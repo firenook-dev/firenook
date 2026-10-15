@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden.test-support'
 import { batchGetMessages, getMessages, messagesExportUrl } from './api'
 import { MESSAGE_FIELDS, deadLetterExpression, messageFields } from './filters'
 import cases from './message-filter-cases.json'

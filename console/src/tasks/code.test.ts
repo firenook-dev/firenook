@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type TaskForCode, quoteShell, taskAsCode } from './code'
-import { testDetail, testQueue } from './test-data'
+import { testDetail, testQueue } from './fixtures.test-support'
 
 const ORIGIN = 'http://127.0.0.1:9499'
 

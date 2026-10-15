@@ -56,7 +56,7 @@ import {
   subscriptionSummary,
   topicIndex,
   topicSummary,
-} from '@/pubsub/test/index-fixture'
+} from '@/pubsub/index-fixture.test-support'
 import { topicTree } from '@/pubsub/tree'
 import { AttemptsView } from '@/tasks/components/attempts-feed'
 import { SlotsAndTokens, SwitchLabel, TabLabel } from '@/tasks/components/queue-view'
@@ -73,7 +73,7 @@ import {
   testDetail,
   testQueue,
   testRow,
-} from '@/tasks/test-data'
+} from '@/tasks/fixtures.test-support'
 import { triggersKey } from '@/lib/triggers'
 import { sectionEntry, testStatus } from '@/test/status'
 import { useNow } from '@/lib/clock'

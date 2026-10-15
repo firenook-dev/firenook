@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden'
+import { type GoldenFile, runGoldenCases } from '@/lib/filter-golden.test-support'
 import cases from './event-filter-cases.json'
 import { eventFields, toggleFailed } from './filters'
 
