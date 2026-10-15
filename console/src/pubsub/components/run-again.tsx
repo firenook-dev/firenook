@@ -9,7 +9,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { PubsubDeliveryRow } from '@/api/generated/messaging/PubsubDeliveryRow'
 import { toast } from '@/lib/toasts'
-import { useConfirmPopover } from '@/messaging/confirm-popover'
+import { useConfirmPopover } from '@/components/console/confirm-popover'
 import { redeliver } from '../api'
 import { pubsubKeys } from '../queries'
 

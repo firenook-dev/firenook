@@ -8,7 +8,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
 import { toast } from '@/lib/toasts'
-import { useConfirmPopover } from '@/messaging/confirm-popover'
+import { useConfirmPopover } from '@/components/console/confirm-popover'
 import { runSchedule } from '../api'
 import { pubsubKeys } from '../queries'
 

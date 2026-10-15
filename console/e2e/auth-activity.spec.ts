@@ -237,10 +237,10 @@ test('A4 a call copies as curl and replays, asking first when it would make a us
     // A sign-up's replay would make another user: it asks, and Cancel sends nothing.
     await page.goto(activity(engine, { entry: String(signedUp.id) }))
     await detail(page).getByTestId('call-replay').click()
-    const ask = page.getByTestId('call-replay-effect')
+    const ask = page.getByTestId('call-replay-ask-description')
     await expect(ask).toHaveText('Replay creates another user.')
     const newest = await latestCall(engine)
-    await page.getByTestId('call-replay-cancel').click()
+    await page.getByTestId('call-replay-ask-cancel').click()
     await expect(ask).toHaveCount(0)
     expect((await latestCall(engine)).id).toBe(newest.id)
   } finally {

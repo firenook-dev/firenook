@@ -25,7 +25,7 @@ import {
 } from '../fixtures.test-support'
 import { AttemptsView } from './attempts-feed'
 import { AttemptsTimeline } from './attempts-timeline'
-import { type ConfirmRequest, useConfirmPopover } from '@/messaging/confirm-popover'
+import { type ConfirmRequest, useConfirmPopover } from '@/components/console/confirm-popover'
 import { QueuesLanding } from './queues-landing'
 import { panelNodes } from './queues-panel'
 import { meantQueue, refusedText } from './refused-banner'

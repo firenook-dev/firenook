@@ -12,7 +12,7 @@ import { toast } from '@/lib/toasts'
 import { deleteTask, enqueueAgain, runTask, stopTask } from '../api'
 import { useTasksSearch } from '../search'
 import { errorText } from '@/lib/error-text'
-import { type ConfirmRequest, useConfirmPopover } from '@/messaging/confirm-popover'
+import { type ConfirmRequest, useConfirmPopover } from '@/components/console/confirm-popover'
 
 /** A task as the actions name it. */
 export interface TaskSubject {

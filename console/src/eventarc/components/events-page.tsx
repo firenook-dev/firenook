@@ -38,7 +38,7 @@ import { CopyButton } from '@/components/console/copy-button'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { Kbd } from '@/components/kit'
 import { EVENT_LIST } from '@/compute/event-row'
-import { ReplayConfirm } from '@/compute/replay-confirm'
+import { ConfirmPopover, rowElement } from '@/components/console/confirm-popover'
 import { useSeededPending } from '@/compute/seeded-pending'
 import { copyToClipboard } from '@/lib/copy'
 import { linkTo } from '@/lib/links'
@@ -470,7 +470,7 @@ export function EventsPage() {
           />
         ) : null}
       </SectionBody>
-      <ReplayConfirm
+      <ConfirmPopover
         open={confirming !== undefined}
         onOpenChange={(open) => {
           if (!open) {
@@ -486,12 +486,10 @@ export function EventsPage() {
             : 'Publish the event again?'
         }
         description="It goes out on its channel as before, and every trigger that listens for it runs again; whatever they write is written again."
+        confirm="Replay"
+        anchor={confirming ? rowElement('event-list', confirming) : null}
         option={{ label: 'Keep the id', checked: keepId, onChange: setKeepId }}
-        pending={replay.isPending}
-        error={refusal(replay.error)?.message}
-        onConfirm={() => {
-          if (confirming) replay.mutate(confirming)
-        }}
+        run={() => (confirming ? replay.mutateAsync(confirming) : undefined)}
         testId="event-replay-confirm"
       />
     </SectionPage>

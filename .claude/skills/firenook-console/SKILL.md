@@ -640,6 +640,15 @@ route chunks. Identity: requests run as a `ViewAs` through
 design-system card (`console/design-system/src/cards/`, one file per
 stream, loaded by glob). A few behaviours worth knowing:
 
+- **Running the app's code again asks in a popover, destroying data in a
+  dialog.** `ConfirmPopover` (`components/console/confirm-popover.tsx`) is
+  the one confirmation for a replay, a run now, a run or enqueue again: a
+  popover beside the row (`rowElement(testId, key)`) or the button, the
+  page's upper middle when neither is there; `r` opens it, Enter confirms,
+  the caller's words say what runs again; an `option` (Eventarc's "Keep the
+  id") and the run's own pending and refusal (`errorText`) live in it.
+  `useConfirmPopover().ask(request)` is the page's one popover for
+  whoever asks. `DangerConfirm` stays the dialog that deletes.
 - `DangerConfirm` draws `DangerConfirmBody`, which is exported: a card (or
   any page that needs the confirmation at rest) draws the real body framed,
   handed a `Job` instead of subscribing. `TriggerLineItem` and
@@ -2957,7 +2966,7 @@ workbench and its Run / Trigger / Environment tabs, the six run forms on
 `invocation-actions.tsx`). `src/extensions/` and `src/eventarc/` follow
 the same split. UI shared by the three lives in `src/compute/`:
 `KindBadge`, `DurationText`, `EnvChangeDialog` (every env or parameter
-save), `ReplayConfirm` (every replay), the event row, the status words,
+save), the event row, the status words,
 `SecretInput` (a password group with its eye and the kit's `CopyButton`
 inside the field — not Kumo's `SensitiveInput`, whose copy tab rises over
 the field's top edge) and `useSeededPending`. Registry entries in
@@ -3215,10 +3224,10 @@ Any new console-held state in these crates needs a bound and an eviction rule
 in the same commit.
 
 **Shared code** (`src/messaging/`): `api.ts` (query strings, page cursors),
-`frames.ts`, `links.ts`, `rows.ts`, `windows.ts` and `confirm-popover.tsx`
-(`useConfirmPopover`, `errorText`, `rowElement`): Run again, Run now and
-Enqueue again ask in a popover anchored to the row or the button, because
-they run the handler; Delete goes through `DangerConfirm`.
+`frames.ts`, `links.ts`, `rows.ts` and `windows.ts`. Run again, Run now and
+Enqueue again ask through the kit's `ConfirmPopover` (`useConfirmPopover`,
+`rowElement`), because they run the handler; Delete goes through
+`DangerConfirm`; a failure reads through `errorText` (`lib/error-text.ts`).
 
 **The messaging fixture**: `scripts/fixtures/functions/messaging.js` (the real
 SDK, loaded through `FIXTURE_STREAMS`) and the seeders `scripts/seed/pubsub.mjs`

@@ -45,7 +45,8 @@ import { useQueueListener } from '../queue-live'
 import { displayName, generatedDetail, outcomeChip } from '../states'
 import { FilterLine, useTaskFields, usableQuery } from './filter-line'
 import type { TaskActions } from './task-actions'
-import { PayloadCell, rowElement } from './task-table'
+import { rowElement } from '@/components/console/confirm-popover'
+import { PayloadCell } from './task-table'
 import { ResultChip } from './result-chip'
 
 const NOUN = { one: 'finished task', other: 'finished tasks' }
