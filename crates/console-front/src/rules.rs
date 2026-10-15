@@ -26,16 +26,15 @@
 //! that response is about, because the editor is a browser text component
 //! and that is how it counts.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Query, State};
 use firenook_core_store::DatabaseName;
 use firenook_rules_engine::{
-    ClaimRead, ClaimReadForm, Diagnostic, DiagnosticSeverity, GoverningMap, LintCode,
-    RequestOperation,
+    Diagnostic, DiagnosticSeverity, GoverningMap, LintCode, RequestOperation,
 };
 use firenook_rules_runtime::{InstalledVersion, LoadError, RulesEvent, RulesRuntime};
 use futures_util::stream::{self, StreamExt as _};
@@ -113,63 +112,6 @@ pub struct RulesDiagnostic {
     pub code: Option<RulesLintCode>,
 }
 
-/// One place a ruleset reads a claim of the caller's ID token
-/// (`request.auth.token.role`), for "read by your rules" beside a user's
-/// custom claims.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RulesClaimRead {
-    /// The top-level claim (`org` for a read of `org.role`); `null` when the
-    /// key is computed at run time (`token[name]`), so the rule may read any
-    /// claim.
-    pub key: Option<String>,
-    pub form: RulesClaimReadForm,
-    /// One-based line of the reading expression.
-    #[ts(type = "number")]
-    pub line: usize,
-    /// Zero-based UTF-16 offset where the expression starts.
-    #[ts(type = "number")]
-    pub from: usize,
-    /// Exclusive UTF-16 end.
-    #[ts(type = "number")]
-    pub to: usize,
-}
-
-/// How a rule spells a claim read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum RulesClaimReadForm {
-    /// A member access of the token.
-    Member,
-    /// An index with a literal key.
-    Index,
-    /// A `get` with a default.
-    Get,
-    /// An `in` test, or `keys().hasAny`.
-    In,
-    /// An index with a computed key.
-    Dynamic,
-}
-
-impl From<&ClaimRead> for RulesClaimRead {
-    /// A rules-engine claim read as the console shows it.
-    fn from(read: &ClaimRead) -> Self {
-        Self {
-            key: read.key.clone(),
-            form: match read.form {
-                ClaimReadForm::Member => RulesClaimReadForm::Member,
-                ClaimReadForm::Index => RulesClaimReadForm::Index,
-                ClaimReadForm::Get => RulesClaimReadForm::Get,
-                ClaimReadForm::In => RulesClaimReadForm::In,
-                ClaimReadForm::Dynamic => RulesClaimReadForm::Dynamic,
-            },
-            line: read.range.line,
-            from: read.range.from,
-            to: read.range.to,
-        }
-    }
-}
-
 /// The rules a database is being served with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -194,9 +136,6 @@ pub struct RulesDocument {
     /// found it did not compile, or could not read it. Empty otherwise.
     /// Positions refer to `fileSource`.
     pub file_problems: Vec<RulesDiagnostic>,
-    /// Where the rules in force read the caller's token claims, in source
-    /// order; positions refer to `source`.
-    pub claim_reads: Vec<RulesClaimRead>,
 }
 
 /// What a change did.
@@ -222,9 +161,6 @@ pub struct RulesCheck {
     /// the console's schema tree. Null when the draft does not compile or
     /// the schema could not be read.
     pub map: Option<RulesMap>,
-    /// Where the draft reads the caller's token claims, in source order;
-    /// empty when it does not compile.
-    pub claim_reads: Vec<RulesClaimRead>,
 }
 
 /// The match blocks of a draft, depth first in source order.
@@ -401,17 +337,7 @@ pub struct RulesEditor {
     files: Arc<BTreeMap<String, PathBuf>>,
     /// The console's schema index, which a check maps the rules against.
     schema: Option<SchemaIndex>,
-    /// The claim reads of recent rulesets in force, by hash, so a read
-    /// compiles a ruleset at most once.
-    claim_reads: ClaimReadCache,
 }
-
-/// Claim reads by ruleset hash, oldest first.
-type ClaimReadCache = Arc<Mutex<VecDeque<(String, Arc<[RulesClaimRead]>)>>>;
-
-/// Rulesets whose claim reads are kept: one per configured database is the
-/// steady state.
-const CLAIM_READ_CACHE: usize = 16;
 
 impl RulesEditor {
     /// An editor over `project`'s rules. `files` maps a database id to the
@@ -423,46 +349,7 @@ impl RulesEditor {
             project: Arc::from(project),
             files: Arc::new(files),
             schema: None,
-            claim_reads: Arc::default(),
         }
-    }
-
-    /// The claim reads of the ruleset with `hash` (its text `source`):
-    /// cached by hash, compiled off the request workers when not.
-    async fn claim_reads_of(&self, hash: &str, source: &str) -> Vec<RulesClaimRead> {
-        if hash.is_empty() || source.is_empty() {
-            return Vec::new();
-        }
-        let cached = self
-            .claim_reads
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .find(|(cached, _)| cached == hash)
-            .map(|(_, reads)| reads.clone());
-        if let Some(reads) = cached {
-            return reads.to_vec();
-        }
-        let text = source.to_owned();
-        let reads: Arc<[RulesClaimRead]> = blocking("the rules task", move || {
-            Ok(firenook_rules_engine::compile(&text)
-                .map(|ruleset| claim_reads(&ruleset.claim_reads()))
-                .unwrap_or_default())
-        })
-        .await
-        .unwrap_or_default()
-        .into();
-        let mut cache = self
-            .claim_reads
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !cache.iter().any(|(cached, _)| cached == hash) {
-            if cache.len() >= CLAIM_READ_CACHE {
-                cache.pop_front();
-            }
-            cache.push_back((hash.to_owned(), reads.clone()));
-        }
-        reads.to_vec()
     }
 
     /// Maps checked drafts against `schema`, the tree the console shows.
@@ -564,13 +451,11 @@ impl RulesEditor {
             .as_ref()
             .map(|version| version.source.to_string())
             .unwrap_or_default();
-        let claim_reads = self.claim_reads_of(&hash, &source).await;
         Ok(RulesDocument {
             database: database_id.to_owned(),
             enforced: current.is_some(),
             hash,
             source,
-            claim_reads,
             path: self.path(database_id),
             file_source,
             file_problems: self
@@ -649,19 +534,17 @@ impl RulesEditor {
             Ok(firenook_rules_engine::compile(&source).map(|ruleset| {
                 let lints = ruleset.lints();
                 let outline = ruleset.outline();
-                let reads = claim_reads(&ruleset.claim_reads());
-                (ruleset, lints, outline, reads)
+                (ruleset, lints, outline)
             }))
         })
         .await?;
-        let (ruleset, lints, outline, reads) = match compiled {
+        let (ruleset, lints, outline) = match compiled {
             Ok(compiled) => compiled,
             Err(errors) => {
                 return Ok(RulesCheck {
                     diagnostics: errors.iter().map(diagnostic).collect(),
                     outline: None,
                     map: None,
-                    claim_reads: Vec::new(),
                 });
             }
         };
@@ -681,14 +564,8 @@ impl RulesEditor {
             diagnostics: lints.iter().map(diagnostic).collect(),
             outline: Some(outline_view(&outline)),
             map,
-            claim_reads: reads,
         })
     }
-}
-
-/// The rules engine's claim reads, as the console shows them.
-fn claim_reads(reads: &[ClaimRead]) -> Vec<RulesClaimRead> {
-    reads.iter().map(RulesClaimRead::from).collect()
 }
 
 /// THE way to turn a failed compilation into what the console shows.
@@ -1152,72 +1029,6 @@ mod tests {
         let from = usize::try_from(from.as_u64().expect("from")).expect("fits");
         let to = usize::try_from(to.as_u64().expect("to")).expect("fits");
         String::from_utf16(&units[from..to]).expect("whole characters")
-    }
-
-    /// Rules that read two claims, after a non-ASCII comment so the UTF-16
-    /// offsets differ from byte offsets.
-    const CLAIMS: &str = "rules_version = '2';\n// é 🔥 claims\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /orgs/{org} {\n      allow read: if request.auth.token.role == 'admin';\n      allow write: if 'tenant_id' in request.auth.token;\n    }\n  }\n}\n";
-
-    #[tokio::test]
-    async fn the_rules_documents_say_where_claims_are_read() {
-        let (runtime, editor) = editor(None);
-        runtime
-            .install_database(&database(), CLAIMS)
-            .expect("install");
-        // The ruleset in force.
-        let (status, document) = request(editor.clone(), get("/rules")).await;
-        assert_eq!(status, StatusCode::OK, "{document}");
-        let reads = document["claimReads"].as_array().expect("claimReads");
-        assert_eq!(reads.len(), 2, "{document}");
-        assert_eq!(reads[0]["key"], "role");
-        assert_eq!(reads[0]["form"], "member");
-        assert_eq!(reads[0]["line"], 6);
-        assert_eq!(
-            utf16_slice(CLAIMS, &reads[0]["from"], &reads[0]["to"]),
-            "request.auth.token.role"
-        );
-        assert_eq!(reads[1]["key"], "tenant_id");
-        assert_eq!(reads[1]["form"], "in");
-        assert_eq!(reads[1]["line"], 7);
-        // A second read is answered from the cache, with the same reads.
-        let (_, again) = request(editor.clone(), get("/rules")).await;
-        assert_eq!(again["claimReads"], document["claimReads"]);
-        // A draft, and a draft that does not compile.
-        let draft = "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read: if request.auth.token.get('plan', 'free') == 'pro' || request.auth.token[request.resource.data.key] == true;\n    }\n  }\n}\n";
-        let (status, checked) = request(
-            editor.clone(),
-            check(&serde_json::json!({ "source": draft })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{checked}");
-        let reads = checked["claimReads"].as_array().expect("claimReads");
-        assert_eq!(
-            reads
-                .iter()
-                .map(|read| (read["key"].clone(), read["form"].clone()))
-                .collect::<Vec<_>>(),
-            [
-                (serde_json::json!("plan"), serde_json::json!("get")),
-                (serde_json::Value::Null, serde_json::json!("dynamic")),
-            ]
-        );
-        let (_, broken) = request(
-            editor,
-            check(&serde_json::json!({ "source": "rules_version = '2';\nservice" })),
-        )
-        .await;
-        assert_eq!(broken["claimReads"], serde_json::json!([]));
-        // Rules without claims, and no rules at all, read none.
-        let (open, open_editor) = editor_without_rules();
-        let (_, document) = request(open_editor, get("/rules")).await;
-        assert_eq!(document["claimReads"], serde_json::json!([]));
-        drop(open);
-    }
-
-    fn editor_without_rules() -> (RulesRuntime, RulesEditor) {
-        let runtime = RulesRuntime::default();
-        let editor = RulesEditor::new(&runtime, PROJECT, BTreeMap::new());
-        (runtime, editor)
     }
 
     #[tokio::test]

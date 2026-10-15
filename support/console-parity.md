@@ -62,10 +62,10 @@ The official users page (`components/Auth/*`).
 | Filter users | Authentication › Users: the filter field (`is:disabled provider:google.com claim:role=admin created:>-7d …`, words), facets with counts | auth | [x] |
 | Tenant picker | Authentication › Users, Inbox and Activity: the tenant picker in the panel (and in row one when the panel is shut), with counts, New tenant… and Manage tenants… | auth | [x] |
 | Add a user | Authentication › Users › New user (every kind of account: email and password, phone, anonymous, a provider, custom claims); a taken email explained | auth | [x] |
-| Edit a user: display name, email, password, phone, photo URL, custom claims JSON with validation, MFA phone factors, sign-in method | Authentication › Users › the inspector: Details (name, email, phone, photo URL, verified, times), Password, Claims (Firebase's own checks, the token it makes, where rules read each key), SMS second factors, linked providers | auth | [x] |
+| Edit a user: display name, email, password, phone, photo URL, custom claims JSON with validation, MFA phone factors, sign-in method | Authentication › Users › the inspector: Details (name, email, phone, photo URL, verified, times), Password, Claims (Firebase's own checks and the token they make), SMS second factors, linked providers | auth | [x] |
 | Delete a user | Authentication › Users: the row menu, the inspector and ticked rows › Delete, a job with the functions it runs | auth | [x] |
 | Enable and disable a user | Authentication › Users: the inspector's switch, and Disable / Enable on ticked rows or everything the filter matches (a job) | auth | [x] |
-| Clear all users | Authentication › Settings › Data ("Delete all users of …", one tenant or every tenant, a job) and ⌘K; Overview › Data › Reset | auth | [x] |
+| Clear all users | Overview › Data › Reset › Authentication (every user of every tenant, one suite job; Settings › Data links to it); one tenant's or the project's users: Users › select every match › Delete, or ⌘K "Delete all users…" (a job, with or without triggers) | auth | [x] |
 | One account per email address | Authentication › Settings › Sign-in (the switch, with what it changes for a provider sign-in) | auth | [x] |
 | Refresh | Authentication › Users is live: rows arrive, flash and patch in place from the `auth.users` topic; no refresh button | auth | [x] |
 | Zero state | Authentication › Users: "No users yet" with how an app connects to this engine's Auth; an empty tenant names the scopes that hold users; New user, Sample users and Import | auth | [x] |

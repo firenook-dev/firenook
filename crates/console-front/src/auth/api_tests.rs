@@ -905,9 +905,15 @@ async fn tenants_are_listed_created_and_read_by_id() {
     assert_eq!(status, StatusCode::OK, "{batch}");
     assert_eq!(batch["items"][0]["row"]["tenantId"], "acme");
     assert_eq!(batch["items"][1]["row"], Value::Null);
-    let (status, meta) = get(&api, "/api/v1/auth/tenants/meta").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(meta["defaultSort"], "tenantId:asc");
+    let (_, all) = get(&api, "/api/v1/auth/tenants").await;
+    assert_eq!(all["total"], 2);
+    assert_eq!(field(&all, "tenantId"), ["acme", "beta-1"]);
+    let (_, first) = get(&api, "/api/v1/auth/tenants?limit=1").await;
+    assert_eq!(field(&first, "tenantId"), ["acme"]);
+    assert_eq!(first["total"], 2);
+    assert_eq!(first.get("nextCursor"), None);
+    let (status, _) = get(&api, "/api/v1/auth/tenants/meta").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

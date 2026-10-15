@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AuthTokenInspection } from '@/api/generated/auth/AuthTokenInspection'
-import { inspectThisToken, takeInspectDraft } from '../inspect-draft'
+import { handOffToken, takeHandedOffToken } from '../inspect-handoff'
 import { consumerLabel, kindLine } from './inspect-token'
 
 function inspection(extra: Partial<AuthTokenInspection> = {}): AuthTokenInspection {
@@ -39,9 +39,22 @@ describe('Inspect a token', () => {
     expect(consumerLabel('signIn', 'customToken')).toBe('signInWithCustomToken')
   })
 
-  it('takes a token handed to it once', () => {
-    inspectThisToken('eyJ.a.b')
-    expect(takeInspectDraft()).toBe('eyJ.a.b')
-    expect(takeInspectDraft()).toBe('')
+  it('takes a token handed to it once, with what Sign in as said of it', () => {
+    handOffToken('eyJ.a.b')
+    expect(takeHandedOffToken()).toEqual({ token: 'eyJ.a.b', minted: undefined })
+    expect(takeHandedOffToken()).toBeUndefined()
+    const minted = {
+      who: 'ada@example.test',
+      minted: {
+        idToken: 'eyJ.c.d',
+        provider: 'password',
+        secondFactor: null,
+        expiresAt: '2026-10-16T01:00:00Z',
+        beforeSignIn: null,
+        differences: ['This user is disabled.'],
+      },
+    }
+    handOffToken('eyJ.c.d', minted)
+    expect(takeHandedOffToken()).toEqual({ token: 'eyJ.c.d', minted })
   })
 })

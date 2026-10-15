@@ -1,22 +1,18 @@
 // The Claims tab: the account's custom claims as JSON, checked as Firebase
-// checks them while they are typed, with the token they produce beside them
-// and where the rules read each one.
+// checks them while they are typed, with the token they produce beside them.
 //
 // - the editor marks text that is not JSON, a value that is not an object,
 //   every reserved key, and the keys the minted token says something about;
 //   it completes the keys other users carry;
 // - the meter measures what Firebase measures (UTF-16 code units of the
 //   compact JSON) against the 1,000-character limit, amber from 900;
-// - "Read by your rules" comes from the rules engine's own analysis;
 // - the ID token below is the engine's mint of this draft, nothing stored.
 //
 // The draft is the inspector's: Save (or ⌘↵ here, ⌘S anywhere) writes it
 // with the rest in one `accounts:update`.
 
 import { Button, Meter, Tooltip } from '@cloudflare/kumo'
-import { ArrowSquareOutIcon, InfoIcon } from '@phosphor-icons/react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import type { AuthUserDetail } from '@/api/generated/auth/AuthUserDetail'
 import { CodeEditor } from '@/components/code-editor'
@@ -33,9 +29,7 @@ import {
   meterTone,
   noteMarks,
 } from '../claims'
-import { type RulesTarget, rulesLineLink } from '../links'
 import { authKeys, claimKeysQuery } from '../queries'
-import { groupClaimReads, useClaimReadSources } from '../rules-reads'
 import { tokenRequest } from '../token-request'
 import { refusal } from '../user-actions'
 import { ProviderSelect, TokenPreview } from './token-preview'
@@ -64,29 +58,6 @@ function previewClaims(text: string): Record<string, unknown> | undefined {
   } catch {
     return undefined
   }
-}
-
-/** A line of a ruleset, as a link to its rules page at that line (the rules pages' own schema). */
-function RulesLine({
-  target,
-  line,
-  testId,
-}: {
-  target: RulesTarget
-  line: number
-  testId?: string
-}) {
-  const link = rulesLineLink(target, line)
-  return (
-    <Link
-      to={link.to as never}
-      search={link.search as never}
-      className="font-mono text-kumo-link underline-offset-2 hover:underline"
-      data-testid={testId}
-    >
-      {line}
-    </Link>
-  )
 }
 
 /**
@@ -177,8 +148,6 @@ export function ClaimsEditor({
     const parsed = previewClaims(text)
     return parsed === undefined ? [] : Object.keys(parsed)
   })()
-  const reads = useClaimReadSources(true)
-  const grouped = groupClaimReads(reads.sources)
   const formatted = formatClaims(text)
   return (
     <div className="pb-2" data-testid="claims-editor">
@@ -254,89 +223,6 @@ export function ClaimsEditor({
           </div>
         </div>
       </InspectorSection>
-      {(reads.firestore || reads.storage) && (
-        <InspectorSection title="Read by your rules" testId="section-claim-reads">
-          {formatted === undefined ? (
-            <p className="text-[12px] text-kumo-subtle">Shown once the claims are JSON.</p>
-          ) : draftKeys.length === 0 && grouped.dynamic.length === 0 ? (
-            <p className="text-[12px] text-kumo-subtle">These claims are empty.</p>
-          ) : (
-            <ul className="grid gap-1">
-              {draftKeys.map((key) => {
-                const places = grouped.byKey.get(key) ?? []
-                return (
-                  <li
-                    key={key}
-                    className="flex min-w-0 items-baseline gap-3 text-[12px]"
-                    data-testid="claim-read"
-                  >
-                    <span className="w-24 shrink-0 truncate font-mono text-kumo-default">
-                      {key}
-                    </span>
-                    {places.length === 0 ? (
-                      <span className="text-kumo-subtle">
-                        {grouped.dynamic.length > 0
-                          ? 'not read by name (a rule reads a claim chosen at run time)'
-                          : 'not read by any rules'}
-                      </span>
-                    ) : (
-                      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                        {places.map((place, index) => (
-                          <span key={place.label} className="inline-flex items-baseline gap-1">
-                            {index > 0 && <span className="text-kumo-subtle">·</span>}
-                            <span className="font-mono text-kumo-subtle">{place.label}</span>
-                            <span className="text-kumo-subtle">
-                              {place.lines.length === 1 ? 'line' : 'lines'}
-                            </span>
-                            {place.lines.map((line, at) => (
-                              <span key={line} className="inline-flex items-baseline">
-                                <RulesLine
-                                  target={place.target}
-                                  line={line}
-                                  testId="claim-read-line"
-                                />
-                                {at < place.lines.length - 1 && ','}
-                              </span>
-                            ))}
-                            <ArrowSquareOutIcon
-                              size={11}
-                              className="self-center text-kumo-subtle"
-                              aria-hidden
-                            />
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          {grouped.dynamic.length > 0 && (
-            <p
-              className="mt-2 flex items-start gap-1.5 text-[12px] text-kumo-subtle"
-              data-testid="claim-reads-dynamic"
-            >
-              <span className="flex h-4 items-center">
-                <InfoIcon size={12} />
-              </span>
-              <span>
-                {grouped.dynamic.length === 1
-                  ? '1 rule reads'
-                  : `${grouped.dynamic.length} rules read`}{' '}
-                a claim chosen at run time (
-                {grouped.dynamic.map((read, index) => (
-                  <span key={`${read.label}:${read.line}`}>
-                    {index > 0 && ', '}
-                    {read.label} line <RulesLine target={read.target} line={read.line} />
-                  </span>
-                ))}
-                ).
-              </span>
-            </p>
-          )}
-        </InspectorSection>
-      )}
       <InspectorSection
         title="The ID token these claims produce"
         testId="section-token"

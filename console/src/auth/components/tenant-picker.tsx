@@ -15,7 +15,7 @@ import { BuildingsIcon, GearSixIcon, PlusIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import { type ScopeAction, type ScopeItem, ScopeSelect } from '@/components/console/scope-select'
 import { formatCount, formatNumber } from '@/lib/format'
 import { authKeys, tenantPickerQuery } from '../queries'
@@ -39,10 +39,10 @@ export function scopeValue(scope: TenantScope): string {
   return scope.kind === 'all' ? ALL_TENANTS : NO_TENANT
 }
 
-/** The list a page's picker offers, from the engine's first page of tenants. */
+/** The list a page's picker offers, from the engine's first tenants. */
 export function pickerItems(
   page: AuthPage,
-  answer: Pick<AuthTenantPage, 'items' | 'projectUsers'> | undefined,
+  answer: Pick<AuthTenantList, 'items' | 'projectUsers'> | undefined,
 ): ScopeItem<string>[] {
   const items: ScopeItem<string>[] = []
   if (page === 'inbox' || page === 'activity')
@@ -51,10 +51,7 @@ export function pickerItems(
     value: NO_TENANT,
     label: 'No tenant',
     note: 'Project users',
-    detail:
-      answer?.projectUsers === null || answer?.projectUsers === undefined
-        ? undefined
-        : formatCount(answer.projectUsers, USERS),
+    detail: answer === undefined ? undefined : formatCount(answer.projectUsers, USERS),
   })
   for (const tenant of answer?.items ?? [])
     items.push({
@@ -107,7 +104,7 @@ export function TenantPicker({
       run: () => settings({ section: 'tenants' }),
     },
   ]
-  const count = first.data?.total?.count ?? first.data?.items.length ?? 0
+  const count = first.data?.total ?? 0
   if (count > PICKER_LIST_MAX)
     return (
       <TenantSearch
@@ -146,7 +143,7 @@ interface TenantOption {
 
 function optionsOf(
   page: AuthPage,
-  answer: AuthTenantPage | undefined,
+  answer: AuthTenantList | undefined,
   text: string,
 ): TenantOption[] {
   const all = pickerItems(page, answer).map((item) => ({
@@ -177,7 +174,7 @@ function TenantSearch({
   page: AuthPage
   scope: TenantScope
   onChange: (scope: TenantScope) => void
-  first: AuthTenantPage | undefined
+  first: AuthTenantList | undefined
   actions: readonly ScopeAction[]
   testId: string
 }) {
@@ -194,8 +191,7 @@ function TenantSearch({
     value,
     label: scopeLabel(scope),
   }
-  const total = answer?.total?.count
-  const more = total === undefined ? 0 : Math.max(0, total - (answer?.items.length ?? 0))
+  const more = answer === undefined ? 0 : Math.max(0, answer.total - answer.items.length)
   return (
     <div className="min-w-0" data-testid={testId}>
       <Combobox<TenantOption>

@@ -4,7 +4,7 @@
 // and how long it took. The engine filters (`q`, the tenant, the console's
 // own edits) and pages; the list is the feed store `auth.activity` fills,
 // bounded by what the engine keeps. A call opens into the detail; the side
-// panel holds the tools (Inspect a token).
+// panel holds Inspect a token.
 
 import { Button, Checkbox } from '@cloudflare/kumo'
 import {
@@ -16,8 +16,6 @@ import {
   ListMagnifyingGlassIcon,
   MagnifyingGlassIcon,
   PauseIcon,
-  PencilSimpleIcon,
-  SignInIcon,
   TerminalWindowIcon,
   TrashIcon,
   UserIcon,
@@ -58,11 +56,10 @@ import { callJson, curlCommand, replayBlocked, tokenOfRequest } from '../activit
 import { clearActivity } from '../api'
 import { copyToClipboard } from '@/lib/copy'
 import { activityFacetGroups, activityFields } from '../fields'
-import { inspectThisToken } from '../inspect-draft'
+import { handOffToken } from '../inspect-handoff'
 import { logsForCall, userLink } from '../links'
 import { useActivityFeed } from '../live'
 import { callLabel } from '../operations'
-import { type TryMethod, fieldsOfCall, methodOfCall, tryWith } from '../sign-in'
 import { ACTIVITY_CAPACITY, activityEntryQuery, authKeys, summaryQuery } from '../queries'
 import { type TenantScope, tenantKey, tenantParam, tenantScope } from '../tenant-scope'
 import { ActivityDetail, useAuthBase, useReplay } from './activity-detail'
@@ -72,7 +69,6 @@ import { useFeedItem, useFeedMenu, useFeedNeighbours } from './feed-menu'
 import { InspectToken } from './inspect-token'
 import { usePagePalette } from './page-palette'
 import { TenantPicker, scopeLabel } from './tenant-picker'
-import { TrySignIn } from './try-sign-in'
 
 /** Activity's search params (`routes/auth_.activity.tsx`). */
 export type ActivitySearch = {
@@ -82,8 +78,7 @@ export type ActivitySearch = {
   entry?: number | undefined
   console?: boolean | undefined
   paused?: boolean | undefined
-  panel?: 'try' | 'inspect' | undefined
-  method?: TryMethod | undefined
+  panel?: 'inspect' | undefined
 }
 
 const NOUN = { one: 'call', other: 'calls' }
@@ -147,8 +142,7 @@ export function ActivityPage() {
     update({ entry: id, panel: undefined }, { replace: search.entry !== undefined })
   }
   const open = (call: AuthActivitySummary) => openId(call.id)
-  const close = () =>
-    update({ entry: undefined, panel: undefined, method: undefined }, { replace: true })
+  const close = () => update({ entry: undefined, panel: undefined }, { replace: true })
   const onSelect = (call: AuthActivitySummary) => {
     if (pointed.current || openKey !== undefined) open(call)
     else setSelectedKey(callKey(call))
@@ -164,17 +158,8 @@ export function ActivityPage() {
   }
   const logs = (call: AuthActivitySummary) => navigateTo(logsForCall(call))
   const inspect = (token?: string) => {
-    if (token) inspectThisToken(token)
-    update({ panel: 'inspect', entry: undefined, method: undefined })
-  }
-  const openTry = (method?: TryMethod) =>
-    update({ panel: 'try', method: method === 'password' ? undefined : method, entry: undefined })
-  /** "Edit and run again": Try with the call's method and identifier. */
-  const editAndRun = (call: AuthActivitySummary) => {
-    const method = methodOfCall(call)
-    if (!method) return
-    tryWith(fieldsOfCall(call, method))
-    openTry(method)
+    if (token) handOffToken(token)
+    update({ panel: 'inspect', entry: undefined })
   }
 
   const detailOf = (call: AuthActivitySummary): Promise<AuthActivityDetail> =>
@@ -264,15 +249,6 @@ export function ActivityPage() {
         run: () => void replayCall(call),
       },
     ]
-    const method = methodOfCall(call)
-    items.push({
-      id: 'edit-run',
-      label: 'Edit and run again',
-      icon: PencilSimpleIcon,
-      shortcut: 'Shift+r',
-      disabled: method ? undefined : 'Try a sign-in has no method for this call.',
-      run: () => editAndRun(call),
-    })
     if (mayCarryToken(call))
       items.push({
         id: 'inspect',
@@ -366,15 +342,6 @@ export function ActivityPage() {
       },
     },
     {
-      key: 'Shift+r',
-      label: 'Edit, then run again',
-      group: 'Activity',
-      when: () => target !== undefined && methodOfCall(target) !== undefined,
-      run: () => {
-        if (target) editAndRun(target)
-      },
-    },
-    {
       key: 'l',
       label: 'Open in Logs',
       group: 'Activity',
@@ -451,11 +418,6 @@ export function ActivityPage() {
             title="No calls yet"
             description="Every request your app makes to the Auth emulator appears here with its outcome."
             connect={{ service: 'auth', project: search.project }}
-            actions={
-              <Button variant="primary" icon={<SignInIcon />} onClick={() => openTry()}>
-                Try a sign-in
-              </Button>
-            }
             testId="activity-empty"
           />
         ) : (
@@ -493,7 +455,7 @@ export function ActivityPage() {
               label={<span className="text-[13px]">Include the console’s own edits</span>}
             />
             <span className="pl-6 text-[12px] text-kumo-subtle">
-              Try a sign-in and Replay are always shown.
+              Replays, and the beforeSignIn runs Sign in as makes, are always shown.
             </span>
           </div>
         </div>
@@ -527,6 +489,7 @@ export function ActivityPage() {
           <Button
             variant={search.panel === 'inspect' ? 'secondary' : 'ghost'}
             size="sm"
+            icon={<MagnifyingGlassIcon />}
             aria-pressed={search.panel === 'inspect'}
             onClick={() => (search.panel === 'inspect' ? close() : inspect())}
             data-testid="activity-inspect-token"
@@ -538,16 +501,6 @@ export function ActivityPage() {
             disabled={loaded === 0}
             testId="activity-clear"
           />
-          <ToolbarDivider />
-          <Button
-            variant="primary"
-            size="sm"
-            icon={<SignInIcon />}
-            onClick={() => (search.panel === 'try' ? close() : openTry())}
-            data-testid="activity-try"
-          >
-            Try a sign-in
-          </Button>
         </ToolbarRow>
         <ToolbarRow variant="line" testId="activity-row-two">
           <FilterField
@@ -576,18 +529,7 @@ export function ActivityPage() {
             <FeedFooter loaded={loaded} capacity={capacity} noun={NOUN} testId="activity-footer" />
           )}
         </div>
-        {search.panel === 'try' ? (
-          <TrySignIn
-            project={project}
-            scope={scope}
-            method={search.method ?? 'password'}
-            onMethod={(method) =>
-              update({ method: method === 'password' ? undefined : method }, { replace: true })
-            }
-            onOpenCall={openId}
-            onClose={close}
-          />
-        ) : search.panel === 'inspect' ? (
+        {search.panel === 'inspect' ? (
           <InspectToken project={project} onClose={close} />
         ) : search.entry !== undefined ? (
           <ActivityDetail

@@ -1,19 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { cleanSeed, sampleUsers } from './sample-users'
+import { SAMPLE_COUNTS, SAMPLE_PASSWORD, sampleUsers } from './sample-users'
 
-const base = {
-  count: 300,
-  providers: ['password', 'phone', 'google.com', 'anonymous'] as const,
-  variety: true,
-  password: 'password-1',
-  seed: 'abc1',
-  now: Date.UTC(2026, 9, 12),
-}
+const base = { count: 300, seed: 'abc1', now: Date.UTC(2026, 9, 12) }
 
 describe('sample users', () => {
   it('are the same for the same seed, and others for another', () => {
     expect(sampleUsers(base)).toEqual(sampleUsers(base))
     expect(sampleUsers({ ...base, seed: 'other' })).not.toEqual(sampleUsers(base))
+  })
+
+  it('are at most 1,000 at a time', () => {
+    expect(Math.max(...SAMPLE_COUNTS)).toBe(1_000)
   })
 
   it('carry sample- uids and sample.test emails, all different', () => {
@@ -30,18 +27,15 @@ describe('sample users', () => {
     expect(phones.every((phone) => /^\+[1-9]\d{1,14}$/.test(phone))).toBe(true)
   })
 
-  it('mix the providers in equal shares', () => {
+  it('mix email, phone and Google accounts in equal shares', () => {
     const users = sampleUsers(base)
     const of = (provider: string) =>
-      users.filter((user) =>
-        provider === 'anonymous'
-          ? user.providerUserInfo === undefined
-          : (user.providerUserInfo as { providerId: string }[] | undefined)?.[0]?.providerId ===
-            provider,
+      users.filter(
+        (user) =>
+          (user.providerUserInfo as { providerId: string }[] | undefined)?.[0]?.providerId ===
+          provider,
       ).length
-    expect([of('password'), of('phone'), of('google.com'), of('anonymous')]).toEqual([
-      75, 75, 75, 75,
-    ])
+    expect([of('password'), of('phone'), of('google.com')]).toEqual([100, 100, 100])
   })
 
   it('keep claims well under the limit, and a password the emulator can read back', () => {
@@ -50,8 +44,11 @@ describe('sample users', () => {
       if (typeof user.customAttributes === 'string')
         expect(user.customAttributes.length).toBeLessThanOrEqual(1_000)
     const withPassword = users.find((user) => typeof user.passwordHash === 'string')
-    expect(String(withPassword?.passwordHash)).toMatch(/^fakeHash:salt=.+:password=password-1$/)
+    expect(String(withPassword?.passwordHash)).toBe(
+      `fakeHash:salt=fakeSaltabc11:password=${SAMPLE_PASSWORD}`,
+    )
     expect(users.some((user) => user.disabled === true)).toBe(true)
+    expect(users.some((user) => user.emailVerified === false)).toBe(true)
     expect(users.some((user) => Array.isArray(user.mfaInfo))).toBe(true)
     // The emulator refuses a second factor without a verified email.
     expect(
@@ -59,12 +56,5 @@ describe('sample users', () => {
         .filter((user) => Array.isArray(user.mfaInfo))
         .every((user) => user.emailVerified === true),
     ).toBe(true)
-    expect(sampleUsers({ ...base, variety: false }).some((user) => user.disabled === true)).toBe(
-      false,
-    )
-  })
-
-  it('takes a seed as letters and digits only', () => {
-    expect(cleanSeed('My Seed #7!')).toBe('myseed7')
   })
 })

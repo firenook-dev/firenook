@@ -8,7 +8,6 @@ import {
   deleteAccounts,
   emulatorConfig,
   latestCall,
-  messages,
   payloadOf,
   scrollSettled,
   setEmulatorConfig,
@@ -25,8 +24,8 @@ import { subscriptionLog } from './support/shell'
 // Authentication › Activity against the real engine (auth spec §9.3,
 // A1–A10): every call with its exact error explained, the console's own
 // edits hidden until asked for, Replay and curl, the live tail and its
-// pause, Try a sign-in, blocking functions, Inspect a token, a dropped
-// channel and the topic only this page takes. Users made here are on
+// pause, blocking functions, Inspect a token, a dropped channel and the
+// topic only this page takes. Users made here are on
 // `journey.test` (or the blocking fixtures' domains) and deleted at the end.
 
 const stamp = () => Date.now().toString(36)
@@ -149,10 +148,7 @@ test('A2 with enumeration protection on, a wrong password is explained with the 
   }
 })
 
-test('A3 the console’s own edits wait behind a tick, a try shows at once', async ({
-  page,
-  engine,
-}) => {
+test('A3 the console’s own edits wait behind a tick', async ({ page, engine }) => {
   const email = `edits-${stamp()}@journey.test`
   const user = await signUp(engine, { email })
   try {
@@ -178,16 +174,6 @@ test('A3 the console’s own edits wait behind a tick, a try shows at once', asy
     await expect(rowOf(page, edit)).toBeVisible()
     await page.getByTestId('activity-console-toggle').getByRole('checkbox').click()
     await expect(rowOf(page, edit)).toHaveCount(0)
-
-    // A try is the developer's own question: shown at once, chipped.
-    await page.getByTestId('activity-try').click()
-    await page.getByTestId('try-email').fill(email)
-    await page.getByTestId('try-password').fill('password-1')
-    await page.getByTestId('try-run').click()
-    await expect(page.locator('[data-testid="try-result"] [data-state="signed-in"]')).toBeVisible()
-    const tried = await latestCall(engine)
-    await expect(rowOf(page, tried.id)).toBeVisible()
-    await expect(rowOf(page, tried.id).getByTestId('activity-caller')).toHaveText('Try')
   } finally {
     await deleteAccounts(engine, [user.localId])
   }
@@ -305,85 +291,6 @@ test('A5 a paused tail holds still, counts what came, and resumes with it', asyn
   await expect(pause).not.toHaveText(/Paused/)
   await expect(feedRows(page).filter({ hasText: email })).toHaveCount(5)
   await expect(feedRows(page).filter({ hasText: email }).first()).toBeInViewport()
-})
-
-test('A6 Try a sign-in fills its own code, finishes MFA and links its entry', async ({
-  page,
-  engine,
-}) => {
-  // Phone: the code is the one its own call sent, whatever came after.
-  const phone = `+1555${String(Date.now()).slice(-7)}`
-  await page.goto(activity(engine, { panel: 'try', method: 'phone' }))
-  await page.getByTestId('try-phone').fill(phone)
-  await page.getByTestId('try-run').click()
-  await expect(page.getByTestId('try-code')).toHaveValue(/^\d{6}$/)
-  const filled = await page.getByTestId('try-code').inputValue()
-  await app(engine, 'POST', toolkit('accounts:sendVerificationCode'), {
-    body: { phoneNumber: phone },
-  })
-  await expect.poll(async () => (await messages(engine, `to:${phone}`)).length).toBe(2)
-  const [later, first] = await messages(engine, `to:${phone}`)
-  expect(filled).toBe(first?.code)
-  expect(filled).not.toBe(later?.code)
-  const own = await consoleJson<{ items: { code: string }[] }>(
-    engine,
-    `/auth/messages?activity=${first?.activity ?? 0}`,
-  )
-  expect(own.items.map((message) => message.code)).toEqual([filled])
-  await page.getByTestId('try-run').click()
-  await expect(page.locator('[data-testid="try-result"] [data-state="signed-in"]')).toBeVisible()
-  const signedIn = await latestCall(engine)
-  await page.getByTestId('try-open-entry').click()
-  await expect(page).toHaveURL(new RegExp(`entry=${signedIn.id}`))
-  await expect(detail(page)).toBeVisible()
-  const phoneUser = (
-    await consoleJson<{ items: { uid: string }[] }>(
-      engine,
-      `/auth/users?q=${encodeURIComponent(`phone:${phone}`)}&limit=1`,
-    )
-  ).items[0]?.uid
-
-  // An email link: sent, then followed, as the app would.
-  const linkEmail = `try-link-${stamp()}@journey.test`
-  await page.goto(activity(engine, { panel: 'try', method: 'emailLink' }))
-  await page.getByTestId('try-email').fill(linkEmail)
-  await page.getByTestId('try-continue-url').fill('https://app.journey.test/finish')
-  await page.getByTestId('try-run').click()
-  await expect(page.getByTestId('try-code')).not.toHaveValue('')
-  await page.getByTestId('try-run').click()
-  await expect(page.locator('[data-testid="try-result"] [data-state="signed-in"]')).toBeVisible()
-  const linkUser = (
-    await consoleJson<{ items: { uid: string }[] }>(
-      engine,
-      `/auth/users?q=${encodeURIComponent(`email:${linkEmail}`)}&limit=1`,
-    )
-  ).items[0]?.uid
-
-  try {
-    // The seeded MFA user: password, then the second factor's code.
-    await page.goto(activity(engine, { panel: 'try', method: 'password' }))
-    await page.getByTestId('try-email').fill('mfa-ada@example.test')
-    await page.getByTestId('try-password').fill('password-1')
-    await page.getByTestId('try-run').click()
-    const second = page.getByTestId('try-second-factor')
-    await expect(second).toBeVisible()
-    await second.getByTestId('try-second-run').click()
-    await expect(second.getByTestId('try-second-code')).toHaveValue(/^\d{6}$/)
-    await second.getByTestId('try-second-run').click()
-    await expect(page.locator('[data-testid="try-result"] [data-state="signed-in"]')).toBeVisible()
-    await page.getByTestId('try-copy-token').click()
-    await expect.poll(() => readClipboard(page)).toMatch(/^ey/)
-    const token = payloadOf(await readClipboard(page))
-    expect(token.sub).toBe('mfa-ada')
-    expect((token.firebase as { sign_in_second_factor: string }).sign_in_second_factor).toBe(
-      'phone',
-    )
-  } finally {
-    await deleteAccounts(
-      engine,
-      [phoneUser, linkUser].filter((uid): uid is string => !!uid),
-    )
-  }
 })
 
 test('A7 a dropped channel is the engine badge’s to say, and the calls catch up', async ({
@@ -532,6 +439,22 @@ test('A9 Inspect a token says how each consumer judges it, and how to fix it', a
       `initializeApp({ projectId: '${engine.project}' })`,
     )
     expect((await userDetail(engine, user.localId))?.row.disabled).toBe(false)
+
+    // Sign in as › View the token… opens the minted token here, with what
+    // the engine said as it minted it, for as long as it is in the box.
+    await page.goto(`${engine.origin}/console/auth?user=${user.localId}`)
+    await page.getByTestId('user-inspector').getByTestId('sign-in-as').click()
+    await page.getByTestId('view-token').click()
+    await expect(page).toHaveURL(/\/console\/auth\/activity\?.*panel=inspect/)
+    const minted = page.getByTestId('inspect-token-minted')
+    await expect(minted).toContainText(`For ${email}, as a password sign-in`)
+    await expect(minted).toContainText('Nothing was stored.')
+    await expect(input).toHaveValue(/^ey/)
+    expect(payloadOf(await input.inputValue()).sub).toBe(user.localId)
+    await expect(verdict('verify')).toHaveAttribute('data-ok', 'true')
+    await expect(verdict('rules')).toHaveAttribute('data-ok', 'true')
+    await input.fill(early)
+    await expect(minted).toHaveCount(0)
   } finally {
     await deleteAccounts(engine, [user.localId])
   }

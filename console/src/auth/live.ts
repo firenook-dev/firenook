@@ -159,17 +159,10 @@ export function useUsersTopic(
 /**
  * `auth.config` while `project` is known: a tenant created, changed or
  * deleted, or the project's switches changed. The tenant picker, the
- * settings it names and the summary are read again; `onChanged` lets a
- * page patch its tenants table (`applyKeys([tenant])`) or say that the
- * tenant it shows was deleted.
+ * tenants table, the settings it names and the summary are read again (a
+ * tenant that is gone reads as `null`, which the pages say).
  */
-export function useConfigLive(
-  project: string,
-  handlers: {
-    onChanged?: (change: AuthConfigChanged) => void
-    onReset?: () => void
-  } = {},
-): SubscriptionStatus {
+export function useConfigLive(project: string): SubscriptionStatus {
   const queryClient = useQueryClient()
   const refresh = (keys: readonly QueryKey[]) => {
     for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey })
@@ -178,24 +171,25 @@ export function useConfigLive(
     onChanged: (change) => {
       refresh([
         authKeys.allTenantPicker(project),
+        authKeys.allTenants(project),
         authKeys.config(project, change.tenant ?? ''),
         authKeys.summary(project),
       ])
-      handlers.onChanged?.(change)
     },
     onReset: () => {
       refresh([
         authKeys.allTenantPicker(project),
+        authKeys.allTenants(project),
         authKeys.allConfig(project),
         authKeys.summary(project),
       ])
-      handlers.onReset?.()
     },
     // What was read before the engine took the subscription is read again
     // in place: a tenant created between the two was never going to be told.
     onTaken: () => {
       for (const queryKey of [
         authKeys.allTenantPicker(project),
+        authKeys.allTenants(project),
         authKeys.allConfig(project),
         authKeys.summary(project),
       ])

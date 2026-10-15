@@ -1330,16 +1330,19 @@ impl From<AuthTenantCreate> for tenants::TenantCreate {
     }
 }
 
-/// `GET /tenants`: the foundation's `Page<AuthTenant>`, flattened.
+/// `GET /tenants`: the tenants a filter matches, at most the limit asked
+/// for (500), in id order.
 #[derive(Clone, Debug, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "auth/")]
-pub struct AuthTenantPage {
-    #[serde(flatten)]
-    pub page: Page<AuthTenant>,
-    /// The project's own users. First page only.
-    #[ts(type = "number | null")]
-    pub project_users: Option<u64>,
+pub struct AuthTenantList {
+    pub items: Vec<AuthTenant>,
+    /// Tenants the filter matches, the listed ones and any past the limit.
+    #[ts(type = "number")]
+    pub total: u64,
+    /// The project's own users.
+    #[ts(type = "number")]
+    pub project_users: u64,
 }
 
 /// One tenant.
@@ -1810,7 +1813,7 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     AuthCallError::export_all(config).expect("TypeScript bindings written");
     AuthHeader::export_all(config).expect("TypeScript bindings written");
     AuthTenantCreate::export_all(config).expect("TypeScript bindings written");
-    AuthTenantPage::export_all(config).expect("TypeScript bindings written");
+    AuthTenantList::export_all(config).expect("TypeScript bindings written");
     AuthTenant::export_all(config).expect("TypeScript bindings written");
     AuthHooks::export_all(config).expect("TypeScript bindings written");
     AuthBlockingHook::export_all(config).expect("TypeScript bindings written");

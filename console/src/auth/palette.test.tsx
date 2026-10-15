@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import { usersPaletteGroups } from './palette'
 
-const tenants: AuthTenantPage = {
+const tenants: AuthTenantList = {
   projectUsers: 3,
   items: [
     {
@@ -17,41 +17,16 @@ const tenants: AuthTenantPage = {
       mfaProviders: [],
     },
   ],
-  nextCursor: null,
-  prevCursor: null,
-  total: { count: 1, exact: true },
-  scanned: null,
+  total: 1,
 }
 
 describe('the Users page in ⌘K', () => {
-  it('offers recent users once each, by the ref the engine’s search uses', () => {
-    const onOpenRecent = vi.fn()
-    const groups = usersPaletteGroups(
-      {
-        scope: { kind: 'tenant', tenant: 'acme' },
-        tenants,
-        recents: [{ tenant: 'acme', uid: 'u|1', label: 'ada@example.test', at: 1 }],
-        onScope: () => {},
-        onOpenRecent,
-        unfrozen: false,
-        onFreeze: () => {},
-      },
-      '',
-    )
-    const recent = groups.find((group) => group.label === 'Recent users')?.items[0]
-    expect(recent?.ref).toEqual({ kind: 'auth.user', key: 'acme|u|1' })
-    recent?.run()
-    expect(onOpenRecent).toHaveBeenCalledTimes(1)
-  })
-
   it('switches to every other scope, and finds them by word', () => {
     const onScope = vi.fn()
     const options = {
       scope: { kind: 'tenant', tenant: 'acme' } as const,
       tenants,
-      recents: [],
       onScope,
-      onOpenRecent: () => {},
       unfrozen: true,
       onFreeze: () => {},
     }

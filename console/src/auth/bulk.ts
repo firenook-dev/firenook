@@ -10,7 +10,6 @@
 import type { AuthBulkPreview } from '@/api/generated/auth/AuthBulkPreview'
 import type { BulkTarget } from '@/api/generated/BulkTarget'
 import { formatCount, formatNumber } from '@/lib/format'
-import type { BulkVerb } from './api'
 import { type TenantScope, keysTarget, queryTarget } from './tenant-scope'
 
 /** Past this many ticked users a change asks the engine for its numbers first. */
@@ -43,8 +42,6 @@ export type SimpleVerb = (typeof SIMPLE_VERBS)[number]
 interface VerbWords {
   /** The button: "Disable". */
   button: string
-  /** What was done, for the toast: "Disabled 3 users". */
-  doneTitle: (count: number) => string
   /** The confirm's title and the job's: "Disable 1,204 users". */
   title: (count: number) => string
   /** What a done item is: "disabled". */
@@ -60,7 +57,6 @@ export const VERB_WORDS: Readonly<
 > = {
   disable: {
     button: 'Disable',
-    doneTitle: (count) => `Disabled ${formatCount(count, USERS)}`,
     title: (count) => `Disable ${formatCount(count, USERS)}`,
     done: 'disabled',
     already: 'already disabled',
@@ -69,7 +65,6 @@ export const VERB_WORDS: Readonly<
   },
   enable: {
     button: 'Enable',
-    doneTitle: (count) => `Enabled ${formatCount(count, USERS)}`,
     title: (count) => `Enable ${formatCount(count, USERS)}`,
     done: 'enabled',
     already: 'already enabled',
@@ -77,7 +72,6 @@ export const VERB_WORDS: Readonly<
   },
   verify: {
     button: 'Verify email',
-    doneTitle: (count) => `Marked ${formatCount(count, USERS)} as verified`,
     title: (count) => `Mark ${formatCount(count, USERS)} as verified`,
     done: 'verified',
     already: 'already verified or without an email',
@@ -85,7 +79,6 @@ export const VERB_WORDS: Readonly<
   },
   revoke: {
     button: 'Revoke',
-    doneTitle: (count) => `Revoked the tokens of ${formatCount(count, USERS)}`,
     title: (count) => `Revoke the tokens of ${formatCount(count, USERS)}`,
     done: 'revoked',
     already: 'unchanged',
@@ -94,7 +87,6 @@ export const VERB_WORDS: Readonly<
   },
   setClaims: {
     button: 'Claims…',
-    doneTitle: (count) => `Set claims on ${formatCount(count, USERS)}`,
     title: (count) => `Set claims on ${formatCount(count, USERS)}`,
     done: 'changed',
     already: 'already had these claims',
@@ -102,7 +94,6 @@ export const VERB_WORDS: Readonly<
   },
   removeClaims: {
     button: 'Remove claim keys',
-    doneTitle: (count) => `Removed claim keys from ${formatCount(count, USERS)}`,
     title: (count) => `Remove claim keys from ${formatCount(count, USERS)}`,
     done: 'changed',
     already: 'did not have them',
@@ -110,7 +101,6 @@ export const VERB_WORDS: Readonly<
   },
   delete: {
     button: 'Delete',
-    doneTitle: (count) => `Deleted ${formatCount(count, USERS)}`,
     title: (count) => `Delete ${formatCount(count, USERS)}`,
     done: 'deleted',
     already: 'already gone',
@@ -145,13 +135,22 @@ export function deleteRefusal(count: number, triggers: boolean): string | undefi
   return 'A delete that runs your user.delete triggers is limited to 10,000 users per action. Narrow the filter, or delete in several steps: each user queues one event for your Functions.'
 }
 
-/** The engine's verbs for the job kinds Auth starts. */
-export const JOB_VERBS: Readonly<Record<BulkVerb, string>> = {
-  disable: 'disabled',
-  enable: 'enabled',
-  verify: 'verified',
-  revoke: 'revoked',
-  setClaims: 'changed',
-  removeClaims: 'changed',
-  delete: 'deleted',
+/** The word a job's items are counted with, by its kind (`auth.disable` → "disabled"). */
+export function jobVerb(kind: string): string {
+  switch (kind.replace(/^auth\./, '')) {
+    case 'disable':
+      return 'disabled'
+    case 'enable':
+      return 'enabled'
+    case 'verify':
+      return 'verified'
+    case 'revoke':
+      return 'revoked'
+    case 'import':
+      return 'imported'
+    case 'delete':
+      return 'deleted'
+    default:
+      return 'changed'
+  }
 }

@@ -744,11 +744,11 @@ served until every section has landed.
   A user opens onto every field the emulator stores — the password it
   keeps recoverably included — with the account actions the Admin SDK has;
   the claims editor checks what Firebase checks as it is typed, measures
-  the 1,000-character limit the way Firebase does, shows the ID token those
-  claims produce, and says on which line your rules read each claim. "Sign
-  in as" mints the token a real sign-in would — tenant, provider and second
-  factor, beforeSignIn on request — without signing in, and says what
-  still differs; Firestore's "view as" and every identity picker now take
+  the 1,000-character limit the way Firebase does, and shows the ID token
+  those claims produce. "Sign in as" mints the token a real sign-in would —
+  tenant, provider and second factor, beforeSignIn on request — without
+  signing in, and Inspect a token shows it with what still differs;
+  Firestore's "view as" and every identity picker now take
   their token from the engine the same way, re-mint it before it expires
   and drop it as soon as a change to the account would change it. Every link and code the
   emulator would have sent is in an inbox, live, with the action it stands
@@ -757,15 +757,13 @@ served until every section has landed.
   with its exact error, the name the SDK gives it, what to change, and what
   it caused: the blocking functions it ran (with their own messages), the
   triggers it queued, the codes it sent and the accounts it changed; a
-  call can be copied as curl or replayed, and any sign-in method — codes
-  and second factor included — can be tried from the console. A pasted
-  token is decoded and judged the way the rules, the emulator and the
-  Admin SDK would judge it. Tenants (with the id you choose), one account
+  call can be copied as curl or replayed. A pasted token is decoded and
+  judged the way the rules, the emulator and the Admin SDK would judge it. Tenants (with the id you choose), one account
   per email, email enumeration protection, blocking functions and the
   lifecycle listeners are on one settings page; bulk changes run as jobs
   you can preview and cancel, users import (streamed) and export in the
-  emulator's own format, and sample users fill a project in seconds and
-  leave as cleanly. Users are in ⌘K. Found and fixed on the way: the suite
+  emulator's own format, and sample users (up to 1,000 at a time) fill a
+  project in seconds and leave as cleanly. Users are in ⌘K. Found and fixed on the way: the suite
   gave Auth no origin, so a code requested through the console linked to
   the console's address; every mutating Auth request — every token refresh
   included — rewrote the whole state, pretty-printed, under the lock, which
