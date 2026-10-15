@@ -2,8 +2,8 @@
 // own), as the engine pages, filters, sorts and counts them over the user
 // index it keeps beside the accounts — one request whatever the user count.
 //
-//   panel     the tenant, the facets (exact counts, a click writes the
-//             term), the users opened lately
+//   panel     the tenant, and the facets (exact counts, a click writes the
+//             term)
 //   row one   the scope, this page's subscription notice, New
 //   row two   the filter in the console's grammar, and what it matches
 //   body      the table (live rows, never moving under the reader) and the
@@ -65,7 +65,6 @@ import {
   usersMetaQuery,
   usersQuery,
 } from '../queries'
-import { type RecentUser, recentsKey, recentsOf, useRecentUsers } from '../recents'
 import {
   type TenantScope,
   projectParam,
@@ -237,20 +236,7 @@ export function UsersPage() {
   }
 
   // ------------------------------------------------------------ opening a user
-  const loadRecents = useRecentUsers((state) => state.load)
-  const recordRecent = useRecentUsers((state) => state.record)
-  const recentItems = useRecentUsers((state) => state.items)
-  useEffect(() => {
-    if (project) loadRecents(recentsKey(project))
-  }, [loadRecents, project])
-  const open = (row: AuthUserRow) => {
-    if (search.user === row.uid) {
-      update({ user: undefined })
-      return
-    }
-    recordRecent({ tenant: slot, uid: row.uid, label: identifierOf(row).text })
-    update({ user: row.uid })
-  }
+  const open = (row: AuthUserRow) => update({ user: search.user === row.uid ? undefined : row.uid })
   /** The row above or below the open one, for the inspector's chevrons. */
   const step = (by: -1 | 1) => {
     const at = rows.rows.findIndex((row) => row.uid === search.user)
@@ -326,9 +312,7 @@ export function UsersPage() {
   useUsersPalette({
     scope,
     tenants: tenants.data,
-    recents: recentsOf(recentItems, slot),
     onScope: setScope,
-    onOpenRecent: (recent: RecentUser) => update({ user: recent.uid }),
     unfrozen,
     onFreeze: freeze,
     actions: [
@@ -427,11 +411,6 @@ export function UsersPage() {
               value={q}
               onChange={(next) => setFilter(next, 'now')}
               testId="user-facets"
-            />
-            <RecentUsers
-              recents={recentsOf(recentItems, slot)}
-              openUid={search.user}
-              onOpen={(recent) => update({ user: recent.uid })}
             />
           </div>
         </div>
@@ -624,7 +603,6 @@ export function UsersPage() {
               remove.reset()
               setDeleting(row)
             }}
-            onSeen={(label) => recordRecent({ tenant: slot, uid: search.user ?? '', label })}
           />
         )}
       </SectionBody>
@@ -718,39 +696,5 @@ export function UsersPage() {
         testId="delete-user"
       />
     </SectionPage>
-  )
-}
-
-/** The users opened lately in this scope, newest first, in the data face. */
-function RecentUsers({
-  recents,
-  openUid,
-  onOpen,
-}: {
-  recents: readonly RecentUser[]
-  openUid: string | undefined
-  onOpen: (recent: RecentUser) => void
-}) {
-  if (recents.length === 0) return null
-  return (
-    <div className="mt-4 grid gap-0.5" role="group" aria-label="Recent" data-testid="recent-users">
-      <span className="px-2 pb-0.5 text-[11px] text-kumo-subtle">Recent</span>
-      {recents.map((recent) => (
-        <button
-          key={`${recent.tenant}|${recent.uid}`}
-          type="button"
-          onClick={() => onOpen(recent)}
-          className={`flex h-7 w-full min-w-0 items-center rounded-md px-2 text-left hover:ink ${
-            openUid === recent.uid ? 'bg-kumo-tint' : ''
-          }`}
-          title={recent.uid}
-          data-testid="recent-user"
-        >
-          <span className="min-w-0 truncate font-mono text-[12px] text-kumo-default">
-            {recent.label}
-          </span>
-        </button>
-      ))}
-    </div>
   )
 }

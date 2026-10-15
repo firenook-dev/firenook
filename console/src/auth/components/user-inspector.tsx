@@ -12,7 +12,7 @@
 import { Button, Tooltip } from '@cloudflare/kumo'
 import { CheckCircleIcon, ProhibitIcon, TrashIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { ApiError } from '@/api/client'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import {
@@ -86,7 +86,6 @@ export function UserInspector({
   onNext,
   blocked,
   onDelete,
-  onSeen,
 }: {
   project: string
   scope: TenantScope
@@ -99,8 +98,6 @@ export function UserInspector({
   /** Why writes are refused (the tenant was deleted). */
   blocked: string | undefined
   onDelete: (row: AuthUserRow) => void
-  /** The user's name once it is known, for the recents. */
-  onSeen?: ((label: string) => void) | undefined
 }) {
   const queryClient = useQueryClient()
   const detail = useQuery({ ...userQuery(project, scope, uid), enabled: project !== '' })
@@ -114,14 +111,6 @@ export function UserInspector({
 
   const data = detail.data
   const label = data ? identifierOf(data.row).text : undefined
-  // Said once per name: the page's callback is a new function on every render.
-  const seen = useRef(onSeen)
-  useLayoutEffect(() => {
-    seen.current = onSeen
-  })
-  useEffect(() => {
-    if (label !== undefined) seen.current?.(label)
-  }, [label])
 
   const server = data ? valuesOf(data) : undefined
   const shown = server
