@@ -33,7 +33,10 @@ describe('a playground request', () => {
       {
         ...EMPTY_FORM,
         path: 'users/u1',
-        who: { kind: 'user', uid: 'u1', email: 'ada@example.test', claims: '{"admin": true}' },
+        who: {
+          kind: 'as',
+          viewAs: { kind: 'user', uid: 'u1', email: 'ada@example.test', claims: { admin: true } },
+        },
       },
       P,
       D,
@@ -68,17 +71,28 @@ describe('a playground request', () => {
     })
   })
 
-  it('says what is wrong with the data or the claims', () => {
+  it('says what is wrong with the data or who is asking', () => {
     expect(
       toEvaluateRequest({ ...EMPTY_FORM, method: 'update', path: 'a/b', data: '[1]' }, P, D),
     ).toEqual({ error: expect.stringMatching(/JSON object/) as unknown as string })
     expect(
       toEvaluateRequest(
-        { ...EMPTY_FORM, path: 'a/b', who: { kind: 'user', uid: 'u', claims: '{nope' } },
+        { ...EMPTY_FORM, path: 'a/b', who: { kind: 'as', viewAs: { kind: 'owner' } } },
         P,
         D,
       ),
-    ).toEqual({ error: expect.stringMatching(/not JSON/) as unknown as string })
+    ).toEqual({ error: expect.stringMatching(/Admin skips the rules/) as unknown as string })
+    expect(
+      toEvaluateRequest(
+        {
+          ...EMPTY_FORM,
+          path: 'a/b',
+          who: { kind: 'as', viewAs: { kind: 'custom', uid: ' ', claims: {} } },
+        },
+        P,
+        D,
+      ),
+    ).toEqual({ error: expect.stringMatching(/uid/) as unknown as string })
   })
 
   it('structures a list query the way the grid does', () => {
@@ -117,7 +131,7 @@ describe('a playground request', () => {
       'r-1',
     )
     expect(JSON.parse(form.data)).toEqual({ seats: 11, meta: { a: null } })
-    expect(describeForm(form)).toBe('update users/u1 as u1')
+    expect(describeForm(form)).toBe('update users/u1 as ada@example.test')
     const back = toEvaluateRequest(form, P, D)
     if (!('request' in back)) throw new Error(back.error)
     expect(back.request).toMatchObject({

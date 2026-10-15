@@ -6,22 +6,10 @@
 import type { EvaluateRequest } from '@/api/generated/EvaluateRequest'
 import type { EvaluateResult } from '@/api/generated/EvaluateResult'
 import type { FirestoreRestValue } from '@/api/generated/FirestoreRestValue'
-import { useStore } from 'zustand'
-import {
-  type TestCaseBase,
-  type TestOutcome as KitOutcome,
-  type TestRunner,
-  type TestsState,
-  createTestsStore,
-  passes,
-  runTests as runKitTests,
-  useTestRunner as useKitTestRunner,
-  useTestSummary as useKitTestSummary,
-} from '@/rules/tests-core'
+import { type TestCaseBase, createRulesTests } from '@/rules/tests-core'
+import type { Who } from '@/rules/who'
 import { evaluateRules } from './api'
 import { type PlaygroundForm, toEvaluateRequest } from './requests'
-
-export { passes }
 
 export interface TestCase extends TestCaseBase {
   form: PlaygroundForm
@@ -29,51 +17,67 @@ export interface TestCase extends TestCaseBase {
   seed?: Record<string, FirestoreRestValue> | null | undefined
 }
 
-export type TestOutcome = KitOutcome<EvaluateResult>
-
 /** Whether a stored item is a case this page can run. */
 function isTestCase(item: unknown): item is TestCase {
   return Boolean(item && typeof item === 'object' && 'form' in item && 'expected' in item)
 }
 
-/** The saved cases of the database on screen. */
-export const testsStore = createTestsStore<TestCase, EvaluateResult>(isTestCase)
-
-/** The saved tests' state, for a component. */
-export function useTests<T>(selector: (state: TestsState<TestCase, EvaluateResult>) => T): T {
-  return useStore(testsStore, selector)
-}
-
-export function testsKey(project: string, database: string): string {
-  return `firenook.console.rules-tests.${project}.${database}`
-}
-
-function runner(
-  project: string,
-  database: string,
-): TestRunner<TestCase, EvaluateRequest, EvaluateResult> {
+/**
+ * A case saved before the playground asked through the console's identity
+ * picker: "Not signed in", or a uid with an email and claims typed as JSON,
+ * which is the custom identity it always was.
+ */
+function revive(test: TestCase): TestCase {
+  const who = test.form.who as
+    | Who
+    | { kind: 'anonymous' }
+    | {
+        kind: 'user'
+        uid: string
+        email?: string
+        claims: string
+      }
+  if (who.kind === 'anonymous')
+    return { ...test, form: { ...test.form, who: { kind: 'as', viewAs: { kind: 'anonymous' } } } }
+  if (who.kind !== 'user') return test
+  let claims: Record<string, unknown> = {}
+  try {
+    const parsed: unknown = who.claims.trim() ? JSON.parse(who.claims) : {}
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      claims = parsed as Record<string, unknown>
+  } catch {
+    claims = {}
+  }
   return {
-    build: (test) => toEvaluateRequest(test.form, project, database),
-    evaluate: (requests, source) => evaluateRules(database, requests, source),
+    ...test,
+    form: {
+      ...test.form,
+      who: {
+        kind: 'as',
+        viewAs: {
+          kind: 'custom',
+          uid: who.uid,
+          claims,
+          signInProvider: who.email ? 'password' : 'custom',
+          ...(who.email ? { email: who.email, emailVerified: true } : {}),
+        },
+      },
+    },
   }
 }
 
-/** Run every saved case against `source`, now. */
-export function runTests(project: string, database: string, source: string): Promise<void> {
-  return runKitTests(testsStore, runner(project, database), source)
-}
-
-/**
- * Keeps the saved cases loaded and run against the editor's text: on
- * arrival, and again shortly after each edit or each change to the cases.
- */
-export function useTestRunner(project: string, database: string, source: string, ready: boolean) {
-  useKitTestRunner(testsStore, testsKey(project, database), source, ready, (text) =>
-    runTests(project, database, text),
-  )
-}
-
-/** How the saved cases fare against `source`; undefined until they have run on it. */
-export function useTestSummary(source: string): { total: number; failing: number } | undefined {
-  return useKitTestSummary(testsStore, source)
-}
+/** The saved cases of the database on screen, run as the page's requests run. */
+export const tests = createRulesTests<
+  TestCase,
+  EvaluateRequest,
+  EvaluateResult,
+  { project: string; database: string }
+>({
+  valid: isTestCase,
+  revive,
+  key: ({ project, database }) => `firenook.console.rules-tests.${project}.${database}`,
+  runner: ({ project, database }) => ({
+    build: (test) => toEvaluateRequest(test.form, project, database),
+    evaluate: (requests, source) => evaluateRules(database, requests, source),
+  }),
+})

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
+import { documentsOf } from './support/shell'
 
 // The security rules page, against the real engine and the synthetic
 // project's rules file (scripts/synthetic-engine.mjs). Every journey that
@@ -157,7 +158,9 @@ test('the rules are checked as they are typed, and a draft is not in force until
   }
 })
 
-test('a denied read links to the decision behind it, drawn into the rules', async ({ page }) => {
+test('a denied read says why where it happened, and opens the decision in Rules', async ({
+  page,
+}) => {
   // Coverage is off until asked for, and nothing reads the report meanwhile.
   const coverageReads: string[] = []
   page.on('request', (request) => {
@@ -165,25 +168,34 @@ test('a denied read links to the decision behind it, drawn into the rules', asyn
   })
   await page.goto(`${origin()}/console/firestore?path=users&as=anonymous`)
   await expect(page.getByText('Denied by security rules')).toBeVisible()
+  // "See why" explains it on the data page: the lines that refused it and
+  // the values they saw, as the Files page does.
   await page.getByTestId('see-why').click()
-  await expect(page).toHaveURL(/\/console\/firestore\/rules\?.*denied=true/)
+  const why = page.getByTestId('refusal-detail')
+  await expect(why.getByTestId('explained-allow').first()).toContainText('line 5')
+  await why.getByTestId('refusal-open-rules').click()
+  await expect(page).toHaveURL(/\/console\/firestore\/rules\?.*decision=/)
   const detail = page.getByTestId('decision-detail')
   await expect(detail).toBeVisible()
   await expect(page.getByTestId('decision-path')).toHaveText('users')
   await expect(detail).toContainText('Not signed in')
+  await expect(detail).toContainText('from the console')
   await expect(page.getByTestId('decision-lines')).toContainText('line 5')
   // The lines that refused it are lit in the editor.
   const lines = page.getByTestId('rules-source').locator('.cm-line')
   await expect(lines.nth(4)).toHaveClass(/cm-line-deny/)
+  // And the collection it was about is one click away in Data.
+  await expect(detail.getByTestId('decision-open-data')).toBeVisible()
 
-  // Back to the list: narrowed to the path and to denials, as the link asked
-  // — and it stays the list. The link picks a decision once; it used to pick
-  // again the moment the list came back, so "All decisions" bounced.
+  // A link narrowed to the path and to denials picks the newest once, and
+  // going back is the list — it stays the list, narrowed as the link asked.
+  await page.goto(`${origin()}/console/firestore/rules?path=users&denied=true&pick=true`)
+  await expect(page.getByTestId('decision-detail')).toBeVisible()
   await page.getByTestId('decision-back').click()
   await page.waitForTimeout(500)
   await expect(page).not.toHaveURL(/decision=/)
   await expect(page.getByTestId('decision-detail')).toHaveCount(0)
-  await expect(page.getByTestId('decisions-narrowed')).toContainText('users')
+  await expect(page.getByTestId('decisions-filter')).toHaveValue('users')
   const rows = page.getByTestId('decision-row')
   await expect(rows.first()).toBeVisible()
   for (const outcome of await rows
@@ -201,12 +213,51 @@ test('a denied read links to the decision behind it, drawn into the rules', asyn
   await expect(page.locator('.cm-note-hit')).toHaveCount(0)
 
   // An empty list says what appears here, and what never does.
+  await page.goto(`${origin()}/console/firestore/rules`)
+  await expect(page.getByTestId('decision-row').first()).toBeVisible()
   await page.getByRole('button', { name: 'Clear the list' }).click()
   await expect(page.getByTestId('decisions-empty')).toContainText('The Admin SDK')
   // And a database with no rules file says nothing is checked at all.
   await page.goto(`${origin()}/console/firestore/rules?db=nobody-here`)
   await expect(page.getByTestId('rules-not-enforced')).toBeVisible()
   await expect(page.getByTestId('decisions-empty')).toContainText('no rules loaded')
+})
+
+test('every tab reads the decisions, and a denial hundreds of decisions old still says why', async ({
+  page,
+  context,
+  engine,
+}) => {
+  // One denial, then more decisions than the Requests feed ever held (256
+  // for ten minutes, four clients): anonymous reads of users the rules
+  // refuse, as an app's client makes them.
+  const read = (id: string) =>
+    fetch(`${engine.origin}/console/api/v1${documentsOf(engine)}/users/${id}`)
+  const stamp = Date.now()
+  const old = `u_old_${stamp}`
+  expect((await read(old)).status).toBe(403)
+  for (let index = 0; index < 300; index += 30)
+    await Promise.all(
+      Array.from({ length: 30 }, (_, offset) => read(`u_fill_${stamp}_${index + offset}`)),
+    )
+
+  // Five tabs at once — the Requests socket refused the fifth — each finds
+  // the old denial and the engine runs it again for why.
+  const tabs = [page, ...(await Promise.all(Array.from({ length: 4 }, () => context.newPage())))]
+  const link = `${origin()}/console/firestore/rules?${new URLSearchParams({ path: `users/${old}`, denied: 'true', pick: 'true' })}`
+  await Promise.all(tabs.map((tab) => tab.goto(link)))
+  for (const tab of tabs) {
+    const detail = tab.getByTestId('decision-detail')
+    await expect(tab.getByTestId('decision-path')).toHaveText(`users/${old}`)
+    await expect(detail.getByTestId('explained-allow').first()).toContainText('line 5')
+    await expect(detail.getByTestId('decision-not-retained')).toHaveCount(0)
+  }
+  await Promise.all(tabs.slice(1).map((tab) => tab.close()))
+  // The window says what the engine holds.
+  await page.getByTestId('decision-back').click()
+  await expect(page.getByTestId('decisions-window')).toContainText(
+    /Holding the last [\d,]+ decisions/,
+  )
 })
 
 test('history keeps every version, and the file on disk is watched', async ({ page }) => {
@@ -326,10 +377,13 @@ test('the playground tries a request against the draft, and a saved test guards 
     .toBe(0)
   await page.getByTestId('playground-path').fill('users/u_k65eq')
 
-  // The owner herself: allowed, and saved as a test that should allow.
-  await page.getByRole('combobox', { name: 'Who is asking' }).click()
-  await page.getByRole('option', { name: 'Someone else…' }).click()
-  await page.getByTestId('playground-uid').fill('u_k65eq')
+  // The owner herself, a custom identity with her uid: allowed, and saved
+  // as a test that should allow.
+  await page.getByTestId('playground-who').click()
+  await page.getByTestId('playground-who-custom').click()
+  await page.getByTestId('playground-who-custom-dialog-uid').fill('u_k65eq')
+  await page.getByTestId('playground-who-custom-dialog-use').click()
+  await expect(page.getByTestId('playground-who')).toContainText('u_k65eq')
   await page.getByTestId('playground-run').click()
   await expect(result.locator('[data-outcome]').first()).toHaveAttribute('data-outcome', 'allow')
   await page.getByTestId('playground-save-test').click()
@@ -398,21 +452,28 @@ test('a decision opens onto why, and a draft says which decisions it would turn 
 }) => {
   await page.goto(`${origin()}/console/firestore?path=users&as=anonymous`)
   await page.getByTestId('see-why').click()
-  const detail = page.getByTestId('decision-detail')
-  await expect(detail.getByTestId('explanation')).toBeVisible()
-  await expect(detail.getByTestId('explained-allow').first()).toContainText('line 5')
+  const why = page.getByTestId('refusal-detail')
+  await expect(why.getByTestId('explanation')).toBeVisible()
+  await expect(why.getByTestId('explained-allow').first()).toContainText('line 5')
+
+  // Tried again in the playground, as it was recorded: it runs on arrival.
+  await why.getByTestId('refusal-try').click()
+  await expect(page).toHaveURL(/\/firestore\/rules\?.*panel=playground/)
+  await expect(page.getByTestId('playground-path')).toHaveValue('users')
+  await expect(page.getByTestId('playground-recorded')).toContainText('not signed in')
+  await expect(
+    page.getByTestId('playground-result').locator('[data-outcome]').first(),
+  ).toHaveAttribute('data-outcome', /deny|error/)
   await expect(
     page.getByTestId('rules-source').locator('[data-inline-value]').first(),
   ).toBeVisible()
 
-  // Tried again in the playground, as it was recorded.
-  await detail.getByTestId('decision-try').click()
-  await expect(page).toHaveURL(/panel=playground/)
-  await expect(page.getByTestId('playground-path')).toHaveValue('users')
-  await page.getByTestId('playground-run').click()
-  await expect(
-    page.getByTestId('playground-result').locator('[data-outcome]').first(),
-  ).toHaveAttribute('data-outcome', /deny|error/)
+  // The decision opens onto why on the Rules page too.
+  await page.getByRole('tab', { name: 'Decisions' }).click()
+  await page.getByTestId('decision-row').first().click()
+  const detail = page.getByTestId('decision-detail')
+  await expect(detail.getByTestId('explanation')).toBeVisible()
+  await page.getByTestId('decision-back').click()
 
   // A draft that opens everything would allow what was denied.
   await page.getByRole('tab', { name: 'Decisions' }).click()
@@ -521,16 +582,18 @@ test('completion offers the claim keys users carry, in the editor and the playgr
     await page.getByTestId('rules-revert').click()
     await expect(page.getByTestId('rules-draft-state')).toHaveCount(0)
 
-    // The playground's claims offer it too, as a key is typed.
+    // The playground's custom identity offers it too, as a key is typed.
     await page.getByRole('tab', { name: /Playground/ }).click()
-    await page.getByRole('combobox', { name: 'Who is asking' }).click()
-    await page.getByRole('option', { name: 'Someone else…' }).click()
-    const claims = page.getByTestId('playground-claims')
+    await page.getByTestId('playground-who').click()
+    await page.getByTestId('playground-who-custom').click()
+    const claims = page.getByTestId('playground-who-custom-dialog-claims')
     await claims.click()
     await page.keyboard.type('{"cons')
     await expect(options.filter({ hasText: 'console_tier' })).toHaveCount(1)
     await page.keyboard.press('Enter')
     await expect(claims).toContainText('"console_tier":')
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
   } finally {
     await setClaims(page, ada, {})
   }
