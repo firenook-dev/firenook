@@ -18,7 +18,6 @@ import {
   restartWorker,
   revealHeader,
   revealSecret,
-  runSchedule,
 } from './api'
 
 interface Sent {
@@ -173,7 +172,7 @@ describe('changes', () => {
     })
   })
 
-  it('publish, enqueue and run now through the brokers', async () => {
+  it('publish and enqueue through the brokers', async () => {
     answer = { status: 200, body: { transport: 'pubsub' } }
     await publishMessage('us-central1-onEmail', {
       data: '{"to":"ada"}',
@@ -190,11 +189,6 @@ describe('changes', () => {
       url: '/console/api/v1/functions/us-central1-resize/enqueue',
       body: { payload: { url: 'a.png' }, runAfterSeconds: null },
     })
-    await runSchedule('us-central1-nightly')
-    expect(last()).toMatchObject({
-      url: '/console/api/v1/functions/us-central1-nightly/run',
-      body: {},
-    })
   })
 
   it('say when the engine refused, with the fix it gave', async () => {
@@ -209,7 +203,10 @@ describe('changes', () => {
         },
       },
     }
-    const error = await runSchedule('us-central1-nightly').catch((caught: unknown) => caught)
+    const error = await enqueueTask('us-central1-resize', {
+      payload: {},
+      runAfterSeconds: null,
+    }).catch((caught: unknown) => caught)
     expect(error).toMatchObject({ code: 'conflict', fix: 'Resume background triggers.' })
   })
 })

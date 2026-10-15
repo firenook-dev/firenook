@@ -25,6 +25,7 @@ import { LiveNotice } from '@/components/console/live-notice'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
 import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
+import { linkTo } from '@/lib/links'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
 import { type PaletteItem, matchesQuery, usePaletteProviders } from '@/lib/palette'
 import { useConsoleProject } from '@/lib/project'
@@ -135,6 +136,11 @@ export function TopicsPage() {
   const openTarget = (target: TreeTarget) => {
     if (target.kind === 'project') {
       update({ ...SCOPED, project: target.project === configured ? undefined : target.project })
+      return
+    }
+    if (target.kind === 'schedule') {
+      const link = linkTo({ kind: 'pubsub.schedule', key: target.functionId })
+      if (link) void navigate({ to: link.to as never, search: link.search as never })
       return
     }
     if (target.kind === 'topic') goTo({ topic: target.topic })

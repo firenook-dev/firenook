@@ -744,7 +744,7 @@ pub(crate) fn schedule_run(
     }
 }
 
-/// A schedule as the Schedules page shows it; `deliveries` holds the
+/// A schedule as the console shows it; `deliveries` holds the
 /// delivery rows of its runs' messages, by message id.
 pub(crate) fn schedule(
     detail: &ScheduleDetail,

@@ -41,6 +41,15 @@ const schedule = topicSummary('firebase-schedule-nightly', {
       managed: 'functions',
     }),
   ],
+  functions: [
+    {
+      functionId: 'us-central1-nightly',
+      name: 'nightly',
+      region: 'us-central1',
+      kind: 'schedule',
+      entity: { kind: 'functions.function', key: 'us-central1-nightly' },
+    },
+  ],
 })
 const index = topicIndex([topicSummary('audit-log'), orders, schedule], {
   otherProjects: [{ project: 'demo-other', topics: 14, subscriptions: 2 }],
@@ -110,6 +119,11 @@ describe('the topics tree (PS-01)', () => {
     })
     const deleted = tree.nodes.find((entry) => entry.id === GROUP.detached)
     expect(deleted?.children?.[0]).toMatchObject({ label: 'left-behind', count: 7 })
+    // A scheduled function's row opens its schedule, in Functions.
+    expect(tree.targets.get('us-central1-nightly')).toEqual({
+      kind: 'schedule',
+      functionId: 'us-central1-nightly',
+    })
   })
 
   it('shows an orphaned functions subscription as the ordinary subscription it now is', () => {

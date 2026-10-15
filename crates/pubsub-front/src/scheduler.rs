@@ -601,8 +601,8 @@ impl ScheduleEntry {
     }
 }
 
-/// One schedule as the Schedules page shows it: the view plus its upcoming
-/// ticks and its kept runs.
+/// One schedule as the console shows it (a scheduled function's Schedule
+/// tab): the view plus its upcoming ticks and its kept runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleDetail {
     pub view: ScheduleView,

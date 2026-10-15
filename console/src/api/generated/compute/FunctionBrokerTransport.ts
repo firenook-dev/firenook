@@ -3,4 +3,4 @@
 /**
  * Which broker took a console request.
  */
-export type FunctionBrokerTransport = "pubsub" | "tasks" | "direct";
+export type FunctionBrokerTransport = "pubsub" | "tasks";

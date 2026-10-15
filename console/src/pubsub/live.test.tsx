@@ -2,10 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Page } from '@/api/generated/Page'
 import type { PubsubCountersFrame } from '@/api/generated/messaging/PubsubCountersFrame'
 import type { PubsubPushStreak } from '@/api/generated/messaging/PubsubPushStreak'
-import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
 import type { PubsubSubscriptionCounters } from '@/api/generated/messaging/PubsubSubscriptionCounters'
 import type { PubsubSubscriptionSummary } from '@/api/generated/messaging/PubsubSubscriptionSummary'
 import type { PubsubTopicIndex } from '@/api/generated/messaging/PubsubTopicIndex'
@@ -259,16 +257,6 @@ describe('usePubsubCounters (U-06)', () => {
   })
 })
 
-/** A schedule with only what a frame patches. */
-const schedule = (functionId: string, runs: number) =>
-  ({
-    functionId,
-    paused: false,
-    automatic: true,
-    nextRunAt: null,
-    runs,
-  }) as unknown as PubsubSchedule
-
 describe('the other Pub/Sub topics (U-06)', () => {
   it('pubsub.topic hands rows to the tables and reads message details again', () => {
     const onBacklogKeys = vi.fn()
@@ -349,33 +337,6 @@ describe('the other Pub/Sub topics (U-06)', () => {
     const first = result.current.store
     rerender({ name: `${WORKER}-2` })
     expect(result.current.store).not.toBe(first)
-  })
-
-  it('pubsub.schedules patches the states it names', () => {
-    const page: Page<PubsubSchedule> = {
-      items: [schedule('a', 1), schedule('b', 1)],
-      nextCursor: null,
-      prevCursor: null,
-      total: { count: 2, exact: true },
-      scanned: null,
-    }
-    const patched = live.applySchedulesFrame(page, {
-      revision: 4,
-      schedules: [
-        {
-          functionId: 'a',
-          paused: true,
-          automatic: true,
-          nextRunAt: 'later',
-          runs: 2,
-          lastRunAt: null,
-          lastOutcome: 'delivered',
-        },
-      ],
-    })
-    expect(patched.items[0]).toMatchObject({ paused: true, runs: 2, nextRunAt: 'later' })
-    expect(patched.items[1]).toBe(page.items[1])
-    expect(live.applySchedulesFrame(page, { revision: 5, schedules: [] })).toBe(page)
   })
 })
 

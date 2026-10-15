@@ -11,20 +11,16 @@
 //   the keys of rows that moved — backlog positions of the scoped
 //   subscription, messages whose marks moved.
 // - `pubsub.push` (a feed): push streaks, upserted in place by streak.
-// - `pubsub.schedules` (state, compared by the scheduler's revision).
 
 import { type QueryClient, type QueryKey, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { MessagingSecondWindow } from '@/api/generated/messaging/MessagingSecondWindow'
-import type { Page } from '@/api/generated/Page'
 import type { PubsubCountersFrame } from '@/api/generated/messaging/PubsubCountersFrame'
 import type { PubsubPublished } from '@/api/generated/messaging/PubsubPublished'
 import type { PubsubPushAttempts } from '@/api/generated/messaging/PubsubPushAttempts'
 import type { PubsubPushStreak } from '@/api/generated/messaging/PubsubPushStreak'
 import type { PubsubRejectedChanged } from '@/api/generated/messaging/PubsubRejectedChanged'
 import type { PubsubResourcesChanged } from '@/api/generated/messaging/PubsubResourcesChanged'
-import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
-import type { PubsubSchedulesFrame } from '@/api/generated/messaging/PubsubSchedulesFrame'
 import type { PubsubStale } from '@/api/generated/messaging/PubsubStale'
 import type { PubsubTopicIndex } from '@/api/generated/messaging/PubsubTopicIndex'
 import type { SubscriptionStatus } from '@/lib/live/channel'
@@ -52,17 +48,12 @@ declare module '@/lib/live/topics' {
       params: { project?: string; subscription: string }
       events: { attempts: PubsubPushAttempts }
     }
-    'pubsub.schedules': {
-      params: { project?: string }
-      events: { schedules: PubsubSchedulesFrame }
-    }
   }
 }
 
 declareTopic('pubsub.counters', 'compare')
 declareTopic('pubsub.topic', 'none')
 declareTopic('pubsub.push', 'replay')
-declareTopic('pubsub.schedules', 'compare')
 
 /** Topics whose throughput one counters subscription follows (the engine refuses more). */
 export const MAX_THROUGHPUT = 24
@@ -336,54 +327,4 @@ export function usePushFeed(
     },
   )
   return { store, status }
-}
-
-// ------------------------------------------------------------ schedules
-
-/** A schedules frame's states put into the cached list (runs themselves come with the next read). */
-export function applySchedulesFrame(
-  page: Page<PubsubSchedule>,
-  frame: PubsubSchedulesFrame,
-): Page<PubsubSchedule> {
-  const states = new Map(frame.schedules.map((state) => [state.functionId, state]))
-  let changed = false
-  const items = page.items.map((schedule) => {
-    const state = states.get(schedule.functionId)
-    if (!state) return schedule
-    changed = true
-    return {
-      ...schedule,
-      paused: state.paused,
-      automatic: state.automatic,
-      nextRunAt: state.nextRunAt,
-      runs: state.runs,
-    }
-  })
-  return changed ? { ...page, items } : page
-}
-
-/**
- * Holds `pubsub.schedules` (the Schedules page): each frame patches the
- * list's states at once and reads the list again shortly after, for the
- * runs and their outcomes.
- */
-export function useSchedulesLive(project: string | undefined): SubscriptionStatus {
-  const client = useQueryClient()
-  const [invalidator] = useState(() =>
-    createInvalidator((key) => void client.invalidateQueries({ queryKey: key }), 250),
-  )
-  useEffect(() => () => invalidator.dispose(), [invalidator])
-  return useLiveTopic('pubsub.schedules', project ? { project } : null, {
-    onSchedules: (frame) => {
-      if (!project) return
-      const key = pubsubKeys.schedules(project)
-      client.setQueryData<Page<PubsubSchedule>>(key, (page) =>
-        page ? applySchedulesFrame(page, frame) : page,
-      )
-      invalidator.push([key])
-    },
-    onReset: () => {
-      if (project) invalidator.flush([pubsubKeys.schedules(project)])
-    },
-  })
 }

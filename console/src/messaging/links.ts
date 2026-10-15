@@ -86,9 +86,13 @@ export function messageSearch(key: string): Record<string, string> {
   return { ...topic, message: id }
 }
 
-/** `pubsub.schedule` (the function id) → the Schedules page with it open. */
+/**
+ * `pubsub.schedule` (the function id) → the scheduled function's Schedule
+ * tab in Functions, which owns schedules in the console (a tick is still a
+ * publish to the function's schedule topic, shown under Pub/Sub's topics).
+ */
 export function scheduleSearch(functionId: string): Record<string, string> {
-  return functionId === '' ? {} : { schedule: functionId }
+  return functionId === '' ? {} : { function: functionId, tab: 'run' }
 }
 
 /** `tasks.queue` (`<project>|<location>|<queue id>`) → the Cloud Tasks page on that queue. */

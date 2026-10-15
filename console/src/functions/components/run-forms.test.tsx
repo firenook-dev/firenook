@@ -3,7 +3,6 @@ import type { BackendDefinition } from '../envelopes'
 import { composedUser } from './blocking-form'
 import { callableHeaders, recordedData } from './callable-form'
 import { documentPattern, eventInput, fixedChange, restFields, startingData } from './event-form'
-import { countdownText } from './schedule-form'
 import { optionsText } from './task-form'
 
 const v1Write: BackendDefinition = {
@@ -77,11 +76,7 @@ describe('the Run forms', () => {
     expect(recordedData('plain')).toBe('plain')
   })
 
-  it('count down to a run and name what a queue sets', () => {
-    const now = Date.parse('2026-10-12T14:02:09.000Z')
-    expect(countdownText('2026-10-12T14:05:00.000Z', now)).toBe('in 2 min 51 s')
-    expect(countdownText('2026-10-12T14:02:09.400Z', now)).toBe('now')
-    expect(countdownText('2026-10-12T14:02:00.000Z', now)).toBe('9 s ago')
+  it('name what a queue sets', () => {
     expect(optionsText({ maxAttempts: 3, maxBackoffSeconds: null })).toBe('maxAttempts 3')
     expect(optionsText(null)).toBe('')
   })

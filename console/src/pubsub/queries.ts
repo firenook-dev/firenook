@@ -13,7 +13,7 @@
 //   const rows = useCursorRows(query, { ...list, q })
 //
 // and live keys go to `rows.applyKeys`. The bounded lists (topics, schemas,
-// schedules, refusals) are one page holding every item.
+// refusals) are one page holding every item.
 
 import { queryOptions } from '@tanstack/react-query'
 import type { PubsubBacklogState } from '@/api/generated/messaging/PubsubBacklogState'
@@ -34,7 +34,6 @@ import {
   getMessage,
   getMessages,
   getRejected,
-  getSchedules,
   getSchema,
   getSchemas,
   getSetup,
@@ -85,7 +84,6 @@ export const pubsubKeys = {
   /** Every schema detail of the project (a prefix). */
   schemaDetails: (project: string) => ['pubsub', project, 'schema'] as const,
   schema: (project: string, name: string) => ['pubsub', project, 'schema', name] as const,
-  schedules: (project: string) => ['pubsub', project, 'schedules'] as const,
   rejected: (project: string) => ['pubsub', project, 'rejected'] as const,
   setup: (project: string) => ['pubsub', project, 'setup'] as const,
   /** Checks the pages make as text is typed: read-only answers, keyed by what was asked. */
@@ -169,13 +167,6 @@ export const schemaQuery = (project: string, name: string) =>
     queryKey: pubsubKeys.schema(project, name),
     queryFn: ({ signal }) => getSchema(name, signal),
     enabled: project !== '' && name !== '',
-  })
-
-export const schedulesQuery = (project: string) =>
-  queryOptions({
-    queryKey: pubsubKeys.schedules(project),
-    queryFn: ({ signal }) => getSchedules(project, signal),
-    enabled: project !== '',
   })
 
 export const setupQuery = (project: string) =>

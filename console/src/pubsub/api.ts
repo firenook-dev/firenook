@@ -36,9 +36,6 @@ import type { PubsubPushConfigBody } from '@/api/generated/messaging/PubsubPushC
 import type { PubsubRedeliverBody } from '@/api/generated/messaging/PubsubRedeliverBody'
 import type { PubsubRedelivery } from '@/api/generated/messaging/PubsubRedelivery'
 import type { PubsubRejectedList } from '@/api/generated/messaging/PubsubRejectedList'
-import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
-import type { PubsubScheduleBody } from '@/api/generated/messaging/PubsubScheduleBody'
-import type { PubsubScheduleRun } from '@/api/generated/messaging/PubsubScheduleRun'
 import type { PubsubSchemaCheck } from '@/api/generated/messaging/PubsubSchemaCheck'
 import type { PubsubSchemaCheckBody } from '@/api/generated/messaging/PubsubSchemaCheckBody'
 import type { PubsubSchemaDetail } from '@/api/generated/messaging/PubsubSchemaDetail'
@@ -347,27 +344,6 @@ export function checkFilter(
   signal?: AbortSignal,
 ): Promise<PubsubFilterCheck> {
   return apiSend('POST', '/pubsub/filter/check', body, signal ? { signal } : {})
-}
-
-// ------------------------------------------------------------ schedules
-
-/** Every scheduled function with its next runs and the runs kept, one page. */
-export function getSchedules(project: string, signal?: AbortSignal): Promise<Page<PubsubSchedule>> {
-  return apiGet('/pubsub/schedules', { project }, signal)
-}
-
-/** Publishes the schedule's tick now (it runs the function's code). */
-export function runSchedule(body: PubsubScheduleBody): Promise<PubsubScheduleRun> {
-  return apiSend('POST', '/pubsub/schedule/run', body)
-}
-
-/** Stops the schedule's clock (console only); Run now still works. */
-export function pauseSchedule(body: PubsubScheduleBody): Promise<PubsubSchedule> {
-  return apiSend('POST', '/pubsub/schedule/pause', body)
-}
-
-export function resumeSchedule(body: PubsubScheduleBody): Promise<PubsubSchedule> {
-  return apiSend('POST', '/pubsub/schedule/resume', body)
 }
 
 // ------------------------------------------------------------ setup

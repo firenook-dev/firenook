@@ -278,8 +278,3 @@ export function enqueueTask(
 ): Promise<FunctionBrokerResult> {
   return apiSend<FunctionBrokerResult>('POST', `/functions/${enc(id)}/enqueue`, request)
 }
-
-/** Runs a schedule now: the same publish the clock makes, or a direct dispatch without Pub/Sub. */
-export function runSchedule(id: string): Promise<FunctionBrokerResult> {
-  return apiSend<FunctionBrokerResult>('POST', `/functions/${enc(id)}/run`, {})
-}

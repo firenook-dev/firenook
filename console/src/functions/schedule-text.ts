@@ -1,14 +1,16 @@
 // A schedule in words (SC-01, U-05): what an `onSchedule` expression means
 // — App Engine's own English ("every 5 minutes", "every day 03:00") read
 // back as a sentence, and a Unix cron line ("0 9 * * 1") turned into one
-// ("every Monday at 09:00") — when it is next due, in the zone it is
-// evaluated in and on this machine's clock, and what state it is in. An
-// expression this cannot put into words is shown as it is, with nothing
-// beside it: a wrong sentence is worse than none.
+// ("every Monday at 09:00") — when it is next due (the one countdown the
+// overview and the Schedule tab both say), in the zone it is evaluated in
+// and on this machine's clock, and what state it is in. An expression this
+// cannot put into words is shown as it is, with nothing beside it: a wrong
+// sentence is worse than none.
 
 import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
 import type { StatusTone } from '@/components/kit'
-import { pad, relativeTime } from '@/lib/format'
+import { elapsedText } from '@/components/console/outcome-chip'
+import { pad } from '@/lib/format'
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const MONTHS = [
@@ -261,15 +263,24 @@ export function describeSchedule(expression: string): string | undefined {
 
 // ------------------------------------------------------------ times and states
 
-/** "in 42 s", "in 3 min", "in 7 d"; "due now" once it has passed. */
-export function nextRunText(iso: string | null, now: number): string {
+/**
+ * "in 42 s", "in 2 min 51 s", "in 6 d 21 h"; "due now" from its last
+ * second on. To the `minute` (a table's narrow cell), a wait of a minute or
+ * more is rounded up to whole minutes: "in 3 min", never "in 2 min".
+ */
+export function nextRunText(
+  iso: string | null,
+  now: number,
+  precision: 'second' | 'minute' = 'second',
+): string {
   if (!iso) return '—'
   const at = Date.parse(iso)
   if (Number.isNaN(at)) return iso
-  const seconds = Math.round((at - now) / 1000)
-  if (seconds <= 0) return 'due now'
-  if (seconds < 60) return `in ${seconds} s`
-  return relativeTime(iso, now)
+  const ms = at - now
+  if (ms < 1000) return 'due now'
+  if (precision === 'minute' && ms >= 60_000)
+    return `in ${elapsedText(Math.ceil(ms / 60_000) * 60_000)}`
+  return `in ${elapsedText(ms)}`
 }
 
 /** A time in a zone, "Mon 19 Oct, 09:00"; in UTC when the zone is not one this browser knows. */
