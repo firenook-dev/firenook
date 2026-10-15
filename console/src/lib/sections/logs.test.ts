@@ -104,13 +104,11 @@ describe('the Logs registry entry', () => {
       expect(checkFilter(String(search(text).search?.q), LOG_FIELDS).ok, text).toBe(true)
   })
 
-  it('offers the Overview’s suite-wide actions as links, registered only here', () => {
+  it('offers its own views in ⌘K, and nothing of the suite’s', () => {
     const links = Object.fromEntries(logsActions.map((action) => [action.id, action.link]))
     expect(links).toEqual({
       'logs.errors': { to: '/logs', search: { q: 'level:error' } },
       'logs.problems': { to: '/logs', search: { q: 'is:problem' } },
-      'overview.reset': { to: '/', search: { dialog: 'reset' } },
-      'overview.env': { to: '/', search: { connect: 'env' } },
     })
   })
 

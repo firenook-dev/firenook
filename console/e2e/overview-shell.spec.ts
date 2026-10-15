@@ -187,6 +187,22 @@ test('⌘K: the suite’s data actions, each once', async ({ page, engine }) => 
   await expect(page.getByTestId('reset-dialog')).toHaveCount(0)
   await expect(documents).toHaveText(count)
 
+  // The environment block an app's server code reads, from anywhere.
+  const env = (await palette('Environment variables')).filter({
+    hasText: 'Environment variables for your app',
+  })
+  await expect(env).toHaveCount(1)
+  await env.click()
+  await expect(page).toHaveURL(/\/console\/?\?connect=env$/)
+  await expect(page.getByTestId('overview-connect-snippet')).toContainText(
+    'FIRESTORE_EMULATOR_HOST=',
+  )
+  // A platform's snippet copies from ⌘K; its tab is one click away on the page.
+  const platforms = await palette('flutter')
+  await expect(platforms.filter({ hasText: 'Copy the Flutter snippet' })).toHaveCount(1)
+  await expect(platforms.filter({ hasText: 'Connect with' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
   const errors = (await palette('Open logs: errors')).filter({ hasText: 'Open logs: errors only' })
   await expect(errors).toHaveCount(1)
   await errors.click()

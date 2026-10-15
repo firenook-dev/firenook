@@ -1,6 +1,6 @@
-// What the Overview adds to ⌘K while it is on screen: open "Connect your
-// app" on any platform, and copy a platform's snippet straight to the
-// clipboard. The suite-wide actions (saving a snapshot on the engine's
+// What the Overview adds to ⌘K while it is on screen: bring "Connect your
+// app" into view, and copy a platform's snippet straight to the clipboard
+// (its tab is one click away on the page). The suite-wide actions (saving a snapshot on the engine's
 // machine, the engine's details) are the palette's own Suite group, offered
 // on every page, so they are not repeated here.
 
@@ -17,17 +17,17 @@ import { CONNECT_TABS, type ConnectParam } from '@/lib/connect-tabs'
 
 export const OVERVIEW_PALETTE = 'overview'
 
-/** A row for one platform (connect with it, copy its snippet): offered once something is typed. */
+/** A row for one platform (copy its snippet): offered once something is typed. */
 function perPlatform(item: PaletteItem): boolean {
-  return item.id.startsWith('overview:copy:') || item.id.startsWith('overview:connect:')
+  return item.id.startsWith('overview:copy:')
 }
 
 export function useOverviewPalette({
   connect,
   snippet,
 }: {
-  /** Brings "Connect your app" into view, on a platform's tab when one is named. */
-  connect: (param: ConnectParam | undefined) => void
+  /** Brings "Connect your app" into view. */
+  connect: () => void
   /** The snippet a platform's tab shows now (host and ports included). */
   snippet: (param: ConnectParam) => string
 }) {
@@ -41,16 +41,8 @@ export function useOverviewPalette({
         description: 'The code that points an app at this engine, for every platform',
         keywords: 'connect snippet emulator sdk setup',
         icon: <PlugsConnectedIcon size={16} />,
-        run: () => connect(undefined),
+        run: connect,
       },
-      ...CONNECT_TABS.map<PaletteItem>((tab) => ({
-        id: `overview:connect:${tab.param}`,
-        title: `Connect with ${tab.label}`,
-        description: tab.title,
-        keywords: `connect snippet emulator sdk setup ${tab.param}`,
-        icon: <PlugsConnectedIcon size={16} />,
-        run: () => connect(tab.param),
-      })),
       ...CONNECT_TABS.map<PaletteItem>((tab) => ({
         id: `overview:copy:${tab.param}`,
         title: `Copy the ${tab.label} snippet`,

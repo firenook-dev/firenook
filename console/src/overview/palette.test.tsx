@@ -18,12 +18,12 @@ describe('the overview in ⌘K', () => {
     const view = renderHook(() => useOverviewPalette({ connect, snippet: () => '' }))
     expect(titles('')).toEqual(['Connect your app'])
     provider()('')[0]?.items[0]?.run()
-    expect(connect).toHaveBeenCalledWith(undefined)
+    expect(connect).toHaveBeenCalledOnce()
     view.unmount()
     expect(usePaletteProviders.getState().providers[OVERVIEW_PALETTE]).toBeUndefined()
   })
 
-  it('offers each platform, and copies its snippet, once something is typed', async () => {
+  it('copies each platform’s snippet once something is typed', async () => {
     const connect = vi.fn()
     const writeText = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
@@ -33,12 +33,12 @@ describe('the overview in ⌘K', () => {
         snippet: (param) => `snippet for ${param}`,
       }),
     )
-    expect(titles('flutter')).toEqual(['Connect with Flutter', 'Copy the Flutter snippet'])
+    expect(titles('flutter')).toEqual(['Copy the Flutter snippet'])
+    expect(titles('connect')).toEqual(expect.not.arrayContaining(['Connect with Web']))
     const [group] = provider()('copy python')
     group?.items[0]?.run()
     expect(writeText).toHaveBeenCalledWith('snippet for python')
-    provider()('connect env')[0]?.items[0]?.run()
-    expect(connect).toHaveBeenCalledWith('env')
+    expect(connect).not.toHaveBeenCalled()
     vi.unstubAllGlobals()
   })
 })

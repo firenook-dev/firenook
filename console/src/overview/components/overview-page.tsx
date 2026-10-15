@@ -55,7 +55,7 @@ export function OverviewPage() {
     update({ dialog }, { replace: dialog === undefined })
 
   useOverviewPalette({
-    connect: openConnect,
+    connect: () => openConnect(undefined),
     snippet: (param) =>
       connectSnippet(connectTab(param).target, {
         services: status.services.map((service) => service.name),
