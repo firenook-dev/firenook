@@ -28,7 +28,6 @@ import type { FunctionRevealedValue } from '@/api/generated/compute/FunctionReve
 import type { FunctionsSnapshot } from '@/api/generated/compute/FunctionsSnapshot'
 import type { InvocationView } from '@/api/generated/compute/InvocationView'
 import type { InvocationsResult } from '@/api/generated/compute/InvocationsResult'
-import { type TriggerService, fetchTriggers, triggersKey } from '@/lib/triggers'
 
 /** The engine keeps this many finished invocations (`MonitorLimits.invocations`). */
 export const INVOCATIONS_KEPT = 2_000
@@ -208,20 +207,6 @@ export const matchQuery = (project: string, request: FunctionMatchRequest) =>
   queryOptions({
     queryKey: functionKeys.matchOf(project, request),
     queryFn: ({ signal }) => matchTriggers(request, signal),
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: false,
-  })
-
-/** Who fires for a resource, under the key every section's trigger line shares. */
-export const triggersQuery = (
-  project: string,
-  service: TriggerService,
-  resource: string,
-  event?: string,
-) =>
-  queryOptions({
-    queryKey: triggersKey(project, service, resource, event),
-    queryFn: ({ signal }) => fetchTriggers(service, resource, event, signal),
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })

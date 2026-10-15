@@ -138,16 +138,6 @@ export function cloudEvent(
   }
 }
 
-/** LocalFunction.constructAuth for the user form; the shell's own {admin, variable} passes through. */
-export function eventAuth(auth: unknown): EventAuth | undefined {
-  if (auth === undefined) return undefined
-  if (!isObject(auth))
-    throw new Error('Auth must be a JSON object: {"uid": "...", "token": {...}} or {"admin": true}')
-  if (auth.admin !== undefined || auth.variable !== undefined)
-    return { admin: Boolean(auth.admin), variable: auth.variable }
-  return { admin: false, variable: { uid: auth.uid ?? '', token: auth.token ?? {} } }
-}
-
 /**
  * LocalFunction.substituteParams: wildcards take the param or, like the
  * shell, the wildcard name with a random digit.
