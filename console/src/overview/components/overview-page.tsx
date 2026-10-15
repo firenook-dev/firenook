@@ -135,7 +135,7 @@ export function OverviewPage() {
             onReset={setReset}
           />
 
-          <EngineDetails status={status} project={project} details={engine} />
+          <EngineDetails status={status} details={engine} />
         </Page>
       </div>
     </div>

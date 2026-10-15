@@ -1,6 +1,6 @@
 //! Suite-wide state no section owns: whether background triggers are
 //! delivered, where the data lives, saving an export on the engine's
-//! machine, clearing sections, and the console's buffer memory.
+//! machine, and clearing sections.
 //!
 //! Each is drawn once, by the shell (its banners and engine badge) and the
 //! Overview; no section keeps a copy. `POST /suite/background` is the only
@@ -23,7 +23,7 @@ use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use firenook_functions_bridge::TriggerRegistry;
-use firenook_suite_front::{BackgroundRequest, ExportCommand, LoggingRuntime, RingBudget};
+use firenook_suite_front::{BackgroundRequest, ExportCommand, LoggingRuntime};
 use futures_util::stream::BoxStream;
 use futures_util::{FutureExt as _, StreamExt as _};
 use serde::{Deserialize, Serialize};
@@ -128,29 +128,6 @@ pub struct ExportResult {
     /// How long the export took.
     #[ts(type = "number")]
     pub took_ms: u64,
-}
-
-/// `GET /status/memory`: the console's buffers against their shared budget.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct MemoryReport {
-    #[ts(type = "number")]
-    pub budget_bytes: u64,
-    #[ts(type = "number")]
-    pub used_bytes: u64,
-    /// Each buffer, in the order it was created.
-    pub rings: Vec<RingSize>,
-}
-
-/// One buffer's size.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-pub struct RingSize {
-    /// `logs`, `firestore.changes`, …
-    pub name: String,
-    #[ts(type = "number")]
-    pub entries: u64,
-    #[ts(type = "number")]
-    pub bytes: u64,
 }
 
 /// What the suite hands the console's suite controls.
@@ -458,30 +435,6 @@ async fn clear(
             .boxed())
         })?;
     Ok(accepted(job))
-}
-
-/// `GET /status/memory`.
-pub(crate) fn memory_router(rings: RingBudget) -> Router {
-    Router::new()
-        .route("/status/memory", get(memory))
-        .with_state(rings)
-}
-
-async fn memory(State(rings): State<RingBudget>) -> Json<MemoryReport> {
-    let wide = |value: usize| u64::try_from(value).unwrap_or(u64::MAX);
-    Json(MemoryReport {
-        budget_bytes: wide(rings.limit()),
-        used_bytes: wide(rings.used()),
-        rings: rings
-            .report()
-            .into_iter()
-            .map(|ring| RingSize {
-                name: ring.name,
-                entries: wide(ring.entries),
-                bytes: wide(ring.bytes),
-            })
-            .collect(),
-    })
 }
 
 /// `{ enabled }`.
@@ -1310,33 +1263,5 @@ mod tests {
                 ),
             ]
         );
-    }
-
-    #[tokio::test]
-    async fn the_memory_report_lists_each_ring_against_the_budget() {
-        let budget = RingBudget::new(1024 * 1024);
-        let ring: firenook_suite_front::ReplayRing<()> = firenook_suite_front::ReplayRing::new(
-            "logs",
-            firenook_suite_front::RingLimits::DEFAULT,
-            7,
-            &budget,
-        );
-        ring.push((), Arc::from("{\"line\":1}"));
-        let response = memory_router(budget)
-            .oneshot(
-                Request::get("/status/memory")
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        let report: Value = serde_json::from_slice(&bytes).expect("json");
-        assert_eq!(report["budgetBytes"], 1024 * 1024);
-        assert_eq!(report["rings"][0]["name"], "logs");
-        assert_eq!(report["rings"][0]["entries"], 1);
-        assert!(report["usedBytes"].as_u64().expect("used") > 0, "{report}");
     }
 }

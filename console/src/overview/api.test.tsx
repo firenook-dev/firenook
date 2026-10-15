@@ -26,7 +26,6 @@ const {
   engineQuery,
   laterJob,
   latestJob,
-  memoryQuery,
   overviewKeys,
   overviewQuery,
   prepareSnapshot,
@@ -97,7 +96,6 @@ describe('the overview queries', () => {
   it('key everything under the section and the project', () => {
     expect(overviewQuery('demo-x').queryKey).toEqual(['overview', 'demo-x'])
     expect(engineQuery('demo-x').queryKey).toEqual(['overview', 'demo-x', 'engine'])
-    expect(memoryQuery('demo-x').queryKey).toEqual(['overview', 'demo-x', 'memory'])
     expect(snapshotFileQuery('demo-x', SNAPSHOT).queryKey).toEqual([
       'overview',
       'demo-x',
@@ -106,10 +104,9 @@ describe('the overview queries', () => {
     ])
   })
 
-  it('never refetch the state or the engine by themselves; the buffers read afresh when shown', () => {
+  it('never refetch the state or the engine by themselves', () => {
     expect(overviewQuery('p').staleTime).toBe(Number.POSITIVE_INFINITY)
     expect(engineQuery('p').staleTime).toBe(Number.POSITIVE_INFINITY)
-    expect(memoryQuery('p').staleTime).toBe(0)
     expect(snapshotFileQuery('p', SNAPSHOT).retry).toBe(false)
   })
 
@@ -117,12 +114,10 @@ describe('the overview queries', () => {
     calls.get.mockResolvedValue({})
     await client.fetchQuery(overviewQuery('p'))
     await client.fetchQuery(engineQuery('p'))
-    await client.fetchQuery(memoryQuery('p'))
     await client.fetchQuery(snapshotFileQuery('p', SNAPSHOT))
     expect(calls.get.mock.calls.map((call) => call[0])).toEqual([
       '/overview',
       '/overview/engine',
-      '/status/memory',
       `/overview/snapshots/${SNAPSHOT}`,
     ])
   })

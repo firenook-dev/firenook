@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { expect, test } from './fixtures'
 import { readClipboard } from './support/clipboard'
 import { statusOf } from './support/shell'
@@ -248,27 +249,15 @@ test('the Admin snippet runs as printed', async ({ page, engine }) => {
   expect(result.users).toContain(ADA.email)
 })
 
-test('engine details: the configuration, and what the console buffers cost', async ({
-  page,
-  engine,
-}) => {
+test('engine details: the configuration, and where the data lives', async ({ page, engine }) => {
   await page.goto(`${engine.origin}/console`)
   const details = page.getByTestId('overview-engine-details')
   await details.scrollIntoViewIfNeeded()
   await expect(details).toBeVisible()
   await expect(page.getByTestId('engine-project-dir')).toContainText(engine.directory)
   await expect(page.getByTestId('engine-offline')).toBeVisible()
-
-  // Every ring the engine reports, the log's among them.
-  const memory = (await (await fetch(`${engine.origin}/console/api/v1/status/memory`)).json()) as {
-    rings: { name: string; entries: number }[]
-  }
-  expect(memory.rings.map((ring) => ring.name)).toContain('logs')
-  const buffers = page.getByTestId('engine-memory')
-  await expect(buffers.locator('[data-ring="logs"]')).toBeVisible()
-  // Each ring holding something has its own figure; the empty ones are counted together.
-  for (const ring of memory.rings.filter((kept) => kept.entries > 0))
-    await expect(buffers.locator(`[data-ring="${ring.name}"]`)).toHaveCount(1)
+  await expect(page.getByTestId('engine-data')).toContainText(join(engine.directory, 'state'))
+  await expect(page.getByTestId('engine-writes')).toBeVisible()
 
   // The engine details carry the configuration, and nothing of the data facts.
   const response = (await (

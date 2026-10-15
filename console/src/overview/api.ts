@@ -1,14 +1,12 @@
 // The Overview's server data: the engine's `overview` state (notices,
 // recent problems, the last hour, the log's totals), how the engine was
-// started, what the console's buffers hold, and the data jobs the page
-// starts (a snapshot to download or to save on the engine's machine, a
-// reset). Section figures are not here:
+// started, and the data jobs the page starts (a snapshot to download or to
+// save on the engine's machine, a reset). Section figures are not here:
 // they are each section's `SectionStatus.summary`, on the `shell` topic.
 //
 // Nothing polls. The state is replaced by the `overview` topic while the
-// page is mounted; the engine details are fixed for an engine run; the
-// buffers are read when their row is shown and on its refresh button; a
-// job moves on the foundation's `jobs` topic (`useJobs('suite')`).
+// page is mounted; the engine details are fixed for an engine run; a job
+// moves on the foundation's `jobs` topic (`useJobs('suite')`).
 //
 // The route's loader reads `queries.ts` alone (it is in the first route's
 // bundle); this file is the page's.
@@ -27,7 +25,7 @@ import { useConsoleProject } from '@/lib/project'
 import '@/observe/live'
 import { overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
 
-export { engineQuery, memoryQuery, overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
+export { engineQuery, overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
 
 /**
  * Keeps `['overview', project]` current from the `overview` topic while

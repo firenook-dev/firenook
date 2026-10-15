@@ -1,34 +1,22 @@
 // The engine itself, for debugging the emulator rather than the app: its
 // build, when it started, where it listens, the files it read, where its
-// data lives, the switches it was started with, and what the console's
-// buffers cost. Configuration comes from `/overview/engine` (fixed for the
-// engine's run), data facts from the status the shell already holds, and
-// the buffers are read when this part of the page comes into view and on
-// its refresh button — never on a timer.
+// data lives and how writes reach the disk, and the switches it was started
+// with. Configuration comes from `/overview/engine` (fixed for the engine's
+// run), data facts from the status the shell already holds. The top bar's
+// engine badge leads here (`/#engine`).
 
-import { Button, Tooltip } from '@cloudflare/kumo'
-import { ArrowClockwiseIcon, ArrowSquareOutIcon } from '@phosphor-icons/react'
-import { type UseQueryResult, useQuery } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { Tooltip } from '@cloudflare/kumo'
+import { ArrowSquareOutIcon } from '@phosphor-icons/react'
+import type { UseQueryResult } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
-import type { MemoryReport } from '@/api/generated/MemoryReport'
 import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngineDetails'
 import { CopyField } from '@/components/console/copy-button'
 import { useNow } from '@/lib/clock'
-import { clockOrDate, formatBytes, formatNumber } from '@/lib/format'
+import { clockOrDate } from '@/lib/format'
 import { serviceLabel } from '@/lib/services'
-import { memoryQuery } from '../api'
 import { uptime } from '../model'
 import { SectionError } from './section-error'
-
-/** What each buffer holds, in words; a buffer the console does not know keeps its name. */
-const RING_LABELS: Record<string, string> = {
-  logs: 'log lines',
-  'logs.problems': 'problems kept longer',
-  logging: 'official log feed',
-  'firestore.changes': 'Firestore changes',
-  jobs: 'jobs',
-}
 
 /** What `--durability` means for a write, in words; a mode the console does not know says nothing. */
 export function durabilityNote(durability: string): string | undefined {
@@ -38,54 +26,20 @@ export function durabilityNote(durability: string): string | undefined {
   return undefined
 }
 
-/** "18.2 MB of 64 MB" and each buffer holding anything, largest first. */
-export function memoryRows(report: MemoryReport) {
-  const used = report.rings.filter((ring) => ring.entries > 0).toSorted((a, b) => b.bytes - a.bytes)
-  return {
-    total: `${formatBytes(report.usedBytes)} of ${formatBytes(report.budgetBytes)}`,
-    rings: used.map((ring) => ({
-      name: ring.name,
-      label: RING_LABELS[ring.name] ?? ring.name,
-      size: formatBytes(ring.bytes),
-      entries: ring.entries,
-    })),
-    empty: report.rings.length - used.length,
-  }
-}
-
 export function EngineDetails({
   status,
-  project,
   details,
 }: {
   status: ConsoleStatus
-  project: string
   details: UseQueryResult<OverviewEngineDetails>
 }) {
   const now = useNow('minute')
-  const section = useRef<HTMLElement>(null)
-  // Without an IntersectionObserver (an old browser) the part counts as shown.
-  const [shown, setShown] = useState(() => typeof IntersectionObserver === 'undefined')
-  useEffect(() => {
-    const node = section.current
-    if (!node || shown) return undefined
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setShown(true)
-        observer.disconnect()
-      }
-    })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [shown])
-  const memory = useQuery({ ...memoryQuery(project), enabled: shown && project !== '' })
   const { engine, data } = status
   const config = details.data?.config ?? null
   const writes = durabilityNote(data.durability)
 
   return (
     <section
-      ref={section}
       id="overview-engine"
       className="grid gap-3"
       aria-labelledby="overview-engine-title"
@@ -232,25 +186,6 @@ export function EngineDetails({
               <Path value={config.node} />
             </Row>
           )}
-          <Row label="Console buffers" testId="engine-memory">
-            <Memory memory={memory} />
-            <Tooltip
-              content="Read the buffers again"
-              render={
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  shape="square"
-                  icon={<ArrowClockwiseIcon />}
-                  aria-label="Read the buffers again"
-                  loading={memory.isFetching}
-                  onClick={() => void memory.refetch()}
-                  className="self-center"
-                  data-testid="engine-memory-refresh"
-                />
-              }
-            />
-          </Row>
           <Row label="Google Emulator UI" testId="engine-google-ui">
             <a
               href="/"
@@ -307,34 +242,5 @@ function Path({ value }: { value: string }) {
         </span>
       }
     />
-  )
-}
-
-function Memory({ memory }: { memory: UseQueryResult<MemoryReport> }) {
-  if (memory.isError) return <span className="text-kumo-danger">{memory.error.message}</span>
-  if (!memory.data) return <span className="text-kumo-subtle">…</span>
-  const rows = memoryRows(memory.data)
-  return (
-    <>
-      <span className="font-mono tabular-nums">{rows.total}</span>
-      {rows.rings.map((ring) => (
-        <Tooltip
-          key={ring.name}
-          content={`${ring.name}: ${formatNumber(ring.entries)} ${ring.entries === 1 ? 'entry' : 'entries'}`}
-          render={
-            <span className="inline-flex items-baseline gap-1" data-ring={ring.name}>
-              <Sep />
-              <span className="text-kumo-subtle">{ring.label}</span>
-              <span className="font-mono tabular-nums">{ring.size}</span>
-            </span>
-          }
-        />
-      ))}
-      {rows.empty > 0 && (
-        <span className="text-kumo-subtle">
-          <Sep /> {rows.empty} empty
-        </span>
-      )}
-    </>
   )
 }

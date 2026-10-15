@@ -110,7 +110,7 @@ pub use sse::Shutdown;
 pub use storage::StorageConsole;
 pub use suite::{
     BackgroundTriggers, DataFacts, DataMode, DroppedCount, ExportDestination, ExportResult,
-    MemoryReport, RingSize, SuiteControls, SuiteSettings,
+    SuiteControls, SuiteSettings,
 };
 
 use instance::Instance;
@@ -529,7 +529,6 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         .route("/status", get(status_route))
         .with_state(status)
         .merge(search::Search::new(sources).router())
-        .merge(suite::memory_router(context.rings.clone()))
         .merge(services.suite.router())
         .merge(services.suite.export_router(context.jobs.clone()))
         .merge(suite::clear_router(
@@ -823,7 +822,6 @@ mod tests {
         ApiErrorBody::export_all(config).expect("TypeScript bindings written");
         ExportDestination::export_all(config).expect("TypeScript bindings written");
         ExportResult::export_all(config).expect("TypeScript bindings written");
-        MemoryReport::export_all(config).expect("TypeScript bindings written");
         JobList::export_all(config).expect("TypeScript bindings written");
         BulkTarget::export_all(config).expect("TypeScript bindings written");
         ClearReport::export_all(config).expect("TypeScript bindings written");

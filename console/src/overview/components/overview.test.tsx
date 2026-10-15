@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { Job } from '@/api/generated/Job'
+import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngineDetails'
 import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { statusQuery } from '@/api/queries'
 import { renderInConsole } from '@/test/render'
@@ -13,6 +14,7 @@ import { createNoticeStore } from '../notices'
 import type { SnapshotView } from '../snapshot'
 import { ConnectSection } from './connect'
 import { DataCards } from './data-section'
+import { EngineDetails } from './engine-details'
 import { Notices } from './notices'
 import { RecentProblems } from './problems'
 import { SectionCard } from './section-card'
@@ -476,5 +478,45 @@ describe('the data cards', () => {
     expect(download).toHaveBeenCalledOnce()
     await user.click(screen.getByTestId('overview-reset-firestore-open'))
     expect(onReset).toHaveBeenCalledWith({ kind: 'section', id: 'firestore' })
+  })
+})
+
+describe('the engine section', () => {
+  /** The engine details before `/overview/engine` has answered: the data facts alone. */
+  const unanswered = {
+    data: undefined,
+    isError: false,
+  } as unknown as UseQueryResult<OverviewEngineDetails>
+  const disk = testStatus({
+    data: {
+      mode: 'disk',
+      stateDir: '/work/app/state',
+      resumed: true,
+      importedFrom: null,
+      exportOnExit: '/work/app/export',
+      durability: 'per-commit',
+    },
+  })
+
+  it('says where the data lives, how writes reach the disk, and where it goes on exit', async () => {
+    await renderInConsole(() => <EngineDetails status={disk} details={unanswered} />, {
+      status: disk,
+    })
+    expect(screen.getByTestId('engine-data')).toHaveTextContent('On disk·resumed·/work/app/state')
+    expect(screen.getByTestId('engine-writes')).toHaveTextContent(
+      'per-commit(each commit reaches the disk before it answers)',
+    )
+    expect(screen.getByTestId('engine-export-on-exit')).toHaveTextContent('/work/app/export')
+  })
+
+  it('in memory, says the data is gone when the engine stops and has no writes to describe', async () => {
+    const memory = testStatus()
+    await renderInConsole(() => <EngineDetails status={memory} details={unanswered} />, {
+      status: memory,
+    })
+    expect(screen.getByTestId('engine-data')).toHaveTextContent(
+      'In memory(gone when the engine stops)',
+    )
+    expect(screen.queryByTestId('engine-writes')).toBeNull()
   })
 })
