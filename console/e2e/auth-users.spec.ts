@@ -29,8 +29,8 @@ import { cutRings, paintOf, paintedAtItsOwnCentre } from './support/look'
 
 // Authentication › Users against the real engine (auth spec §9.3, U1–U16):
 // the table, its filter and facets, live rows, the inspector and its
-// claims, creating users, bulk jobs, import and export, sample users at
-// scale, sign in as, another project, the keyboard and the look. Journeys
+// claims, creating users, bulk jobs, import and export, sample users and
+// ten thousand rows, sign in as, another project, the keyboard and the look. Journeys
 // that make many users, delete in bulk, import or count work in a scratch
 // tenant they delete at the end; users made in the project scope are on
 // `journey.test` and deleted at the end; the seeded people are only read.
@@ -787,7 +787,7 @@ test('U11 an export loads back with one upload and a small import request', asyn
   })
 })
 
-test('U12 ten thousand sample users scroll smoothly and leave with Delete sample users', async ({
+test('U12 sample users come a thousand at most, ten thousand scroll smoothly, and Delete sample users takes them', async ({
   page,
   engine,
 }) => {
@@ -797,11 +797,15 @@ test('U12 ten thousand sample users scroll smoothly and leave with Delete sample
     await page.goto(users(engine, { tenant, new: 'sample' }))
     const sample = page.getByTestId('sample-users-dialog')
     await sample.getByRole('combobox', { name: 'How many sample users' }).click()
-    await page.getByRole('option', { name: '10,000' }).click()
+    await expect(page.getByRole('option')).toHaveText(['10', '100', '1,000'])
+    await page.getByRole('option', { name: '1,000' }).click()
     await sample.getByTestId('sample-go').click()
     await expect(sample.getByTestId('sample-show')).toBeVisible({ timeout: 120_000 })
     await sample.getByTestId('sample-show').click()
     await expect(page).toHaveURL(/q=is%3Asample/)
+    expect(await usersCount(engine, { tenant, q: 'is:sample' })).toBe(1_000)
+    // Nine thousand more of the same shape, as the Admin SDK would make them.
+    await batchCreate(engine, sampleShaped(9_000, 12), tenant)
     expect(await usersCount(engine, { tenant })).toBe(10_000)
     await expect(countText(page)).toHaveText('10,000 users')
 
