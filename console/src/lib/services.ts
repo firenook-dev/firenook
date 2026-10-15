@@ -140,13 +140,6 @@ export function itemBadges(section: ConsoleSection): readonly string[] {
   return [...(section.badges ?? []), `${section.id}.jobs`]
 }
 
-/** The section a console path belongs to (`/firestore/rules` → Firestore). */
-export function sectionAt(pathname: string): ConsoleSection | undefined {
-  return SECTIONS.find(
-    (section) => pathname === section.to || pathname.startsWith(`${section.to}/`),
-  )
-}
-
 export const AREA_LABELS: Record<ServiceArea, string> = {
   data: 'Data',
   compute: 'Compute',

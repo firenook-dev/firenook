@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import order from './section-order.json'
-import { SECTIONS, itemBadges, sectionAt, sectionById } from './services'
+import { SECTIONS, itemBadges, sectionById } from './services'
 
 describe('the one section order', () => {
   it('is the sidebar order, which the engine sorts its status by', () => {
@@ -19,13 +19,6 @@ describe('finding a section', () => {
     expect(sectionById('firestore')?.label).toBe('Firestore')
     expect(sectionById('toString')).toBeUndefined()
     expect(sectionById('overview')).toBeUndefined()
-  })
-
-  it('by path, page included, never by a prefix of another id', () => {
-    expect(sectionAt('/firestore/rules')?.id).toBe('firestore')
-    expect(sectionAt('/auth')?.id).toBe('auth')
-    expect(sectionAt('/authx')).toBeUndefined()
-    expect(sectionAt('/')).toBeUndefined()
   })
 })
 

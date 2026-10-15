@@ -634,8 +634,9 @@ barrel, so a route chunk carries only what it uses. The shell imports only
 route chunks. Identity: requests run as a `ViewAs` through
 `resolveAuthorization`/`fetchAs` (the engine mints a user's token; never
 `mintUnsignedToken` directly); `IdentityPicker` picks it. Requests:
-`components/console/request/` (`sendComposed` streams, `requestAsCode`,
-`useRequestHistory`, `ResponseView`, `CodePopover`). Every piece has a
+`components/console/request/` (`requestAsCode`, `useRequestHistory`,
+`ResponseView`, `CodePopover`; an invoke streams through the engine,
+`functions/invoke-stream.ts`). Every piece has a
 design-system card (`console/design-system/src/cards/`, one file per
 stream, loaded by glob). A few behaviours worth knowing:
 
@@ -2006,7 +2007,7 @@ kept current by that channel, so a dropped channel is a grid that looks
 fresh and is not — the one thing a dev tool must not do quietly. While it
 is up there is nothing to say: a green "Live" in every toolbar was the
 normal case announced beside the engine's own green dot. The toolbar keeps
-a `LiveDot` chip only for this page's own subscription, when the engine
+a `LiveNotice` chip only for this page's own subscription, when the engine
 ended or refused it. A journey drops the channel with `dropLive`
 (`e2e/support/live.ts`: the product's own release path — the tab hidden
 until it lets the connection go, the live routes refused, the tab shown

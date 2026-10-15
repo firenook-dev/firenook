@@ -67,7 +67,7 @@ export interface ResponseRecord {
   chunks?: readonly { atMs: number; text: string }[]
   /** Still arriving: a partial record handed to `onUpdate`. */
   receiving?: boolean
-  /** The body was longer than the console keeps (`MAX_KEPT_BODY`); `sizeBytes` is all of it. */
+  /** The body was longer than the console keeps; `sizeBytes` is all of it. */
   truncated?: boolean
   /** A network failure, a refusal to send, or an abort, in a sentence. */
   error?: string

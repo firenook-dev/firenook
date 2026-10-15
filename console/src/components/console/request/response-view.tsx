@@ -9,10 +9,17 @@ import { StatusDot, type StatusTone } from '@/components/kit'
 import { download } from '@/lib/download'
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
 import { JsonView } from '../json-view'
-import { isTextual } from './send'
 import type { ResponseRecord } from './types'
 
 type Tab = 'body' | 'headers' | 'raw' | 'chunks'
+
+const TEXTUAL =
+  /^(text\/|application\/(json|[\w.+-]*\+json|x-ndjson|ndjson|javascript|ecmascript|xml|[\w.+-]*\+xml|x-www-form-urlencoded|graphql|yaml|x-yaml)\b)/i
+
+/** Whether a content type is text the console can show as it is. */
+export function isTextual(contentType: string | undefined): boolean {
+  return contentType !== undefined && TEXTUAL.test(contentType.trim())
+}
 
 /** Bytes shown as hex: the first 4 KB. */
 const HEX_BYTES = 4096

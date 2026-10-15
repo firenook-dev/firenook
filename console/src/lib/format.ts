@@ -74,24 +74,6 @@ export function formatDuration(ms: number): string {
   return rest === 0 ? `${days} d` : `${days} d ${rest} h`
 }
 
-/** "0.5 lines/s", "12 lines/s", "1.2k lines/s", "3.4M events/s". */
-export function formatRate(perSecond: number, noun: string): string {
-  const value = Math.max(0, perSecond)
-  return `${compactNumber(value)} ${noun}/s`
-}
-
-function compactNumber(value: number): string {
-  if (value >= 1_000_000) return `${trim(value / 1_000_000)}M`
-  if (value >= 1000) return `${trim(value / 1000)}k`
-  if (value < 10 && !Number.isInteger(value)) return value.toFixed(1).replace(/\.0$/, '')
-  return String(Math.round(value))
-}
-
-/** One decimal below 100, none from there: 1.2k, 12.5k, 120k. */
-function trim(value: number): string {
-  return value < 100 ? value.toFixed(1).replace(/\.0$/, '') : String(Math.round(value))
-}
-
 /** Relative time in the shortest honest form; the exact time stays a hover away. */
 export function relativeTime(iso: string, now = Date.now()): string {
   const then = new Date(iso).getTime()
@@ -168,15 +150,6 @@ export function whenParts(
 export function whenText(iso: string, now = Date.now()): string {
   const parts = whenParts(iso, now)
   return parts ? `${parts.local} local · ${parts.instant} · ${parts.ago}` : iso
-}
-
-/**
- * An id cut in the middle for a narrow cell: the start says what kind of
- * id it is and the end tells two of them apart. Short ids stay whole.
- */
-export function shortId(id: string, keep = 6): string {
-  if (id.length <= keep * 2 + 1) return id
-  return `${id.slice(0, keep)}…${id.slice(-keep)}`
 }
 
 /**

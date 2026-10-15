@@ -7,9 +7,7 @@ import {
   formatCount,
   formatDuration,
   formatNumber,
-  formatRate,
   relativeTime,
-  shortId,
   utcStamp,
   whenParts,
   whenText,
@@ -76,17 +74,6 @@ describe('durations', () => {
   })
 })
 
-describe('rates', () => {
-  it('compacts thousands and millions', () => {
-    expect(formatRate(1234, 'lines')).toBe('1.2k lines/s')
-    expect(formatRate(12, 'lines')).toBe('12 lines/s')
-    expect(formatRate(0.5, 'events')).toBe('0.5 events/s')
-    expect(formatRate(120_000, 'lines')).toBe('120k lines/s')
-    expect(formatRate(3_400_000, 'events')).toBe('3.4M events/s')
-    expect(formatRate(2000, 'lines')).toBe('2k lines/s')
-  })
-})
-
 describe('times', () => {
   const now = Date.parse('2026-09-20T09:00:00Z')
 
@@ -140,12 +127,6 @@ describe('times', () => {
     const nextDay = at.getTime() + 26 * 3_600_000
     expect(whenParts(at.toISOString(), nextDay)?.local).toBe('Oct 13 04:10:27.670')
     expect(whenText('nope')).toBe('nope')
-  })
-
-  it('cuts long ids in the middle and leaves short ones whole', () => {
-    expect(shortId('u_9f3k2')).toBe('u_9f3k2')
-    expect(shortId('projects/demo/messages/18340000000000')).toBe('projec…000000')
-    expect(shortId('abcdefghij', 2)).toBe('ab…ij')
   })
 })
 
