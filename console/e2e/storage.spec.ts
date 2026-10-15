@@ -1431,7 +1431,11 @@ test('the keyboard reaches everything: rows, ticks, Quick Look, the row menu and
   await expect(cursor().getByRole('checkbox')).toBeChecked()
   await page.keyboard.press('Space')
   await expect(cursor().getByRole('checkbox')).not.toBeChecked()
-  // ⌘C copies the cursor row's name cell: its gs:// URL.
+  // ⌘C copies the cursor row's path; from its name cell, the gs:// URL.
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect.poll(() => readClipboard(page)).toBe(seed.names.events)
+  await cursor().locator('td[data-column="name"]').click()
+  await page.keyboard.press('Escape')
   await page.keyboard.press('ControlOrMeta+c')
   await expect
     .poll(() => readClipboard(page))
