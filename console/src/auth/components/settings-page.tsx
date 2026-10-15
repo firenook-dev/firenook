@@ -290,9 +290,6 @@ export function SettingsPage() {
   )
 }
 
-/** Where the Overview's Data part starts: its reset rows, Authentication's among them. */
-const OVERVIEW_DATA = 'overview-data-title'
-
 /** A link in the page's sentences: the console's link colour, underlined on hover. */
 const TEXT_LINK =
   'text-kumo-link underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none'
@@ -345,7 +342,12 @@ function DataLinks({
         Add sample users
       </Link>
       . To delete every user of every tenant, reset Authentication on the{' '}
-      <Link to="/" hash={OVERVIEW_DATA} className={TEXT_LINK} data-testid="settings-reset">
+      <Link
+        to="/"
+        search={{ dialog: 'reset', section: 'auth' }}
+        className={TEXT_LINK}
+        data-testid="settings-reset"
+      >
         Overview ↗
       </Link>
       .
