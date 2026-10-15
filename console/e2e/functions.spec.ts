@@ -603,6 +603,9 @@ test('enqueue a task through Cloud Tasks and follow its attempt', async ({ page,
   expect(view.refs.some((ref) => ref.kind === 'tasks.task' || ref.kind === 'tasks.queue')).toBe(
     true,
   )
+  // Retries and rate limits are the queue's, in Cloud Tasks' configuration.
+  await page.getByTestId('task-queue-config').click()
+  await expect(page).toHaveURL(/\/console\/tasks\?.*view=config/)
 })
 
 test("publish to a Pub/Sub function's topic for real, through Pub/Sub's own publish", async ({

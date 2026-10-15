@@ -1,33 +1,54 @@
 // Enqueue, for a task queue function: the queue as the Cloud Tasks emulator
-// holds it (its key, retries, rate limits, why it refused the queue when it
-// did, a link to it in Cloud Tasks) and a task with a JSON payload, enqueued
-// through Cloud Tasks' console path so the retries and headers are the real
-// ones. There is
-// no delay field unless the queue holds scheduled tasks: Cloud Tasks here
-// runs a task at once whatever its schedule time, as the official emulator.
+// holds it (its key, why it refused the queue when it did, links to its
+// configuration and its full enqueue dialog in Cloud Tasks) and a task
+// with a JSON payload, enqueued through Cloud Tasks' console path so the
+// retries and headers are the real ones. There is no delay field unless the
+// queue holds scheduled tasks: Cloud Tasks here runs a task at once
+// whatever its schedule time, as the official emulator.
 
 import { Input, Text } from '@cloudflare/kumo'
 import { useMutation } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ApiError } from '@/api/client'
+import type { EntityRef } from '@/api/generated/EntityRef'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { InvocationSummary } from '@/api/generated/compute/InvocationSummary'
 import { EntityLink } from '@/components/console/entity-link'
 import { JsonField, parseJsonText } from '@/components/console/json-field'
 import { RequiresNotice } from '@/components/console/requires-notice'
 import { SendButton } from '@/components/console/request/send-button'
+import { useLinkTo } from '@/lib/links'
 import { enqueue as enqueueTask } from '@/tasks/api'
 import { type TaskDraft, useRunDraft } from '../run-drafts'
 import { statusReasonText } from '../trigger-text'
 import { FormRow, RunAnswer, RunError, RunFooter, useNextInvocation } from './run-parts'
 
-/** A queue option in words: `maxAttempts 3`, the set ones only. */
-export function optionsText(value: unknown): string {
-  if (value === null || typeof value !== 'object') return ''
-  return Object.entries(value)
-    .filter(([, item]) => item !== null && item !== undefined)
-    .map(([key, item]) => `${key} ${String(item)}`)
-    .join(' · ')
+/**
+ * Where the queue's own settings are: its configuration (retries and rate
+ * limits, with where each value comes from) and Cloud Tasks' enqueue dialog,
+ * which takes a task's name, headers and deadline too.
+ */
+function QueueElsewhere({ queueRef }: { queueRef: EntityRef }) {
+  const link = useLinkTo(queueRef)
+  if (!link) return null
+  const at = (patch: Record<string, string>, text: string, testId: string) => (
+    <Link
+      to={link.to as never}
+      search={{ ...link.search, ...patch } as never}
+      className="text-kumo-link underline-offset-2 hover:underline"
+      data-testid={testId}
+    >
+      {text}
+    </Link>
+  )
+  return (
+    <>
+      Retries and rate limits: {at({ view: 'config' }, 'its configuration', 'task-queue-config')}. A
+      name, headers or a deadline:{' '}
+      {at({ new: 'task' }, 'Enqueue in Cloud Tasks', 'task-queue-enqueue')}.
+    </>
+  )
 }
 
 export function TaskForm({
@@ -103,7 +124,10 @@ export function TaskForm({
       <div className="grid shrink-0 gap-2.5 px-5 py-3">
         {queue && (
           <>
-            <FormRow label="Queue">
+            <FormRow
+              label="Queue"
+              hint={queue.queueRef ? <QueueElsewhere queueRef={queue.queueRef} /> : undefined}
+            >
               <span
                 className="min-w-0 truncate font-mono text-[12px] text-kumo-default"
                 data-testid="task-queue"
@@ -116,16 +140,6 @@ export function TaskForm({
                   testId="task-queue-link"
                 />
               )}
-            </FormRow>
-            <FormRow label="Retries">
-              <span className="font-mono text-[12px] text-kumo-default">
-                {optionsText(queue.retryConfig) || 'defaults'}
-              </span>
-            </FormRow>
-            <FormRow label="Rate">
-              <span className="font-mono text-[12px] text-kumo-default">
-                {optionsText(queue.rateLimits) || 'defaults'}
-              </span>
             </FormRow>
             {queue.refused && (
               <RunError message={`The Cloud Tasks emulator refused this queue: ${queue.refused}`} />

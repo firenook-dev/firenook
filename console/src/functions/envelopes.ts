@@ -323,7 +323,8 @@ export interface EnvelopeOptions {
 /** A test event: the body to post to the trigger route, and what the shell would also say about it. */
 export interface TestEnvelope {
   kind: ShellKind
-  transport: 'functions' | 'tasks'
+  /** Always the functions trigger route (the CLI's own envelope says the same). */
+  transport: 'functions'
   body?: Record<string, unknown>
   headers?: Record<string, string>
   /** Firestore: the full document name. */
@@ -331,8 +332,6 @@ export interface TestEnvelope {
   /** Pub/Sub: the message and its topic (short name). */
   message?: Record<string, unknown>
   topic?: string
-  /** A task queue's task, as the CLI enqueues it. */
-  task?: Record<string, unknown>
 }
 
 function firestoreEnvelope(
@@ -657,18 +656,11 @@ export function buildTestEvent(
     case 'unknown':
       throw new Error(`${trigger.name} has no trigger Firenook can drive`)
     case 'taskQueue':
-      return {
-        kind,
-        transport: 'tasks',
-        task: {
-          httpRequest: {
-            url: '',
-            oidcToken: { serviceAccountEmail: 'emulated-service-acct@email.com' },
-            body: utf8Base64(JSON.stringify({ data: eventData ?? {} })),
-            headers: { 'Content-Type': 'application/json' },
-          },
-        },
-      }
+      // The Run tab enqueues through Cloud Tasks instead (the shell's own
+      // task envelope is a task the Tasks API takes, not an event).
+      throw new Error(
+        `${trigger.name} is a task queue function; enqueue a task for it through Cloud Tasks`,
+      )
     case 'firestore':
       return firestoreEnvelope(trigger, project, eventData, opts, clock, random)
     case 'storage':
