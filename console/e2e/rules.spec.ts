@@ -117,11 +117,14 @@ test('the rules are checked as they are typed, and a draft is not in force until
     await expect(problems.locator('[data-severity="warning"]')).toContainText(
       'Anyone, signed in or not',
     )
-    await page.getByRole('tab', { name: /Collections/ }).click()
-    await expect(page.getByTestId('rules-warning').first()).toHaveAttribute(
+    await expect(problems.locator('[data-severity="warning"]').first()).toHaveAttribute(
       'data-code',
       'open-access',
     )
+    // The strip is the one place warnings are listed: the map panel lists the data.
+    await page.getByRole('tab', { name: /Collections/ }).click()
+    await expect(page.getByTestId('rules-map')).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Collections' })).toHaveText('Collections')
 
     // A draft outlives a trip to the data page and back.
     await page.getByTestId('primary-nav').getByTestId('nav-page-data').click()

@@ -197,7 +197,7 @@ function StorageRulesBody({
   // The draft, checked as it is typed: the compiler's errors and the
   // engine's warnings (Storage's own among them: uploads with no size
   // limit, list() below rules_version 2), where they are.
-  const { checked, problems, marks, warnings, compiles } = useRulesCheck(draft, scope, (text) =>
+  const { checked, problems, marks, compiles } = useRulesCheck(draft, scope, (text) =>
     storageRulesCheckQuery(project, scope, text),
   )
 
@@ -423,19 +423,7 @@ function StorageRulesBody({
                     </span>
                   ),
                 },
-                {
-                  value: 'folders',
-                  label: (
-                    <span className="flex items-center gap-1.5" data-testid="tab-folders">
-                      Folders
-                      {warnings > 0 && (
-                        <span className="rounded-full bg-kumo-warning-tint px-1.5 text-[10px] leading-4 text-kumo-default tabular-nums ring ring-kumo-warning">
-                          {warnings}
-                        </span>
-                      )}
-                    </span>
-                  ),
-                },
+                { value: 'folders', label: 'Folders' },
               ]}
             />
           </div>

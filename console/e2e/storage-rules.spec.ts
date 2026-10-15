@@ -94,8 +94,10 @@ test('a bucket’s rules load as they are on disk, and the picker opens another 
   await expect(page.getByTestId('rules-draft-state')).toHaveCount(0)
   // The check of the loaded text has come back and is drawn — its two
   // warnings, the open read of public/ and the any-signed-in list of
-  // shared/, count on the Folders tab — and no error showed on the way.
-  await expect(page.getByTestId('tab-folders')).toContainText('2')
+  // shared/, are in the Problems strip — and no error showed on the way.
+  await expect(
+    page.getByTestId('rules-diagnostics').locator('[data-severity="warning"]'),
+  ).toHaveCount(2)
   expect(await page.evaluate(() => (globalThis as unknown as ProblemWatch).rulesSeen?.errors)).toBe(
     false,
   )
@@ -130,12 +132,11 @@ test('the rules are checked as they are typed, with Storage’s own warnings', a
     edited(original, '\n        && request.resource.size < 5 * 1024 * 1024', ''),
   )
   await expect(problems.locator('[data-severity="error"]')).toHaveCount(0)
-  await page.getByRole('tab', { name: /Folders/ }).click()
-  const unbounded = page.locator('[data-testid="rules-warning"][data-code="unbounded-upload"]')
+  const unbounded = problems.locator('[data-code="unbounded-upload"]')
   await expect(unbounded).toHaveCount(1)
   await expect(unbounded).toContainText('no size limit')
   // With the open read of public/ and the any-signed-in list of shared/.
-  await expect(page.getByTestId('tab-folders')).toContainText('3')
+  await expect(problems.locator('[data-severity="warning"]')).toHaveCount(3)
   // A warning is a way to its line.
   await unbounded.click()
   await expect(activeLine(page)).toHaveText(/^(6|7)$/)
@@ -151,9 +152,7 @@ test('the rules are checked as they are typed, with Storage’s own warnings', a
       "      allow update: if request.auth != null && request.auth.uid == uid\n        && request.resource.contentType.matches('image/.*');",
     ),
   )
-  await expect(page.locator('[data-testid="rules-warning"][data-code="open-access"]')).toHaveCount(
-    1,
-  )
+  await expect(problems.locator('[data-code="open-access"]')).toHaveCount(1)
   await expect(unbounded).toHaveCount(0)
 
   await page.getByTestId('rules-revert').click()

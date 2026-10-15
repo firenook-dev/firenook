@@ -2,8 +2,9 @@
 // directly, with the match blocks that govern it and what they allow; the
 // folders no rule covers, where every client request is denied; folders too
 // deep to analyse; the match blocks that reach no file at all (usually a
-// typo in a path); and the engine's warnings about the rules themselves.
-// Only an emulator can draw this: it holds both the rules and the files.
+// typo in a path). Only an emulator can draw this: it holds both the rules
+// and the files. The engine's warnings about the rules are the Problems
+// strip's.
 //
 // It follows the files: an upload into a folder no rule covers shows up
 // here as it lands (the `storage.objects` topic asks the map again, at most
@@ -11,10 +12,9 @@
 // built.
 
 import { Button, DropdownMenu, Text, Tooltip } from '@cloudflare/kumo'
-import { CaretDownIcon, MagicWandIcon, WarningIcon } from '@phosphor-icons/react'
+import { CaretDownIcon, MagicWandIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import type { RulesDiagnostic } from '@/api/generated/RulesDiagnostic'
 import type { RulesOperation } from '@/api/generated/RulesOperation'
 import type { StorageFolderRules } from '@/api/generated/storage/StorageFolderRules'
 import { RequiresNotice } from '@/components/console/requires-notice'
@@ -64,7 +64,7 @@ export function FoldersPanel({
   /** The bucket the map is drawn for (the page's). */
   bucket: string
   draft: RulesDraft
-  /** The text the page last checked, which the map and warnings describe; none before the rules load. */
+  /** The text the page last checked, which the map describes; none before the rules load. */
   checked: string | undefined
   onReveal: (line: number) => void
 }) {
@@ -73,9 +73,6 @@ export function FoldersPanel({
     ...storageRulesCheckQuery(project, scope, checked ?? ''),
     enabled: checked !== undefined,
   })
-  const warnings = (check.data?.diagnostics ?? []).filter(
-    (diagnostic): diagnostic is RulesDiagnostic => diagnostic.severity === 'warning',
-  )
   const errors = (check.data?.diagnostics ?? []).some((item) => item.severity === 'error')
   const map = check.data?.map ?? null
   const [writing, setWriting] = useState(false)
@@ -230,38 +227,6 @@ export function FoldersPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {warnings.length > 0 && (
-          <section
-            className="grid gap-2 border-b border-kumo-line px-3 py-3"
-            data-testid="rules-warnings"
-          >
-            <Text as="h3" size="xs" bold>
-              Worth a second look
-            </Text>
-            <ul className="grid gap-1.5">
-              {warnings.map((warning) => (
-                <li key={`${warning.line}:${warning.column}:${warning.code ?? ''}`}>
-                  <button
-                    type="button"
-                    onClick={() => onReveal(warning.line)}
-                    className="flex w-full items-start gap-2 rounded-md bg-kumo-warning-tint p-2 text-left ring ring-kumo-hairline hover:ink"
-                    data-testid="rules-warning"
-                    data-code={warning.code ?? undefined}
-                  >
-                    <WarningIcon size={14} className="mt-0.5 shrink-0 text-kumo-warning" />
-                    <span className="grid gap-0.5">
-                      <span className="text-[13px] text-kumo-default">{warning.message}</span>
-                      <span className="font-mono text-[11px] text-kumo-subtle">
-                        line {warning.line}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
         {(checked === undefined || check.isPending) && (
           <div className="p-4">
             <Text size="sm" variant="secondary">

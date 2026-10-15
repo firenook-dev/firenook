@@ -110,7 +110,7 @@ function RulesBody({ project }: { project: string }) {
 
   // The draft, checked as it is typed: the compiler's errors and the
   // engine's warnings, where they are, before anything is applied.
-  const { checked, problems, marks, warnings, compiles } = useRulesCheck(draft, database, (text) =>
+  const { checked, problems, marks, compiles } = useRulesCheck(draft, database, (text) =>
     checkQuery(database, text),
   )
 
@@ -297,19 +297,7 @@ function RulesBody({ project }: { project: string }) {
                     </span>
                   ),
                 },
-                {
-                  value: 'collections',
-                  label: (
-                    <span className="flex items-center gap-1.5">
-                      Collections
-                      {warnings > 0 && (
-                        <span className="rounded-full bg-kumo-warning-tint px-1.5 text-[10px] leading-4 text-kumo-default tabular-nums ring ring-kumo-warning">
-                          {warnings}
-                        </span>
-                      )}
-                    </span>
-                  ),
-                },
+                { value: 'collections', label: 'Collections' },
               ]}
             />
           </div>

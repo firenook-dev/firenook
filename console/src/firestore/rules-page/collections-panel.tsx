@@ -2,15 +2,14 @@
 // the match blocks that govern its documents and what they allow; the
 // ones no rule covers, where every client request is denied; the match
 // blocks that reach no collection at all, which is usually a typo in a
-// path; and the engine's warnings about the rules themselves. Only an
-// emulator can draw this: it holds both the rules and the data.
+// path. Only an emulator can draw this: it holds both the rules and the
+// data. The engine's warnings about the rules are the Problems strip's.
 
 import { Button, Text, useKumoToastManager } from '@cloudflare/kumo'
-import { MagicWandIcon, WarningIcon } from '@phosphor-icons/react'
+import { MagicWandIcon } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { checkQuery } from './api'
-import type { RulesDiagnostic } from '@/api/generated/RulesDiagnostic'
 import type { CollectionRules } from '@/api/generated/CollectionRules'
 import { fieldsQuery } from './schema-fields'
 import { insertBlock, starterRules } from './starter'
@@ -28,51 +27,16 @@ export function CollectionsPanel({
   project: string
   database: string
   draft: RulesDraft
-  /** The text the page last checked, which the map and warnings describe; none before the rules load. */
+  /** The text the page last checked, which the map describes; none before the rules load. */
   checked: string | undefined
   onReveal: (line: number) => void
 }) {
   const check = useQuery({ ...checkQuery(database, checked ?? ''), enabled: checked !== undefined })
-  const warnings = (check.data?.diagnostics ?? []).filter(
-    (diagnostic): diagnostic is RulesDiagnostic => diagnostic.severity === 'warning',
-  )
   const map = check.data?.map ?? null
   const errors = (check.data?.diagnostics ?? []).some((item) => item.severity === 'error')
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="collections">
-      {warnings.length > 0 && (
-        <section
-          className="grid gap-2 border-b border-kumo-line px-3 py-3"
-          data-testid="rules-warnings"
-        >
-          <Text as="h3" size="xs" bold>
-            Worth a second look
-          </Text>
-          <ul className="grid gap-1.5">
-            {warnings.map((warning) => (
-              <li key={`${warning.line}:${warning.column}:${warning.code ?? ''}`}>
-                <button
-                  type="button"
-                  onClick={() => onReveal(warning.line)}
-                  className="flex w-full items-start gap-2 rounded-md bg-kumo-warning-tint p-2 text-left ring ring-kumo-hairline hover:ink"
-                  data-testid="rules-warning"
-                  data-code={warning.code ?? undefined}
-                >
-                  <WarningIcon size={14} className="mt-0.5 shrink-0 text-kumo-warning" />
-                  <span className="grid gap-0.5">
-                    <span className="text-[13px] text-kumo-default">{warning.message}</span>
-                    <span className="font-mono text-[11px] text-kumo-subtle">
-                      line {warning.line}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {check.isPending && (
         <div className="p-4">
           <Text size="sm" variant="secondary">

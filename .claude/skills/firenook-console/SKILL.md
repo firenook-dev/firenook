@@ -2119,8 +2119,8 @@ text. A reveal comes from a click, an overlay's arrival or a link's `line`
 compile errors or the engine's lint warnings (`code`: `open-access`,
 `auth-only`, `unvalidated-write`; positions are UTF-16 `from`/`to`), the
 outline, and the map against the schema index. The Problems strip under
-the editor lists them; Collections shows the warnings and the map
-(governing match blocks with the operations their allows grant, uncovered
+the editor lists them, the one place a warning is listed (`rules-problem`,
+`data-code`); Collections shows the map (governing match blocks with the operations their allows grant, uncovered
 collections, match blocks that reach no data). "Add starter rules"
 (`starter.ts`) writes a match block from sampled fields: ownership from a
 `users/{userId}` ancestor, `users` itself, or an owner field; a
