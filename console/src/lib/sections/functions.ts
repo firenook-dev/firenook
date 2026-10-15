@@ -41,6 +41,8 @@ export const functions: ConsoleSection = {
   routes: {
     'functions.function': (id) => ({ to: '/functions', search: { function: id } }),
     'functions.invocation': (id) => ({ to: '/functions/invocations', search: { invocation: id } }),
+    // Key: an Invocations filter (`function:us-central1-processOrder`).
+    'functions.invocations': (q) => ({ to: '/functions/invocations', search: { q } }),
     'functions.codebase': (codebase) => ({ to: '/functions', search: { codebase } }),
   },
 }
