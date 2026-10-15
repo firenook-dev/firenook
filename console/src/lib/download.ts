@@ -9,6 +9,8 @@
 //   to the file through the File System Access API where the browser has it,
 //   chunk by chunk.
 // - Elsewhere, a Blob, as the last resort.
+// - A Blob the page built itself (a test file, an export read through the
+//   rules) is already in memory: it is saved as it is, no picker asked.
 
 import { ApiError } from '@/api/client'
 
@@ -20,18 +22,22 @@ interface SaveFilePicker {
 
 /**
  * Saves a file: an `href` the engine streams (an `<a download>`, nothing held
- * in memory), or a Response (a POST answer) piped to a file through the File
- * System Access API when available, else a Blob as the last resort.
- * Resolves once the file is handed to the browser; rejects with the engine's
- * error when the answer is not a file, and quietly when the person cancels
- * the save dialog.
+ * in memory), a Blob the page built (saved as it is), or a Response (a POST
+ * answer) piped to a file through the File System Access API when
+ * available, else a Blob as the last resort. Resolves once the file is
+ * handed to the browser; rejects with the engine's error when the answer is
+ * not a file, and quietly when the person cancels the save dialog.
  */
 export async function download(
-  source: string | (() => Promise<Response>),
+  source: string | Blob | (() => Promise<Response>),
   filename?: string,
 ): Promise<void> {
   if (typeof source === 'string') {
     clickAnchor(source, filename)
+    return
+  }
+  if (source instanceof Blob) {
+    saveUrl(URL.createObjectURL(source), filename ?? 'download')
     return
   }
   const response = await source()
@@ -58,7 +64,10 @@ export async function download(
 }
 
 async function saveBlob(response: Response, name: string): Promise<void> {
-  const url = URL.createObjectURL(await response.blob())
+  saveUrl(URL.createObjectURL(await response.blob()), name)
+}
+
+function saveUrl(url: string, name: string) {
   try {
     clickAnchor(url, name)
   } finally {
