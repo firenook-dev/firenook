@@ -9,7 +9,7 @@
 
 import { Button, Popover } from '@cloudflare/kumo'
 import { type ReactNode, useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import { PanelTitle } from '@/components/kit'
 
 export interface ConfirmRequest {
@@ -23,12 +23,6 @@ export interface ConfirmRequest {
   anchor: Element | null
   run: () => Promise<unknown>
   testId?: string
-}
-
-/** An engine refusal as its message and then its fix; anything else as its message. */
-export function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
 }
 
 /** The row of a `DataTable` (its `testId`) by its key, for a popover to hang off. */

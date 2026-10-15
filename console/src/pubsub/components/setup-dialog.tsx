@@ -28,7 +28,7 @@ import type { PubsubTopicIndex } from '@/api/generated/messaging/PubsubTopicInde
 import { download } from '@/lib/download'
 import { formatNumber } from '@/lib/format'
 import { toast } from '@/lib/toasts'
-import { errorText } from '@/messaging/confirm-popover'
+import { errorText } from '@/lib/error-text'
 import { importSetup } from '../api'
 import { shortName } from '../names'
 import { pubsubKeys, schemasQuery, setupQuery, topicIndexQuery } from '../queries'

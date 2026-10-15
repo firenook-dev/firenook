@@ -7,17 +7,12 @@ import { Button, Dialog, Input, Select, Text } from '@cloudflare/kumo'
 import { XIcon } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import { toast } from '@/lib/toasts'
 import { createSnapshot } from '../api'
 import { fullName, idProblem, shortName } from '../names'
 import { pubsubKeys } from '../queries'
 import { useGeneration } from './create-topic-dialog'
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
-}
 
 const pad = (value: number) => String(value).padStart(2, '0')
 

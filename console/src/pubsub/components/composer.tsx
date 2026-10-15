@@ -20,7 +20,7 @@ import {
 } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { PubsubOutgoingMessage } from '@/api/generated/messaging/PubsubOutgoingMessage'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
 import type { PubsubTopicSummary } from '@/api/generated/messaging/PubsubTopicSummary'
@@ -81,11 +81,6 @@ import {
 export const MAX_REPEAT = 1000
 
 const TEMPLATE = /\{\{\s*(i|uuid|now|ts)\s*\}\}/
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
-}
 
 /** The prefill parameter: a message id of this topic, or `<topic full name>|<id>` of another. */
 export function prefillSource(prefill: string, topic: string): { topic: string; id: string } {

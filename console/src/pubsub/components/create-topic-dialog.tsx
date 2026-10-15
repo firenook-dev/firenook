@@ -8,7 +8,7 @@ import { Button, Checkbox, Collapsible, Dialog, Input, Radio, Select, Text } fro
 import { XIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import { type KeyValueRow, KeyValueEditor } from '@/components/console/key-value-editor'
 import { createTopic } from '../api'
 import { fullName, idProblem } from '../names'
@@ -19,11 +19,6 @@ import {
   durationSeconds,
   retentionProblem,
 } from './retention-field'
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
-}
 
 /** A folded part of a create form: its name, and what it holds while shut. */
 export function Fold({

@@ -8,7 +8,7 @@ import { Button, Select, Switch, Tooltip } from '@cloudflare/kumo'
 import { TrashIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
 import { CopyField } from '@/components/console/copy-button'
 import { DangerConfirm } from '@/components/console/danger-confirm'
@@ -67,11 +67,6 @@ export function Note({ children, tone }: { children: ReactNode; tone?: 'danger' 
       {children}
     </p>
   )
-}
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
 }
 
 export function TopicSettings({

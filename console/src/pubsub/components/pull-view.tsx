@@ -17,7 +17,7 @@ import {
 } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { PubsubSubscription } from '@/api/generated/messaging/PubsubSubscription'
 import type { PubsubSubscriptionCounters } from '@/api/generated/messaging/PubsubSubscriptionCounters'
 import { DataTable, type DataTableColumn } from '@/components/console/data-table'
@@ -66,11 +66,6 @@ export const PUSH_PULL_SENTENCE =
 /** "1 subscriber is connected to orders-worker. Pulling here takes messages away from it." */
 export function consumersWarning(connected: number, subscriptionId: string): string {
   return `${connected === 1 ? '1 subscriber is' : `${formatNumber(connected)} subscribers are`} connected to ${subscriptionId}. Pulling here takes messages away from ${connected === 1 ? 'it' : 'them'}.`
-}
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
 }
 
 /** JSON written compactly, as the lists show it; any other text as it is. */

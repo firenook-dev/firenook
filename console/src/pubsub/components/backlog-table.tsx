@@ -22,7 +22,7 @@ import {
 } from '@phosphor-icons/react'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { BulkTarget } from '@/api/generated/BulkTarget'
 import type { PubsubBacklogRow } from '@/api/generated/messaging/PubsubBacklogRow'
 import type { PubsubBacklogState } from '@/api/generated/messaging/PubsubBacklogState'
@@ -57,11 +57,6 @@ import { type MessageTab, MessageInspector } from './message-inspector'
 import { SubscriptionState } from './subscription-state'
 
 const NOUN = { one: 'message', other: 'messages' }
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
-}
 
 /** A row's state as a dot and words, counting its lease down while it is on screen. */
 function BacklogStateCell({ row }: { row: PubsubBacklogRow }) {

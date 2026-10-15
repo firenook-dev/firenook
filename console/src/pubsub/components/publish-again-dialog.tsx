@@ -8,7 +8,7 @@
 import { Button, Dialog } from '@cloudflare/kumo'
 import { PaperPlaneTiltIcon, XIcon } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { BulkTarget } from '@/api/generated/BulkTarget'
 import { formatNumber } from '@/lib/format'
 import { toast } from '@/lib/toasts'
@@ -19,11 +19,6 @@ export interface AgainRequest {
   target: BulkTarget
   /** How many messages it names (the selection's count, or a query's total). */
   count: number
-}
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
 }
 
 export function PublishAgainDialog({

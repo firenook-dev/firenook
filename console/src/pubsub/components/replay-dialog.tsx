@@ -8,7 +8,7 @@ import { Button, DatePicker, Dialog, Input, Popover, Radio, Select, Text } from 
 import { CalendarBlankIcon, XIcon } from '@phosphor-icons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ApiError } from '@/api/client'
+import { errorText } from '@/lib/error-text'
 import type { PubsubSubscription } from '@/api/generated/messaging/PubsubSubscription'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { formatNumber } from '@/lib/format'
@@ -19,11 +19,6 @@ import { pubsubKeys, snapshotsQuery, topicQuery } from '../queries'
 import { type SeekMode, seekResultText, seekSentence, seekTime } from '../seek-text'
 import { useGeneration } from './create-topic-dialog'
 import { topicSnapshots } from './snapshots-table'
-
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.fix ? `${error.message} ${error.fix}` : error.message
-  return error instanceof Error ? error.message : String(error)
-}
 
 const pad = (value: number) => String(value).padStart(2, '0')
 

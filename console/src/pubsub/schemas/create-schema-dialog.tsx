@@ -9,7 +9,7 @@ import { CaretDownIcon, CheckCircleIcon, WarningIcon, XIcon } from '@phosphor-ic
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { CodeEditor } from '@/components/code-editor'
-import { errorText } from '@/messaging/confirm-popover'
+import { errorText } from '@/lib/error-text'
 import { createSchema } from '../api'
 import { useGeneration } from '../components/create-topic-dialog'
 import { fullName, idProblem } from '../names'

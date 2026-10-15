@@ -13,7 +13,7 @@ import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctio
 import { useDelayedFlag } from '@/components/console/empty-state'
 import { JsonView } from '@/components/console/json-view'
 import { formatBytes } from '@/lib/format'
-import { errorText } from '@/messaging/confirm-popover'
+import { errorText } from '@/lib/error-text'
 import { dispatchQuery } from '../queries'
 
 /** The disclosure's words: what the request was to the function, by how far the delivery got. */
