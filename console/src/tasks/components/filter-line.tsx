@@ -38,7 +38,7 @@ export const TASK_FIELDS: readonly FilterFieldSpec[] = [
 
 /** The task filter's fields, as the engine validates them. */
 export function useTaskFields(project: string): readonly FilterFieldSpec[] {
-  const meta = useQuery(listMetaQuery(project, 'tasks'))
+  const meta = useQuery(listMetaQuery(project))
   return meta.data?.fields ?? TASK_FIELDS
 }
 

@@ -14,7 +14,6 @@ import type { TasksTaskState } from '@/api/generated/messaging/TasksTaskState'
 import { cursorPagesOptions } from '@/components/console/use-cursor-rows'
 import type { PageAt } from '@/messaging/api'
 import {
-  type TasksList,
   batchGetHistory,
   batchGetTasks,
   getHistory,
@@ -42,7 +41,7 @@ export const tasksKeys = {
   queueHistory: (project: string, queue: string) => ['tasks', project, queue, 'history'] as const,
   history: (project: string, queue: string, outcome?: TasksOutcome, q = '') =>
     ['tasks', project, queue, 'history', outcome ?? 'all', q] as const,
-  meta: (project: string, list: TasksList) => ['tasks', project, 'meta', list] as const,
+  meta: (project: string) => ['tasks', project, 'meta'] as const,
 }
 
 /**
@@ -66,11 +65,11 @@ export const taskQuery = (project: string, queue: string, id: string) =>
     enabled: project !== '' && queue !== '' && id !== '',
   })
 
-/** A list's order and filter fields: fixed for the engine's life. */
-export const listMetaQuery = (project: string, list: TasksList) =>
+/** The task lists' order and filter fields: fixed for the engine's life. */
+export const listMetaQuery = (project: string) =>
   queryOptions({
-    queryKey: tasksKeys.meta(project, list),
-    queryFn: ({ signal }) => getListMeta(list, signal),
+    queryKey: tasksKeys.meta(project),
+    queryFn: ({ signal }) => getListMeta(signal),
     staleTime: Number.POSITIVE_INFINITY,
   })
 

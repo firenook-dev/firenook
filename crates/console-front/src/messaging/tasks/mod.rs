@@ -89,7 +89,6 @@ pub(crate) fn router(api: TasksApi) -> Router {
         .route("/tasks/queue/purge", post(purge_queue))
         .route("/tasks/queue/hold", post(hold_queue))
         .route("/tasks/history", get(history))
-        .route("/tasks/history/meta", get(history_meta))
         .route("/tasks/history:batchGet", post(history_batch))
         .layer(Extension(BodyLimit(BODY)))
         .with_state(api)
@@ -528,14 +527,6 @@ async fn history(
         }),
         None,
     )))
-}
-
-async fn history_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "finishedAt:desc".to_owned(),
-        fields: TASK_FIELDS.infos(),
-    })
 }
 
 async fn history_batch(

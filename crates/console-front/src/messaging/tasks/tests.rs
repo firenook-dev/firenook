@@ -679,17 +679,22 @@ async fn a_task_taking_a_slot_is_a_new_key() {
 #[tokio::test]
 async fn task_lists_are_pages_with_meta() {
     let suite = suite(None);
-    for uri in ["/api/v1/tasks/tasks/meta", "/api/v1/tasks/history/meta"] {
-        let (status, meta) = suite.call(Method::GET, uri, None).await;
-        assert_eq!(status, StatusCode::OK, "{uri}");
-        let fields: Vec<&str> = meta["fields"]
-            .as_array()
-            .expect("fields")
-            .iter()
-            .filter_map(|field| field["key"].as_str())
-            .collect();
-        assert_eq!(fields, ["name", "is"], "{uri}");
-    }
+    // One meta for both lists: History filters with the same fields.
+    let (status, meta) = suite
+        .call(Method::GET, "/api/v1/tasks/tasks/meta", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{meta}");
+    let fields: Vec<&str> = meta["fields"]
+        .as_array()
+        .expect("fields")
+        .iter()
+        .filter_map(|field| field["key"].as_str())
+        .collect();
+    assert_eq!(fields, ["name", "is"]);
+    let (status, _) = suite
+        .call(Method::GET, "/api/v1/tasks/history/meta", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let cases: Value = serde_json::from_str(TASK_CASES).expect("cases");
     for (field, info) in cases["fields"]
         .as_array()
