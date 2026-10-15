@@ -2980,7 +2980,9 @@ engine does not deliver Firebase Alerts yet, an alert function is
 filters, envelopes, callable, identity headers, blocking, Copy as commands,
 curl paste, the invoke request and stream, run drafts);
 pages and forms in `src/functions/components/` (overview, codebase view,
-workbench and its Run / Trigger / Environment tabs, the six run forms on
+workbench and its Run / Trigger / Environment tabs — the inspector,
+`run-side-panel.tsx`, loads through `lazy-inspector.ts` once a function is
+open, so nothing else may import the forms statically — the six run forms on
 `run-parts.tsx`, invocation list, row and detail, `request-view.tsx`,
 `invocation-actions.tsx`). `src/extensions/` and `src/eventarc/` follow
 the same split. UI shared by the three lives in `src/compute/`:
@@ -3067,6 +3069,12 @@ Generated types in `src/api/generated/compute/`.
   /pubsub/topic/publish`, `publish_from_console`, so a refusal is never
   counted as the app's) and Enqueue is Cloud Tasks' (`POST /tasks/tasks`,
   its refusals and fixes said in the form).
+- **Invocations is where every run is listed.** Other sections do not keep
+  their own delivery or attempt lists; they link to
+  `/functions/invocations` with the engine's filter: `function:`,
+  `topic:` (a Pub/Sub or schedule topic, by name or full name) or
+  `queue:` (a Cloud Tasks queue key, with or without its `queue:`), all
+  held to `invocation-filter-cases.json` on both sides.
 - **"Which functions fire here" has one matcher**: `GET
   /functions/triggers` (through `useTriggersFor`, `'unknown'` while
   starting, one reference-counted `functions.events {changesOnly}`
