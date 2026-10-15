@@ -5,8 +5,6 @@
 // `express.json`'s 100 KiB — so the dialog can say a task is too large
 // before the engine refuses it with the same figure. The engine checks
 // again; this is the early warning, never the authority.
-//
-// Also the payloads a queue was sent recently (TK-43), per browser.
 
 import type { TasksEnqueueBody } from '@/api/generated/messaging/TasksEnqueueBody'
 import type { TasksHeader } from '@/api/generated/messaging/TasksHeader'
@@ -236,58 +234,5 @@ export function draftFrom(detail: {
     deadline:
       detail.task.deadlineSeconds === DEFAULT_DEADLINE ? '' : String(detail.task.deadlineSeconds),
     url: detail.task.url ?? '',
-  }
-}
-
-// ------------------------------------------------------------ recent payloads
-
-/** One payload a queue was sent from this browser. */
-export interface RecentPayload {
-  sendAs: SendAs
-  text: string
-  at: string
-}
-
-/** How many a queue keeps. */
-export const RECENT_LIMIT = 10
-
-const recentKey = (queue: string) => `firenook.console.tasks.payloads.${queue}`
-
-/** The payloads this browser sent `queue`, newest first. */
-export function recentPayloads(queue: string): RecentPayload[] {
-  try {
-    const stored = localStorage.getItem(recentKey(queue))
-    if (!stored) return []
-    const parsed = JSON.parse(stored) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter(
-        (entry): entry is RecentPayload =>
-          typeof entry === 'object' &&
-          entry !== null &&
-          (entry.sendAs === 'data' || entry.sendAs === 'raw') &&
-          typeof entry.text === 'string' &&
-          typeof entry.at === 'string',
-      )
-      .slice(0, RECENT_LIMIT)
-  } catch {
-    return []
-  }
-}
-
-/** Keeps a payload first in `queue`'s list, the same text once. */
-export function rememberPayload(
-  queue: string,
-  payload: Omit<RecentPayload, 'at'>,
-  now = Date.now(),
-) {
-  const entry: RecentPayload = { ...payload, at: new Date(now).toISOString() }
-  const kept = recentPayloads(queue).filter(
-    (other) => other.text !== entry.text || other.sendAs !== entry.sendAs,
-  )
-  try {
-    localStorage.setItem(recentKey(queue), JSON.stringify([entry, ...kept].slice(0, RECENT_LIMIT)))
-  } catch {
-    // A browser that refuses storage keeps no recent payloads.
   }
 }
