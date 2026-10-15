@@ -1137,10 +1137,10 @@ test('JSON imports as typed documents, and the palette jumps anywhere', async ({
     .first()
     .click()
   await expect(page).toHaveURL(/path=teams&doc=teams%2Ft_real/)
-  // The page's own groups no longer repeat the engine's: no "Go to" row.
+  // Opened, it is a recent too, and shown once: no "Go to" row repeats it.
   await page.keyboard.press('ControlOrMeta+k')
   await palette.fill('teams/t_real')
-  await expect(page.getByRole('group', { name: 'Documents' })).toBeVisible()
+  await expect(page.getByRole('option', { name: /teams\/t_real/ })).toHaveCount(1)
   await expect(page.getByRole('group', { name: 'Go to' })).toHaveCount(0)
   await page.keyboard.press('Escape')
 
