@@ -635,8 +635,12 @@ route chunks. Identity: requests run as a `ViewAs` through
 `resolveAuthorization`/`fetchAs` (the engine mints a user's token; never
 `mintUnsignedToken` directly); `IdentityPicker` picks it. Requests:
 `components/console/request/` (`requestAsCode`, `useRequestHistory`,
-`ResponseView`, `CodePopover`; an invoke streams through the engine,
-`functions/invoke-stream.ts`). Every piece has a
+`ResponseView`; an invoke streams through the engine,
+`functions/invoke-stream.ts`). Copy as code is `CodePopover`
+(`components/console/code-popover.tsx`): a footer's Code button and a
+`CodeBlock` with a tab per dialect, labels from the one list
+`CODE_DIALECTS` (`request/as-code.ts`, through `codeTab(id, code)`), a
+note under it, and the last tab remembered per `kind`. Every piece has a
 design-system card (`console/design-system/src/cards/`, one file per
 stream, loaded by glob). A few behaviours worth knowing:
 
