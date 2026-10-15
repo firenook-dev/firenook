@@ -2982,7 +2982,6 @@ mod inspect {
         assert!(value("timeoutSeconds").unused && !value("timeoutSeconds").provided);
         assert!(value("retry").unused);
         assert!(value("defaultUri").provided);
-        assert_eq!(view.counters.official.as_ref().unwrap().running_tasks, 1000);
         assert_eq!(view.history_capacity, 1000);
 
         runtime.shutdown().await;

@@ -777,7 +777,7 @@ async fn the_counters_topics_open_with_their_state() {
         "{frame}"
     );
 
-    // Cloud Tasks: every queue of the project, the official figures left out.
+    // Cloud Tasks: every queue of the project.
     let topics = tasks.topics(&context(&suite.stop));
     let mut opened = topic(&topics, "tasks.counters")
         .open(&json!({}), None)
@@ -787,10 +787,6 @@ async fn the_counters_topics_open_with_their_state() {
     let queues = frame["queues"].as_array().expect("queues");
     assert!(
         queues.iter().any(|queue| queue["key"] == PROCESS_ORDER),
-        "{frame}"
-    );
-    assert!(
-        queues.iter().all(|queue| queue["official"].is_null()),
         "{frame}"
     );
     let (_, list) = suite.call(Method::GET, "/api/v1/tasks/queues", None).await;

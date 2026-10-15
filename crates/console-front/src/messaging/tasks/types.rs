@@ -194,19 +194,6 @@ pub(crate) struct TasksOutcomeCounts {
     pub replaced: u32,
 }
 
-/// What `/queueStats` answers for a queue, quirks included.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct TasksOfficialStats {
-    #[ts(type = "number")]
-    pub number_of_tasks: i64,
-    pub tasks_added: f64,
-    pub completed_last_min: u32,
-    pub failed_tasks: f64,
-    pub running_tasks: u32,
-}
-
 /// A queue's live figures.
 #[derive(Clone, Debug, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -238,9 +225,6 @@ pub(crate) struct TasksQueueCounters {
     pub history: u32,
     /// The history by outcome (they add up to `history`).
     pub outcomes: TasksOutcomeCounts,
-    /// What `/queueStats` answers for this queue, quirks included (computed
-    /// on request, never streamed).
-    pub official: Option<TasksOfficialStats>,
 }
 
 /// Where a task is.

@@ -5,11 +5,11 @@
 // in force with where it came from (the function's `taskQueueTrigger`, the
 // client's registration, or the emulator's default), the retry ladder a
 // failing task climbs with the off-by-one said plainly, the console's hold
-// switch, the registration, and what `/queueStats` answers an SDK.
+// switch, and the registration.
 
-import { Button, Switch, Tooltip, cn } from '@cloudflare/kumo'
+import { Switch, Tooltip, cn } from '@cloudflare/kumo'
 import { InfoIcon } from '@phosphor-icons/react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { TasksConfigValue } from '@/api/generated/messaging/TasksConfigValue'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
@@ -22,7 +22,6 @@ import { clockTime, formatNumber } from '@/lib/format'
 import { useAgedBuckets, useAgedCount, useTokens } from '@/messaging/windows'
 import { holdQueue } from '../api'
 import { errorText } from '@/lib/error-text'
-import { queueQuery } from '../queries'
 import { queueResourceName } from '../queue-address'
 import { ladderTotal, maxAttemptsNote } from '../retry-plan'
 import { secondsText } from '../states'
@@ -381,63 +380,6 @@ function Registration({ queue }: { queue: TasksQueue }) {
   )
 }
 
-function Official({ queue }: { queue: TasksQueue }) {
-  const query = useQuery(queueQuery(queue.project, queue.key))
-  const official = query.data?.counters.official
-  return (
-    <Section
-      title="What /queueStats answers"
-      aside={
-        <Button
-          variant="ghost"
-          size="xs"
-          loading={query.isFetching}
-          onClick={() => void query.refetch()}
-          data-testid="config-official-refresh"
-        >
-          Read again
-        </Button>
-      }
-      testId="config-official"
-    >
-      {official ? (
-        <dl className="m-0 grid grid-cols-[repeat(5,minmax(0,1fr))] gap-4">
-          {(
-            [
-              [
-                'numberOfTasks',
-                official.numberOfTasks,
-                'Pending tasks as the emulator counts them; a delete of a dispatched task takes it below zero.',
-              ],
-              [
-                'tasksAdded',
-                official.tasksAdded,
-                'Enqueued in the last minute, as the official emulator counts it.',
-              ],
-              ['completedLastMin', official.completedLastMin, 'Finished in the last minute.'],
-              ['failedTasks', official.failedTasks, 'Failed attempts in the last minute.'],
-              [
-                'runningTasks',
-                official.runningTasks,
-                'The dispatch slots, not running requests, as the official emulator reports it.',
-              ],
-            ] as const
-          ).map(([key, value, tooltip]) => (
-            <Figure key={key} label={key} value={formatNumber(value)} tooltip={tooltip} />
-          ))}
-        </dl>
-      ) : (
-        <p className="m-0 text-[13px] text-kumo-subtle">
-          {query.isError ? errorText(query.error) : 'Reading…'}
-        </p>
-      )}
-      <p className="m-0 text-[12px] text-kumo-subtle">
-        Read when you open this tab or press Read again; the figures above it are live.
-      </p>
-    </Section>
-  )
-}
-
 export function QueueConfig({ queue }: { queue: TasksQueue }) {
   let document = queue.config.document
   try {
@@ -453,7 +395,6 @@ export function QueueConfig({ queue }: { queue: TasksQueue }) {
         <Ladder queue={queue} />
         <Hold queue={queue} />
         <Registration queue={queue} />
-        <Official queue={queue} />
         <Section title="The stored taskQueueConfig" testId="config-document">
           <CodeBlock code={document} language="json" testId="config-document-code" />
         </Section>

@@ -4,10 +4,9 @@
 // engine key (`['tasks', project, <queue key>, 'tasks' | 'history' | 'task', …]`),
 // so `tasks.queue` refreshes one queue's rows and nothing else.
 //
-// The queue list is the queue view's source too (it holds every queue's
-// configuration and counters, kept current by `tasks.counters`); a queue
-// detail adds only the official `/queueStats` figures, computed when read.
-// Task and History lists are cursor lists for `useCursorRows`, as Pub/Sub's.
+// The queue list is the queue view's source too: it holds every queue's
+// configuration and counters, kept current by `tasks.counters`. Task and
+// History lists are cursor lists for `useCursorRows`, as Pub/Sub's.
 
 import { queryOptions } from '@tanstack/react-query'
 import type { TasksOutcome } from '@/api/generated/messaging/TasksOutcome'
@@ -20,7 +19,6 @@ import {
   batchGetTasks,
   getHistory,
   getListMeta,
-  getQueue,
   getQueues,
   getTask,
   getTasks,
@@ -32,9 +30,6 @@ export const tasksKeys = {
   section: (project: string) => ['tasks', project] as const,
   /** The queue list (the panel, every queue's view). */
   queues: (project: string) => ['tasks', project, 'queues'] as const,
-  /** Every queue detail of the project (a prefix). */
-  queueDetails: (project: string) => ['tasks', project, 'queue'] as const,
-  queue: (project: string, queue: string) => ['tasks', project, 'queue', queue] as const,
   /** Everything of one queue: its task lists, history lists and task details (a prefix). */
   queueData: (project: string, queue: string) => ['tasks', project, queue] as const,
   tasks: (project: string, queue: string, state?: TasksTaskState, q = '') =>
@@ -62,14 +57,6 @@ export const queuesQuery = (project: string) =>
       return catchUpQueues(list, countersLog.newerThan(project, list.revision))
     },
     enabled: project !== '',
-  })
-
-/** One queue with the official `/queueStats` figures, computed when read. */
-export const queueQuery = (project: string, queue: string) =>
-  queryOptions({
-    queryKey: tasksKeys.queue(project, queue),
-    queryFn: ({ signal }) => getQueue(queue, signal),
-    enabled: project !== '' && queue !== '',
   })
 
 export const taskQuery = (project: string, queue: string, id: string) =>

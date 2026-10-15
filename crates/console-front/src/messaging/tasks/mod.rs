@@ -75,7 +75,6 @@ impl TasksApi {
 pub(crate) fn router(api: TasksApi) -> Router {
     Router::new()
         .route("/tasks/queues", get(queues))
-        .route("/tasks/queue", get(queue))
         .route("/tasks/tasks", get(tasks).post(enqueue))
         .route("/tasks/tasks/meta", get(tasks_meta))
         .route("/tasks/tasks:batchGet", post(tasks_batch))
@@ -230,11 +229,6 @@ async fn queues(
         refused: list.refused.iter().map(convert::refused).collect(),
         revision: list.revision,
     }))
-}
-
-async fn queue(State(api): State<TasksApi>, Query(query): Query<QueueQuery>) -> Answer<TasksQueue> {
-    let console = api.console()?;
-    Ok(Json(queue_of(&console, &query.queue)?))
 }
 
 async fn pause_queue(

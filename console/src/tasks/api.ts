@@ -37,11 +37,6 @@ export function getQueues(project: string, signal?: AbortSignal): Promise<TasksQ
   return apiGet('/tasks/queues', { project }, signal)
 }
 
-/** One queue, with the official `/queueStats` figures computed now. */
-export function getQueue(queue: string, signal?: AbortSignal): Promise<TasksQueue> {
-  return apiGet('/tasks/queue', { queue }, signal)
-}
-
 /** Stops dispatching (console only): pending tasks stay put, running ones finish. */
 export function pauseQueue(body: TasksQueueRef): Promise<TasksQueue> {
   return apiSend('POST', '/tasks/queue/pause', body)

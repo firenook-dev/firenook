@@ -41,7 +41,6 @@ export function testCounters(overrides: Partial<TasksQueueCounters> = {}): Tasks
     oldestPendingAt: null,
     history: 0,
     outcomes: { succeeded: 0, failed: 0, cancelled: 0, deleted: 0, purged: 0, replaced: 0 },
-    official: null,
     ...overrides,
   }
 }

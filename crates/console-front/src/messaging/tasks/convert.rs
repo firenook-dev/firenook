@@ -3,16 +3,16 @@
 
 use firenook_functions_runtime::Monitor;
 use firenook_tasks_front::inspect::{
-    BodyPreview, ConfigView, FinishedView, HistoryRow, OfficialStats, OutcomeCounts,
-    PlannedAttempt, QueueCounters, QueueView, RefusedView, TaskDetail, TaskRow, TaskState,
+    BodyPreview, ConfigView, FinishedView, HistoryRow, OutcomeCounts, PlannedAttempt,
+    QueueCounters, QueueView, RefusedView, TaskDetail, TaskRow, TaskState,
 };
 use firenook_tasks_front::{AttemptRecord, QueueOrigin, RejectedQueue, TaskOutcome};
 
 use super::types::{
     TasksAttempt, TasksBodyPreview, TasksConfigValue, TasksFinished, TasksHeader, TasksHistoryRow,
-    TasksLadderStep, TasksOfficialStats, TasksOutcome, TasksOutcomeCounts, TasksPlannedAttempt,
-    TasksQueue, TasksQueueConfig, TasksQueueCounters, TasksQueueFunction, TasksQueueOrigin,
-    TasksRefused, TasksRejectedQueue, TasksReplaced, TasksTaskDetail, TasksTaskRow, TasksTaskState,
+    TasksLadderStep, TasksOutcome, TasksOutcomeCounts, TasksPlannedAttempt, TasksQueue,
+    TasksQueueConfig, TasksQueueCounters, TasksQueueFunction, TasksQueueOrigin, TasksRefused,
+    TasksRejectedQueue, TasksReplaced, TasksTaskDetail, TasksTaskRow, TasksTaskState,
 };
 use crate::entity::EntityRef;
 use crate::messaging::shared::{millis, stamped_seconds, stamped_ten_seconds, time, time_of};
@@ -115,16 +115,6 @@ fn outcomes(counts: OutcomeCounts) -> TasksOutcomeCounts {
     }
 }
 
-fn official(stats: &OfficialStats) -> TasksOfficialStats {
-    TasksOfficialStats {
-        number_of_tasks: stats.number_of_tasks,
-        tasks_added: stats.tasks_added,
-        completed_last_min: stats.completed_last_min,
-        failed_tasks: stats.failed_tasks,
-        running_tasks: stats.running_tasks,
-    }
-}
-
 pub(crate) fn counters(counters: &QueueCounters) -> TasksQueueCounters {
     TasksQueueCounters {
         key: counters.key.clone(),
@@ -146,7 +136,6 @@ pub(crate) fn counters(counters: &QueueCounters) -> TasksQueueCounters {
         oldest_pending_at: time_of(counters.oldest_pending_at),
         history: counters.history,
         outcomes: outcomes(counters.outcomes),
-        official: counters.official.as_ref().map(official),
     }
 }
 

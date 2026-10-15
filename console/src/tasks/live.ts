@@ -70,12 +70,12 @@ export function useTasksCounters(project: string | undefined): SubscriptionStatu
       if (project) applyTasksCounters(client, project, frame)
     },
     onQueues: () => {
-      if (project) invalidator.push([tasksKeys.queues(project), tasksKeys.queueDetails(project)])
+      if (project) invalidator.push([tasksKeys.queues(project)])
     },
     onReset: () => {
       if (!project) return
       countersLog.clear(project)
-      invalidator.flush([tasksKeys.queues(project), tasksKeys.queueDetails(project)])
+      invalidator.flush([tasksKeys.queues(project)])
     },
   })
 }

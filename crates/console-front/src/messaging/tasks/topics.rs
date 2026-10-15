@@ -177,8 +177,7 @@ impl Counters {
 
     /// The state a subscriber without a cursor opens with: the project's
     /// queues read once, then whatever changed between that read and the
-    /// cursor's, so the frame is the state at its revision. The official
-    /// `/queueStats` figures are never streamed.
+    /// cursor's, so the frame is the state at its revision.
     fn open_frame(&mut self) {
         let project = self.scope.project.clone();
         let list = self.console.runtime.queues_view(project.as_deref());
@@ -205,13 +204,7 @@ impl Counters {
         }
         let frame = TasksCountersFrame {
             revision: delta.revision,
-            queues: queues
-                .into_values()
-                .map(|mut counters| {
-                    counters.official = None;
-                    counters
-                })
-                .collect(),
+            queues: queues.into_values().collect(),
         };
         self.outbox.push_back(TopicEvent::json(
             "counters",
