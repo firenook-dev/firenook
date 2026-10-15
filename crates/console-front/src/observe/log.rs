@@ -291,8 +291,11 @@ struct Shared {
     epoch: u32,
     state: Mutex<LogState>,
     /// Ticks with the entry count after every line, for the badges and the
-    /// Overview.
+    /// Logs card.
     changes: watch::Sender<u64>,
+    /// Ticks after every warning, error or problem only: what the Overview
+    /// draws, so a flood of plain output never wakes it.
+    notable: watch::Sender<u64>,
 }
 
 /// Every line the suite writes, as the console keeps it. Cloning shares it.
@@ -399,6 +402,7 @@ impl ConsoleLog {
                     last_reload: None,
                 }),
                 changes: watch::Sender::new(0),
+                notable: watch::Sender::new(0),
             }),
         }
     }
@@ -421,6 +425,11 @@ impl ConsoleLog {
     /// Ticks with the entry count after every line.
     pub(crate) fn changes(&self) -> watch::Receiver<u64> {
         self.shared.changes.subscribe()
+    }
+
+    /// Ticks after every warning, error or problem, never for plain output.
+    pub(crate) fn notable_changes(&self) -> watch::Receiver<u64> {
+        self.shared.notable.subscribe()
     }
 
     /// Lines kept: the main ring, plus problems it has already evicted.
@@ -686,6 +695,9 @@ impl ConsoleLog {
         let entries = state.totals.entries;
         drop(state);
         self.shared.changes.send_replace(entries);
+        if line.flags.problem || line.level == LogLevel::Warn {
+            self.shared.notable.send_replace(entries);
+        }
     }
 }
 

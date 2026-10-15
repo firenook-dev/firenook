@@ -254,6 +254,33 @@ async fn the_topic_sends_the_state_then_each_change_and_resumes_by_comparing() {
     assert_eq!(topic.name(), "overview");
 }
 
+#[tokio::test]
+async fn a_flood_of_plain_output_is_not_news_and_a_warning_or_a_problem_is() {
+    let log = log();
+    let topic = OverviewTopic {
+        api: api(Some(&log)),
+        now: mid_minute,
+    };
+    let mut stream = topic.open(&json!({}), None).expect("opened");
+    let (first, _) = next_state(&mut stream).await;
+    for index in 0..2_000 {
+        log.accept(line(LogLevel::Info, &format!("fine {index}")));
+        log.accept(line(LogLevel::Debug, &format!("detail {index}")));
+    }
+    let quiet = tokio::time::timeout(Duration::from_millis(1_500), stream.next()).await;
+    assert!(quiet.is_err(), "4,000 lines of plain output sent a state");
+    assert_eq!(api(Some(&log)).generation(mid_minute()), first);
+    // A warning is drawn in the hour, so it is news.
+    log.accept(line(LogLevel::Warn, "slow"));
+    let (warned, _) = next_state(&mut stream).await;
+    assert_ne!(warned, first);
+    // So is a problem, which leads the list.
+    log.accept(line(LogLevel::Error, "boom"));
+    let (failed, state) = next_state(&mut stream).await;
+    assert_ne!(failed, warned);
+    assert_eq!(state["problems"][0]["firstLine"], "boom");
+}
+
 /// A tenth of a second before a whole minute (`1_700_000_040_000`).
 static TURNING: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1_700_000_039_900);
 

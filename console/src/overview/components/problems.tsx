@@ -19,7 +19,7 @@ import { LiveNotice } from '@/components/console/live-notice'
 import { RelativeTime } from '@/components/console/relative-time'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
 import { formatCount } from '@/lib/format'
-import { bucketSentence, bucketSpan, hourBucketStart, problemBuckets } from '@/observe/level-bars'
+import { bucketSpan, hourBucketStart, problemBuckets, problemSentence } from '@/observe/level-bars'
 import { LevelStrip } from '@/observe/level-strip'
 import { LevelWord } from '@/observe/level-word'
 import { SourceChip, labelSource } from '@/observe/source-chip'
@@ -84,7 +84,7 @@ export function RecentProblems({
                   hourBucketStart(data.generatedAt, index, hour.length),
                   MINUTE,
                 )
-                return bucket ? bucketSentence(bucket, span) : span
+                return bucket ? problemSentence(bucket, span) : span
               }}
               {...(pick ? { onPick: pick } : {})}
               className="w-60"

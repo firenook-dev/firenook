@@ -129,11 +129,16 @@ impl OverviewApi {
         }
     }
 
-    /// What a state answers for: the lines logged and the minute it is,
-    /// so a state is resent when either moves.
+    /// What a state answers for: the problems and warnings logged (what the
+    /// Overview draws: the problem list and the hour's warnings and errors;
+    /// every error is a problem) and the minute it is, so a state is resent
+    /// when one of them moves, never for a line of plain output.
     fn generation(&self, now_ms: i64) -> String {
-        let entries = self.log.as_ref().map_or(0, |log| log.totals().entries);
-        format!("{entries}.{}", now_ms.div_euclid(60_000))
+        let (problems, warnings) = self.log.as_ref().map_or((0, 0), |log| {
+            let totals = log.totals();
+            (totals.problems, totals.levels.warn)
+        });
+        format!("{problems}.{warnings}.{}", now_ms.div_euclid(60_000))
     }
 }
 
@@ -181,8 +186,9 @@ async fn engine(State(api): State<OverviewApi>) -> Json<OverviewEngineDetails> {
 }
 
 /// The `overview` topic: the state on open (unless the subscriber's
-/// cursor says it has this one), then again whenever lines arrive or the
-/// minute turns, at most twice a second.
+/// cursor says it has this one), then again whenever a warning or a
+/// problem arrives or the minute turns, at most twice a second. A flood of
+/// plain output neither wakes it nor resends anything.
 pub(crate) struct OverviewTopic {
     pub(crate) api: OverviewApi,
     /// The wall clock, in milliseconds since the epoch. A generation names
@@ -223,7 +229,7 @@ impl LiveTopic for OverviewTopic {
         let following = Following {
             api: self.api.clone(),
             now: self.now,
-            changes: self.api.log.as_ref().map(ConsoleLog::changes),
+            changes: self.api.log.as_ref().map(ConsoleLog::notable_changes),
             seen: after.map(str::to_owned),
             sent: false,
         };
@@ -242,7 +248,7 @@ impl LiveTopic for OverviewTopic {
                         following,
                     ));
                 }
-                // Nothing new: wait for a line or the next minute.
+                // Nothing new: wait for a warning or a problem, or the next minute.
                 let now = (following.now)();
                 let next_minute = Instant::now()
                     + Duration::from_millis(
