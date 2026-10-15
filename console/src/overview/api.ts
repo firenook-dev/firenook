@@ -15,7 +15,6 @@ import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-quer
 import { API_BASE, ApiError, apiGet, apiSend } from '@/api/client'
 import type { ExportDestination } from '@/api/generated/ExportDestination'
 import type { Job } from '@/api/generated/Job'
-import type { OverviewSnapshotRequest } from '@/api/generated/observe/OverviewSnapshotRequest'
 import { download } from '@/lib/download'
 import { jobKey, mergeJob, sectionJobsKey, useJobs } from '@/lib/jobs'
 import type { LiveChannel, SubscriptionStatus } from '@/lib/live/channel'
@@ -142,18 +141,14 @@ function remember(client: QueryClient, job: Job): Job {
 }
 
 /**
- * `POST /overview/snapshots`: starts preparing a snapshot of `targets`
- * (`firestore`, `auth`, `storage`; every service this engine runs when
- * absent) and answers the `suite.snapshot` job at once. Refused before any
- * job starts when there is not enough free space (`failed-precondition`,
- * with both figures) or another data job runs (`conflict`).
+ * `POST /overview/snapshots`: starts preparing a snapshot of every service
+ * this engine runs whose data an export keeps, and answers the
+ * `suite.snapshot` job at once. Refused before any job starts when there
+ * is not enough free space (`failed-precondition`, with both figures) or
+ * another data job runs (`conflict`).
  */
-export async function prepareSnapshot(
-  client: QueryClient,
-  targets?: readonly string[],
-): Promise<Job> {
-  const body: OverviewSnapshotRequest = targets ? { targets: [...targets] } : {}
-  return remember(client, await apiSend<Job>('POST', '/overview/snapshots', body))
+export async function prepareSnapshot(client: QueryClient): Promise<Job> {
+  return remember(client, await apiSend<Job>('POST', '/overview/snapshots', {}))
 }
 
 /** Where the browser downloads a prepared snapshot from (the engine streams the zip once). */

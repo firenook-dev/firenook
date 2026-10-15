@@ -5,7 +5,6 @@
 
 import {
   ArrowCounterClockwiseIcon,
-  DownloadSimpleIcon,
   PlugsConnectedIcon,
   WarningCircleIcon,
   WarningIcon,
@@ -29,14 +28,6 @@ export const logsActions: readonly SectionAction[] = [
     keywords: 'logs problems denials failures timeouts',
     icon: WarningIcon,
     link: { to: '/logs', search: { q: 'is:problem' } },
-  },
-  {
-    id: 'overview.snapshot',
-    title: 'Download a snapshot…',
-    description: "The emulators' data as an export the engine imports with --import",
-    keywords: 'snapshot export backup download data zip',
-    icon: DownloadSimpleIcon,
-    link: { to: '/', search: { dialog: 'snapshot' } },
   },
   {
     id: 'overview.reset',

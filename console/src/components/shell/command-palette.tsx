@@ -9,6 +9,7 @@ import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
 import {
   ArrowSquareOutIcon,
   CpuIcon,
+  DownloadSimpleIcon,
   FloppyDiskIcon,
   GaugeIcon,
   KeyboardIcon,
@@ -40,7 +41,8 @@ import { SECTIONS, type SectionLink, sectionById } from '@/lib/services'
 import { describeKey } from '@/lib/shortcuts'
 import { useConsoleUi } from '@/lib/store'
 import { toast } from '@/lib/toasts'
-import { openEngineDetails } from './engine-details'
+import { startSnapshot, snapshotServices } from '@/overview/snapshot'
+import { openOverviewPart } from './overview-parts'
 import { THEME_CHOICES } from './theme-picker'
 
 /** The shortest text the engine is asked to search, and how long typing settles first. */
@@ -308,6 +310,21 @@ export function CommandPalette() {
             ),
       })
     }
+    // A snapshot covers what the engine runs of Firestore, Auth and Storage.
+    if (snapshotServices(data).length > 0)
+      items.push({
+        id: 'suite:snapshot',
+        title: 'Download a snapshot',
+        description: 'The emulators’ data as a zip of an export the engine imports with --import',
+        keywords: 'snapshot export backup download data zip',
+        icon: <DownloadSimpleIcon size={16} />,
+        // The card's own download: this tab downloads it once it is ready,
+        // and the Overview's data cards follow it.
+        run: () =>
+          void startSnapshot(client).then((started) => {
+            if (started) openOverviewPart(navigate, 'data')
+          }),
+      })
     items.push(
       {
         id: 'suite:save',
@@ -323,7 +340,7 @@ export function CommandPalette() {
         description: 'Version, where the data lives, folders and the switches it was started with',
         keywords: 'engine version config data disk memory state durability debug log node',
         icon: <CpuIcon size={16} />,
-        run: () => openEngineDetails(navigate),
+        run: () => openOverviewPart(navigate, 'engine'),
       },
     )
     return items

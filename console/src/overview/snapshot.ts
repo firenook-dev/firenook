@@ -6,11 +6,12 @@
 // is remembered and never offered again. If the tab goes away before the
 // download starts, the engine is told to let the file go (best effort).
 
-import { useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
 import { API_BASE, type ApiError } from '@/api/client'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
+import { errorText } from '@/lib/error-text'
 import { formatBytes, formatCount } from '@/lib/format'
 import { serviceLabel } from '@/lib/services'
 import { toast } from '@/lib/toasts'
@@ -59,9 +60,31 @@ export function listedLabels(names: readonly string[]): string {
 }
 
 /**
+ * Starts a snapshot from outside the Data card (⌘K's "Download a
+ * snapshot"): this tab downloads it once it is ready, exactly as after the
+ * card's button, while the Overview is open. A refusal is said in a toast;
+ * resolves whether the engine took it.
+ */
+export async function startSnapshot(client: QueryClient): Promise<boolean> {
+  try {
+    const prepared = await prepareSnapshot(client)
+    useSnapshotTab.getState().start(prepared.id)
+    return true
+  } catch (error) {
+    toast({
+      key: 'overview-snapshot',
+      title: 'The snapshot did not start',
+      description: errorText(error),
+      tone: 'danger',
+    })
+    return false
+  }
+}
+
+/**
  * The page's snapshot and what it can do: start one (every service this
- * engine runs, or `targets`), download the one ready, and why the last
- * start was refused.
+ * engine runs), download the one ready, and why the last start was
+ * refused.
  */
 export function useSnapshotFlow(project: string) {
   const client = useQueryClient()
@@ -110,11 +133,11 @@ export function useSnapshotFlow(project: string) {
     return () => window.removeEventListener('pagehide', discard)
   }, [])
 
-  const start = async (targets?: readonly string[]): Promise<boolean> => {
+  const start = async (): Promise<boolean> => {
     setStarting(true)
     setRefusal(undefined)
     try {
-      const prepared = await prepareSnapshot(client, targets)
+      const prepared = await prepareSnapshot(client)
       markStarted(prepared.id)
       return true
     } catch (error) {
@@ -133,7 +156,6 @@ export function useSnapshotFlow(project: string) {
     ...snapshot,
     starting,
     refusal,
-    clearRefusal: () => setRefusal(undefined),
     start,
     download,
     /** The newest snapshot, still kept and not downloaded by this tab. */

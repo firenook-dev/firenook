@@ -11,8 +11,8 @@
 import { z } from 'zod'
 import { CONNECT_PARAMS } from '@/lib/connect-tabs'
 
-/** The dialogs a link opens: download a snapshot, save one on the engine's machine, reset data. */
-export const OVERVIEW_DIALOGS = ['snapshot', 'save', 'reset'] as const
+/** The dialogs a link opens: save a snapshot on the engine's machine, reset data. */
+export const OVERVIEW_DIALOGS = ['save', 'reset'] as const
 
 export type OverviewDialog = (typeof OVERVIEW_DIALOGS)[number]
 

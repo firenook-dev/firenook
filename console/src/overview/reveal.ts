@@ -4,13 +4,14 @@
 // last part of the page), lifting the whole shell — top bar included — off
 // the top of the window. So only the column is scrolled.
 //
-// A link names a part by its hash (`/#engine`, the engine badge's link):
-// the page brings it into view when it opens on it, and again each time the
-// engine's details are asked for while it is open.
+// A link names a part by its hash (`/#engine`, the engine badge's link;
+// `/#data`, where ⌘K's snapshot download is followed): the page brings it
+// into view when it opens on it, and again each time the part is asked for
+// while it is open (`components/shell/overview-parts.ts`).
 
 import { useRouter } from '@tanstack/react-router'
 import { useEffect } from 'react'
-import { ENGINE_HASH, useEngineDetailsAsks } from '@/components/shell/engine-details'
+import { type OverviewPart, useOverviewAsks } from '@/components/shell/overview-parts'
 
 /** The Overview's scrolling column. */
 export const OVERVIEW_SCROLL = 'overview-scroll'
@@ -19,8 +20,9 @@ export const OVERVIEW_SCROLL = 'overview-scroll'
 const GAP = 20
 
 /** The parts a hash names, by the element id each part carries. */
-const HASH_PARTS: Readonly<Record<string, string>> = {
-  [ENGINE_HASH]: 'overview-engine',
+const HASH_PARTS: Readonly<Record<OverviewPart, string>> = {
+  engine: 'overview-engine',
+  data: 'overview-data',
 }
 
 export function reveal(element: HTMLElement | null): void {
@@ -42,19 +44,20 @@ export function revealById(id: string): void {
 
 /** The part `hash` names, revealed; any other hash is left alone. */
 export function revealHash(hash: string): void {
-  const id = HASH_PARTS[hash]
-  if (id) revealById(id)
+  if (Object.hasOwn(HASH_PARTS, hash)) revealById(HASH_PARTS[hash as OverviewPart])
 }
 
 /**
- * Reveals the part the address's hash names when the page opens, and the
- * engine section each time it is asked for while the page is open (a link
- * to the address already shown changes nothing the router sees).
+ * Reveals the part the address's hash names when the page opens, and each
+ * part asked for while the page is open (a link to the address already
+ * shown changes nothing the router sees).
  */
 export function useRevealHash(): void {
   const router = useRouter()
   useEffect(() => {
     revealHash(router.state.location.hash)
-    return useEngineDetailsAsks.subscribe(() => revealHash(ENGINE_HASH))
+    return useOverviewAsks.subscribe((state) => {
+      if (state.part) revealHash(state.part)
+    })
   }, [router])
 }

@@ -161,15 +161,18 @@ test('⌘K: the suite’s data actions, each once', async ({ page, engine }) => 
     return page.getByRole('option')
   }
 
+  // Download is the card's own: started at once, followed on the Data
+  // cards, downloaded by this tab when it is ready.
+  const downloaded = page.waitForEvent('download', { timeout: 60_000 })
   const snapshot = (await palette('Download a snapshot')).filter({
-    hasText: 'Download a snapshot…',
+    hasText: 'Download a snapshot',
   })
   await expect(snapshot).toHaveCount(1)
   await snapshot.click()
-  await expect(page).toHaveURL(/\/console\/?\?dialog=snapshot$/)
-  await expect(page.getByTestId('snapshot-dialog')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('snapshot-dialog')).toHaveCount(0)
+  await expect(page).toHaveURL(/\/console\/?#data$/)
+  await expect(page.getByTestId('overview-data-section')).toBeInViewport()
+  expect((await downloaded).suggestedFilename()).toMatch(/\.zip$/)
+  await expect(page.getByTestId('overview-snapshot-taken')).toContainText('Snapshot downloaded')
 
   const documents = page.getByTestId('overview-figure-firestore-documents')
   await expect(documents).toHaveText(/^[\d,]+$/)

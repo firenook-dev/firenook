@@ -132,7 +132,6 @@ fn every_observe_type_is_named_for_its_family_and_the_kinds_are_exported() {
         "OverviewNoticeLevel",
         "OverviewProblem",
         "OverviewSnapshotFile",
-        "OverviewSnapshotRequest",
         "OverviewState",
     ] {
         assert!(

@@ -109,7 +109,6 @@ describe('the Logs registry entry', () => {
     expect(links).toEqual({
       'logs.errors': { to: '/logs', search: { q: 'level:error' } },
       'logs.problems': { to: '/logs', search: { q: 'is:problem' } },
-      'overview.snapshot': { to: '/', search: { dialog: 'snapshot' } },
       'overview.reset': { to: '/', search: { dialog: 'reset' } },
       'overview.env': { to: '/', search: { connect: 'env' } },
     })

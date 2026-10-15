@@ -57,7 +57,7 @@ import {
 import { useConsoleUi } from '@/lib/store'
 import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
 import { consoleToasts } from '@/lib/toasts'
-import { ENGINE_DETAILS_HREF, openEngineDetails } from './engine-details'
+import { ENGINE_DETAILS_HREF, openOverviewPart } from './overview-parts'
 import { ThemePicker } from './theme-picker'
 
 const AREAS: readonly ServiceArea[] = ['data', 'compute', 'messaging', 'observe']
@@ -558,7 +558,7 @@ function EngineBadge() {
       onClick={(event) => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
         event.preventDefault()
-        openEngineDetails(navigate)
+        openOverviewPart(navigate, 'engine')
       }}
       data-testid="engine-badge-button"
     >

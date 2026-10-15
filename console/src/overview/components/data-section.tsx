@@ -32,13 +32,10 @@ import {
 import type { ResetTarget } from './reset-dialog'
 import { LINK_CLASS } from './text-link'
 
-// The three dialogs load when one is first asked for: their checkboxes,
+// The two dialogs load when one is first asked for: their checkboxes,
 // radios and confirmation are not part of the Overview's first paint, and
 // the landing route is the one every visit starts on. Once loaded, each
 // stays mounted and is opened and shut by `open`, as every dialog is.
-const SnapshotDialog = lazy(() =>
-  import('./snapshot-dialog').then((module) => ({ default: module.SnapshotDialog })),
-)
 const SaveSnapshotDialog = lazy(() =>
   import('./save-snapshot-dialog').then((module) => ({ default: module.SaveSnapshotDialog })),
 )
@@ -74,7 +71,6 @@ export function DataSection({
 }) {
   const snapshot = useSnapshotFlow(project)
   const resettable = resettableSections(status)
-  const snapshotAsked = useAsked(dialog === 'snapshot')
   const saveAsked = useAsked(dialog === 'save')
   const running = snapshot.running
   // `?dialog=reset` names no section: the one there is, or all of them.
@@ -89,6 +85,7 @@ export function DataSection({
 
   return (
     <section
+      id="overview-data"
       className="grid gap-3"
       aria-labelledby="overview-data-title"
       data-testid="overview-data-section"
@@ -99,22 +96,6 @@ export function DataSection({
       <DataCards status={status} snapshot={snapshot} onDialog={onDialog} onReset={onReset} />
 
       <Suspense fallback={null}>
-        {snapshotAsked && (
-          <SnapshotDialog
-            open={dialog === 'snapshot'}
-            onOpenChange={(open) => {
-              if (!open) {
-                onDialog(undefined)
-                snapshot.clearRefusal()
-              }
-            }}
-            status={status}
-            running={running}
-            starting={snapshot.starting}
-            refusal={snapshot.refusal}
-            onStart={snapshot.start}
-          />
-        )}
         {saveAsked && (
           <SaveSnapshotDialog
             open={dialog === 'save'}
