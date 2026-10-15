@@ -1118,16 +1118,31 @@ test('JSON imports as typed documents, and the palette jumps anywhere', async ({
   await page.getByTestId('open-in-grid').click()
   await expect(page).toHaveURL(/path=users&doc=users%2F/)
 
-  // ⌘K: the page's collections and recents join the console palette.
+  // ⌘K: collections and documents are the engine's hits, beside the
+  // page's recents and actions.
   await page.keyboard.press('ControlOrMeta+k')
   const palette = page.getByTestId('palette-input')
   await palette.fill('prod')
-  await page.getByRole('option', { name: /^products — / }).click()
+  await page
+    .getByRole('group', { name: 'Collections' })
+    .getByRole('option', { name: /^products/ })
+    .first()
+    .click()
   await expect(page).toHaveURL(/path=products/)
   await page.keyboard.press('ControlOrMeta+k')
   await palette.fill('teams/t_real')
-  await page.getByRole('option', { name: /Open this document/ }).click()
+  await page
+    .getByRole('group', { name: 'Documents' })
+    .getByRole('option', { name: /teams\/t_real/ })
+    .first()
+    .click()
   await expect(page).toHaveURL(/path=teams&doc=teams%2Ft_real/)
+  // The page's own groups no longer repeat the engine's: no "Go to" row.
+  await page.keyboard.press('ControlOrMeta+k')
+  await palette.fill('teams/t_real')
+  await expect(page.getByRole('group', { name: 'Documents' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Go to' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
 
   // The path bar offers to create what does not exist yet.
   await page.getByRole('button', { name: 'Edit the path' }).click()

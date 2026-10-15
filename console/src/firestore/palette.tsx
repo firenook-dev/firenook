@@ -1,15 +1,14 @@
-// What Firestore contributes to ⌘K while the workbench is on screen: any
-// typed path, recent paths, every collection in the schema tree (a nested
-// one opens as its group), the subcollections of the open document, and
-// the workbench's own actions. The panel's toggle is the shell's.
+// What Firestore contributes to ⌘K while the workbench is on screen: the
+// recent paths and the workbench's own actions. Collections and documents
+// are the engine's search hits (every section's palette shows them, with
+// their counts, from any page), and a path the data does not hold yet is
+// typed into the path bar, which offers to create it; the panel's toggle
+// is the shell's.
 
 import {
-  ArrowRightIcon,
   ClockCounterClockwiseIcon,
-  DatabaseIcon,
   DownloadSimpleIcon,
   FileIcon,
-  FolderIcon,
   FolderPlusIcon,
   FolderSimplePlusIcon,
   FunnelIcon,
@@ -18,7 +17,6 @@ import {
   ShieldCheckIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
-import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo } from 'react'
 import {
@@ -27,20 +25,16 @@ import {
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { useConsoleUi } from '@/lib/store'
-import { normalizePath, useWorkbench } from './components/workbench-context'
+import { useWorkbench } from './components/workbench-context'
 import { useCreateDialog } from './create'
 import { useExportDialog } from './export'
 import { useQueryLine } from './query-line-store'
-import { collectionsQuery } from './queries'
 import { useRecents } from './recents'
-import { flattenSchema, patternOf, workbenchSchemaQuery } from './schema'
-import { formatNumber } from './value'
+import { patternOf } from './schema'
 
 export function useFirestorePalette() {
   const workbench = useWorkbench()
   const navigate = useNavigate()
-  const paletteOpen = useConsoleUi((state) => state.paletteOpen)
   const register = usePaletteProviders((state) => state.register)
   const unregister = usePaletteProviders((state) => state.unregister)
   const openCreate = useCreateDialog((state) => state.open)
@@ -49,12 +43,6 @@ export function useFirestorePalette() {
   const openExport = useExportDialog((state) => state.setOpen)
   const recents = useRecents((state) => state.items)
   const selected = workbench.selectedDocument
-  const roots = useQuery({ ...collectionsQuery(workbench.ownerScope, ''), enabled: paletteOpen })
-  const schema = useQuery({ ...workbenchSchemaQuery(workbench), enabled: paletteOpen })
-  const under = useQuery({
-    ...collectionsQuery(workbench.ownerScope, selected ?? ''),
-    enabled: paletteOpen && Boolean(selected),
-  })
 
   const provider = useMemo(() => {
     const go = (path: string) => () => workbench.setPath(path)
@@ -67,52 +55,6 @@ export function useFirestorePalette() {
         : { kind: `firestore.${kind}`, key: `${workbench.database}|${path}` }
     const collectionRef = (path: string) =>
       patternOf(path) === path ? ref('collection', path) : undefined
-    // The schema tree lists every shape; the plain root list stands in
-    // until it has answered.
-    const shapes = flattenSchema(schema.data)
-    const known = new Set([
-      ...(roots.data ?? []),
-      ...shapes.map((entry) => entry.node.pattern),
-      ...recents.map((recent) => recent.path),
-    ])
-    const plural = (count: number, word: string) =>
-      `${formatNumber(count)} ${word}${count === 1 ? '' : 's'}`
-    const collections: PaletteItem[] = [
-      ...(selected
-        ? (under.data ?? []).map<PaletteItem>((id) => ({
-            id: `sub:${selected}/${id}`,
-            title: id,
-            breadcrumbs: [selected],
-            keywords: `${selected}/${id}`,
-            icon: <DatabaseIcon size={16} />,
-            run: go(`${selected}/${id}`),
-          }))
-        : []),
-      ...(schema.data
-        ? shapes.map<PaletteItem>(({ node, depth, parent }) => {
-            const item: PaletteItem = {
-              id: `shape:${node.pattern}`,
-              title: node.id,
-              description:
-                depth === 0
-                  ? plural(node.documents, 'document')
-                  : `${plural(node.documents, 'document')} across every ${parent?.id ?? 'parent'}`,
-              keywords: node.pattern,
-              icon: depth === 0 ? <DatabaseIcon size={16} /> : <FolderIcon size={16} />,
-              run: go(node.pattern),
-              ref: ref('collection', node.pattern),
-            }
-            if (parent) item.breadcrumbs = [parent.pattern]
-            return item
-          })
-        : (roots.data ?? []).map<PaletteItem>((id) => ({
-            id: `root:${id}`,
-            title: id,
-            icon: <DatabaseIcon size={16} />,
-            run: go(id),
-            ref: ref('collection', id),
-          }))),
-    ]
     const recentItems = recents.map<PaletteItem>((recent) => ({
       id: `recent:${recent.path}`,
       title: recent.path,
@@ -209,47 +151,12 @@ export function useFirestorePalette() {
 
     return (query: string): PaletteGroup[] => {
       const filter = (items: PaletteItem[]) => items.filter((item) => matchesQuery(item, query))
-      const groups: PaletteGroup[] = [
+      return [
         { label: 'Recent', items: filter(recentItems) },
-        { label: 'Collections', items: filter(collections) },
         { label: 'Firestore', items: filter(actions) },
       ].filter((group) => group.items.length > 0)
-      // Text shaped like a path, or one word matching nothing here, can be
-      // opened as one. Words with spaces between them are a sentence — an
-      // action's name ("Download a snapshot") meant for another group — so
-      // they are not offered as a collection id ahead of it.
-      const path = normalizePath(query)
-      const pathLike = query.includes('/') || (groups.length === 0 && !/\s/.test(query.trim()))
-      if (path && pathLike && !known.has(path))
-        groups.unshift({
-          label: 'Go to',
-          items: [
-            {
-              id: `fs:go:${path}`,
-              title: path,
-              description:
-                path.split('/').length % 2 === 0 ? 'Open this document' : 'Open this collection',
-              icon: <ArrowRightIcon size={16} />,
-              run: go(path),
-              ref: path.split('/').length % 2 === 0 ? ref('document', path) : collectionRef(path),
-            },
-          ],
-        })
-      return groups
     }
-  }, [
-    workbench,
-    roots.data,
-    schema.data,
-    under.data,
-    recents,
-    selected,
-    openCreate,
-    openQuery,
-    setExplain,
-    openExport,
-    navigate,
-  ])
+  }, [workbench, recents, selected, openCreate, openQuery, setExplain, openExport, navigate])
 
   useEffect(() => {
     register('firestore', provider)

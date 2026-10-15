@@ -2378,10 +2378,13 @@ indenting: paste instead (`pasteRules`).
 - Rules are a page of their own — see "Security rules" below.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
-  Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
-  path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
-  project+database, twelve kept), every pattern of the schema tree (a nested one opens
-  as its group) and its actions; the panel toggle (`t`) and the nav modes
+  Firestore's provider (`src/firestore/palette.tsx`) adds recents
+  (`src/firestore/recents.ts`, localStorage per project+database, twelve
+  kept) and its actions. Collections and documents are the engine's
+  search hits alone (its "Collections" and "Documents" groups, from any
+  page, a typed document path read exactly); the page once listed the
+  schema tree and a "Go to" row as well, which only repeated them and the
+  path bar. The panel toggle (`t`) and the nav modes
   are the shell's "Layout" group. `matchesQuery` is word-wise: every word
   of the query must appear in the title, breadcrumbs or keywords.
 - The root landing shows **one row of recents, in the collection cards'
