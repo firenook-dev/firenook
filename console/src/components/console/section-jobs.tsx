@@ -170,8 +170,11 @@ export function SectionJobs({
     summaryMs > 0 && jobs.some((job) => job.state !== 'running') ? 'second' : 'minute',
   )
   const running = jobs.filter((job) => job.state === 'running')
+  // `summaryMs` 0 draws running jobs only: the minute clock can be behind a
+  // job that just ended, and a negative age is no summary to keep.
   const recent = jobs.filter(
     (job) =>
+      summaryMs > 0 &&
       job.state !== 'running' &&
       job.finishedAt !== null &&
       now - Date.parse(job.finishedAt) < summaryMs,

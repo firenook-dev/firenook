@@ -135,6 +135,27 @@ describe('a section’s jobs', () => {
     expect(screen.getByTestId('pubsub-job-cancel')).toHaveTextContent('Stop')
   })
 
+  it('with no summary, draw a job that just ended no more', async () => {
+    calls.get.mockResolvedValue({
+      jobs: [
+        job({
+          id: 'p1',
+          kind: 'pubsub.publish',
+          section: 'pubsub',
+          state: 'cancelled',
+          finishedAt: new Date(Date.now() + 1_000).toISOString(),
+        }),
+        job({ id: 'p2', kind: 'pubsub.publish', section: 'pubsub', title: 'Publish to orders' }),
+      ],
+    })
+    renderJobs(
+      <SectionJobs section="pubsub" verb={() => 'sent'} summaryMs={0} testId="pubsub-job" />,
+    )
+    expect(await screen.findByTestId('pubsub-job-progress')).toBeInTheDocument()
+    expect(screen.getAllByTestId('pubsub-job')).toHaveLength(1)
+    expect(screen.getByTestId('pubsub-job')).toHaveTextContent('Publish to orders')
+  })
+
   it('say why a job failed', async () => {
     calls.get.mockResolvedValue({
       jobs: [
