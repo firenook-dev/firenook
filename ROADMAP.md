@@ -784,25 +784,26 @@ served until every section has landed.
   filtered view counts them and offers Refresh instead of jumping. A list
   and a thumbnail grid, and previews that ask only for what they draw:
   images, video, audio, PDFs, text and code, JSON as text or a tree, CSV
-  as a table, HTML with scripts off, the entries of a zip, raw bytes. A
-  file opens onto its facts, the gs:// path, the download URL and REST
-  address an app connected to the emulator gets, its download tokens (made
-  and revoked from there), a metadata editor that sends only what changed
-  and says when the file changed underneath, its history — who changed it,
-  from the app or the console, and whether the event reached the Functions
-  emulator — the exact event bodies it sends, with Send again, and a
-  warning with a one-click fix when its contentType disagrees with its
-  bytes. Small text files edit in place. Uploads of files and whole folders
-  with progress, cancel, retry and a question when names are taken; new
-  folders, rename, move, copy, duplicate, metadata for many files at once,
-  delete and zip downloads at any size run as jobs that report progress
-  and can be cancelled, and the unfinished resumable uploads an app left
-  are listed with Discard. The whole page can act as any Auth user, an
-  anonymous client or a custom token: listings, previews and uploads then
-  meet the rules (uploads are judged before a byte is sent), a column says
-  what that identity may read and delete, and every refusal names the line
-  that refused it, with "See why" and "Try in the playground". ⌘K goes to
-  a pasted gs:// or download URL, a recent folder or file, any folder the
+  as a table, HTML with scripts off, and any other bytes, a zip among
+  them, as hex with what their first bytes say. A file opens onto its
+  facts, the gs:// path, the download URL and REST address an app
+  connected to the emulator gets, its download tokens (made and revoked
+  from there), a metadata editor that sends only what changed and says
+  when the file changed underneath, its history — who changed it, from the
+  app or the console, and whether the event reached the Functions emulator
+  and which invocations it started — the exact event bodies it sends, with
+  Send again, and a warning with a one-click fix when its contentType
+  disagrees with its bytes. Small text files edit in place. Uploads of
+  files and whole folders with progress, cancel, retry and a question when
+  names are taken; new folders, rename, move, copy, duplicate, metadata
+  for many files at once and delete run as jobs that report progress and
+  can be cancelled, and a folder or a selection downloads as one streamed
+  zip at any size. The whole page can act as any Auth user, an anonymous
+  client or a custom token: listings, previews and uploads then meet the
+  rules (uploads are judged before a byte is sent), a column says what
+  that identity may read and delete, and every refusal names the line that
+  refused it, with "See why" and "Try in the playground". ⌘K goes to a
+  pasted gs:// or download URL, a recent folder or file, any folder the
   tree has read and any bucket. Storage rules have their own page: an
   editor that knows Storage rules (the file an upload proposes,
   `firestore.get()`, the metadata keys the bucket's files carry), live
