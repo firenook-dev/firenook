@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pubsub } from '@/lib/sections/pubsub'
 import { pubsubActions } from '@/lib/sections/pubsub-actions'
-import { tasks } from '@/lib/sections/tasks'
+import { tasks, tasksQueueLink } from '@/lib/sections/tasks'
 import { tasksActions } from '@/lib/sections/tasks-actions'
 import {
   messageSearch,
@@ -113,6 +113,20 @@ describe('where Cloud Tasks things open (U-19)', () => {
         task: '42',
       },
     })
+  })
+
+  it('another section opens a queue’s Configuration or its Enqueue dialog', () => {
+    const key = 'demo-console|us-central1|processOrder'
+    const queue = { project: 'demo-console', queue: 'processOrder', location: 'us-central1' }
+    expect(tasksQueueLink(key, 'config')).toEqual({
+      to: '/tasks',
+      search: { ...queue, view: 'config' },
+    })
+    expect(tasksQueueLink(key, 'enqueue')).toEqual({
+      to: '/tasks',
+      search: { ...queue, new: 'task' },
+    })
+    expect(tasksQueueLink('processOrder', 'enqueue')).toEqual({ to: '/tasks' })
   })
 
   it('a malformed key opens the section root', () => {

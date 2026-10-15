@@ -170,8 +170,17 @@ test('J-TK-03 a task name used before in this run is refused, and the dialog say
   const id = uniqueId('tk03')
   const first = await enqueueOverPort(engine, { queue: 'processOrder' }, { orderId: 'o_3' }, { id })
   expect(first.status).toBe(200)
-  await openQueue(page, engine, 'processOrder', '&new=task')
+  // Opened as another section links to it (`tasksQueueLink(key, 'enqueue')`):
+  // the dialog on the queue, the address cut to what it needs.
+  await page.goto(
+    `${engine.origin}/console/tasks?project=${engine.project}&queue=processOrder&location=${LOCATION}&new=task`,
+  )
   const dialog = page.getByTestId('enqueue-dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('processOrder')
+  await expect(page.getByTestId('queue-field-id')).toHaveText('processOrder')
+  await expect(page).not.toHaveURL(/location=/)
+  await expect(page).toHaveURL(/new=task/)
   await dialog.getByTestId('enqueue-id').fill(id)
   await dialog.getByTestId('enqueue-submit').click()
   const error = dialog.getByTestId('enqueue-error')
