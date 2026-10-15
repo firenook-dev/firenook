@@ -1416,9 +1416,9 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
 
   // The whole collection, keyed by id, as the console's own import reads it.
   await open.click()
-  await expect(page.getByTestId('export-scope')).toHaveText('Every document in products')
+  await expect(page.getByTestId('export-what')).toHaveText('Every document in products')
   const jsonDownload = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const json = await jsonDownload
   expect(json.suggestedFilename()).toMatch(/^products-[\d-]+\.json$/)
   const exported = JSON.parse(await readDownload(json)) as Record<string, Record<string, unknown>>
@@ -1430,7 +1430,7 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   await page.getByTestId('export-open').click()
   const usersDownload = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const users = JSON.parse(await readDownload(await usersDownload)) as Record<string, unknown>
   expect(Object.keys(users)).toHaveLength(240)
   await page.goto(`${origin()}/console/firestore?path=products`)
@@ -1451,10 +1451,10 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
   expect(matched).toBeLessThan(60)
 
   await page.getByTestId('export-open').click()
-  await expect(page.getByTestId('export-scope')).toContainText('where("published", "==", false)')
+  await expect(page.getByTestId('export-what')).toContainText('where("published", "==", false)')
   await page.getByRole('tab', { name: 'CSV' }).click()
   const csvDownload = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const csv = await csvDownload
   const lines = (await readDownload(csv)).trim().split('\n')
   expect(lines).toHaveLength(matched + 1)
@@ -1494,7 +1494,7 @@ test('a typed export imports back as the same documents', async ({ page }) => {
   await page.getByTestId('export-open').click()
   await page.getByRole('checkbox', { name: 'Keep Firestore types exactly' }).click()
   const download = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const text = await readDownload(await download)
   expect(JSON.parse(text)).toMatchObject({
     one: {

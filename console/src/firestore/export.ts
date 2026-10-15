@@ -11,6 +11,7 @@
 // the question is "what does my app see".
 
 import { create } from 'zustand'
+import type { ExportFormat } from '@/components/console/export-dialog'
 import { DEFAULT_LIMIT, type WorkbenchQuery, toStructuredQuery } from './query'
 import { cursorAfter, splitCollection } from './queries'
 import { type FirestoreScope, batchGetDocuments, documentRoot, runQuery } from './rest'
@@ -21,40 +22,14 @@ import { type FsDocument, type RestValue, encodeFields, fieldsToJson } from './v
  *  rows do. */
 export const EXPORT_PAGE = 500
 
-export type ExportFormat = 'json' | 'ndjson' | 'csv'
+export type { ExportFormat }
 
-export interface ExportFormatInfo {
-  id: ExportFormat
-  label: string
-  extension: string
-  mediaType: string
-  /** What the file is good for, in one line. */
-  note: string
+/** What each format holds, in Firestore's words: the JSON is what the console imports. */
+export const EXPORT_NOTES: Readonly<Record<ExportFormat, string>> = {
+  json: 'One object keyed by document id — the shape this console imports.',
+  ndjson: 'One document per line, for streaming into another tool.',
+  csv: 'Flattened columns for a spreadsheet; nested keys join with a dot.',
 }
-
-export const EXPORT_FORMATS: readonly [ExportFormatInfo, ...ExportFormatInfo[]] = [
-  {
-    id: 'json',
-    label: 'JSON',
-    extension: 'json',
-    mediaType: 'application/json',
-    note: 'One object keyed by document id — the shape this console imports.',
-  },
-  {
-    id: 'ndjson',
-    label: 'NDJSON',
-    extension: 'ndjson',
-    mediaType: 'application/x-ndjson',
-    note: 'One document per line, for streaming into another tool.',
-  },
-  {
-    id: 'csv',
-    label: 'CSV',
-    extension: 'csv',
-    mediaType: 'text/csv',
-    note: 'Flattened columns for a spreadsheet; nested keys join with a dot.',
-  },
-]
 
 export interface ExportOptions {
   format: ExportFormat
@@ -124,10 +99,6 @@ export function csvRow(values: readonly string[]): string {
 }
 
 /** The name the browser saves the file under. */
-export function formatInfo(format: ExportFormat): ExportFormatInfo {
-  return EXPORT_FORMATS.find((item) => item.id === format) ?? EXPORT_FORMATS[0]
-}
-
 export function exportFilename(
   collectionPath: string,
   format: ExportFormat,
@@ -135,8 +106,7 @@ export function exportFilename(
 ): string {
   const stem = collectionPath.replaceAll('/', '-') || 'firestore'
   const stamp = at.toISOString().slice(0, 19).replaceAll(':', '').replace('T', '-')
-  const extension = formatInfo(format).extension
-  return `${stem}-${stamp}.${extension}`
+  return `${stem}-${stamp}.${format}`
 }
 
 export interface ExportSource {
@@ -209,7 +179,8 @@ export async function* exportPages(
 
 /**
  * The export as text, in parts: everything the source names, read whole,
- * in the format asked for. The dialog saves it as a file and the selection
+ * in the format asked for. The kit's export dialog saves it as a file (its
+ * `run` mode, since the browser reads it through the rules) and the selection
  * bar's Copy puts it on the clipboard, so the two can never disagree about
  * what a JSON or CSV of these documents is.
  */
@@ -256,18 +227,6 @@ export async function renderExport(
   }
   if (options.format === 'json') parts.push('\n}\n')
   return { parts, count }
-}
-
-/** Hands the finished file to the browser. */
-export function download(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  // Revoking immediately can cancel the download in some browsers; a tick
-  // later the navigation has already started.
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 /** Whether the export dialog is open. Anything can ask for it: the grid's

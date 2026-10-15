@@ -16,6 +16,7 @@ import {
   ScalesIcon,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo } from 'react'
+import { download } from '@/lib/download'
 import {
   type PaletteGroup,
   type PaletteItem,
@@ -25,16 +26,6 @@ import {
 import type { RulesDraft } from '@/rules/draft'
 import type { StorageRulesPanel } from './rules-search'
 import type { TestCase } from './tests-store'
-
-/** A text file the browser saves, made here. */
-function saveText(name: string, text: string, type: string) {
-  const url = URL.createObjectURL(new Blob([text], { type }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = name
-  link.click()
-  URL.revokeObjectURL(url)
-}
 
 export function useStorageRulesPalette({
   draft,
@@ -155,7 +146,7 @@ export function useStorageRulesPalette({
         icon: <DownloadSimpleIcon size={16} />,
         run: () => {
           const exported = exportFile(cases)
-          saveText(exported.name, exported.text, 'text/typescript')
+          void download(new Blob([exported.text], { type: 'text/typescript' }), exported.name)
         },
       })
     return (query: string): PaletteGroup[] => {

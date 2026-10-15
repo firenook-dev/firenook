@@ -16,6 +16,7 @@ import {
 } from '@phosphor-icons/react'
 import { useStore } from 'zustand'
 import type { RulesOutcome } from '@/api/generated/RulesOutcome'
+import { download } from '@/lib/download'
 import { type TestCaseBase, type TestsStore, passes } from './tests-core'
 import { Verdict } from './verdict'
 
@@ -50,14 +51,9 @@ export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOut
     ? cases.filter((test) => passes(test, outcomes[test.id]) === false).length
     : 0
 
-  const download = () => {
+  const saveFile = () => {
     const file = exportFile(cases)
-    const url = URL.createObjectURL(new Blob([file.text], { type: 'text/typescript' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = file.name
-    link.click()
-    URL.revokeObjectURL(url)
+    void download(new Blob([file.text], { type: 'text/typescript' }), file.name)
   }
 
   return (
@@ -96,7 +92,7 @@ export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOut
                   variant="ghost"
                   size="sm"
                   icon={<DownloadSimpleIcon />}
-                  onClick={download}
+                  onClick={saveFile}
                   disabled={cases.length === 0}
                   data-testid="tests-download"
                 >

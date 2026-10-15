@@ -2370,8 +2370,12 @@ indenting: paste instead (`pasteRules`).
   REST wire shape, and `isRestShape` in `value.ts` is what lets the import
   recognise such a file and decode it rather than storing `{"stringValue":…}`
   as a map; it matches on the wire's own field names, so a person's own
-  one-key map is not mistaken for it. The dialog names the scope and whose
-  identity it reads as, because rules apply.
+  one-key map is not mistaken for it. The dialog is the kit's
+  `ExportDialog` in its `run` mode (the file is built in the tab, since it
+  reads through the rules; `notes` say what each format holds and
+  `options` adds "Keep Firestore types exactly"); it names the scope and
+  whose identity it reads as, because rules apply. Test ids `export-what`,
+  `export-confirm`, `export-progress`.
 - There is no undo: the write log and its undo were taken out (see "The
   write log and its undo were taken out" under Design), and there is no
   `changelog.rs`, `GET /changelog` or `POST /undo`.
