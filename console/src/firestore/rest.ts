@@ -89,11 +89,6 @@ export interface QueryPage {
   readTime: string
 }
 
-export interface RulesDenied {
-  kind: 'denied'
-  message: string
-}
-
 export class FirestoreError extends ApiError {
   readonly denied: boolean
   constructor(status: number, message: string) {

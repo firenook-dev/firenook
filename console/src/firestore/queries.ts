@@ -19,10 +19,6 @@ import { type FsDocument, type RestValue, encodeValue } from './value'
 
 export const FS = 'fs' as const
 
-export function scopeKey(scope: FirestoreScope): string {
-  return `${scope.project}/${scope.database}/${identityKey(scope.identity)}`
-}
-
 export const collectionsQuery = (scope: FirestoreScope, parent: string) =>
   queryOptions({
     queryKey: [FS, keySlot(scope), 'collections', parent, identityKey(scope.identity)],

@@ -87,12 +87,6 @@ test('rules are a page of their own under Firestore, beside Data', async ({ page
   // Highlighted as the rules language, not as plain text.
   await expect(page.getByTestId('rules-source').locator('span').first()).toBeVisible()
 
-  // The old addresses still lead here.
-  await page.goto(`${origin()}/console/firestore?view=rules`)
-  await expect(page).toHaveURL(/\/console\/firestore\/rules/)
-  await page.goto(`${origin()}/console/requests`)
-  await expect(page).toHaveURL(/\/console\/firestore\/rules/)
-
   // And ⌘K knows it.
   await page.goto(`${origin()}/console/firestore`)
   await expect(page.getByTestId('toolbar')).toBeVisible()

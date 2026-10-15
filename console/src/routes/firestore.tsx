@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { SectionFrame } from '@/components/console/section-gate'
 import { FirestoreWorkbench } from '@/firestore/components/workbench'
@@ -16,19 +16,12 @@ const searchSchema = z.object({
   // Another project the app used, shown instead of the emulator's own
   // (the shell's foreign-project banner links here with it).
   project: z.string().optional(),
-  // The rules were a mode of this page once (`?view=rules`); they are a
-  // page of their own now, and the old address still leads there.
-  view: z.enum(['rules']).optional(),
 })
 
 export type FirestoreSearch = z.infer<typeof searchSchema>
 
 export const Route = createFileRoute('/firestore')({
   validateSearch: searchSchema,
-  beforeLoad: ({ search }) => {
-    if (search.view === 'rules')
-      throw redirect({ to: '/firestore/rules', search: { db: search.db }, replace: true })
-  },
   component: FirestorePage,
 })
 

@@ -2375,8 +2375,7 @@ indenting: paste instead (`pasteRules`).
 - There is no undo: the write log and its undo were taken out (see "The
   write log and its undo were taken out" under Design), and there is no
   `changelog.rs`, `GET /changelog` or `POST /undo`.
-- Rules are a page of their own — see "Security rules" below. `?view=rules`
-  and `/requests` redirect there.
+- Rules are a page of their own — see "Security rules" below.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
   Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
