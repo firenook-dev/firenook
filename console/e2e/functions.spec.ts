@@ -735,6 +735,11 @@ test('the environment says where each value comes from, and saves secrets and pa
     const greeting = tab.locator('[data-testid="env-variable"][data-key="GREETING"]')
     await expect(greeting).toContainText('hello')
     await expect(greeting).toContainText('.env')
+    // A value is changed in its file; the tab says where, and has no editor of its own.
+    await expect(page.getByTestId('env-edit-hint')).toContainText(
+      'To change a value, edit its file in functions/',
+    )
+    await expect(tab.getByRole('button', { name: /^Edit / })).toHaveCount(0)
     // A secret is masked until asked for, and read from the file then.
     await expect(page.getByTestId('env-secret-API_KEY-masked')).toBeVisible()
     await expect(tab).not.toContainText('s3cret')

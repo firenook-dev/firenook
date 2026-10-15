@@ -7,17 +7,17 @@
 // variables; and only a count of what the worker inherits from the
 // engine's environment.
 //
-// It writes too: edit a variable in the file that set it, add one, add a
-// missing secret, set an unresolved param (in `.env.local`, what the
-// official CLI's prompt writes). Every change goes through the same dialog
-// and the same atomic write with restore as Extensions' reconfigure.
+// It writes what the official CLI would ask for: a missing secret (in
+// `.secret.local`) and an unresolved param (in `.env.local`, what its
+// prompt writes), through the same dialog and the same atomic write with
+// restore as Extensions' reconfigure. Any other value is changed in its
+// file, in the developer's editor: the codebase says the file changed, and
+// Reload loads it.
 
-import { Button, Input, Select, Text } from '@cloudflare/kumo'
-import { PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react'
+import { Button, Input, Text } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
 import { type KeyboardEvent, useState } from 'react'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
-import type { FunctionEnvFile } from '@/api/generated/compute/FunctionEnvFile'
 import type { FunctionEnvVariable } from '@/api/generated/compute/FunctionEnvVariable'
 import { EntityLink } from '@/components/console/entity-link'
 import { InspectorSection } from '@/components/console/inspector'
@@ -28,24 +28,9 @@ import { SecretInput } from '@/compute/secret-input'
 import { formatNumber } from '@/lib/format'
 import { matchesKey } from '@/lib/shortcuts'
 import { functionsSnapshotQuery, revealSecret } from '../api'
-import { type EnvChangeLine, EnvChangeDialog, SECRET_KEPT, envFileName } from './env-change-dialog'
-
-/** The dotenv dialect's key rule (the engine refuses the rest with its own words). */
-export function envKeyProblem(key: string): string | undefined {
-  if (key === '') return 'Name the variable.'
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
-    return 'A name is letters, digits and _, not starting with a digit.'
-  if (/^(FIREBASE_|X_GOOGLE_|EXT_)/.test(key) || key === 'GCLOUD_PROJECT')
-    return `${key} is set by the emulator; the codebase cannot override it.`
-  return undefined
-}
-
-/** The files a new variable can go to. */
-const ADD_FILES: readonly FunctionEnvFile[] = ['env', 'envProject', 'envLocal', 'secretLocal']
+import { type EnvChangeLine, EnvChangeDialog } from './env-change-dialog'
 
 type Editing =
-  | { kind: 'edit'; variable: FunctionEnvVariable; value: string }
-  | { kind: 'add'; key: string; value: string; file: FunctionEnvFile }
   | { kind: 'secret'; key: string; value: string }
   | { kind: 'param'; key: string; value: string; secret: boolean }
 
@@ -81,35 +66,7 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
 
   const stage = () => {
     if (!editing) return
-    if (editing.kind === 'edit') {
-      const variable = editing.variable
-      if (!variable.file || !variable.fileName) return
-      setStaged([
-        {
-          file: variable.file,
-          fileName: variable.fileName,
-          key: variable.key,
-          before: variable.secret ? SECRET_KEPT : variable.value,
-          after: editing.value,
-          secret: variable.secret,
-        },
-      ])
-    } else if (editing.kind === 'add') {
-      if (envKeyProblem(editing.key.trim())) return
-      const existing = user.find(
-        (variable) => variable.key === editing.key.trim() && variable.file === editing.file,
-      )
-      setStaged([
-        {
-          file: editing.file,
-          fileName: existing?.fileName ?? envFileName(editing.file, project),
-          key: editing.key.trim(),
-          before: existing ? (existing.secret ? SECRET_KEPT : existing.value) : null,
-          after: editing.value,
-          secret: editing.file === 'secretLocal',
-        },
-      ])
-    } else if (editing.kind === 'secret') {
+    if (editing.kind === 'secret') {
       setStaged([
         {
           file: 'secretLocal',
@@ -151,136 +108,50 @@ export function EnvironmentTab({ detail, project }: { detail: FunctionDetail; pr
           <span className="font-sans text-[11px] text-kumo-subtle"> (later files win)</span>
         </p>
       </InspectorSection>
-      <InspectorSection
-        title="Variables"
-        count={editing?.kind === 'add' && user.length === 0 ? undefined : user.length}
-        testId="env-variables"
-        action={
-          editable ? (
-            <Button
-              variant="ghost"
-              size="xs"
-              icon={<PlusIcon />}
-              onClick={() => setEditing({ kind: 'add', key: '', value: '', file: 'env' })}
-              data-testid="env-add"
-            >
-              Add
-            </Button>
-          ) : undefined
-        }
-      >
+      <InspectorSection title="Variables" count={user.length} testId="env-variables">
         <ul className="grid gap-0.5">
-          {user.map((variable) =>
-            editing?.kind === 'edit' &&
-            editing.variable.key === variable.key &&
-            editing.variable.file === variable.file ? (
-              <li
-                key={`${variable.fileName}:${variable.key}`}
-                className="grid gap-1.5 py-1"
-                data-testid="env-editing"
-              >
-                <span className="flex items-baseline gap-2 font-mono text-[12px]">
-                  <span className="text-kumo-default">{variable.key}</span>
-                  <span className="text-[11px] text-kumo-subtle">{variable.fileName}</span>
-                </span>
-                <EditBox
-                  secret={variable.secret}
-                  value={editing.value}
-                  onChange={(value) => setEditing({ ...editing, value })}
-                  onStage={stage}
-                  onCancel={cancel}
-                  label={`New value of ${variable.key}`}
-                />
-              </li>
-            ) : (
-              <li
-                key={`${variable.fileName}:${variable.key}`}
-                className="group/env -mx-2 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)_auto_auto] items-start gap-x-3 rounded-md px-2 py-1 hover:ink"
-                data-testid="env-variable"
-                data-key={variable.key}
-              >
-                <span className="font-mono text-[12px] leading-5 text-kumo-default">
-                  {variable.key}
-                </span>
-                <span className="min-w-0 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] text-kumo-default">
-                  {variable.secret ? (
-                    <MaskedValue
-                      label={`Show ${variable.key}`}
-                      reveal={(signal) => revealSecret(codebase, variable.key, signal)}
-                      copyable
-                      testId={`env-secret-${variable.key}`}
-                    />
-                  ) : (
-                    variable.value
-                  )}
-                </span>
-                <span className="font-mono text-[11px] leading-5 text-kumo-subtle">
-                  {variable.fileName}
-                </span>
-                {editable && variable.file ? (
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    shape="square"
-                    icon={<PencilSimpleIcon />}
-                    aria-label={`Edit ${variable.key}`}
-                    className="opacity-0 group-hover/env:opacity-100 focus-visible:opacity-100"
-                    onClick={() =>
-                      setEditing({
-                        kind: 'edit',
-                        variable,
-                        value: variable.secret ? '' : (variable.value ?? ''),
-                      })
-                    }
-                    data-testid={`env-edit-${variable.key}`}
+          {user.map((variable) => (
+            <li
+              key={`${variable.fileName}:${variable.key}`}
+              className="-mx-2 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-2 py-1 hover:ink"
+              data-testid="env-variable"
+              data-key={variable.key}
+            >
+              <span className="font-mono text-[12px] leading-5 text-kumo-default">
+                {variable.key}
+              </span>
+              <span className="min-w-0 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] text-kumo-default">
+                {variable.secret ? (
+                  <MaskedValue
+                    label={`Show ${variable.key}`}
+                    reveal={(signal) => revealSecret(codebase, variable.key, signal)}
+                    copyable
+                    testId={`env-secret-${variable.key}`}
                   />
                 ) : (
-                  <span />
+                  variable.value
                 )}
-              </li>
-            ),
-          )}
-          {editing?.kind === 'add' && (
-            <li className="grid gap-1.5 py-1" data-testid="env-adding">
-              <div className="flex min-w-0 gap-1.5">
-                <Input
-                  size="sm"
-                  className="min-w-0 flex-1 font-mono"
-                  value={editing.key}
-                  onChange={(event) => setEditing({ ...editing, key: event.target.value })}
-                  onKeyDown={(event) => editKeys(event, stage, cancel)}
-                  placeholder="NAME"
-                  aria-label="Variable name"
-                  spellCheck={false}
-                  autoFocus
-                  data-testid="env-add-key"
-                />
-                <Select
-                  size="sm"
-                  aria-label="File"
-                  value={editing.file}
-                  onValueChange={(next) =>
-                    setEditing({ ...editing, file: next as FunctionEnvFile })
-                  }
-                  items={ADD_FILES.map((file) => ({
-                    value: file,
-                    label: envFileName(file, project),
-                  }))}
-                  className="w-40 shrink-0 font-mono"
-                />
-              </div>
-              <EditBox
-                secret={editing.file === 'secretLocal'}
-                value={editing.value}
-                onChange={(value) => setEditing({ ...editing, value })}
-                onStage={stage}
-                onCancel={cancel}
-                label="Value"
-                problem={editing.key.trim() === '' ? undefined : envKeyProblem(editing.key.trim())}
-              />
+              </span>
+              <span className="font-mono text-[11px] leading-5 text-kumo-subtle">
+                {variable.fileName}
+              </span>
             </li>
-          )}
+          ))}
         </ul>
+        {editable && (
+          <p className="m-0 mt-1.5 text-[12px] text-kumo-subtle" data-testid="env-edit-hint">
+            {user.length === 0
+              ? 'To add a variable, write it to an env file'
+              : 'To change a value, edit its file'}
+            {directory && (
+              <>
+                {' '}
+                in <span className="font-mono">{directory}/</span>
+              </>
+            )}
+            ; the codebase then says a file changed, and Reload loads it.
+          </p>
+        )}
       </InspectorSection>
       <InspectorSection
         title="Declared secrets"

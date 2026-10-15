@@ -1,6 +1,6 @@
 // The one confirmation every change to a codebase's environment goes
-// through — edit a variable, add one, set a declared param, add a missing
-// secret: the values that change, per file, old → new (secrets masked),
+// through — set a declared param, add a missing secret: the values that
+// change, per file, old → new (secrets masked),
 // and that the codebase reloads. It is the dialog Extensions' configuration
 // uses (`src/compute/env-change-dialog.tsx`), so a save says the same thing
 // wherever it is made. Save writes the files atomically and reloads; a
@@ -26,22 +26,6 @@ export interface EnvChangeLine {
   secret: boolean
 }
 
-/** The file a new value goes to, by name, for a project id. */
-export function envFileName(file: FunctionEnvFile, project: string): string {
-  switch (file) {
-    case 'env':
-      return '.env'
-    case 'envProject':
-      return `.env.${project}`
-    case 'envAlias':
-      return '.env.<alias>'
-    case 'envLocal':
-      return '.env.local'
-    case 'secretLocal':
-      return '.secret.local'
-  }
-}
-
 /** The changes grouped by file, files in the order they first appear. */
 export function byFile(lines: readonly EnvChangeLine[]): [string, EnvChangeLine[]][] {
   const groups = new Map<string, EnvChangeLine[]>()
@@ -53,9 +37,6 @@ export function byFile(lines: readonly EnvChangeLine[]): [string, EnvChangeLine[
   return [...groups]
 }
 
-/** A secret's present value, which the console never held. */
-export const SECRET_KEPT = '\u0000kept'
-
 /** The lines as the shared dialog lists them: per file, under the codebase's directory. */
 export function changedFiles(
   lines: readonly EnvChangeLine[],
@@ -65,7 +46,7 @@ export function changedFiles(
     file: directory ? `${directory}/${fileName}` : fileName,
     changes: changes.map((line) => ({
       key: line.key,
-      before: line.before === SECRET_KEPT ? null : line.before,
+      before: line.before,
       after: line.after,
       secret: line.secret,
     })),
