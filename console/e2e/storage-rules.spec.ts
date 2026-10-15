@@ -1,12 +1,19 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
+import {
+  brokenTextSaysWhere,
+  coverageOnlyWhenAsked,
+  coverageReads,
+  historyPutsAVersionBack,
+  paletteReachesEveryPart,
+  pasteRules,
+} from './support/rules'
 import { commit, documentsOf, text } from './support/shell'
 import {
   bucketsOf,
   getMetadata,
   listFolder,
-  pasteRules,
   person,
   putFile,
   removeFile,
@@ -121,10 +128,7 @@ test('the rules are checked as they are typed, with Storage’s own warnings', a
   const problems = page.getByTestId('rules-diagnostics')
 
   // Broken text says where, before anything is applied.
-  await pasteRules(page, "rules_version = '2';\nservice firebase.storage { match")
-  await expect(problems.locator('[data-severity="error"]').first()).toBeVisible()
-  await expect(problems.locator('[data-severity="error"]').first()).toHaveText(/^\d+:\d+ /)
-  await expect(page.getByTestId('rules-draft-state')).toHaveText('Draft · not applied')
+  await brokenTextSaysWhere(page, "rules_version = '2';\nservice firebase.storage { match")
 
   // An upload with no size check: the engine says so, on the write allow.
   await pasteRules(
@@ -518,23 +522,21 @@ test('coverage draws how often each condition ran, from the engine’s report', 
   expect(
     (await getMetadata(engine, { bucket, name: `users/${ada.uid}/avatar.png`, token })).status,
   ).toBe(200)
-  await openRules(page, engine)
   const coverage = await page.request.get(`${engine.origin}/console/api/v1/storage/rules/coverage`)
   expect(coverage.ok()).toBeTruthy()
   const report = (await coverage.json()) as { report?: unknown[] }
   expect(report.report?.length ?? 0).toBeGreaterThan(0)
 
+  const reads = coverageReads(page, /\/storage\/rules\/coverage/)
+  await openRules(page, engine)
+  await coverageOnlyWhenAsked(page, reads)
+  // What a count says, and a condition that never ran.
   const toggle = page.getByTestId('rules-coverage')
-  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
-  await expect(toggle).toHaveText(/\d+\/\d+ ran/)
+  await toggle.click()
   const hit = page.locator('.cm-note-hit').first()
-  await expect(hit).toHaveText(/^\d+×$/)
   await expect(hit).toHaveAttribute('title', /Ran \d+ times?/)
   await expect(page.locator('.cm-note-miss').first()).toHaveText('never')
   await toggle.click()
-  await expect(page.locator('.cm-note-hit')).toHaveCount(0)
-  await toggle.click()
-  await expect(page.locator('.cm-note-hit').first()).toBeVisible()
 })
 
 test('the folders map says which rules govern which files, and writes starter rules', async ({
@@ -589,23 +591,11 @@ test('history diffs any version against the editor and puts one back as the draf
   const original = await rulesNow(page, engine)
   try {
     await openRules(page, engine)
-    const applied = `${original.source}// a version to go back from\n`
-    await pasteRules(page, applied)
-    await page.getByTestId('rules-apply').click()
-    await expect(page.getByTestId('rules-draft-state')).toHaveCount(0)
-    await page.getByTestId('rules-history').click()
-    const versions = page.getByTestId('history-version')
-    // Applied, not saved: the file on disk is listed first, as what differs.
-    await expect(versions.first()).toContainText('The file on disk')
-    await expect(versions.filter({ hasText: 'Applied in the console' }).first()).toContainText(
-      'In force',
+    await historyPutsAVersionBack(
+      page,
+      `${original.source}// a version to go back from\n`,
+      '// a version to go back from',
     )
-    await versions.filter({ hasText: 'Loaded at startup' }).click()
-    const diff = page.getByTestId('history-diff')
-    await expect(diff.locator('[data-kind="added"]')).toContainText('// a version to go back from')
-    await page.getByTestId('history-restore').click()
-    await expect(page.getByTestId('rules-draft-state')).toHaveText('Draft · not applied')
-    await expect(page.getByTestId('rules-source')).not.toContainText('a version to go back from')
   } finally {
     await restoreRules(engine, original)
   }
@@ -649,18 +639,5 @@ test('a bucket no rules serve says so, and ⌘K reaches every part of the page',
   await expect(page.getByTestId('rules-save')).toBeDisabled()
 
   await openRules(page, engine)
-  await page.keyboard.press('ControlOrMeta+k')
-  await page.getByTestId('palette-input').fill('playground')
-  await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/panel=playground/)
-  await expect(page.getByTestId('playground')).toBeVisible()
-  await page.keyboard.press('ControlOrMeta+k')
-  await page.getByTestId('palette-input').fill('rules history')
-  await page.keyboard.press('Enter')
-  await expect(page.getByTestId('history-versions')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await page.keyboard.press('ControlOrMeta+k')
-  await page.getByTestId('palette-input').fill('folders')
-  await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/panel=folders/)
+  await paletteReachesEveryPart(page, 'folders')
 })

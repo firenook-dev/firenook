@@ -1,6 +1,14 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
+import {
+  brokenTextSaysWhere,
+  coverageOnlyWhenAsked,
+  coverageReads,
+  historyPutsAVersionBack,
+  paletteReachesEveryPart,
+  pasteRules,
+} from './support/rules'
 import { documentsOf } from './support/shell'
 
 // The security rules page, against the real engine and the synthetic
@@ -34,24 +42,6 @@ async function restore(page: Page, original: RulesNow) {
   await page.request.put(api('rules'), {
     data: { database: '(default)', source: original.source, save: false },
   })
-}
-
-/**
- * Replace the editor's text the way a person pastes it: typing would meet
- * the editor's own bracket closing and indenting.
- */
-async function pasteRules(page: Page, text: string) {
-  const editor = page.getByTestId('rules-source')
-  await editor.click()
-  await page.keyboard.press('ControlOrMeta+a')
-  await page.evaluate(
-    (value) =>
-      (
-        navigator as Navigator & { clipboard: { writeText(text: string): Promise<void> } }
-      ).clipboard.writeText(value),
-    text,
-  )
-  await page.keyboard.press('ControlOrMeta+v')
 }
 
 const OPEN = [
@@ -106,11 +96,8 @@ test('the rules are checked as they are typed, and a draft is not in force until
     await expect(page.getByTestId('rules-source')).toContainText('allow read')
 
     // Broken text says where, before anything is applied.
-    await pasteRules(page, 'service cloud.firestore { match')
+    await brokenTextSaysWhere(page, 'service cloud.firestore { match')
     const problems = page.getByTestId('rules-diagnostics')
-    await expect(problems.locator('[data-severity="error"]').first()).toBeVisible()
-    await expect(problems).toContainText(/^\d+:\d+ /)
-    await expect(page.getByTestId('rules-draft-state')).toHaveText('Draft · not applied')
 
     // Open to everyone: it compiles, and the engine says what that means.
     await pasteRules(page, OPEN)
@@ -162,10 +149,7 @@ test('a denied read says why where it happened, and opens the decision in Rules'
   page,
 }) => {
   // Coverage is off until asked for, and nothing reads the report meanwhile.
-  const coverageReads: string[] = []
-  page.on('request', (request) => {
-    if (request.url().includes(':ruleCoverage')) coverageReads.push(request.url())
-  })
+  const reads = coverageReads(page, /:ruleCoverage/)
   await page.goto(`${origin()}/console/firestore?path=users&as=anonymous`)
   await expect(page.getByText('Denied by security rules')).toBeVisible()
   // "See why" explains it on the data page: the lines that refused it and
@@ -204,13 +188,7 @@ test('a denied read says why where it happened, and opens the decision in Rules'
     expect(outcome).not.toBe('allow')
 
   // How often each rule has run, in the gutter once asked for, and gone again.
-  await expect(page.locator('.cm-note-hit')).toHaveCount(0)
-  expect(coverageReads).toHaveLength(0)
-  await page.getByTestId('rules-coverage').click()
-  await expect(page.locator('.cm-note-hit').first()).toHaveText(/^\d+×$/)
-  expect(coverageReads.length).toBeGreaterThan(0)
-  await page.getByTestId('rules-coverage').click()
-  await expect(page.locator('.cm-note-hit')).toHaveCount(0)
+  await coverageOnlyWhenAsked(page, reads)
 
   // An empty list says what appears here, and what never does.
   await page.goto(`${origin()}/console/firestore/rules`)
@@ -267,22 +245,7 @@ test('history keeps every version, and the file on disk is watched', async ({ pa
   try {
     await page.goto(`${origin()}/console/firestore/rules`)
     await expect(page.getByTestId('rules-source')).toContainText('allow read')
-    await pasteRules(page, `${original.source}// applied here\n`)
-    await page.getByTestId('rules-apply').click()
-    await expect(page.getByRole('heading', { name: 'Rules applied' })).toBeVisible()
-
-    await page.getByTestId('rules-history').click()
-    const versions = page.getByTestId('history-version')
-    await expect(versions.first()).toContainText('The file on disk')
-    await expect(page.getByTestId('history-versions')).toContainText('Applied in the console')
-    await expect(page.getByTestId('history-versions')).toContainText('Loaded at startup')
-    // The file still has the startup text, so against the editor the
-    // applied line is the difference.
-    await expect(page.getByTestId('history-diff').locator('[data-kind="added"]')).toContainText(
-      'applied here',
-    )
-    await page.getByTestId('history-restore').click()
-    await expect(page.getByTestId('rules-source')).not.toContainText('applied here')
+    await historyPutsAVersionBack(page, `${original.source}// applied here\n`, '// applied here')
     await page.getByTestId('rules-apply').click()
     await expect(page.getByRole('heading', { name: 'Rules applied' }).first()).toBeVisible()
     await expect(page.getByTestId('rules-unsaved')).toHaveCount(0)
@@ -309,6 +272,13 @@ test('history keeps every version, and the file on disk is watched', async ({ pa
     await restore(page, original)
     expect(readFileSync(file, 'utf8')).toBe(original.source)
   }
+})
+
+test('⌘K reaches every part of the rules page', async ({ page }) => {
+  await page.goto(`${origin()}/console/firestore/rules`)
+  await expect(page.getByTestId('rules-source')).toContainText('allow read')
+  await paletteReachesEveryPart(page, 'collections')
+  await expect(page.getByTestId('rules-map')).toBeVisible()
 })
 
 test('a collection no rule covers gets starter rules drawn from its documents', async ({
