@@ -28,7 +28,7 @@ import { PanelTitle } from '@/components/kit'
 import type { ViewAs } from '@/lib/identity'
 import { latencyText, stepChips } from '../activity'
 import { AuthEmulatorError, callAuthEmulator, getMessagesOfCall, getUser } from '../api'
-import { copyWithToast } from '../clipboard'
+import { copyToClipboard } from '@/lib/copy'
 import { explainAuthError } from '../errors'
 import { firestoreAsUser, userRef } from '../links'
 import { activityEntryQuery } from '../queries'
@@ -767,7 +767,7 @@ function Result({
             variant="secondary"
             size="xs"
             onClick={() =>
-              void copyWithToast(`Bearer ${tokens.idToken}`, 'the Authorization header')
+              void copyToClipboard(`Bearer ${tokens.idToken}`, { what: 'the Authorization header' })
             }
             data-testid="try-copy-header"
           >
@@ -776,7 +776,7 @@ function Result({
           <Button
             variant="ghost"
             size="xs"
-            onClick={() => void copyWithToast(tokens.idToken, 'the ID token')}
+            onClick={() => void copyToClipboard(tokens.idToken, { what: 'the ID token' })}
             data-testid="try-copy-token"
           >
             Copy ID token

@@ -12,7 +12,7 @@ import {
 import { type ReactNode, useState } from 'react'
 import { PanelFilter, PanelHeader } from '@/components/console/panel'
 import { SectionPanel } from '@/components/shell/section-panel'
-import { copyText } from '../copy'
+import { copyToClipboard } from '@/lib/copy'
 import { useFiles } from '../files-state'
 import { gsUrl } from '../paths'
 import { useRulesPageLink } from '../rules-link'
@@ -69,7 +69,9 @@ export function FoldersPanel({
             </DropdownMenu.Item>
             <DropdownMenu.Item
               icon={CopySimpleIcon}
-              onClick={() => void copyText(gsUrl(files.bucket), 'the bucket’s gs:// URL')}
+              onClick={() =>
+                void copyToClipboard(gsUrl(files.bucket), { what: 'the bucket’s gs:// URL' })
+              }
             >
               Copy the bucket’s gs:// URL
             </DropdownMenu.Item>

@@ -7,6 +7,7 @@
 // it is that call's message whatever else arrives meanwhile.
 
 import type { SectionLink } from '@/lib/services'
+import { copyToClipboard } from '@/lib/copy'
 import { toast } from '@/lib/toasts'
 import {
   AuthEmulatorError,
@@ -134,23 +135,6 @@ export function announceSent(options: {
   })
 }
 
-/** Writes text to the clipboard and says so (or why not). */
-export async function copyToClipboard(text: string, what: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast({ key: 'auth.copy', title: `Copied ${what}`, tone: 'success' })
-    return true
-  } catch {
-    toast({
-      key: 'auth.copy',
-      title: 'The browser did not let the console copy',
-      description: 'Allow clipboard access for this page, or copy it from the inspector.',
-      tone: 'warning',
-    })
-    return false
-  }
-}
-
 /**
  * Mints the ID token a sign-in of this user would produce (the account's
  * own provider and first second factor, nothing stored) and copies it.
@@ -161,7 +145,10 @@ export async function copyIdToken(target: UserTarget, label: string): Promise<vo
       uid: target.uid,
       ...(target.tenant ? { tenant: target.tenant } : {}),
     })
-    await copyToClipboard(minted.idToken, `an ID token for ${label}`)
+    await copyToClipboard(minted.idToken, {
+      what: `an ID token for ${label}`,
+      refused: 'Allow clipboard access for this page, or copy it from the inspector.',
+    })
   } catch (error) {
     toast({
       key: 'auth.copy',

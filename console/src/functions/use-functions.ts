@@ -1,7 +1,6 @@
 // What every Functions page reads the same way: the project the runtime
 // serves, the Functions service as apps reach it, a function's own URL
-// built from that address, whether a link into Logs leads anywhere yet,
-// and copying with a toast that says what was copied.
+// built from that address, and whether a link into Logs leads anywhere.
 
 import { useQuery } from '@tanstack/react-query'
 import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
@@ -9,7 +8,6 @@ import { statusQuery } from '@/api/queries'
 import { serviceAddress } from '@/components/console/request/address'
 import { linkToLogs } from '@/lib/sections/logs'
 import type { SectionLink } from '@/lib/services'
-import { toast } from '@/lib/toasts'
 import { answersOnUrl } from './kinds'
 import { urlPath } from './trigger-text'
 
@@ -46,19 +44,4 @@ export function useLogsLink(
   if (!filter) return null
   if (status.data?.sections.find((entry) => entry.id === 'logs')?.state === 'absent') return null
   return linkToLogs(filter)
-}
-
-/** Copies `text`, saying what was copied (or that the browser refused). */
-export async function copyText(text: string, what: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast({ key: 'functions.copy', title: `Copied ${what}`, tone: 'success' })
-  } catch {
-    toast({
-      key: 'functions.copy',
-      title: `Could not copy ${what}`,
-      description: 'The browser refused the clipboard.',
-      tone: 'danger',
-    })
-  }
 }

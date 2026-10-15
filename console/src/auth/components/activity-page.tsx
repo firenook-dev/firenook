@@ -56,7 +56,7 @@ import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
 import { callJson, curlCommand, replayBlocked, tokenOfRequest } from '../activity'
 import { clearActivity } from '../api'
-import { copyWithToast } from '../clipboard'
+import { copyToClipboard } from '@/lib/copy'
 import { activityFacetGroups, activityFields } from '../fields'
 import { inspectThisToken } from '../inspect-draft'
 import { logsForCall, userLink } from '../links'
@@ -183,7 +183,7 @@ export function ActivityPage() {
   const copyCurl = async (call: AuthActivitySummary) => {
     if (!base) return
     try {
-      await copyWithToast(curlCommand(await detailOf(call), base), 'the call as curl')
+      await copyToClipboard(curlCommand(await detailOf(call), base), { what: 'the call as curl' })
     } catch (error) {
       toast({
         key: 'auth.curl',
@@ -306,7 +306,7 @@ export function ActivityPage() {
       label: 'Copy as JSON',
       icon: BracketsCurlyIcon,
       shortcut: 'Shift+c',
-      run: () => void copyWithToast(callJson(call), 'the call as JSON'),
+      run: () => void copyToClipboard(callJson(call), { what: 'the call as JSON' }),
     })
     return items
   }
@@ -344,7 +344,7 @@ export function ActivityPage() {
       when: () => selected !== undefined && (selected.identifier ?? selected.uid) !== null,
       run: () => {
         const text = selected?.identifier ?? selected?.uid
-        if (text) void copyWithToast(text, text)
+        if (text) void copyToClipboard(text, { what: text })
       },
     },
     {
@@ -353,7 +353,7 @@ export function ActivityPage() {
       group: 'Activity',
       when: () => selected !== undefined,
       run: () => {
-        if (selected) void copyWithToast(callJson(selected), 'the call as JSON')
+        if (selected) void copyToClipboard(callJson(selected), { what: 'the call as JSON' })
       },
     },
     {

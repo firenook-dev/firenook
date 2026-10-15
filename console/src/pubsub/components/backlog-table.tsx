@@ -22,6 +22,7 @@ import {
 } from '@phosphor-icons/react'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { copyToClipboard } from '@/lib/copy'
 import { errorText } from '@/lib/error-text'
 import type { BulkTarget } from '@/api/generated/BulkTarget'
 import type { PubsubBacklogRow } from '@/api/generated/messaging/PubsubBacklogRow'
@@ -393,10 +394,7 @@ export function BacklogView({
       label: 'Copy id',
       icon: CopyIcon,
       run: () => {
-        void navigator.clipboard
-          .writeText(row.id)
-          .then(() => toast({ key: 'pubsub-copy', title: `Copied ${row.id}` }))
-          .catch(() => toast({ key: 'pubsub-copy', title: 'Could not copy', tone: 'danger' }))
+        void copyToClipboard(row.id, { what: row.id })
       },
     },
   ]

@@ -25,7 +25,8 @@ import { functionMenu } from '../function-menu'
 import { answersOnUrl, runForm } from '../kinds'
 import type { FunctionsSearch, FunctionTab } from '../search'
 import { receivesWhat, serviceSection, statusReasonText } from '../trigger-text'
-import { copyText, functionUrl, useFunctionsAddress, useLogsLink } from '../use-functions'
+import { copyToClipboard } from '@/lib/copy'
+import { functionUrl, useFunctionsAddress, useLogsLink } from '../use-functions'
 import { CodebaseBanners, useReloadCodebase } from './codebase-banners'
 import { FunctionToolbar } from './function-toolbar'
 import { useInvocationActions } from './invocation-actions'
@@ -124,7 +125,7 @@ export function FunctionWorkbench({
 
   const menu = functionMenu(summary, codebase?.codebase, {
     run: () => openTab(primaryTab),
-    copy: (text, what) => void copyText(text, what),
+    copy: (text, what) => void copyToClipboard(text, { what }),
     url,
     logs: logs
       ? () => void navigate({ to: logs.to as never, search: logs.search as never })

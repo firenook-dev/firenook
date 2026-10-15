@@ -8,7 +8,7 @@ import { BracketsCurlyIcon, CaretDownIcon, TerminalIcon, CodeIcon } from '@phosp
 import { useQuery } from '@tanstack/react-query'
 import { statusQuery } from '@/api/queries'
 import { serviceAddress } from '@/components/console/request/address'
-import { toast } from '@/lib/toasts'
+import { copyToClipboard } from '@/lib/copy'
 import { type PublishDraft, adminSdkCode, curlCode, wireEvent } from '../publish'
 
 /** A random id for an event the code publishes, as the engine would give it. */
@@ -24,12 +24,7 @@ function now(): string {
 }
 
 async function copy(text: string, what: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast({ key: 'eventarc.copy-as', title: `Copied as ${what}`, tone: 'success' })
-  } catch {
-    toast({ key: 'eventarc.copy-as', title: 'Could not copy', tone: 'danger' })
-  }
+  await copyToClipboard(text, { title: `Copied as ${what}` })
 }
 
 export function CopyAsMenu({

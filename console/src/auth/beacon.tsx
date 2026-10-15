@@ -39,7 +39,7 @@ import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { type PaletteItem, matchesQuery, usePaletteProviders } from '@/lib/palette'
 import { type ToastOptions, toast } from '@/lib/toasts'
 import { getMessages } from './api'
-import { copyWithToast } from './clipboard'
+import { copyToClipboard } from '@/lib/copy'
 import { MESSAGE_KIND_LABELS } from './fields'
 import { consoleActionLink } from './links'
 import { readUsersWindow } from './live'
@@ -146,7 +146,7 @@ export function messageToast(
       ...base,
       action: {
         label: 'Copy',
-        run: () => void copyWithToast(message.code, `the code ${message.code}`),
+        run: () => void copyToClipboard(message.code, { what: `the code ${message.code}` }),
       },
     }
   const link = message.link
@@ -157,7 +157,7 @@ export function messageToast(
       label: 'Open',
       run: () => void window.open(consoleActionLink(link), '_blank', 'noopener'),
     },
-    actions: [{ label: 'Copy link', run: () => void copyWithToast(link, 'the link') }],
+    actions: [{ label: 'Copy link', run: () => void copyToClipboard(link, { what: 'the link' }) }],
   }
 }
 
@@ -267,17 +267,11 @@ function useLatestMessages(project: string, channel: LiveChannel): Latest {
 }
 
 async function copyCode(message: AuthMessage) {
-  try {
-    await navigator.clipboard.writeText(message.code)
-    toast({ key: 'auth.latest-code', title: `Copied ${message.code}`, tone: 'success' })
-  } catch {
-    toast({
-      key: 'auth.latest-code',
-      title: 'The browser did not let the console copy',
-      description: `The code for ${message.to} is ${message.code}.`,
-      tone: 'warning',
-    })
-  }
+  await copyToClipboard(message.code, {
+    what: message.code,
+    refused: `The code for ${message.to} is ${message.code}.`,
+    key: 'auth.latest-code',
+  })
 }
 
 /** The ⌘K items for what the beacon holds; unused messages only, since a used one works no more. */

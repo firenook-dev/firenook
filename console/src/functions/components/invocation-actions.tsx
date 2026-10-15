@@ -27,7 +27,7 @@ import { linkToLogs } from '@/lib/sections/logs'
 import { toast } from '@/lib/toasts'
 import { getInvocation } from '../api'
 import { replayInvocation } from '../invoke-stream'
-import { copyText } from '../use-functions'
+import { copyToClipboard } from '@/lib/copy'
 import { ReplayConfirm } from '@/compute/replay-confirm'
 import { formatNumber } from '@/lib/format'
 
@@ -77,12 +77,12 @@ export function causeRefs(refs: readonly EntityRef[]): EntityRef[] {
 
 /** `c`: the invocation's id. */
 function copyId(invocation: InvocationSummary) {
-  void copyText(invocation.id, 'the invocation id')
+  void copyToClipboard(invocation.id, { what: 'the invocation id' })
 }
 
 /** `Shift+C`: the row as JSON. */
 function copyJson(invocation: InvocationSummary) {
-  void copyText(JSON.stringify(invocation, null, 2), 'the invocation as JSON')
+  void copyToClipboard(JSON.stringify(invocation, null, 2), { what: 'the invocation as JSON' })
 }
 
 export interface InvocationActions {

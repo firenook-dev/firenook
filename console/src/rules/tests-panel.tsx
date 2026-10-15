@@ -18,6 +18,7 @@ import {
 import { useRef } from 'react'
 import { useStore } from 'zustand'
 import type { RulesOutcome } from '@/api/generated/RulesOutcome'
+import { copyToClipboard } from '@/lib/copy'
 import { toast } from '@/lib/toasts'
 import { type TestCaseBase, type TestsStore, passes } from './tests-core'
 import { Verdict } from './verdict'
@@ -115,10 +116,9 @@ export function TestsPanel<C extends TestCaseBase, R extends { outcome: RulesOut
               <DropdownMenu.Item
                 disabled={cases.length === 0}
                 onClick={() => {
-                  void navigator.clipboard.writeText(JSON.stringify(cases, null, 2))
-                  toast({
-                    key: 'rules-tests',
+                  void copyToClipboard(JSON.stringify(cases, null, 2), {
                     title: `Copied ${cases.length} test${cases.length === 1 ? '' : 's'} as JSON`,
+                    key: 'rules-tests',
                   })
                 }}
               >

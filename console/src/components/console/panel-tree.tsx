@@ -14,8 +14,8 @@ import { Tooltip, cn } from '@cloudflare/kumo'
 import { CaretRightIcon, type Icon } from '@phosphor-icons/react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
+import { copyToClipboard } from '@/lib/copy'
 import { formatNumber } from '@/lib/format'
-import { toast } from '@/lib/toasts'
 
 export interface PanelTreeNode {
   id: string
@@ -260,12 +260,7 @@ export function PanelTree({
 }
 
 async function copyId(id: string) {
-  try {
-    await navigator.clipboard.writeText(id)
-    toast({ key: 'panel-tree-copy', title: `Copied ${id}` })
-  } catch {
-    toast({ key: 'panel-tree-copy', title: 'Could not copy', tone: 'danger' })
-  }
+  await copyToClipboard(id, { what: id })
 }
 
 function TreeRowView({

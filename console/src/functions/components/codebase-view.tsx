@@ -33,7 +33,7 @@ import { createFeedStore } from '@/lib/live/feed-store'
 import { statusQuery } from '@/api/queries'
 import { codebaseLogQuery } from '../api'
 import { useCodebaseLog } from '../live'
-import { copyText } from '../use-functions'
+import { copyToClipboard } from '@/lib/copy'
 import { CodebaseBanners, exitWords, useReloadCodebase } from './codebase-banners'
 import { LogLines, lineKey } from './log-lines'
 import { RestartWorkerDialog } from './restart-worker-dialog'
@@ -353,7 +353,7 @@ function DebugChip({ port }: { port: number }) {
       />
       <DropdownMenu.Content className="w-72">
         <DropdownMenu.Item
-          onClick={() => void copyText(address, `${address}`)}
+          onClick={() => void copyToClipboard(address, { what: `${address}` })}
           data-testid="codebase-debug-copy"
         >
           Copy <span className="font-mono text-[12px]">chrome://inspect</span> address

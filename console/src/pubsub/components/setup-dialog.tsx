@@ -25,6 +25,7 @@ import { type ReactNode, useRef, useState } from 'react'
 import type { PubsubSetup } from '@/api/generated/messaging/PubsubSetup'
 import type { PubsubSetupResult } from '@/api/generated/messaging/PubsubSetupResult'
 import type { PubsubTopicIndex } from '@/api/generated/messaging/PubsubTopicIndex'
+import { copyToClipboard } from '@/lib/copy'
 import { download } from '@/lib/download'
 import { formatNumber } from '@/lib/format'
 import { toast } from '@/lib/toasts'
@@ -173,8 +174,11 @@ function ExportPanel({
   const copy = async () => {
     setError(undefined)
     try {
-      await navigator.clipboard.writeText(await fresh())
-      toast({ key: 'pubsub-setup-export', title: 'Copied the Pub/Sub setup as JSON' })
+      const text = await fresh()
+      await copyToClipboard(text, {
+        what: 'the Pub/Sub setup as JSON',
+        key: 'pubsub-setup-export',
+      })
     } catch (thrown) {
       setError(errorText(thrown))
     }

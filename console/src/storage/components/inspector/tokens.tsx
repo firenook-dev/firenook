@@ -15,7 +15,7 @@ import { OWNER_AUTHORIZATION, identityKey } from '@/lib/identity'
 import { toast } from '@/lib/toasts'
 import { changeToken } from '../../api'
 import { downloadUrl } from '../../code'
-import { copyText } from '../../copy'
+import { copyToClipboard } from '@/lib/copy'
 import { storageKeys } from '../../queries'
 
 export function Tokens({
@@ -105,9 +105,9 @@ export function Tokens({
                       size="xs"
                       icon={<LinkSimpleIcon />}
                       onClick={() =>
-                        void copyText(
+                        void copyToClipboard(
                           downloadUrl(address, object.bucket, object.name, token),
-                          'the download URL',
+                          { what: 'the download URL' },
                         )
                       }
                       data-testid="token-copy-url"

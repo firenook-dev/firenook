@@ -37,7 +37,7 @@ import { toast } from '@/lib/toasts'
 import { useAccess } from '../access'
 import { StorageApiError, mediaUrl } from '../api'
 import { downloadUrl, storageAddress } from '../code'
-import { copyText } from '../copy'
+import { copyToClipboard } from '@/lib/copy'
 import { type EntryActions, entryMenu } from '../entry-menu'
 import { useFiles } from '../files-state'
 import { FILTER_PLACEHOLDER, filterFields } from '../filter'
@@ -260,12 +260,14 @@ export function FilesWorkbench() {
       window.open(url, '_blank', 'noopener')
     },
     copyGsUrl: (entry) =>
-      void copyText(
+      void copyToClipboard(
         gsUrl(files.bucket, entry.type === 'folder' ? entry.prefix : entry.name),
-        'the gs:// URL',
+        { what: 'the gs:// URL' },
       ),
     copyPath: (entry) =>
-      void copyText(entry.type === 'folder' ? entry.prefix : entry.name, 'the path'),
+      void copyToClipboard(entry.type === 'folder' ? entry.prefix : entry.name, {
+        what: 'the path',
+      }),
     quickLook: (entry) => {
       if (entry.type === 'file') files.update({ object: entry.name, dialog: 'quick-look' })
     },
@@ -279,10 +281,9 @@ export function FilesWorkbench() {
               const token = object.downloadTokens[0]
               const address = storageAddress(queryClient.getQueryData(statusQuery.queryKey))
               if (token && address)
-                void copyText(
-                  downloadUrl(address, files.bucket, entry.name, token),
-                  'the download URL',
-                )
+                void copyToClipboard(downloadUrl(address, files.bucket, entry.name, token), {
+                  what: 'the download URL',
+                })
             })
         }
       : undefined,
@@ -482,7 +483,9 @@ export function FilesWorkbench() {
                       size="sm"
                       icon={<CopySimpleIcon />}
                       disabled={everything}
-                      onClick={() => void copyText([...checked].join('\n'), 'the paths')}
+                      onClick={() =>
+                        void copyToClipboard([...checked].join('\n'), { what: 'the paths' })
+                      }
                       data-testid="selection-copy-paths"
                     >
                       Copy paths

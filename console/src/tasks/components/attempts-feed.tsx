@@ -17,10 +17,10 @@ import { FeedList } from '@/components/console/feed-list'
 import { OutcomeChip } from '@/components/console/outcome-chip'
 import { SectionBody } from '@/components/console/section-page'
 import { useNow } from '@/lib/clock'
+import { copyToClipboard } from '@/lib/copy'
 import { formatClock, formatDuration, formatNumber, useClockFormat } from '@/lib/format'
 import type { FeedStore } from '@/lib/live/feed-store'
 import { useShortcuts } from '@/lib/shortcuts'
-import { toast } from '@/lib/toasts'
 import { attemptKey } from '../live'
 import { attemptLogs, useLogsLinkable } from '../logs'
 import {
@@ -140,10 +140,7 @@ function Expanded({
 }
 
 function copy(text: string, title: string) {
-  void navigator.clipboard.writeText(text).then(
-    () => toast({ key: 'tasks-copy', title }),
-    () => toast({ key: 'tasks-copy', title: 'Could not copy', tone: 'danger' }),
-  )
+  void copyToClipboard(text, { title })
 }
 
 export function AttemptsView({

@@ -35,6 +35,7 @@ import {
 import { SectionBody, SectionPage } from '@/components/console/section-page'
 import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
+import { copyToClipboard } from '@/lib/copy'
 import { download } from '@/lib/download'
 import { checkFilter } from '@/lib/filter'
 import { formatNumber } from '@/lib/format'
@@ -44,7 +45,6 @@ import { type FeedStore, useFeed } from '@/lib/live/feed-store'
 import { createInvalidator } from '@/lib/live/use-live-topic'
 import { useConsoleProject } from '@/lib/project'
 import { useRouteSearch } from '@/lib/search-params'
-import { toast } from '@/lib/toasts'
 import { isProblemLine } from '@/observe/kinds'
 import { bucketSentence, bucketSpan, bucketTotal, levelBuckets } from '@/observe/level-bars'
 import { LevelStrip } from '@/observe/level-strip'
@@ -131,17 +131,7 @@ function stepLine(
 }
 
 async function copy(text: string, title: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast({ key: 'logs.copy', title, tone: 'success' })
-  } catch {
-    toast({
-      key: 'logs.copy',
-      title: 'The browser did not let the console copy',
-      description: 'Select the text and copy it yourself.',
-      tone: 'warning',
-    })
-  }
+  await copyToClipboard(text, { title })
 }
 
 export function LogsPage() {

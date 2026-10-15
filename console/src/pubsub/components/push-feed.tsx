@@ -16,6 +16,7 @@ import { FeedList, useFeedPending } from '@/components/console/feed-list'
 import { PauseButton } from '@/components/console/pause-button'
 import { RelativeTime } from '@/components/console/relative-time'
 import { StatusDot } from '@/components/kit'
+import { copyToClipboard } from '@/lib/copy'
 import { formatNumber } from '@/lib/format'
 import type { FeedStore } from '@/lib/live/feed-store'
 import { toast } from '@/lib/toasts'
@@ -233,12 +234,7 @@ export function PushEnd({
               icon={<CopyIcon />}
               aria-label="Copy the endpoint"
               onClick={() => {
-                void navigator.clipboard
-                  .writeText(endpoint)
-                  .then(() => toast({ key: 'pubsub-copy', title: 'Copied the endpoint' }))
-                  .catch(() =>
-                    toast({ key: 'pubsub-copy', title: 'Could not copy', tone: 'danger' }),
-                  )
+                void copyToClipboard(endpoint, { what: 'the endpoint' })
               }}
             />
           }

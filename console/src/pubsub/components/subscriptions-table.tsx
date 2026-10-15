@@ -21,8 +21,8 @@ import { EmptyState } from '@/components/console/empty-state'
 import { RelativeTime } from '@/components/console/relative-time'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { TableFooter } from '@/components/console/table-footer'
+import { copyToClipboard } from '@/lib/copy'
 import { formatNumber } from '@/lib/format'
-import { toast } from '@/lib/toasts'
 import { shortName } from '../names'
 import { consumersText } from '../states'
 import { orphanedNote } from '../tree'
@@ -211,12 +211,9 @@ export function SubscriptionsTable({
       label: 'Copy the full name',
       icon: CopyIcon,
       run: () => {
-        void navigator.clipboard
-          .writeText(row.subscription.summary.name)
-          .then(() =>
-            toast({ key: 'pubsub-copy', title: `Copied ${row.subscription.summary.name}` }),
-          )
-          .catch(() => toast({ key: 'pubsub-copy', title: 'Could not copy', tone: 'danger' }))
+        void copyToClipboard(row.subscription.summary.name, {
+          what: row.subscription.summary.name,
+        })
       },
     },
   ]

@@ -48,6 +48,7 @@ import { TableFooter } from '@/components/console/table-footer'
 import { ToolbarRow } from '@/components/console/toolbar'
 import type { CursorPages } from '@/components/console/use-cursor-rows'
 import { useCursorRows } from '@/components/console/use-cursor-rows'
+import { copyToClipboard } from '@/lib/copy'
 import { formatDuration, formatNumber } from '@/lib/format'
 import { linkTo } from '@/lib/links'
 import type { SubscriptionStatus } from '@/lib/live/channel'
@@ -55,7 +56,6 @@ import { createInvalidator, readStarted } from '@/lib/live/use-live-topic'
 import { linkToLogs } from '@/lib/sections/logs'
 import type { SectionLink } from '@/lib/services'
 import { useShortcuts } from '@/lib/shortcuts'
-import { toast } from '@/lib/toasts'
 import { rowElement } from '@/messaging/confirm-popover'
 import { useDeliveriesLive } from '../live'
 import { shortName } from '../names'
@@ -566,10 +566,7 @@ function DeliveriesTable({
         label: 'Copy event id',
         icon: CopyIcon,
         run: () => {
-          void navigator.clipboard
-            .writeText(row.eventId)
-            .then(() => toast({ key: 'pubsub-copy', title: `Copied ${row.eventId}` }))
-            .catch(() => toast({ key: 'pubsub-copy', title: 'Could not copy', tone: 'danger' }))
+          void copyToClipboard(row.eventId, { what: row.eventId })
         },
       },
     ]

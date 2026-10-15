@@ -37,6 +37,7 @@ import { SectionToolbar } from '@/components/console/toolbar'
 import { useCursorRows } from '@/components/console/use-cursor-rows'
 import { StatusDot } from '@/components/kit'
 import { useNow } from '@/lib/clock'
+import { copyToClipboard } from '@/lib/copy'
 import { formatNumber } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { useShortcuts } from '@/lib/shortcuts'
@@ -335,10 +336,7 @@ export function TasksView({
       icon: CopyIcon,
       shortcut: 'Mod+c',
       run: () => {
-        void navigator.clipboard.writeText(row.name).then(
-          () => toast({ key: 'tasks-copy', title: `Copied ${displayName(row)}` }),
-          () => toast({ key: 'tasks-copy', title: 'Could not copy', tone: 'danger' }),
-        )
+        void copyToClipboard(row.name, { what: displayName(row) })
       },
     },
     {

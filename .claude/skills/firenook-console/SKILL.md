@@ -2366,6 +2366,13 @@ indenting: paste instead (`pasteRules`).
   `[data-kumo-component='InlineCopyText'][aria-label='Copied'] > svg`.
   The path's copy gave no answer at all before. A new copy button takes
   the glyph; the `ticked` helper in the journeys checks it.
+- **Every copy goes through `copyToClipboard`** (`lib/copy.ts`): the text,
+  and a note — `what` ("Copied the code 482913") or a whole `title` for
+  the toast, an optional `description`, `refused` for what to do when the
+  browser has no clipboard, a `key` when the toast must replace another.
+  Without `what` or `title` it says nothing on success (`useCopied` uses
+  it so: the tick says it); a refused write always says so and never
+  throws. Never call `navigator.clipboard` directly.
 - Kumo gotchas met here: `DropdownMenu.RadioItem` needs `closeOnClick`;
   a `Tooltip` given a `Button` as its **child** nests two `<button>`s and
   React says so in the console — pass it as `render={<Button … />}`, which

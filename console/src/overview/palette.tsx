@@ -7,13 +7,13 @@
 
 import { CopyIcon, CpuIcon, FloppyDiskIcon, PlugsConnectedIcon } from '@phosphor-icons/react'
 import { useEffect } from 'react'
+import { copyToClipboard } from '@/lib/copy'
 import {
   type PaletteGroup,
   type PaletteItem,
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { toast } from '@/lib/toasts'
 import { CONNECT_TABS } from './connect-tabs'
 import type { ConnectParam } from './search'
 
@@ -66,21 +66,10 @@ export function useOverviewPalette({
         keywords: `copy clipboard connect snippet ${tab.param}`,
         icon: <CopyIcon size={16} />,
         run: () => {
-          void navigator.clipboard.writeText(snippet(tab.param)).then(
-            () =>
-              toast({
-                key: 'overview-copy',
-                title: `Copied the ${tab.label} snippet`,
-                tone: 'success',
-              }),
-            () =>
-              toast({
-                key: 'overview-copy',
-                title: 'The snippet was not copied',
-                description: 'The browser refused the clipboard; copy it from the page instead.',
-                tone: 'warning',
-              }),
-          )
+          void copyToClipboard(snippet(tab.param), {
+            what: `the ${tab.label} snippet`,
+            refused: 'Copy it from the Connect panel on the Overview instead.',
+          })
         },
       })),
       {

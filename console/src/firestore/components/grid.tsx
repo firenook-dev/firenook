@@ -10,7 +10,7 @@
 // a flat 16.7. Most such fields fold into one column now (`foldRare`), but
 // the way back to having all of them as columns has to stay fast too.
 
-import { Button, Empty, Table, Text, Tooltip, useKumoToastManager } from '@cloudflare/kumo'
+import { Button, Empty, Table, Text, Tooltip } from '@cloudflare/kumo'
 import {
   ClockCounterClockwiseIcon,
   DatabaseIcon,
@@ -33,6 +33,7 @@ import { useColumnWidths, useIdFreeze } from '@/components/console/column-widths
 import { EmptyState } from '@/components/console/empty-state'
 import { CHECK_WIDTH, PIN_EDGE, PIN_HEAD, ROW_HEIGHT } from '@/components/console/table-pins'
 import { Kbd } from '@/components/kit'
+import { copyToClipboard } from '@/lib/copy'
 import { describeKey, useShortcuts } from '@/lib/shortcuts'
 import { arrangeColumns, foldRare, inferColumns } from '../columns'
 import { useCreateDialog } from '../create'
@@ -87,7 +88,6 @@ export function Grid() {
   'use no memo' // the virtualizers hand out functions the compiler cannot memoize safely
   const workbench = useWorkbench()
   const queryClient = useQueryClient()
-  const toasts = useKumoToastManager()
   const openCreate = useCreateDialog((state) => state.open)
   const hidden = useColumns((state) => state.hidden)
   const showAll = useColumns((state) => state.showAll)
@@ -262,12 +262,7 @@ export function Grid() {
       if (!value) return
       text = copyText(value)
     }
-    try {
-      await navigator.clipboard.writeText(text)
-      toasts.add({ title: `Copied ${field ?? (workbench.group ? 'path' : 'id')}` })
-    } catch {
-      toasts.add({ title: 'Could not copy', variant: 'error' })
-    }
+    await copyToClipboard(text, { what: field ?? (workbench.group ? 'path' : 'id') })
   }
 
   // What a row asks of the grid, through a ref so that no row re-renders

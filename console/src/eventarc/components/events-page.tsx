@@ -40,6 +40,7 @@ import { Kbd } from '@/components/kit'
 import { EVENT_LIST } from '@/compute/event-row'
 import { ReplayConfirm } from '@/compute/replay-confirm'
 import { useSeededPending } from '@/compute/seeded-pending'
+import { copyToClipboard } from '@/lib/copy'
 import { linkTo } from '@/lib/links'
 import { useFunctionsEvents } from '@/functions/live'
 import { type SubscriptionStatus, liveChannel } from '@/lib/live/channel'
@@ -59,9 +60,7 @@ import { PublishDrawer } from './publish-drawer'
 
 /** Copies an event's id, and says so. */
 function copyId(id: string) {
-  void navigator.clipboard
-    .writeText(id)
-    .then(() => toast({ key: 'eventarc.copy', title: `Copied ${id}`, tone: 'success' }))
+  void copyToClipboard(id, { what: id })
 }
 
 /** Whether this page's subscription stopped, so `LiveNotice` has something to say. */
@@ -188,9 +187,8 @@ export function EventsPage() {
   const copyJson = (id: string) =>
     void client
       .fetchQuery(eventQuery(project, id))
-      .then((view) => navigator.clipboard.writeText(JSON.stringify(view.detail, null, 2)))
-      .then(() =>
-        toast({ key: 'eventarc.copy', title: 'Copied the event as JSON', tone: 'success' }),
+      .then((view) =>
+        copyToClipboard(JSON.stringify(view.detail, null, 2), { what: 'the event as JSON' }),
       )
 
   /** One event's actions: its row's menu (right-click, Shift+F10), ⌘K, and the keys. */

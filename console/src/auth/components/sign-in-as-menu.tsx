@@ -40,7 +40,8 @@ import {
   firestoreCurl,
   tokenRequest,
 } from '../token-request'
-import { type UserTarget, copyToClipboard, refusal } from '../user-actions'
+import { copyToClipboard } from '@/lib/copy'
+import { type UserTarget, refusal } from '../user-actions'
 
 export function SignInAsMenu({
   detail,
@@ -85,7 +86,11 @@ export function SignInAsMenu({
   }
   const copyFrom = (what: string, pick: (minted: AuthMintedToken) => string) => async () => {
     const minted = await mint(what)
-    if (minted) await copyToClipboard(pick(minted), what)
+    if (minted)
+      await copyToClipboard(pick(minted), {
+        what,
+        refused: 'Allow clipboard access for this page, or copy it from the inspector.',
+      })
   }
   const as = { uid: target.uid, tenant: target.tenant, email: detail.row.email }
   const factorLabel =

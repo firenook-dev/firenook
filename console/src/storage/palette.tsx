@@ -36,7 +36,7 @@ import {
   usePaletteProviders,
 } from '@/lib/palette'
 import { exportUrl } from './api'
-import { copyText } from './copy'
+import { copyToClipboard } from '@/lib/copy'
 import type { FilesState } from './files-state'
 import { baseName, gsUrl, parentOf, parseLocation } from './paths'
 import { storageKeys } from './queries'
@@ -189,7 +189,7 @@ export function storagePaletteGroups(
       description: gsUrl(files.bucket, files.prefix),
       keywords: 'clipboard link',
       icon: <CopySimpleIcon size={16} />,
-      run: () => void copyText(gsUrl(files.bucket, files.prefix), 'the gs:// URL'),
+      run: () => void copyToClipboard(gsUrl(files.bucket, files.prefix), { what: 'the gs:// URL' }),
     },
     {
       id: 'storage:sessions',

@@ -18,6 +18,7 @@ import { CaretDownIcon, DownloadSimpleIcon, TrashIcon } from '@phosphor-icons/re
 import { useInfiniteQuery, useMutation } from '@tanstack/react-query'
 import { SelectionBar as KitSelectionBar } from '@/components/console/selection-bar'
 import { CopyGlyph, useCopied } from '@/components/kit'
+import { copyToClipboard } from '@/lib/copy'
 import { type ExportFormat, renderExport, useExportDialog } from '../export'
 import { isEmptyQuery } from '../query'
 import { pageQueryOptions } from '../queries'
@@ -67,14 +68,12 @@ export function SelectionBar({ onDelete }: { onDelete: (target: DeleteTarget) =>
         },
         { format, typed: false },
       )
-      await navigator.clipboard.writeText(parts.join(''))
-      return { copied, format }
-    },
-    onSuccess: ({ copied, format }) => {
-      tick.flash()
-      toasts.add({
+      return copyToClipboard(parts.join(''), {
         title: `Copied ${formatNumber(copied)} ${copied === 1 ? 'document' : 'documents'} as ${format === 'csv' ? 'CSV' : 'JSON'}`,
       })
+    },
+    onSuccess: (written) => {
+      if (written) tick.flash()
     },
     onError: (failure) =>
       toasts.add({ title: 'Not copied', description: failure.message, variant: 'error' }),

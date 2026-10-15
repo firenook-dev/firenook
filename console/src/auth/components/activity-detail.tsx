@@ -52,7 +52,7 @@ import {
 } from '../activity'
 import { AuthEmulatorError, callAuthEmulator } from '../api'
 import { clientLabel } from '../clients'
-import { copyWithToast } from '../clipboard'
+import { copyToClipboard } from '@/lib/copy'
 import { explainAuthError } from '../errors'
 import { messageRef, userRef } from '../links'
 import { callLabel } from '../operations'
@@ -557,7 +557,8 @@ function DetailFooter({
             labels={labels}
             disabled={!detail || !base || bodiesRetained === false}
             onClick={() => {
-              if (detail && base) void copyWithToast(curlCommand(detail, base), 'the call as curl')
+              if (detail && base)
+                void copyToClipboard(curlCommand(detail, base), { what: 'the call as curl' })
             }}
             testId="call-curl"
           />

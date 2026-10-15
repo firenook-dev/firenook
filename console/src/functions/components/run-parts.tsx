@@ -37,7 +37,7 @@ import {
   saveTest,
   useSavedTests,
 } from '../saved-tests'
-import { copyText } from '../use-functions'
+import { copyToClipboard } from '@/lib/copy'
 import { LogLines, lineKey } from './log-lines'
 
 /** A labelled row of a Run form: the label 12 px quiet, the control beside it. */
@@ -110,7 +110,7 @@ export function CopyAsMenu({
               disabled={dialect.text === undefined}
               onClick={() => {
                 if (dialect.text !== undefined)
-                  void copyText(dialect.text, `the ${dialect.label} command`)
+                  void copyToClipboard(dialect.text, { what: `the ${dialect.label} command` })
               }}
               data-testid={`${testId}-${dialect.id}`}
             >

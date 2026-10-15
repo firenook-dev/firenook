@@ -17,13 +17,13 @@ import {
   ScalesIcon,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo } from 'react'
+import { copyToClipboard } from '@/lib/copy'
 import {
   type PaletteGroup,
   type PaletteItem,
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { toast } from '@/lib/toasts'
 import type { RulesDraft } from '@/rules/draft'
 import type { StorageRulesPanel } from './rules-search'
 import type { TestCase } from './tests-store'
@@ -168,10 +168,9 @@ export function useStorageRulesPalette({
           keywords: 'export clipboard',
           icon: <CopyIcon size={16} />,
           run: () => {
-            void navigator.clipboard.writeText(JSON.stringify(cases, null, 2))
-            toast({
-              key: 'rules-tests',
+            void copyToClipboard(JSON.stringify(cases, null, 2), {
               title: `Copied ${cases.length} test${cases.length === 1 ? '' : 's'} as JSON`,
+              key: 'rules-tests',
             })
           },
         },
