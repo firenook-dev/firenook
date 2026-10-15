@@ -135,6 +135,23 @@ describe('a section’s jobs', () => {
     expect(screen.getByTestId('pubsub-job-cancel')).toHaveTextContent('Stop')
   })
 
+  it('say why a job failed', async () => {
+    calls.get.mockResolvedValue({
+      jobs: [
+        job({
+          state: 'failed',
+          message: 'The engine stopped.',
+          finishedAt: new Date().toISOString(),
+        }),
+      ],
+    })
+    renderJobs(<SectionJobs section="storage" verb={() => 'deleted'} testId="storage-job" />)
+    expect(await screen.findByTestId('storage-job-message')).toHaveTextContent(
+      'The engine stopped.',
+    )
+    expect(screen.getByTestId('storage-job')).toHaveAttribute('data-tone', 'danger')
+  })
+
   it('tone a failed job danger and one with failed items a warning once it ends', () => {
     expect(jobTone({ state: 'failed', errorCount: 0 })).toBe('danger')
     expect(jobTone({ state: 'done', errorCount: 3 })).toBe('warning')

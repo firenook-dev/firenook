@@ -617,10 +617,13 @@ The only spellings: `useLiveTopic`, `useInvalidateOn`, `useCursorRows`,
 `IdentityPicker`, `SectionBanner`, `ShellBanners`, `FilterField`,
 `MatchCount`, `ToolbarDivider`, `LiveNotice`, `RequiresNotice`, `PauseButton`,
 `MaskedValue`, `RowMenu`, `FacetList`, `CodeBlock`, `EntityLink`,
-`DangerConfirm`, `ExportDialog`, `OutcomeChip`, `LogLine`, `MiniBars`,
+`DangerConfirm`, `ConfirmPopover`, `CodePopover`, `SectionJobs`,
+`FeedTime`, `ExportDialog`, `OutcomeChip`, `LogLine`, `MiniBars`,
 `JobsWatch`, `routes`, `badgeLink`, `shellMount`, `linkTo`, `linkToLogs`,
 `resolveAuthorization`, `identityKey`, `useTriggersFor`, `useLocalBadge`,
-`useJobs`, `toast`, `connectSnippet`, `ApiError`, `api_error.rs`,
+`useJobs`, `toast`, `copyToClipboard`, `errorText`, `clockTime`,
+`createRecents`, `connectSnippet`, `connectDialects`, `CODE_DIALECTS`,
+`codeTab`, `FLASH_MS`, `ApiError`, `api_error.rs`,
 `ConsoleJson`, `EntityRef`, `Job`, `BulkTarget`, `JobRegistry`,
 `SearchSource`, `ReplayOptions`, `replay_topic`, `ComputeParts`,
 `ForeignProjects`, `HookContext`, `Section::summary`, `Section::clear`. A
@@ -658,8 +661,9 @@ stream, loaded by glob). A few behaviours worth knowing:
   are counted with, Cancel (or `cancelLabel`), a bar while the total is
   known, a summary for `summaryMs` (4 s) once it ends, "See why" over the
   failed items with the section's own `why(error)` beside each, and
-  `onEnded` to read lists again. Test ids: `<testId>s`, `<testId>`,
-  `-progress`, `-cancel`, `-see-why`.
+  `onEnded` to read lists again; a job that failed or stopped says why.
+  Test ids: `<testId>s`, `<testId>`, `-progress`, `-message`, `-cancel`,
+  `-see-why`. Its card is `design-system/src/cards/console-shared.tsx`.
 - `DangerConfirm` draws `DangerConfirmBody`, which is exported: a card (or
   any page that needs the confirmation at rest) draws the real body framed,
   handed a `Job` instead of subscribing. `TriggerLineItem` and

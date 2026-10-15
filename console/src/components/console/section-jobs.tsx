@@ -36,7 +36,8 @@ export interface SectionJobsProps {
   cancelLabel?: string | undefined
   /**
    * Each banner's test id; the list is `<testId>s`, a banner's parts are
-   * `-progress`, `-cancel` and `-see-why`.
+   * `-progress`, `-message` (why it failed or stopped), `-cancel` and
+   * `-see-why`.
    */
   testId: string
 }
@@ -130,6 +131,14 @@ function JobBanner({
         >
           {jobProgress(job, verb)}
         </span>
+        {!running && job.message && (
+          <span
+            className="min-w-0 truncate text-[12px] text-kumo-default"
+            data-testid={`${testId}-message`}
+          >
+            {job.message}
+          </span>
+        )}
         {running && job.total ? (
           <span className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-kumo-tint">
             <span
