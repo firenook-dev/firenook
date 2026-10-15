@@ -181,7 +181,7 @@ async fn remove(root: PathBuf) {
 pub(crate) fn router(snapshots: Snapshots) -> Router {
     Router::new()
         .route("/overview/snapshots", post(prepare))
-        .route("/overview/snapshots/{id}", get(file).delete(delete))
+        .route("/overview/snapshots/{id}", get(file))
         .route("/overview/snapshots/{id}/download", get(download))
         .with_state(snapshots)
 }
@@ -413,19 +413,6 @@ fn gone() -> ApiError {
         "The engine no longer keeps this snapshot; it keeps the newest one for 10 minutes.",
     )
     .with_fix("Prepare it again.")
-}
-
-/// `DELETE /overview/snapshots/{id}` (body `{}`): discards it.
-async fn delete(
-    State(snapshots): State<Snapshots>,
-    RoutePath(id): RoutePath<String>,
-    ConsoleJson(_): ConsoleJson<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    if snapshots.discard(&id).await {
-        Ok(Json(serde_json::json!({})))
-    } else {
-        Err(gone())
-    }
 }
 
 /// `GET /overview/snapshots/{id}/download`: the zip, streamed once. The

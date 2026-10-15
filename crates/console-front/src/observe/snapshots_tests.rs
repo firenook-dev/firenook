@@ -289,25 +289,6 @@ async fn a_download_abandoned_mid_way_still_removes_the_folder() {
     wait_empty(&scratch).await;
 }
 
-#[tokio::test]
-async fn a_discarded_snapshot_is_gone_with_its_folder() {
-    let scratch = Scratch::new("discard");
-    let harness = harness(port(&scratch, exporter(None, 10), None));
-    let job = finished(&harness.jobs, &start(&harness, &json!({})).await.id).await;
-    let id = snapshot_of(&job);
-    let delete = |id: &str| {
-        Request::delete(format!("/overview/snapshots/{id}"))
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from("{}"))
-            .expect("request")
-    };
-    let (status, _, _) = send(&harness.router, delete(&id)).await;
-    assert_eq!(status, StatusCode::OK);
-    wait_empty(&scratch).await;
-    let (status, _, _) = send(&harness.router, delete(&id)).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
 #[tokio::test(start_paused = true)]
 async fn a_snapshot_nobody_downloads_expires_after_ten_minutes() {
     let scratch = Scratch::new("expiry");
