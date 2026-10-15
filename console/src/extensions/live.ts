@@ -1,5 +1,5 @@
 // Extensions kept current by the live channel: `extensions.changes` names
-// the instances a reload, a reconfigure, a vendor or an edited parameter
+// the instances a reload, a reconfigure or an edited parameter
 // file changed — keys only, coalesced by the engine in 100 ms — and each
 // name refreshes that instance and the list. A reload of the instance's
 // codebase seen by Functions' topic refreshes the same keys

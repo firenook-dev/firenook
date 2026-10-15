@@ -1,15 +1,16 @@
 //! The running Extension instances and what the console (and the suite's
 //! env-file watcher) may do to them: reload one in place, reconfigure it
 //! (writing the file that actually set each value, and putting every file
-//! back when the new values do not load), vendor its source, read a secret.
+//! back when the new values do not load), read a secret. Vendoring a source
+//! is the CLI's (`firenook ext:vendor`); a reload then loads the copy.
 //!
-//! One operation at a time per instance: reload, reconfigure, vendor and a
+//! One operation at a time per instance: reload, reconfigure and a
 //! watcher's `files_changed` take the instance's lock first, and the
 //! console's own writes are recognised by their content, so one Save
 //! reloads once.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use firenook_functions_runtime::console::ConsoleHandle;
@@ -74,15 +75,6 @@ pub enum ReconfigureError {
 pub struct Reconfigured {
     /// The files written, relative to the project (`extensions/greeter.env`).
     pub written: Vec<String>,
-    pub state: InstanceState,
-}
-
-/// Where a vendored source went.
-#[derive(Debug, Clone)]
-pub struct Vendored {
-    /// Relative to the project when inside it.
-    pub directory: String,
-    pub version: String,
     pub state: InstanceState,
 }
 
@@ -410,39 +402,6 @@ impl ExtensionsControl {
         }
     }
 
-    /// Copies a registry instance's source into `extensions/.sources` and
-    /// records its version (exactly `firenook ext:vendor`), then reloads it
-    /// so it runs from the vendored copy.
-    pub async fn vendor(&self, instance_id: &str) -> Result<Vendored, ExtensionsError> {
-        let lock = self.known(instance_id).await?;
-        let _held = lock.lock().await;
-        let written = self
-            .inner
-            .config
-            .extensions
-            .iter()
-            .find(|(id, _)| id == instance_id)
-            .map(|(_, written)| written.clone())
-            .ok_or_else(|| {
-                ExtensionsError(format!("There is no extension instance {instance_id}."))
-            })?;
-        if is_local_path(&written) {
-            return Err(ExtensionsError(format!(
-                "{instance_id} is a local extension ({written}); nothing to vendor."
-            )));
-        }
-        let directory =
-            crate::vendor(&self.inner.config, instance_id, &written, &self.inner.log).await?;
-        let version = crate::source::vendored_version(&self.inner.config.project_dir, &written)
-            .unwrap_or_default();
-        let state = self.reload_held(instance_id).await?;
-        Ok(Vendored {
-            directory: relative(&self.inner.config.project_dir, &directory),
-            version,
-            state,
-        })
-    }
-
     /// A secret param's value, read from `extensions/<id>.secret.local` now.
     pub async fn secret(&self, instance_id: &str, param: &str) -> Option<String> {
         let path = self
@@ -633,13 +592,6 @@ fn status_of(statuses: &[InstanceStatus], instance_id: &str, written: &str) -> I
             params_found: false,
             note: None,
         })
-}
-
-fn relative(project: &Path, path: &Path) -> String {
-    path.strip_prefix(project).map_or_else(
-        |_| path.display().to_string(),
-        |relative| relative.display().to_string(),
-    )
 }
 
 #[cfg(test)]

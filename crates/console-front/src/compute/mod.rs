@@ -543,7 +543,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     extensions::ExtensionReconfigureResult::export_all(config)
         .expect("TypeScript bindings written");
     extensions::ExtensionParamProblem::export_all(config).expect("TypeScript bindings written");
-    extensions::ExtensionVendorResult::export_all(config).expect("TypeScript bindings written");
     extensions::ExtensionRevealedValue::export_all(config).expect("TypeScript bindings written");
     extensions::ExtensionsChanged::export_all(config).expect("TypeScript bindings written");
 }
