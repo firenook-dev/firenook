@@ -1,7 +1,7 @@
 import type { QueryKey } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
 import type { AuthUsersChanged } from '@/api/generated/auth/AuthUsersChanged'
-import { FLASH_MS } from '@/components/console/use-cursor-rows'
+import { FLASH_MS } from '@/components/kit'
 import { createUsersLive } from './users-live'
 
 function harness(open?: string) {

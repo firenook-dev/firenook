@@ -8,8 +8,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-/** How long one flash lasts (the grid's `row-flash`). */
-export const FLASH_MS = 1600
 /** The least time between two flashes of one figure, and the rest that ends a streak. */
 export const FLASH_GAP_MS = 5000
 /** Changes in this many consecutive statuses make a streak. */

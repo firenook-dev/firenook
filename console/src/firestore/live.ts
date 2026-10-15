@@ -23,6 +23,7 @@ import { useEffect, useRef } from 'react'
 import { create } from 'zustand'
 import type { ChangeBatch } from '@/api/generated/ChangeBatch'
 import type { ChangeKind } from '@/api/generated/ChangeKind'
+import { FLASH_MS } from '@/components/kit'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
 import { EMPTY_QUERY, type WorkbenchQuery, parseQuery } from './query'
@@ -43,8 +44,6 @@ interface LiveState {
   recordBatch: (batch: ChangeBatch) => void
   expireFlashes: (before: number) => void
 }
-
-export const FLASH_MS = 1600
 
 let expiry: ReturnType<typeof setTimeout> | undefined
 
