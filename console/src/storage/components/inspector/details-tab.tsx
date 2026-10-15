@@ -188,7 +188,7 @@ export function DetailsTab({
       <InspectorSection title="Location" testId="location">
         <KeyValueList items={location} testId="location-list" />
       </InspectorSection>
-      <Tokens object={object} project={project} address={address} />
+      <Tokens object={object} project={project} />
     </>
   )
 }

@@ -1,10 +1,12 @@
 // "Copy as code" for an object: the Web SDK, the Admin SDK for Node and the
 // REST protocol, each to read it and to upload a file with its metadata —
-// typed, with the real bucket, name, token and metadata, so a fixture or a
-// seed script starts from what is in the emulator. The import line holds
-// what the body uses and nothing else; the bucket is named only when it is
-// not the default one; REST uses the Storage service's own address (what an
-// app connected to the emulator reaches), and says which it assumed.
+// typed, with the real bucket, name and metadata, so a fixture or a seed
+// script starts from what is in the emulator. The import line holds what
+// the body uses and nothing else; the bucket is named only when it is not
+// the default one; REST uses the Storage service's own address (what an
+// app connected to the emulator reaches), and says which it assumed. The
+// download URL with its token is the Location section's and the row
+// menu's, not repeated here: REST reads the bytes as Admin.
 
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { CodeDialectId } from '@/components/console/request/as-code'
@@ -21,8 +23,6 @@ export interface ObjectForCode {
   bucket: string
   defaultBucket: string
   name: string
-  /** A download token, when the object has one and the page may see it. */
-  token: string | undefined
   contentType: string | null
   cacheControl: string | null
   contentDisposition: string | null
@@ -135,9 +135,7 @@ function restCode(object: ObjectForCode, variant: CodeVariant, address: string):
       `curl ${quote(path)} -H 'Authorization: Bearer owner'`,
       '',
       '# Its bytes',
-      object.token
-        ? `curl ${quote(`${path}?alt=media&token=${encodeURIComponent(object.token)}`)} -o ${quote(object.name.split('/').at(-1) ?? 'download')}`
-        : `curl ${quote(`${path}?alt=media`)} -H 'Authorization: Bearer owner' -o ${quote(object.name.split('/').at(-1) ?? 'download')}`,
+      `curl ${quote(`${path}?alt=media`)} -H 'Authorization: Bearer owner' -o ${quote(object.name.split('/').at(-1) ?? 'download')}`,
     ].join('\n')
   const body: Record<string, unknown> = {}
   if (object.cacheControl) body.cacheControl = object.cacheControl

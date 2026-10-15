@@ -1,7 +1,7 @@
 // "Copy as code" for the open file (the inspector footer's Code), on the
 // console's one CodePopover: the Web SDK, the Admin SDK for Node and REST,
-// to read it or to upload a file with its metadata — real bucket, name,
-// token and metadata, typed. The last dialect chosen opens first next time.
+// to read it or to upload a file with its metadata — real bucket, name and
+// metadata, typed. The last dialect chosen opens first next time.
 
 import { Tabs } from '@cloudflare/kumo'
 import { useQuery } from '@tanstack/react-query'
@@ -28,7 +28,6 @@ export function FileCodePopover({
     bucket: object.bucket,
     defaultBucket,
     name: object.name,
-    token: object.downloadTokens[0],
     contentType: object.contentType,
     cacheControl: object.cacheControl,
     contentDisposition: object.contentDisposition,
