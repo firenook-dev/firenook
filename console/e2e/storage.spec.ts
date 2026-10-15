@@ -1125,7 +1125,9 @@ test('a folder is deleted as a job: counted first, followed while it runs, found
   await page.reload()
   const banner = page.getByTestId('storage-job').filter({ hasText: /Delete .*doomed-again\// })
   await expect(banner).toBeVisible()
-  await expect(banner.getByTestId('job-progress')).toContainText(`${figure(folder.objects)}`)
+  await expect(banner.getByTestId('storage-job-progress')).toContainText(
+    `${figure(folder.objects)}`,
+  )
   await expect(row(page, 'doomed-again/')).toHaveCount(0)
 })
 
