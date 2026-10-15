@@ -24,7 +24,7 @@ function isIdChar(char: string): boolean {
 }
 
 /**
- * What is wrong with `id` as a topic, subscription, snapshot or schema id,
+ * What is wrong with `id` as a topic, subscription or schema id,
  * or undefined when the engine would take it. One sentence, the first
  * problem only, so the line under the field stays one line.
  */
@@ -39,10 +39,6 @@ export function idProblem(id: string): string | undefined {
   if (id.length > 255) return `An id has at most 255 characters; this one has ${id.length}.`
   if (id.startsWith('goog')) return 'An id cannot start with goog.'
   return undefined
-}
-
-export function isValidId(id: string): boolean {
-  return idProblem(id) === undefined
 }
 
 /** A resource's full name; the same function the links use, so the two cannot disagree. */

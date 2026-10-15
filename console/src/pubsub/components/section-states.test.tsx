@@ -4,7 +4,7 @@ import { SectionFrame } from '@/components/console/section-gate'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
 
-// Pub/Sub's pages (Topics, Schemas, Schedules) sit in the section's frame:
+// Pub/Sub's pages (Topics, Schemas) sit in the section's frame:
 // before the engine runs Pub/Sub nothing of the page renders and nothing
 // asks the service; the frame says why and how to turn it on, or what it
 // waits for, in the engine's own sentences.

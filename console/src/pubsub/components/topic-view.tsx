@@ -1,60 +1,50 @@
-// One topic: row two is its tabs — Messages, Subscriptions, Deliveries,
-// Snapshots, Settings — with how much it publishes at the right end (since
-// start, the last minute's rate, and the bars, aged on the shared
-// one-second clock so a topic that went quiet decays to zero by itself);
-// below, the tab.
+// One topic: row two is its tabs — Messages, Subscriptions, Settings —
+// then, when functions listen, the way to their runs in Functions ›
+// Invocations (every delivery is an invocation there, with its logs and Run
+// again), and how much it publishes at the right end (since start, the last
+// minute's rate, and the bars, aged on the shared one-second clock so a
+// topic that went quiet decays to zero by itself); below, the tab. A
+// message's own deliveries are in its inspector.
 
-import { Button, Tabs } from '@cloudflare/kumo'
-import { BroadcastIcon, CameraIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
+import { Button, Tabs, Tooltip } from '@cloudflare/kumo'
+import { BroadcastIcon, LightningIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { ApiError } from '@/api/client'
-import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctionMark'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
 import type { PubsubTopicSummary } from '@/api/generated/messaging/PubsubTopicSummary'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
+import { SectionJobs } from '@/components/console/section-jobs'
 import { ToolbarRow } from '@/components/console/toolbar'
 import { formatNumber } from '@/lib/format'
+import { useLinkTo } from '@/lib/links'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useThroughput } from '../live'
 import { shortName } from '../names'
-import { snapshotsQuery, topicQuery } from '../queries'
+import { topicQuery } from '../queries'
 import { Composer } from './composer'
-import { CreateSnapshotDialog } from './create-snapshot-dialog'
-import { DeliveriesView } from './deliveries-table'
-import { JobStrip } from './job-strip'
 import type { MessageTab } from './message-inspector'
 import { type MessagesSearch, MessagesView } from './message-table'
-import { SnapshotsTable, topicSnapshots } from './snapshots-table'
 import { SubscriptionsTable, subscriptionRows } from './subscriptions-table'
 import type { SubscriptionViewName } from './subscription-view'
 import { ThroughputBars, useLastMinute } from './throughput-bars'
 import { TopicSettings } from './topic-settings'
 
-export type TopicViewName = 'messages' | 'subscriptions' | 'deliveries' | 'snapshots' | 'settings'
+export type TopicViewName = 'messages' | 'subscriptions' | 'settings'
 
 export interface TopicSearch extends MessagesSearch {
   /** A topic's view, or a subscription's (the page's one parameter for both). */
   view?: TopicViewName | SubscriptionViewName | undefined
   tab?: MessageTab | undefined
   /** `message` opens the composer in the inspector's place. */
-  new?: 'topic' | 'subscription' | 'message' | 'snapshot' | undefined
+  new?: 'topic' | 'subscription' | 'message' | undefined
   /** With new=message: the message that fills the composer. */
   prefill?: string | undefined
-  dialog?: 'replay' | 'setup' | 'export' | undefined
-  /** Deliveries: one function's, by its id. */
-  function?: string | undefined
-  /** Deliveries: one outcome's. */
-  outcome?: PubsubFunctionMark | undefined
+  dialog?: 'setup' | 'export' | undefined
 }
 
 /** The topic's tabs, in order; later commits add theirs here. */
-export const TOPIC_VIEWS: readonly TopicViewName[] = [
-  'messages',
-  'subscriptions',
-  'deliveries',
-  'snapshots',
-  'settings',
-]
+export const TOPIC_VIEWS: readonly TopicViewName[] = ['messages', 'subscriptions', 'settings']
 
 /** The view a `view` parameter names for a topic, or the first. */
 export function topicView(view: string | undefined): TopicViewName {
@@ -102,6 +92,38 @@ function Throughput({
   )
 }
 
+/**
+ * The way to the runs of the topic's functions in Functions › Invocations:
+ * each delivery is an invocation there, with its logs, its request and Run
+ * again. Nothing when no function listens or Functions does not run.
+ */
+function FunctionRuns({
+  detail,
+  names,
+}: {
+  detail: PubsubTopicDetail | undefined
+  names: readonly string[]
+}) {
+  const link = useLinkTo(detail?.invocations ?? undefined)
+  if (!link) return null
+  return (
+    <Tooltip
+      content={`Every run of ${names.join(', ')}, with its logs and Run again`}
+      render={
+        <Link
+          to={link.to as never}
+          search={link.search as never}
+          className="ml-3 flex shrink-0 items-center gap-1 text-[12px] text-kumo-link underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+          data-testid="pubsub-topic-runs"
+        >
+          <LightningIcon size={13} />
+          Function runs in Invocations
+        </Link>
+      }
+    />
+  )
+}
+
 export function TopicView({
   project,
   topic,
@@ -112,7 +134,6 @@ export function TopicView({
   onCreateSubscription,
   onCreateTopic,
   onLiveStatus,
-  onReplay,
   onDeleted,
 }: {
   project: string
@@ -125,12 +146,9 @@ export function TopicView({
   onCreateSubscription: () => void
   onCreateTopic: (id: string) => void
   onLiveStatus: (status: SubscriptionStatus) => void
-  /** Opens the replay of a subscription, with a snapshot chosen. */
-  onReplay: (subscription: string, snapshot: string) => void
   onDeleted: () => void
 }) {
   const detail = useQuery(topicQuery(project, topic))
-  const snapshots = useQuery(snapshotsQuery(project))
   const topicId = shortName(topic)
   const view = topicView(search.view)
   const missing = detail.error instanceof ApiError && detail.error.code === 'not-found'
@@ -157,11 +175,6 @@ export function TopicView({
     update({ new: 'message', prefill: id, message: undefined, tab: undefined })
   const openComposer = () =>
     update({ new: 'message', prefill: undefined, message: undefined, tab: undefined })
-  const snapshotCount = topicSnapshots(snapshots.data?.items, topic).length
-  // A snapshot is of a subscription the console tracks; the functions' own are drained.
-  const snapshotSources = (detail.data?.subscriptions ?? [])
-    .filter((item) => item.summary.managed !== 'functions')
-    .map((item) => item.summary.name)
   return (
     <>
       <ToolbarRow variant="line" testId="pubsub-topic-tabs">
@@ -174,8 +187,6 @@ export function TopicView({
               view: next === 'messages' ? undefined : (next as TopicViewName),
               message: undefined,
               tab: undefined,
-              function: undefined,
-              outcome: undefined,
             })
           }
           tabs={[
@@ -191,35 +202,11 @@ export function TopicView({
                 </span>
               ),
             },
-            { value: 'deliveries', label: 'Deliveries' },
-            {
-              value: 'snapshots',
-              label: (
-                <span>
-                  Snapshots{' '}
-                  <span className="font-mono text-[11px] text-kumo-subtle">
-                    {formatNumber(snapshotCount)}
-                  </span>
-                </span>
-              ),
-            },
             { value: 'settings', label: 'Settings' },
           ]}
         />
-        {view === 'snapshots' ? (
-          <span className="ml-auto flex shrink-0 items-center">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<CameraIcon />}
-              disabled={snapshotSources.length === 0}
-              onClick={() => update({ new: 'snapshot' })}
-              data-testid="pubsub-new-snapshot"
-            >
-              New snapshot
-            </Button>
-          </span>
-        ) : view === 'subscriptions' ? (
+        <FunctionRuns detail={detail.data} names={functions.map((target) => target.name)} />
+        {view === 'subscriptions' ? (
           <span className="ml-auto flex shrink-0 items-center">
             <Button
               variant="secondary"
@@ -271,31 +258,21 @@ export function TopicView({
             ) : undefined
           }
           onEditAgain={editAgain}
-          above={<JobStrip />}
+          above={
+            // A publish that outlives its composer: every running
+            // `pubsub.publish` job, in every tab, until it ends.
+            <SectionJobs
+              section="pubsub"
+              filter={(job) => job.kind === 'pubsub.publish'}
+              verb={() => 'sent'}
+              cancelLabel="Stop"
+              summaryMs={0}
+              testId="pubsub-job"
+            />
+          }
           exportOpen={search.dialog === 'export'}
           onExportOpenChange={(open) =>
             update({ dialog: open ? 'export' : undefined }, { replace: !open })
-          }
-        />
-      ) : view === 'deliveries' ? (
-        <DeliveriesView
-          project={project}
-          topic={topic}
-          functions={functions}
-          search={search}
-          update={update}
-          onLiveStatus={onLiveStatus}
-          onOpenSubscription={onOpenSubscription}
-          onEditAgain={(id) =>
-            update({
-              view: undefined,
-              new: 'message',
-              prefill: id,
-              message: undefined,
-              tab: undefined,
-              function: undefined,
-              outcome: undefined,
-            })
           }
         />
       ) : view === 'subscriptions' ? (
@@ -306,24 +283,9 @@ export function TopicView({
           onOpen={onOpenSubscription}
           onCreate={onCreateSubscription}
         />
-      ) : view === 'snapshots' ? (
-        <SnapshotsTable
-          project={project}
-          topic={topic}
-          onCreate={() => update({ new: 'snapshot' })}
-          onReplay={onReplay}
-        />
       ) : detail.data ? (
         <TopicSettings key={topic} project={project} detail={detail.data} onDeleted={onDeleted} />
       ) : null}
-      <CreateSnapshotDialog
-        open={search.new === 'snapshot'}
-        project={project}
-        subscriptions={snapshotSources}
-        onOpenChange={(open) => {
-          if (!open) update({ new: undefined }, { replace: true })
-        }}
-      />
     </>
   )
 }

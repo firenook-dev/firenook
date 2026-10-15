@@ -12,39 +12,31 @@
 //   const query = useInfiniteQuery(list.options)
 //   const rows = useCursorRows(query, { ...list, q })
 //
-// and live keys go to `rows.applyKeys`. The bounded lists (topics,
-// snapshots, schemas, schedules, refusals) are one page holding every item.
+// and live keys go to `rows.applyKeys`. The bounded lists (topics, schemas,
+// refusals) are one page holding every item.
 
 import { queryOptions } from '@tanstack/react-query'
 import type { PubsubBacklogState } from '@/api/generated/messaging/PubsubBacklogState'
-import type { PubsubDeliveryPage } from '@/api/generated/messaging/PubsubDeliveryPage'
 import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctionMark'
 import type { PubsubMessageCheckBody } from '@/api/generated/messaging/PubsubMessageCheckBody'
 import type { PubsubPublishBody } from '@/api/generated/messaging/PubsubPublishBody'
 import type { PubsubSchemaExampleBody } from '@/api/generated/messaging/PubsubSchemaExampleBody'
-import type { CursorPages } from '@/components/console/use-cursor-rows'
 import { cursorPagesOptions } from '@/components/console/use-cursor-rows'
 import {
   type PageAt,
-  type PubsubList,
   batchGetBacklog,
-  batchGetDeliveries,
   batchGetMessages,
   checkFilter,
   checkMessage,
   checkSchema,
   getBacklog,
-  getDeliveries,
   getDispatch,
-  getListMeta,
   getMessage,
   getMessages,
   getRejected,
-  getSchedules,
   getSchema,
   getSchemas,
   getSetup,
-  getSnapshots,
   getSubscription,
   getTopic,
   getTopicIndex,
@@ -88,23 +80,12 @@ export const pubsubKeys = {
     ['pubsub', project, 'backlog', subscription] as const,
   backlog: (project: string, subscription: string, state?: PubsubBacklogState) =>
     ['pubsub', project, 'backlog', subscription, state ?? 'all'] as const,
-  /** Every deliveries list of a topic (a prefix). */
-  topicDeliveries: (project: string, topic: string) =>
-    ['pubsub', project, 'deliveries', topic] as const,
-  deliveries: (project: string, topic: string, functionId?: string, outcome?: PubsubFunctionMark) =>
-    ['pubsub', project, 'deliveries', topic, functionId ?? '', outcome ?? 'all'] as const,
-  /** A topic's delivery counts by outcome, over every delivery kept (one function's, or all). */
-  deliveryCounts: (project: string, topic: string, functionId?: string) =>
-    ['pubsub', project, 'deliveries', topic, functionId ?? '', 'counts'] as const,
-  snapshots: (project: string) => ['pubsub', project, 'snapshots'] as const,
   schemas: (project: string) => ['pubsub', project, 'schemas'] as const,
   /** Every schema detail of the project (a prefix). */
   schemaDetails: (project: string) => ['pubsub', project, 'schema'] as const,
   schema: (project: string, name: string) => ['pubsub', project, 'schema', name] as const,
-  schedules: (project: string) => ['pubsub', project, 'schedules'] as const,
   rejected: (project: string) => ['pubsub', project, 'rejected'] as const,
   setup: (project: string) => ['pubsub', project, 'setup'] as const,
-  meta: (project: string, list: PubsubList) => ['pubsub', project, 'meta', list] as const,
   /** Checks the pages make as text is typed: read-only answers, keyed by what was asked. */
   check: (project: string, kind: string, ...asked: readonly (string | undefined)[]) =>
     ['pubsub', project, 'check', kind, ...asked.map((part) => part ?? '')] as const,
@@ -174,13 +155,6 @@ export const rejectedQuery = (project: string) =>
     enabled: project !== '',
   })
 
-export const snapshotsQuery = (project: string) =>
-  queryOptions({
-    queryKey: pubsubKeys.snapshots(project),
-    queryFn: ({ signal }) => getSnapshots(project, signal),
-    enabled: project !== '',
-  })
-
 export const schemasQuery = (project: string) =>
   queryOptions({
     queryKey: pubsubKeys.schemas(project),
@@ -195,26 +169,11 @@ export const schemaQuery = (project: string, name: string) =>
     enabled: project !== '' && name !== '',
   })
 
-export const schedulesQuery = (project: string) =>
-  queryOptions({
-    queryKey: pubsubKeys.schedules(project),
-    queryFn: ({ signal }) => getSchedules(project, signal),
-    enabled: project !== '',
-  })
-
 export const setupQuery = (project: string) =>
   queryOptions({
     queryKey: pubsubKeys.setup(project),
     queryFn: ({ signal }) => getSetup(project, signal),
     enabled: project !== '',
-  })
-
-/** A list's order and filter fields: fixed for the engine's life. */
-export const listMetaQuery = (project: string, list: PubsubList) =>
-  queryOptions({
-    queryKey: pubsubKeys.meta(project, list),
-    queryFn: ({ signal }) => getListMeta(list, signal),
-    staleTime: Number.POSITIVE_INFINITY,
   })
 
 // ------------------------------------------------------------ cursor lists
@@ -255,65 +214,6 @@ export function backlogList(project: string, subscription: string, state?: Pubsu
   }
 }
 
-/** A topic's deliveries to functions, newest first; rows keyed by event id. */
-export function deliveryList(
-  project: string,
-  topic: string,
-  functionId?: string,
-  outcome?: PubsubFunctionMark,
-) {
-  const queryKey = pubsubKeys.deliveries(project, topic, functionId, outcome)
-  const fetchPage = (page: PageAt, signal: AbortSignal) =>
-    getDeliveries({ topic, function: functionId, outcome }, page, signal)
-  return {
-    queryKey,
-    fetchPage,
-    rowKey: (row: { eventId: string }) => row.eventId,
-    // The engine reads a delivery by event id whatever the list's narrowing;
-    // one that no longer matches it (a queued delivery that ran, under
-    // "Queued") leaves the list, as it would on a fresh read.
-    batchGet: async (request: Parameters<typeof batchGetDeliveries>[1], signal: AbortSignal) => {
-      const answer = await batchGetDeliveries(topic, request, signal)
-      if (functionId === undefined && outcome === undefined) return answer
-      return {
-        ...answer,
-        items: answer.items.map((item) =>
-          item.row &&
-          ((functionId !== undefined && item.row.functionId !== functionId) ||
-            (outcome !== undefined && item.row.mark !== outcome))
-            ? { key: item.key, row: null, page: null }
-            : item,
-        ),
-      }
-    },
-    options: {
-      ...cursorPagesOptions(queryKey, fetchPage),
-      enabled: project !== '' && topic !== '',
-    },
-  }
-}
-
-/**
- * A topic's delivery counts by outcome (one function's, or every one), read
- * on their own so the outcome switch stays current wherever the list is
- * scrolled: a one-row page carries them.
- */
-export const deliveryCountsQuery = (project: string, topic: string, functionId?: string) =>
-  queryOptions({
-    queryKey: pubsubKeys.deliveryCounts(project, topic, functionId),
-    queryFn: async ({ signal }) =>
-      (await getDeliveries({ topic, function: functionId }, { limit: 1 }, signal)).counts,
-    enabled: project !== '' && topic !== '',
-  })
-
-/** The outcome counts a deliveries list's first page carries (over every delivery kept). */
-export function deliveryCountsOf(
-  data: CursorPages<unknown> | undefined,
-): PubsubDeliveryPage['counts'] | undefined {
-  const first = data?.pages[0] as Partial<PubsubDeliveryPage> | undefined
-  return first?.counts
-}
-
 // ------------------------------------------------------------ checks
 
 /** Whether a subscription filter parses, and what it would pass of the topic's history. */
@@ -336,7 +236,7 @@ export const schemaCheckQuery = (project: string, kind: string, definition: stri
     gcTime: CHECK_GC_MS,
   })
 
-/** Whether a message passes a schema, a revision or an unsaved definition. */
+/** Whether a message passes a topic's bound schema revision. */
 export const messageCheckQuery = (project: string, body: PubsubMessageCheckBody) =>
   queryOptions({
     queryKey: pubsubKeys.check(project, 'message', JSON.stringify(body)),
@@ -346,7 +246,7 @@ export const messageCheckQuery = (project: string, body: PubsubMessageCheckBody)
     gcTime: CHECK_GC_MS,
   })
 
-/** An example message for a schema, a topic's bound revision or a definition. */
+/** An example message for a topic's bound revision or an unsaved definition. */
 export const schemaExampleQuery = (project: string, body: PubsubSchemaExampleBody) =>
   queryOptions({
     queryKey: pubsubKeys.check(project, 'example', JSON.stringify(body)),

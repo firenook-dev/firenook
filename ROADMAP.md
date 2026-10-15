@@ -900,21 +900,23 @@ served until every section has landed.
   takes, exported as NDJSON or JSON and published again, ticked rows or a
   file at a time. Each message shows, for every subscription and function,
   what became of it: waiting, leased, acknowledged, dead-lettered, filtered
-  out, queued for a function, delivered, or failed with the handler's error;
-  a topic's Deliveries list every function's outcome with the exact request
-  it received, and a function can be run again with one message alone. A
-  composer publishes JSON, text, bytes or Avro with attributes and an
-  ordering key, up to a thousand at a time with templated ids, or on an
-  interval that keeps going when the tab is closed, and checks data against
-  the topic's schema as it is typed. A backlog can be read in the order the
-  next pull takes it, without leasing it, or pulled, acked, nacked and
-  extended; subscriptions replay to a time or a snapshot, push subscriptions
+  out, queued for a function, delivered, or failed with the handler's error,
+  with the exact request each function received, and a function can be run
+  again with one message alone; every run of a topic's functions is one
+  link away in Functions › Invocations. A composer publishes JSON, text,
+  bytes or Avro with attributes and an ordering key, up to a thousand at a
+  time with templated ids, or on an interval that keeps going when the tab
+  is closed, and checks data against the topic's schema as it is typed. A
+  backlog can be read in the order the next pull takes it, without leasing
+  it, its rows acknowledged or returned, and purged; push subscriptions
   show every outcome with its count, dead letters have their own list, and
   filters say where they fail to parse. A whole setup — topics,
   subscriptions, schemas — exports to a file and imports into another run
-  or project. Schemas have an editor with revisions, diffs, rollback and a
-  message tester. Scheduled functions show their next runs and their runs'
-  outcomes, run now, pause, and run in the time zone they declare. Found and
+  or project. Schemas have an editor the engine's parser checks as it is
+  typed, each commit a new revision, and the topics that use them. A
+  scheduled function's Schedule tab in Functions shows its expression in
+  words, its next runs and its runs' outcomes, runs it now, pauses it, and
+  the schedule runs in the time zone it declares. Found and
   fixed on the way: every published message and every acknowledged one was
   kept for the life of the process, and the acknowledged ones were visited
   by the 50 ms timer; every pull sorted the whole backlog; dead-lettered

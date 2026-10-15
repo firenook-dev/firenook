@@ -680,14 +680,15 @@ topic keeps a history ring of what it received, each entry with the outcome
 every subscription gave it when it let go (acknowledged, dead-lettered,
 drained by the functions consumer) and the functions it was handed to, so a
 message's marks stay answerable after the backlog moved on. The read models
-(`broker::inspect`) page the ring, a backlog in the order the next pull takes
-it and the deliveries by cursor; a search that reads data examines at most
+(`broker::inspect`) page the ring and a backlog in the order the next pull
+takes it by cursor; a search that reads data examines at most
 20,000 messages or 64 MiB per request, and the last 8 searches are cached.
-`console_delta` reports counters, moved backlog rows and new fanouts since a
-cursor, with a ring of 1,000 changed keys per scope; a cursor past it gets a
-reset. The scheduler is keyed by function id and is the one compute's Run now
-calls through `ScheduleControl`: run now, pause, the next five ticks, the
-first run and the nineteen latest. Cron, daily, weekly and window cadences
+`console_delta` reports counters, moved backlog rows and the messages whose
+fanout changed since a cursor, with a ring of 1,000 changed keys per scope; a
+cursor past it gets a reset. The scheduler is keyed by function id and is the
+one a scheduled function's Schedule tab (in Functions) drives through
+`ScheduleControl`: run now, pause, the next five ticks, the first run and the
+nineteen latest. Cron, daily, weekly and window cadences
 evaluate in the declared zone with jiff and its bundled IANA database
 (tzdata 2026e, `tzdb-bundle-always`, so a host without `/usr/share/zoneinfo`
 fires at the same instants); a civil time a daylight-saving change skips fires

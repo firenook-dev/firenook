@@ -4,7 +4,6 @@ import {
   findSubscription,
   fullName,
   idProblem,
-  isValidId,
   projectOf,
   resolveTyped,
   scopeCompletions,
@@ -14,9 +13,9 @@ import {
 
 describe('resource ids, as the engine checks them (U-01)', () => {
   it('take 3 to 255 characters of letters, digits and - _ . ~ + %, a letter first', () => {
-    expect(isValidId('abc')).toBe(true)
-    expect(isValidId('Topic_1.two~three+four%five-six')).toBe(true)
-    expect(isValidId('a'.repeat(255))).toBe(true)
+    expect(idProblem('abc')).toBeUndefined()
+    expect(idProblem('Topic_1.two~three+four%five-six')).toBeUndefined()
+    expect(idProblem('a'.repeat(255))).toBeUndefined()
     expect(idProblem('ab')).toBe('An id has at least 3 characters.')
     expect(idProblem('a'.repeat(256))).toBe('An id has at most 255 characters; this one has 256.')
     expect(idProblem('1abc')).toBe('An id starts with a letter.')
@@ -36,8 +35,8 @@ describe('resource ids, as the engine checks them (U-01)', () => {
 
   it('refuse the goog prefix, lowercase only, as the recorded emulator does', () => {
     expect(idProblem('googTopic')).toBe('An id cannot start with goog.')
-    expect(isValidId('GoogTopic')).toBe(true)
-    expect(isValidId('gooTopic')).toBe(true)
+    expect(idProblem('GoogTopic')).toBeUndefined()
+    expect(idProblem('gooTopic')).toBeUndefined()
   })
 })
 

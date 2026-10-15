@@ -244,6 +244,9 @@ pub(crate) struct PubsubConsumers {
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubTopicDetail {
     pub summary: PubsubTopicSummary,
+    /// `functions.invocations`: every run of the functions the topic
+    /// triggers, in Functions › Invocations; null when none listens.
+    pub invocations: Option<EntityRef>,
     pub labels: BTreeMap<String, String>,
     /// The topic's own message retention, seconds; `null` = none.
     #[ts(type = "number | null")]
@@ -257,7 +260,6 @@ pub(crate) struct PubsubTopicDetail {
     pub subscriptions: Vec<PubsubSubscription>,
     /// Subscriptions that dead-letter into this topic.
     pub dead_letter_for: Vec<String>,
-    pub snapshots: Vec<PubsubSnapshot>,
     /// Ordering keys seen on this topic, kept as messages arrive (newest 50).
     pub ordering_keys: Vec<String>,
     /// Attribute keys seen on this topic, kept as messages arrive (first 100).
@@ -482,32 +484,6 @@ pub(crate) struct PubsubDeliveryRow {
     pub redelivery: bool,
 }
 
-/// `GET /pubsub/deliveries`: a page plus the counts over the records kept.
-#[derive(Clone, Debug, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeliveryPage {
-    #[serde(flatten)]
-    #[ts(flatten)]
-    pub page: Page<PubsubDeliveryRow>,
-    pub counts: PubsubDeliveryCounts,
-}
-
-/// Deliveries per mark, over the records kept.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeliveryCounts {
-    /// Every record, those whose invocation is no longer kept included
-    /// (their outcome is unknown, so no other count has them).
-    pub all: u32,
-    pub queued: u32,
-    pub running: u32,
-    pub delivered: u32,
-    pub failed: u32,
-    pub skipped: u32,
-}
-
 /// `GET /pubsub/dispatch`: the request a function received, or would have.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -714,8 +690,8 @@ pub(crate) struct PubsubPublishResult {
     pub functions_skipped: u32,
 }
 
-/// `dryRun: true` on either publish route: message 1 as the publish would
-/// send it.
+/// `dryRun: true` on `POST /pubsub/topic/publish`: message 1 as the publish
+/// would send it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "messaging/")]
@@ -759,10 +735,6 @@ pub(crate) struct PubsubPublishJobBody {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub template: bool,
-    /// Answer `PubsubPreview` and start nothing.
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub dry_run: bool,
 }
 
 /// A request the wire refused, coalesced by operation, resource and error.
@@ -978,58 +950,6 @@ pub(crate) struct PubsubPushConfigBody {
     pub endpoint: Option<String>,
 }
 
-/// `POST /pubsub/subscription/pull`: an immediate pull (never the long
-/// poll).
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubPullBody {
-    pub subscription: String,
-    /// 1 to 1,000.
-    pub max: i32,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub ack_deadline_seconds: Option<i32>,
-}
-
-/// One message a console pull received.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubReceived {
-    pub ack_id: String,
-    pub delivery_attempt: i32,
-    pub lease_expires_at: String,
-    pub message: PubsubMessageDetail,
-}
-
-/// What a console pull received.
-#[derive(Clone, Debug, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubPullResult {
-    pub received: Vec<PubsubReceived>,
-}
-
-/// `POST /pubsub/subscription/ack`: a subscriber's ack ids.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubAckBody {
-    pub subscription: String,
-    pub ack_ids: Vec<String>,
-}
-
-/// `POST /pubsub/subscription/modify-deadline` (0 seconds is a nack).
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubModifyDeadlineBody {
-    pub subscription: String,
-    pub ack_ids: Vec<String>,
-    pub seconds: i32,
-}
-
 /// `POST /pubsub/message/ack` and `/message/release`: one message at one
 /// subscription.
 #[derive(Clone, Debug, Deserialize, TS)]
@@ -1040,31 +960,14 @@ pub(crate) struct PubsubMessageActionBody {
     pub message_id: String,
 }
 
-/// `POST /pubsub/subscription/seek`: exactly one of `time`, `snapshot`,
-/// `now`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSeekBody {
-    pub subscription: String,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub time: Option<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub snapshot: Option<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub now: bool,
-}
-
-/// What a seek left in the subscription.
+/// What `POST /pubsub/subscription/purge` left in the subscription.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSeekResult {
+pub(crate) struct PubsubPurged {
     #[ts(type = "number")]
     pub available: u64,
+    /// Acknowledged messages it keeps (`retainAckedMessages`).
     #[ts(type = "number")]
     pub acked: u64,
 }
@@ -1076,32 +979,6 @@ pub(crate) struct PubsubSeekResult {
 pub(crate) struct PubsubBacklogJobBody {
     pub subscription: String,
     pub target: BulkTarget,
-}
-
-/// A snapshot.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSnapshot {
-    pub name: String,
-    pub project: String,
-    pub id: String,
-    pub topic: String,
-    pub topic_deleted: bool,
-    /// The subscription it was taken from (console-recorded).
-    pub source: Option<String>,
-    pub created_at: String,
-    pub expire_time: String,
-    pub unacked: u32,
-}
-
-/// `POST /pubsub/snapshots`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubCreateSnapshotBody {
-    pub name: String,
-    pub subscription: String,
 }
 
 // ------------------------------------------------------------ schemas
@@ -1178,24 +1055,6 @@ pub(crate) struct PubsubCommitSchemaBody {
     pub definition: String,
 }
 
-/// `POST /pubsub/schema/rollback`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubRollbackSchemaBody {
-    pub name: String,
-    pub revision_id: String,
-}
-
-/// `DELETE /pubsub/schema/revision`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeleteRevisionBody {
-    pub name: String,
-    pub revision: String,
-}
-
 /// `POST /pubsub/schema/check`.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1226,14 +1085,9 @@ pub(crate) struct PubsubSchemaCheck {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubMessageCheckBody {
-    /// A schema name, optionally `name@revision`.
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub schema: Option<String>,
-    /// Or a definition not yet saved.
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub definition: Option<String>,
+    /// A schema name, optionally `name@revision` (the composer names the
+    /// topic's bound revision).
+    pub schema: String,
     /// `JSON` or `BINARY`.
     pub encoding: String,
     pub data: PubsubData,
@@ -1261,35 +1115,12 @@ pub(crate) struct PubsubMessageCheck {
     pub problem: Option<PubsubSchemaProblem>,
 }
 
-/// `POST /pubsub/schema/encode`: JSON written as Avro binary for a topic's
-/// bound schema.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSchemaEncodeBody {
-    pub topic: String,
-    pub json: String,
-}
-
-/// The Avro binary, or where the JSON stops matching.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSchemaEncoded {
-    pub base64: Option<String>,
-    pub problem: Option<PubsubSchemaProblem>,
-}
-
-/// `POST /pubsub/schema/example`: a schema name (optionally
-/// `name@revision`), a topic (its bound revision), or a definition not yet
-/// saved.
+/// `POST /pubsub/schema/example`: a topic (its bound revision), or a
+/// definition not yet saved.
 #[derive(Clone, Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubSchemaExampleBody {
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub schema: Option<String>,
     #[serde(default)]
     #[ts(optional = nullable)]
     pub topic: Option<String>,
@@ -1520,18 +1351,6 @@ pub(crate) struct PubsubStale {
     /// `backlog:<row key>` (old and new keys of a moved row), `snapshots`,
     /// or `message:<id>`.
     pub keys: Vec<String>,
-}
-
-/// `pubsub.deliveries` `changed`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeliveriesChanged {
-    /// Event ids of deliveries whose outcome changed (at most 100).
-    pub keys: Vec<String>,
-    /// New fanout records since the last event.
-    pub added: u32,
-    pub overflow: bool,
 }
 
 /// One schedule's state, as `pubsub.schedules` patches it.

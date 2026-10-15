@@ -55,7 +55,7 @@ describe('a trigger in words', () => {
           trigger: trigger({ schedule: '0 3 * * *', timeZone: 'America/New_York' }),
         }),
       ),
-    ).toBe('0 3 * * * · America/New_York')
+    ).toBe('0 3 * * * (every day at 03:00) · America/New_York')
     expect(
       triggerText(
         summary('onGreetedVip', 'eventarc', {
@@ -103,6 +103,16 @@ describe('a trigger in words', () => {
       }),
     })
     expect(triggerSentence(written)).toContain('is created, updated or deleted')
+    const cleanup = summary('cleanup', 'schedule', {
+      trigger: trigger({ schedule: '0 3 * * *', timeZone: 'America/New_York' }),
+    })
+    expect(triggerSentence(cleanup)).toBe(
+      'Runs `0 3 * * *` (every day at 03:00) in `America/New_York`',
+    )
+    const nightly = summary('nightly', 'schedule', {
+      trigger: trigger({ schedule: 'every 5 minutes' }),
+    })
+    expect(triggerSentence(nightly)).toBe('Runs `every 5 minutes`')
   })
 
   it('says why a function receives nothing without the runtime repeating the word', () => {

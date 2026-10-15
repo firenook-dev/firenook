@@ -42,10 +42,10 @@ describe('where Pub/Sub things open (U-19)', () => {
     })
   })
 
-  it('a schedule by its function id on the Schedules page', () => {
+  it('a schedule by its function id on its Schedule tab in Functions', () => {
     expect(route(pubsub, 'pubsub.schedule', 'us-central1-nightlyCleanup')).toEqual({
-      to: '/pubsub/schedules',
-      search: { schedule: 'us-central1-nightlyCleanup' },
+      to: '/functions',
+      search: { function: 'us-central1-nightlyCleanup', tab: 'run' },
     })
   })
 
@@ -71,7 +71,7 @@ describe('where Pub/Sub things open (U-19)', () => {
       to: '/pubsub',
     })
     expect(messageSearch('|12')).toEqual({})
-    expect(route(pubsub, 'pubsub.schedule', '')).toEqual({ to: '/pubsub/schedules' })
+    expect(route(pubsub, 'pubsub.schedule', '')).toEqual({ to: '/functions' })
   })
 
   it('reads back what it wrote: an id under the page project, or a whole name', () => {

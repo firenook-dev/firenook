@@ -19,7 +19,7 @@
 
 import { splitKey } from '@/lib/sections/keys'
 
-export type ResourceCollection = 'topics' | 'subscriptions' | 'schemas' | 'snapshots'
+export type ResourceCollection = 'topics' | 'subscriptions' | 'schemas'
 
 /** `projects/<project>/<collection>/<id>` split, or null when `name` is not one. */
 export function splitResourceName(
@@ -86,9 +86,13 @@ export function messageSearch(key: string): Record<string, string> {
   return { ...topic, message: id }
 }
 
-/** `pubsub.schedule` (the function id) → the Schedules page with it open. */
+/**
+ * `pubsub.schedule` (the function id) → the scheduled function's Schedule
+ * tab in Functions, which owns schedules in the console (a tick is still a
+ * publish to the function's schedule topic, shown under Pub/Sub's topics).
+ */
 export function scheduleSearch(functionId: string): Record<string, string> {
-  return functionId === '' ? {} : { schedule: functionId }
+  return functionId === '' ? {} : { function: functionId, tab: 'run' }
 }
 
 /** `tasks.queue` (`<project>|<location>|<queue id>`) → the Cloud Tasks page on that queue. */

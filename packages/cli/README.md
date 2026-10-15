@@ -137,8 +137,8 @@ Firenook has its own console at `/console` on the Emulator UI port —
 `http://127.0.0.1:4000/console` with the default port (`emulators.ui.port` in
 `firebase.json` sets another). It covers every service the suite runs:
 Firestore data and security rules, Authentication (users, activity, the
-inbox of codes and links, settings), Storage files and rules, Functions and
-their invocations, Extensions, Eventarc, Pub/Sub (topics, schedules,
+inbox of codes and links, settings), Storage files and rules, Functions with
+their invocations and schedules, Extensions, Eventarc, Pub/Sub (topics,
 schemas), Cloud Tasks, Logs and an Overview with each section's health,
 recent problems, snapshots and resets. It follows the engine live over one
 connection per browser, links a thing in one section to where it shows in

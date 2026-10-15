@@ -9,7 +9,7 @@ import { readDownload } from './support/downloads'
 import { dropLive, restoreLive } from './support/live'
 import { cutRings, paintOf } from './support/look'
 import {
-  type DeliveryPageView,
+  type MessageDetailView,
   type SchemaDetailView,
   type SubscriptionDetailView,
   type TopicDetailView,
@@ -616,13 +616,14 @@ test('J-PS-23 an interval job outlives the composer and the tab', async ({ page,
     await expect(page.getByTestId('composer-job-progress')).toContainText('of 20 · every 100 ms')
     await page.getByTestId('pubsub-composer-close').click()
 
-    const strip = page.getByTestId('pubsub-job')
+    // Another journey's job may still run: this topic's is the one.
+    const strip = page.getByTestId('pubsub-job').filter({ hasText: topic })
     await expect(strip).toContainText(`Publishing 20 messages to ${topic}`)
     await expect(page.getByTestId('nav-badge-pubsub')).toBeVisible()
-    const jobId = await strip.getAttribute('data-job')
+    const jobId = await strip.locator('[data-job]').getAttribute('data-job')
     await page.reload()
     await expect(strip).toContainText(`Publishing 20 messages to ${topic}`)
-    await strip.getByTestId('pubsub-job-stop').click()
+    await strip.getByTestId('pubsub-job-cancel').click()
     await expect(strip).toHaveCount(0)
     const stopped = await waitForJob(engine, jobId ?? '')
     expect(stopped.state).toBe('cancelled')
@@ -777,95 +778,33 @@ test('J-PS-06 the backlog is read without leasing anything', async ({ page, engi
   expect(after.backlog).toBe(before.backlog)
 })
 
-test('J-PS-07 pull, ack, nack and extend from the Pull tab', async ({ page, engine }) => {
-  const topic = uniqueId('ps07')
-  const subscription = `${topic}-sub`
-  try {
-    await createTopic(engine, topic)
-    await createSubscription(engine, subscription, topic, { ackDeadlineSeconds: 30 })
-    const ids = (
-      await publishOverPort(
-        engine,
-        topic,
-        [1, 2, 3, 4, 5].map((n) => ({ data: { n } })),
-      )
-    ).messageIds
-    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
-    await page.getByTestId('pull-max').fill('3')
-    await page.getByTestId('pull-submit').click()
-    const rows = page.getByTestId('pubsub-pull-table').getByTestId('data-row')
-    await expect(rows).toHaveCount(3)
-    await expect(page.getByTestId('pull-summary')).toHaveText('3 received · 3 leased · 0 acked')
-    expect((await countersOf(engine, subscription)).outstanding).toBe(3)
-    const lease = (index: number) => rows.nth(index).locator('td[data-column="lease"]')
-
-    // a: acknowledged — the backlog is one shorter.
-    await rows.nth(0).click()
-    await page.keyboard.press('a')
-    await expect(lease(0)).toHaveText('acked')
-    await expect.poll(async () => (await countersOf(engine, subscription)).backlog).toBe(4)
-
-    // x: nacked — it goes back behind the others.
-    await rows.nth(1).click()
-    await page.keyboard.press('x')
-    await expect(lease(1)).toHaveText('nacked')
-
-    // e: the lease starts again from now.
-    // 30 s from the engine's clock, read a moment later on the browser's.
-    const left = Number((await lease(2).innerText()).match(/(\d+) s left/)?.[1])
-    expect(left).toBeLessThan(40)
-    await rows.nth(2).click()
-    await page.keyboard.press('e')
-    await expect(lease(2)).toHaveText(/^(1 m|5\d s) left$/)
-
-    // The backlog: the extended lease first, then #1, #2 never delivered, and
-    // the nacked one at #3 after its one delivery.
-    await page.getByRole('tab', { name: 'Backlog' }).click()
-    await expect(page.getByTestId('pubsub-backlog-table').getByTestId('data-row')).toHaveCount(4)
-    await expect(backlogRow(page, ids[2] ?? '')).toContainText('outstanding')
-    await expect(backlogRow(page, ids[3] ?? '').locator('td[data-column="place"]')).toHaveText('#1')
-    await expect(backlogRow(page, ids[4] ?? '').locator('td[data-column="place"]')).toHaveText('#2')
-    const nacked = backlogRow(page, ids[1] ?? '')
-    await expect(nacked.locator('td[data-column="place"]')).toHaveText('#3')
-    await expect(nacked.locator('td[data-column="attempts"]')).toHaveText('1')
-    await expect(page.getByTestId('backlog-state-outstanding')).toBeVisible()
-    const after = await countersOf(engine, subscription)
-    expect([after.outstanding, after.available]).toEqual([1, 3])
-  } finally {
-    await deleteTopic(engine, topic)
-  }
-})
-
-test('J-PS-08 a connected subscriber is said before a pull', async ({ page, engine }) => {
+test('J-PS-08 a connected subscriber is said in the tree', async ({ page, engine }) => {
   const topic = uniqueId('ps08')
   const subscription = `${topic}-sub`
   try {
     await createTopic(engine, topic)
     await createSubscription(engine, subscription, topic)
-    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
-    await expect(page.getByTestId('pull-submit')).toBeVisible()
-    await expect(page.getByTestId('pubsub-pull-consumers')).toHaveCount(0)
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)
+    await expect(page.getByTestId('pubsub-subscription-tabs')).toBeVisible()
     const held = holdPull(engine, subscription)
     try {
-      await expect(page.getByTestId('pubsub-pull-consumers')).toHaveText(
-        `1 subscriber is connected to ${subscription}. Pulling here takes messages away from it.`,
-      )
       await treeRow(page, subscription).hover()
       await expect(page.locator('.kumo-tooltip-popup')).toContainText('1 subscriber')
     } finally {
       await held.stop()
     }
-    await expect(page.getByTestId('pubsub-pull-consumers')).toHaveCount(0)
     expect((await countersOf(engine, subscription)).outstanding).toBe(0)
   } finally {
     await deleteTopic(engine, topic)
   }
 })
 
-test('J-PS-10 replay: purge, back to a time, and back to a snapshot', async ({ page, engine }) => {
+test('J-PS-10 purge: what waits is acknowledged, and kept when the subscription keeps it', async ({
+  page,
+  engine,
+}) => {
   const topic = uniqueId('ps10')
   const subscription = `${topic}-sub`
-  const snapshot = `${topic}-before`
   try {
     await createTopic(engine, topic)
     await createSubscription(engine, subscription, topic, { retainAcked: true })
@@ -880,52 +819,21 @@ test('J-PS-10 replay: purge, back to a time, and back to a snapshot', async ({ p
     const available = rows.filter({ hasText: 'available' })
     const acked = rows.filter({ hasText: 'acked (retained)' })
     await expect(available).toHaveCount(3)
-    const purge = async () => {
-      await page.getByTestId('pubsub-replay').click()
-      await page.getByRole('radio', { name: /^Purge/ }).click()
-      await expect(page.getByTestId('replay-sentence')).toHaveText(
-        'The 3 messages waiting now are acknowledged; messages published from now on arrive as usual.',
-      )
-      await page.getByTestId('replay-submit').click()
-      await page.getByTestId('replay-purge-confirm-confirm').click()
-      await expect(acked).toHaveCount(3)
-      await expect(available).toHaveCount(0)
-      expect((await countersOf(engine, subscription)).backlog).toBe(0)
-    }
-    await purge()
-
-    // Kept acknowledged, they come back from a minute ago.
-    await expect(page.getByTestId('replay')).toHaveCount(0)
-    await page.keyboard.press('r')
-    await expect(page.getByTestId('replay-sentence')).toContainText(
-      'acknowledged ones too, because this subscription keeps acknowledged messages',
+    await page.getByTestId('pubsub-purge').click()
+    const confirm = page.getByTestId('pubsub-purge-confirm')
+    await expect(confirm).toContainText(
+      'The 3 messages waiting now are acknowledged, as if a subscriber had acked them; messages published from now on arrive as usual.',
     )
-    await page.getByTestId('replay-back-1min').click()
-    await page.getByTestId('replay-submit').click()
-    await expect(available).toHaveCount(3)
-    await expect(acked).toHaveCount(0)
-
-    // A snapshot of the three, a purge, and back to the snapshot.
-    await page.getByTestId('pubsub-new-menu').click()
-    await page.getByTestId('pubsub-new-snapshot-item').click()
-    await page.getByTestId('create-snapshot-id').fill(snapshot)
-    await page.getByTestId('create-snapshot-submit').click()
-    await expect(page.getByTestId('create-snapshot')).toHaveCount(0)
-    await purge()
-    await page.getByTestId('pubsub-replay').click()
-    await page.getByRole('radio', { name: 'To a snapshot' }).click()
-    await page.getByRole('combobox', { name: 'Snapshot' }).click()
-    await page.getByRole('option', { name: snapshot }).click()
-    await expect(page.getByTestId('replay-sentence')).toContainText(
-      'the 3 messages it recorded as waiting',
-    )
-    await page.getByTestId('replay-submit').click()
-    await expect(available).toHaveCount(3)
-    expect((await countersOf(engine, subscription)).backlog).toBe(3)
+    await expect(confirm).toContainText('they stay in its backlog, listed as acked')
+    await page.getByTestId('pubsub-purge-confirm-confirm').click()
+    await expect(confirm).toHaveCount(0)
+    await expect(acked).toHaveCount(3)
+    await expect(available).toHaveCount(0)
+    expect((await countersOf(engine, subscription)).backlog).toBe(0)
+    // What is published after arrives as usual.
+    await publishOverPort(engine, topic, [{ data: { n: 4 } }])
+    await expect(available).toHaveCount(1)
   } finally {
-    await consoleCall(engine, 'DELETE', '/pubsub/snapshot', {
-      name: `projects/${engine.project}/snapshots/${snapshot}`,
-    }).catch(() => undefined)
     await deleteTopic(engine, topic)
   }
 })
@@ -974,41 +882,40 @@ test('J-PS-11 push attempts: a streak in place, the pause, and the switch to pul
     await expect(streaks.first()).toContainText(second ?? '')
     await expect(streaks.first()).toBeInViewport()
 
-    // Its Pull tab says why a pull gets nothing; switched, it pulls.
-    await page.getByRole('tab', { name: 'Pull' }).click()
-    await expect(page.getByTestId('pubsub-pull-push-note')).toContainText(
-      'A push subscription delivers to its endpoint, so a pull here would get nothing.',
-    )
-    await page.getByTestId('pubsub-switch-to-pull').click()
-    await expect(page.getByTestId('pull-submit')).toBeVisible()
+    // Switched to pull, the Push tab goes and the backlog keeps what arrives.
+    await page.getByTestId('pubsub-push-to-pull').click()
     await expect(page.getByRole('tab', { name: 'Push' })).toHaveCount(0)
+    await expect(page.getByRole('tab', { name: 'Backlog', selected: true })).toBeVisible()
+    const [third] = (await publishOverPort(engine, topic, [{ data: { n: 3 } }])).messageIds
+    await expect(backlogRow(page, third ?? '')).toContainText('available')
   } finally {
     await deleteTopic(engine, topic)
   }
 })
 
-test('J-PS-13 an exactly-once ack on a lease returned elsewhere shows the engine refusal', async ({
+test('J-PS-13 a lease a subscriber holds is returned from the Backlog', async ({
   page,
   engine,
 }) => {
   const topic = uniqueId('ps13')
-  const subscription = `${topic}-once`
+  const subscription = `${topic}-sub`
   try {
     await createTopic(engine, topic)
-    await createSubscription(engine, subscription, topic, {
-      exactlyOnce: true,
-      ackDeadlineSeconds: 60,
-    })
+    await createSubscription(engine, subscription, topic, { ackDeadlineSeconds: 60 })
     const [id] = (await publishOverPort(engine, topic, [{ data: { n: 1 } }])).messageIds
-    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}&view=pull`)
-    await page.getByTestId('pull-max').fill('1')
-    await page.getByTestId('pull-submit').click()
-    const rows = page.getByTestId('pubsub-pull-table').getByTestId('data-row')
-    await expect(rows).toHaveCount(1)
-    await expect(rows.first().locator('td[data-column="lease"]')).toHaveText(/s left$/)
-
-    // Returned from the Backlog: the engine ends this tab's lease now.
-    await page.getByRole('tab', { name: 'Backlog' }).click()
+    // A subscriber pulls it over the port and holds its lease.
+    const pulled = (await (
+      await fetch(
+        `${portUrl(engine, 'pubsub')}/v1/projects/${engine.project}/subscriptions/${subscription}:pull`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ maxMessages: 1, returnImmediately: true }),
+        },
+      )
+    ).json()) as { receivedMessages?: unknown[] }
+    expect(pulled.receivedMessages).toHaveLength(1)
+    await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)
     const row = backlogRow(page, id ?? '')
     await expect(row).toContainText('outstanding')
     await row.click({ button: 'right' })
@@ -1018,16 +925,7 @@ test('J-PS-13 an exactly-once ack on a lease returned elsewhere shows the engine
     )
     await page.getByTestId('pubsub-backlog-confirm-confirm').click()
     await expect(row).toContainText('available')
-
-    // Back in Pull the row says so, and acking it anyway shows the engine's answer.
-    await page.getByRole('tab', { name: 'Pull' }).click()
-    await expect(rows.first().locator('td[data-column="lease"]')).toHaveText('expired')
-    await rows.first().locator('td[data-check] [role="checkbox"]').click()
-    await page.getByTestId('pubsub-pull-selection-ack').click()
-    await expect(page.getByTestId('pull-error')).toContainText(
-      'The lease had expired or the message was already acknowledged, so another delivery may hold it.',
-    )
-    expect((await countersOf(engine, subscription)).backlog).toBe(1)
+    expect((await countersOf(engine, subscription)).outstanding).toBe(0)
   } finally {
     await deleteTopic(engine, topic)
   }
@@ -1083,18 +981,16 @@ test('J-PS-24 a bulk ack runs as a job and the backlog empties by patches', asyn
 
 // ------------------------------------------------------------ deliveries and the setup
 
-/** A topic's deliveries as the engine reports them now (newest first). */
-async function deliveriesOf(engine: Parameters<typeof consoleCall>[0], topic: string) {
-  return consoleCall<DeliveryPageView>(
-    engine,
-    'GET',
-    `/pubsub/deliveries?topic=${enc(topicName(engine, topic))}&limit=500`,
-  )
+/** A message's deliveries to functions as the engine reports them now. */
+async function deliveriesOf(engine: Parameters<typeof consoleCall>[0], topic: string, id: string) {
+  return (
+    await consoleCall<MessageDetailView>(
+      engine,
+      'GET',
+      `/pubsub/message?topic=${enc(topicName(engine, topic))}&id=${id}`,
+    )
+  ).functions
 }
-
-/** A Deliveries table row by its event id. */
-const deliveryRow = (page: Page, eventId: string) =>
-  page.getByTestId('pubsub-delivery-table').locator(`tr[data-key="${eventId}"]`)
 
 test('J-PS-03 a JSON message is published, read whole, and delivered to its function', async ({
   page,
@@ -1154,9 +1050,7 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
     ])
   ).messageIds
   const failed = async () =>
-    (await deliveriesOf(engine, 'orders')).items.find(
-      (item) => item.messageId === id && !item.redelivery,
-    )
+    (await deliveriesOf(engine, 'orders', id ?? '')).find((item) => !item.redelivery)
   await expect.poll(async () => (await failed())?.mark, { timeout: 15_000 }).toBe('failed')
   const original = (await failed())?.eventId ?? ''
   const topic = await consoleCall<TopicDetailView>(
@@ -1171,16 +1065,11 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
   const messageRow = page.getByTestId('pubsub-message-table').locator(`tr[data-key="${id}"]`)
   await expect(messageRow.locator('[data-mark="failed"]')).toBeVisible()
 
-  // Deliveries: failed, with the handler's own error.
-  await page.getByTestId('pubsub-topic-tabs').getByRole('tab', { name: 'Deliveries' }).click()
-  await expect(page).toHaveURL(/view=deliveries/)
-  const row = deliveryRow(page, original)
-  await expect(row).toContainText('failed')
-  await expect(row).toContainText('order rejected: card declined')
-
-  // Opened: the CloudEvent the function received, as compute recorded it.
-  await row.click()
+  // Opened on its Deliveries: failed, with the handler's own error, and the
+  // CloudEvent the function received, as compute recorded it.
+  await messageRow.click()
   const inspector = page.getByTestId('pubsub-message-inspector')
+  await inspector.getByRole('tab', { name: /Deliveries/ }).click()
   const delivery = inspector.getByTestId('message-function').filter({ hasText: 'failed' })
   await expect(delivery).toContainText('order rejected: card declined')
   await delivery.getByTestId('message-function-dispatch-toggle').click()
@@ -1193,27 +1082,21 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
   const logs = delivery.getByTestId('message-function-logs')
   if ((await logs.count()) > 0) await expect(logs).toHaveAttribute('href', /function/)
 
-  // `r` on the row asks first; Enter runs it again, for this function alone.
-  await row.click()
-  await page.keyboard.press('Escape')
-  await expect(inspector).toBeHidden()
-  await page.keyboard.press('r')
+  // Run again asks first; Enter runs it again, for this function alone.
+  await delivery.getByTestId('message-function-again').click()
   const confirm = page.getByTestId('pubsub-run-again')
   await expect(confirm).toContainText(`Run onOrderPlaced again with message ${id}?`)
-  expect(
-    (await deliveriesOf(engine, 'orders')).items.filter((item) => item.messageId === id),
-  ).toHaveLength(1)
+  expect(await deliveriesOf(engine, 'orders', id ?? '')).toHaveLength(1)
   await page.keyboard.press('Enter')
   await expect(confirm).toBeHidden()
-  const again = page
-    .getByTestId('pubsub-delivery-table')
-    .getByTestId('data-row')
-    .filter({ has: page.getByTestId('delivery-again') })
-    .filter({ hasText: id ?? '' })
+  const again = inspector
+    .getByTestId('message-function')
+    .filter({ has: page.getByTestId('message-function-redelivery') })
   await expect(again).toHaveCount(1, { timeout: 15_000 })
-  const resent = await again.getAttribute('data-key')
-  expect(resent).not.toBe(original)
-  await expect(again).toContainText('failed', { timeout: 15_000 })
+  await expect(again).toHaveAttribute('data-mark', 'failed', { timeout: 15_000 })
+  const resent = (await deliveriesOf(engine, 'orders', id ?? '')).find((item) => item.redelivery)
+  expect(resent?.eventId).toBeTruthy()
+  expect(resent?.eventId).not.toBe(original)
   // Nothing was published again: the topic's count is what it was.
   const after = await consoleCall<TopicDetailView>(
     engine,
@@ -1222,13 +1105,21 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
   )
   expect(after.summary.counters.published).toBe(published)
   // Each delivery's request carries its own event id.
-  await again.click()
-  const second = page
-    .getByTestId('pubsub-message-inspector')
-    .getByTestId('message-function')
-    .filter({ has: page.getByTestId('message-function-redelivery') })
-  await second.getByTestId('message-function-dispatch-toggle').click()
-  await expect(second.getByTestId('message-function-dispatch-body')).toContainText(resent ?? '')
+  await again.getByTestId('message-function-dispatch-toggle').click()
+  await expect(again.getByTestId('message-function-dispatch-body')).toContainText(
+    resent?.eventId ?? '',
+  )
+
+  // Every run of the topic's function is an invocation in Functions.
+  await page.keyboard.press('Escape')
+  await page.getByTestId('pubsub-topic-runs').click()
+  await expect(page).toHaveURL(/\/console\/functions\/invocations\?/)
+  await expect(page.getByTestId('invocations-filter-input')).toHaveValue(
+    'function:us-central1-onOrderPlaced',
+  )
+  await expect(
+    page.getByTestId('invocations-list').getByTestId('invocation-row').first(),
+  ).toBeVisible()
 })
 
 test('J-PS-09 a dead letter reaches its topic, its tab, and the function on it', async ({
@@ -1262,13 +1153,15 @@ test('J-PS-09 a dead letter reaches its topic, its tab, and the function on it',
     await expect(source).toHaveText(subscription)
 
     // The function listening on orders-dead ran for it (dead letters reach functions).
-    await page.getByTestId('pubsub-topic-tabs').getByRole('tab', { name: 'Deliveries' }).click()
+    await page
+      .getByTestId('pubsub-message-inspector')
+      .getByRole('tab', { name: /Deliveries/ })
+      .click()
     const delivered = page
-      .getByTestId('pubsub-delivery-table')
-      .getByTestId('data-row')
+      .getByTestId('pubsub-message-inspector')
+      .getByTestId('message-function')
       .filter({ hasText: 'onOrderDeadLettered' })
-      .filter({ hasText: dead })
-    await expect(delivered).toContainText('delivered', { timeout: 15_000 })
+    await expect(delivered).toHaveAttribute('data-mark', 'delivered', { timeout: 15_000 })
 
     // The subscription's Dead letters tab lists it, under its fixed expression.
     await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)

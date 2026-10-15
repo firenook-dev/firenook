@@ -46,14 +46,13 @@ import type { SubscriptionStatus } from '@/lib/live/channel'
 import { readStarted } from '@/lib/live/use-live-topic'
 import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
-import { dedupeRows, renumberPlaces } from '@/messaging/rows'
+import { dedupeRows, renumberPlaces } from '../rows'
 import { ackMessage, releaseMessage, startBacklogAck, startBacklogRelease } from '../api'
 import { useTopicLive } from '../live'
 import { shortName } from '../names'
 import { previewText } from '../payload'
 import { backlogList, pubsubKeys } from '../queries'
 import { backlogState, consumersText, waitedShort } from '../states'
-import { ConfirmDialog } from './confirm-dialog'
 import { type MessageTab, MessageInspector } from './message-inspector'
 import { SubscriptionState } from './subscription-state'
 
@@ -570,8 +569,8 @@ export function BacklogView({
         }
         consequences={[
           config.retainAcked
-            ? 'The subscription keeps acknowledged messages, so a replay brings them back.'
-            : 'The subscription does not keep acknowledged messages: only a snapshot taken before brings them back.',
+            ? 'The subscription keeps acknowledged messages: they stay in its backlog, listed as acked.'
+            : 'The subscription does not keep acknowledged messages, so they do not come back.',
           'A subscriber holding one of their leases gets an error or a duplicate when it acks.',
         ]}
         {...(jobId ? { jobId } : {})}
@@ -581,20 +580,20 @@ export function BacklogView({
         onConfirm={() => startBulk.mutate('ack')}
         testId="pubsub-backlog-ack-confirm"
       />
-      <ConfirmDialog
+      <DangerConfirm
         open={bulk === 'release'}
         onOpenChange={(open) => !open && closeBulk()}
         title={`Return ${formatNumber(tickedCount)} to the backlog`}
         description="Their leases end now, as their expiry would: each counts as a delivery attempt and goes to the next pull, and a subscriber that still holds one may process it twice."
-        confirmLabel={`Return ${formatNumber(tickedCount)}`}
-        jobId={jobId}
+        tone="neutral"
+        {...(jobId ? { jobId } : {})}
         progressVerb="returned"
-        error={startBulk.isError ? errorText(startBulk.error) : undefined}
+        {...(startBulk.isError ? { error: errorText(startBulk.error) } : {})}
         pending={startBulk.isPending}
         onConfirm={() => startBulk.mutate('release')}
         testId="pubsub-backlog-release-confirm"
       />
-      <ConfirmDialog
+      <DangerConfirm
         open={single !== null}
         onOpenChange={(open) => !open && setSingle(null)}
         title={
@@ -607,9 +606,8 @@ export function BacklogView({
             ? `A subscriber holds its lease. When it acks, ${config.summary.exactlyOnce ? 'it gets INVALID_ARGUMENT, since the subscription delivers exactly once' : 'its ack is ignored'}; the message leaves the backlog now.`
             : `A subscriber holds its lease. It ends now, as its expiry would: the message counts as a delivery attempt and goes to the next pull${config.deadLetter ? `, or to ${shortName(config.deadLetter.topic)} after ${config.deadLetter.maxDeliveryAttempts} deliveries` : ''}, and the subscriber may process it twice.`
         }
-        confirmLabel={single?.verb === 'ack' ? 'Acknowledge' : 'Return'}
-        danger={single?.verb === 'ack'}
-        error={act.isError ? errorText(act.error) : undefined}
+        tone={single?.verb === 'ack' ? 'danger' : 'neutral'}
+        {...(act.isError ? { error: errorText(act.error) } : {})}
         pending={act.isPending}
         onConfirm={() => single && act.mutate(single)}
         testId="pubsub-backlog-confirm"

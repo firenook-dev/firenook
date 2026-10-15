@@ -19,6 +19,12 @@ import { SECTION_ACTIONS } from './palette-actions'
 import { parseSearch } from './search-params'
 import { SECTIONS } from './services'
 
+/**
+ * Kinds that may open in another section's page: a schedule is Pub/Sub's
+ * scheduler, shown on its function's Schedule tab in Functions.
+ */
+const OPENS_IN: Readonly<Record<string, string>> = { 'pubsub.schedule': 'functions' }
+
 const everySectionReady = testStatus({
   sections: SECTIONS.map((section) => sectionEntry(section.id)),
 })
@@ -57,9 +63,11 @@ describe('every kind of link', () => {
       const link = linkTo(entity, everySectionReady)
       expect(link, `${entity.kind} resolves`).not.toBeNull()
       if (!link) return
-      // The page exists, and the section that owns the kind is the one it opens.
+      // The page exists, and the section that owns the kind is the one it
+      // opens (or the one `OPENS_IN` names for it).
       expect(Object.keys(router.routesByPath)).toContain(link.to)
-      expect(link.to.split('/')[1]).toBe(entity.kind.slice(0, entity.kind.indexOf('.')))
+      const owner = entity.kind.slice(0, entity.kind.indexOf('.'))
+      expect([owner, OPENS_IN[entity.kind] ?? owner]).toContain(link.to.split('/')[1])
       // Nothing the link says is dropped: every param reaches the page (an
       // id the page reads as a number may arrive as one).
       const search = validated(link.to, link.search) as Record<string, unknown>

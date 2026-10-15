@@ -29,11 +29,12 @@ import { formatNumber } from '@/lib/format'
 import { isStalled, waitedText } from './states'
 import { GROUP } from './tree-store'
 
-/** What a row of the tree opens. */
+/** What a row of the tree opens: a scheduled function's row opens its schedule in Functions. */
 export type TreeTarget =
   | { kind: 'topic'; topic: string }
   | { kind: 'subscription'; subscription: string; topic: string | null }
   | { kind: 'project'; project: string }
+  | { kind: 'schedule'; functionId: string }
 
 export interface TopicTree {
   nodes: PanelTreeNode[]
@@ -112,14 +113,17 @@ function topicNode(
     children.push(subscriptionNode(subscription, current, now, topic.id))
   }
   for (const target of topic.functions) {
-    // A function's row opens the subscription the emulator drains for it,
-    // whose page explains it and leads to the deliveries.
+    // A scheduled function's row opens its schedule, in Functions; any
+    // other function's opens the subscription the emulator drains for it,
+    // whose page explains it and leads to its runs.
     const own = topic.subscriptions.find((subscription) => subscription.managed === 'functions')
     targets.set(
       target.functionId,
-      own
-        ? { kind: 'subscription', subscription: own.name, topic: topic.name }
-        : { kind: 'topic', topic: topic.name },
+      target.kind === 'schedule'
+        ? { kind: 'schedule', functionId: target.functionId }
+        : own
+          ? { kind: 'subscription', subscription: own.name, topic: topic.name }
+          : { kind: 'topic', topic: topic.name },
     )
     children.push({
       id: target.functionId,
@@ -127,7 +131,7 @@ function topicNode(
       icon: LightningIcon,
       title:
         target.kind === 'schedule'
-          ? `${target.name} runs for every tick of its schedule (${target.region}).`
+          ? `${target.name} runs for every tick of its schedule (${target.region}); open its schedule in Functions.`
           : `${target.name} runs for every message published to ${topic.id} (${target.region}).`,
     })
   }

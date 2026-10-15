@@ -9,13 +9,10 @@
 //
 // The address is the engine's (`serviceAddress`'s host rule), never assumed.
 
-export type CodeDialect = 'node' | 'curl' | 'gcloud'
+/** The dialects a message is written in: ids of the console's one list, `CODE_DIALECTS`. */
+export type MessageDialect = 'node' | 'curl' | 'gcloud'
 
-export const CODE_DIALECTS: readonly { id: CodeDialect; label: string }[] = [
-  { id: 'node', label: 'Node' },
-  { id: 'curl', label: 'curl' },
-  { id: 'gcloud', label: 'gcloud' },
-]
+export const MESSAGE_DIALECTS: readonly MessageDialect[] = ['node', 'curl', 'gcloud']
 
 /** What the code is built from: a message as the engine answers it, and where it lives. */
 export interface CodeMessage {
@@ -151,7 +148,11 @@ function gcloudCode(message: CodeMessage, origin: string): string {
 }
 
 /** The message as code in `dialect`, against the Pub/Sub port at `origin`. */
-export function messageAsCode(message: CodeMessage, dialect: CodeDialect, origin: string): string {
+export function messageAsCode(
+  message: CodeMessage,
+  dialect: MessageDialect,
+  origin: string,
+): string {
   if (dialect === 'node') return nodeCode(message, origin)
   if (dialect === 'curl') return curlCode(message, origin)
   return gcloudCode(message, origin)

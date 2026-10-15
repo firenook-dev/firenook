@@ -514,7 +514,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
     functions::FunctionInvokeRequest::export_all(config).expect("TypeScript bindings written");
     functions::InvocationFrame::export_all(config).expect("TypeScript bindings written");
     functions::FunctionTestEventRequest::export_all(config).expect("TypeScript bindings written");
-    functions::FunctionBrokerResult::export_all(config).expect("TypeScript bindings written");
     functions::FunctionMatchRequest::export_all(config).expect("TypeScript bindings written");
     functions::FunctionMatchResult::export_all(config).expect("TypeScript bindings written");
     functions::FunctionTriggersResult::export_all(config).expect("TypeScript bindings written");

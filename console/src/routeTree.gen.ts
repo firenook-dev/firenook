@@ -24,7 +24,6 @@ import { Route as AuthInboxRouteImport } from './routes/auth_.inbox'
 import { Route as AuthSettingsRouteImport } from './routes/auth_.settings'
 import { Route as FirestoreRulesRouteImport } from './routes/firestore_.rules'
 import { Route as FunctionsInvocationsRouteImport } from './routes/functions_.invocations'
-import { Route as PubsubSchedulesRouteImport } from './routes/pubsub_.schedules'
 import { Route as PubsubSchemasRouteImport } from './routes/pubsub_.schemas'
 import { Route as StorageRulesRouteImport } from './routes/storage_.rules'
 
@@ -103,11 +102,6 @@ const FunctionsInvocationsRoute = FunctionsInvocationsRouteImport.update({
   path: '/functions/invocations',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PubsubSchedulesRoute = PubsubSchedulesRouteImport.update({
-  id: '/pubsub_/schedules',
-  path: '/pubsub/schedules',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const PubsubSchemasRoute = PubsubSchemasRouteImport.update({
   id: '/pubsub_/schemas',
   path: '/pubsub/schemas',
@@ -135,7 +129,6 @@ export interface FileRoutesByFullPath {
   '/auth/settings': typeof AuthSettingsRoute
   '/firestore/rules': typeof FirestoreRulesRoute
   '/functions/invocations': typeof FunctionsInvocationsRoute
-  '/pubsub/schedules': typeof PubsubSchedulesRoute
   '/pubsub/schemas': typeof PubsubSchemasRoute
   '/storage/rules': typeof StorageRulesRoute
 }
@@ -155,7 +148,6 @@ export interface FileRoutesByTo {
   '/auth/settings': typeof AuthSettingsRoute
   '/firestore/rules': typeof FirestoreRulesRoute
   '/functions/invocations': typeof FunctionsInvocationsRoute
-  '/pubsub/schedules': typeof PubsubSchedulesRoute
   '/pubsub/schemas': typeof PubsubSchemasRoute
   '/storage/rules': typeof StorageRulesRoute
 }
@@ -176,7 +168,6 @@ export interface FileRoutesById {
   '/auth_/settings': typeof AuthSettingsRoute
   '/firestore_/rules': typeof FirestoreRulesRoute
   '/functions_/invocations': typeof FunctionsInvocationsRoute
-  '/pubsub_/schedules': typeof PubsubSchedulesRoute
   '/pubsub_/schemas': typeof PubsubSchemasRoute
   '/storage_/rules': typeof StorageRulesRoute
 }
@@ -198,7 +189,6 @@ export interface FileRouteTypes {
     | '/auth/settings'
     | '/firestore/rules'
     | '/functions/invocations'
-    | '/pubsub/schedules'
     | '/pubsub/schemas'
     | '/storage/rules'
   fileRoutesByTo: FileRoutesByTo
@@ -218,7 +208,6 @@ export interface FileRouteTypes {
     | '/auth/settings'
     | '/firestore/rules'
     | '/functions/invocations'
-    | '/pubsub/schedules'
     | '/pubsub/schemas'
     | '/storage/rules'
   id:
@@ -238,7 +227,6 @@ export interface FileRouteTypes {
     | '/auth_/settings'
     | '/firestore_/rules'
     | '/functions_/invocations'
-    | '/pubsub_/schedules'
     | '/pubsub_/schemas'
     | '/storage_/rules'
   fileRoutesById: FileRoutesById
@@ -259,7 +247,6 @@ export interface RootRouteChildren {
   AuthSettingsRoute: typeof AuthSettingsRoute
   FirestoreRulesRoute: typeof FirestoreRulesRoute
   FunctionsInvocationsRoute: typeof FunctionsInvocationsRoute
-  PubsubSchedulesRoute: typeof PubsubSchedulesRoute
   PubsubSchemasRoute: typeof PubsubSchemasRoute
   StorageRulesRoute: typeof StorageRulesRoute
 }
@@ -371,13 +358,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FunctionsInvocationsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/pubsub_/schedules': {
-      id: '/pubsub_/schedules'
-      path: '/pubsub/schedules'
-      fullPath: '/pubsub/schedules'
-      preLoaderRoute: typeof PubsubSchedulesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/pubsub_/schemas': {
       id: '/pubsub_/schemas'
       path: '/pubsub/schemas'
@@ -411,7 +391,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthSettingsRoute: AuthSettingsRoute,
   FirestoreRulesRoute: FirestoreRulesRoute,
   FunctionsInvocationsRoute: FunctionsInvocationsRoute,
-  PubsubSchedulesRoute: PubsubSchedulesRoute,
   PubsubSchemasRoute: PubsubSchemasRoute,
   StorageRulesRoute: StorageRulesRoute,
 }

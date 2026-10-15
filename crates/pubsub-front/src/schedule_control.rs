@@ -4,9 +4,9 @@
 //! Two regions' functions of one name each keep their own clock, pause and
 //! runs, while both publish to the one synthetic topic the clock uses,
 //! `firebase-schedule-<name>`, so a tick of either reaches both functions.
-//! The console's Pub/Sub › Schedules page and the Functions section's
-//! schedule card and Run now both go through [`ScheduleControl`], so neither
-//! reaches into the scheduler's internals.
+//! The console's schedules (a scheduled function's Schedule tab in
+//! Functions, with Run now and the pause) go through [`ScheduleControl`],
+//! so nothing reaches into the scheduler's internals.
 
 use time::OffsetDateTime;
 
@@ -98,8 +98,7 @@ pub struct ScheduleRun {
 pub enum RunTrigger {
     /// The schedule's clock.
     Clock,
-    /// [`ScheduleControl::run`]: Pub/Sub › Schedules or the Functions
-    /// section's Run now.
+    /// [`ScheduleControl::run`]: the console's Run now.
     Console,
 }
 

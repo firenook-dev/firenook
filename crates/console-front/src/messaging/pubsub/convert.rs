@@ -13,8 +13,8 @@ use firenook_functions_runtime::monitor::{
 };
 use firenook_pubsub_front::broker::inspect::{
     BacklogRow, BacklogState, HistoryRow, MessageAtSubscription, MessageView, PayloadEncoding,
-    PayloadPreview, SchemaDetail, SchemaSummary, SnapshotView, SubscriptionCountersView,
-    SubscriptionSummary, SubscriptionView, TopicCounters, TopicSummary, TopicView,
+    PayloadPreview, SchemaDetail, SchemaSummary, SubscriptionCountersView, SubscriptionSummary,
+    SubscriptionView, TopicCounters, TopicSummary, TopicView,
 };
 use firenook_pubsub_front::broker::{Fanout, FanoutSkip, FanoutTarget, MessageMark, StoredMessage};
 use firenook_pubsub_front::{
@@ -31,9 +31,9 @@ use super::types::{
     PubsubMessageSchema, PubsubMessageState, PubsubMostBehind, PubsubPayloadEncoding,
     PubsubPayloadPreview, PubsubPushStreak, PubsubRejected, PubsubRetry, PubsubSchedule,
     PubsubScheduleRun, PubsubSchemaDetail, PubsubSchemaRevision, PubsubSchemaSummary,
-    PubsubSchemaUse, PubsubSnapshot, PubsubSubscription, PubsubSubscriptionCounters,
-    PubsubSubscriptionSummary, PubsubTargetKind, PubsubTopicCounters, PubsubTopicDetail,
-    PubsubTopicKind, PubsubTopicSchema, PubsubTopicSummary,
+    PubsubSchemaUse, PubsubSubscription, PubsubSubscriptionCounters, PubsubSubscriptionSummary,
+    PubsubTargetKind, PubsubTopicCounters, PubsubTopicDetail, PubsubTopicKind, PubsubTopicSchema,
+    PubsubTopicSummary,
 };
 use crate::entity::EntityRef;
 use crate::messaging::shared::{millis, second_window, time, time_of, u32_of};
@@ -228,27 +228,24 @@ pub(crate) fn subscription(
     }
 }
 
-pub(crate) fn snapshot(view: &SnapshotView) -> PubsubSnapshot {
-    PubsubSnapshot {
-        name: view.name.clone(),
-        project: view.project.clone(),
-        id: view.id.clone(),
-        topic: view.topic.clone(),
-        topic_deleted: view.topic_deleted,
-        source: view.source.clone(),
-        created_at: time(view.created_at),
-        expire_time: time(view.expire_time),
-        unacked: view.unacked,
-    }
-}
-
 pub(crate) fn topic_detail(
     view: &TopicView,
     targets: &Targets,
     managed_by: &dyn Fn(&str) -> Managed,
 ) -> PubsubTopicDetail {
+    let summary = topic_summary(&view.summary, targets, managed_by);
+    // Every run of the topic's functions is an invocation in Functions.
+    let invocations = (!summary.functions.is_empty()).then(|| {
+        let filter: Vec<String> = summary
+            .functions
+            .iter()
+            .map(|target| format!("function:{}", target.function_id))
+            .collect();
+        EntityRef::invocations(&filter.join(" "))
+    });
     PubsubTopicDetail {
-        summary: topic_summary(&view.summary, targets, managed_by),
+        summary,
+        invocations,
         labels: view.labels.clone(),
         retention_seconds: view.retention_seconds,
         schema: view.schema.as_ref().map(|schema| PubsubTopicSchema {
@@ -276,7 +273,6 @@ pub(crate) fn topic_detail(
             .map(|view| subscription(view, managed_by))
             .collect(),
         dead_letter_for: view.dead_letter_for.clone(),
-        snapshots: view.snapshots.iter().map(snapshot).collect(),
         ordering_keys: view.keys.ordering_keys.clone(),
         attribute_keys: view.keys.attribute_keys.clone(),
     }
@@ -748,7 +744,7 @@ pub(crate) fn schedule_run(
     }
 }
 
-/// A schedule as the Schedules page shows it; `deliveries` holds the
+/// A schedule as the console shows it; `deliveries` holds the
 /// delivery rows of its runs' messages, by message id.
 pub(crate) fn schedule(
     detail: &ScheduleDetail,

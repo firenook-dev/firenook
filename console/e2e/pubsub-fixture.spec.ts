@@ -6,7 +6,6 @@
 
 import { expect, test } from './fixtures'
 import {
-  type DeliveryPageView,
   type JobView,
   type MessageDetailView,
   type MessageRowView,
@@ -109,18 +108,17 @@ test('the seeded messages reach onOrderPlaced, decoded by the real SDK', async (
   expect(row?.data.encoding).toBe('json')
   expect(['eu', 'us']).toContain(row?.attributes.region)
 
-  // Each of the 40 ran the handler and succeeded: the deliveries are
-  // compute's record of the invocations, joined by event id.
+  // Each of the 40 ran the handler and succeeded: each row's mark is
+  // compute's record of the invocation, joined by event id.
   await expect
     .poll(
       async () =>
         (
-          await consoleCall<DeliveryPageView>(
-            engine,
-            'GET',
-            `/pubsub/deliveries?topic=${enc(orders)}`,
-          )
-        ).counts.delivered,
+          await consoleCall<
+            PageView<MessageRowView & { deliveries: { functions: { mark: string }[] } }>
+          >(engine, 'GET', `/pubsub/messages?topic=${enc(orders)}&limit=100`)
+        ).items.filter((item) => item.deliveries.functions.some((at) => at.mark === 'delivered'))
+          .length,
       { timeout: 60_000 },
     )
     .toBeGreaterThanOrEqual(40)

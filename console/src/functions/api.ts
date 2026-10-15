@@ -14,7 +14,6 @@
 
 import { queryOptions } from '@tanstack/react-query'
 import { API_BASE, apiGet, apiSend } from '@/api/client'
-import type { FunctionBrokerResult } from '@/api/generated/compute/FunctionBrokerResult'
 import type { FunctionDetail } from '@/api/generated/compute/FunctionDetail'
 import type { FunctionEnvEditRequest } from '@/api/generated/compute/FunctionEnvEditRequest'
 import type { FunctionEnvEditResult } from '@/api/generated/compute/FunctionEnvEditResult'
@@ -240,9 +239,4 @@ export function restartWorker(codebase: string): Promise<FunctionRestartResult> 
 /** Empties the engine's record of invocations; function stats reset with it. */
 export async function clearInvocations(): Promise<void> {
   await apiSend<undefined>('DELETE', '/functions/invocations', {})
-}
-
-/** Runs a schedule now: the same publish the clock makes, or a direct dispatch without Pub/Sub. */
-export function runSchedule(id: string): Promise<FunctionBrokerResult> {
-  return apiSend<FunctionBrokerResult>('POST', `/functions/${enc(id)}/run`, {})
 }

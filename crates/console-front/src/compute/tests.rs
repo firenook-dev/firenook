@@ -305,7 +305,6 @@ pub(crate) struct Suite {
     pub(crate) context: SectionContext,
     pub(crate) router: Router,
     pub(crate) runtime: Option<FunctionsRuntime>,
-    pub(crate) triggers: TriggerRegistry,
     pub(crate) directory: Scratch,
 }
 
@@ -313,13 +312,7 @@ impl Suite {
     /// The section before Functions start.
     pub(crate) fn starting() -> Self {
         let parts = ComputeParts::new();
-        Self::assemble(
-            parts,
-            Setup::default(),
-            None,
-            TriggerRegistry::default(),
-            Scratch::new("starting"),
-        )
+        Self::assemble(parts, Setup::default(), None, Scratch::new("starting"))
     }
 
     /// The section over a runtime that loaded [`MANIFEST`], handed over.
@@ -353,7 +346,7 @@ impl Suite {
             write_greeter(&directory);
         }
         // The console exists before Functions start, as in a suite.
-        let mut suite = Self::assemble(parts, setup, None, triggers.clone(), directory);
+        let mut suite = Self::assemble(parts, setup, None, directory);
         let loaded = if greeter {
             let config = extensions_config(&suite.directory);
             let outcome = firenook_extensions::load_outcome(&config, &log)
@@ -435,7 +428,6 @@ impl Suite {
         parts: ComputeParts,
         setup: Setup,
         runtime: Option<FunctionsRuntime>,
-        triggers: TriggerRegistry,
         directory: Scratch,
     ) -> Self {
         let section = ComputeSection {
@@ -451,7 +443,6 @@ impl Suite {
             context,
             router,
             runtime,
-            triggers,
             directory,
         }
     }

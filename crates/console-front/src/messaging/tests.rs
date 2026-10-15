@@ -394,9 +394,9 @@ fn messaging_bindings_are_exported() {
     );
     assert!(read("TasksTaskRow.ts").contains("state: TasksTaskState"));
     // A flattened page keeps its root types, imported across directories.
-    let page = read("PubsubDeliveryPage.ts");
+    let page = read("PubsubRejectedList.ts");
     assert!(page.contains("from \"../Total\""), "{page}");
-    assert!(page.contains("items: Array<PubsubDeliveryRow>"), "{page}");
+    assert!(page.contains("items: Array<PubsubRejected>"), "{page}");
     assert!(read("PubsubFunctionTarget.ts").contains("from \"../EntityRef\""));
     let _ = std::fs::remove_dir_all(&out);
 }
@@ -1113,60 +1113,6 @@ async fn the_schedules_topic_follows_each_runs_outcome() {
             ..
         }
     ));
-    suite.stop.send(true).expect("stop");
-}
-
-#[tokio::test]
-async fn the_deliveries_topic_names_new_deliveries_and_outcome_changes() {
-    let monitor = Monitor::new(firenook_functions_runtime::MonitorLimits::default());
-    let mut suite = suite(Some(monitor.clone()));
-    let section = PubsubSection::new({
-        let late = Late::pending("Pub/Sub");
-        late.set(suite.pubsub.clone());
-        late
-    });
-    let topics = section.topics(&context(&suite.stop));
-    let mut stream = topic(&topics, "pubsub.deliveries")
-        .open(&json!({ "topic": ORDERS }), None)
-        .expect("open");
-    // A publish adds a delivery and names it.
-    publish(&suite.pubsub, ORDERS, "{}");
-    let dispatch = suite.deliveries.recv().await.expect("dispatch");
-    let (name, changed) = event(&next(&mut stream).await);
-    assert_eq!(name, "changed");
-    assert_eq!(changed["added"], 1, "{changed}");
-    assert_eq!(changed["keys"], json!([dispatch.event_id]));
-    // Compute's record of its invocation names it again.
-    let token = begin_dispatch(
-        &monitor,
-        "us-central1-onOrderPlaced",
-        FunctionKind::Pubsub,
-        &dispatch,
-    );
-    finish_invocation(&monitor, &token, 200, None);
-    let (name, changed) = event(&next(&mut stream).await);
-    assert_eq!(name, "changed");
-    assert_eq!(changed["added"], 0, "{changed}");
-    assert_eq!(changed["keys"], json!([dispatch.event_id]));
-    // Another topic's invocation is not this topic's change; the next
-    // event is the next publish.
-    let elsewhere = begin_invocation(
-        &monitor,
-        "us-central1-nightlyCleanup",
-        FunctionKind::Schedule,
-        InvocationCause::Schedule {
-            topic: SCHEDULE_TOPIC.to_owned(),
-            event_id: Some("tick".to_owned()),
-        },
-        [],
-        b"{}",
-    );
-    finish_invocation(&monitor, &elsewhere, 200, None);
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    publish(&suite.pubsub, ORDERS, "{}");
-    let second = suite.deliveries.recv().await.expect("dispatch");
-    let (_, changed) = event(&next(&mut stream).await);
-    assert_eq!(changed["keys"], json!([second.event_id]), "{changed}");
     suite.stop.send(true).expect("stop");
 }
 

@@ -73,9 +73,13 @@ describe('the next run and the state', () => {
   it('counts down the next run', () => {
     expect(nextRunText('2026-10-12T10:00:42Z', now)).toBe('in 42 s')
     expect(nextRunText('2026-10-12T10:03:00Z', now)).toBe('in 3 min')
-    expect(nextRunText('2026-10-19T07:00:00Z', now)).toBe('in 7 d')
+    expect(nextRunText('2026-10-12T10:02:51.400Z', now)).toBe('in 2 min 51 s')
+    expect(nextRunText('2026-10-12T10:00:00.600Z', now)).toBe('due now')
+    expect(nextRunText('2026-10-19T07:00:00Z', now)).toBe('in 6 d 21 h')
     expect(nextRunText('2026-10-12T09:59:00Z', now)).toBe('due now')
     expect(nextRunText(null, now)).toBe('—')
+    expect(nextRunText('2026-10-12T10:02:51.400Z', now, 'minute')).toBe('in 3 min')
+    expect(nextRunText('2026-10-12T10:00:42Z', now, 'minute')).toBe('in 42 s')
   })
 
   it('says the next run in its zone', () => {

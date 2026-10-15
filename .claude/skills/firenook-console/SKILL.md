@@ -565,7 +565,6 @@ defaults never in the URL):
 | `pubsub.counters` | `{ project?, throughput? }` | `counters`, `resources`, `rejected` | compare |
 | `pubsub.topic` | `{ project?, topic, subscription? }` | `published`, `stale` | none |
 | `pubsub.push` | `{ project?, subscription }` | `attempts` | replay |
-| `pubsub.deliveries` | `{ project?, topic }` | `changed` | none |
 | `pubsub.schedules` | `{ project? }` | `schedules` | compare |
 | `tasks.counters` | `{ project? }` | `counters`, `queues` | compare |
 | `tasks.queue` | `{ project?, queue }` | `stale`, `finished` | none |
@@ -3224,12 +3223,18 @@ exchange, so the greeter fixture calls a plain `initializeApp()`.)
 
 ## Pub/Sub and Cloud Tasks (built, `src/pubsub/`, `src/tasks/`, shared code in `src/messaging/`)
 
-**Pages.** Pub/Sub is one nav entry with three pages: Topics (`/pubsub`,
-`routes/pubsub.tsx`), Schemas (`/pubsub/schemas`, `routes/pubsub_.schemas.tsx`)
-and Schedules (`/pubsub/schedules`, `routes/pubsub_.schedules.tsx`). Schedules
-lives under Pub/Sub because a tick is a publish to `firebase-schedule-<name>`;
-this stream owns the scheduler and the `ScheduleControl` trait
-(`crates/pubsub-front/src/schedule_control.rs`) that compute's Run now calls.
+**Pages.** Pub/Sub is one nav entry with two pages: Topics (`/pubsub`,
+`routes/pubsub.tsx`) and Schemas (`/pubsub/schemas`,
+`routes/pubsub_.schemas.tsx`). A schedule's page is its function's: the
+scheduled function's Run tab in Functions is its Schedule tab
+(`src/functions/components/schedule-form.tsx`, the overview's lead in
+`components/next-run.tsx`, the words in `functions/schedule-text.ts`), which
+reads Pub/Sub's scheduler through `functions/schedules.ts`
+(`GET /pubsub/schedules`, `pubsub.schedules`, `/pubsub/schedule/run|pause|resume`).
+This stream owns the scheduler and the `ScheduleControl` trait
+(`crates/pubsub-front/src/schedule_control.rs`), the Schedule tab and that
+lead; the topics tree keeps the schedule topics (Function schedules) as the
+transport they are, a scheduled function's row opening its tab.
 Cloud Tasks is one page (`/tasks`, `routes/tasks.tsx`): the queues in the
 panel, a queue with Tasks, History and Configuration, a task in the
 inspector (Payload, Request, Attempts). A queue's attempts as they happen
@@ -3239,12 +3244,11 @@ invocation): row two links there through the queue function's
 
 **Search parameters.** Topics: `topic` and `subscription` (an id under the
 page's project, or a full name that travelled whole), `view` (`messages`,
-`subscriptions`, `deliveries`, `snapshots`, `settings` on a topic; `backlog`,
-`pull`, `push`, `dead-letters`, `settings` on a subscription), `message`,
-`tab`, `q`, `expr` (a subscription filter expression over attributes),
-`state`, `function`, `outcome`, `paused`, `new`, `dialog` (`replay`, `setup`,
-`export`), `prefill`, `project`. Schemas: `schema`, `revision`, `diff`, `view`,
-`panel=test`, `new=schema`. Schedules: `schedule` (the function id). Tasks:
+`subscriptions`, `settings` on a topic; `backlog`, `push`, `dead-letters`,
+`settings` on a subscription), `message`, `tab`, `q`, `expr` (a subscription
+filter expression over attributes), `state`, `paused`, `new`, `dialog`
+(`setup`, `export`), `prefill`, `project`. Schemas: `schema`, `view`
+(`definition`, `used-by`), `new=schema`. Tasks:
 `queue` by id with `location` only when two locations register that id (the
 page drops it otherwise), `view`, `task` (the console's decimal id), `tab`,
 `state`, `outcome`, `q`, `new=task`, `prefill`. The router parses
@@ -3254,9 +3258,12 @@ a number and normalize (`text` in `routes/pubsub.tsx`, `src/tasks/search.ts`).
 
 **Links.** `pubsub.topic`, `pubsub.subscription` and `pubsub.schema` are keyed
 by full name, `pubsub.message` by `<topic full name>|<id>`, `pubsub.schedule`
-by function id, `tasks.queue` by `<project>|<location>|<queue>` and
-`tasks.task` by that plus `|<task id>`; the registries' `routes` open them
-(`src/messaging/links.ts`). A link always writes `project` (and `location`
+by function id (it opens the function's Schedule tab in Functions, the one
+kind `links-every-kind.test.ts` lets open in another section), `tasks.queue`
+by `<project>|<location>|<queue>` and `tasks.task` by that plus `|<task id>`;
+the registries' `routes` open them (`src/messaging/links.ts`). A topic's
+functions' runs are `functions.invocations` (an Invocations filter, on the
+topic detail's `invocations`). A link always writes `project` (and `location`
 for Tasks) and the page tidies what it does not need; a subscription link
 carries no topic, which the Topics page completes from its index. These pages
 link out only through `EntityLink`, `linkTo` and `linkToLogs`, and never
@@ -3265,14 +3272,15 @@ or the Enqueue dialog on it through the Cloud Tasks registry's
 `tasksQueueLink(<tasks.queue key>, 'config' | 'enqueue')` (the dialog's one
 parameter is `new=task`).
 
-**Topics, not streams.** Seven, declared in `src/pubsub/live.ts` and
+**Topics, not streams.** Declared in `src/pubsub/live.ts`,
+`src/functions/schedules.ts` (`pubsub.schedules`) and
 `src/tasks/live.ts`: `pubsub.counters`, `pubsub.schedules` and
 `tasks.counters` are `compare` (state: without a cursor they open with every
 entity of the project, and over 1,000 they answer a reset instead; then
 changes after the revision, at most every 250 ms and 200 a frame, throughput
-for at most 24 topics on screen); `pubsub.topic`, `pubsub.deliveries` and
-`tasks.queue` are invalidation (published ids, moved backlog keys, delivery
-event ids, task row keys and finished ids, which the page reads back through
+for at most 24 topics on screen); `pubsub.topic` and `tasks.queue` are
+invalidation (published ids, moved backlog keys, messages whose marks moved,
+task row keys and finished ids, which the page reads back through
 `:batchGet`); `pubsub.push` is `replay` over a console ring fed inline by
 the runtime's sink. Time is a stamp, not a window: a
 throughput window carries its end and the client ages it
@@ -3287,19 +3295,19 @@ Never a per-message broadcast, never `new EventSource`.
 wake on it. Everything the console needs goes on `console`. A console-only
 bump on `changed` makes every waiting pull spin.
 
-**Lists are pages with meta; mutable rows are patched.** `messageList`,
-`backlogList`, `deliveryList`, `taskList` and `historyList` (in each section's
-`queries.ts`) go through `useCursorRows`. Backlog, task and delivery rows are
-keyed by position or event id and patched in place through `:batchGet`;
-message and History heads read again at the top and count `newAbove` below
-it; the window is 20 pages. Message rows are deduplicated by id and backlog
-places renumbered (`src/messaging/rows.ts`).
+**Lists are pages; mutable rows are patched.** `messageList`, `backlogList`,
+`taskList` and `historyList` (in each section's `queries.ts`) go through
+`useCursorRows`. Backlog and task rows are keyed by position and patched in
+place through `:batchGet`; message and History heads read again at the top
+and count `newAbove` below it; the window is 20 pages. Message rows are
+deduplicated by id and backlog places renumbered (`src/pubsub/rows.ts`).
 
-**Peek is the default, Pull is a choice.** Nothing on screen leases a message
-unless the person pressed Pull. Pull warns when a subscriber is connected, is
-absent on a subscription the functions consumer drains, and explains itself
-on a push subscription. `a`, `x` and `e` act only in the Pull tab, on a
-received row.
+**Peek, never pull.** Nothing on screen leases a message: the backlog is read
+without leasing, a row is acknowledged or returned (behind `DangerConfirm`
+when a subscriber holds its lease), and Purge acknowledges everything that
+waits (`POST /pubsub/subscription/purge`, a seek to now). Pulls, snapshots,
+seeks and schema revisions are the app's, through the wire API, which keeps
+all of them.
 
 **Console-only controls never reach the wire**: pause, hold, stop retrying,
 force acknowledge, release, publish jobs (foundation `Job`s), schedule pause
@@ -3307,9 +3315,11 @@ and clear. Every engine change in these crates passes the oracle replays:
 `npm run replay:pubsub` and `npm run replay:functions:runtime -- --fixture
 fixtures/tasks-v1/emulator-programs.json --profiles tasks`.
 
-**Deliveries are compute's record joined by event id**: a topic's Deliveries
-tab and a message's deliveries read the fanout the runtime recorded and the
-invocation compute keeps; `GET /pubsub/dispatch?event=` serves the request
+**Deliveries are compute's record joined by event id**: a message's deliveries
+(its inspector's tab, and its row's marks) read the fanout the runtime
+recorded and the invocation compute keeps; every run of a topic's functions
+is listed in Functions › Invocations, one link away;
+`GET /pubsub/dispatch?event=` serves the request
 each delivery received (a run again has its own CloudEvent id). When the SDK
 caught the handler's throw itself (`onSchedule` answers 500 with no body), the
 failure takes its error from the invocation's first error-level log line.
@@ -3342,7 +3352,7 @@ Any new console-held state in these crates needs a bound and an eviction rule
 in the same commit.
 
 **Shared code** (`src/messaging/`): `api.ts` (query strings, page cursors),
-`frames.ts`, `links.ts`, `rows.ts` and `windows.ts`. Run again, Run now and
+`frames.ts`, `links.ts` and `windows.ts`. Run again, Run now and
 Enqueue again ask through the kit's `ConfirmPopover` (`useConfirmPopover`,
 `rowElement`), because they run the handler; Delete goes through
 `DangerConfirm`; a failure reads through `errorText` (`lib/error-text.ts`).
@@ -3366,8 +3376,8 @@ banner).
 **Keys**: the foundation's reserved-keys table, no new row. `n` publishes on
 a topic (a new schema on Schemas, Enqueue on a queue), `p` pauses the Push
 feed, `r` and Shift+R run again (behind a confirmation, or through a form),
-`l` opens in Logs while Logs is built, `a`/`x`/`e` only in the Pull tab,
-Delete acknowledges ticked backlog rows.
+`l` opens in Logs while Logs is built, Delete acknowledges ticked backlog
+rows.
 
 **Testing gotchas.** Kumo `Select` does not forward `data-testid`: find it with
 `getByRole('combobox', { name })`. A single-key shortcut pressed while focus

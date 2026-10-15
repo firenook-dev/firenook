@@ -16,7 +16,6 @@ import {
   restartWorker,
   revealHeader,
   revealSecret,
-  runSchedule,
 } from './api'
 
 interface Sent {
@@ -171,27 +170,18 @@ describe('changes', () => {
     })
   })
 
-  it('run now through the scheduler', async () => {
-    answer = { status: 200, body: { transport: 'pubsub' } }
-    await runSchedule('us-central1-nightly')
-    expect(last()).toMatchObject({
-      url: '/console/api/v1/functions/us-central1-nightly/run',
-      body: {},
-    })
-  })
-
   it('say when the engine refused, with the fix it gave', async () => {
     answer = {
       status: 409,
       body: {
         error: {
           code: 'conflict',
-          message: 'Background triggers are paused, so the tick was not published.',
-          fix: 'Resume background triggers.',
+          message: 'The codebase app is still loading, so its worker cannot restart.',
+          fix: 'Wait until it has loaded.',
         },
       },
     }
-    const error = await runSchedule('us-central1-nightly').catch((caught: unknown) => caught)
-    expect(error).toMatchObject({ code: 'conflict', fix: 'Resume background triggers.' })
+    const error = await restartWorker('app').catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'conflict', fix: 'Wait until it has loaded.' })
   })
 })

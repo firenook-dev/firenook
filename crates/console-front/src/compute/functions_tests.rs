@@ -1,7 +1,5 @@
 #![allow(clippy::too_many_lines)] // Scenarios read best whole.
 
-use std::sync::{Arc, Mutex};
-
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::Request;
@@ -14,6 +12,7 @@ use firenook_functions_runtime::monitor::{
 };
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
+use tower::ServiceExt as _;
 
 use super::super::tests::{CHANNEL, PROJECT, Setup, Suite, begin, finish};
 use super::*;
@@ -25,41 +24,6 @@ fn find<'a>(list: &'a Value, id: &str) -> &'a Value {
     list.as_array()
         .and_then(|items| items.iter().find(|item| item["id"] == id))
         .unwrap_or_else(|| panic!("{id} in {list}"))
-}
-
-/// A service application that records every request and answers `reply`.
-/// The path and JSON body of every request a stub received.
-type Seen = Arc<Mutex<Vec<(String, Value)>>>;
-
-fn stub(status: StatusCode, reply: Value) -> (Router, Seen) {
-    let seen: Seen = Arc::default();
-    let recorded = Arc::clone(&seen);
-    let router = Router::new().fallback(move |request: Request| {
-        let recorded = Arc::clone(&recorded);
-        let reply = reply.clone();
-        async move {
-            let path = request.uri().path().to_owned();
-            let body = axum::body::to_bytes(request.into_body(), usize::MAX)
-                .await
-                .unwrap_or_default();
-            recorded
-                .lock()
-                .expect("recorded")
-                .push((path, serde_json::from_slice(&body).unwrap_or(Value::Null)));
-            (
-                status,
-                [(header::CONTENT_TYPE, "application/json")],
-                reply.to_string(),
-            )
-        }
-    });
-    (router, seen)
-}
-
-fn pubsub(router: Router) -> Late<PubsubConsole> {
-    let late = Late::pending("Pub/Sub");
-    late.set(crate::messaging::test_pubsub_console(router));
-    late
 }
 
 #[tokio::test]
@@ -248,12 +212,8 @@ async fn a_function_detail_holds_its_environment_params_and_kind_facts() {
         "projects/demo-compute/topics/firebase-schedule-nightly"
     );
     assert_eq!(schedule["pubsub"], false);
-    assert_eq!(schedule["automatic"], false);
-    assert_eq!(
-        schedule["manualReason"],
-        "Pub/Sub is not running in this suite."
-    );
-    assert_eq!(schedule["scheduleRef"], Value::Null);
+    // What the scheduler makes of it is Pub/Sub's, never a copy here.
+    assert_eq!(schedule.get("nextRun"), None);
 
     let (_, resize) = suite.get("/functions/us-central1-resize").await;
     let queue = &resize["taskQueue"];
@@ -712,122 +672,6 @@ async fn a_task_attempt_links_to_its_task_and_queue() {
         ]
     );
 
-    suite.stop().await;
-}
-
-#[tokio::test]
-async fn run_publishes_the_clocks_tick_or_calls_the_function_directly() {
-    let (native, seen) = stub(StatusCode::OK, json!({"messageIds": ["7"]}));
-    let suite = Suite::running(Setup {
-        pubsub: Some(pubsub(native)),
-        ..Setup::default()
-    })
-    .await;
-    let (status, body) = suite
-        .post("/functions/us-central1-nightly/run", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["transport"], "pubsub");
-    assert_eq!(
-        body["topic"],
-        "projects/demo-compute/topics/firebase-schedule-nightly"
-    );
-    let (path, request) = seen.lock().expect("seen")[0].clone();
-    assert_eq!(
-        path,
-        "/v1/projects/demo-compute/topics/firebase-schedule-nightly:publish"
-    );
-    assert_eq!(request["messages"][0]["data"], BASE64.encode("{}"));
-    let (status, _) = suite
-        .post("/functions/us-central1-api/run", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    suite.triggers.set_background_enabled(false);
-    let (status, body) = suite
-        .post("/functions/us-central1-nightly/run", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"]["fix"], "Resume background triggers.");
-    suite.stop().await;
-
-    let suite = Suite::running(Setup::default()).await;
-    let (status, body) = suite
-        .post("/functions/us-central1-nightly/run", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["transport"], "direct");
-    assert_eq!(body["invocation"]["functionId"], "us-central1-nightly");
-    assert_eq!(body["invocation"]["origin"], "console");
-    suite.stop().await;
-}
-
-/// A Pub/Sub console whose scheduler holds the fixture's `nightly`.
-fn pubsub_with_nightly(native: Router) -> Late<PubsubConsole> {
-    let inventory = firenook_functions_bridge::FunctionsInventory::from_backends_json(
-        &json!({ "backends": [{ "codebase": "default", "functionTriggers": [{
-            "id": "us-central1-nightly",
-            "name": "nightly",
-            "region": "us-central1",
-            "entryPoint": "nightly",
-            "platform": "gcfv2",
-            "schedule": { "schedule": "every 5 minutes", "timeZone": "Asia/Kuala_Lumpur" },
-            "eventTrigger": { "eventType": "pubsub", "resource": "" }
-        }] }] }),
-        0,
-    )
-    .expect("inventory");
-    let background = firenook_functions_bridge::TriggerRegistry::default();
-    let (observer, _deliveries) =
-        firenook_functions_bridge::TriggerObserver::channel(background.clone());
-    let runtime =
-        firenook_pubsub_front::router("demo-compute", &inventory, observer.queue(), background);
-    let late = Late::pending("Pub/Sub");
-    late.set(PubsubConsole::new(native, runtime, None));
-    late
-}
-
-#[tokio::test]
-async fn a_schedule_is_the_schedulers_view_and_run_now_goes_through_it() {
-    let (native, seen) = stub(StatusCode::OK, json!({"messageIds": ["7"]}));
-    let suite = Suite::running(Setup {
-        pubsub: Some(pubsub_with_nightly(native)),
-        ..Setup::default()
-    })
-    .await;
-    let (status, detail) = suite.get("/functions/us-central1-nightly").await;
-    assert_eq!(status, StatusCode::OK, "{detail}");
-    let schedule = &detail["schedule"];
-    assert_eq!(schedule["expression"], "every 5 minutes");
-    assert_eq!(schedule["evaluatedIn"], "Asia/Kuala_Lumpur");
-    assert_eq!(schedule["automatic"], true);
-    assert_eq!(schedule["manualReason"], Value::Null);
-    assert_eq!(schedule["paused"], false);
-    assert_eq!(schedule["pubsub"], true);
-    assert_eq!(
-        schedule["topic"],
-        "projects/demo-compute/topics/firebase-schedule-nightly"
-    );
-    assert_eq!(schedule["scheduleRef"]["kind"], "pubsub.schedule");
-
-    // Run now is the scheduler's own run: published in memory, not
-    // through the REST publish, and recorded as the schedule's last run.
-    let (status, body) = suite
-        .post("/functions/us-central1-nightly/run", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["transport"], "pubsub");
-    assert!(body["messageId"].as_str().is_some_and(|id| !id.is_empty()));
-    assert_eq!(body["target"]["kind"], "pubsub.message");
-    assert_eq!(seen.lock().expect("seen").len(), 0);
-    let (_, detail) = suite.get("/functions/us-central1-nightly").await;
-    assert!(detail["schedule"]["lastRun"].as_str().is_some());
-
-    suite.triggers.set_background_enabled(false);
-    let (status, body) = suite
-        .post("/functions/us-central1-nightly/run", json!({}))
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"]["fix"], "Resume background triggers.");
     suite.stop().await;
 }
 
