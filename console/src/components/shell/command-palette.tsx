@@ -8,7 +8,8 @@
 import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
 import {
   ArrowSquareOutIcon,
-  DownloadSimpleIcon,
+  CpuIcon,
+  FloppyDiskIcon,
   GaugeIcon,
   KeyboardIcon,
   MagnifyingGlassIcon,
@@ -39,6 +40,7 @@ import { SECTIONS, type SectionLink, sectionById } from '@/lib/services'
 import { describeKey } from '@/lib/shortcuts'
 import { useConsoleUi } from '@/lib/store'
 import { toast } from '@/lib/toasts'
+import { openEngineDetails } from './engine-details'
 import { THEME_CHOICES } from './theme-picker'
 
 /** The shortest text the engine is asked to search, and how long typing settles first. */
@@ -192,7 +194,6 @@ export function CommandPalette() {
   const mode = useTheme((state) => state.mode)
   const setTheme = useTheme((state) => state.setChoice)
   const setShortcutsOpen = useConsoleUi((state) => state.setShortcutsOpen)
-  const setEnginePopoverOpen = useConsoleUi((state) => state.setEnginePopoverOpen)
   const engine = useEngineSearch(search, open)
 
   const go = useMemo(
@@ -307,16 +308,26 @@ export function CommandPalette() {
             ),
       })
     }
-    items.push({
-      id: 'suite:export',
-      title: 'Export now…',
-      description: 'Save the emulator’s data to a folder the engine lists',
-      keywords: 'export save snapshot data backup',
-      icon: <DownloadSimpleIcon size={16} />,
-      run: () => setEnginePopoverOpen(true),
-    })
+    items.push(
+      {
+        id: 'suite:save',
+        title: 'Save a snapshot on the engine’s machine…',
+        description: 'A standard export in a folder the engine lists',
+        keywords: 'snapshot export save folder disk backup data',
+        icon: <FloppyDiskIcon size={16} />,
+        run: go({ to: '/', search: { dialog: 'save' } }),
+      },
+      {
+        id: 'suite:engine',
+        title: 'Engine details',
+        description: 'Version, where the data lives, folders and the switches it was started with',
+        keywords: 'engine version config data disk memory state durability debug log node',
+        icon: <CpuIcon size={16} />,
+        run: () => openEngineDetails(navigate),
+      },
+    )
     return items
-  }, [status.data, client, setEnginePopoverOpen])
+  }, [status.data, client, go, navigate])
 
   // How the shell is laid out: the navigation and the section panel.
   const layout = useMemo<PaletteItem[]>(() => {

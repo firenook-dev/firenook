@@ -13,7 +13,8 @@
 // bundle); this file is the page's.
 
 import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
-import { API_BASE, ApiError, apiSend } from '@/api/client'
+import { API_BASE, ApiError, apiGet, apiSend } from '@/api/client'
+import type { ExportDestination } from '@/api/generated/ExportDestination'
 import type { Job } from '@/api/generated/Job'
 import type { OverviewSnapshotRequest } from '@/api/generated/observe/OverviewSnapshotRequest'
 import { download } from '@/lib/download'
@@ -57,6 +58,17 @@ export function useOverview() {
   const live = useOverviewLive(project)
   const state = useQuery({ ...overviewQuery(project), enabled: project !== '' })
   return { project, state, live }
+}
+
+/**
+ * `GET /suite/destinations`: the folders on the engine's machine a snapshot
+ * may be saved to, each with why the engine refuses it now, when it does.
+ * Read when the save dialog opens.
+ */
+export const destinationsQuery = {
+  queryKey: ['suite', 'destinations'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    apiGet<ExportDestination[]>('/suite/destinations', undefined, signal),
 }
 
 /** The job kind a snapshot is prepared as. */

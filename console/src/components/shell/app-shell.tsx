@@ -8,7 +8,9 @@
 // ⌘K, `[`, `t` and `?`, and every page's, go through the same registry;
 // and its one live subscription (`lib/live/shell.ts`), whose channel the
 // engine badge speaks for: the whole console shares one connection, so a
-// drop is said once, there, not again on every page. The navigation draws
+// drop is said once, there, not again on every page. The badge leads to the
+// Overview's engine section (`/#engine`), where the engine's facts are
+// drawn once. The navigation draws
 // each section's state from the engine's status (absent sections dimmed,
 // starting ones with a pulsing dot) and its badges; a section's own shell
 // piece (`shellMount`) and the suite jobs watch mount here, lazily, so no
@@ -55,6 +57,7 @@ import {
 import { useConsoleUi } from '@/lib/store'
 import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
 import { consoleToasts } from '@/lib/toasts'
+import { ENGINE_DETAILS_HREF, openEngineDetails } from './engine-details'
 import { ThemePicker } from './theme-picker'
 
 const AREAS: readonly ServiceArea[] = ['data', 'compute', 'messaging', 'observe']
@@ -73,11 +76,6 @@ const ShortcutsDialog = lazy(() =>
  */
 const CommandPalette = lazy(() =>
   import('./command-palette').then((module) => ({ default: module.CommandPalette })),
-)
-
-/** The engine badge's popover, loaded the first time the badge is clicked. */
-const EnginePopover = lazy(() =>
-  import('./engine-popover').then((module) => ({ default: module.EnginePopover })),
 )
 
 /** Toasts for suite jobs in every tab; nothing on screen needs it to start. */
@@ -548,45 +546,24 @@ function TopBar() {
  * connections as it takes. A red dot rides on it while requests name a
  * project that is not this emulator's (the shell banner says which). An
  * engine of another build than this page's says so; the shell banners ask
- * for the reload. Clicking it opens the engine's facts and Export now.
+ * for the reload. It is a link to the Overview's engine section.
  */
 function EngineBadge() {
-  const open = useConsoleUi((state) => state.enginePopoverOpen)
-  const setOpen = useConsoleUi((state) => state.setEnginePopoverOpen)
-  // The popover's code arrives the first time it is asked for, and stays.
-  const [loaded, setLoaded] = useState(false)
-  if (open && !loaded) setLoaded(true)
-  const face = <EngineBadgeFace />
-  const button = (
-    <button
-      type="button"
-      className="flex cursor-pointer items-center rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus"
+  const navigate = useNavigate()
+  return (
+    <a
+      href={ENGINE_DETAILS_HREF}
+      className="flex items-center rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus"
       aria-label="Engine details"
-      aria-haspopup="dialog"
-      onClick={() => setOpen(true)}
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+        event.preventDefault()
+        openEngineDetails(navigate)
+      }}
       data-testid="engine-badge-button"
     >
-      {face}
-    </button>
-  )
-  if (!loaded) return button
-  return (
-    <Suspense fallback={button}>
-      <EnginePopover
-        open={open}
-        onOpenChange={setOpen}
-        trigger={
-          <button
-            type="button"
-            className="flex cursor-pointer items-center rounded-md outline-none focus-visible:ring focus-visible:ring-kumo-focus"
-            aria-label="Engine details"
-            data-testid="engine-badge-button"
-          >
-            {face}
-          </button>
-        }
-      />
-    </Suspense>
+      <EngineBadgeFace />
+    </a>
   )
 }
 

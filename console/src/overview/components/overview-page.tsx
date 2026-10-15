@@ -20,7 +20,7 @@ import { engineQuery } from '../queries'
 import { useConnectHost } from '../host'
 import { absentGroups, absentSections, infrastructure, sectionCards } from '../model'
 import { useOverviewPalette } from '../palette'
-import { OVERVIEW_SCROLL, revealById } from '../reveal'
+import { OVERVIEW_SCROLL, revealById, useRevealHash } from '../reveal'
 import { type ConnectParam, DEFAULT_CONNECT, connectTab } from '@/lib/connect-tabs'
 import type { OverviewDialog, OverviewSearch } from '../search'
 import { ConnectSection } from './connect'
@@ -63,9 +63,8 @@ export function OverviewPage() {
         status,
         bucket: engine.data?.config?.defaultBucket,
       }),
-    save: () => setDialog('save'),
-    engine: () => revealById('overview-engine'),
   })
+  useRevealHash()
 
   const cards = sectionCards(status, badges)
   const absent = absentSections(status)

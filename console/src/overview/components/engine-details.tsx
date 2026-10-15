@@ -30,6 +30,14 @@ const RING_LABELS: Record<string, string> = {
   jobs: 'jobs',
 }
 
+/** What `--durability` means for a write, in words; a mode the console does not know says nothing. */
+export function durabilityNote(durability: string): string | undefined {
+  if (durability === 'write-behind')
+    return 'a commit answers once journaled; the disk is synced every second and at shutdown'
+  if (durability === 'per-commit') return 'each commit reaches the disk before it answers'
+  return undefined
+}
+
 /** "18.2 MB of 64 MB" and each buffer holding anything, largest first. */
 export function memoryRows(report: MemoryReport) {
   const used = report.rings.filter((ring) => ring.entries > 0).toSorted((a, b) => b.bytes - a.bytes)
@@ -73,6 +81,7 @@ export function EngineDetails({
   const memory = useQuery({ ...memoryQuery(project), enabled: shown && project !== '' })
   const { engine, data } = status
   const config = details.data?.config ?? null
+  const writes = durabilityNote(data.durability)
 
   return (
     <section
@@ -133,9 +142,9 @@ export function EngineDetails({
             </Row>
           )}
           <Row label="Data" testId="engine-data">
-            <span>{data.mode === 'memory' ? 'In memory' : 'On disk'}</span>
-            <Sep />
-            <span className="font-mono">{data.durability}</span>
+            <span className={data.mode === 'memory' ? 'text-kumo-warning' : undefined}>
+              {data.mode === 'memory' ? 'In memory' : 'On disk'}
+            </span>
             {data.resumed && (
               <>
                 <Sep />
@@ -151,6 +160,12 @@ export function EngineDetails({
               <Note>gone when the engine stops</Note>
             )}
           </Row>
+          {data.mode === 'disk' && (
+            <Row label="Writes" testId="engine-writes">
+              <span className="font-mono">{data.durability}</span>
+              {writes && <Note>{writes}</Note>}
+            </Row>
+          )}
           {data.importedFrom && (
             <Row label="Import seed" testId="engine-import">
               <Path value={data.importedFrom} />

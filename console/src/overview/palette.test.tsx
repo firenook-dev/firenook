@@ -13,16 +13,10 @@ const titles = (query: string) =>
   provider()(query).flatMap((group) => group.items.map((item) => item.title))
 
 describe('the overview in ⌘K', () => {
-  it('offers one way into Connect, the save dialog and the engine while nothing is typed', () => {
+  it('offers one way into Connect while nothing is typed', () => {
     const connect = vi.fn()
-    const view = renderHook(() =>
-      useOverviewPalette({ connect, snippet: () => '', save: vi.fn(), engine: vi.fn() }),
-    )
-    expect(titles('')).toEqual([
-      'Connect your app',
-      'Save a snapshot on the engine’s machine…',
-      'Engine details',
-    ])
+    const view = renderHook(() => useOverviewPalette({ connect, snippet: () => '' }))
+    expect(titles('')).toEqual(['Connect your app'])
     provider()('')[0]?.items[0]?.run()
     expect(connect).toHaveBeenCalledWith(undefined)
     view.unmount()
@@ -37,8 +31,6 @@ describe('the overview in ⌘K', () => {
       useOverviewPalette({
         connect,
         snippet: (param) => `snippet for ${param}`,
-        save: vi.fn(),
-        engine: vi.fn(),
       }),
     )
     expect(titles('flutter')).toEqual(['Connect with Flutter', 'Copy the Flutter snippet'])
