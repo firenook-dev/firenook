@@ -1,9 +1,10 @@
 // Where Authentication's things open, and how Auth links into the rest of
 // the console. Auth never writes another section's address by hand: a
 // user, a call or a message is an `EntityRef` the registry routes; Logs is
-// `linkToLogs`; Firestore "as this user" is `serializeViewAs`; a rules line
-// is the rules pages' own search schema. And an email link the emulator
-// generated opens through the console's own origin, never the Auth port.
+// `linkToLogs`; Firestore "as this user" is `serializeViewAs`; a user's
+// rules decisions are the rules pages' own search schema. And an email
+// link the emulator generated opens through the console's own origin,
+// never the Auth port.
 
 import type { EntityRef } from '@/api/generated/EntityRef'
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
@@ -103,22 +104,6 @@ export function playgroundAsUser(user: Parameters<typeof viewAsUser>[0]): Sectio
 /** Firestore's `db` param: absent for the default database, as its pages write it. */
 function dbParam(database: string): string | undefined {
   return database === '' || database === '(default)' ? undefined : database
-}
-
-/** Which rules a claim read was found in. */
-export type RulesTarget =
-  | { service: 'firestore'; database: string }
-  | { service: 'storage'; bucket: string }
-
-/**
- * "Read by your rules · line 12 ↗": the rules page of that database or
- * bucket at that line, in the rules pages' shared search schema (`db` or
- * `bucket`, and `line`, which the page reveals once).
- */
-export function rulesLineLink(target: RulesTarget, line: number): SectionLink {
-  if (target.service === 'firestore')
-    return { to: '/firestore/rules', search: { db: dbParam(target.database), line } }
-  return { to: '/storage/rules', search: { bucket: target.bucket, line } }
 }
 
 /** "Rules decisions for this user ↗": the Firestore rules page's decisions, narrowed to the uid. */

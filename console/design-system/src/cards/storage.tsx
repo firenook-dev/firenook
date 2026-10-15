@@ -1013,7 +1013,6 @@ const RULES_DOCUMENT: StorageRulesDocument = {
   fileProblems: [],
   governs: [BUCKET],
   openDefault: false,
-  claimReads: [],
 }
 
 /** The check of the rules in force: two warnings the Folders tab counts. */
@@ -1131,7 +1130,6 @@ const RULES_CHECK: StorageRulesCheck = {
     ],
   },
   map: null,
-  claimReads: [],
 }
 
 const HISTORY: RulesVersion[] = [

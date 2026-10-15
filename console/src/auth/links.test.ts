@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { rulesPageSearch } from '@/rules/search'
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
 import { parseViewAs } from '@/lib/identity'
 import { auth } from '@/lib/sections/auth'
@@ -16,7 +15,6 @@ import {
   messageRef,
   playgroundAsUser,
   rulesDecisionsLink,
-  rulesLineLink,
   userLink,
   userRef,
 } from './links'
@@ -135,33 +133,7 @@ describe('as this user, elsewhere', () => {
   })
 })
 
-describe('rules pages', () => {
-  it('a rules line in the shared schema, the default database left out', () => {
-    expect(rulesLineLink({ service: 'firestore', database: '(default)' }, 12)).toEqual({
-      to: '/firestore/rules',
-      search: { db: undefined, line: 12 },
-    })
-    expect(rulesLineLink({ service: 'firestore', database: 'orders' }, 3)).toEqual({
-      to: '/firestore/rules',
-      search: { db: 'orders', line: 3 },
-    })
-    expect(rulesLineLink({ service: 'storage', bucket: 'demo.appspot.com' }, 8)).toEqual({
-      to: '/storage/rules',
-      search: { bucket: 'demo.appspot.com', line: 8 },
-    })
-  })
-
-  it('a rules line the rules pages accept: their shared schema reads it back', () => {
-    const firestore = rulesPageSearch('db', { panel: ['decisions'] })
-    const storage = rulesPageSearch('bucket', { panel: ['decisions'] })
-    expect(
-      firestore.parse(rulesLineLink({ service: 'firestore', database: 'orders' }, 3).search),
-    ).toMatchObject({ db: 'orders', line: 3 })
-    expect(
-      storage.parse(rulesLineLink({ service: 'storage', bucket: 'b' }, 8).search),
-    ).toMatchObject({ bucket: 'b', line: 8 })
-  })
-
+describe('the rules pages', () => {
   it("a user's rules decisions", () => {
     expect(rulesDecisionsLink('u_ada')).toEqual({
       to: '/firestore/rules',

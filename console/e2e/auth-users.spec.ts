@@ -392,7 +392,7 @@ test('U6 an edit keeps its draft through a sign-in, and a real change raises a b
   }
 })
 
-test('U7 the claims editor checks as Firebase does and shows where rules read each claim', async ({
+test('U7 the claims editor checks as Firebase does, and the saved claims reach the rules', async ({
   page,
   engine,
 }) => {
@@ -436,17 +436,9 @@ test('U7 the claims editor checks as Firebase does and shows where rules read ea
     await pasteInto(page, editor, '{"email": "x", "admin": true}')
     await expect(editor.locator('.cm-lintRange-warning')).toHaveText('"email"')
 
-    // Saved: the rules read admin at the line the engine reports.
+    // Saved, with the token they produce on screen first.
     await pasteInto(page, editor, '{"admin": true}')
-    const reads = inspector(page).getByTestId('claim-read').filter({ hasText: 'admin' })
-    await expect(reads.getByTestId('claim-read-line')).toHaveText(String(rule.line))
-    const document = await consoleJson<{ claimReads: { key: string | null; line: number }[] }>(
-      engine,
-      '/firestore/rules?database=(default)',
-    )
-    expect(document.claimReads).toContainEqual(
-      expect.objectContaining({ key: 'admin', line: rule.line }),
-    )
+    await expect(inspector(page).getByTestId('token-preview-tree')).toContainText('admin')
     await expect(save).toBeEnabled()
     await save.click()
     await expect
@@ -462,20 +454,6 @@ test('U7 the claims editor checks as Firebase does and shows where rules read ea
     await expect(page.getByTestId('inspector').getByLabel('secret value')).toHaveValue(
       'only admins read this',
     )
-
-    // "Read by your rules · line N" opens the rules page at that line, which
-    // is revealed and marked once and then leaves the address.
-    await page.goto(users(engine, { user: user.localId, tab: 'claims' }))
-    await inspector(page)
-      .getByTestId('claim-read')
-      .filter({ hasText: 'admin' })
-      .getByTestId('claim-read-line')
-      .click()
-    await expect(page).toHaveURL(/\/console\/firestore\/rules/)
-    const ruleLines = page.getByTestId('rules-source').locator('.cm-line')
-    await expect(ruleLines.nth(rule.line - 1)).toHaveClass(/cm-line-focus/)
-    await expect(page.locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText(String(rule.line))
-    await expect(page).not.toHaveURL(/line=/)
   } finally {
     await deleteAccounts(engine, [user.localId])
     await rule.restore()
