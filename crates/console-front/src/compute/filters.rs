@@ -62,6 +62,18 @@ const INVOCATION_SPECS: &[FieldSpec] = &[
         help: "How the function is triggered",
     },
     FieldSpec {
+        key: "topic",
+        aliases: &[],
+        kind: FieldKind::Exact,
+        help: "Pub/Sub or schedule topic, by name or full name",
+    },
+    FieldSpec {
+        key: "queue",
+        aliases: &[],
+        kind: FieldKind::Exact,
+        help: "Cloud Tasks queue key, like demo-project-us-central1-resize",
+    },
+    FieldSpec {
         key: "outcome",
         aliases: &[],
         kind: FieldKind::Enum {
@@ -324,6 +336,23 @@ fn exact(value: &str, wanted: &str) -> bool {
     }
 }
 
+/// A topic's full name (`projects/<p>/topics/<t>`) against a `topic:`
+/// value: a full name (or a prefix of one) when it holds a `/`, else the
+/// topic's own name.
+fn topic_matches(topic: &str, wanted: &str) -> bool {
+    if wanted.contains('/') {
+        return exact(topic, wanted);
+    }
+    exact(topic.rsplit('/').next().unwrap_or(topic), wanted)
+}
+
+/// The engine's queue key (`queue:<project>-<location>-<id>`) against a
+/// `queue:` value, which may leave out the key's own `queue:`.
+fn queue_matches(queue: &str, wanted: &str) -> bool {
+    let bare = |key: &str| key.strip_prefix("queue:").unwrap_or(key).to_owned();
+    exact(&bare(queue), &bare(wanted))
+}
+
 fn compare<T: PartialOrd + ?Sized>(value: &T, op: FilterOp, bound: &T) -> bool {
     match op {
         FilterOp::Eq => value == bound,
@@ -370,6 +399,16 @@ fn invocation_term(term: &FilterTerm, now: OffsetDateTime) -> Predicate<Invocati
         }
         "codebase" => Box::new(move |summary: &InvocationSummary| exact(&summary.codebase, &value)),
         "kind" => Box::new(move |summary: &InvocationSummary| kind_word(summary.kind) == value),
+        "topic" => Box::new(move |summary: &InvocationSummary| match &summary.cause {
+            InvocationCause::Pubsub { topic, .. } | InvocationCause::Schedule { topic, .. } => {
+                topic_matches(topic, &value)
+            }
+            _ => false,
+        }),
+        "queue" => Box::new(move |summary: &InvocationSummary| match &summary.cause {
+            InvocationCause::Task { queue, .. } => queue_matches(queue, &value),
+            _ => false,
+        }),
         "outcome" => {
             Box::new(move |summary: &InvocationSummary| class_word(summary.outcome_class) == value)
         }

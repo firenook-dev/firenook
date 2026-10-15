@@ -34,6 +34,16 @@
       ]
     },
     {
+      "key": "topic",
+      "kind": "exact",
+      "help": "Pub/Sub or schedule topic, by name or full name"
+    },
+    {
+      "key": "queue",
+      "kind": "exact",
+      "help": "Cloud Tasks queue key, like demo-project-us-central1-resize"
+    },
+    {
       "key": "outcome",
       "kind": "enum",
       "help": "Succeeded, failed, skipped or still running",
@@ -218,6 +228,70 @@
         "message": "\"kind:\" is one of http, callable, firestore, storage, auth, pubsub, schedule, eventarc, tasks, blocking, alerts, database, other.",
         "from": 0,
         "to": 11
+      }
+    },
+    {
+      "name": "topic by name",
+      "text": "topic:emails",
+      "ok": {
+        "terms": [
+          {
+            "key": "topic",
+            "op": "eq",
+            "value": "emails",
+            "negated": false,
+            "from": 0,
+            "to": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "topic by full name",
+      "text": "topic:projects/demo/topics/emails",
+      "ok": {
+        "terms": [
+          {
+            "key": "topic",
+            "op": "eq",
+            "value": "projects/demo/topics/emails",
+            "negated": false,
+            "from": 0,
+            "to": 33
+          }
+        ]
+      }
+    },
+    {
+      "name": "queue",
+      "text": "queue:demo-us-central1-resize",
+      "ok": {
+        "terms": [
+          {
+            "key": "queue",
+            "op": "eq",
+            "value": "demo-us-central1-resize",
+            "negated": false,
+            "from": 0,
+            "to": 29
+          }
+        ]
+      }
+    },
+    {
+      "name": "queue with its key's own prefix",
+      "text": "queue:queue:demo-us-central1-resize",
+      "ok": {
+        "terms": [
+          {
+            "key": "queue",
+            "op": "eq",
+            "value": "queue:demo-us-central1-resize",
+            "negated": false,
+            "from": 0,
+            "to": 35
+          }
+        ]
       }
     },
     {
@@ -470,7 +544,7 @@
       "name": "an unknown key",
       "text": "region:us-central1",
       "error": {
-        "message": "Unknown filter \"region:\". Use function, codebase, kind, outcome, origin, status, took, at or is; quote it to search for the text.",
+        "message": "Unknown filter \"region:\". Use function, codebase, kind, topic, queue, outcome, origin, status, took, at or is; quote it to search for the text.",
         "from": 0,
         "to": 18
       }

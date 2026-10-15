@@ -176,12 +176,12 @@ export function filterOverview(rows: readonly OverviewRow[], q: string): Overvie
 
 // ── Invocations ──────────────────────────────────────────────────────────
 
-/** The engine's invocation fields (`INVOCATION_FIELDS`), with completions where the page has them. */
 /** Completions from a list: the values that start with what is typed, at most twenty. */
 function startingWith(values: readonly string[] | undefined) {
   return (prefix: string) => (values ?? []).filter((value) => value.startsWith(prefix)).slice(0, 20)
 }
 
+/** The engine's invocation fields (`INVOCATION_FIELDS`), with completions where the page has them. */
 export function invocationFields(options: {
   functionIds?: readonly string[] | undefined
   codebases?: readonly string[] | undefined
@@ -201,6 +201,12 @@ export function invocationFields(options: {
       suggest: startingWith(options.codebases),
     },
     { key: 'kind', kind: 'enum', help: 'How the function is triggered', values: [...KIND_WORDS] },
+    { key: 'topic', kind: 'exact', help: 'Pub/Sub or schedule topic, by name or full name' },
+    {
+      key: 'queue',
+      kind: 'exact',
+      help: 'Cloud Tasks queue key, like demo-project-us-central1-resize',
+    },
     {
       key: 'outcome',
       kind: 'enum',
