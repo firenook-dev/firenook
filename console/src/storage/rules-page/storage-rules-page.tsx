@@ -27,7 +27,7 @@ import {
   ScalesIcon,
 } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { lazy, Suspense, useMemo } from 'react'
 import { statusQuery } from '@/api/queries'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
 import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
@@ -62,12 +62,17 @@ import {
 import { DecisionDetail } from './decision-detail'
 import { decisionParams, emptyText, rowExtras, useStorageDecisions } from './decisions'
 import { FoldersPanel } from './folders-panel'
-import { Playground } from './playground'
 import { usePlayground } from './playground-store'
 import { describeForm } from './requests'
 import { type StorageRulesPanel, useStorageRulesSearch } from './rules-search'
 import { exportTests } from './tests-export'
 import { type TestCase, tests } from './tests-store'
+
+// The playground (its request form, the identity picker and the result
+// view) loads when its tab is first opened, not with the page.
+const Playground = lazy(() =>
+  import('./playground').then((module) => ({ default: module.Playground })),
+)
 
 /** Where each version of a scope's rules came from. */
 const ORIGINS: OriginLabels = {
@@ -387,15 +392,17 @@ function StorageRulesBody({
         />
       )}
       {panel === 'playground' && (
-        <Playground
-          project={project}
-          scope={scope}
-          bucket={bucket}
-          buckets={buckets.buckets}
-          source={draft.source}
-          ready={draft.rules.isSuccess}
-          onReveal={focus.setReveal}
-        />
+        <Suspense fallback={null}>
+          <Playground
+            project={project}
+            scope={scope}
+            bucket={bucket}
+            buckets={buckets.buckets}
+            source={draft.source}
+            ready={draft.rules.isSuccess}
+            onReveal={focus.setReveal}
+          />
+        </Suspense>
       )}
       {panel === 'tests' && (
         <TestsPanel

@@ -19,7 +19,7 @@ import {
   TreeStructureIcon,
 } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { lazy, Suspense, useMemo } from 'react'
 import { statusQuery } from '@/api/queries'
 import { SectionBanner } from '@/components/console/section-banner'
 import { Page } from '@/components/shell/page'
@@ -46,13 +46,18 @@ import {
 import { CollectionsPanel } from './collections-panel'
 import { DecisionDetail } from './decision-detail'
 import { decisionParams, emptyText, useFirestoreDecisions } from './decisions'
-import { Playground } from './playground'
 import { usePlayground } from './playground-store'
 import { describeForm } from './requests'
 import { type RulesPanel, useRulesSearch } from './rules-search'
 import { fieldsQuery } from './schema-fields'
 import { exportTests } from './tests-export'
 import { type TestCase, tests } from './tests-store'
+
+// The playground (its request form, the identity picker and the result
+// view) loads when its tab is first opened, not with the page.
+const Playground = lazy(() =>
+  import('./playground').then((module) => ({ default: module.Playground })),
+)
 
 /** Where each version of a database's rules came from. */
 const ORIGINS: OriginLabels = {
@@ -281,13 +286,15 @@ function RulesBody({ project, diagnostics }: { project: string; diagnostics: boo
         />
       )}
       {panel === 'playground' && (
-        <Playground
-          project={project}
-          database={database}
-          source={draft.source}
-          ready={draft.rules.isSuccess}
-          onReveal={focus.setReveal}
-        />
+        <Suspense fallback={null}>
+          <Playground
+            project={project}
+            database={database}
+            source={draft.source}
+            ready={draft.rules.isSuccess}
+            onReveal={focus.setReveal}
+          />
+        </Suspense>
       )}
       {panel === 'tests' && (
         <TestsPanel
