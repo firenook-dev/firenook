@@ -1,14 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventarcEventSummary } from '@/api/generated/compute/EventarcEventSummary'
-import {
-  clearEvents,
-  eventarcKeys,
-  getChannels,
-  getEvent,
-  getEvents,
-  publishEvent,
-  replayEvent,
-} from './api'
+import { eventarcKeys, getChannels, getEvent, getEvents, publishEvent, replayEvent } from './api'
 import { batchKeys } from './live'
 
 let sent: Array<{ url: string; method: string; body: unknown }>
@@ -73,15 +65,12 @@ describe('the Eventarc routes', () => {
     })
   })
 
-  it('replay keeps or renews the id, and clearing empties the record', async () => {
+  it('replay keeps or renews the id', async () => {
     await replayEvent('a3f9c1-212', { keepId: true })
     expect(last()).toMatchObject({
       url: '/console/api/v1/eventarc/events/a3f9c1-212/replay',
       body: { keepId: true },
     })
-    status = 204
-    await clearEvents()
-    expect(last()).toMatchObject({ url: '/console/api/v1/eventarc/events', method: 'DELETE' })
   })
 })
 

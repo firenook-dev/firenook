@@ -1048,8 +1048,6 @@ fn eventarc_events_record_their_deliveries() {
     assert_eq!(page.total, 3);
     assert_eq!(page.items.len(), 2);
     assert_eq!(page.next, Some(page.items[1].seq));
-    monitor.clear_events();
-    assert_eq!(monitor.event(&recorded.id), None);
 }
 
 #[test]

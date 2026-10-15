@@ -112,8 +112,3 @@ export function replayEvent(
 ): Promise<EventarcPublishResult> {
   return apiSend<EventarcPublishResult>('POST', `/eventarc/events/${enc(id)}/replay`, request)
 }
-
-/** Empties the engine's record of events. */
-export async function clearEvents(): Promise<void> {
-  await apiSend<undefined>('DELETE', '/eventarc/events', {})
-}
