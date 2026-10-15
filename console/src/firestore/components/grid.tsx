@@ -20,12 +20,22 @@ import {
   FolderPlusIcon,
   FunnelIcon,
   LockKeyIcon,
+  ShieldCheckIcon,
   PlusIcon,
   WarningIcon,
 } from '@phosphor-icons/react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { ColumnResizer } from '@/components/console/column-resizer'
 import { useColumnWidths, useIdFreeze } from '@/components/console/column-widths'
 import { EmptyState } from '@/components/console/empty-state'
@@ -49,7 +59,6 @@ import {
 } from '../queries'
 import { useRecents } from '../recents'
 import { FirestoreError } from '../rest'
-import { SeeWhy } from '../rules-page/see-why'
 import { childrenOf, describeChildren, patternOf, workbenchSchemaQuery } from '../schema'
 import { useGridSteps } from '../grid-steps'
 import { useSelection } from '../selection'
@@ -850,6 +859,12 @@ function QueryUnparsed() {
   )
 }
 
+// The explanation and its decision lookup load with the first denial, not
+// with every grid.
+const SeeWhy = lazy(() =>
+  import('../rules-page/see-why').then((module) => ({ default: module.SeeWhy })),
+)
+
 function QueryFailure({ error }: { error: Error }) {
   const workbench = useWorkbench()
   const denied = error instanceof FirestoreError && error.denied
@@ -871,12 +886,20 @@ function QueryFailure({ error }: { error: Error }) {
               {/* Why, here: the lines that refused it and the values they
                   saw, in the rules kit's popover, with the decision one
                   click away on the Rules page. */}
-              <SeeWhy
-                database={workbench.database}
-                path={workbench.collectionPath}
-                viewAs={workbench.viewAs}
-                message={error.message}
-              />
+              <Suspense
+                fallback={
+                  <Button variant="primary" icon={<ShieldCheckIcon />} disabled>
+                    See why
+                  </Button>
+                }
+              >
+                <SeeWhy
+                  database={workbench.database}
+                  path={workbench.collectionPath}
+                  viewAs={workbench.viewAs}
+                  message={error.message}
+                />
+              </Suspense>
               <Button variant="secondary" onClick={() => workbench.setViewAs({ kind: 'owner' })}>
                 View as admin
               </Button>

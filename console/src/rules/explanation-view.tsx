@@ -31,6 +31,9 @@ export interface ExplainedResult {
 /** How Firestore's rules spell their two document reads. */
 const DOCUMENT_READS: readonly [string, string] = ['get()', 'exists()']
 
+/** How Storage's rules spell theirs: Firestore documents, read from the Storage rules. */
+export const STORAGE_READS: readonly [string, string] = ['firestore.get()', 'firestore.exists()']
+
 function outcomeWord(outcome: AllowTrace['outcome']): string {
   return outcome === 'allow' ? 'allowed' : outcome === 'deny' ? 'refused' : 'raised an error'
 }

@@ -9,13 +9,11 @@ import type { StorageDecision } from '@/api/generated/storage/StorageDecision'
 import { useLinkTo } from '@/lib/links'
 import { DetailSection as Section, Mono, Term } from '@/rules/decision-parts'
 import { DecisionDetailFrame } from '@/rules/decision-detail'
+import { STORAGE_READS } from '@/rules/explanation-view'
 import { storageDecisionQuery } from '../queries'
 import { ObjectFacts, sizeText } from './object-facts'
 import { usePlayground } from './playground-store'
 import { formFromDecision, formFromRequest } from './requests'
-
-/** How Storage's rules spell their two document reads. */
-export const STORAGE_READS: readonly [string, string] = ['firestore.get()', 'firestore.exists()']
 
 export function DecisionDetail({
   project,

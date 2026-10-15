@@ -8,12 +8,12 @@
 
 import { useQuery } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
+import { STORAGE_READS } from '@/rules/explanation-view'
 import { RefusalDetail as RulesRefusal } from '@/rules/refusal-detail'
 import type { StorageErrorExtras } from '../api'
 import { useFiles } from '../files-state'
 import { rulesScope, storageRulesQuery } from '../queries'
 import { useRulesPageLink, useTryInPlayground } from '../rules-link'
-import { STORAGE_READS } from '../rules-page/decision-detail'
 
 /** The rules source in force for the bucket on screen, and one line of it. */
 export function useRulesText(): {
