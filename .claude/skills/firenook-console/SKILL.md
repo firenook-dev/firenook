@@ -228,7 +228,12 @@ component import beyond `shellMount`'s lazy one.
   against a real engine; there is no flag for a section that is not
   finished, so a half-built page never ships behind one.
 - `pages` (sub-items, each with its own `badges`), `badges` (ids from the
-  badge table), `actions` (⌘K rows; `?new=` and `?dialog=` open dialogs).
+  badge table).
+- The section's ⌘K rows (`?new=` and `?dialog=` open dialogs) are not in the
+  registry: they live beside it in `lib/sections/<id>-actions.ts`,
+  assembled by `lib/palette-actions.ts`, which only the lazy palette
+  imports, so their icons stay off the first route (5 KB gzip).
+  `links-every-kind.test.ts` opens every action's page with its search.
 - `routes` — `kind → (key) => SectionLink`: serves engine search hits and
   every `EntityRef` another section's payload carries (`linkTo(ref)`,
   `useLinkTo`). Keys split at the first `|` (the first three for
@@ -3232,8 +3237,8 @@ job and its file). Producers write `LogInput` (`suite-front`
 `suite-runtime/src/console_wiring/observe.rs`. Console: `src/logs/` (the page),
 `src/overview/` (`/`), `src/observe/` (only what those two share: the topic
 declarations, kinds, `LevelWord`, `SourceChip`, the level series and
-`LevelStrip`), the registry `src/lib/sections/logs.ts` (badge, routes, the
-suite-wide ⌘K actions, `linkToLogs`). Journeys: `e2e/logs.spec.ts`,
+`LevelStrip`), the registry `src/lib/sections/logs.ts` (badge, routes,
+`linkToLogs`) and `logs-actions.ts` beside it (the suite-wide ⌘K actions). Journeys: `e2e/logs.spec.ts`,
 `e2e/overview*.spec.ts`, helpers `e2e/support/observe.ts`, profile `observe`.
 
 - **The log ring.** One `ReplayRing` of 20,000 lines / 16 MiB, and a problem

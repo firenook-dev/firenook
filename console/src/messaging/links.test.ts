@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { pubsub } from '@/lib/sections/pubsub'
+import { pubsubActions } from '@/lib/sections/pubsub-actions'
 import { tasks } from '@/lib/sections/tasks'
+import { tasksActions } from '@/lib/sections/tasks-actions'
 import {
   messageSearch,
   queueSearch,
@@ -134,13 +136,13 @@ describe('the registries', () => {
   })
 
   it('open dialogs from their actions with the shared parameters', () => {
-    expect(pubsub.actions?.map((action) => action.link)).toEqual([
+    expect(pubsubActions.map((action) => action.link)).toEqual([
       { to: '/pubsub', search: { new: 'topic' } },
       { to: '/pubsub', search: { new: 'message' } },
       { to: '/pubsub/schemas', search: { new: 'schema' } },
       { to: '/pubsub', search: { dialog: 'setup' } },
     ])
-    expect(tasks.actions?.map((action) => action.link)).toEqual([
+    expect(tasksActions.map((action) => action.link)).toEqual([
       { to: '/tasks', search: { new: 'task' } },
     ])
   })

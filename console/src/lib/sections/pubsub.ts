@@ -1,16 +1,11 @@
 // Pub/Sub's registry entry: three pages (Topics, Schemas, Schedules —
 // schedules live here because a tick is a publish to the function's
 // schedule topic, so a run, its message and its delivery are one story on
-// one page), its badges, its ⌘K actions, and where a topic, subscription,
-// schema, message or schedule opens when ⌘K finds one or another section's
-// payload points at one.
+// one page), its badges, and where a topic, subscription, schema, message
+// or schedule opens when ⌘K finds one or another section's payload points
+// at one. Its ⌘K actions are in `./pubsub-actions.ts`.
 
-import {
-  ArrowsDownUpIcon,
-  BroadcastIcon,
-  PaperPlaneTiltIcon,
-  PlusIcon,
-} from '@phosphor-icons/react'
+import { BroadcastIcon } from '@phosphor-icons/react'
 import {
   messageSearch,
   scheduleSearch,
@@ -52,33 +47,6 @@ export const pubsub: ConsoleSection = {
   // The API and topics take `project`, so the shell's "Show demo-other"
   // opens the topics an app wrote under another project id.
   projectScope: true,
-  actions: [
-    {
-      id: 'pubsub.new-topic',
-      title: 'Create a topic',
-      icon: PlusIcon,
-      link: { to: '/pubsub', search: { new: 'topic' } },
-    },
-    {
-      id: 'pubsub.publish',
-      title: 'Publish a message',
-      icon: PaperPlaneTiltIcon,
-      link: { to: '/pubsub', search: { new: 'message' } },
-    },
-    {
-      id: 'pubsub.new-schema',
-      title: 'Create a schema',
-      icon: PlusIcon,
-      link: { to: '/pubsub/schemas', search: { new: 'schema' } },
-    },
-    {
-      id: 'pubsub.setup',
-      title: 'Export or import the Pub/Sub setup',
-      keywords: 'topics subscriptions schemas file',
-      icon: ArrowsDownUpIcon,
-      link: { to: '/pubsub', search: { dialog: 'setup' } },
-    },
-  ],
   searchLabels: {
     'pubsub.topic': 'Topics',
     'pubsub.subscription': 'Subscriptions',

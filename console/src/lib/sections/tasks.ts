@@ -1,8 +1,9 @@
 // Cloud Tasks' registry entry: one page (queues in the panel, the queue on
 // the right with its Tasks, Attempts, History and Configuration), its
-// badge, its ⌘K action, and where a queue or a task opens.
+// badge, and where a queue or a task opens. Its ⌘K action is in
+// `./tasks-actions.ts`.
 
-import { PlusIcon, QueueIcon } from '@phosphor-icons/react'
+import { QueueIcon } from '@phosphor-icons/react'
 import { queueSearch, taskSearch } from '@/messaging/links'
 import type { ConsoleSection, SectionLink } from '../services'
 
@@ -23,15 +24,6 @@ export const tasks: ConsoleSection = {
   // `tasks.jobs` (run and delete jobs) is the engine's automatic gauge.
   badges: ['tasks.failed'],
   projectScope: true,
-  actions: [
-    {
-      id: 'tasks.enqueue',
-      title: 'Enqueue a task',
-      keywords: 'cloud tasks queue onTaskDispatched',
-      icon: PlusIcon,
-      link: { to: '/tasks', search: { new: 'task' } },
-    },
-  ],
   searchLabels: { 'tasks.queue': 'Task queues', 'tasks.task': 'Tasks' },
   // The page's `q` filters one queue's tasks; with no queue in the link
   // there is nothing for it to filter, and the engine's hits already name

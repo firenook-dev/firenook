@@ -1,14 +1,15 @@
 // Storage's registry entry. What the rest of the console routes through
 // it: its two pages (Files, and Rules with the `storage.rules` badge),
 // where an object, a folder or a rules decision opens, the ⌘K group
-// labels, the create actions and the uploads beacon the shell mounts on
-// every page. Buckets are not per project, so there is no `projectScope`.
+// labels and the uploads beacon the shell mounts on every page (the create
+// actions ⌘K offers are in `./storage-actions.ts`). Buckets are not per
+// project, so there is no `projectScope`.
 //
 // A registry file loads with the first route: icons, types and pure string
 // helpers only (`splitKey`, `parentOf`); the beacon is a lazy import, its own
 // small chunk.
 
-import { FolderPlusIcon, HardDrivesIcon, UploadSimpleIcon } from '@phosphor-icons/react'
+import { HardDrivesIcon } from '@phosphor-icons/react'
 import { parentOf } from '@/storage/paths'
 import type { ConsoleSection, SectionLink } from '../services'
 import { splitKey } from './keys'
@@ -43,22 +44,6 @@ export const storage: ConsoleSection = {
   // While Storage is ready, on every page: the uploads badge and the
   // leave-page guard while this tab's upload queue holds bytes.
   shellMount: () => import('@/storage/uploads-beacon'),
-  actions: [
-    {
-      id: 'storage.upload',
-      title: 'Upload files',
-      keywords: 'storage bucket object',
-      icon: UploadSimpleIcon,
-      link: { to: '/storage', search: { new: 'upload' } },
-    },
-    {
-      id: 'storage.folder',
-      title: 'Create a folder',
-      keywords: 'storage bucket',
-      icon: FolderPlusIcon,
-      link: { to: '/storage', search: { new: 'folder' } },
-    },
-  ],
   searchLabels: { 'storage.object': 'Objects', 'storage.folder': 'Folders' },
   // Keys are the pinned ones entity.rs builds. The default bucket's `bucket`
   // param is dropped by the route, as the page writes it.

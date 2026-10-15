@@ -52,7 +52,11 @@ export interface SectionPage {
   keywords?: string
 }
 
-/** Something ⌘K offers from anywhere; a link, so a dialog opens from `?new=` or `?dialog=`. */
+/**
+ * Something ⌘K offers from anywhere; a link, so a dialog opens from `?new=`
+ * or `?dialog=`. A section's are in `sections/<id>-actions.ts`, which only
+ * the palette loads (`palette-actions.ts`), never in its registry.
+ */
 export interface SectionAction {
   id: string
   title: string
@@ -81,8 +85,6 @@ export interface ConsoleSection {
   pages?: readonly SectionPage[]
   /** Badge ids shown on the section's own nav item. */
   badges?: readonly string[]
-  /** What ⌘K offers from anywhere. */
-  actions?: readonly SectionAction[]
   /**
    * Where a thing of this section opens, by entity kind: serves engine
    * search hits (`SearchHit.kind`) and every `EntityRef` another section's

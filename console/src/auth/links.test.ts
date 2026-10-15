@@ -3,6 +3,7 @@ import { rulesPageSearch } from '@/rules/search'
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
 import { parseViewAs } from '@/lib/identity'
 import { auth } from '@/lib/sections/auth'
+import { authActions } from '@/lib/sections/auth-actions'
 import {
   ACTION_PATH,
   activityLink,
@@ -74,7 +75,7 @@ describe('where Authentication things open', () => {
       '/auth/settings',
     ])
     expect(auth.pages?.[1]?.badges).toEqual(['auth.inbox'])
-    expect(auth.actions?.map((action) => action.link)).toEqual([
+    expect(authActions.map((action) => action.link)).toEqual([
       { to: '/auth', search: { new: 'user' } },
       { to: '/auth', search: { new: 'import' } },
       { to: '/auth', search: { new: 'sample' } },

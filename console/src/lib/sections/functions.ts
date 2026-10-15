@@ -1,10 +1,11 @@
 // Functions' registry entry: its two pages, the two badges the engine
-// publishes for it, what ⌘K offers from anywhere, and where a function, an
-// invocation or a codebase opens when another section's payload points at
-// one (an `EntityRef` the engine built) or ⌘K's engine search finds one.
-// Compute exports no link builder: every link here goes through `routes`.
+// publishes for it, and where a function, an invocation or a codebase opens
+// when another section's payload points at one (an `EntityRef` the engine
+// built) or ⌘K's engine search finds one. Compute exports no link builder:
+// every link here goes through `routes`. What ⌘K offers from anywhere is in
+// `./functions-actions.ts`.
 
-import { LightningIcon, ListIcon } from '@phosphor-icons/react'
+import { LightningIcon } from '@phosphor-icons/react'
 import type { ConsoleSection } from '../services'
 
 export const functions: ConsoleSection = {
@@ -34,15 +35,6 @@ export const functions: ConsoleSection = {
       label: 'Invocations',
       badges: ['functions.failed'],
       keywords: 'runs executions history calls',
-    },
-  ],
-  actions: [
-    {
-      id: 'functions.invocations',
-      title: 'Show every invocation',
-      keywords: 'runs executions history',
-      icon: ListIcon,
-      link: { to: '/functions/invocations' },
     },
   ],
   searchLabels: { 'functions.function': 'Functions' },

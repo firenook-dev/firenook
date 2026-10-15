@@ -28,6 +28,7 @@ import { Kbd, PanelIcon } from '@/components/kit'
 import { describeTheme, useTheme } from '@/lib/color-mode'
 import { panelShown, useLayout } from '@/lib/layout'
 import { linkTo } from '@/lib/links'
+import { SECTION_ACTIONS } from '@/lib/palette-actions'
 import {
   type PaletteGroup,
   type PaletteItem,
@@ -261,7 +262,7 @@ export function CommandPalette() {
     const entries = new Map(status.data?.sections.map((entry) => [entry.id, entry]))
     return SECTIONS.filter((section) => entries.get(section.id)?.state !== 'absent').flatMap(
       (section) =>
-        (section.actions ?? []).map<PaletteItem>((action) => ({
+        (SECTION_ACTIONS[section.id] ?? []).map<PaletteItem>((action) => ({
           id: `action:${action.id}`,
           title: action.title,
           description: action.description,

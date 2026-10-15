@@ -3,6 +3,7 @@ import { seenBadges } from '@/components/console/section-gate'
 import { sectionEntry, testStatus } from '@/test/status'
 import { linkTo } from '../links'
 import { eventarc } from './eventarc'
+import { eventarcActions } from './eventarc-actions'
 import { extensions } from './extensions'
 import { functions } from './functions'
 
@@ -60,7 +61,7 @@ describe('pages and badges', () => {
 
   it('Eventarc has its events and its channels, and no Alerts page without alert delivery', () => {
     expect(eventarc.pages?.map((page) => page.to)).toEqual(['/eventarc', '/eventarc/channels'])
-    expect(eventarc.actions?.[0]?.link).toEqual({ to: '/eventarc', search: { new: 'event' } })
+    expect(eventarcActions[0]?.link).toEqual({ to: '/eventarc', search: { new: 'event' } })
   })
 })
 

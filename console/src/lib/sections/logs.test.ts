@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { type FilterFieldSet, checkFilter } from '@/lib/filter'
 import cases from '@/logs/filter-cases.json'
 import { LOGS_LINK_KEYS, linkToLogs, logs } from './logs'
+import { logsActions } from './logs-actions'
 
 // The Logs fields as the engine declares them (the cases file mirrors
 // `LOG_FIELDS`, and the engine's own test pins it).
@@ -104,7 +105,7 @@ describe('the Logs registry entry', () => {
   })
 
   it('offers the Overview’s suite-wide actions as links, registered only here', () => {
-    const links = Object.fromEntries((logs.actions ?? []).map((action) => [action.id, action.link]))
+    const links = Object.fromEntries(logsActions.map((action) => [action.id, action.link]))
     expect(links).toEqual({
       'logs.errors': { to: '/logs', search: { q: 'level:error' } },
       'logs.problems': { to: '/logs', search: { q: 'is:problem' } },
