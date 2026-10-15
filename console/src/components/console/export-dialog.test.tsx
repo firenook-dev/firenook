@@ -113,7 +113,7 @@ describe('the export dialog', () => {
           formats={['json', 'csv']}
           filename={(format) => `orders.${format}`}
           notes={{ json: 'One object keyed by document id.' }}
-          options={(format) =>
+          renderOptions={(format) =>
             format === 'csv' ? null : <span data-testid="typed-option">Keep types</span>
           }
           run={async () => new Blob(['{}'])}

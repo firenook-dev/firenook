@@ -320,7 +320,7 @@ function ExportDocuments({
       }
       formats={['json', 'ndjson', 'csv']}
       notes={EXPORT_NOTES}
-      options={(format) =>
+      renderOptions={(format) =>
         format === 'csv' ? null : (
           <div className="grid gap-1">
             <Checkbox

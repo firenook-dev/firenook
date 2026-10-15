@@ -2373,7 +2373,7 @@ indenting: paste instead (`pasteRules`).
   one-key map is not mistaken for it. The dialog is the kit's
   `ExportDialog` in its `run` mode (the file is built in the tab, since it
   reads through the rules; `notes` say what each format holds and
-  `options` adds "Keep Firestore types exactly"); it names the scope and
+  `renderOptions` adds "Keep Firestore types exactly"); it names the scope and
   whose identity it reads as, because rules apply. Test ids `export-what`,
   `export-confirm`, `export-progress`.
 - There is no undo: the write log and its undo were taken out (see "The

@@ -7,7 +7,7 @@
 // manager reads it, so nothing is assembled in this tab's memory. `run` is
 // for the exports the browser must build itself, such as Firestore's
 // view-as export, which reads through the rules as the chosen identity; its
-// Blob is saved as it is. `notes` and `options` let a section say what its
+// Blob is saved as it is. `notes` and `renderOptions` let a section say what its
 // formats hold and offer a choice of its own.
 
 import { Button, Dialog, Tabs, Text } from '@cloudflare/kumo'
@@ -52,7 +52,7 @@ export function ExportDialog({
   href,
   run,
   notes,
-  options,
+  renderOptions,
   testId = 'export-dialog',
 }: {
   open: boolean
@@ -73,7 +73,7 @@ export function ExportDialog({
   /** A section's own word for what a format holds, in place of the generic note. */
   notes?: Partial<Record<ExportFormat, string>>
   /** Choices of the section's own under the format's note (Firestore's exact types). */
-  options?: (format: ExportFormat) => ReactNode
+  renderOptions?: (format: ExportFormat) => ReactNode
   testId?: string
 }) {
   const [format, setFormat] = useState<ExportFormat>(formats[0] ?? 'json')
@@ -167,7 +167,7 @@ export function ExportDialog({
             <Text variant="secondary" size="sm">
               {notes?.[chosen] ?? info.note}
             </Text>
-            {options?.(chosen)}
+            {renderOptions?.(chosen)}
           </div>
           {progress && (
             <div className="mt-3" data-testid={`${testId}-progress`}>
