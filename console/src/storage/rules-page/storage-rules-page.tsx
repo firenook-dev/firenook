@@ -13,41 +13,40 @@
 // next request), a file per bucket (the bucket picker), or none at all in a
 // demo project (the emulator's open default rules, said in a banner).
 //
-// The page is the rules kit's (`src/rules/`) — the draft, the check, the
-// toolbar, the banners, the Problems strip, history, coverage, the tests
-// panel and the decisions shell, shared with Firestore's rules page — with
-// Storage's own pieces: the `storage.decisions` feed, the playground's file
+// The page is the rules kit's workbench (`src/rules/workbench.tsx`) — the
+// same frame, keys and ⌘K as Firestore's rules page — with Storage's own
+// pieces: the scope, the `storage.decisions` feed, the playground's file
 // requests, the folders map and starter rules from the bucket's files.
 
-import { Tabs, Text, Tooltip } from '@cloudflare/kumo'
+import { Text, Tooltip } from '@cloudflare/kumo'
+import {
+  FlaskIcon,
+  FoldersIcon,
+  ListChecksIcon,
+  MagicWandIcon,
+  ScalesIcon,
+} from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { statusQuery } from '@/api/queries'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
 import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
-import { CodeEditor } from '@/components/code-editor'
 import { CopyButton } from '@/components/console/copy-button'
 import { QueryError, useDelayedFlag } from '@/components/console/empty-state'
 import { ScopeSelect } from '@/components/console/scope-select'
 import { SectionBanner } from '@/components/console/section-banner'
 import { Page } from '@/components/shell/page'
 import { useClaimKeys } from '@/lib/claim-keys'
+import { download } from '@/lib/download'
 import { formatCount } from '@/lib/format'
-import { useShortcuts } from '@/lib/shortcuts'
-import {
-  FileProblemsBanner,
-  ImpactBanner,
-  OvertakenBanner,
-  TestsFailingBanner,
-} from '@/rules/banners'
 import { useRulesCheck } from '@/rules/check'
-import { coverageView } from '@/rules/coverage'
+import { RulesDecisionsPanel } from '@/rules/decisions-panel'
 import { type RulesDraft, useRulesDraft } from '@/rules/draft'
 import { useEditorFocus } from '@/rules/focus'
 import type { OriginLabels } from '@/rules/history'
-import { Problems, nextProblem } from '@/rules/problems'
 import { TestsPanel } from '@/rules/tests-panel'
-import { RulesToolbar, fileName, useCoveragePreference } from '@/rules/toolbar'
+import { fileName } from '@/rules/toolbar'
+import { type WorkbenchPanel, RulesWorkbench } from '@/rules/workbench'
 import { useStorageRulesLive } from '../live'
 import {
   bucketsQuery,
@@ -60,23 +59,15 @@ import {
   storageRulesCheckQuery,
   storageRulesHistoryQuery,
 } from '../queries'
-import { DecisionsPanel } from './decisions-panel'
-import { decisionParams, useStorageDecisions } from './decisions'
+import { DecisionDetail } from './decision-detail'
+import { decisionParams, emptyText, rowExtras, useStorageDecisions } from './decisions'
 import { FoldersPanel } from './folders-panel'
-import { useStorageRulesPalette } from './palette'
 import { Playground } from './playground'
 import { usePlayground } from './playground-store'
 import { describeForm } from './requests'
 import { type StorageRulesPanel, useStorageRulesSearch } from './rules-search'
 import { exportTests } from './tests-export'
-import {
-  type TestCase,
-  runTests,
-  testsStore,
-  useTestRunner,
-  useTestSummary,
-  useTests,
-} from './tests-store'
+import { type TestCase, tests } from './tests-store'
 
 /** Where each version of a scope's rules came from. */
 const ORIGINS: OriginLabels = {
@@ -174,7 +165,9 @@ function StorageRulesBody({
   const document = draft.rules.data as StorageRulesDocument | undefined
   useStorageRulesLive(project, scope)
   const panel: StorageRulesPanel = search.panel ?? 'decisions'
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const openPanel = (next: StorageRulesPanel) =>
+    update({ panel: next === 'decisions' ? undefined : next })
+  const loadPlayground = usePlayground((state) => state.load)
 
   const params = diagnostics
     ? decisionParams(scopeBucket(scope), {
@@ -192,39 +185,26 @@ function StorageRulesBody({
     line: search.line,
     onLineShown: () => update({ line: undefined }, { replace: true }),
   })
-  const [coverageOn, setCoverageOn] = useCoveragePreference('storage')
 
   // The draft, checked as it is typed: the compiler's errors and the
   // engine's warnings (Storage's own among them: uploads with no size
   // limit, list() below rules_version 2), where they are.
-  const { checked, problems, marks, compiles } = useRulesCheck(draft, scope, (text) =>
-    storageRulesCheckQuery(project, scope, text),
-  )
-
-  // How often each expression has run, moving as the app makes requests:
-  // the decisions feed asks for the report again (at most once a second).
-  // Read only while coverage is shown.
-  const coverage = useQuery({
-    ...storageCoverageQuery(project, scope),
-    enabled: diagnostics && coverageOn,
-  })
-  const covered = useMemo(
-    () => (coverageOn ? coverageView(coverage.data, draft.source) : undefined),
-    [coverageOn, coverage.data, draft.source],
-  )
+  const check = useRulesCheck(draft, scope, (text) => storageRulesCheckQuery(project, scope, text))
 
   // The saved tests, run against the editor's text as it changes.
-  useTestRunner(project, scope, bucket, draft.source, draft.rules.isSuccess)
-  const tests = useTestSummary(draft.source)
-  const cases = useTests((state) => state.cases)
-  const loadPlayground = usePlayground((state) => state.load)
+  tests.useRunner({ project, scope, bucket }, draft.source, draft.rules.isSuccess)
+  const summary = tests.useSummary(draft.source)
+  const cases = tests.useTests((state) => state.cases)
 
   // What applying the draft would turn around among the decisions the
   // engine can still re-run — asked once the draft compiles and settles.
   const impact = useQuery({
-    ...storageImpactQuery(project, scope, checked ?? ''),
-    enabled: compiles && diagnostics,
+    ...storageImpactQuery(project, scope, check.checked ?? ''),
+    enabled: check.compiles && diagnostics,
   })
+  const flips = check.compiles
+    ? new Map((impact.data?.flips ?? []).map((flip) => [flip.id, flip.after]))
+    : undefined
 
   // The text of the rules a decision was made by, while the page has it:
   // what is in force, or a version in the history.
@@ -253,234 +233,194 @@ function StorageRulesBody({
     name: `${rulesFile}.test.ts`,
     text: exportTests(list, { project, bucket, rulesFile }),
   })
-  const openPanel = (next: StorageRulesPanel) =>
-    update({ panel: next === 'decisions' ? undefined : next })
 
-  useStorageRulesPalette({
-    draft,
-    coverageOn,
-    setCoverageOn,
-    openHistory: () => setHistoryOpen(true),
-    openPanel,
-    cases,
-    exportFile,
-  })
-
-  // ⌘↵ applies, ⌘S saves, from the keys and from inside the editor, which
-  // is where they are pressed; F8 and Shift+F8 walk the problems.
-  useShortcuts({ id: 'storage.rules', label: 'Storage rules' }, [
+  const panels: WorkbenchPanel<StorageRulesPanel>[] = [
     {
-      key: 'Mod+Enter',
-      label: 'Apply the draft',
-      allowInInputs: true,
-      run: () => {
-        if (draft.edited) draft.apply(false)
+      value: 'decisions',
+      label: 'Decisions',
+      palette: {
+        title: 'Decisions',
+        description: 'Every request the rules judged',
+        keywords: 'requests denied allowed why',
+        icon: <ScalesIcon size={16} />,
       },
     },
     {
-      key: 'Mod+s',
-      label: 'Save to the rules file',
-      allowInInputs: true,
-      run: () => {
-        if (document?.path) draft.apply(true)
+      value: 'playground',
+      label: 'Playground',
+      palette: {
+        title: 'Playground',
+        description: 'Try a request against the draft',
+        keywords: 'simulate test request',
+        icon: <FlaskIcon size={16} />,
       },
     },
     {
-      key: 'F8',
-      label: 'Next problem',
-      allowInInputs: true,
-      when: () => problems.length > 0,
-      run: () => {
-        const next = nextProblem(problems, focus.at)
-        if (next) focus.setReveal(next.line)
+      value: 'tests',
+      label: 'Tests',
+      alarm: summary?.failing,
+      testId: 'tab-tests',
+      palette: {
+        title: 'Tests',
+        description: 'Saved requests and the verdict each should get',
+        keywords: 'saved cases',
+        icon: <ListChecksIcon size={16} />,
       },
     },
     {
-      key: 'Shift+F8',
-      label: 'Previous problem',
-      allowInInputs: true,
-      when: () => problems.length > 0,
-      run: () => {
-        const previous = nextProblem(problems, focus.at, true)
-        if (previous) focus.setReveal(previous.line)
+      value: 'folders',
+      label: 'Folders',
+      palette: {
+        title: 'Folders',
+        description: 'Which rules govern which folders',
+        keywords: 'map uncovered coverage',
+        icon: <FoldersIcon size={16} />,
       },
     },
-  ])
+  ]
 
   const mode = document?.mode ?? buckets.rulesMode
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="rules-page">
-      <h1 className="sr-only">Storage rules</h1>
-      <RulesToolbar
-        scope={
-          mode === 'perBucket' ? (
-            <ScopeSelect
-              label="Bucket"
-              value={bucket}
-              items={buckets.buckets.map((item) => ({
-                value: item.name,
-                detail: item.isDefault ? 'default' : item.served ? undefined : 'no rules',
-              }))}
-              onChange={(next) =>
-                update({
-                  bucket: next === buckets.defaultBucket ? undefined : next,
-                  decision: undefined,
-                  path: undefined,
-                })
-              }
-              onOpen={() =>
-                void queryClient.invalidateQueries({ queryKey: bucketsQuery(project).queryKey })
-              }
-              testId="rules-bucket"
-              className="w-80 shrink"
+    <RulesWorkbench
+      page="storage"
+      title="Storage rules"
+      sourceLabel="Storage rules source"
+      draft={draft}
+      focus={focus}
+      check={check}
+      completion={completion}
+      scope={
+        mode === 'perBucket' ? (
+          <ScopeSelect
+            label="Bucket"
+            value={bucket}
+            items={buckets.buckets.map((item) => ({
+              value: item.name,
+              detail: item.isDefault ? 'default' : item.served ? undefined : 'no rules',
+            }))}
+            onChange={(next) =>
+              update({
+                bucket: next === buckets.defaultBucket ? undefined : next,
+                decision: undefined,
+                path: undefined,
+              })
+            }
+            onOpen={() =>
+              void queryClient.invalidateQueries({ queryKey: bucketsQuery(project).queryKey })
+            }
+            testId="rules-bucket"
+            className="w-80 shrink"
+          />
+        ) : (
+          <AllBuckets governs={document?.governs ?? buckets.buckets.map((item) => item.name)} />
+        )
+      }
+      history={storageRulesHistoryQuery(project, scope)}
+      origins={ORIGINS}
+      noFileText={
+        mode === 'openDefault'
+          ? 'Open default rules · no storage section in firebase.json'
+          : 'No rules file in firebase.json'
+      }
+      noFileTip={
+        mode === 'openDefault'
+          ? 'firebase.json has no storage section, so there is no file to save to'
+          : `firebase.json names no rules file for gs://${bucket}; Apply keeps rules in memory`
+      }
+      applyTip={
+        mode === 'single' || mode === 'openDefault'
+          ? 'In force for every bucket from the next request'
+          : `In force for gs://${bucket} from the next request, not written to disk`
+      }
+      coverageQuery={storageCoverageQuery(project, scope)}
+      coverageAvailable={diagnostics}
+      banners={<ScopeBanners document={document} draft={draft} bucket={bucket} />}
+      impact={check.compiles ? impact.data : undefined}
+      onShowFlips={() => update({ panel: undefined, decision: undefined, flips: true })}
+      tests={summary}
+      onShowTests={() => update({ panel: 'tests' })}
+      exportTests={{
+        count: cases.length,
+        run: () => {
+          const file = exportFile(cases)
+          void download(new Blob([file.text], { type: 'text/typescript' }), file.name)
+        },
+      }}
+      panels={panels}
+      panel={panel}
+      onPanel={openPanel}
+      actions={[
+        {
+          id: 'storage-rules:starter',
+          title: 'Add starter rules',
+          description: 'From a template or from the bucket’s files',
+          keywords: 'template generate',
+          icon: <MagicWandIcon size={16} />,
+          run: () => openPanel('folders'),
+        },
+      ]}
+    >
+      {panel === 'decisions' && (
+        <RulesDecisionsPanel
+          search={search}
+          update={update}
+          diagnostics={diagnostics}
+          log={decisions.log}
+          status={decisions.status}
+          flips={flips}
+          placeholder="Filter by path, uid:<uid> or method"
+          empty={emptyText(document?.enforced ?? true)}
+          keepEnd
+          extras={(decision) => rowExtras(decision, scope === '*' ? undefined : bucket)}
+          renderDetail={(decision) => (
+            <DecisionDetail
+              key={decision.id}
+              project={project}
+              scope={scope}
+              decision={decision}
+              rulesOf={rulesOf}
+              editorSource={draft.source}
+              onReveal={focus.setReveal}
+              onTry={() => update({ panel: 'playground' })}
             />
-          ) : (
-            <AllBuckets governs={document?.governs ?? buckets.buckets.map((item) => item.name)} />
-          )
-        }
-        draft={draft}
-        coverage={covered}
-        coverageOn={coverageOn}
-        onCoverage={setCoverageOn}
-        history={storageRulesHistoryQuery(project, scope)}
-        origins={ORIGINS}
-        noFileText={
-          mode === 'openDefault'
-            ? 'Open default rules · no storage section in firebase.json'
-            : 'No rules file in firebase.json'
-        }
-        noFileTip={
-          mode === 'openDefault'
-            ? 'firebase.json has no storage section, so there is no file to save to'
-            : `firebase.json names no rules file for gs://${bucket}; Apply keeps rules in memory`
-        }
-        applyTip={
-          mode === 'single' || mode === 'openDefault'
-            ? 'In force for every bucket from the next request'
-            : `In force for gs://${bucket} from the next request, not written to disk`
-        }
-        historyOpen={historyOpen}
-        onHistoryOpen={setHistoryOpen}
-      />
-      <ScopeBanners document={document} draft={draft} bucket={bucket} />
-      <FileProblemsBanner draft={draft} onReveal={focus.setReveal} />
-      <OvertakenBanner draft={draft} />
-      <ImpactBanner
-        impact={compiles ? impact.data : undefined}
-        onShow={() => update({ panel: undefined, decision: undefined, flips: true })}
-      />
-      <TestsFailingBanner
-        tests={draft.edited ? tests : undefined}
-        onShow={() => update({ panel: 'tests' })}
-      />
-      <div className="flex min-h-0 flex-1">
-        <section
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
-          aria-label="Storage rules source"
-          data-testid="rules-editor"
-        >
-          <div className="flex min-h-0 flex-1 flex-col">
-            <CodeEditor
-              value={draft.source}
-              onChange={draft.setSource}
-              language="rules"
-              rulesCompletion={completion}
-              marks={marks}
-              lineMarks={focus.lineMarks}
-              inlineValues={focus.shown?.values ?? covered?.tallies}
-              gutterNotes={covered?.notes}
-              reveal={focus.reveal}
-              ariaLabel="Storage rules source"
-              testId="rules-source"
-            />
-          </div>
-          <Problems problems={problems} onJump={focus.setReveal} />
-        </section>
-        <aside
-          className="flex w-[440px] shrink-0 flex-col border-l border-kumo-line bg-kumo-base max-xl:w-[380px]"
-          aria-label="What the rules do"
-          data-testid="rules-side"
-        >
-          <div className="flex h-11 shrink-0 items-center border-b border-kumo-line px-3">
-            <Tabs
-              variant="underline"
-              size="sm"
-              value={panel}
-              onValueChange={(next) => openPanel(next as StorageRulesPanel)}
-              tabs={[
-                { value: 'decisions', label: 'Decisions' },
-                { value: 'playground', label: 'Playground' },
-                {
-                  value: 'tests',
-                  label: (
-                    <span className="flex items-center gap-1.5" data-testid="tab-tests">
-                      Tests
-                      {tests && tests.failing > 0 && (
-                        <span className="rounded-full bg-kumo-danger px-1.5 text-[10px] leading-4 text-kumo-inverse tabular-nums">
-                          {tests.failing}
-                        </span>
-                      )}
-                    </span>
-                  ),
-                },
-                { value: 'folders', label: 'Folders' },
-              ]}
-            />
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col">
-            {panel === 'decisions' && (
-              <DecisionsPanel
-                project={project}
-                scope={scope}
-                bucket={bucket}
-                diagnostics={diagnostics}
-                enforced={document?.enforced ?? true}
-                log={decisions.log}
-                status={decisions.status}
-                flips={compiles ? impact.data?.flips : undefined}
-                rulesOf={rulesOf}
-                editorSource={draft.source}
-                onReveal={focus.setReveal}
-              />
-            )}
-            {panel === 'playground' && (
-              <Playground
-                project={project}
-                scope={scope}
-                bucket={bucket}
-                buckets={buckets.buckets}
-                source={draft.source}
-                ready={draft.rules.isSuccess}
-                onReveal={focus.setReveal}
-              />
-            )}
-            {panel === 'tests' && (
-              <TestsPanel
-                store={testsStore}
-                source={draft.source}
-                onRun={() => void runTests(project, scope, bucket, draft.source)}
-                describe={(test) => test.name || describeForm(test.form, bucket)}
-                onOpen={(test) => {
-                  loadPlayground(test.form)
-                  update({ panel: 'playground' })
-                }}
-                exportFile={exportFile}
-              />
-            )}
-            {panel === 'folders' && (
-              <FoldersPanel
-                project={project}
-                scope={scope}
-                bucket={bucket}
-                draft={draft}
-                checked={checked}
-                onReveal={focus.setReveal}
-              />
-            )}
-          </div>
-        </aside>
-      </div>
-    </div>
+          )}
+        />
+      )}
+      {panel === 'playground' && (
+        <Playground
+          project={project}
+          scope={scope}
+          bucket={bucket}
+          buckets={buckets.buckets}
+          source={draft.source}
+          ready={draft.rules.isSuccess}
+          onReveal={focus.setReveal}
+        />
+      )}
+      {panel === 'tests' && (
+        <TestsPanel
+          store={tests.store}
+          source={draft.source}
+          onRun={() => void tests.run({ project, scope, bucket }, draft.source)}
+          describe={(test) => test.name || describeForm(test.form, bucket)}
+          onOpen={(test) => {
+            loadPlayground(test.form)
+            update({ panel: 'playground' })
+          }}
+          exportFile={exportFile}
+        />
+      )}
+      {panel === 'folders' && (
+        <FoldersPanel
+          project={project}
+          scope={scope}
+          bucket={bucket}
+          draft={draft}
+          checked={check.checked}
+          onReveal={focus.setReveal}
+        />
+      )}
+    </RulesWorkbench>
   )
 }
 

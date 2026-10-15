@@ -54,7 +54,7 @@ export function ExplanationView({
   result,
   rules,
   onReveal,
-  readFunctions = DOCUMENT_READS,
+  readFunctions,
 }: {
   result: ExplainedResult
   /** The rules source the offsets refer to. */
@@ -62,9 +62,9 @@ export function ExplanationView({
   /** Bring a line of these rules into view in the editor, when the editor holds them. */
   onReveal?: ((line: number) => void) | undefined
   /** How the rules language spells its two document reads: Storage's are `firestore.get()`. */
-  readFunctions?: readonly [string, string]
+  readFunctions?: readonly [string, string] | undefined
 }) {
-  const [getter, exister] = readFunctions
+  const [getter, exister] = readFunctions ?? DOCUMENT_READS
   const steps = inlineSteps(result.explanation, rules)
   // The allows that decided it first, then the ones that merely ran.
   const deciding = (allow: AllowTrace) =>

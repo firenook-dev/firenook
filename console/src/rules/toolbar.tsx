@@ -176,7 +176,7 @@ export function RulesToolbar<K extends QueryKey>({
   onCoverage,
   history,
   origins,
-  noFileText = 'No rules file in firebase.json',
+  noFileText,
   noFileTip,
   applyTip,
   historyOpen,
@@ -191,7 +191,7 @@ export function RulesToolbar<K extends QueryKey>({
   history: HistoryQuery<K>
   origins: OriginLabels
   /** In place of the file name when the scope has none. */
-  noFileText?: string
+  noFileText?: string | undefined
   noFileTip: string
   applyTip?: string | undefined
   /** The history dialog, when the page opens it from elsewhere too (⌘K). */
@@ -221,7 +221,7 @@ export function RulesToolbar<K extends QueryKey>({
         />
       ) : (
         <Text as="span" variant="secondary" size="sm">
-          {noFileText}
+          {noFileText ?? 'No rules file in firebase.json'}
         </Text>
       )}
       <DraftState draft={draft} />
