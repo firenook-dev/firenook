@@ -7,6 +7,7 @@
 
 import type { TasksAttempt } from '@/api/generated/messaging/TasksAttempt'
 import type { TasksOutcome } from '@/api/generated/messaging/TasksOutcome'
+import type { TasksQueueCounters } from '@/api/generated/messaging/TasksQueueCounters'
 import type { TasksTaskRow } from '@/api/generated/messaging/TasksTaskRow'
 import type { TasksTaskState } from '@/api/generated/messaging/TasksTaskState'
 import type { StatusTone } from '@/components/kit'
@@ -162,6 +163,21 @@ export function executionText(attempt: Pick<TasksAttempt, 'countedExecution' | '
   if (attempt.status !== null && attempt.status >= 500) return 'not counted as an execution (5xx)'
   if (attempt.status !== null && attempt.status < 300) return 'not counted as an execution'
   return 'not counted as an execution (no answer)'
+}
+
+/**
+ * Whether the rate limit is what holds the queue back now: tasks wait to be
+ * sent and the bucket had no whole token at its last change (a dispatch
+ * takes one; it refills once a second by maxDispatchesPerSecond). Read from
+ * the engine's last figures, not the clock's refill, so it does not blink
+ * between a refill and the dispatch that spends it. A paused queue is held
+ * by its pause, not its rate. Only then are the tokens worth showing.
+ */
+export function rateLimiting(queue: {
+  paused: boolean
+  counters: Pick<TasksQueueCounters, 'pending' | 'tokens'>
+}): boolean {
+  return !queue.paused && queue.counters.pending > 0 && queue.counters.tokens < 1
 }
 
 /** How a finished task left its queue, as History's chip says it. */

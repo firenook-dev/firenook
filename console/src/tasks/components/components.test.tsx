@@ -20,7 +20,8 @@ import { AttemptsTimeline } from './attempts-timeline'
 import { type ConfirmRequest, useConfirmPopover } from '@/components/console/confirm-popover'
 import { QueuesLanding } from './queues-landing'
 import { panelNodes } from './queues-panel'
-import { AttemptsLink } from './queue-view'
+import { QueueConfig } from './queue-config'
+import { AttemptsLink, SlotsAndTokens } from './queue-view'
 import { meantQueue, refusedText } from './refused-banner'
 import { replacedText } from './replaced-banner'
 import type { TaskActions } from './task-actions'
@@ -455,6 +456,30 @@ describe('where a queue’s attempts are', () => {
       }),
     })
     expect(screen.queryByTestId('queue-attempts-link')).not.toBeInTheDocument()
+  })
+})
+
+describe('the token bucket, shown only while the rate limit holds tasks back', () => {
+  const limited = testQueue('processOrder', {
+    counters: testCounters({ pending: 3, tokens: 0.2, refilledAt: new Date().toISOString() }),
+  })
+
+  it('in Configuration: the bucket as an alarm, else the rate in words', async () => {
+    await renderInConsole(() => <QueueConfig queue={limited} />, { status: ready() })
+    expect(screen.getByTestId('gauge-tokens')).toHaveTextContent('0.2 of 10')
+    expect(screen.queryByTestId('gauge-rate')).not.toBeInTheDocument()
+    cleanup()
+    await renderInConsole(() => <QueueConfig queue={testQueue()} />, { status: ready() })
+    expect(screen.getByTestId('gauge-rate')).toHaveTextContent('10 a second')
+    expect(screen.queryByTestId('gauge-tokens')).not.toBeInTheDocument()
+  })
+
+  it('on the Tasks tab’s row two: the slots always, the tokens only then', async () => {
+    await renderInConsole(() => <SlotsAndTokens queue={limited} />, { status: ready() })
+    expect(screen.getByTestId('slots-tokens')).toHaveTextContent('slots 0/2 · 0.2 tokens')
+    cleanup()
+    await renderInConsole(() => <SlotsAndTokens queue={testQueue()} />, { status: ready() })
+    expect(screen.getByTestId('slots-tokens')).toHaveTextContent(/^slots 0\/2$/)
   })
 })
 

@@ -44,7 +44,7 @@ import { tasksKeys } from '../queries'
 import { QueueLiveContext, useQueueHub } from '../queue-live'
 import { queueResourceName } from '../queue-address'
 import { type TasksView, useTasksSearch } from '../search'
-import { OUTCOMES, type StateFilter } from '../states'
+import { OUTCOMES, type StateFilter, rateLimiting } from '../states'
 import { HistoryView } from './history-table'
 import { QueueConfig } from './queue-config'
 import { RefusedBanners } from './refused-banner'
@@ -162,13 +162,27 @@ export function SwitchLabel({
   )
 }
 
-/** `slots 2/2 · 4.1 tokens`, the bucket refilling on the shared clock. */
+/** The bucket's tokens, refilling on the shared clock (mounted only while they count). */
+function Tokens({ counters }: { counters: TasksQueue['counters'] }) {
+  const tokens = useTokens(counters) ?? counters.tokens
+  return <span className="font-mono text-kumo-warning tabular-nums">{tokens.toFixed(1)}</span>
+}
+
+/**
+ * `slots 2/2`, and `· 0.4 tokens` only while the rate limit is what holds
+ * tasks back (`rateLimiting`).
+ */
 export function SlotsAndTokens({ queue }: { queue: TasksQueue }) {
   const { counters } = queue
-  const tokens = useTokens(counters) ?? counters.tokens
+  const limiting = rateLimiting(queue)
+  const full = counters.slotsInUse >= counters.slots && counters.slots > 0
   return (
     <Tooltip
-      content={`${formatNumber(counters.slotsInUse)} of ${formatNumber(counters.slots)} dispatch slots busy (maxConcurrentDispatches). The token bucket refills ${formatNumber(counters.maxDispatchesPerSecond)} a second (maxDispatchesPerSecond), up to ${formatNumber(counters.maxTokens)}.`}
+      content={`${formatNumber(counters.slotsInUse)} of ${formatNumber(counters.slots)} dispatch slots busy (maxConcurrentDispatches). ${
+        limiting
+          ? `Tasks wait for tokens: the bucket refills ${formatNumber(counters.maxDispatchesPerSecond)} a second (maxDispatchesPerSecond), up to ${formatNumber(counters.maxTokens)}.`
+          : `The rate limit, ${formatNumber(counters.maxDispatchesPerSecond)} a second, holds nothing back now.`
+      }`}
       render={
         <span
           className="shrink-0 cursor-default text-[12px] whitespace-nowrap text-kumo-subtle"
@@ -176,12 +190,16 @@ export function SlotsAndTokens({ queue }: { queue: TasksQueue }) {
         >
           slots{' '}
           <span
-            className={`font-mono tabular-nums ${counters.slotsInUse >= counters.slots && counters.slots > 0 ? 'text-kumo-warning' : 'text-kumo-default'}`}
+            className={`font-mono tabular-nums ${full ? 'text-kumo-warning' : 'text-kumo-default'}`}
           >
             {formatNumber(counters.slotsInUse)}/{formatNumber(counters.slots)}
-          </span>{' '}
-          · <span className="font-mono text-kumo-default tabular-nums">{tokens.toFixed(1)}</span>{' '}
-          tokens
+          </span>
+          {limiting && (
+            <>
+              {' '}
+              · <Tokens counters={counters} /> tokens
+            </>
+          )}
         </span>
       }
     />

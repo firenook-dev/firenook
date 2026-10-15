@@ -9,12 +9,19 @@ import {
   executionText,
   lastResult,
   outcomeChip,
+  rateLimiting,
   stateTone,
   stateWord,
 } from './states'
 import { NOW, testAttempt, testRow } from './fixtures.test-support'
 
 const at = (ms: number) => new Date(NOW + ms).toISOString()
+
+/** A queue as `rateLimiting` reads it. */
+const queue = (pending: number, tokens: number, paused = false) => ({
+  paused,
+  counters: { pending, tokens },
+})
 
 describe('task states (U-16)', () => {
   it('say where a task is, with its place in the queue or its due time', () => {
@@ -95,6 +102,16 @@ describe('task states (U-16)', () => {
     expect(executionText(testAttempt({ countedExecution: false, status: null }))).toMatch(
       /no answer/,
     )
+  })
+
+  it('say the rate limit holds a queue back only while tasks wait on an empty bucket', () => {
+    expect(rateLimiting(queue(3, 0.4))).toBe(true)
+    // A full bucket: the slots, not the rate, hold whatever waits.
+    expect(rateLimiting(queue(3, 10))).toBe(false)
+    // Nothing waits: an empty bucket holds nothing back.
+    expect(rateLimiting(queue(0, 0))).toBe(false)
+    // Paused: the pause holds the tasks, whatever the bucket.
+    expect(rateLimiting(queue(3, 0, true))).toBe(false)
   })
 
   it('give each outcome its word and tone, and say what replaced means', () => {

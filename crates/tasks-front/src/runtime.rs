@@ -203,12 +203,8 @@ pub struct StampedWindow {
 pub(crate) struct QueueWindows {
     /// Attempts sent, per second over a minute.
     pub dispatched: Buckets<60, 1>,
-    /// Attempts answered 2xx, per second over a minute.
-    pub succeeded: Buckets<60, 1>,
     /// Tasks that ran out of retries, per ten seconds over five minutes.
     pub failed: Buckets<30, 10>,
-    /// Tasks enqueued, per ten seconds over five minutes.
-    pub added: Buckets<30, 10>,
 }
 
 /// A request the Tasks port refused, coalesced by operation, queue, status
@@ -949,14 +945,10 @@ impl TasksRuntime {
         }
         task.id = id;
         task.enqueued_at = SystemTime::now();
-        let at = task.enqueued_at;
         queue
             .enqueue(task, Instant::now(), controls)
             .map_err(|Conflict| EnqueueError::NameReserved)?;
         state.next_task = id;
-        if let Some(console) = state.console.get_mut(key) {
-            console.windows.added.record(at, 1);
-        }
         self.finish(state);
         Ok(id)
     }
@@ -1457,11 +1449,6 @@ impl TasksRuntime {
                 && state.attach_to_history(&request.queue_key, request.dispatch_id, record)
             {
                 state.stamp(&request.queue_key);
-            }
-            if status.is_some_and(|status| (200..=299).contains(&status))
-                && let Some(console) = state.console.get_mut(&request.queue_key)
-            {
-                console.windows.succeeded.record(SystemTime::now(), 1);
             }
             self.finish(state);
         }

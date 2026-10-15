@@ -35,9 +35,7 @@ export function testCounters(overrides: Partial<TasksQueueCounters> = {}): Tasks
     refilledAt: '2026-10-12T10:02:27.000Z',
     maxDispatchesPerSecond: 10,
     dispatched: window,
-    succeeded: window,
     failed: window,
-    added: window,
     oldestPendingAt: null,
     history: 0,
     outcomes: { succeeded: 0, failed: 0, cancelled: 0, deleted: 0, purged: 0, replaced: 0 },
@@ -88,7 +86,6 @@ export function testQueue(
         { key: 'retry', value: 'false', provided: false, unused: true },
         { key: 'defaultUri', value: '"http://127.0.0.1:5001/x"', provided: true, unused: false },
       ],
-      document: '{"retryConfig":{"maxAttempts":3}}',
       ladder: [
         { attempt: 1, backoffSeconds: 0, afterSeconds: 0, last: false },
         { attempt: 2, backoffSeconds: 1, afterSeconds: 1, last: false },

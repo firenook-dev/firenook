@@ -97,9 +97,12 @@ test('J-TK-01 the queues register from their functions; badQueue_1 is refused; C
   await expect(value('retryConfig.maxDoublings').getByTestId('config-value-source')).toHaveText(
     'emulator default',
   )
-  await expect(page.getByTestId('config-parts')).toHaveText(
-    `project ${engine.project} · location ${LOCATION} · queue processOrder`,
+  await expect(page.getByTestId('config-queue-name')).toHaveText(
+    `projects/${engine.project}/locations/${LOCATION}/queues/processOrder`,
   )
+  // Live traffic is Configuration's: slots, and the rate limit, which holds nothing back.
+  await expect(page.getByTestId('gauge-slots')).toBeVisible()
+  await expect(page.getByTestId('gauge-rate')).toContainText('10 a second')
   // The ladder is the dispatcher's: four runs, the last after 7 s, with the off-by-one said.
   await expect(page.getByTestId('ladder-step')).toHaveCount(4)
   await expect(page.getByTestId('ladder-step').last()).toContainText('+7 s')

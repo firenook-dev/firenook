@@ -94,8 +94,6 @@ pub struct ConfigView {
     pub max_dispatches_per_second: f64,
     /// Every key of the stored document, in its order.
     pub values: Vec<ConfigValue>,
-    /// The `taskQueueConfig` document as stored.
-    pub document: String,
     /// The attempts a task that fails every time runs, from the first: the
     /// dispatcher's own backoff and stop rule (`retry_plan`), with requests
     /// that take no time.
@@ -199,9 +197,7 @@ pub struct QueueCounters {
     pub refilled_at: SystemTime,
     pub max_dispatches_per_second: f64,
     pub dispatched: StampedWindow,
-    pub succeeded: StampedWindow,
     pub failed: StampedWindow,
-    pub added: StampedWindow,
     pub oldest_pending_at: Option<SystemTime>,
     /// Finished tasks the history holds.
     pub history: u32,
@@ -616,7 +612,6 @@ fn config_view(config: &QueueConfig) -> ConfigView {
         max_concurrent_dispatches: u32::try_from(config.slots).unwrap_or(u32::MAX),
         max_dispatches_per_second: config.max_dispatches_per_second,
         values,
-        document: config.document().stringify(),
         ladder: retry_plan(config, 1, Duration::ZERO, Duration::ZERO)
             .into_iter()
             .map(|step| LadderStep {
@@ -689,9 +684,7 @@ fn counters(key: &str, queue: &TaskQueue, console: Option<&QueueConsole>) -> Que
         refilled_at,
         max_dispatches_per_second: queue.config.max_dispatches_per_second,
         dispatched: window(|console| console.windows.dispatched.window()),
-        succeeded: window(|console| console.windows.succeeded.window()),
         failed: window(|console| console.windows.failed.window()),
-        added: window(|console| console.windows.added.window()),
         oldest_pending_at,
         history: console.map_or(0, |console| count(console.history.len())),
         outcomes: console.map_or_else(OutcomeCounts::default, |console| console.outcomes),

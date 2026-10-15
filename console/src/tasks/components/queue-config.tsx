@@ -1,11 +1,12 @@
-// The queue's Configuration tab (TK-50, TK-51, TK-36, TK-02, TK-03, S22):
-// what the queue is doing now — slots against maxConcurrentDispatches, the
-// token bucket refilling on screen against maxDispatchesPerSecond, what it
-// dispatched, finished and took in lately — then every configuration value
-// in force with where it came from (the function's `taskQueueTrigger`, the
-// client's registration, or the emulator's default), the retry ladder a
-// failing task climbs with the off-by-one said plainly, the console's hold
-// switch, and the registration.
+// The queue's Configuration tab (TK-50, TK-51, TK-36, TK-02, TK-03, S22),
+// where its live traffic is shown: what the queue is doing now — slots
+// against maxConcurrentDispatches, the token bucket refilling on screen
+// while the rate limit is what holds tasks back (else the rate in words),
+// what it dispatched and what failed lately, how long the oldest task has
+// waited — then every configuration value in force with where it came from
+// (the function's `taskQueueTrigger`, the client's registration, or the
+// emulator's default), the retry ladder a failing task climbs with the
+// off-by-one said plainly, the console's hold switch, and the registration.
 
 import { Switch, Tooltip, cn } from '@cloudflare/kumo'
 import { InfoIcon } from '@phosphor-icons/react'
@@ -13,18 +14,16 @@ import { useMutation } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { TasksConfigValue } from '@/api/generated/messaging/TasksConfigValue'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
-import { CodeBlock } from '@/components/console/code-block'
 import { CopyButton } from '@/components/console/copy-button'
 import { EntityLink } from '@/components/console/entity-link'
-import { MiniBars } from '@/components/console/mini-bars'
 import { RelativeTime } from '@/components/console/relative-time'
 import { clockTime, formatNumber } from '@/lib/format'
-import { useAgedBuckets, useAgedCount, useTokens } from '@/messaging/windows'
+import { useAgedCount, useTokens } from '@/messaging/windows'
 import { holdQueue } from '../api'
 import { errorText } from '@/lib/error-text'
 import { queueResourceName } from '../queue-address'
 import { ladderTotal, maxAttemptsNote } from '../retry-plan'
-import { secondsText } from '../states'
+import { rateLimiting, secondsText } from '../states'
 
 /** Where a value came from, in words. */
 function sourceOf(queue: TasksQueue, value: TasksConfigValue): string {
@@ -130,15 +129,46 @@ function Figure({ label, value, tooltip }: { label: string; value: ReactNode; to
   )
 }
 
-/** What the queue is doing now: slots, the bucket, and the last minutes' traffic. */
+/** The bucket while it holds tasks back, refilling on the shared clock. */
+function TokensGauge({ counters }: { counters: TasksQueue['counters'] }) {
+  const tokens = useTokens(counters) ?? counters.tokens
+  return (
+    <Gauge
+      label="Tokens"
+      value={tokens}
+      max={counters.maxTokens}
+      text={`${tokens.toFixed(1)} of ${formatNumber(counters.maxTokens)}`}
+      alarm
+      tooltip={`Tasks wait for tokens: the bucket refills ${formatNumber(counters.maxDispatchesPerSecond)} a second (maxDispatchesPerSecond), once a second, up to ${formatNumber(counters.maxTokens)}; each dispatch takes one.`}
+    />
+  )
+}
+
+/** The rate limit in words, in the bucket's place while it holds nothing back. */
+function RateLimit({ counters }: { counters: TasksQueue['counters'] }) {
+  return (
+    <Tooltip
+      content="The token bucket shows here only while the rate limit is what keeps tasks waiting."
+      render={
+        <div className="grid cursor-default gap-1" data-testid="gauge-rate">
+          <div className="flex items-baseline justify-between gap-2 text-[12px]">
+            <span className="text-kumo-subtle">Rate limit</span>
+            <span className="font-mono text-kumo-default tabular-nums">
+              {formatNumber(counters.maxDispatchesPerSecond)} a second
+            </span>
+          </div>
+          <span className="text-[12px] text-kumo-subtle">Holds nothing back now</span>
+        </div>
+      }
+    />
+  )
+}
+
+/** What the queue is doing now: slots, the rate limit, and the last minutes' traffic. */
 function Now({ queue }: { queue: TasksQueue }) {
   const { counters } = queue
-  const tokens = useTokens(counters) ?? counters.tokens
   const dispatched = useAgedCount(counters.dispatched, 60)
-  const succeeded = useAgedCount(counters.succeeded, 60)
   const failed = useAgedCount(counters.failed, 300, 10)
-  const added = useAgedCount(counters.added, 300, 10)
-  const bars = useAgedBuckets(counters.dispatched, 60)
   return (
     <Section title="Now" testId="config-now">
       <div className="grid grid-cols-2 gap-x-8 gap-y-3">
@@ -150,35 +180,22 @@ function Now({ queue }: { queue: TasksQueue }) {
           alarm={counters.slots > 0 && counters.slotsInUse >= counters.slots}
           tooltip={`${formatNumber(counters.slotsInUse)} of ${formatNumber(counters.slots)} dispatch slots busy (maxConcurrentDispatches): ${formatNumber(counters.running)} running, ${formatNumber(counters.backoff)} in backoff, ${formatNumber(counters.dispatching)} about to be sent.`}
         />
-        <Gauge
-          label="Tokens"
-          value={tokens}
-          max={counters.maxTokens}
-          text={`${tokens.toFixed(1)} of ${formatNumber(counters.maxTokens)}`}
-          alarm={tokens < 1 && counters.pending > 0}
-          tooltip={`The token bucket refills ${formatNumber(counters.maxDispatchesPerSecond)} a second (maxDispatchesPerSecond), once a second, up to ${formatNumber(counters.maxTokens)}; each dispatch takes one.`}
-        />
+        {rateLimiting(queue) ? (
+          <TokensGauge counters={counters} />
+        ) : (
+          <RateLimit counters={counters} />
+        )}
       </div>
-      <div className="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-4">
+      <div className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-4">
         <Figure
           label="Dispatched / min"
           value={formatNumber(dispatched)}
           tooltip="Attempts sent in the last 60 seconds."
         />
         <Figure
-          label="Succeeded / min"
-          value={formatNumber(succeeded)}
-          tooltip="Tasks that finished with a 2xx in the last 60 seconds."
-        />
-        <Figure
           label="Failed / 5 min"
           value={formatNumber(failed)}
           tooltip="Tasks that ran out of retries in the last five minutes."
-        />
-        <Figure
-          label="Added / 5 min"
-          value={formatNumber(added)}
-          tooltip="Tasks enqueued in the last five minutes, over the Tasks port or from the console."
         />
         <Figure
           label="Oldest waiting"
@@ -191,19 +208,6 @@ function Now({ queue }: { queue: TasksQueue }) {
           }
           tooltip="How long the oldest pending or held task has waited."
         />
-      </div>
-      <div className="grid gap-1">
-        <span className="text-[11px] text-kumo-subtle">Sent per second, the last minute</span>
-        <div className="border-b border-kumo-hairline">
-          <MiniBars
-            buckets={bars.map((count) => [count])}
-            series={[{ label: 'dispatched', tone: 'neutral' }]}
-            height={20}
-            label="Attempts sent per second, last minute"
-            tooltip={(index) => `${60 - index} s ago · ${formatNumber(bars[index] ?? 0)} sent`}
-            testId="config-bars"
-          />
-        </div>
       </div>
     </Section>
   )
@@ -347,15 +351,6 @@ function Registration({ queue }: { queue: TasksQueue }) {
           </span>
           <CopyButton value={name} label="Copy the queue's name" size="xs" />
         </dd>
-        <dt className="text-kumo-subtle">Parts</dt>
-        <dd className="m-0 font-mono text-kumo-default" data-testid="config-parts">
-          project {queue.project} · location {queue.location} · queue {queue.id}
-        </dd>
-        <dt className="text-kumo-subtle">Key</dt>
-        <dd className="m-0 flex min-w-0 items-center gap-1 font-mono text-kumo-subtle">
-          <span className="min-w-0 [overflow-wrap:anywhere]">{queue.key}</span>
-          <CopyButton value={queue.key} label="Copy the emulator's key" size="xs" />
-        </dd>
         <dt className="text-kumo-subtle">Registered</dt>
         <dd
           className="m-0 flex flex-wrap items-center gap-x-1.5 text-kumo-default"
@@ -381,12 +376,6 @@ function Registration({ queue }: { queue: TasksQueue }) {
 }
 
 export function QueueConfig({ queue }: { queue: TasksQueue }) {
-  let document = queue.config.document
-  try {
-    document = JSON.stringify(JSON.parse(queue.config.document), null, 2)
-  } catch {
-    // Shown as stored.
-  }
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="queue-config">
       <div className="grid max-w-[880px] px-5 py-4">
@@ -395,9 +384,6 @@ export function QueueConfig({ queue }: { queue: TasksQueue }) {
         <Ladder queue={queue} />
         <Hold queue={queue} />
         <Registration queue={queue} />
-        <Section title="The stored taskQueueConfig" testId="config-document">
-          <CodeBlock code={document} language="json" testId="config-document-code" />
-        </Section>
       </div>
     </div>
   )

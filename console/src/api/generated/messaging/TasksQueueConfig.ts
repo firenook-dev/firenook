@@ -11,10 +11,6 @@ export type TasksQueueConfig = { maxAttempts: number, maxRetrySeconds: number | 
  */
 values: Array<TasksConfigValue>, 
 /**
- * The `taskQueueConfig` document as the emulator stores it.
- */
-document: string, 
-/**
  * What a task that fails every time runs, from its first attempt: the
  * dispatcher's own backoff and stop rule, with requests that take no
  * time.

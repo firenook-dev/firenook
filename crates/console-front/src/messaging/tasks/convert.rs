@@ -90,7 +90,6 @@ fn config(view: &ConfigView) -> TasksQueueConfig {
                 unused: value.unused,
             })
             .collect(),
-        document: view.document.clone(),
         ladder: view
             .ladder
             .iter()
@@ -130,9 +129,7 @@ pub(crate) fn counters(counters: &QueueCounters) -> TasksQueueCounters {
         refilled_at: time(counters.refilled_at),
         max_dispatches_per_second: counters.max_dispatches_per_second,
         dispatched: stamped_seconds(&counters.dispatched),
-        succeeded: stamped_seconds(&counters.succeeded),
         failed: stamped_ten_seconds(&counters.failed),
-        added: stamped_ten_seconds(&counters.added),
         oldest_pending_at: time_of(counters.oldest_pending_at),
         history: counters.history,
         outcomes: outcomes(counters.outcomes),

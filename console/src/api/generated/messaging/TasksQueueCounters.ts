@@ -28,9 +28,10 @@ backoff: number, slots: number, slotsInUse: number,
  */
 tokens: number, maxTokens: number, refilledAt: string, maxDispatchesPerSecond: number, 
 /**
- * Stamped windows the console ages.
+ * Stamped windows the console ages: attempts sent per second over a
+ * minute, tasks that ran out of retries per ten seconds over five.
  */
-dispatched: MessagingSecondWindow, succeeded: MessagingSecondWindow, failed: MessagingTenSecondWindow, added: MessagingTenSecondWindow, oldestPendingAt: string | null, history: number, 
+dispatched: MessagingSecondWindow, failed: MessagingTenSecondWindow, oldestPendingAt: string | null, history: number, 
 /**
  * The history by outcome (they add up to `history`).
  */

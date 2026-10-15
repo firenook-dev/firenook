@@ -3332,15 +3332,6 @@ mod inspect {
             .find(|queue| queue.key == key)
             .unwrap();
         assert_eq!(watched.pending, 2);
-        assert_eq!(
-            watched
-                .added
-                .buckets
-                .iter()
-                .map(|(_, count)| count)
-                .sum::<u32>(),
-            2
-        );
         // A task that takes a slot: its old and new keys.
         runtime.run_now(&key, a).unwrap();
         let delta = runtime.console_delta(&mut rows, &scoped);

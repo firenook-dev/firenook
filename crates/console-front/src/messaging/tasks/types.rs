@@ -159,8 +159,6 @@ pub(crate) struct TasksQueueConfig {
     pub max_dispatches_per_second: f64,
     /// Every key of the stored `taskQueueConfig`, in its order.
     pub values: Vec<TasksConfigValue>,
-    /// The `taskQueueConfig` document as the emulator stores it.
-    pub document: String,
     /// What a task that fails every time runs, from its first attempt: the
     /// dispatcher's own backoff and stop rule, with requests that take no
     /// time.
@@ -216,11 +214,10 @@ pub(crate) struct TasksQueueCounters {
     pub max_tokens: f64,
     pub refilled_at: String,
     pub max_dispatches_per_second: f64,
-    /// Stamped windows the console ages.
+    /// Stamped windows the console ages: attempts sent per second over a
+    /// minute, tasks that ran out of retries per ten seconds over five.
     pub dispatched: MessagingSecondWindow,
-    pub succeeded: MessagingSecondWindow,
     pub failed: MessagingTenSecondWindow,
-    pub added: MessagingTenSecondWindow,
     pub oldest_pending_at: Option<String>,
     pub history: u32,
     /// The history by outcome (they add up to `history`).
