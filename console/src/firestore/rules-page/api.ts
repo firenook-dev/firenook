@@ -10,8 +10,11 @@ import { API_BASE } from '@/api/client'
 import type { DecisionDetail } from '@/api/generated/DecisionDetail'
 import type { EvaluateRequest } from '@/api/generated/EvaluateRequest'
 import type { RulesCheck } from '@/api/generated/RulesCheck'
+import type { RulesCheckBody } from '@/api/generated/RulesCheckBody'
+import type { RulesEvaluateBody } from '@/api/generated/RulesEvaluateBody'
 import type { RulesEvaluation } from '@/api/generated/RulesEvaluation'
 import type { RulesImpact } from '@/api/generated/RulesImpact'
+import type { RulesImpactBody } from '@/api/generated/RulesImpactBody'
 import type { RulesVersion } from '@/api/generated/RulesVersion'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useLiveTopic } from '@/lib/live/use-live-topic'
@@ -39,7 +42,10 @@ export function firestoreRulesBackend(project: string, database: string) {
   } satisfies RulesBackend<RulesDocument, string[]>
 }
 
-async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+/** The bodies the engine reads, as it declares them: a hand-built body is checked against them. */
+type RulesBody = RulesCheckBody | RulesEvaluateBody | RulesImpactBody
+
+async function post<T>(path: string, body: RulesBody, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${API_BASE}/firestore/${path}`, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
@@ -52,7 +58,8 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
 
 /** Compile a draft without installing it: errors, the engine's warnings, the outline and the map. */
 export function checkRules(database: string, source: string, signal?: AbortSignal) {
-  return post<RulesCheck>('rules/check', { database, source }, signal)
+  const body: RulesCheckBody = { database, source }
+  return post<RulesCheck>('rules/check', body, signal)
 }
 
 export const checkQuery = (database: string, source: string) =>
@@ -70,11 +77,9 @@ export function evaluateRules(
   source?: string,
   signal?: AbortSignal,
 ) {
-  return post<RulesEvaluation>(
-    'rules/evaluate',
-    source === undefined ? { database, requests } : { database, source, requests },
-    signal,
-  )
+  const body: RulesEvaluateBody =
+    source === undefined ? { database, requests } : { database, source, requests }
+  return post<RulesEvaluation>('rules/evaluate', body, signal)
 }
 
 /** A recorded decision, run again with the values each expression had. */
@@ -99,7 +104,10 @@ export const decisionQuery = (database: string, requestId: string) =>
 export const impactQuery = (database: string, source: string) =>
   queryOptions({
     queryKey: [FS, database, 'rules-impact', source],
-    queryFn: ({ signal }) => post<RulesImpact>('rules/impact', { database, source }, signal),
+    queryFn: ({ signal }) => {
+      const body: RulesImpactBody = { database, source }
+      return post<RulesImpact>('rules/impact', body, signal)
+    },
     staleTime: 5_000,
     retry: false,
   })

@@ -831,17 +831,24 @@ pub(crate) struct ReadRules {
     database: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// `PUT /rules`.
+#[derive(Debug, Deserialize, TS)]
+#[ts(rename = "RulesWriteBody")]
 pub(crate) struct WriteRules {
+    #[ts(optional = nullable)]
     database: Option<String>,
     source: String,
     /// Also write the configured file.
     #[serde(default)]
+    #[ts(optional, as = "Option<bool>")]
     save: bool,
 }
 
-#[derive(Debug, Deserialize)]
+/// `POST /rules/check`.
+#[derive(Debug, Deserialize, TS)]
+#[ts(rename = "RulesCheckBody")]
 pub(crate) struct CheckRules {
+    #[ts(optional = nullable)]
     database: Option<String>,
     source: String,
 }
@@ -1067,6 +1074,17 @@ mod tests {
     use super::*;
 
     const PROJECT: &str = "demo-rules";
+
+    /// The bodies the console builds by hand are checked against these.
+    #[test]
+    fn export_rules_body_bindings() {
+        let config = ts_rs::Config::new().with_out_dir(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../console/src/api/generated"
+        ));
+        WriteRules::export_all(&config).expect("TypeScript bindings written");
+        CheckRules::export_all(&config).expect("TypeScript bindings written");
+    }
 
     fn allow(everything: bool) -> String {
         format!(
