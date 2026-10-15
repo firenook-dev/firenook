@@ -96,6 +96,14 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   (`precompress` in `vite.config.ts`); the engine serves it when the
   request accepts gzip, with `Vary: accept-encoding` (`serve` in
   console-front's `lib.rs`).
+- Icons ship three weights, not Phosphor's six: `iconWeights()`
+  (`scripts/icon-weights.mjs`, in the app, design-system and kit-harness
+  builds) cuts duotone, light and thin out of every icon's `defs` module,
+  11 KB gzip off the first route and 2–18 KB off each section route. An
+  icon drawn in a stripped weight would render empty, so
+  `src/test/icon-weights.test.ts` reads every `weight` the console, the
+  design system and Kumo ask for and fails on any other; a new weight goes
+  into `ICON_WEIGHTS`, never around the test.
 - Assets ship inside the binary with immutable cache headers; the shell is
   `no-cache`. Fonts are self-hosted, never fetched.
 - The engine does the heavy lifting (key cursors, index counts, incremental
