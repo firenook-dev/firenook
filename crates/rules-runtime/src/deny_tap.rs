@@ -157,7 +157,7 @@ impl DenyTap {
 /// The document a refused request addressed, or for a list its collection
 /// or collection group: a list's evaluator path names a synthetic candidate
 /// document, so the query's scope says what was listed.
-fn denied_path(database: &DatabaseName, request: &EvaluationRequest) -> String {
+pub(crate) fn denied_path(database: &DatabaseName, request: &EvaluationRequest) -> String {
     if request.operation != RequestOperation::List {
         return request.path.clone();
     }

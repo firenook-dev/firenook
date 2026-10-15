@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 pub mod coverage;
+mod decision_tap;
 mod deny_tap;
 mod dry_run;
 mod query;
@@ -12,6 +13,7 @@ mod request_event;
 pub mod request_history;
 mod retention;
 mod versions;
+pub use decision_tap::{DECISION_CAPACITY, RecordedDecision};
 pub use deny_tap::{DENIAL_CAPACITY, Denial, DenialOrigin};
 pub use dry_run::{
     DryRunError, DryRunOperation, DryRunRequest, DryRunRules, EvaluationAccess, PreparedRequest,
@@ -76,6 +78,8 @@ pub struct RulesRuntime {
     events: versions::Events,
     /// Refused requests, for the console's log.
     tap: Arc<deny_tap::DenyTap>,
+    /// Every recorded decision, for the console's decisions feed.
+    decisions: Arc<decision_tap::DecisionTap>,
     /// Where the requests this handle evaluates entered.
     origin: DenialOrigin,
 }
@@ -284,7 +288,7 @@ impl RulesRuntime {
             None => installed.rules.evaluate_with_trace(&request, access),
         };
         drop(coverage);
-        let request_id = recorder.record(
+        let event = recorder.record(
             database.project_id(),
             &installed,
             &request,
@@ -295,13 +299,18 @@ impl RulesRuntime {
                 write: None,
             },
         );
-        self.tap.observe(
-            self.origin,
+        self.tap
+            .observe(self.origin, database, &request, &result, event.kept());
+        self.decisions.observe(&decision_tap::Recorded {
+            origin: self.origin,
             database,
-            &request,
-            &result,
-            request_id.as_deref(),
-        );
+            installed: &installed,
+            request: &request,
+            result: &result,
+            trace: &trace,
+            request_id: &event.id,
+            retained: event.retained,
+        });
         result
     }
 
@@ -400,7 +409,7 @@ impl RulesRuntime {
             .zip(&traces)
             .enumerate()
         {
-            let request_id = recorder.record(
+            let event = recorder.record(
                 database.project_id(),
                 &installed,
                 request,
@@ -411,13 +420,18 @@ impl RulesRuntime {
                     write: context.writes.and_then(|writes| writes.get(index)),
                 },
             );
-            self.tap.observe(
-                self.origin,
+            self.tap
+                .observe(self.origin, database, request, operation, event.kept());
+            self.decisions.observe(&decision_tap::Recorded {
+                origin: self.origin,
                 database,
+                installed: &installed,
                 request,
-                operation,
-                request_id.as_deref(),
-            );
+                result: operation,
+                trace,
+                request_id: &event.id,
+                retained: event.retained,
+            });
         }
         result
     }
