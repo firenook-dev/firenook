@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   bulkTarget,
   deleteRefusal,
+  jobVerb,
   needsDryRun,
   previewSentence,
   withoutTriggersOffer,
@@ -70,6 +71,15 @@ describe('bulk changes', () => {
     expect(deleteRefusal(10_000, true)).toBeUndefined()
     expect(deleteRefusal(10_001, true)).toMatch(/limited to 10,000/)
     expect(deleteRefusal(50_000, false)).toBeUndefined()
+  })
+
+  it('count a job’s items in the words of the engine’s kinds', () => {
+    expect(jobVerb('auth.disable')).toBe('disabled')
+    expect(jobVerb('auth.revoke')).toBe('revoked')
+    expect(jobVerb('auth.import')).toBe('imported')
+    expect(jobVerb('auth.delete')).toBe('deleted')
+    expect(jobVerb('auth.set-claims')).toBe('changed')
+    expect(jobVerb('auth.remove-claims')).toBe('changed')
   })
 })
 

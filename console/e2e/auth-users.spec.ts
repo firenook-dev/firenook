@@ -336,6 +336,19 @@ test('U5 the inspector opens from a row and follows the keyboard', async ({ page
   await inspector(page).getByRole('tab', { name: 'Details' }).click()
   await expect(page).not.toHaveURL(/tab=/)
 
+  // The user as code, in the console's dialects and an accounts.json entry.
+  await inspector(page).getByTestId('user-code').click()
+  const code = page.getByTestId('user-code-popover')
+  await expect(code.getByRole('tab')).toHaveText([
+    'Admin (Node.js)',
+    'Python',
+    'REST (curl)',
+    'accounts.json entry',
+  ])
+  await expect(code).toContainText(firstUid ?? '')
+  await page.keyboard.press('Escape')
+  await expect(code).toBeHidden()
+
   // Ages say the instant in a tooltip.
   await inspector(page).getByTestId('user-created').hover()
   await expect(page.locator('.kumo-tooltip-popup')).toContainText(/^Created .+ UTC$/)
@@ -654,6 +667,20 @@ test('U10 bulk changes are engine jobs that re-attach after a reload and stop on
     const finished = await consoleJson<{ state: string; done: number }>(engine, `/jobs/${job.id}`)
     expect(finished.state).toBe('done')
     expect(await usersCount(engine, { tenant, q: 'claim:cohort' })).toBe(20_000)
+
+    // A change that destroys nothing asks with the engine's numbers, and its
+    // button is the primary one, without the bin; Cancel sends nothing.
+    await rows(page).first().getByRole('checkbox').click()
+    await page.getByTestId('select-everything').click()
+    await page.getByTestId('bulk-verify').click()
+    const verify = page.getByTestId('bulk-confirm')
+    await expect(verify).toContainText('Mark 20,000 users as verified')
+    await expect(page.getByTestId('bulk-confirm-confirm')).toHaveText(
+      'Mark 20,000 users as verified',
+    )
+    await expect(page.getByTestId('bulk-confirm-confirm').locator('svg')).toHaveCount(0)
+    await page.getByTestId('bulk-confirm-cancel').click()
+    await expect(verify).toBeHidden()
 
     // Delete every match: the functions it runs, the number typed, then
     // Cancel while it runs: the chunks done stay deleted.

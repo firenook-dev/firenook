@@ -15,7 +15,7 @@
 import { Button } from '@cloudflare/kumo'
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '@/api/client'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import type { AuthUserFacets } from '@/api/generated/auth/AuthUserFacets'
@@ -29,6 +29,7 @@ import {
 } from '@phosphor-icons/react'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { EmptyState } from '@/components/console/empty-state'
+import { EntityLink } from '@/components/console/entity-link'
 import type { DataTableSort } from '@/components/console/data-table'
 import { FacetList } from '@/components/console/facet-list'
 import { FilterField } from '@/components/console/filter-field'
@@ -36,6 +37,7 @@ import { LiveNotice } from '@/components/console/live-notice'
 import { MatchCount } from '@/components/console/match-count'
 import { PanelHeader } from '@/components/console/panel'
 import { SectionBanner } from '@/components/console/section-banner'
+import { SectionJobs } from '@/components/console/section-jobs'
 import { SectionBody, SectionPage } from '@/components/console/section-page'
 import {
   SectionToolbar,
@@ -46,12 +48,14 @@ import {
 import { useCursorRows } from '@/components/console/use-cursor-rows'
 import { PanelToggle, SectionPanel } from '@/components/shell/section-panel'
 import { checkFilter } from '@/lib/filter'
+import type { JobError } from '@/lib/jobs'
 import { formatDuration } from '@/lib/format'
 import { panelShown, useLayout } from '@/lib/layout'
 import { liveChannel } from '@/lib/live/channel'
 import { useConsoleProject } from '@/lib/project'
 import { parseSort, printSort } from '@/lib/search-params'
 import { isTyping, useShortcuts } from '@/lib/shortcuts'
+import { jobVerb } from '../bulk'
 import { userFacetGroups, userFields } from '../fields'
 import { identifierOf } from '../identifier'
 import { useConfigLive } from '../live'
@@ -78,7 +82,6 @@ import { deleteUser, refusal } from '../user-actions'
 import { useAccountTriggers } from '../user-triggers'
 import { USERS_DEFAULTS, useUsersSearch } from '../users-search'
 import { useUsersLive } from '../users-live'
-import { AuthJobs } from './auth-jobs'
 import { useUserBulk } from './bulk-bar'
 import { BulkDeleteDialog } from './bulk-delete-dialog'
 import { CreateUserDialog } from './create-user-dialog'
@@ -92,6 +95,12 @@ import { UsersGrid } from './users-grid'
 import { TENANT_GONE, useUserRowMenu } from './user-row-menu'
 
 const USERS = { one: 'user', other: 'users' }
+
+/** Beside a failed item of a bulk job, its user; an import's file line (`#12`) is none. */
+function failedUser(error: JobError): ReactNode {
+  if (error.key.startsWith('#')) return null
+  return <EntityLink entity={{ kind: 'auth.user', key: error.key, label: 'Open the user' }} />
+}
 
 /** The User column scrolls with the others while this is set (localStorage). */
 export const UNFROZEN_KEY = 'firenook.console.auth.unfrozen'
@@ -470,7 +479,7 @@ export function UsersPage() {
           />
         </ToolbarRow>
       </SectionToolbar>
-      <AuthJobs />
+      <SectionJobs section="auth" verb={jobVerb} why={failedUser} testId="auth-job" />
       {tenantState === 'missing' && tenant !== undefined && (
         <SectionBanner
           tone="danger"
