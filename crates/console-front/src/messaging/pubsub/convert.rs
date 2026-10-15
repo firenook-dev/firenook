@@ -233,8 +233,19 @@ pub(crate) fn topic_detail(
     targets: &Targets,
     managed_by: &dyn Fn(&str) -> Managed,
 ) -> PubsubTopicDetail {
+    let summary = topic_summary(&view.summary, targets, managed_by);
+    // Every run of the topic's functions is an invocation in Functions.
+    let invocations = (!summary.functions.is_empty()).then(|| {
+        let filter: Vec<String> = summary
+            .functions
+            .iter()
+            .map(|target| format!("function:{}", target.function_id))
+            .collect();
+        EntityRef::invocations(&filter.join(" "))
+    });
     PubsubTopicDetail {
-        summary: topic_summary(&view.summary, targets, managed_by),
+        summary,
+        invocations,
         labels: view.labels.clone(),
         retention_seconds: view.retention_seconds,
         schema: view.schema.as_ref().map(|schema| PubsubTopicSchema {

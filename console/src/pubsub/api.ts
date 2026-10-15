@@ -18,12 +18,9 @@ import type { PubsubCreateSchemaBody } from '@/api/generated/messaging/PubsubCre
 import type { PubsubCreateSubscriptionBody } from '@/api/generated/messaging/PubsubCreateSubscriptionBody'
 import type { PubsubCreateTopicBody } from '@/api/generated/messaging/PubsubCreateTopicBody'
 import type { PubsubDeleteTopicBody } from '@/api/generated/messaging/PubsubDeleteTopicBody'
-import type { PubsubDeliveryPage } from '@/api/generated/messaging/PubsubDeliveryPage'
-import type { PubsubDeliveryRow } from '@/api/generated/messaging/PubsubDeliveryRow'
 import type { PubsubDispatchBody } from '@/api/generated/messaging/PubsubDispatchBody'
 import type { PubsubFilterCheck } from '@/api/generated/messaging/PubsubFilterCheck'
 import type { PubsubFilterCheckBody } from '@/api/generated/messaging/PubsubFilterCheckBody'
-import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctionMark'
 import type { PubsubMessageActionBody } from '@/api/generated/messaging/PubsubMessageActionBody'
 import type { PubsubMessageCheck } from '@/api/generated/messaging/PubsubMessageCheck'
 import type { PubsubMessageCheckBody } from '@/api/generated/messaging/PubsubMessageCheckBody'
@@ -288,42 +285,6 @@ export function startBacklogAck(body: PubsubBacklogJobBody): Promise<Job> {
 /** A `pubsub.release` job: the leases end now, as their expiry would. */
 export function startBacklogRelease(body: PubsubBacklogJobBody): Promise<Job> {
   return apiSend('POST', '/pubsub/backlog:release', body)
-}
-
-// ------------------------------------------------------------ deliveries
-
-/** What a deliveries page reads: one topic, narrowed to one function and one outcome or not. */
-export interface DeliveryScope {
-  topic: string
-  function?: string | undefined
-  outcome?: PubsubFunctionMark | undefined
-}
-
-/** One page of a topic's deliveries to functions, newest first, with counts over those kept. */
-export function getDeliveries(
-  scope: DeliveryScope,
-  page: PageAt = {},
-  signal?: AbortSignal,
-): Promise<PubsubDeliveryPage> {
-  return apiGet(
-    '/pubsub/deliveries',
-    { topic: scope.topic, function: scope.function, outcome: scope.outcome, ...page },
-    signal,
-  )
-}
-
-/** Loaded deliveries read again by event id (their outcome moved). */
-export function batchGetDeliveries(
-  topic: string,
-  request: BatchGetRequest,
-  signal?: AbortSignal,
-): Promise<BatchGetResponse<PubsubDeliveryRow>> {
-  return apiSend(
-    'POST',
-    withQuery('/pubsub/deliveries:batchGet', { topic }),
-    request,
-    signal ? { signal } : {},
-  )
 }
 
 // ------------------------------------------------------------ schemas

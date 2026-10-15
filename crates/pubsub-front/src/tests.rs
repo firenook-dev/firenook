@@ -3416,11 +3416,6 @@ mod console {
         );
         assert_eq!(fanout.targets[0].at, fanout.at, "the publish's own time");
         assert!(fanout.targets[1].at > fanout.at, "a redelivery's own time");
-        // The deliveries view's records: this message, with every target.
-        let records = runtime.broker().fanouts(&topic).expect("records");
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.id, id);
-        assert_eq!(records[0].1.targets.len(), 3);
         assert_eq!(
             runtime.broker().topics_with_message(id, 5),
             vec![topic.clone()]
@@ -3446,7 +3441,6 @@ mod console {
             .deliveries
             .expect("deliveries");
         assert_eq!(changes.message_ids, [id]);
-        assert_eq!(changes.event_ids.len(), 4);
         let preview = runtime
             .dispatch_preview(&topic, id, function)
             .expect("preview");

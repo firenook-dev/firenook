@@ -56,8 +56,6 @@ const SCOPED = {
   q: undefined,
   expr: undefined,
   state: undefined,
-  function: undefined,
-  outcome: undefined,
   paused: undefined,
   prefill: undefined,
   new: undefined,

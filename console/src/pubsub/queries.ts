@@ -17,23 +17,19 @@
 
 import { queryOptions } from '@tanstack/react-query'
 import type { PubsubBacklogState } from '@/api/generated/messaging/PubsubBacklogState'
-import type { PubsubDeliveryPage } from '@/api/generated/messaging/PubsubDeliveryPage'
 import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctionMark'
 import type { PubsubMessageCheckBody } from '@/api/generated/messaging/PubsubMessageCheckBody'
 import type { PubsubPublishBody } from '@/api/generated/messaging/PubsubPublishBody'
 import type { PubsubSchemaExampleBody } from '@/api/generated/messaging/PubsubSchemaExampleBody'
-import type { CursorPages } from '@/components/console/use-cursor-rows'
 import { cursorPagesOptions } from '@/components/console/use-cursor-rows'
 import {
   type PageAt,
   batchGetBacklog,
-  batchGetDeliveries,
   batchGetMessages,
   checkFilter,
   checkMessage,
   checkSchema,
   getBacklog,
-  getDeliveries,
   getDispatch,
   getMessage,
   getMessages,
@@ -85,14 +81,6 @@ export const pubsubKeys = {
     ['pubsub', project, 'backlog', subscription] as const,
   backlog: (project: string, subscription: string, state?: PubsubBacklogState) =>
     ['pubsub', project, 'backlog', subscription, state ?? 'all'] as const,
-  /** Every deliveries list of a topic (a prefix). */
-  topicDeliveries: (project: string, topic: string) =>
-    ['pubsub', project, 'deliveries', topic] as const,
-  deliveries: (project: string, topic: string, functionId?: string, outcome?: PubsubFunctionMark) =>
-    ['pubsub', project, 'deliveries', topic, functionId ?? '', outcome ?? 'all'] as const,
-  /** A topic's delivery counts by outcome, over every delivery kept (one function's, or all). */
-  deliveryCounts: (project: string, topic: string, functionId?: string) =>
-    ['pubsub', project, 'deliveries', topic, functionId ?? '', 'counts'] as const,
   schemas: (project: string) => ['pubsub', project, 'schemas'] as const,
   /** Every schema detail of the project (a prefix). */
   schemaDetails: (project: string) => ['pubsub', project, 'schema'] as const,
@@ -233,65 +221,6 @@ export function backlogList(project: string, subscription: string, state?: Pubsu
       enabled: project !== '' && subscription !== '',
     },
   }
-}
-
-/** A topic's deliveries to functions, newest first; rows keyed by event id. */
-export function deliveryList(
-  project: string,
-  topic: string,
-  functionId?: string,
-  outcome?: PubsubFunctionMark,
-) {
-  const queryKey = pubsubKeys.deliveries(project, topic, functionId, outcome)
-  const fetchPage = (page: PageAt, signal: AbortSignal) =>
-    getDeliveries({ topic, function: functionId, outcome }, page, signal)
-  return {
-    queryKey,
-    fetchPage,
-    rowKey: (row: { eventId: string }) => row.eventId,
-    // The engine reads a delivery by event id whatever the list's narrowing;
-    // one that no longer matches it (a queued delivery that ran, under
-    // "Queued") leaves the list, as it would on a fresh read.
-    batchGet: async (request: Parameters<typeof batchGetDeliveries>[1], signal: AbortSignal) => {
-      const answer = await batchGetDeliveries(topic, request, signal)
-      if (functionId === undefined && outcome === undefined) return answer
-      return {
-        ...answer,
-        items: answer.items.map((item) =>
-          item.row &&
-          ((functionId !== undefined && item.row.functionId !== functionId) ||
-            (outcome !== undefined && item.row.mark !== outcome))
-            ? { key: item.key, row: null, page: null }
-            : item,
-        ),
-      }
-    },
-    options: {
-      ...cursorPagesOptions(queryKey, fetchPage),
-      enabled: project !== '' && topic !== '',
-    },
-  }
-}
-
-/**
- * A topic's delivery counts by outcome (one function's, or every one), read
- * on their own so the outcome switch stays current wherever the list is
- * scrolled: a one-row page carries them.
- */
-export const deliveryCountsQuery = (project: string, topic: string, functionId?: string) =>
-  queryOptions({
-    queryKey: pubsubKeys.deliveryCounts(project, topic, functionId),
-    queryFn: async ({ signal }) =>
-      (await getDeliveries({ topic, function: functionId }, { limit: 1 }, signal)).counts,
-    enabled: project !== '' && topic !== '',
-  })
-
-/** The outcome counts a deliveries list's first page carries (over every delivery kept). */
-export function deliveryCountsOf(
-  data: CursorPages<unknown> | undefined,
-): PubsubDeliveryPage['counts'] | undefined {
-  const first = data?.pages[0] as Partial<PubsubDeliveryPage> | undefined
-  return first?.counts
 }
 
 // ------------------------------------------------------------ checks

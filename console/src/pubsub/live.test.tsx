@@ -351,25 +351,6 @@ describe('the other Pub/Sub topics (U-06)', () => {
     expect(result.current.store).not.toBe(first)
   })
 
-  it('pubsub.deliveries names keys, counts new ones, and resets on overflow', () => {
-    const onKeys = vi.fn()
-    const onAdded = vi.fn()
-    const onReset = vi.fn()
-    renderHook(() => live.useDeliveriesLive(PROJECT, ORDERS, { onKeys, onAdded, onReset }), {
-      wrapper,
-    })
-    const onChanged = subscribed('pubsub.deliveries').handlers.onChanged as (c: {
-      keys: string[]
-      added: number
-      overflow: boolean
-    }) => void
-    act(() => onChanged({ keys: ['e1'], added: 3, overflow: false }))
-    expect(onKeys).toHaveBeenCalledWith(['e1'])
-    expect(onAdded).toHaveBeenCalledWith(3)
-    act(() => onChanged({ keys: [], added: 0, overflow: true }))
-    expect(onReset).toHaveBeenCalledOnce()
-  })
-
   it('pubsub.schedules patches the states it names', () => {
     const page: Page<PubsubSchedule> = {
       items: [schedule('a', 1), schedule('b', 1)],

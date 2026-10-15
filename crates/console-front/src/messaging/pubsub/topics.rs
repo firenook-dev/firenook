@@ -1,10 +1,10 @@
-//! Pub/Sub's live topics: `pubsub.counters`, `pubsub.topic`, `pubsub.push`,
-//! `pubsub.deliveries` and `pubsub.schedules`.
+//! Pub/Sub's live topics: `pubsub.counters`, `pubsub.topic`, `pubsub.push`
+//! and `pubsub.schedules`.
 //!
 //! Counters are state: a frame carries the topics and subscriptions stamped
 //! after the subscriber's revision (its cursor), at most every 250 ms, and
-//! `reset` past 200 changed entities. Invalidation topics carry keys
-//! (message ids, backlog row keys, event ids), coalesced per 100 ms with
+//! `reset` past 200 changed entities. The invalidation topic carries keys
+//! (message ids, backlog row keys), coalesced per 100 ms with
 //! `reset` past 1,000 keys. The push feed is the console's ring, fed inline
 //! by the runtime's push sink, served by the foundation's `replay_topic`.
 //! Schedule frames follow the scheduler and, while Functions run, each
@@ -31,9 +31,9 @@ use tokio::time::Instant;
 
 use super::convert;
 use super::types::{
-    PubsubCountersFrame, PubsubDeliveriesChanged, PubsubPublished, PubsubPushStreak,
-    PubsubRejectedChanged, PubsubResourcesChanged, PubsubScheduleState, PubsubSchedulesFrame,
-    PubsubStale, PubsubSubscriptionCounters, PubsubThroughput, PubsubTopicCounters,
+    PubsubCountersFrame, PubsubPublished, PubsubPushStreak, PubsubRejectedChanged,
+    PubsubResourcesChanged, PubsubScheduleState, PubsubSchedulesFrame, PubsubStale,
+    PubsubSubscriptionCounters, PubsubThroughput, PubsubTopicCounters,
 };
 use crate::api_error::ApiError;
 use crate::late::Late;
@@ -145,7 +145,6 @@ pub(crate) fn topics(
         Arc::new(CountersTopic(shared.clone())),
         Arc::new(TopicTopic(shared.clone())),
         Arc::new(PushTopic(shared.clone())),
-        Arc::new(DeliveriesTopic(shared.clone())),
         Arc::new(SchedulesTopic(shared)),
     ]
 }
@@ -729,30 +728,6 @@ fn invocation_causes(monitor: &Monitor, ids: &HashSet<Arc<str>>) -> Vec<Invocati
         .collect()
 }
 
-/// The event ids of the invocations `ids` whose cause names `topic`.
-fn touched_events(monitor: &Monitor, ids: &HashSet<Arc<str>>, topic: &str) -> Vec<String> {
-    let filter = |summary: &firenook_functions_runtime::monitor::InvocationSummary| {
-        ids.contains(summary.id.as_str())
-    };
-    monitor
-        .invocations(
-            &InvocationQuery {
-                filter: Some(&filter),
-                limit: ids.len(),
-            },
-            None,
-        )
-        .items
-        .into_iter()
-        .filter(|summary| match &summary.cause {
-            InvocationCause::Pubsub { topic: cause, .. }
-            | InvocationCause::Schedule { topic: cause, .. } => cause == topic,
-            _ => false,
-        })
-        .filter_map(|summary| summary.event_id)
-        .collect()
-}
-
 // ------------------------------------------------------------ pubsub.push
 
 #[derive(Debug, Deserialize)]
@@ -802,174 +777,6 @@ fn newest_streaks(entries: &[Entry<PushMeta>]) -> Arc<str> {
     kept.sort_unstable();
     let items: Vec<&str> = kept.iter().map(|index| &*entries[*index].json).collect();
     Arc::from(format!("{{\"items\":[{}]}}", items.join(",")))
-}
-
-// ------------------------------------------------------------ pubsub.deliveries
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct DeliveriesParams {
-    #[serde(default)]
-    project: Option<String>,
-    topic: String,
-}
-
-struct DeliveriesTopic(Shared);
-
-impl LiveTopic for DeliveriesTopic {
-    fn name(&self) -> &'static str {
-        "pubsub.deliveries"
-    }
-
-    fn open(
-        &self,
-        params: &serde_json::Value,
-        after: Option<&str>,
-    ) -> Result<TopicStream, ApiError> {
-        let params: DeliveriesParams = topic_params(params)?;
-        let _ = self.0.project(params.project);
-        let resumed = after.is_some();
-        Ok(after_start(&self.0, move |console| {
-            DeliveriesWatcher::open(console, params.topic, resumed)
-        }))
-    }
-}
-
-/// One `pubsub.deliveries` subscriber.
-struct DeliveriesWatcher {
-    console: PubsubConsole,
-    scope: DeltaScope,
-    cursor: ConsoleCursor,
-    watch: watch::Receiver<u64>,
-    touched: Option<broadcast::Receiver<Arc<str>>>,
-    keys: KeyWindow,
-    invocations: HashSet<Arc<str>>,
-    added: u32,
-    overflow: bool,
-    due: Option<Instant>,
-    outbox: VecDeque<TopicEvent>,
-}
-
-impl DeliveriesWatcher {
-    fn open(console: PubsubConsole, topic: String, resumed: bool) -> TopicStream {
-        let Some(monitor) = console.monitor.clone() else {
-            return stream::once(async {
-                TopicEvent::End(Some(super::errors::functions_absent().detail().clone()))
-            })
-            .boxed();
-        };
-        let broker = console.runtime.broker();
-        let mut watch = broker.console_watch();
-        watch.mark_unchanged();
-        let scope = DeltaScope {
-            topic: Some(topic),
-            deliveries: true,
-            ..DeltaScope::default()
-        };
-        let mut cursor = ConsoleCursor::default();
-        let _ = broker.console_delta(&mut cursor, &scope);
-        let mut outbox = VecDeque::new();
-        if resumed {
-            outbox.push_back(TopicEvent::Reset {
-                reason: ResetReason::Gap,
-                missed: None,
-            });
-        }
-        let state = Self {
-            touched: Some(monitor.touched()),
-            console,
-            scope,
-            cursor,
-            watch,
-            keys: KeyWindow::default(),
-            invocations: HashSet::new(),
-            added: 0,
-            overflow: false,
-            due: None,
-            outbox,
-        };
-        stream::unfold(state, |mut state| async move {
-            state.next().await.map(|event| (event, state))
-        })
-        .boxed()
-    }
-
-    async fn next(&mut self) -> Option<TopicEvent> {
-        loop {
-            if let Some(event) = self.outbox.pop_front() {
-                return Some(event);
-            }
-            let due = self.due;
-            tokio::select! {
-                changed = self.watch.changed() => {
-                    changed.ok()?;
-                    self.watch.mark_unchanged();
-                    let delta = self
-                        .console
-                        .runtime
-                        .broker()
-                        .console_delta(&mut self.cursor, &self.scope);
-                    if let Some(fanouts) = delta.deliveries {
-                        self.added = self.added.saturating_add(fanouts.added);
-                        self.overflow |= fanouts.overflow;
-                        for event in fanouts.event_ids {
-                            self.keys.add(event);
-                        }
-                        self.due.get_or_insert_with(|| Instant::now() + KEY_WINDOW);
-                    }
-                }
-                touched = recv_touched(self.touched.as_mut()) => match touched {
-                    Ok(id) => {
-                        if self.invocations.len() < MAX_KEYS {
-                            self.invocations.insert(id);
-                        } else {
-                            self.overflow = true;
-                        }
-                        self.due.get_or_insert_with(|| Instant::now() + KEY_WINDOW);
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        self.overflow = true;
-                        self.due.get_or_insert_with(|| Instant::now() + KEY_WINDOW);
-                    }
-                    Err(broadcast::error::RecvError::Closed) => self.touched = None,
-                },
-                () = sleep_until(due) => self.flush(),
-            }
-        }
-    }
-
-    fn flush(&mut self) {
-        self.due = None;
-        let topic = self.scope.topic.clone().unwrap_or_default();
-        if let Some(monitor) = &self.console.monitor
-            && !self.invocations.is_empty()
-        {
-            for event in touched_events(monitor, &self.invocations, &topic) {
-                self.keys.add(event);
-            }
-        }
-        self.invocations.clear();
-        let keys = if let Ok(mut keys) = self.keys.take() {
-            if keys.len() > MAX_IDS {
-                keys.truncate(MAX_IDS);
-                self.overflow = true;
-            }
-            keys
-        } else {
-            self.overflow = true;
-            Vec::new()
-        };
-        if keys.is_empty() && self.added == 0 && !self.overflow {
-            return;
-        }
-        let event = PubsubDeliveriesChanged {
-            keys,
-            added: std::mem::take(&mut self.added),
-            overflow: std::mem::take(&mut self.overflow),
-        };
-        self.outbox
-            .push_back(TopicEvent::json("changed", None, &event));
-    }
 }
 
 // ------------------------------------------------------------ pubsub.schedules

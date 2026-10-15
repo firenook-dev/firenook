@@ -5,6 +5,7 @@
 
 import { Button, Tabs } from '@cloudflare/kumo'
 import { LightningIcon, TrashIcon, TrayArrowDownIcon } from '@phosphor-icons/react'
+import { useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { ApiError } from '@/api/client'
@@ -14,10 +15,11 @@ import { DangerConfirm } from '@/components/console/danger-confirm'
 import { EmptyState, QueryError } from '@/components/console/empty-state'
 import { SectionBanner } from '@/components/console/section-banner'
 import { ToolbarRow } from '@/components/console/toolbar'
+import { useLinkTo } from '@/lib/links'
 import { toast } from '@/lib/toasts'
 import { deleteSubscription } from '../api'
 import { shortName } from '../names'
-import { pubsubKeys, subscriptionQuery } from '../queries'
+import { pubsubKeys, subscriptionQuery, topicQuery } from '../queries'
 import { orphanedNote } from '../tree'
 import { SubscriptionSettings } from './subscription-settings'
 
@@ -96,6 +98,14 @@ export function SubscriptionView({
 }) {
   const queryClient = useQueryClient()
   const detail = useQuery(subscriptionQuery(project, subscription))
+  const navigate = useNavigate()
+  // The functions' own subscription leads to their runs, which its topic links.
+  const drained =
+    detail.data?.subscription.summary.managed === 'functions'
+      ? (detail.data.subscription.summary.topic ?? '')
+      : ''
+  const drainedTopic = useQuery({ ...topicQuery(project, drained), enabled: drained !== '' })
+  const runs = useLinkTo(drainedTopic.data?.invocations ?? undefined)
   const id = shortName(subscription)
   const missing = detail.error instanceof ApiError && detail.error.code === 'not-found'
   const [deleting, setDeleting] = useState(false)
@@ -132,16 +142,30 @@ export function SubscriptionView({
       <EmptyState
         icon={LightningIcon}
         title={`The emulator's own subscription for ${names.join(', ') || 'a function'}`}
-        description={`Each publish to ${shortName(config.summary.topic)} is handed to the function and drained here, so it is always empty. Each message shows its delivery on the topic.`}
+        description={`Each publish to ${shortName(config.summary.topic)} is handed to the function and drained here, so it is always empty. Each message shows its delivery on the topic, and every run is an invocation in Functions.`}
         actions={
           config.summary.topic ? (
-            <Button
-              variant="secondary"
-              onClick={() => onOpenTopic(config.summary.topic ?? '')}
-              data-testid="pubsub-managed-open-topic"
-            >
-              Open {shortName(config.summary.topic)}
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => onOpenTopic(config.summary.topic ?? '')}
+                data-testid="pubsub-managed-open-topic"
+              >
+                Open {shortName(config.summary.topic)}
+              </Button>
+              {runs && (
+                <Button
+                  variant="secondary"
+                  icon={<LightningIcon />}
+                  onClick={() =>
+                    void navigate({ to: runs.to as never, search: runs.search as never })
+                  }
+                  data-testid="pubsub-managed-runs"
+                >
+                  Function runs in Invocations
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
         testId="pubsub-managed-subscription"

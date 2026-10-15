@@ -11,8 +11,6 @@
 //   the keys of rows that moved — backlog positions of the scoped
 //   subscription, messages whose marks moved.
 // - `pubsub.push` (a feed): push streaks, upserted in place by streak.
-// - `pubsub.deliveries` (invalidation): event ids whose outcome moved, and
-//   how many deliveries are new.
 // - `pubsub.schedules` (state, compared by the scheduler's revision).
 
 import { type QueryClient, type QueryKey, useQueryClient } from '@tanstack/react-query'
@@ -20,7 +18,6 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { MessagingSecondWindow } from '@/api/generated/messaging/MessagingSecondWindow'
 import type { Page } from '@/api/generated/Page'
 import type { PubsubCountersFrame } from '@/api/generated/messaging/PubsubCountersFrame'
-import type { PubsubDeliveriesChanged } from '@/api/generated/messaging/PubsubDeliveriesChanged'
 import type { PubsubPublished } from '@/api/generated/messaging/PubsubPublished'
 import type { PubsubPushAttempts } from '@/api/generated/messaging/PubsubPushAttempts'
 import type { PubsubPushStreak } from '@/api/generated/messaging/PubsubPushStreak'
@@ -55,10 +52,6 @@ declare module '@/lib/live/topics' {
       params: { project?: string; subscription: string }
       events: { attempts: PubsubPushAttempts }
     }
-    'pubsub.deliveries': {
-      params: { project?: string; topic: string }
-      events: { changed: PubsubDeliveriesChanged }
-    }
     'pubsub.schedules': {
       params: { project?: string }
       events: { schedules: PubsubSchedulesFrame }
@@ -69,7 +62,6 @@ declare module '@/lib/live/topics' {
 declareTopic('pubsub.counters', 'compare')
 declareTopic('pubsub.topic', 'none')
 declareTopic('pubsub.push', 'replay')
-declareTopic('pubsub.deliveries', 'none')
 declareTopic('pubsub.schedules', 'compare')
 
 /** Topics whose throughput one counters subscription follows (the engine refuses more). */
@@ -344,40 +336,6 @@ export function usePushFeed(
     },
   )
   return { store, status }
-}
-
-// ------------------------------------------------------------ deliveries
-
-export interface DeliveriesLiveHandlers {
-  /** Event ids whose outcome moved: the deliveries table's `applyKeys`. */
-  onKeys?: (eventIds: string[]) => void
-  /** New deliveries: at the top the head page is read again, else they go to `newAbove`. */
-  onAdded?: (count: number) => void
-  /** Too many to name, a reconnect, or a reset: back to page one, the counts with it. */
-  onReset?: () => void
-  /** The engine took the subscription: a head read before it reads again (`TopicLiveHandlers.onTaken`). */
-  onTaken?: () => void
-}
-
-/** Holds `pubsub.deliveries` for the topic whose Deliveries tab is open. */
-export function useDeliveriesLive(
-  project: string | undefined,
-  topic: string | undefined,
-  handlers: DeliveriesLiveHandlers,
-): SubscriptionStatus {
-  return useLiveTopic('pubsub.deliveries', project && topic ? { project, topic } : null, {
-    onChanged: (changed) => {
-      if (changed.overflow) {
-        handlers.onReset?.()
-        return
-      }
-      if (changed.keys.length > 0) handlers.onKeys?.(changed.keys)
-      if (changed.added > 0) handlers.onAdded?.(changed.added)
-    },
-    onReset: () => handlers.onReset?.(),
-    onEnd: () => handlers.onReset?.(),
-    onTaken: () => handlers.onTaken?.(),
-  })
 }
 
 // ------------------------------------------------------------ schedules

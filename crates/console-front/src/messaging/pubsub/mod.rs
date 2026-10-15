@@ -46,13 +46,12 @@ use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 
 use self::convert::{Join, Targets};
-use self::errors::{functions_absent, pubsub_error, redeliver_error, schedule_error};
+use self::errors::{pubsub_error, redeliver_error, schedule_error};
 use self::filters::message_query;
 use self::types::{
     PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody, PubsubCreateSchemaBody,
     PubsubCreateSubscriptionBody, PubsubCreateTopicBody, PubsubData, PubsubDeleteSubscriptions,
-    PubsubDeleteTopicBody, PubsubDeliveryCounts, PubsubDeliveryPage, PubsubDeliveryRow,
-    PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody, PubsubFunctionMark,
+    PubsubDeleteTopicBody, PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody,
     PubsubMessageActionBody, PubsubMessageCheck, PubsubMessageCheckBody, PubsubMessageDetail,
     PubsubMessageRow, PubsubNameBody, PubsubOutgoingMessage, PubsubPreview, PubsubPublishBody,
     PubsubPublishResult, PubsubPurged, PubsubPushConfigBody, PubsubRedeliverBody, PubsubRedelivery,
@@ -154,8 +153,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
         .route("/pubsub/backlog:batchGet", post(backlog_batch))
         .route("/pubsub/backlog:ack", post(jobs::backlog_ack))
         .route("/pubsub/backlog:release", post(jobs::backlog_release))
-        .route("/pubsub/deliveries", get(deliveries))
-        .route("/pubsub/deliveries:batchGet", post(deliveries_batch))
         .route("/pubsub/schema", get(schema_detail).delete(delete_schema))
         .route("/pubsub/filter/check", post(check_filter))
         .route("/pubsub/schedules", get(schedules))
@@ -262,28 +259,6 @@ pub(crate) struct BacklogScope {
     subscription: String,
     #[serde(default)]
     state: Option<PubsubBacklogState>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct DeliveriesQuery {
-    topic: String,
-    #[serde(default)]
-    function: Option<String>,
-    #[serde(default)]
-    outcome: Option<PubsubFunctionMark>,
-    #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
-    before: Option<String>,
-    #[serde(default)]
-    limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct TopicQuery {
-    topic: String,
 }
 
 fn limit_of(limit: Option<u32>) -> usize {
@@ -1403,169 +1378,6 @@ async fn backlog_batch(
     Ok(Json(BatchGetResponse { items }))
 }
 
-// ------------------------------------------------------------ deliveries
-
-/// A deliveries page's cursor: the record's place (newest first).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-struct DeliveryCursor {
-    message: u64,
-    target: usize,
-}
-
-/// Every delivery record of a topic, newest first, joined.
-fn delivery_records(
-    console: &PubsubConsole,
-    topic: &str,
-) -> Result<Vec<(DeliveryCursor, PubsubDeliveryRow)>, ApiError> {
-    let records = console
-        .runtime
-        .broker()
-        .fanouts(topic)
-        .ok_or_else(topic_missing)?;
-    let targets = targets(console);
-    let join = join(
-        console,
-        &targets,
-        records
-            .iter()
-            .flat_map(|(_, fanout)| fanout.targets.iter().map(|target| target.event_id.as_str())),
-    );
-    let mut rows = Vec::new();
-    for (message, fanout) in &records {
-        for (index, target) in fanout.targets.iter().enumerate().rev() {
-            rows.push((
-                DeliveryCursor {
-                    message: message.id,
-                    target: index,
-                },
-                join.row(topic, message, fanout, target),
-            ));
-        }
-    }
-    Ok(rows)
-}
-
-fn count_marks(rows: &[(DeliveryCursor, PubsubDeliveryRow)]) -> PubsubDeliveryCounts {
-    let mut counts = PubsubDeliveryCounts::default();
-    for (_, row) in rows {
-        counts.all += 1;
-        match row.mark {
-            PubsubFunctionMark::Queued => counts.queued += 1,
-            PubsubFunctionMark::Running => counts.running += 1,
-            PubsubFunctionMark::Delivered => counts.delivered += 1,
-            PubsubFunctionMark::Failed => counts.failed += 1,
-            PubsubFunctionMark::Skipped => counts.skipped += 1,
-            // Its outcome is unknown, not a failure: only `all` counts it.
-            PubsubFunctionMark::NotKept => {}
-        }
-    }
-    counts
-}
-
-/// Whether a record sorts after (older than) a cursor.
-fn older(cursor: DeliveryCursor, than: DeliveryCursor) -> bool {
-    (cursor.message, cursor.target) < (than.message, than.target)
-}
-
-async fn deliveries(
-    State(api): State<PubsubApi>,
-    Query(query): Query<DeliveriesQuery>,
-) -> Answer<PubsubDeliveryPage> {
-    let console = api.console()?;
-    if console.monitor.is_none() {
-        return Err(functions_absent());
-    }
-    let (after, before) =
-        cursors::<DeliveryCursor>(query.cursor.as_deref(), query.before.as_deref())?;
-    let limit = limit_of(query.limit);
-    blocking("the deliveries page", move || {
-        let mut rows = delivery_records(&console, &query.topic)?;
-        if let Some(function) = &query.function {
-            rows.retain(|(_, row)| &row.function_id == function);
-        }
-        let counts = count_marks(&rows);
-        if let Some(outcome) = query.outcome {
-            rows.retain(|(_, row)| row.mark == outcome);
-        }
-        let total = u64_of(rows.len());
-        let (start, end) = match (after, before) {
-            (_, Some(before)) => {
-                // Rows newer than the page below's first.
-                let end = rows.partition_point(|(cursor, _)| older(before, *cursor));
-                (end.saturating_sub(limit), end)
-            }
-            (Some(after), None) => {
-                // Rows older than the page above's last.
-                let start = rows.partition_point(|(cursor, _)| !older(*cursor, after));
-                (start, (start + limit).min(rows.len()))
-            }
-            (None, None) => (0, limit.min(rows.len())),
-        };
-        let length = rows.len();
-        let mut builder = PageBuilder::new(limit);
-        let mut taken = start;
-        for (cursor, row) in rows.drain(start..end) {
-            if !builder.push(row, cursor) {
-                break;
-            }
-            taken += 1;
-        }
-        Ok(Json(PubsubDeliveryPage {
-            page: builder.finish(
-                taken < length,
-                start > 0,
-                Some(Total {
-                    count: total,
-                    exact: true,
-                }),
-                None,
-            ),
-            counts,
-        }))
-    })
-    .await
-}
-
-async fn deliveries_batch(
-    State(api): State<PubsubApi>,
-    Query(scope): Query<TopicQuery>,
-    ConsoleJson(request): ConsoleJson<BatchGetRequest>,
-) -> Answer<BatchGetResponse<PubsubDeliveryRow>> {
-    request.check()?;
-    let console = api.console()?;
-    if console.monitor.is_none() {
-        return Err(functions_absent());
-    }
-    let (starts, end) = request.window::<DeliveryCursor>()?;
-    let rows = delivery_records(&console, &scope.topic)?;
-    let by_event: HashMap<&str, (DeliveryCursor, &PubsubDeliveryRow)> = rows
-        .iter()
-        .map(|(cursor, row)| (row.event_id.as_str(), (*cursor, row)))
-        .collect();
-    let items = request
-        .keys
-        .iter()
-        .map(|key| {
-            let found = by_event.get(key.as_str());
-            let page = found.and_then(|(cursor, _)| {
-                let position = starts
-                    .iter()
-                    .rposition(|start| start.is_none_or(|start| !older(start, *cursor)))?;
-                if position + 1 == starts.len() && end.is_some_and(|end| older(*cursor, end)) {
-                    return None;
-                }
-                Some(u32_of(position))
-            });
-            BatchGetItem {
-                key: key.clone(),
-                row: found.map(|(_, row)| (*row).clone()),
-                page,
-            }
-        })
-        .collect();
-    Ok(Json(BatchGetResponse { items }))
-}
-
 // ------------------------------------------------------------ schemas
 
 async fn list_schemas(
@@ -2023,7 +1835,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubSubscriptionDetail,
         types::PubsubMessageRow,
         types::PubsubMessageDetail,
-        types::PubsubDeliveryPage,
         types::PubsubDispatchBody,
         types::PubsubRedelivery,
         types::PubsubRedeliverBody,
@@ -2065,7 +1876,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubRejectedChanged,
         types::PubsubPublished,
         types::PubsubStale,
-        types::PubsubDeliveriesChanged,
         types::PubsubSchedulesFrame,
         types::PubsubScheduleState,
         types::PubsubPushAttempts,

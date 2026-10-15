@@ -105,17 +105,6 @@ export interface DeliveryRowView {
   redelivery: boolean
 }
 
-export interface DeliveryPageView extends PageView<DeliveryRowView> {
-  counts: {
-    all: number
-    queued: number
-    running: number
-    delivered: number
-    failed: number
-    skipped: number
-  }
-}
-
 export interface PushStreakView {
   streak: string
   messageId: string

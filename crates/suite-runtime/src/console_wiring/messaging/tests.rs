@@ -565,20 +565,8 @@ fn subscriber_inventory() -> FunctionsInventory {
 
 #[tokio::test]
 async fn both_consoles_read_the_record_functions_write_into() {
-    // Without Functions there is no record: deliveries say so.
-    let without = messaging();
-    let (status, body) = call(
-        &without.router,
-        Method::GET,
-        "/api/v1/pubsub/deliveries?topic=projects%2Fdemo-diagnostics%2Ftopics%2Forders",
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
-    without.stop.send(true).expect("stop");
-
-    // With Functions, `run()` builds compute's parts first and hands the
-    // same parts to the Functions runtime and to both ready hooks.
+    // `run()` builds compute's parts first and hands the same parts to the
+    // Functions runtime and to both ready hooks.
     let config = test_config();
     let logging = LoggingRuntime::new();
     let compute = ComputeParts::new();
@@ -603,7 +591,7 @@ async fn both_consoles_read_the_record_functions_write_into() {
     pubsub_ready(&pubsub_late, &pubsub, Some(&compute), &config, &logging);
     tasks_ready(&tasks_late, &tasks, Some(&compute), &config, &logging);
     let topic = format!("projects/{PROJECT}/topics/orders");
-    let (_, published) = pubsub
+    let (ids, published) = pubsub
         .broker()
         .publish(
             &topic,
@@ -642,15 +630,19 @@ async fn both_consoles_read_the_record_functions_write_into() {
     });
     monitor.response_head(&token, 204, &HeaderMap::new());
     monitor.finish(&token, InvocationEnd::default());
-    let (status, page) = call(
+    // The message's delivery (the inspector's Deliveries tab) joins it.
+    let (status, detail) = call(
         &router,
         Method::GET,
-        "/api/v1/pubsub/deliveries?topic=projects%2Fdemo-diagnostics%2Ftopics%2Forders",
+        &format!(
+            "/api/v1/pubsub/message?topic=projects%2Fdemo-diagnostics%2Ftopics%2Forders&id={}",
+            ids[0]
+        ),
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{page}");
-    let row = &page["items"][0];
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let row = &detail["functions"][0];
     assert_eq!(row["eventId"], dispatch.event_id);
     assert_eq!(row["mark"], "delivered");
     assert_eq!(row["status"], 204);

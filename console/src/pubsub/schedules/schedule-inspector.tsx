@@ -25,7 +25,7 @@ import { Kbd, StatusDot } from '@/components/kit'
 import { formatNumber } from '@/lib/format'
 import { useNavigate } from '@tanstack/react-router'
 import { linkTo } from '@/lib/links'
-import { DeliveryOutcome } from '../components/deliveries-table'
+import { DeliveryOutcome } from '../components/delivery-outcome'
 import { LogsLink } from '../components/message-inspector'
 import { shortName } from '../names'
 import {

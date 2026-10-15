@@ -1328,27 +1328,6 @@ impl Broker {
             .collect()
     }
 
-    /// Every message of `topic`'s history ring that reached the functions
-    /// step, with its fanout, newest first: the deliveries view's records
-    /// (bounded by the ring), copied under one lock.
-    #[must_use]
-    pub fn fanouts(&self, topic: &str) -> Option<Vec<(Arc<StoredMessage>, Fanout)>> {
-        let state = lock(&self.inner.state);
-        let entry = state.topics.get(topic)?;
-        Some(
-            entry
-                .history
-                .iter()
-                .rev()
-                .filter_map(|history| {
-                    history
-                        .fanout()
-                        .map(|fanout| (Arc::clone(&history.message), fanout))
-                })
-                .collect(),
-        )
-    }
-
     /// The topics (full names) whose history ring keeps message `id`, at
     /// most `limit`: a binary search in each ring.
     #[must_use]
@@ -1443,10 +1422,8 @@ pub struct PublishedIds {
 /// New fanout records of the scoped topic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FanoutChanges {
-    pub added: u32,
-    /// Event ids of the new or changed records, at most 100.
-    pub event_ids: Vec<String>,
-    /// The messages those records belong to (their function marks moved).
+    /// The messages whose fanout records are new or changed (their
+    /// function marks moved), at most 100.
     pub message_ids: Vec<u64>,
     pub overflow: bool,
 }
@@ -1655,12 +1632,10 @@ fn resources_since(state: &State, since: u64) -> Vec<ResourceKind> {
 }
 
 fn fanouts_since(topic: &TopicEntry, seen: u64) -> FanoutChanges {
-    let added = topic.fanouts - seen;
     let oldest = topic
         .recent_fanouts
         .front()
         .map_or(u64::MAX, |(sequence, _)| *sequence);
-    let mut event_ids = Vec::new();
     let mut message_ids = Vec::new();
     let mut overflow = oldest > seen + 1;
     for (_, id) in topic
@@ -1669,30 +1644,21 @@ fn fanouts_since(topic: &TopicEntry, seen: u64) -> FanoutChanges {
         .rev()
         .take_while(|(sequence, _)| *sequence > seen)
     {
-        let Ok(position) = topic
-            .history
-            .binary_search_by_key(id, |history| history.message.id)
-        else {
+        if message_ids.contains(id)
+            || topic
+                .history
+                .binary_search_by_key(id, |history| history.message.id)
+                .is_err()
+        {
             continue;
-        };
-        if message_ids.len() < 100 && !message_ids.contains(id) {
-            message_ids.push(*id);
         }
-        if let Some(fanout) = topic.history[position].fanout() {
-            for target in fanout.targets {
-                if event_ids.len() >= 100 {
-                    overflow = true;
-                    break;
-                }
-                if !event_ids.contains(&target.event_id) {
-                    event_ids.push(target.event_id);
-                }
-            }
+        if message_ids.len() >= 100 {
+            overflow = true;
+            break;
         }
+        message_ids.push(*id);
     }
     FanoutChanges {
-        added: u32::try_from(added).unwrap_or(u32::MAX),
-        event_ids,
         message_ids,
         overflow,
     }

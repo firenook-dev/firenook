@@ -9,7 +9,7 @@ import { readDownload } from './support/downloads'
 import { dropLive, restoreLive } from './support/live'
 import { cutRings, paintOf } from './support/look'
 import {
-  type DeliveryPageView,
+  type MessageDetailView,
   type SchemaDetailView,
   type SubscriptionDetailView,
   type TopicDetailView,
@@ -980,18 +980,16 @@ test('J-PS-24 a bulk ack runs as a job and the backlog empties by patches', asyn
 
 // ------------------------------------------------------------ deliveries and the setup
 
-/** A topic's deliveries as the engine reports them now (newest first). */
-async function deliveriesOf(engine: Parameters<typeof consoleCall>[0], topic: string) {
-  return consoleCall<DeliveryPageView>(
-    engine,
-    'GET',
-    `/pubsub/deliveries?topic=${enc(topicName(engine, topic))}&limit=500`,
-  )
+/** A message's deliveries to functions as the engine reports them now. */
+async function deliveriesOf(engine: Parameters<typeof consoleCall>[0], topic: string, id: string) {
+  return (
+    await consoleCall<MessageDetailView>(
+      engine,
+      'GET',
+      `/pubsub/message?topic=${enc(topicName(engine, topic))}&id=${id}`,
+    )
+  ).functions
 }
-
-/** A Deliveries table row by its event id. */
-const deliveryRow = (page: Page, eventId: string) =>
-  page.getByTestId('pubsub-delivery-table').locator(`tr[data-key="${eventId}"]`)
 
 test('J-PS-03 a JSON message is published, read whole, and delivered to its function', async ({
   page,
@@ -1051,9 +1049,7 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
     ])
   ).messageIds
   const failed = async () =>
-    (await deliveriesOf(engine, 'orders')).items.find(
-      (item) => item.messageId === id && !item.redelivery,
-    )
+    (await deliveriesOf(engine, 'orders', id ?? '')).find((item) => !item.redelivery)
   await expect.poll(async () => (await failed())?.mark, { timeout: 15_000 }).toBe('failed')
   const original = (await failed())?.eventId ?? ''
   const topic = await consoleCall<TopicDetailView>(
@@ -1068,16 +1064,11 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
   const messageRow = page.getByTestId('pubsub-message-table').locator(`tr[data-key="${id}"]`)
   await expect(messageRow.locator('[data-mark="failed"]')).toBeVisible()
 
-  // Deliveries: failed, with the handler's own error.
-  await page.getByTestId('pubsub-topic-tabs').getByRole('tab', { name: 'Deliveries' }).click()
-  await expect(page).toHaveURL(/view=deliveries/)
-  const row = deliveryRow(page, original)
-  await expect(row).toContainText('failed')
-  await expect(row).toContainText('order rejected: card declined')
-
-  // Opened: the CloudEvent the function received, as compute recorded it.
-  await row.click()
+  // Opened on its Deliveries: failed, with the handler's own error, and the
+  // CloudEvent the function received, as compute recorded it.
+  await messageRow.click()
   const inspector = page.getByTestId('pubsub-message-inspector')
+  await inspector.getByRole('tab', { name: /Deliveries/ }).click()
   const delivery = inspector.getByTestId('message-function').filter({ hasText: 'failed' })
   await expect(delivery).toContainText('order rejected: card declined')
   await delivery.getByTestId('message-function-dispatch-toggle').click()
@@ -1090,27 +1081,21 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
   const logs = delivery.getByTestId('message-function-logs')
   if ((await logs.count()) > 0) await expect(logs).toHaveAttribute('href', /function/)
 
-  // `r` on the row asks first; Enter runs it again, for this function alone.
-  await row.click()
-  await page.keyboard.press('Escape')
-  await expect(inspector).toBeHidden()
-  await page.keyboard.press('r')
+  // Run again asks first; Enter runs it again, for this function alone.
+  await delivery.getByTestId('message-function-again').click()
   const confirm = page.getByTestId('pubsub-run-again')
   await expect(confirm).toContainText(`Run onOrderPlaced again with message ${id}?`)
-  expect(
-    (await deliveriesOf(engine, 'orders')).items.filter((item) => item.messageId === id),
-  ).toHaveLength(1)
+  expect(await deliveriesOf(engine, 'orders', id ?? '')).toHaveLength(1)
   await page.keyboard.press('Enter')
   await expect(confirm).toBeHidden()
-  const again = page
-    .getByTestId('pubsub-delivery-table')
-    .getByTestId('data-row')
-    .filter({ has: page.getByTestId('delivery-again') })
-    .filter({ hasText: id ?? '' })
+  const again = inspector
+    .getByTestId('message-function')
+    .filter({ has: page.getByTestId('message-function-redelivery') })
   await expect(again).toHaveCount(1, { timeout: 15_000 })
-  const resent = await again.getAttribute('data-key')
-  expect(resent).not.toBe(original)
-  await expect(again).toContainText('failed', { timeout: 15_000 })
+  await expect(again).toHaveAttribute('data-mark', 'failed', { timeout: 15_000 })
+  const resent = (await deliveriesOf(engine, 'orders', id ?? '')).find((item) => item.redelivery)
+  expect(resent?.eventId).toBeTruthy()
+  expect(resent?.eventId).not.toBe(original)
   // Nothing was published again: the topic's count is what it was.
   const after = await consoleCall<TopicDetailView>(
     engine,
@@ -1119,13 +1104,21 @@ test('J-PS-04 a failing function, its request, and a run again with one message'
   )
   expect(after.summary.counters.published).toBe(published)
   // Each delivery's request carries its own event id.
-  await again.click()
-  const second = page
-    .getByTestId('pubsub-message-inspector')
-    .getByTestId('message-function')
-    .filter({ has: page.getByTestId('message-function-redelivery') })
-  await second.getByTestId('message-function-dispatch-toggle').click()
-  await expect(second.getByTestId('message-function-dispatch-body')).toContainText(resent ?? '')
+  await again.getByTestId('message-function-dispatch-toggle').click()
+  await expect(again.getByTestId('message-function-dispatch-body')).toContainText(
+    resent?.eventId ?? '',
+  )
+
+  // Every run of the topic's function is an invocation in Functions.
+  await page.keyboard.press('Escape')
+  await page.getByTestId('pubsub-topic-runs').click()
+  await expect(page).toHaveURL(/\/console\/functions\/invocations\?/)
+  await expect(page.getByTestId('invocations-filter-input')).toHaveValue(
+    'function:us-central1-onOrderPlaced',
+  )
+  await expect(
+    page.getByTestId('invocations-list').getByTestId('invocation-row').first(),
+  ).toBeVisible()
 })
 
 test('J-PS-09 a dead letter reaches its topic, its tab, and the function on it', async ({
@@ -1159,13 +1152,15 @@ test('J-PS-09 a dead letter reaches its topic, its tab, and the function on it',
     await expect(source).toHaveText(subscription)
 
     // The function listening on orders-dead ran for it (dead letters reach functions).
-    await page.getByTestId('pubsub-topic-tabs').getByRole('tab', { name: 'Deliveries' }).click()
+    await page
+      .getByTestId('pubsub-message-inspector')
+      .getByRole('tab', { name: /Deliveries/ })
+      .click()
     const delivered = page
-      .getByTestId('pubsub-delivery-table')
-      .getByTestId('data-row')
+      .getByTestId('pubsub-message-inspector')
+      .getByTestId('message-function')
       .filter({ hasText: 'onOrderDeadLettered' })
-      .filter({ hasText: dead })
-    await expect(delivered).toContainText('delivered', { timeout: 15_000 })
+    await expect(delivered).toHaveAttribute('data-mark', 'delivered', { timeout: 15_000 })
 
     // The subscription's Dead letters tab lists it, under its fixed expression.
     await openTopics(page, engine.origin, `topic=${topic}&subscription=${subscription}`)

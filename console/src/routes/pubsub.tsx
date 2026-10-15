@@ -16,7 +16,7 @@ const text = z
   .transform((value) => String(value))
   .optional()
 
-const topicView = z.enum(['messages', 'subscriptions', 'deliveries', 'settings'])
+const topicView = z.enum(['messages', 'subscriptions', 'settings'])
 const subscriptionView = z.enum(['backlog', 'push', 'dead-letters', 'settings'])
 
 const searchSchema = z.object({
@@ -42,9 +42,6 @@ const searchSchema = z.object({
   expr: text,
   // Backlog narrowing (a single-choice switch with counts, not a filter).
   state: z.enum(['available', 'outstanding', 'pushing', 'acked']).optional(),
-  // Deliveries narrowing.
-  function: text,
-  outcome: z.enum(['queued', 'running', 'delivered', 'failed', 'skipped', 'not-kept']).optional(),
   // The Push feed is paused (absent: following).
   paused: zFlag,
   // A create dialog or the composer: `message` opens the composer.

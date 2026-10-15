@@ -244,6 +244,9 @@ pub(crate) struct PubsubConsumers {
 #[ts(export_to = "messaging/")]
 pub(crate) struct PubsubTopicDetail {
     pub summary: PubsubTopicSummary,
+    /// `functions.invocations`: every run of the functions the topic
+    /// triggers, in Functions › Invocations; null when none listens.
+    pub invocations: Option<EntityRef>,
     pub labels: BTreeMap<String, String>,
     /// The topic's own message retention, seconds; `null` = none.
     #[ts(type = "number | null")]
@@ -479,32 +482,6 @@ pub(crate) struct PubsubDeliveryRow {
     pub queue_depth: Option<u32>,
     /// A console redelivery, not the publish's own.
     pub redelivery: bool,
-}
-
-/// `GET /pubsub/deliveries`: a page plus the counts over the records kept.
-#[derive(Clone, Debug, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeliveryPage {
-    #[serde(flatten)]
-    #[ts(flatten)]
-    pub page: Page<PubsubDeliveryRow>,
-    pub counts: PubsubDeliveryCounts,
-}
-
-/// Deliveries per mark, over the records kept.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeliveryCounts {
-    /// Every record, those whose invocation is no longer kept included
-    /// (their outcome is unknown, so no other count has them).
-    pub all: u32,
-    pub queued: u32,
-    pub running: u32,
-    pub delivered: u32,
-    pub failed: u32,
-    pub skipped: u32,
 }
 
 /// `GET /pubsub/dispatch`: the request a function received, or would have.
@@ -1374,18 +1351,6 @@ pub(crate) struct PubsubStale {
     /// `backlog:<row key>` (old and new keys of a moved row), `snapshots`,
     /// or `message:<id>`.
     pub keys: Vec<String>,
-}
-
-/// `pubsub.deliveries` `changed`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubDeliveriesChanged {
-    /// Event ids of deliveries whose outcome changed (at most 100).
-    pub keys: Vec<String>,
-    /// New fanout records since the last event.
-    pub added: u32,
-    pub overflow: bool,
 }
 
 /// One schedule's state, as `pubsub.schedules` patches it.
