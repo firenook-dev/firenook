@@ -115,7 +115,7 @@ export function FunctionToolbar({
   codebase: FunctionCodebaseEntry | undefined
   /** The URL as apps reach it, for kinds that answer on one. */
   url: string | undefined
-  /** Open in Logs, when Logs is built. */
+  /** Open in Logs, while the engine runs Logs. */
   logs: SectionLink | null
   menu: readonly RowMenuItem[]
   /** The Run tab is open: the primary steps aside. */

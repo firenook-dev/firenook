@@ -2,10 +2,10 @@
 // page. They come from the engine's problem ring, which keeps them apart
 // from the rest of the log, so a flood of ordinary output never empties
 // this list. Above it, the last hour of warnings and errors a minute at a
-// time; with Logs built, a row opens its line there (centred, in the
-// inspector), a bar opens that minute's problems, and "Open logs" all of
-// them. Until then the list is the engine's own and nothing pretends to
-// open.
+// time; while the engine runs Logs, a row opens its line there (centred,
+// in the inspector), a bar opens that minute's problems, and "Open logs"
+// all of them. Without Logs the list is the engine's own and nothing
+// pretends to open.
 
 import { SkeletonLine, Tooltip } from '@cloudflare/kumo'
 import type { UseQueryResult } from '@tanstack/react-query'

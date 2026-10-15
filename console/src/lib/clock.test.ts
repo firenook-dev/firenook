@@ -109,4 +109,27 @@ describe('the shared clock', () => {
     expect(result.current).toBe(first + 60_000)
     expect(renders).toBe(before + 1)
   })
+
+  it('re-renders a reader that selects only when its selection changes', () => {
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      // Whole minutes since 09:00, read on the second clock.
+      return useNow('second', (now) =>
+        Math.floor((now - Date.parse('2026-09-20T09:00:00Z')) / 60_000),
+      )
+    })
+    expect(result.current).toBe(0)
+    const before = renders
+    for (let second = 0; second < 59; second += 1)
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+    expect(renders).toBe(before)
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current).toBe(1)
+    expect(renders).toBe(before + 1)
+  })
 })

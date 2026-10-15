@@ -207,7 +207,7 @@ describe('recent problems', () => {
     expect(screen.getByTestId('overview-problems-empty')).toHaveTextContent(
       'No errors, failures or denials since the engine started.',
     )
-    // With Logs built the bars are a control: a bar opens that minute's problems.
+    // While Logs runs the bars are a control: a bar opens that minute's problems.
     expect(
       screen.getByRole('group', { name: 'Warnings and errors per minute, last hour' }),
     ).toBeInTheDocument()
