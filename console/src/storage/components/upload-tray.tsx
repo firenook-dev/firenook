@@ -202,7 +202,7 @@ function Rows({ items }: { items: readonly UploadItem[] }) {
   )
 }
 
-export function UploadTray({ sessionsLine }: { sessionsLine?: React.ReactNode }) {
+export function UploadTray() {
   const items = useUploadQueue((state) => state.items)
   const totals = useUploadQueue((state) => state.totals)
   const collapsed = useUploadQueue((state) => state.collapsed)
@@ -281,7 +281,6 @@ export function UploadTray({ sessionsLine }: { sessionsLine?: React.ReactNode })
       {!collapsed && (
         <>
           <Rows items={items} />
-          {sessionsLine}
           {(failed > 0 || flight.count > 0) && (
             <div className="flex items-center justify-between gap-2 border-t border-kumo-line px-3 py-1.5">
               {failed > 0 ? (

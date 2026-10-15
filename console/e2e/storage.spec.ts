@@ -1695,57 +1695,6 @@ test('upload options travel with the files and are remembered; many files are ed
   expect((await objectOf(engine, bucket, 'options/o1.png')).customMetadata.place).toBe('été')
 })
 
-test('an upload the app left half way is listed with what arrived, and is discarded', async ({
-  page,
-  engine,
-}) => {
-  const { default: bucket } = bucketsOf(engine)
-  const storage = `http://127.0.0.1:${engine.ports.storage}`
-  const name = 'sessions/half.bin'
-  const start = await fetch(`${storage}/v0/b/${bucket}/o?name=${encodeURIComponent(name)}`, {
-    method: 'POST',
-    headers: {
-      authorization: 'Bearer owner',
-      'content-type': 'application/json',
-      'x-goog-upload-protocol': 'resumable',
-      'x-goog-upload-command': 'start',
-      'x-goog-upload-header-content-length': '200000',
-      'x-goog-upload-header-content-type': 'application/octet-stream',
-    },
-    body: JSON.stringify({ name, contentType: 'application/octet-stream' }),
-  })
-  expect(start.ok).toBe(true)
-  const url = start.headers.get('x-goog-upload-url') ?? ''
-  expect(url).toContain('upload_id=')
-  const chunk = await fetch(url, {
-    method: 'POST',
-    headers: {
-      authorization: 'Bearer owner',
-      'x-goog-upload-command': 'upload',
-      'x-goog-upload-offset': '0',
-    },
-    body: Buffer.alloc(100_000, 3),
-  })
-  expect(chunk.ok).toBe(true)
-
-  await openFiles(page, engine)
-  await page.getByTestId('bucket-menu').click()
-  await expect(page.getByTestId('bucket-sessions')).toHaveText(/Uploads in progress · 1$/)
-  await page.getByTestId('bucket-sessions').click()
-  const popover = page.getByTestId('uploads-in-progress')
-  const session = popover.getByTestId('session-row')
-  await expect(session).toHaveCount(1)
-  await expect(session).toContainText(name)
-  await expect(session).toContainText(/100(\.0)? KB|97\.7 KB|100,000/)
-  await session.getByTestId('session-discard').click()
-  await expect(session).toHaveCount(0)
-  const after = await fetch(url, {
-    method: 'POST',
-    headers: { authorization: 'Bearer owner', 'x-goog-upload-command': 'query' },
-  })
-  expect(after.status).toBe(404)
-})
-
 test('a pasted gs:// location of this bucket is copied into the folder on screen', async ({
   page,
   engine,

@@ -2859,7 +2859,7 @@ the one way to stand in for XHR (tests, the design-system card).
 a file the access check (`POST /storage/rules/access`, `get` and `delete`
 for each page, recorded nowhere) refuses is a lock tile with its line, not a
 picture, since an `<img>` cannot carry a token. Tokens are Admin-only (the
-official API's rule), and so are Send again and Discard. A refusal is an
+official API's rule), and so is Send again. A refusal is an
 `ApiError` `permission-denied` with `decision`, `line`, `noRuleset`,
 `evaluation` and `request` extras, so `RefusalDetail` explains it ("See
 why") and hands it to the playground ("Try in the playground") even after

@@ -125,20 +125,16 @@ fn user_token(uid: &str, tenant: Option<&str>) -> String {
     )
 }
 
-fn committed(event: &ChangeEvent) -> (u64, Vec<(String, ObjectChangeKind)>, usize) {
+fn committed(event: &ChangeEvent) -> (u64, Vec<(String, ObjectChangeKind)>) {
     match event {
         ChangeEvent::Committed {
-            revision,
-            touches,
-            sessions,
-            ..
+            revision, touches, ..
         } => (
             *revision,
             touches
                 .iter()
                 .map(|(name, kind)| (name.to_string(), *kind))
                 .collect(),
-            sessions.len(),
         ),
         other => panic!("expected a committed change, got {other:?}"),
     }
@@ -192,7 +188,7 @@ async fn events_in_commit_order() {
         }
     }
     assert_eq!(seen.len(), 100, "one event per write");
-    for (offset, (revision, touches, sessions)) in seen.iter().enumerate() {
+    for (offset, (revision, touches)) in seen.iter().enumerate() {
         assert_eq!(
             *revision,
             start + 1 + offset as u64,
@@ -200,17 +196,16 @@ async fn events_in_commit_order() {
         );
         assert_eq!(touches.len(), 1);
         assert_eq!(touches[0].1, ObjectChangeKind::Created);
-        assert_eq!(*sessions, 0);
     }
     let mut names = seen
         .iter()
-        .map(|(_, touches, _)| touches[0].0.clone())
+        .map(|(_, touches)| touches[0].0.clone())
         .collect::<Vec<_>>();
     names.sort();
     names.dedup();
     assert_eq!(names.len(), 100);
 
-    // A resumable session announces its id, and its finish the object.
+    // A resumable session is not an object: starting one announces nothing.
     let start = harness
         .send(
             Method::POST,
@@ -220,9 +215,7 @@ async fn events_in_commit_order() {
         )
         .await;
     assert_eq!(start.status(), StatusCode::OK);
-    let (_, touches, sessions) = committed(&events.try_recv().expect("session event"));
-    assert_eq!(touches.len(), 0, "{touches:?}");
-    assert_eq!(sessions, 1);
+    assert!(matches!(events.try_recv(), Err(TryRecvError::Empty)));
 
     // A reset is one event, and the revision keeps moving forwards.
     let before_reset = console.revision();
@@ -393,7 +386,7 @@ async fn imports_are_recorded_as_the_system_and_send_nothing() {
     let mut events = harness.runtime.console().subscribe();
     assert_eq!(harness.runtime.import(&export).await.expect("import"), 1);
     assert_eq!(harness.drain_dispatches(), 0);
-    let (_, touches, _) = committed(&events.try_recv().expect("import event"));
+    let (_, touches) = committed(&events.try_recv().expect("import event"));
     assert_eq!(
         touches,
         [("seeded.txt".to_owned(), ObjectChangeKind::Created)]

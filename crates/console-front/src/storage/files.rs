@@ -1,7 +1,7 @@
 //! The Files page's API: buckets, listings both ways, batch reads of the
 //! rows a live event named, one object (read, upload, metadata, tokens,
 //! delete), its bytes, thumbnail, archive entries, activity and event
-//! bodies, folders, upload sessions and zip downloads.
+//! bodies, folders and zip downloads.
 //!
 //! Routes marked as rules routes read the `Authorization` header exactly as
 //! the protocol does (owner credentials are Admin and skip the rules; any
@@ -18,8 +18,8 @@ use axum::response::{IntoResponse, Response};
 use firenook_storage_front::{
     Actor, ConsoleListQuery, ConsoleUpload, EventDelivery, ExportSource, FileEntry, FolderEntry,
     FolderStats, Identity, ListCursor, ListEntry, ListKind, ListOrder, MediaMode, MetadataPatch,
-    ObjectChangeKind, ObjectChangeRecord, ObjectView, ResendEvent, SessionCursor, SessionState,
-    SniffFamily, SortColumn, TokenOp,
+    ObjectChangeKind, ObjectChangeRecord, ObjectView, ResendEvent, SniffFamily, SortColumn,
+    TokenOp,
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -618,47 +618,6 @@ pub(crate) enum StorageResendEvent {
 pub(crate) struct StorageResendResult {
     pub sent: bool,
     pub delivery: StorageEventDelivery,
-}
-
-/// A resumable upload an app started and has not finished.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageUploadSession {
-    pub id: String,
-    pub bucket: String,
-    pub name: String,
-    #[ts(type = "number")]
-    pub received: u64,
-    /// The size the client declared, when it did.
-    #[ts(type = "number | null")]
-    pub total: Option<u64>,
-    pub started_at: Option<String>,
-    pub updated_at: Option<String>,
-    /// The uid of the session's Authorization; null for Admin or an
-    /// unauthenticated client.
-    pub uid: Option<String>,
-    pub admin: bool,
-    pub state: StorageSessionState,
-}
-
-/// Where a session stands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export_to = "storage/")]
-pub(crate) enum StorageSessionState {
-    Active,
-    Denied,
-    Cancelled,
-}
-
-/// `POST /storage/session/discard`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageDiscardSessionBody {
-    pub bucket: String,
-    pub id: String,
 }
 
 /// The first entries of a `.zip` object.
@@ -1576,89 +1535,6 @@ pub(crate) async fn events(
         metadata_update: bodies(payloads.metadata_update),
         delete: bodies(payloads.delete),
     }))
-}
-
-/// `?bucket&cursor&before&limit`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SessionsQuery {
-    bucket: String,
-    cursor: Option<String>,
-    before: Option<String>,
-    limit: Option<u32>,
-}
-
-/// `GET /storage/sessions`: resumable uploads not finished, newest
-/// activity first.
-pub(crate) async fn sessions(
-    State(routes): State<StorageRoutes>,
-    Query(query): Query<SessionsQuery>,
-) -> Result<Json<Page<StorageUploadSession>>, ApiError> {
-    let paging = PageQuery {
-        limit: query.limit,
-        cursor: query.cursor,
-        before: query.before,
-        ..PageQuery::default()
-    };
-    let after = paging.after::<SessionCursor>()?;
-    let before = paging.before::<SessionCursor>()?;
-    let found = routes.api.sessions(
-        &query.bucket,
-        after.as_ref(),
-        before.as_ref(),
-        paging.limit(DEFAULT_LIMIT, MAX_LIMIT),
-    );
-    let first = found
-        .sessions
-        .first()
-        .map(|(_, cursor)| encode_cursor(cursor));
-    let last = found
-        .sessions
-        .last()
-        .map(|(_, cursor)| encode_cursor(cursor));
-    Ok(Json(Page {
-        items: found
-            .sessions
-            .into_iter()
-            .map(|(session, _)| StorageUploadSession {
-                id: session.id,
-                bucket: session.bucket,
-                name: session.name,
-                received: session.received,
-                total: session.total,
-                started_at: rfc3339_millis(session.started_at_ms),
-                updated_at: rfc3339_millis(session.updated_at_ms),
-                uid: session.uid,
-                admin: session.admin,
-                state: match session.state {
-                    SessionState::Active => StorageSessionState::Active,
-                    SessionState::Denied => StorageSessionState::Denied,
-                    SessionState::Cancelled => StorageSessionState::Cancelled,
-                },
-            })
-            .collect(),
-        next_cursor: found.more_after.then_some(last).flatten(),
-        prev_cursor: found.more_before.then_some(first).flatten(),
-        total: None,
-        scanned: None,
-    }))
-}
-
-/// `POST /storage/session/discard`: removes a session and its staged
-/// bytes (Admin only).
-pub(crate) async fn discard_session(
-    State(routes): State<StorageRoutes>,
-    headers: HeaderMap,
-    ConsoleJson(body): ConsoleJson<StorageDiscardSessionBody>,
-) -> Result<StatusCode, ApiError> {
-    if identity(&headers) != Identity::Admin {
-        return Err(
-            ApiError::permission_denied("Only Admin can discard an upload session.")
-                .with_fix("Act as Admin to do this."),
-        );
-    }
-    routes.api.discard_session(&body.bucket, &body.id).await?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /storage/objects:export`: a selection becomes a download ticket.

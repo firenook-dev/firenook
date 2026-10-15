@@ -26,9 +26,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::routing::{get, post};
-use firenook_storage_front::{
-    BulkProgress, ChangeEvent, ConsoleRefusal, StorageConsoleApi, StorageRulesEvent,
-};
+use firenook_storage_front::{BulkProgress, ConsoleRefusal, StorageConsoleApi, StorageRulesEvent};
 use firenook_suite_front::LoggingRuntime;
 use futures_util::future::BoxFuture;
 use futures_util::stream::{BoxStream, StreamExt as _};
@@ -199,19 +197,15 @@ impl Section for StorageSection {
     }
 
     fn status_changes(&self) -> Option<BoxStream<'static, ()>> {
-        // The folder index finishing, and counts moving: at most one tick
-        // every 500 ms.
+        // The folder index finishing, and counts moving (every change the
+        // service announces moves one, and so does a window lost to lag):
+        // at most one tick every 500 ms.
         let receiver = self.0.api.subscribe();
         Some(
             futures_util::stream::unfold(receiver, |mut receiver| async move {
-                loop {
-                    match receiver.recv().await {
-                        Ok(ChangeEvent::IndexReady | ChangeEvent::Reset)
-                        | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => break,
-                        Ok(ChangeEvent::Committed { touches, .. }) if !touches.is_empty() => break,
-                        Ok(ChangeEvent::Committed { .. }) => {}
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
-                    }
+                if let Err(tokio::sync::broadcast::error::RecvError::Closed) = receiver.recv().await
+                {
+                    return None;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 // What arrived meanwhile is in the counts the tick reads.
@@ -260,8 +254,6 @@ impl Section for StorageSection {
             .route("/object/archive", get(files::archive))
             .route("/object/activity", get(files::activity))
             .route("/object/events", get(files::events))
-            .route("/sessions", get(files::sessions))
-            .route("/session/discard", post(files::discard_session))
             .route("/rules", get(rules::read_rules).put(rules::write_rules))
             .route("/rules/check", post(rules::check_rules))
             .route("/rules/history", get(rules::rules_history))
@@ -403,9 +395,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         files::StorageResendEventBody,
         files::StorageResendEvent,
         files::StorageResendResult,
-        files::StorageUploadSession,
-        files::StorageSessionState,
-        files::StorageDiscardSessionBody,
         files::StorageArchive,
         files::StorageArchiveEntry,
         files::StorageProfile,

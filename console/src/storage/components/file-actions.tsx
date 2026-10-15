@@ -10,7 +10,6 @@
 import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
   ArrowsOutCardinalIcon,
-  CloudArrowUpIcon,
   CopyIcon,
   DownloadSimpleIcon,
   SlidersHorizontalIcon,
@@ -45,7 +44,6 @@ import { selectionTarget, useFileSelection } from '../selection'
 import { existingNames, keepBothName } from '../uploads'
 import { EditMetadataDialog, type MetadataRequest } from './edit-metadata-dialog'
 import { MoveDialog, type MoveRequest } from './move-dialog'
-import { UploadsInProgress, useSessions } from './uploads-in-progress'
 import { useToolLabels } from './inspector/room'
 
 type Confirm =
@@ -122,10 +120,6 @@ export interface FileActions {
   askEmpty: () => void
   /** Edit the metadata of the ticked rows. */
   editSelection: () => void
-  /** Opens "Uploads in progress" beside an element. */
-  showSessions: (anchor: Element | null) => void
-  /** Resumable uploads the bucket holds. */
-  unfinished: number
   element: ReactNode
 }
 
@@ -146,8 +140,6 @@ export function useFileActions(selectionScope: {
   const checked = useFileSelection((state) => state.checked)
   const everything = useFileSelection((state) => state.everything)
   const clearSelection = useFileSelection((state) => state.clear)
-  const sessions = useSessions()
-  const [sessionsAnchor, setSessionsAnchor] = useState<Element | null>(null)
 
   const resource =
     confirm?.kind === 'file'
@@ -565,7 +557,6 @@ export function useFileActions(selectionScope: {
     </>
   )
 
-  const unfinished = sessions.data?.items.length ?? 0
   const bucketMenu = (
     <>
       <DropdownMenu.Item
@@ -574,13 +565,6 @@ export function useFileActions(selectionScope: {
         data-testid="bucket-download"
       >
         Download the bucket as .zip
-      </DropdownMenu.Item>
-      <DropdownMenu.Item
-        icon={CloudArrowUpIcon}
-        onClick={() => setSessionsAnchor(document.querySelector('[data-testid="bucket-menu"]'))}
-        data-testid="bucket-sessions"
-      >
-        Uploads in progress{unfinished > 0 ? ` · ${formatNumber(unfinished)}` : ''}
       </DropdownMenu.Item>
       <DropdownMenu.Separator />
       <DropdownMenu.Item
@@ -661,7 +645,6 @@ export function useFileActions(selectionScope: {
         onConfirm={() => void confirmDelete()}
         testId="storage-danger"
       />
-      <UploadsInProgress anchor={sessionsAnchor} onClose={() => setSessionsAnchor(null)} />
       <MoveDialog request={move} onCancel={() => setMove(undefined)} onConfirm={confirmMove} />
       <EditMetadataDialog
         request={metadata}
@@ -706,10 +689,8 @@ export function useFileActions(selectionScope: {
     cancelRename: () => setRenaming(undefined),
     deleteTicked,
     copyHere,
-    showSessions: setSessionsAnchor,
     askEmpty,
     editSelection: () => askMetadata(selected()),
-    unfinished,
     element,
   }
 }

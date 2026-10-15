@@ -111,7 +111,6 @@ pub use rules_manager::{
     FolderRules, Impact, ImpactFlip, StorageRulesHandle, StorageRulesMap,
 };
 pub use search::{SearchFound, SearchKind, SearchOutcome};
-pub use sessions::{SESSION_IDLE, SessionCursor, SessionPage, SessionState, SessionView};
 pub use sniff::{SniffFamily, Sniffed};
 pub use staging::InFlight;
 use staging::{StagedFile, StagingGauge, staging_path};

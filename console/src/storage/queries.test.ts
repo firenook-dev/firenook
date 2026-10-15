@@ -38,7 +38,6 @@ describe('Storage’s query keys', () => {
       storageKeys.object('demo', 'b', 'users/a.png', 'owner'),
       storageKeys.activity('demo', 'b', 'users/a.png'),
       storageKeys.events('demo', 'b', 'users/a.png', '3'),
-      storageKeys.sessions('demo', 'b'),
       storageKeys.access('demo', 'b', 'owner', ['a.png']),
     ])
       expect(key.slice(0, bucket.length)).toEqual([...bucket])

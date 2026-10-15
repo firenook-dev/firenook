@@ -7,8 +7,9 @@
 //! and sends one [`ChangeEvent`], so whoever observes the service sees the
 //! changes in exactly the order the object map took them, and a console
 //! never has to poll. Resumable upload sessions change through
-//! [`StorageData::put_session`] and [`StorageData::remove_session`] for the
-//! same reason.
+//! [`StorageData::put_session`] and [`StorageData::remove_session`], which
+//! keep the times the idle sweep reads; a session is not an object, so it
+//! announces nothing until it finishes as one.
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
@@ -179,15 +180,13 @@ impl ObjectChangeRecord {
 /// never blocks, and with no subscriber it costs nothing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChangeEvent {
-    /// One committed mutation: a protocol write (one name), or an upload
-    /// session that started, advanced, finished or was discarded.
+    /// One committed mutation of the bucket's objects: a protocol write
+    /// (one name), or a bulk batch (its names).
     Committed {
         bucket: Arc<str>,
         /// The storage revision after the mutation.
         revision: u64,
         touches: Arc<[(Arc<str>, ObjectChangeKind)]>,
-        /// Upload sessions the mutation changed.
-        sessions: Arc<[String]>,
     },
     /// The folder index finished building: counts that were unknown are
     /// known now.
@@ -206,28 +205,16 @@ pub(crate) struct Batch {
 struct Touched {
     revision: u64,
     touches: Vec<(Arc<str>, ObjectChangeKind)>,
-    sessions: Vec<String>,
 }
 
 impl Batch {
-    fn touch(
-        &mut self,
-        bucket: &str,
-        revision: u64,
-        object: Option<(&str, ObjectChangeKind)>,
-        session: Option<String>,
-    ) {
+    fn touch(&mut self, bucket: &str, revision: u64, name: &str, kind: ObjectChangeKind) {
         if !self.buckets.contains_key(bucket) {
             self.buckets.insert(bucket.to_owned(), Touched::default());
         }
         let touched = self.buckets.get_mut(bucket).expect("bucket present");
         touched.revision = revision;
-        if let Some((name, kind)) = object {
-            touched.touches.push((Arc::from(name), kind));
-        }
-        if let Some(id) = session {
-            touched.sessions.push(id);
-        }
+        touched.touches.push((Arc::from(name), kind));
     }
 }
 
@@ -502,12 +489,7 @@ impl StorageData {
     /// the announcement waits for the batch's end.
     fn committed(&mut self, record: ObjectChangeRecord) {
         if let Some(batch) = &mut self.batch {
-            batch.touch(
-                &record.bucket,
-                record.revision,
-                Some((&record.name, record.kind)),
-                None,
-            );
+            batch.touch(&record.bucket, record.revision, &record.name, record.kind);
             self.feed.ring().push(record);
             return;
         }
@@ -515,7 +497,6 @@ impl StorageData {
             bucket: Arc::from(record.bucket.as_str()),
             revision: record.revision,
             touches: Arc::from([(Arc::from(record.name.as_str()), record.kind)]),
-            sessions: Arc::from([]),
         };
         self.feed.ring().push(record);
         self.feed.announce(event);
@@ -524,8 +505,6 @@ impl StorageData {
     /// Starts a batch: until [`Self::end_batch`], changes are recorded at
     /// once but announced together, one [`ChangeEvent::Committed`] per
     /// bucket, so a bulk batch of 200 names is one live event, not 200.
-    /// Upload sessions that change meanwhile join the batch's event, so the
-    /// announced revisions keep their order.
     pub(crate) fn begin_batch(&mut self) {
         self.batch.get_or_insert_with(Batch::default);
     }
@@ -540,7 +519,6 @@ impl StorageData {
                 bucket: Arc::from(bucket.as_str()),
                 revision: touched.revision,
                 touches: Arc::from(touched.touches),
-                sessions: Arc::from(touched.sessions),
             });
         }
     }
@@ -562,37 +540,20 @@ impl StorageData {
     }
 
     /// The one way to record an upload session's new state (started,
-    /// advanced, refused, cancelled).
+    /// advanced, refused, cancelled): it is stamped with when it last moved,
+    /// which the idle sweep reads.
     pub(crate) fn put_session(&mut self, mut session: UploadSession) {
         let now = unix_millis(OffsetDateTime::now_utc());
         if session.started_at_ms == 0 {
             session.started_at_ms = now;
         }
         session.updated_at_ms = now;
-        let (bucket, id) = (session.bucket.clone(), session.id.clone());
-        self.uploads.insert(id.clone(), session);
-        self.session_committed(&bucket, id);
+        self.uploads.insert(session.id.clone(), session);
     }
 
-    /// The one way to forget an upload session (finished or discarded).
+    /// The one way to forget an upload session (finished or swept).
     pub(crate) fn remove_session(&mut self, id: &str) -> Option<UploadSession> {
-        let session = self.uploads.remove(id)?;
-        self.session_committed(&session.bucket, id.to_owned());
-        Some(session)
-    }
-
-    fn session_committed(&mut self, bucket: &str, id: String) {
-        self.revision += 1;
-        if let Some(batch) = &mut self.batch {
-            batch.touch(bucket, self.revision, None, Some(id));
-            return;
-        }
-        self.feed.announce(ChangeEvent::Committed {
-            bucket: Arc::from(bucket),
-            revision: self.revision,
-            touches: Arc::from([]),
-            sessions: Arc::from([id]),
-        });
+        self.uploads.remove(id)
     }
 }
 

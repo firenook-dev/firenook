@@ -3,9 +3,9 @@
 // refreshes. Nothing polls and nothing opens a stream of its own.
 //
 // `storage.objects` names the objects a window of writes touched — names,
-// kinds, folders, upload session ids, never metadata — and resumes by
-// replay (the storage revision is global across buckets, so a resumed tab
-// gets exactly what it missed). What it refreshes:
+// kinds, folders, never metadata — and resumes by replay (the storage
+// revision is global across buckets, so a resumed tab gets exactly what it
+// missed). What it refreshes:
 //
 // - the lists on screen, which the page owns: a listing by name patches the
 //   touched rows through `:batchGet` (`touchedRows` → `useCursorRows`'
@@ -16,7 +16,7 @@
 // - everything else, through a keyed throttle with a leading and a trailing
 //   edge (250 ms per key): the buckets' figures, the folders a name sits in,
 //   the object itself, its activity and its event payloads, the profiles, the
-//   access checks, the upload sessions (`invalidationKeys`);
+//   access checks (`invalidationKeys`);
 // - a `reset` (the cursor left the ring, or another engine run) starts every
 //   query of the bucket again.
 //
@@ -162,7 +162,6 @@ export function invalidationKeys(
       storageKeys.treeOf(project, bucket),
       storageKeys.objectsOf(project, bucket),
     )
-  if (batch.sessions.length > 0) keys.push(storageKeys.sessions(project, bucket))
   return keys
 }
 

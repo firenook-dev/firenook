@@ -386,8 +386,6 @@ export function FilesWorkbench() {
     actions: {
       uploadFiles: () => filesInput.current?.click(),
       uploadFolder: () => folderInput.current?.click(),
-      showSessions: () =>
-        fileActions.showSessions(document.querySelector('[data-testid="storage-toolbar"]')),
       editSelection: selecting ? fileActions.editSelection : undefined,
       emptyBucket: fileActions.askEmpty,
     },
@@ -621,22 +619,7 @@ export function FilesWorkbench() {
               summary={drag.summary}
             />
           )}
-          <UploadTray
-            sessionsLine={
-              fileActions.unfinished > 0 ? (
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between border-t border-kumo-line px-3 py-1.5 text-left text-[12px] text-kumo-subtle hover:ink"
-                  onClick={(event) => fileActions.showSessions(event.currentTarget)}
-                  data-testid="tray-sessions"
-                >
-                  {formatNumber(fileActions.unfinished)} unfinished{' '}
-                  {fileActions.unfinished === 1 ? 'upload' : 'uploads'} from your app
-                  <span className="text-kumo-link">Show</span>
-                </button>
-              ) : undefined
-            }
-          />
+          <UploadTray />
         </div>
         {files.object !== undefined && (
           <FileInspector

@@ -1121,13 +1121,17 @@ async fn idle_sessions_are_swept() {
             .expect("response");
         assert_eq!(response.status(), StatusCode::OK);
     }
-    let page = harness.console().sessions(BUCKET, None, None, 10);
-    assert_eq!(page.sessions.len(), 2);
-    assert!(
-        page.sessions
-            .iter()
-            .all(|(session, _)| session.admin && session.total == Some(100))
-    );
+    let names = |harness: &Harness| {
+        let data = lock(&harness.runtime.state.inner);
+        let mut names = data
+            .uploads
+            .values()
+            .map(|session| session.name.clone())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    assert_eq!(names(&harness), ["fresh.bin", "old.bin"]);
     let (old_id, old_file) = {
         let mut data = lock(&harness.runtime.state.inner);
         let session = data
@@ -1144,32 +1148,11 @@ async fn idle_sessions_are_swept() {
         .expect("sweep");
     assert_eq!(count, 1);
     assert!(!old_file.exists(), "its staged bytes went too");
-    let page = harness.console().sessions(BUCKET, None, None, 10);
-    assert_eq!(page.sessions.len(), 1);
-    assert_eq!(page.sessions[0].0.name, "fresh.bin");
+    assert_eq!(names(&harness), ["fresh.bin"]);
     assert!(
         !lock(&harness.runtime.state.inner)
             .uploads
             .contains_key(&old_id)
-    );
-    // Discard removes one at once; a second discard is 404.
-    let fresh = page.sessions[0].0.id.clone();
-    harness
-        .console()
-        .discard_session(BUCKET, &fresh)
-        .await
-        .expect("discard");
-    assert!(matches!(
-        harness.console().discard_session(BUCKET, &fresh).await,
-        Err(ConsoleError::NotFound(_))
-    ));
-    assert_eq!(
-        harness
-            .console()
-            .sessions(BUCKET, None, None, 10)
-            .sessions
-            .len(),
-        0
     );
     harness.finish().await;
 }

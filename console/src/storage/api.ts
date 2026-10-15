@@ -25,7 +25,6 @@ import { API_BASE, ApiError, type ApiErrorCode, parseErrorBody } from '@/api/cli
 import type { BatchGetResponse } from '@/api/generated/BatchGetResponse'
 import type { Job } from '@/api/generated/Job'
 import type { ListMeta } from '@/api/generated/ListMeta'
-import type { Page } from '@/api/generated/Page'
 import type { RulesDiagnostic } from '@/api/generated/RulesDiagnostic'
 import type { RulesMethod } from '@/api/generated/RulesMethod'
 import type { RulesVersion } from '@/api/generated/RulesVersion'
@@ -42,7 +41,6 @@ import type { StorageDecisionBatch } from '@/api/generated/storage/StorageDecisi
 import type { StorageDecisionDetail } from '@/api/generated/storage/StorageDecisionDetail'
 import type { StorageDecisionsParams } from '@/api/generated/storage/StorageDecisionsParams'
 import type { StorageDeleteObjectBody } from '@/api/generated/storage/StorageDeleteObjectBody'
-import type { StorageDiscardSessionBody } from '@/api/generated/storage/StorageDiscardSessionBody'
 import type { StorageEntry } from '@/api/generated/storage/StorageEntry'
 import type { StorageEvaluateBody } from '@/api/generated/storage/StorageEvaluateBody'
 import type { StorageEvaluateRequest } from '@/api/generated/storage/StorageEvaluateRequest'
@@ -70,7 +68,6 @@ import type { StorageRulesInstalled } from '@/api/generated/storage/StorageRules
 import type { StorageRulesWrite } from '@/api/generated/storage/StorageRulesWrite'
 import type { StorageTokenBody } from '@/api/generated/storage/StorageTokenBody'
 import type { StorageUpdateObjectBody } from '@/api/generated/storage/StorageUpdateObjectBody'
-import type { StorageUploadSession } from '@/api/generated/storage/StorageUploadSession'
 import { RulesCompileError } from '@/rules/text'
 
 /** Every Storage route is under this. */
@@ -592,26 +589,6 @@ export function uploadObject(
     })
     request.send(body)
   })
-}
-
-// ---------------------------------------------------------------------------
-// Resumable sessions an app started.
-
-/** Resumable uploads not finished, newest activity first. */
-export function listSessions(
-  bucket: string,
-  page: { cursor?: string | undefined; before?: string | undefined; limit?: number | undefined },
-  signal?: AbortSignal,
-): Promise<Page<StorageUploadSession>> {
-  return get('/sessions', { bucket, ...page }, { signal })
-}
-
-/** Removes a session and its staged bytes (Admin only). */
-export function discardSession(
-  body: StorageDiscardSessionBody,
-  options?: CallOptions,
-): Promise<void> {
-  return call('POST', '/session/discard', body, options)
 }
 
 // ---------------------------------------------------------------------------

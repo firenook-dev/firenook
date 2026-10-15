@@ -47,7 +47,6 @@ const changed = (names: string[]) => ({
   changes: names.map((name) => ({ name, kind: 'metadata' })),
   folders: [],
   truncated: false,
-  sessions: [],
   indexReady: false,
 })
 

@@ -50,7 +50,6 @@ import {
   getRules,
   getRulesHistory,
   listObjects,
-  listSessions,
   putRules,
 } from './api'
 
@@ -116,7 +115,6 @@ export const storageKeys = {
   profilesOf: (project: string, bucket: string) => [ST, project, bucket, 'profile'] as const,
   profile: (project: string, bucket: string, prefix: string) =>
     [ST, project, bucket, 'profile', prefix] as const,
-  sessions: (project: string, bucket: string) => [ST, project, bucket, 'sessions'] as const,
   /** Every access check of a bucket. */
   accessOf: (project: string, bucket: string) => [ST, project, bucket, 'access'] as const,
   access: (project: string, bucket: string, as: string, names: readonly string[]) =>
@@ -329,14 +327,6 @@ export const archiveQuery = (project: string, bucket: string, name: string, gene
     queryFn: ({ signal }) => getArchive(bucket, name, generation, undefined, signal),
     staleTime: FOREVER,
     retry: false,
-  })
-
-/** The first page of a bucket's unfinished resumable uploads (the popover's list). */
-export const sessionsQuery = (project: string, bucket: string) =>
-  queryOptions({
-    queryKey: storageKeys.sessions(project, bucket),
-    queryFn: ({ signal }) => listSessions(bucket, {}, signal),
-    staleTime: FOREVER,
   })
 
 /**

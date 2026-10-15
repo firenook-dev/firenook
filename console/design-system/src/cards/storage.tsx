@@ -33,7 +33,6 @@ import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { IdentityUser } from '@/api/generated/IdentityUser'
 import type { Job } from '@/api/generated/Job'
 import type { ListMeta } from '@/api/generated/ListMeta'
-import type { Page } from '@/api/generated/Page'
 import type { RulesVersion } from '@/api/generated/RulesVersion'
 import type { StorageActivity } from '@/api/generated/storage/StorageActivity'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
@@ -51,7 +50,6 @@ import type { StorageRulesCheck } from '@/api/generated/storage/StorageRulesChec
 import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
 import type { StorageRulesImpact } from '@/api/generated/storage/StorageRulesImpact'
 import type { StorageRulesObjectView } from '@/api/generated/storage/StorageRulesObjectView'
-import type { StorageUploadSession } from '@/api/generated/storage/StorageUploadSession'
 import { statusQuery } from '@/api/queries'
 import { Inspector, InspectorFooter, InspectorTitle } from '@/components/console/inspector'
 import type { CursorRows } from '@/components/console/use-cursor-rows'
@@ -88,7 +86,6 @@ import {
   objectsMetaQuery,
   profileQuery,
   rulesScope,
-  sessionsQuery,
   storageCoverageQuery,
   storageDecisionQuery,
   storageImpactQuery,
@@ -677,14 +674,6 @@ const META: ListMeta = {
       prefixes: [],
     },
   ],
-}
-
-const NO_SESSIONS: Page<StorageUploadSession> = {
-  items: [],
-  nextCursor: null,
-  prevCursor: null,
-  total: null,
-  scanned: null,
 }
 
 /** An object as `GET /storage/object` answers the owner, from its listing entry. */
@@ -1283,7 +1272,6 @@ function fillFiles(client: QueryClient) {
   client.setQueryData(folderQuery(PROJECT, BUCKET, HOME).queryKey, HOME_FIGURES)
   client.setQueryData(profileQuery(PROJECT, BUCKET, HOME).queryKey, HOME_PROFILE)
   client.setQueryData(objectsMetaQuery(PROJECT).queryKey, META)
-  client.setQueryData(sessionsQuery(PROJECT, BUCKET).queryKey, NO_SESSIONS)
   for (const object of [COVER, PREFS]) {
     client.setQueryData(objectQuery(PROJECT, BUCKET, object.name, OWNER).queryKey, object)
     client.setQueryData(
