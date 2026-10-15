@@ -2,9 +2,9 @@
 // project's one-account-per-email and email enumeration protection, or a
 // tenant's sign-in methods and multi-factor state), the tenants, the
 // blocking functions and triggers, where the section's data goes in and
-// out (the Users page's dialogs, the Overview's reset), how to connect an
-// app, and the production settings the emulator does not apply — stated as
-// facts, never as controls. Every change goes through the official API as
+// out (the Users page's dialogs, the Overview's reset), where the snippets
+// that connect an app are (the Overview's), and the production settings the
+// emulator does not apply — stated as facts, never as controls. Every change goes through the official API as
 // the Admin SDK makes it (`x-firenook-console: write`), and `auth.config`
 // keeps every open page in step.
 
@@ -36,7 +36,6 @@ import {
   patchOf,
   updateTenant,
 } from '../tenants'
-import { ConnectCard } from './connect-card'
 import { HooksCard } from './hooks-card'
 import { usePagePalette } from './page-palette'
 import { TenantDialog, type TenantDialogMode } from './tenant-dialog'
@@ -236,8 +235,20 @@ export function SettingsPage() {
               project={search.project}
             />
           </Card>
-          <Card id="connect" title="Connect your app">
-            <ConnectCard />
+          <Card id="connect" title="Connect your app" plain>
+            <p className="m-0 text-[14px] text-kumo-subtle" data-testid="settings-connect-note">
+              The snippets that point an app at this Auth emulator, for the web, Flutter, Apple,
+              Android, the Admin SDKs and environment variables, are on the{' '}
+              <Link
+                to="/"
+                search={{ connect: 'web' }}
+                className={TEXT_LINK}
+                data-testid="settings-connect-overview"
+              >
+                Overview ↗
+              </Link>
+              , with this engine&apos;s host and ports.
+            </p>
           </Card>
           <Card id="production" title="Production settings the emulator does not apply" plain>
             <Text variant="secondary">{NOT_EMULATED}</Text>

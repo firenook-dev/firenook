@@ -17,7 +17,8 @@ import {
 // Authentication › Settings against the real engine (auth spec §9.3, S1–S4;
 // S5 and S6 need engines of their own, in `auth-engines.spec.ts`): tenants
 // with chosen ids and their sign-in switches, the blocking functions and
-// triggers, one account per email, and the snippets that connect an app.
+// triggers, one account per email, and the way to the Overview's snippets
+// that connect an app.
 // Every switch and tenant is put back at the end.
 
 const stamp = () => Date.now().toString(36)
@@ -228,7 +229,7 @@ test('S3 one account per email decides whether a provider sign-in makes a second
   }
 })
 
-test('S4 the snippets point an app at this Auth emulator, Android through its loopback', async ({
+test('S4 Settings leads to the Overview’s snippets, which point an app at this Auth emulator', async ({
   page,
   engine,
 }) => {
@@ -238,14 +239,21 @@ test('S4 the snippets point an app at this Auth emulator, Android through its lo
   )
   const auth = status.services.find((service) => service.name === 'auth')!
   await page.goto(settings(engine, { section: 'connect' }))
-  const snippet = page.getByTestId('connect-snippet')
+  await page.getByTestId('settings-connect-overview').click()
+  await expect(page).toHaveURL(/\/console\/?\?connect=web/)
+  const snippet = page.getByTestId('overview-connect-snippet')
+  await expect(snippet).toBeInViewport()
   await expect(snippet).toContainText(`connectAuthEmulator(`)
   await expect(snippet).toContainText(`http://${auth.host}:${auth.port}`)
-  await snippet.getByRole('tab', { name: 'Android' }).click()
-  await expect(snippet).toContainText(`10.0.2.2`)
-  await expect(snippet).toContainText(String(auth.port))
-  await expect(snippet).not.toContainText(auth.host)
-  await snippet.getByRole('tab', { name: 'Environment' }).click()
-  await expect(snippet).toContainText(`FIREBASE_AUTH_EMULATOR_HOST`)
-  await expect(snippet).toContainText(`${auth.host}:${auth.port}`)
+  // An Android emulator reaches this machine at 10.0.2.2.
+  await page.getByTestId('overview-host').getByRole('combobox').click()
+  await page.getByRole('option', { name: /10\.0\.2\.2/ }).click()
+  await page.getByTestId('overview-connect-tabs').getByRole('tab', { name: 'Android' }).click()
+  await expect(snippet).toContainText(`Firebase.auth.useEmulator("10.0.2.2", ${auth.port})`)
+  await page
+    .getByTestId('overview-connect-tabs')
+    .getByRole('tab', { name: 'Environment variables' })
+    .click()
+  await expect(snippet).toContainText('FIREBASE_AUTH_EMULATOR_HOST=')
+  await expect(snippet).toContainText(`:${auth.port}`)
 })
