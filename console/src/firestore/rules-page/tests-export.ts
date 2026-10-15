@@ -7,10 +7,8 @@
 import { type WorkbenchQuery, parseQuery } from '../query'
 import { INFER, type FsValue, decodeFields, fromJson } from '../value'
 import type { FirestoreRestValue } from '@/api/generated/FirestoreRestValue'
+import { contextCode } from '@/rules/who'
 import type { TestCase } from './tests-store'
-
-/** Claims every ID token carries; the rest are what a test passes as token options. */
-const STANDARD = new Set(['iss', 'aud', 'auth_time', 'user_id', 'sub', 'iat', 'exp', 'firebase'])
 
 /** A Firestore value as JavaScript source for the modular SDK. */
 export function valueCode(value: FsValue, db: string): string {
@@ -63,27 +61,6 @@ function queryCode(query: WorkbenchQuery): string[] {
       `orderBy(${JSON.stringify(order.field)}${order.direction === 'desc' ? ", 'desc'" : ''})`,
     )
   return parts
-}
-
-function contextCode(test: TestCase): string {
-  const who = test.form.who
-  if (who.kind === 'anonymous' || (who.kind === 'recorded' && !who.auth))
-    return 'env.unauthenticatedContext()'
-  if (who.kind === 'recorded' && who.auth) {
-    const options = Object.fromEntries(
-      Object.entries(who.auth.token).filter(([key]) => !STANDARD.has(key)),
-    )
-    return `env.authenticatedContext(${JSON.stringify(who.auth.uid)}, ${JSON.stringify(options)})`
-  }
-  if (who.kind !== 'user') return 'env.unauthenticatedContext()'
-  let claims: Record<string, unknown> = {}
-  try {
-    claims = who.claims.trim() ? (JSON.parse(who.claims) as Record<string, unknown>) : {}
-  } catch {
-    claims = {}
-  }
-  const options = { ...(who.email ? { email: who.email, email_verified: true } : {}), ...claims }
-  return `env.authenticatedContext(${JSON.stringify(who.uid)}, ${JSON.stringify(options)})`
 }
 
 function dataCode(test: TestCase): string {
@@ -190,7 +167,7 @@ export function exportTests(
     lines.push('', `test(${JSON.stringify(`${test.name} ${verdict}`)}, async () => {`)
     const seed = seedCode(test)
     if (seed) lines.push(seed)
-    lines.push(`  const db = ${contextCode(test)}.firestore()`)
+    lines.push(`  const db = ${contextCode(test.form.who)}.firestore()`)
     lines.push(
       `  await ${test.expected === 'allow' ? 'assertSucceeds' : 'assertFails'}(${operationCode(test)})`,
     )

@@ -3,10 +3,10 @@
 // design on every rules page — the filter row (one field for path, user and
 // method terms, All or Denied, Clear), the narrowing chips, the count, the
 // virtualized list of two-line rows, the footer that says what is held,
-// the detail with its way back and its previous and next — and an adapter
-// fills it with data: Firestore's reads the official Requests WebSocket and
-// narrows in the browser (that feed cannot be asked to), Storage's reads
-// the `storage.decisions` topic, whose parameters the engine evaluates.
+// the detail with its way back and its previous and next — and the kit's
+// decisions panel (`decisions-panel.tsx`) fills it from a page's decision
+// log: Firestore's `firestore.decisions` topic or Storage's
+// `storage.decisions`, whose parameters the engine evaluates.
 //
 // A row reads the same on both pages: the verdict, the method, the path;
 // then when, who, what else the page knows (an upload's size and type),

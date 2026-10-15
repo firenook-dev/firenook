@@ -1,5 +1,7 @@
 // Deleting one or many documents, with the choice of taking their
-// subcollections along. The dialog stays mounted and toggles with `target`.
+// subcollections along, in the console's one destructive confirmation
+// (`DangerConfirm`: what goes, the functions it runs, the option, how far
+// it has got). The dialog stays mounted and toggles with `target`.
 //
 // Two kinds of many. Ticked rows are paths the page already has. Everything
 // the query matches — the selection bar's "Select all" — is mostly rows the
@@ -8,12 +10,11 @@
 // read for its paths first and deleted in batches, with the count going up
 // as it does.
 
-import { Button, Checkbox, Dialog, Text, useKumoToastManager } from '@cloudflare/kumo'
-import { TrashIcon, XIcon } from '@phosphor-icons/react'
+import { useKumoToastManager } from '@cloudflare/kumo'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { statusQuery } from '@/api/queries'
-import { TriggerLineItem, triggerLine } from '@/components/console/danger-confirm'
+import { DangerConfirm, triggerLine } from '@/components/console/danger-confirm'
 import { useTriggersFor } from '@/lib/triggers'
 import { exportPages } from '../export'
 import { isEmptyQuery, printQuery } from '../query'
@@ -142,16 +143,12 @@ export function DeleteDialog({
     : `${workbench.collectionPath} matching ${printQuery(workbench.query)}`
   const line = triggerLine(triggers, count, status.data?.backgroundTriggers)
   return (
-    <Dialog.Root open={target !== null} onOpenChange={onOpenChange}>
-      <Dialog size="base" className="p-6">
-        <div className="mb-3 flex items-start justify-between gap-4">
-          <Dialog.Title className="text-lg font-semibold">{label}</Dialog.Title>
-          <Dialog.Close
-            aria-label="Close"
-            render={<Button variant="ghost" shape="square" icon={<XIcon />} aria-label="Close" />}
-          />
-        </div>
-        <Dialog.Description className="text-kumo-subtle">
+    <DangerConfirm
+      open={target !== null}
+      onOpenChange={onOpenChange}
+      title={label}
+      description={
+        <>
           {target?.kind === 'paths' ? (
             <>
               <span className="font-mono text-[0.9em] text-kumo-default">
@@ -170,51 +167,23 @@ export function DeleteDialog({
           {line
             ? 'Listeners see the delete like any other write.'
             : 'Listeners and triggers see the delete like any other write.'}
-        </Dialog.Description>
-        {line && (
-          <ul
-            className="mt-3 grid list-disc gap-1 pl-5 text-[14px] text-kumo-subtle"
-            data-testid="delete-dialog-consequences"
-          >
-            <TriggerLineItem line={line} testId="delete-dialog" />
-          </ul>
-        )}
-        <div className="mt-4">
-          <Checkbox
-            checked={recursive}
-            onCheckedChange={(checked) => setRecursive(Boolean(checked))}
-            label="Also delete subcollections underneath"
-          />
-        </div>
-        {remove.isPending && done !== undefined && (
-          <div className="mt-2" data-testid="delete-progress">
-            <Text variant="secondary" size="sm">
-              {formatNumber(done)} of {formatNumber(count)} deleted…
-            </Text>
-          </div>
-        )}
-        {remove.isError && (
-          <div className="mt-2">
-            <Text variant="error" size="sm">
-              {remove.error.message}
-            </Text>
-          </div>
-        )}
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            icon={<TrashIcon />}
-            onClick={() => remove.mutate()}
-            loading={remove.isPending}
-            data-testid="confirm-delete"
-          >
-            {label}
-          </Button>
-        </div>
-      </Dialog>
-    </Dialog.Root>
+        </>
+      }
+      triggers={{ answer: triggers, times: count }}
+      option={{
+        label: 'Also delete subcollections underneath',
+        checked: recursive,
+        onChange: setRecursive,
+      }}
+      progress={
+        remove.isPending && done !== undefined
+          ? `${formatNumber(done)} of ${formatNumber(count)} deleted…`
+          : undefined
+      }
+      {...(remove.isError ? { error: remove.error.message } : {})}
+      pending={remove.isPending}
+      onConfirm={() => remove.mutate()}
+      testId="delete-dialog"
+    />
   )
 }

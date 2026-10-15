@@ -273,7 +273,6 @@ impl Section for StorageSection {
             .route("/rules/check", post(rules::check_rules))
             .route("/rules/history", get(rules::rules_history))
             .route("/rules/evaluate", post(rules::evaluate))
-            .route("/rules/decisions", get(rules::decisions))
             .route("/rules/decisions/{id}", get(rules::decision))
             .route("/rules/impact", post(rules::impact))
             .route("/rules/coverage", get(rules::coverage))

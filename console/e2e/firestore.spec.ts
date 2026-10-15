@@ -482,7 +482,7 @@ test('documents are added and deleted from the workbench', async ({ page }) => {
   await put(page.request, 'teams/t_journey/notes/n1', { body: { stringValue: 'beneath' } })
   await page.getByLabel('Select t_journey').click()
   await page.getByTestId('delete-selected').click()
-  await page.getByTestId('confirm-delete').click()
+  await page.getByTestId('delete-dialog-confirm').click()
   await expect(page.getByText('2 documents deleted')).toBeVisible()
   await expect(page.getByTestId('grid-row').filter({ hasText: 't_journey' })).toHaveCount(0)
   const gone = await page.request.get(`${documents()}/teams/t_journey`, { headers: owner })
@@ -1118,16 +1118,31 @@ test('JSON imports as typed documents, and the palette jumps anywhere', async ({
   await page.getByTestId('open-in-grid').click()
   await expect(page).toHaveURL(/path=users&doc=users%2F/)
 
-  // ⌘K: the page's collections and recents join the console palette.
+  // ⌘K: collections and documents are the engine's hits, beside the
+  // page's recents and actions.
   await page.keyboard.press('ControlOrMeta+k')
   const palette = page.getByTestId('palette-input')
   await palette.fill('prod')
-  await page.getByRole('option', { name: /^products — / }).click()
+  await page
+    .getByRole('group', { name: 'Collections' })
+    .getByRole('option', { name: /^products/ })
+    .first()
+    .click()
   await expect(page).toHaveURL(/path=products/)
   await page.keyboard.press('ControlOrMeta+k')
   await palette.fill('teams/t_real')
-  await page.getByRole('option', { name: /Open this document/ }).click()
+  await page
+    .getByRole('group', { name: 'Documents' })
+    .getByRole('option', { name: /teams\/t_real/ })
+    .first()
+    .click()
   await expect(page).toHaveURL(/path=teams&doc=teams%2Ft_real/)
+  // Opened, it is a recent too, and shown once: no "Go to" row repeats it.
+  await page.keyboard.press('ControlOrMeta+k')
+  await palette.fill('teams/t_real')
+  await expect(page.getByRole('option', { name: /teams\/t_real/ })).toHaveCount(1)
+  await expect(page.getByRole('group', { name: 'Go to' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
 
   // The path bar offers to create what does not exist yet.
   await page.getByRole('button', { name: 'Edit the path' }).click()
@@ -1401,9 +1416,9 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
 
   // The whole collection, keyed by id, as the console's own import reads it.
   await open.click()
-  await expect(page.getByTestId('export-scope')).toHaveText('Every document in products')
+  await expect(page.getByTestId('export-what')).toHaveText('Every document in products')
   const jsonDownload = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const json = await jsonDownload
   expect(json.suggestedFilename()).toMatch(/^products-[\d-]+\.json$/)
   const exported = JSON.parse(await readDownload(json)) as Record<string, Record<string, unknown>>
@@ -1415,7 +1430,7 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
   await expect(page.getByTestId('grid-row').first()).toBeVisible()
   await page.getByTestId('export-open').click()
   const usersDownload = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const users = JSON.parse(await readDownload(await usersDownload)) as Record<string, unknown>
   expect(Object.keys(users)).toHaveLength(240)
   await page.goto(`${origin()}/console/firestore?path=products`)
@@ -1436,10 +1451,10 @@ test('export writes the whole result, in the shape asked for', async ({ page }) 
   expect(matched).toBeLessThan(60)
 
   await page.getByTestId('export-open').click()
-  await expect(page.getByTestId('export-scope')).toContainText('where("published", "==", false)')
+  await expect(page.getByTestId('export-what')).toContainText('where("published", "==", false)')
   await page.getByRole('tab', { name: 'CSV' }).click()
   const csvDownload = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const csv = await csvDownload
   const lines = (await readDownload(csv)).trim().split('\n')
   expect(lines).toHaveLength(matched + 1)
@@ -1479,7 +1494,7 @@ test('a typed export imports back as the same documents', async ({ page }) => {
   await page.getByTestId('export-open').click()
   await page.getByRole('checkbox', { name: 'Keep Firestore types exactly' }).click()
   const download = page.waitForEvent('download')
-  await page.getByTestId('confirm-export').click()
+  await page.getByTestId('export-confirm').click()
   const text = await readDownload(await download)
   expect(JSON.parse(text)).toMatchObject({
     one: {
@@ -3811,7 +3826,7 @@ test('ticked rows turn the query line into their own bar, which reaches every do
   await expect(
     page.getByRole('dialog').filter({ hasText: 'Delete all 130 documents' }),
   ).toBeVisible()
-  await page.getByTestId('confirm-delete').click()
+  await page.getByTestId('delete-dialog-confirm').click()
   await expect(page.getByText('131 documents deleted')).toBeVisible()
   await expect(bar).toHaveCount(0)
   const left = await page.request.get(`${documents()}/bulk/s129`, { headers: owner })
@@ -3838,7 +3853,7 @@ test('every copy answers with the same tick', async ({ page }) => {
   // The document as code, in the inspector.
   await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
   await page.getByTestId('inspector').getByTestId('document-code').click()
-  const copyCode = page.getByTestId('copy-code')
+  const copyCode = page.getByTestId('document-code-block-copy')
   await copyCode.click()
   await expect(copyCode).toContainText('Copied')
   await ticked(copyCode)

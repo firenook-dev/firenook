@@ -249,38 +249,6 @@ test('every error the console API sends has a code', async ({ engine }) => {
   )
 })
 
-test('the decisions feed reconnects by itself and lists nothing twice', async ({
-  page,
-  engine,
-}) => {
-  let sockets = 0
-  let first: { close: (options?: { code?: number; reason?: string }) => Promise<void> } | undefined
-  await page.routeWebSocket('**/console/api/v1/firestore/requests', (socket) => {
-    sockets += 1
-    if (sockets === 1) first = socket
-    socket.connectToServer()
-  })
-  await page.goto(`${engine.origin}/console/firestore/rules`)
-  await expect(page.getByTestId('decisions-count')).toBeVisible()
-  // An anonymous read the rules deny is a decision.
-  const read = () =>
-    fetch(`${engine.origin}/console/api/v1${documentsOf(engine)}/users/u_nobody_${Date.now()}`)
-  await read()
-  const rows = page.getByTestId('decision-row')
-  await expect(rows.first()).toBeVisible()
-  const before = await rows.count()
-
-  await first!.close({ code: 4000, reason: 'closed by the test' })
-  await expect(page.getByTestId('decisions-reconnecting')).toBeVisible({ timeout: 3_000 })
-  await expect(page.getByTestId('decisions-reconnecting')).toHaveCount(0, { timeout: 8_000 })
-  expect(sockets).toBe(2)
-  // The new socket's replayed history is deduplicated by request id.
-  await page.waitForTimeout(500)
-  await expect(rows).toHaveCount(before)
-  await read()
-  await expect(rows).toHaveCount(before + 1)
-})
-
 test('paused background triggers are said on every page, with what was dropped and Resume', async ({
   page,
   engine,

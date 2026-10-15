@@ -176,7 +176,7 @@ export function RulesToolbar<K extends QueryKey>({
   onCoverage,
   history,
   origins,
-  noFileText = 'No rules file in firebase.json',
+  noFileText,
   noFileTip,
   applyTip,
   historyOpen,
@@ -191,7 +191,7 @@ export function RulesToolbar<K extends QueryKey>({
   history: HistoryQuery<K>
   origins: OriginLabels
   /** In place of the file name when the scope has none. */
-  noFileText?: string
+  noFileText?: string | undefined
   noFileTip: string
   applyTip?: string | undefined
   /** The history dialog, when the page opens it from elsewhere too (⌘K). */
@@ -221,7 +221,7 @@ export function RulesToolbar<K extends QueryKey>({
         />
       ) : (
         <Text as="span" variant="secondary" size="sm">
-          {noFileText}
+          {noFileText ?? 'No rules file in firebase.json'}
         </Text>
       )}
       <DraftState draft={draft} />
@@ -241,15 +241,19 @@ export function RulesToolbar<K extends QueryKey>({
   )
 }
 
-const COVERAGE_KEY = 'firenook.console.rules-coverage'
-
-/** Whether coverage is drawn in the editor; remembered in this browser, for every rules page. */
-export function useCoveragePreference(): [boolean, (on: boolean) => void] {
+/**
+ * Whether coverage is drawn in the editor, remembered in this browser per
+ * rules page (`firestore`, `storage`). Off until asked for: the report is
+ * read only while it is on, and read again after each burst of decisions,
+ * which a page nobody is reading the gutter of has no use for.
+ */
+export function useCoveragePreference(page: string): [boolean, (on: boolean) => void] {
+  const key = `firenook.console.rules-coverage.${page}`
   const [on, setOn] = useState(() => {
     try {
-      return localStorage.getItem(COVERAGE_KEY) !== 'off'
+      return localStorage.getItem(key) === 'on'
     } catch {
-      return true
+      return false
     }
   })
   return [
@@ -257,7 +261,7 @@ export function useCoveragePreference(): [boolean, (on: boolean) => void] {
     (next) => {
       setOn(next)
       try {
-        localStorage.setItem(COVERAGE_KEY, next ? 'on' : 'off')
+        localStorage.setItem(key, next ? 'on' : 'off')
       } catch {
         // A convenience; the toggle still works for this page.
       }

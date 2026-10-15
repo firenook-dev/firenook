@@ -16,6 +16,7 @@ import { queryOptions } from '@tanstack/react-query'
 import { API_BASE } from '@/api/client'
 import type { RulesDocument } from '@/api/generated/RulesDocument'
 import type { RulesInstalled } from '@/api/generated/RulesInstalled'
+import type { RulesWriteBody } from '@/api/generated/RulesWriteBody'
 import { type RulesDiagnostic, rulesFailure } from '@/rules/text'
 import { FS } from './queries'
 
@@ -35,10 +36,11 @@ export async function putRules(
   source: string,
   save: boolean,
 ): Promise<RulesInstalled> {
+  const body: RulesWriteBody = { database, source, save }
   const response = await fetch(`${API_BASE}/firestore/rules`, {
     method: 'PUT',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ database, source, save }),
+    body: JSON.stringify(body),
   })
   if (!response.ok) throw await rulesFailure(response)
   return (await response.json()) as RulesInstalled

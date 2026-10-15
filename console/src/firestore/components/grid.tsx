@@ -20,14 +20,22 @@ import {
   FolderPlusIcon,
   FunnelIcon,
   LockKeyIcon,
+  ShieldCheckIcon,
   PlusIcon,
   WarningIcon,
-  ShieldCheckIcon,
 } from '@phosphor-icons/react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { ColumnResizer } from '@/components/console/column-resizer'
 import { useColumnWidths, useIdFreeze } from '@/components/console/column-widths'
 import { EmptyState } from '@/components/console/empty-state'
@@ -59,7 +67,7 @@ import { CellEditor } from './cell-editor'
 import { FOLDED_COLUMN, type GridColumn, GridRow, ID_COLUMN, type RowActions } from './grid-row'
 import { FoldedHeader, HeaderMenu, IdHeaderMenu } from './header-menu'
 import { subcollectionsWidth } from './subcollections-cell'
-import { DEFAULT_DATABASE, useWorkbench } from './workbench-context'
+import { useWorkbench } from './workbench-context'
 
 /**
  * Which collections share a set of column widths: per *shape* of collection
@@ -851,9 +859,14 @@ function QueryUnparsed() {
   )
 }
 
+// The explanation and its decision lookup load with the first denial, not
+// with every grid.
+const SeeWhy = lazy(() =>
+  import('../rules-page/see-why').then((module) => ({ default: module.SeeWhy })),
+)
+
 function QueryFailure({ error }: { error: Error }) {
   const workbench = useWorkbench()
-  const navigate = useNavigate()
   const denied = error instanceof FirestoreError && error.denied
   return (
     <div className="min-h-0 flex-1 overflow-auto">
@@ -870,31 +883,23 @@ function QueryFailure({ error }: { error: Error }) {
         contents={
           denied ? (
             <span className="flex flex-wrap justify-center gap-2">
-              {/* The decision behind the denial, on the rules page: the
-                  lines that refused it and the values they saw. It used to
-                  say "open the Requests drawer", a list to search by hand. */}
-              <Button
-                variant="primary"
-                icon={<ShieldCheckIcon />}
-                onClick={() =>
-                  void navigate({
-                    to: '/firestore/rules',
-                    search: {
-                      db: workbench.database === DEFAULT_DATABASE ? undefined : workbench.database,
-                      path: workbench.collectionPath || undefined,
-                      uid:
-                        workbench.viewAs.kind === 'user' || workbench.viewAs.kind === 'custom'
-                          ? workbench.viewAs.uid
-                          : undefined,
-                      denied: true,
-                      pick: true,
-                    },
-                  })
+              {/* Why, here: the lines that refused it and the values they
+                  saw, in the rules kit's popover, with the decision one
+                  click away on the Rules page. */}
+              <Suspense
+                fallback={
+                  <Button variant="primary" icon={<ShieldCheckIcon />} disabled>
+                    See why
+                  </Button>
                 }
-                data-testid="see-why"
               >
-                See why
-              </Button>
+                <SeeWhy
+                  database={workbench.database}
+                  path={workbench.collectionPath}
+                  viewAs={workbench.viewAs}
+                  message={error.message}
+                />
+              </Suspense>
               <Button variant="secondary" onClick={() => workbench.setViewAs({ kind: 'owner' })}>
                 View as admin
               </Button>

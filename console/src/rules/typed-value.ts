@@ -1,12 +1,10 @@
-// A value as the rules runtime writes it — in a coverage report, in a
-// Requests event — and how the rules pages write it as text. The notation
-// is the official runtime's, the same for Firestore's rules and Storage's,
-// so it belongs to the kit; Firestore's decisions also read it into the
-// console's Firestore value model (`fromRulesValue`), which stays theirs.
+// A value as the rules runtime writes it — in a coverage report — and how
+// the rules pages write it as text. The notation is the official runtime's,
+// the same for Firestore's rules and Storage's, so it belongs to the kit.
 
 import { formatNumber } from '@/lib/format'
 
-/** A value as the rules runtime writes it into a report or an event. */
+/** A value as the rules runtime writes it into a report. */
 export interface RulesTypedValue {
   nullValue?: null
   boolValue?: boolean

@@ -93,7 +93,7 @@ describe('the saved tests of one scope', () => {
       form: { path: index === 3 ? '' : `public/${index}` },
       expected: 'allow',
     }))
-    store.getState().replaceAll(cases)
+    store.setState({ cases })
     const calls: string[][] = []
     await runTests(store, runner(calls), 'rules text')
     expect(calls.map((batch) => batch.length)).toEqual([TEST_BATCH, 4])

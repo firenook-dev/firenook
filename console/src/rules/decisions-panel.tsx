@@ -1,29 +1,27 @@
-// Every request Storage's rules judged, newest first, beside the rules that
-// judged it: the rules kit's decisions panel (`src/rules/decisions-shell.tsx`)
-// over the `storage.decisions` topic — the same panel as Firestore's.
+// Every decision a rules page's topic delivers, newest first, beside the
+// rules that made them: the decisions shell (`decisions-shell.tsx`) filled
+// from a page's decision log, the same on Firestore's page and Storage's.
 //
-// - The filter field takes the topic's parameters as terms — a folder or a
-//   file, `uid:<uid>`, a method — beside All or Denied, and they are the
-//   page's URL: a change resubscribes and the engine answers, so the count
-//   is what it holds for that question.
-// - A row says the verdict, the method and the file; then when, who asked,
-//   what an upload proposed and the deciding lines. A decision opens onto
-//   who asked, the file before and the one proposed, the lines that decided
-//   it, and why, with the editor lit.
+// - The filter field takes the topic's parameters as terms — a path,
+//   `uid:<uid>`, a method — beside All or Denied, and they are the page's
+//   URL: a change resubscribes and the engine answers, so the count is
+//   what it holds for that question.
+// - A row says the verdict, the method and the path; then when, who asked,
+//   what else the page knows and the deciding lines. A decision opens onto
+//   the page's detail.
 // - The footer names the window the engine holds, so an old "See why" that
 //   no longer opens is explained before it is tried.
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { StorageDecision } from '@/api/generated/storage/StorageDecision'
-import type { StorageImpactFlip } from '@/api/generated/storage/StorageImpactFlip'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { RulesMethod } from '@/api/generated/RulesMethod'
+import type { RulesOutcome } from '@/api/generated/RulesOutcome'
 import { LiveNotice } from '@/components/console/live-notice'
-import { formatBytes, useClockFormat } from '@/lib/format'
+import { useClockFormat } from '@/lib/format'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { liveChannel } from '@/lib/live/channel'
-import { type DecisionNarrowing, DecisionsShell } from '@/rules/decisions-shell'
-import { DecisionDetail } from './decision-detail'
 import {
   type DecisionLog,
+  type RulesDecisionSummary,
   decidingLines,
   gapText,
   parseDecisionFilter,
@@ -31,11 +29,22 @@ import {
   useDecisionLog,
   whoAsked,
   windowText,
-} from './decisions'
-import { useStorageRulesSearch } from './rules-search'
+} from './decision-log'
+import { type DecisionNarrowing, DecisionsShell } from './decisions-shell'
 
 /** How long typing in a filter must pause before the question changes. */
 const SETTLE_MS = 350
+
+/** The part of a rules page's address the decisions panel reads and writes. */
+export interface DecisionsSearch {
+  decision?: string | undefined
+  path?: string | undefined
+  uid?: string | undefined
+  denied?: boolean | undefined
+  method?: RulesMethod | undefined
+  flips?: boolean | undefined
+  pick?: boolean | undefined
+}
 
 /** A filter field's text, written to the address once typing settles (or at once on Enter). */
 function useSettled(
@@ -70,36 +79,37 @@ function useSettled(
   ]
 }
 
-export function DecisionsPanel({
-  project,
-  scope,
-  bucket,
+export function RulesDecisionsPanel<T extends RulesDecisionSummary>({
+  search,
+  update,
   diagnostics,
-  enforced,
   log,
   status,
   flips,
-  rulesOf,
-  editorSource,
-  onReveal,
+  placeholder,
+  empty,
+  keepEnd = false,
+  extras,
+  renderDetail,
 }: {
-  project: string
-  scope: string
-  /** The bucket the filters complete folders in (the page's). */
-  bucket: string
+  search: DecisionsSearch
+  update: (patch: DecisionsSearch, options?: { replace?: boolean }) => void
   /** Whether the engine records decisions at all. */
   diagnostics: boolean
-  /** Whether any rules govern the scope. */
-  enforced: boolean
-  log: DecisionLog
+  log: DecisionLog<T>
   status: SubscriptionStatus
-  /** The decisions the draft would turn around, while there is a draft that compiles. */
-  flips: readonly StorageImpactFlip[] | undefined
-  rulesOf: (hash: string) => string | undefined
-  editorSource: string
-  onReveal: (line: number) => void
+  /** What the draft would turn each decision into, while there is a draft that compiles. */
+  flips: ReadonlyMap<string, RulesOutcome> | undefined
+  /** Says which terms the field takes: "Filter by path, uid:<uid> or method". */
+  placeholder: string
+  /** What an empty list says when nothing narrows it: nothing governs the scope, or nothing yet. */
+  empty: string
+  /** Cut a long path from its start, so a file's own name stays (Storage's). */
+  keepEnd?: boolean
+  /** What else a row says about a decision beyond who asked. */
+  extras?: ((decision: T) => string[]) | undefined
+  renderDetail: (decision: T) => ReactNode
 }) {
-  const { search, update } = useStorageRulesSearch()
   const items = useDecisionLog(log, (state) => state.items)
   const gaps = useDecisionLog(log, (state) => state.gaps)
   const held = useDecisionLog(log, (state) => state.window)
@@ -117,8 +127,8 @@ export function DecisionsPanel({
     },
   )
   // A quiet engine sends nothing on subscribing; "none yet" waits a moment
-  // so a replay on its way never flashes it.
-  // Each question waits again: a narrowing's replay is on its way too.
+  // so a replay on its way never flashes it. Each question waits again: a
+  // narrowing's replay is on its way too.
   const question = JSON.stringify([search.path, search.uid, search.denied, search.method])
   const [waitedFor, setWaitedFor] = useState<string | undefined>()
   useEffect(() => {
@@ -127,8 +137,7 @@ export function DecisionsPanel({
   }, [question])
   const waited = waitedFor === question
 
-  const flipped = new Map((flips ?? []).map((flip) => [flip.id, flip]))
-  const shown = search.flips ? items.filter((item) => flipped.has(item.id)) : items
+  const shown = search.flips ? items.filter((item) => flips?.has(item.id)) : items
   const selected = search.decision ? items.find((item) => item.id === search.decision) : undefined
   const filtered = Boolean(search.path || search.uid || search.denied || search.method)
 
@@ -142,7 +151,7 @@ export function DecisionsPanel({
       ]
     : []
 
-  const empty = !diagnostics
+  const said = !diagnostics
     ? 'Rules decisions are off: the suite was started with --no-diagnostics.'
     : !heard && !waited
       ? 'Reading the decisions the engine holds…'
@@ -150,12 +159,10 @@ export function DecisionsPanel({
         ? 'Applying the draft would change none of the decisions listed.'
         : filtered
           ? 'No decisions match. Loosen a filter, or make the request from your app.'
-          : !enforced
-            ? 'No rules govern this bucket, so every client request is refused before the rules can judge it. Apply rules to see decisions here.'
-            : 'No rules decisions yet. Admin, the console as Admin and downloads with a valid token skip the rules, so only client requests appear here.'
+          : empty
 
   return (
-    <DecisionsShell<StorageDecision>
+    <DecisionsShell<T>
       items={diagnostics ? shown : []}
       itemKey={(decision) => decision.id}
       isDenied={(decision) => decision.outcome !== 'allow'}
@@ -164,12 +171,7 @@ export function DecisionsPanel({
       onStep={(decision) => update({ decision: decision.id }, { replace: true })}
       pick={search.pick}
       onPick={(decision) => update({ decision: decision.id, pick: undefined }, { replace: true })}
-      filter={{
-        value: terms,
-        onChange: setTerms,
-        onCommit: commitTerms,
-        placeholder: 'Filter by path, uid:<uid> or method',
-      }}
+      filter={{ value: terms, onChange: setTerms, onCommit: commitTerms, placeholder }}
       denied={search.denied ?? false}
       onDenied={(denied) => update({ denied, decision: undefined }, { replace: true })}
       onClearList={() => log.clear()}
@@ -179,51 +181,22 @@ export function DecisionsPanel({
           <LiveNotice status={status} what="the decisions" onRetry={() => liveChannel.retry()} />
         </span>
       }
-      empty={empty}
+      empty={said}
       gaps={gaps}
       renderGap={(missed) => <span className="truncate">{gapText(missed)}</span>}
       row={(decision) => ({
         outcome: decision.outcome,
         method: decision.method,
         path: decision.path,
-        keepEnd: true,
+        keepEnd,
         at: decision.at,
         who: whoAsked(decision),
-        extras: rowExtras(decision, scope === '*' ? undefined : bucket),
-        flip: flipped.get(decision.id)?.after,
+        extras: extras?.(decision),
+        flip: flips?.get(decision.id),
         lines: decidingLines(decision),
       })}
-      renderDetail={(decision) => (
-        <DecisionDetail
-          key={decision.id}
-          project={project}
-          scope={scope}
-          decision={decision}
-          rulesOf={rulesOf}
-          editorSource={editorSource}
-          onReveal={onReveal}
-          onTry={() => update({ panel: 'playground' })}
-        />
-      )}
+      renderDetail={renderDetail}
       held={diagnostics ? windowText(held, format) : undefined}
     />
   )
-}
-
-/**
- * What else a row says about a decision beyond who asked: the bucket when
- * it is not the page's, and what an upload proposed (its size and type).
- */
-export function rowExtras(
-  decision: Pick<StorageDecision, 'bucket' | 'size' | 'contentType'>,
-  bucket: string | undefined,
-): string[] {
-  const extras: string[] = []
-  if (bucket !== undefined && decision.bucket !== bucket) extras.push(`gs://${decision.bucket}`)
-  const proposed = [
-    decision.size === null ? undefined : formatBytes(decision.size),
-    decision.contentType ?? undefined,
-  ].filter(Boolean)
-  if (proposed.length > 0) extras.push(proposed.join(' '))
-  return extras
 }

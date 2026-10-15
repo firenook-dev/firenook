@@ -17,7 +17,6 @@ import { Route as FirestoreRouteImport } from './routes/firestore'
 import { Route as FunctionsRouteImport } from './routes/functions'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as PubsubRouteImport } from './routes/pubsub'
-import { Route as RequestsRouteImport } from './routes/requests'
 import { Route as StorageRouteImport } from './routes/storage'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as AuthActivityRouteImport } from './routes/auth_.activity'
@@ -67,11 +66,6 @@ const LogsRoute = LogsRouteImport.update({
 const PubsubRoute = PubsubRouteImport.update({
   id: '/pubsub',
   path: '/pubsub',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RequestsRoute = RequestsRouteImport.update({
-  id: '/requests',
-  path: '/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
 const StorageRoute = StorageRouteImport.update({
@@ -134,7 +128,6 @@ export interface FileRoutesByFullPath {
   '/functions': typeof FunctionsRoute
   '/logs': typeof LogsRoute
   '/pubsub': typeof PubsubRoute
-  '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/auth/activity': typeof AuthActivityRoute
@@ -155,7 +148,6 @@ export interface FileRoutesByTo {
   '/functions': typeof FunctionsRoute
   '/logs': typeof LogsRoute
   '/pubsub': typeof PubsubRoute
-  '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/auth/activity': typeof AuthActivityRoute
@@ -177,7 +169,6 @@ export interface FileRoutesById {
   '/functions': typeof FunctionsRoute
   '/logs': typeof LogsRoute
   '/pubsub': typeof PubsubRoute
-  '/requests': typeof RequestsRoute
   '/storage': typeof StorageRoute
   '/tasks': typeof TasksRoute
   '/auth_/activity': typeof AuthActivityRoute
@@ -200,7 +191,6 @@ export interface FileRouteTypes {
     | '/functions'
     | '/logs'
     | '/pubsub'
-    | '/requests'
     | '/storage'
     | '/tasks'
     | '/auth/activity'
@@ -221,7 +211,6 @@ export interface FileRouteTypes {
     | '/functions'
     | '/logs'
     | '/pubsub'
-    | '/requests'
     | '/storage'
     | '/tasks'
     | '/auth/activity'
@@ -242,7 +231,6 @@ export interface FileRouteTypes {
     | '/functions'
     | '/logs'
     | '/pubsub'
-    | '/requests'
     | '/storage'
     | '/tasks'
     | '/auth_/activity'
@@ -264,7 +252,6 @@ export interface RootRouteChildren {
   FunctionsRoute: typeof FunctionsRoute
   LogsRoute: typeof LogsRoute
   PubsubRoute: typeof PubsubRoute
-  RequestsRoute: typeof RequestsRoute
   StorageRoute: typeof StorageRoute
   TasksRoute: typeof TasksRoute
   AuthActivityRoute: typeof AuthActivityRoute
@@ -333,13 +320,6 @@ declare module '@tanstack/react-router' {
       path: '/pubsub'
       fullPath: '/pubsub'
       preLoaderRoute: typeof PubsubRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/requests': {
-      id: '/requests'
-      path: '/requests'
-      fullPath: '/requests'
-      preLoaderRoute: typeof RequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/storage': {
@@ -424,7 +404,6 @@ const rootRouteChildren: RootRouteChildren = {
   FunctionsRoute: FunctionsRoute,
   LogsRoute: LogsRoute,
   PubsubRoute: PubsubRoute,
-  RequestsRoute: RequestsRoute,
   StorageRoute: StorageRoute,
   TasksRoute: TasksRoute,
   AuthActivityRoute: AuthActivityRoute,

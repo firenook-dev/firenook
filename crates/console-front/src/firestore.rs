@@ -649,6 +649,9 @@ pub(crate) fn firestore_router(console: FirestoreConsole) -> Router {
     router.merge(forwarded(console.rest, REST_MOUNT))
 }
 
+#[path = "firestore_decisions.rs"]
+pub(crate) mod decisions;
+
 /// The Firestore section: the data page and the rules page.
 pub(crate) struct FirestoreSection(pub(crate) FirestoreConsole);
 
@@ -675,11 +678,20 @@ impl Section for FirestoreSection {
         Router::new().nest("/firestore", firestore_router(self.0.clone()))
     }
 
-    fn topics(&self, _context: &SectionContext) -> Vec<Arc<dyn LiveTopic>> {
-        vec![
+    fn topics(&self, context: &SectionContext) -> Vec<Arc<dyn LiveTopic>> {
+        let mut topics: Vec<Arc<dyn LiveTopic>> = vec![
             Arc::new(self.0.changes.topic()),
             Arc::new(self.0.rules.topic()),
-        ]
+        ];
+        // The rules decisions, while diagnostics record them.
+        if let Some(feed) = decisions::DecisionFeed::start(
+            self.0.rules_evaluator.runtime(),
+            &context.rings,
+            context.shutdown.clone(),
+        ) {
+            topics.push(Arc::new(decisions::DecisionsTopic(feed)));
+        }
+        topics
     }
 
     fn search(&self, _context: &SectionContext) -> Option<Arc<dyn SearchSource>> {

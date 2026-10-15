@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { insertBlock, starterRules, wildcardName } from './starter'
+import { starterRules, wildcardName } from './starter'
 
 const sample = (field: string, type: string, present = 10, of = 10) => ({
   field,
@@ -53,29 +53,5 @@ describe('starter rules', () => {
     expect(block).toContain('data.name is string')
     expect(block).toContain('(!("nick" in data) || data.nick is string)')
     expect(block).not.toContain('meta.x')
-  })
-})
-
-describe('putting a block into the rules', () => {
-  const rules = [
-    "rules_version = '2';",
-    'service cloud.firestore {',
-    '  match /databases/{database}/documents {',
-    "    match /a/{b} { allow read: if '}' == '}'; } // a } in a comment",
-    '  }',
-    '}',
-  ].join('\n')
-
-  it('goes inside the documents block, before it closes', () => {
-    const { text, line } = insertBlock(rules, '    match /x/{y} {}')
-    const lines = text.split('\n')
-    expect(lines[line - 1]).toBe('    match /x/{y} {}')
-    expect(lines[line]).toBe('  }')
-    expect(lines.at(-1)).toBe('}')
-  })
-
-  it('goes at the end when there is no documents block', () => {
-    const { text, line } = insertBlock('service cloud.firestore {}', 'X')
-    expect(text.split('\n')[line - 1]).toBe('X')
   })
 })

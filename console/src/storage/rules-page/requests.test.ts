@@ -14,8 +14,8 @@ import {
   sizeFields,
   toBytes,
   toEvaluateRequest,
-  tokenWho,
 } from './requests'
+import { tokenWho } from '@/rules/who'
 
 const BUCKET = 'demo.appspot.com'
 

@@ -1,293 +1,69 @@
 import { describe, expect, it } from 'vitest'
-import {
-  changedKeys,
-  decidingLines,
-  decodeDecision,
-  filterDecisions,
-  fromRulesValue,
-  linesRun,
-} from './decisions'
-import { rulesValueText } from '@/rules/typed-value'
-import { displayValue } from '../value'
-import type { RulesTypedValue } from './decisions'
+import type { FirestoreDecision } from '@/api/generated/FirestoreDecision'
+import { decisionParams, emptyText, recordedAuth } from './decisions'
+import { describeForm, formFromDecision } from './requests'
 
-const RULES = "rules_version = '2';\nservice cloud.firestore {}\n"
-
-function frame(overrides: Record<string, unknown>) {
-  return JSON.stringify({
-    requestId: 'r-1',
-    time: '2026-09-20T09:00:00Z',
+function decision(patch: Partial<FirestoreDecision> = {}): FirestoreDecision {
+  return {
+    id: 'firenook-1-1',
+    at: '2026-10-12T09:12:04Z',
+    database: '(default)',
+    method: 'get',
+    path: 'users/u1',
     outcome: 'deny',
-    rules: RULES,
-    rulesReleaseKey: 'projects/p/releases/cloud.firestore-HASH123',
-    granularAllowOutcomes: [{ line: 5, outcome: false }],
-    rulesContext: {
-      method: 'get',
-      path: '/databases/(default)/documents/users/u1',
-      request: {
-        mapValue: {
-          fields: {
-            auth: {
-              mapValue: {
-                fields: {
-                  uid: { stringValue: 'u9' },
-                  token: {
-                    mapValue: {
-                      fields: {
-                        email: { stringValue: 'ada@example.test' },
-                        admin: { boolValue: true },
-                        firebase: {
-                          mapValue: {
-                            fields: { sign_in_provider: { stringValue: 'password' } },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            inTransaction: { boolValue: false },
-          },
-        },
-      },
-      resource: {
-        mapValue: {
-          fields: {
-            data: { mapValue: { fields: { name: { stringValue: 'Ada' } } } },
-            __name__: { pathValue: { segments: [] } },
-            id: { stringValue: 'u1' },
-          },
-        },
-      },
-    },
-    ...overrides,
-  })
+    error: null,
+    uid: 'u2',
+    tenant: null,
+    provider: 'password',
+    anonymous: false,
+    allows: [{ line: 5, outcome: 'deny' }],
+    rulesHash: 'h',
+    viaConsole: false,
+    ...patch,
+  }
 }
 
-describe('a rules decision', () => {
-  it('decodes a read: who, the document, the lines and the rules that decided it', () => {
-    const decision = decodeDecision(frame({}))
-    expect(decision).toMatchObject({
-      requestId: 'r-1',
-      outcome: 'deny',
-      method: 'get',
-      path: 'users/u1',
+describe('narrowing the decisions', () => {
+  it('becomes the topic’s parameters, which the engine evaluates; absent filters are left out', () => {
+    expect(decisionParams('(default)', {})).toEqual({ database: '(default)' })
+    expect(
+      decisionParams('other', { path: 'users', uid: 'u1', denied: true, method: 'list' }),
+    ).toEqual({ database: 'other', path: 'users', uid: 'u1', denied: true, method: 'list' })
+    expect(decisionParams('(default)', { path: '', uid: '', denied: false })).toEqual({
       database: '(default)',
-      uid: 'u9',
-      lines: [{ line: 5, outcome: false }],
-      rules: RULES,
-      rulesHash: 'HASH123',
-      before: { name: { type: 'string', value: 'Ada' } },
-      after: undefined,
-      changedKeys: undefined,
     })
-    expect(decision?.token?.admin).toEqual({ type: 'boolean', value: true })
-    expect(decision?.token?.firebase).toMatchObject({ type: 'map' })
   })
 
-  it('decodes an update with the document it would leave and the fields it changes', () => {
-    const decision = decodeDecision(
-      frame({
-        rulesContext: {
-          method: 'update',
-          path: '/databases/(default)/documents/users/u1',
-          request: {
-            mapValue: {
-              fields: {
-                auth: { nullValue: null },
-                resource: {
-                  mapValue: {
-                    fields: {
-                      data: {
-                        mapValue: {
-                          fields: {
-                            name: { stringValue: 'Ada' },
-                            seats: { intValue: '11' },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          resource: {
-            mapValue: {
-              fields: {
-                data: {
-                  mapValue: {
-                    fields: { name: { stringValue: 'Ada' }, plan: { stringValue: 'free' } },
-                  },
-                },
-              },
-            },
-          },
-        },
-      }),
-    )
-    expect(decision?.uid).toBeUndefined()
-    expect(decision?.after).toEqual({
-      name: { type: 'string', value: 'Ada' },
-      seats: { type: 'number', value: 11, integer: true },
-    })
-    expect(decision?.changedKeys).toEqual(['plan', 'seats'])
-  })
-
-  it('reads a missing document as null and the undefined marker as no resource', () => {
-    const decision = decodeDecision(frame({}).replace('"resource":{"mapValue"', '"resource":{"x"'))
-    expect(decision?.before).toBeNull()
-    const create = decodeDecision(
-      JSON.stringify({
-        requestId: 'c',
-        outcome: 'allow',
-        rulesContext: {
-          method: 'create',
-          path: '/databases/(default)/documents/users/new',
-          request: { mapValue: { fields: { resource: { nullValue: null } } } },
-          resource: { undefined: {} },
-        },
-      }),
-    )
-    expect(create?.before).toBeNull()
-    expect(create?.after).toBeNull()
-  })
-
-  it('refuses what is not a decision', () => {
-    expect(decodeDecision('not json')).toBeUndefined()
-    expect(decodeDecision('{"hello":true}')).toBeUndefined()
-  })
-
-  it('converts every rules value type', () => {
-    expect(fromRulesValue({ floatValue: 'NaN' })).toMatchObject({ type: 'number', integer: false })
-    expect(fromRulesValue({ timestampValue: '2026-01-01T00:00:00Z' })).toEqual({
-      type: 'timestamp',
-      value: '2026-01-01T00:00:00Z',
-    })
-    expect(
-      fromRulesValue({
-        pathValue: {
-          segments: ['databases', '(default)', 'documents', 'users', 'u1'].map((simple) => ({
-            simple,
-          })),
-        },
-      }),
-    ).toMatchObject({ type: 'reference', path: 'users/u1' })
-    expect(fromRulesValue({ listValue: { values: [{ intValue: 1 }, { undefined: {} }] } })).toEqual(
-      { type: 'array', items: [{ type: 'number', value: 1, integer: true }] },
-    )
-    expect(fromRulesValue({ undefined: {} })).toBeUndefined()
+  it('says why a list is empty: nothing judged yet, or no rules at all', () => {
+    expect(emptyText(true)).toContain('The Admin SDK')
+    expect(emptyText(false)).toContain('no rules loaded')
   })
 })
 
-describe('reading decisions', () => {
-  const base = decodeDecision(frame({}))!
-  const allowed = { ...base, requestId: 'a', outcome: 'allow' as const, path: 'products/p1' }
-  const anonymous = { ...base, requestId: 'b', uid: undefined, path: 'users/u1/orders/o1' }
-  const other = { ...base, requestId: 'c', database: 'analytics' }
-  const all = [base, allowed, anonymous, other]
-
-  it('narrows by database, path prefix, user and verdict', () => {
-    expect(filterDecisions(all, '(default)', {}).map((d) => d.requestId)).toEqual(['r-1', 'a', 'b'])
-    expect(filterDecisions(all, '(default)', { path: 'users/u1' }).map((d) => d.requestId)).toEqual(
-      ['r-1', 'b'],
-    )
-    // `users/u1` is not a prefix of `users/u10`.
-    expect(
-      filterDecisions([{ ...base, path: 'users/u10' }], '(default)', { path: 'users/u1' }),
-    ).toEqual([])
-    expect(filterDecisions(all, '(default)', { uid: '' }).map((d) => d.requestId)).toEqual(['b'])
-    expect(filterDecisions(all, '(default)', { denied: true }).map((d) => d.requestId)).toEqual([
-      'r-1',
-      'b',
-    ])
-    expect(filterDecisions(all, '(default)', { text: 'PRODUCTS' }).map((d) => d.requestId)).toEqual(
-      ['a'],
-    )
-    expect(
-      filterDecisions(all, '(default)', { text: 'anonymous' }).map((d) => d.requestId),
-    ).toEqual(['b'])
-  })
-
-  it('names the lines that decided it, each once, with how often it ran', () => {
-    const lines = [
-      { line: 5, outcome: false },
-      { line: 9, outcome: true },
-      { line: 5, outcome: false },
-    ]
-    expect(decidingLines({ outcome: 'deny', lines })).toEqual([5])
-    expect(decidingLines({ outcome: 'allow', lines })).toEqual([9])
-    expect(linesRun({ lines })).toEqual([
-      { line: 5, outcome: false, times: 2 },
-      { line: 9, outcome: true, times: 1 },
-    ])
-  })
-
-  it('finds the fields a write changes', () => {
-    expect(
-      changedKeys(
-        { a: { type: 'number', value: 1, integer: true }, b: { type: 'null' } },
-        {
-          a: { type: 'number', value: 2, integer: true },
-          b: { type: 'null' },
-          c: { type: 'null' },
-        },
-      ),
-    ).toEqual(['a', 'c'])
-    expect(changedKeys(null, { a: { type: 'null' } })).toEqual(['a'])
-  })
-})
-
-describe('the rules kit writes a rules value as Firestore does', () => {
-  // Coverage tallies moved to the kit (`rulesValueText`); the text must stay
-  // exactly what `displayValue(fromRulesValue(value))` wrote here before.
-  const values: RulesTypedValue[] = [
-    { nullValue: null },
-    { boolValue: true },
-    { intValue: '1234567' },
-    { intValue: 3 },
-    { floatValue: 2.5 },
-    { floatValue: '0.125' },
-    { stringValue: 'ada@example.test' },
-    { timestampValue: '2026-09-20T09:00:00Z' },
-    { bytesValue: 'aGVsbG8=' },
-    { latlngValue: { latitude: 51.5, longitude: -0.12 } },
-    { latlngValue: {} },
-    {
-      pathValue: {
-        segments: ['databases', '(default)', 'documents', 'users', 'u1'].map((simple) => ({
-          simple,
-        })),
+describe('a decision the engine no longer keeps', () => {
+  it('is tried as who asked, with the uid, tenant and provider the feed recorded', () => {
+    expect(recordedAuth(decision({ tenant: 'team-a' }))).toEqual({
+      uid: 'u2',
+      token: {
+        sub: 'u2',
+        user_id: 'u2',
+        firebase: { sign_in_provider: 'password', tenant: 'team-a' },
       },
-    },
-    { pathValue: { segments: [{ simple: 'b' }, { simple: 'demo' }] } },
-    { mapValue: { fields: {} } },
-    { mapValue: { fields: { a: { intValue: 1 }, b: { undefined: {} }, c: { stringValue: 'x' } } } },
-    { listValue: { values: [{ boolValue: true }] } },
-    { listValue: { values: [] } },
-    { undefined: {} },
-    {},
-  ]
-  for (const value of values)
-    it(JSON.stringify(value), () => {
-      const decoded = fromRulesValue(value)
-      expect(rulesValueText(value)).toBe(decoded ? displayValue(decoded) : undefined)
     })
-})
+    expect(recordedAuth(decision({ uid: null, anonymous: true }))).toBeNull()
+    const form = formFromDecision(decision())
+    expect(form).toMatchObject({ method: 'get', path: 'users/u1', group: false })
+    expect(describeForm(form)).toBe('get users/u1 as u2')
+  })
 
-describe('narrowing by operation', () => {
-  it('keeps only the method a link names', () => {
-    const get = decodeDecision(frame({}))
-    const list = decodeDecision(
-      frame({
-        requestId: 'r-2',
-        rulesContext: { method: 'list', path: '/databases/(default)/documents/users/*' },
-      }),
-    )
-    const all = [get, list].filter((decision) => decision !== undefined)
-    expect(filterDecisions(all, '(default)', { method: 'list' }).map((d) => d.requestId)).toEqual([
-      'r-2',
-    ])
+  it('reads a collection group back as the group of its id', () => {
+    const form = formFromDecision(decision({ method: 'list', path: '**/orders' }))
+    expect(form).toMatchObject({ method: 'list', path: 'orders', group: true })
+    const below = formFromDecision(decision({ method: 'list', path: 'users/u1/**/orders' }))
+    expect(below).toMatchObject({ path: 'orders', group: true })
+    expect(formFromDecision(decision({ method: 'list', path: 'users' }))).toMatchObject({
+      path: 'users',
+      group: false,
+    })
   })
 })

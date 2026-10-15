@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StorageProfile } from '@/api/generated/storage/StorageProfile'
 import { operationsText, patternText, readsFirestore } from './folders-panel'
-import {
-  TEMPLATES,
-  insertBlock,
-  sizeLimitMb,
-  starterFromData,
-  typeCheck,
-  uncoveredRoots,
-} from './starter'
+import { TEMPLATES, sizeLimitMb, starterFromData, typeCheck, uncoveredRoots } from './starter'
 
 const MB = 1024 * 1024
 
@@ -27,17 +20,6 @@ function profile(patch: Partial<StorageProfile>): StorageProfile {
     ...patch,
   }
 }
-
-const RULES = [
-  "rules_version = '2';",
-  'service firebase.storage {',
-  '  match /b/{bucket}/o {',
-  '    // a } in a comment, and one in a string',
-  "    match /public/{file} { allow read: if '}' != ''; }",
-  '  }',
-  '}',
-  '',
-].join('\n')
 
 describe('starter templates', () => {
   it('are match blocks for the shapes most apps have, indented for inside the bucket match', () => {
@@ -120,22 +102,6 @@ describe('starter rules from a folder’s files', () => {
         { pattern: '', uncovered: true },
       ]),
     ).toEqual(['misc/', 'users/*/uploads/2026/', ''])
-  })
-})
-
-describe('putting a block in the rules', () => {
-  it('goes inside match /b/{bucket}/o, before it closes, past braces in comments and strings', () => {
-    const { text, line } = insertBlock(RULES, '    match /misc/{file} {}')
-    const lines = text.split('\n')
-    expect(lines[line - 1]).toBe('    match /misc/{file} {}')
-    expect(lines[line]).toBe('  }')
-    expect(text.endsWith('}\n')).toBe(true)
-  })
-
-  it('goes at the end when there is no bucket match', () => {
-    const { text, line } = insertBlock('// nothing yet', 'match /x/{f} {}')
-    expect(text).toBe('// nothing yet\n\nmatch /x/{f} {}\n')
-    expect(text.split('\n')[line - 1]).toBe('match /x/{f} {}')
   })
 })
 

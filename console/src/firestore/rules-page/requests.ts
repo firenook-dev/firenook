@@ -5,24 +5,20 @@
 // the way the SDK mints one against the emulator, data typed the way the
 // grid types it, a query structured the way the grid structures it.
 //
-// The person asking is a uid with the claims the form gives it: a custom
-// identity, minted through the console's one token path for that kind
-// (`authorizationFor`). It is the identity a saved test exports as
-// (`authenticatedContext(uid, { email, email_verified, ...claims })`), so a
-// run here and the exported test decide alike, Auth record or not.
+// Who is asking is the rules kit's `Who` (`src/rules/who.ts`), the same as
+// Storage's: an identity from the console's picker, run as a token minted
+// for it, or a recorded request's own credentials.
 
-import { type ViewAs, authorizationFor } from '@/lib/identity'
 import { type WorkbenchQuery, parseQuery, toStructuredQuery } from '../query'
 import { INFER, encodeFields, fromJson } from '../value'
 import type { EvaluateRequest } from '@/api/generated/EvaluateRequest'
+import type { FirestoreDecision } from '@/api/generated/FirestoreDecision'
 import type { FirestoreRestValue } from '@/api/generated/FirestoreRestValue'
 import type { RulesMethod } from '@/api/generated/RulesMethod'
+import { ANONYMOUS, type Who, credentialsOf, describeWho } from '@/rules/who'
+import { recordedAuth } from './decisions'
 
-export type Who =
-  | { kind: 'anonymous' }
-  | { kind: 'user'; uid: string; email?: string | undefined; claims: string }
-  /** As a recorded request carried it: the decoded token, replayed as it was. */
-  | { kind: 'recorded'; auth: { uid: string; token: Record<string, unknown> } | null }
+export type { Who }
 
 export interface PlaygroundForm {
   method: RulesMethod
@@ -45,9 +41,20 @@ export const EMPTY_FORM: PlaygroundForm = {
   method: 'get',
   path: '',
   group: false,
-  who: { kind: 'anonymous' },
+  who: ANONYMOUS,
   data: '{}',
   query: '',
+}
+
+/**
+ * The form after `patch`: a change to what the request is about leaves a
+ * replayed decision's recorded context behind, since it described that
+ * request, not this one.
+ */
+export function patchForm(form: PlaygroundForm, patch: Partial<PlaygroundForm>): PlaygroundForm {
+  const next = { ...form, ...patch }
+  if (form.replay && ('path' in patch || 'method' in patch || 'group' in patch)) delete next.replay
+  return next
 }
 
 export function normalize(path: string): string {
@@ -90,31 +97,10 @@ export function toEvaluateRequest(
   const request: EvaluateRequest = { method: form.method, path }
   if (form.method === 'list' && form.group) request.group = true
 
-  if (form.who.kind === 'anonymous') request.auth = null
-  else if (form.who.kind === 'recorded') request.auth = form.who.auth
-  else {
-    if (!form.who.uid.trim()) return { error: 'Give the user a uid.' }
-    let claims: Record<string, unknown> | undefined
-    if (form.who.claims.trim()) {
-      try {
-        const parsed: unknown = JSON.parse(form.who.claims)
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-          return { error: 'Custom claims are a JSON object, such as {"admin": true}.' }
-        claims = parsed as Record<string, unknown>
-      } catch (error) {
-        return { error: `The custom claims are not JSON: ${(error as Error).message}` }
-      }
-    }
-    const email = form.who.email
-    const identity: Extract<ViewAs, { kind: 'custom' }> = {
-      kind: 'custom',
-      uid: form.who.uid.trim(),
-      claims: claims ?? {},
-      signInProvider: email ? 'password' : 'custom',
-      ...(email ? { email, emailVerified: true } : {}),
-    }
-    request.authorization = authorizationFor(identity, project) ?? null
-  }
+  const credentials = credentialsOf(form.who, project)
+  if ('error' in credentials) return credentials
+  if (credentials.authorization) request.authorization = credentials.authorization
+  else request.auth = credentials.auth ?? null
 
   if (form.method === 'create' || form.method === 'update') {
     let parsed: unknown
@@ -171,7 +157,11 @@ export function formFromRequest(request: EvaluateRequest, requestId: string): Pl
     method: request.method,
     path: request.path,
     group: request.group ?? false,
-    who: { kind: 'recorded', auth: request.auth ?? null },
+    who: {
+      kind: 'recorded',
+      auth: request.auth ?? null,
+      ...(request.authorization ? { authorization: request.authorization } : {}),
+    },
     data: request.data ? JSON.stringify(plainFields(request.data), null, 2) : '{}',
     query: '',
     replay: {
@@ -206,14 +196,24 @@ function plain(value: FirestoreRestValue): unknown {
   return value
 }
 
-/** Who a request is from, in a few words. */
-export function describeWho(who: Who): string {
-  if (who.kind === 'anonymous') return 'not signed in'
-  if (who.kind === 'recorded') return who.auth ? who.auth.uid : 'not signed in'
-  return who.email ?? who.uid
-}
-
 /** A request in a line: `get users/u1 as ada@example.test`. */
 export function describeForm(form: PlaygroundForm): string {
   return `${form.method} ${normalize(form.path) || '…'}${form.group ? ' (group)' : ''} as ${describeWho(form.who)}`
+}
+
+/**
+ * A decision the engine no longer keeps the request of, as a form from its
+ * summary: the operation, the path (a collection group's id), and who asked.
+ * The document is read from the store as it is now.
+ */
+export function formFromDecision(decision: FirestoreDecision): PlaygroundForm {
+  const groupAt = decision.path.lastIndexOf('**/')
+  const group = decision.method === 'list' && groupAt >= 0
+  return {
+    ...EMPTY_FORM,
+    method: decision.method,
+    path: group ? decision.path.slice(groupAt + 3) : decision.path,
+    group,
+    who: { kind: 'recorded', auth: recordedAuth(decision) },
+  }
 }

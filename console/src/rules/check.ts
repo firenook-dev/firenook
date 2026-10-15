@@ -37,7 +37,6 @@ export interface RulesCheckState<C extends RulesCheckLike> {
   problems: Problem[]
   /** The problems as editor marks, while the editor holds the text they are about. */
   marks: CodeMark[]
-  warnings: number
   /** An edited draft, checked as it is now, that compiles: what impact is asked of. */
   compiles: boolean
 }
@@ -84,11 +83,10 @@ export function useRulesCheck<C extends RulesCheckLike, K extends QueryKey>(
           }
         })
       : []
-  const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length
   const compiles =
     draft.edited &&
     checked === draft.source &&
     check.data !== undefined &&
     !check.data.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
-  return { checked, check, problems, marks, warnings, compiles }
+  return { checked, check, problems, marks, compiles }
 }

@@ -72,6 +72,10 @@ describe('the export dialog', () => {
     finish?.(new Blob(['[]']))
     await waitFor(() => expect(saved.download).toHaveBeenCalledTimes(1))
     expect(saved.download.mock.calls[0]?.[1]).toBe('orders.json')
+    // Built here, so saved as the Blob it is, typed for its format.
+    const file = saved.download.mock.calls[0]?.[0] as Blob
+    expect(file).toBeInstanceOf(Blob)
+    expect(file.type).toBe('application/json')
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
 
     cleanup()
@@ -96,5 +100,31 @@ describe('the export dialog', () => {
     expect(await screen.findByTestId('export-dialog-error')).toHaveTextContent(
       'Denied by security rules.',
     )
+  })
+
+  it('says what a section’s formats hold, and offers its own choice under them', async () => {
+    await renderInConsole(
+      () => (
+        <ExportDialog
+          open
+          onOpenChange={() => {}}
+          title="Export"
+          scope="Every document in orders."
+          formats={['json', 'csv']}
+          filename={(format) => `orders.${format}`}
+          notes={{ json: 'One object keyed by document id.' }}
+          renderOptions={(format) =>
+            format === 'csv' ? null : <span data-testid="typed-option">Keep types</span>
+          }
+          run={async () => new Blob(['{}'])}
+        />
+      ),
+      { status: testStatus() },
+    )
+    expect(screen.getByText('One object keyed by document id.')).toBeInTheDocument()
+    expect(screen.getByTestId('typed-option')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: 'CSV' }))
+    expect(screen.queryByTestId('typed-option')).toBeNull()
+    expect(screen.getByText(/Columns for a spreadsheet/)).toBeInTheDocument()
   })
 })

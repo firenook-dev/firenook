@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use firenook_core_store::{Store, StoreOptions};
 use firenook_rules_engine::{RequestOperation, Timestamp};
@@ -90,60 +89,54 @@ fn without_diagnostics_nothing_is_retained() {
 }
 
 #[test]
-fn the_ring_keeps_the_newest_256_decisions() {
+fn the_ring_keeps_the_newest_2000_decisions_however_old() {
     let retention = DecisionRetention::default();
     let rules = installed();
-    let now = Instant::now();
-    for index in 0..300 {
-        retention.retain_at(
+    for index in 0..2_050 {
+        retention.retain(
             &format!("id-{index}"),
             PROJECT,
             &rules,
             &get(&format!("items/{index}")),
             &denied(),
-            now,
         );
     }
-    let kept = retention.of_database_at(&database(), now);
-    assert_eq!(kept.len(), MAXIMUM_EVENTS);
-    assert_eq!(kept[0].request_id(), "id-44", "oldest first");
-    assert!(retention.find_at("id-43", now).is_none());
-    assert!(retention.find_at("id-299", now).is_some());
+    let kept = retention.of_database(&database());
+    assert_eq!(kept.len(), RETAINED_DECISIONS);
+    assert_eq!(retention.len(), RETAINED_DECISIONS);
+    assert_eq!(kept[0].request_id(), "id-50", "oldest first");
+    assert!(retention.find("id-49").is_none());
+    assert!(retention.find("id-2049").is_some());
     assert_eq!(retention.omitted(), 0);
 }
 
 #[test]
-fn decisions_expire_after_ten_minutes() {
+fn a_ruleset_source_is_charged_once_for_every_decision_it_made() {
     let retention = DecisionRetention::default();
     let rules = installed();
-    let start = Instant::now();
-    retention.retain_at("old", PROJECT, &rules, &get("a/1"), &denied(), start);
-    retention.retain_at(
-        "new",
-        PROJECT,
-        &rules,
-        &get("a/2"),
-        &denied(),
-        start + Duration::from_secs(300),
-    );
-    let almost = start + Duration::from_secs(MAXIMUM_AGE.as_secs() - 1);
-    assert!(retention.find_at("old", almost).is_some());
-    let expired = start + MAXIMUM_AGE;
-    assert!(retention.find_at("old", expired).is_none());
-    assert!(retention.find_at("new", expired).is_some());
+    for index in 0..3 {
+        retention.retain(
+            &format!("id-{index}"),
+            PROJECT,
+            &rules,
+            &get(&format!("a/{index}")),
+            &denied(),
+        );
+    }
     let ring = retention.lock();
-    assert_eq!(ring.entries.len(), 1);
+    let entries: usize = ring.entries.iter().map(|entry| entry.bytes).sum();
     assert_eq!(
-        ring.bytes, ring.entries[0].bytes,
-        "expired bytes are released"
+        ring.bytes,
+        entries + DENY.len(),
+        "the source once, not three times"
     );
+    assert_eq!(ring.sources.get(&rules.source_hash), Some(&3));
 }
 
 #[test]
 fn the_byte_budget_evicts_the_oldest_and_refuses_an_oversized_entry() {
     let retention = DecisionRetention::default();
     let rules = installed();
-    let now = Instant::now();
     let with_document = |megabytes: usize| {
         let mut request = get("blobs/b");
         request.resource = Some(Resource::new(
@@ -156,30 +149,39 @@ fn the_byte_budget_evicts_the_oldest_and_refuses_an_oversized_entry() {
         request
     };
     for index in 0..3 {
-        retention.retain_at(
+        retention.retain(
             &format!("big-{index}"),
             PROJECT,
             &rules,
             &with_document(6),
             &denied(),
-            now,
         );
     }
-    assert!(
-        retention.find_at("big-0", now).is_none(),
-        "evicted for bytes"
-    );
-    assert!(retention.find_at("big-1", now).is_some());
-    assert!(retention.find_at("big-2", now).is_some());
-    assert!(retention.lock().bytes <= MAXIMUM_BYTES);
+    assert!(retention.find("big-0").is_none(), "evicted for bytes");
+    assert!(retention.find("big-1").is_some());
+    assert!(retention.find("big-2").is_some());
+    assert!(retention.lock().bytes <= RETAINED_BYTES);
 
-    retention.retain_at("huge", PROJECT, &rules, &with_document(17), &denied(), now);
-    assert!(retention.find_at("huge", now).is_none());
+    retention.retain("huge", PROJECT, &rules, &with_document(17), &denied());
+    assert!(retention.find("huge").is_none());
     assert_eq!(retention.omitted(), 1);
-    assert!(
-        retention.find_at("big-2", now).is_some(),
-        "nothing evicted for it"
-    );
+    assert!(retention.find("big-2").is_some(), "nothing evicted for it");
+
+    // Evicting the last decision a source made releases the source too.
+    let other = InstalledRules::compile(&DENY.replace("false", "1 == 2")).expect("compiles");
+    for index in 0..3 {
+        retention.retain(
+            &format!("other-{index}"),
+            PROJECT,
+            &other,
+            &with_document(6),
+            &denied(),
+        );
+    }
+    let ring = retention.lock();
+    assert!(!ring.sources.contains_key(&rules.source_hash));
+    let entries: usize = ring.entries.iter().map(|entry| entry.bytes).sum();
+    assert_eq!(ring.bytes, entries + other.rules.source().len());
 }
 
 #[test]

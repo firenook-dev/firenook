@@ -549,6 +549,7 @@ defaults never in the URL):
 | `jobs` | `{ section? }` | `job` | replay |
 | `firestore.changes` | `{ database?, scope? }` | `change` | replay (path-only ring) |
 | `firestore.rules` | `{ database? }` | `rules`, `file` | compare |
+| `firestore.decisions` | `{ database?, path?, uid?, denied?, method? }` | `decisions` | replay |
 | `auth.users` | `{ project?, tenant? }` | `changed`, `cleared` | none |
 | `auth.activity` | `{ project?, tenant?, q?, console? }` | `calls` | replay |
 | `auth.inbox` | `{ project?, tenant?, q? }` | `messages` | replay |
@@ -672,9 +673,9 @@ stream, loaded by glob). A few behaviours worth knowing:
   `-see-why`. Its card is `design-system/src/cards/console-shared.tsx`.
 - `DangerConfirm` draws `DangerConfirmBody`, which is exported: a card (or
   any page that needs the confirmation at rest) draws the real body framed,
-  handed a `Job` instead of subscribing. `TriggerLineItem` and
-  `triggerLine` are the trigger line any destructive dialog draws
-  (Firestore's delete dialog uses them).
+  handed a `Job` instead of subscribing. `triggerLine` is the trigger
+  line any destructive dialog draws; `progress` says how far work that is
+  not a job has got (Firestore's browser-side delete loop).
 - `StatusDot` keeps its width; let it shrink (`className="min-w-0
   shrink"`) and its word ends in an ellipsis. `OutcomeChip` keeps its width
   beside a truncating sibling; `shrink` lets it give way (put the whole word
@@ -2065,22 +2066,37 @@ held, both under the word "change".
 
 ## Security rules (built, `src/firestore/rules-page/` on the rules kit `src/rules/`)
 
-**The rules kit** (`src/rules/`) is what every rules page shares, Firestore's
-and Storage's: the draft (`useRulesDraft` over a backend: the document in
-force, how to install a text, where the draft is kept), the check as you type
-(`useRulesCheck`), the toolbar (`RulesToolbar` with a `scope` slot, its
-`DraftState`, `CoverageToggle`, `DraftActions`), the banners (on
-`SectionBanner`), `Problems` (F8 / Shift+F8 walk them), `HistoryDialog`,
-`diff.ts`, `overlay.ts`, `explain.ts`, `ExplanationView`, `coverage.ts`,
-`tests-core.ts` and `TestsPanel`, `Verdict` (on `StatusDot`), the decisions
-panel shell (`DecisionsShell`; each page's adapter fills it), `focus.ts` and
-the one search schema (`rulesPageSearch('db' | 'bucket')`, with `line`). It
+**The rules kit** (`src/rules/`) is one rules page, Firestore's and
+Storage's. `RulesWorkbench` (`workbench.tsx`) is the frame: the toolbar
+(`RulesToolbar` with a `scope` slot, its `DraftState`, `CoverageToggle`,
+`DraftActions`, `HistoryDialog`), the banners (on `SectionBanner`), the
+editor with its `Problems` strip (F8 / Shift+F8 walk them), the 440 px
+side panel and its tabs, the keys (⌘↵ applies, ⌘S saves) and ⌘K (Apply,
+Revert, Save, History, coverage on or off, every panel, the page's own
+actions, the tests as a file); each service is an adapter that hands it
+its scope, queries, panels and words. Inside it: the draft
+(`useRulesDraft` over a backend), the check as you type
+(`useRulesCheck`), `diff.ts`, `overlay.ts`, `explain.ts`,
+`ExplanationView`, `coverage.ts`, `focus.ts`, `Verdict`; the decisions
+(`decision-log.ts`, a topic's bounded newest-first log with its window
+and gap words; `RulesDecisionsPanel` over `DecisionsShell`;
+`DecisionDetailFrame`, a decision opened, with the page's own facts as
+children); the playground (`RulesPlayground`: method tabs, the page's
+fields, who is asking — the console's `IdentityPicker`, or "As recorded"
+for a handed-over request — run, re-run on every edit, the result and
+Save as a test; `createPlaygroundStore`; `who.ts`, the one `Who`, its
+credentials and its rules-unit-testing context); the map
+(`RulesMapPanel`, the page's rows); starter rules (`starter.ts`:
+`insertBlock` under `FIRESTORE_ROOT` or `STORAGE_ROOT`, `insertStarter`);
+saved tests (`tests-core.ts`, `createRulesTests`, `TestsPanel`); "See
+why" where a request was refused (`RefusalDetail`, a popover); and the
+one search schema (`rulesPageSearch('db' | 'bucket')`, with `line`). It
 imports nothing from a section's directory. Change it with both pages'
-journeys running. **Only a loaded text is checked**: the editor holds an
-empty text until the rules arrive, and checking it flashed `1:1 expected
-"service"` in the Problems strip on every visit (`textToCheck`). A link's
-`line` is revealed and marked once the rules have loaded, then leaves the
-address.
+journeys running (the bodies both run are in `e2e/support/rules.ts`).
+**Only a loaded text is checked**: the editor holds an empty text until
+the rules arrive, and checking it flashed `1:1 expected "service"` in the
+Problems strip on every visit (`textToCheck`). A link's `line` is
+revealed and marked once the rules have loaded, then leaves the address.
 
 Rules are **a page of their own**, `/firestore/rules` (route file
 `routes/firestore_.rules.tsx`, the trailing underscore keeps it out of the
@@ -2101,7 +2117,8 @@ loaded (everything allowed), the file on disk does not compile, the rules
 changed under your draft (Discard / Keep editing), what applying would
 turn around ("Show them" filters the decisions to the flips), saved tests
 that fail against the draft. The editor fills the left; a 440 px side
-panel has Decisions · Playground · Tests · Collections (counts as badges).
+panel has Decisions · Playground · Tests · Collections (failing tests count
+on their tab).
 
 **The editor** is the shared CodeMirror `CodeEditor` with
 `language="rules"` (`components/code-editor/rules/`: a `StreamLanguage`
@@ -2125,37 +2142,49 @@ text. A reveal comes from a click, an overlay's arrival or a link's `line`
 compile errors or the engine's lint warnings (`code`: `open-access`,
 `auth-only`, `unvalidated-write`; positions are UTF-16 `from`/`to`), the
 outline, and the map against the schema index. The Problems strip under
-the editor lists them; Collections shows the warnings and the map
-(governing match blocks with the operations their allows grant, uncovered
+the editor lists them, the one place a warning is listed (`rules-problem`,
+`data-code`); Collections shows the map (governing match blocks with the operations their allows grant, uncovered
 collections, match blocks that reach no data). "Add starter rules"
 (`starter.ts`) writes a match block from sampled fields: ownership from a
 `users/{userId}` ancestor, `users` itself, or an owner field; a
 `valid<Name>(data)` with `hasOnly`, `hasAll` for fields every sample
 carries, and type checks; inserted before the documents block closes.
 
-**Decisions** (`decisions.ts`, `decisions-panel.tsx`, `decision-detail.tsx`)
-are drawn by the rules kit's `DecisionsShell`, the same panel as Storage's:
-one filter field (Firestore matches path, user and method in the browser;
-Storage parses `path uid:<uid> method` into the topic's parameters), All /
-Denied, Clear, the count line, two-line rows from `DecisionRowParts`
-(verdict, method, path; when, who, extras, the draft's flip, the deciding
-lines) and the "Holding the last N…" footer. They read the official
-Requests websocket, unchanged — its JSON is pinned by conformance
-fixtures. **History arrives as one JSON array, live events
-one by one**; the old drawer parsed only objects and silently dropped the
-replay. Typed rules values (`intValue`, `pathValue`, `undefined` …) become
-`FsValue` through `fromRulesValue`. A decision opens onto who asked
-(claims, provider), the lines that ran (deduplicated with ×n), the
-document before/after with changed keys, and **Why**: `GET
-/rules/decisions/{requestId}` re-runs the retained context against the
-ruleset that decided it and returns the explanation. "See why" on a denied
-grid read links with `path`, `uid`, `denied` and **`pick`**: pick opens the
-newest matching denial **once** and is cleared — the first version
-re-picked every time the list came back, so "All decisions" bounced (and
-the React Compiler memoizes the filtered list, so a sabotage that drops
-`decision` from the effect's dependencies does not reproduce it). An empty
-list says the Admin SDK and the console as admin skip rules; a database
-with no rules file says nothing is checked.
+**Decisions** (`decisions.ts`, `decision-detail.tsx`, the kit's panel)
+come from the `firestore.decisions` topic, built as `storage.decisions` is
+(`crates/console-front/src/firestore_decisions.rs`): the rules runtime
+hands every decision it records to a tap
+(`RulesRuntime::subscribe_decisions`, beside the Requests event and the
+retained context), a forwarder keeps a ring of 10,000 summaries
+(`FirestoreDecision`: id, time, database, method, path — a list's
+collection, a group as `**` and its id — outcome, who asked, the lines it
+ran, the ruleset's hash, `viaConsole`), the topic replays it by cursor
+with gaps, and every parameter (`database`, a `path` and what is under
+it, `uid`, `denied`, `method`) is evaluated by the engine. It exists
+while diagnostics record decisions (`features.diagnostics`). The page used
+to read the official Requests websocket, which stays exactly as it is for
+the Google Emulator UI and conformance: four clients, 256 decisions for
+ten minutes, filtered in the browser — a fifth tab was refused, and "See
+why" on an older denial found nothing. One filter field (a path,
+`uid:<uid>`, a method) beside All / Denied is the URL; Clear forgets this
+tab's list. A decision opens onto who asked (claims from the re-run), the
+lines that ran, **Why** — `GET /rules/decisions/{requestId}` re-runs the
+retained context against the ruleset that decided it, for the newest
+2,000 (the runtime's `RETAINED_DECISIONS`, each ruleset source charged
+once) — the query a list ran, the document before and after, "Open in
+Data" and "Try in the playground". `pick` opens the newest matching
+denial **once** and is cleared — the first version re-picked every time
+the list came back, so "All decisions" bounced. An empty list says the
+Admin SDK and the console as admin skip rules; a database with no rules
+file says nothing is checked.
+
+**See why** on a denied grid read is the kit's `RefusalDetail` popover
+(`rules-page/see-why.tsx`), on the data page: Firestore's 403 is the
+protocol's plain one, so it finds the newest denial the console's own
+read made on that path as that identity (`viaConsole`) on the topic,
+runs it again for every value, and offers "Try in the playground" and
+"Open in Rules" (the decision, or `path`/`uid`/`denied`/`pick` when none
+is held).
 
 **Inline values** (`src/rules/explain.ts`, `inlineSteps`): the engine reports every
 expression evaluated; written after each, a line is unreadable. Keep each
@@ -2167,26 +2196,35 @@ it) and lists steps inside called functions separately, plus the
 `get()`/`exists()` count and `queryReason` (which filter a list needs).
 
 **Coverage** is the official report, read from the console origin at
-`/console/api/v1/firestore/emulator/v1/projects/{p}:ruleCoverage` and
-refetched when the decisions feed grows (no timer). Offsets are Unicode
-scalars with an **inclusive** end (`scalarToUtf16`); the `report` key is
+`/console/api/v1/firestore/emulator/v1/projects/{p}:ruleCoverage` — only
+while Coverage is on, which it is not until asked for (remembered per
+page, `useCoveragePreference(page)`) — and read again as decisions
+arrive, at most once a second (no timer). Offsets are Unicode scalars
+with an **inclusive** end (`scalarToUtf16`); the `report` key is
 **absent** when the rules have nothing to count (`if true` alone) — that
 crashed the page once. Drawn only over the text it describes.
 
-**Playground** (`playground.tsx`, `requests.ts`): a form becomes the
-request a real client sends — a token minted like View as, data typed by
-`fromJson(INFER)` + `encodeFields`, a list query through `parseQuery` +
+**Playground** (`playground.tsx` on the kit's `RulesPlayground`,
+`requests.ts`): a form becomes the request a real client sends — who is
+asking from the `IdentityPicker` (an Auth user found by search, a custom
+identity), minted as a custom identity's token; data typed by
+`fromJson(INFER)` + `encodeFields`; a list query through `parseQuery` +
 `toStructuredQuery` — and `POST /rules/evaluate` runs it against the
 **editor's text** (a dry run: nothing committed or recorded), again on
 every edit. "Try in the playground" loads a decision's replayable
-`request` (recorded auth, before-document, time).
+`request` (recorded auth, before-document, time) and runs it on arrival;
+a decision past the retained window is tried from its summary. Tests
+saved before the picker (`{ kind: 'user', claims: '…' }`) are revived as
+the custom identities they were.
 
-**Tests** (`tests-store.ts` on the kit's `tests-core.ts`): saved cases per project+database in
-localStorage, run against the editor's text after each edit (an error
-counts as a deny, as in Firestore); export as a
-`@firebase/rules-unit-testing` file (`tests-export.ts`: seeds the
-document read with `withSecurityRulesDisabled`, `assertSucceeds` /
-`assertFails`) or as JSON.
+**Tests** (`tests-store.ts`, `createRulesTests` in the kit's
+`tests-core.ts`): saved cases per project+database in localStorage, run
+against the editor's text after each edit (an error counts as a deny, as
+in Firestore); exported as a `@firebase/rules-unit-testing` file
+(`tests-export.ts`: seeds the document read with
+`withSecurityRulesDisabled`, `assertSucceeds` / `assertFails`) from the
+panel's Export and ⌘K. There is no JSON copy or import: a JSON of
+browser-local cases ran nowhere.
 
 **History and the file.** `GET /rules/history` (startup, console, file,
 reload); the dialog diffs any version — and the file on disk when it
@@ -2200,14 +2238,17 @@ the engine watches each configured rules file (1 s debounce, a broken file
 keeps the rules in force and reports `fileProblems`). No polling anywhere.
 
 **Engine contract**: `crates/console-front/src/rules.rs` (read, apply,
-check, history, the `firestore.rules` topic) and `rules_eval.rs` (evaluate, decision detail,
-impact); generated types in `src/api/generated/`. A Rust doc comment that
+check, history, the `firestore.rules` topic), `rules_eval.rs` (evaluate,
+decision detail, impact) and `firestore_decisions.rs` (the
+`firestore.decisions` topic); generated types in `src/api/generated/`,
+and every body the page sends is typed by its generated `Rules…Body`. A Rust doc comment that
 contains `*/` — a pattern like `users/*/orders` — closes the generated
 TypeScript comment and breaks the console build; spell it out.
 
 **Test hooks**: Kumo's `Badge` and `Select` do not pass `data-testid`
 through — wrap the badge, find the select by role and name. Journeys live
-in `e2e/rules.spec.ts`; each one that changes rules restores the rules in
+in `e2e/rules.spec.ts` (and the bodies both rules pages run, in
+`e2e/support/rules.ts`); each one that changes rules restores the rules in
 force and the file on disk in `finally`, because the data journeys read
 through them. Typing into CodeMirror meets its bracket closing and
 indenting: paste instead (`pasteRules`).
@@ -2216,10 +2257,11 @@ indenting: paste instead (`pasteRules`).
 
 - Data path: the browser talks Firestore REST to the console's own origin
   (`/console/api/v1/firestore/v1/...`, a second `rest-front` router on the
-  same service), Identity Toolkit at `/console/api/v1/auth/...` and the
-  official Requests websocket at `/console/api/v1/firestore/requests`,
-  which the rules page reads as its decisions. Never reach the service
-  ports from the browser.
+  same service) and Identity Toolkit at `/console/api/v1/auth/...`; the
+  rules page's decisions are the `firestore.decisions` topic. The official
+  Requests websocket stays mounted at `/console/api/v1/firestore/requests`
+  for the Google Emulator UI; the console does not read it. Never reach
+  the service ports from the browser.
 - Live: the `firestore.changes` topic on the console's one live channel
   (`useLiveTopic`, `src/lib/live`), fed by the store's commit observer
   (`ChangeFeed` in `crates/console-front/src/firestore.rs`, a ring of
@@ -2376,19 +2418,25 @@ indenting: paste instead (`pasteRules`).
   REST wire shape, and `isRestShape` in `value.ts` is what lets the import
   recognise such a file and decode it rather than storing `{"stringValue":…}`
   as a map; it matches on the wire's own field names, so a person's own
-  one-key map is not mistaken for it. The dialog names the scope and whose
-  identity it reads as, because rules apply.
+  one-key map is not mistaken for it. The dialog is the kit's
+  `ExportDialog` in its `run` mode (the file is built in the tab, since it
+  reads through the rules; `notes` say what each format holds and
+  `renderOptions` adds "Keep Firestore types exactly"); it names the scope and
+  whose identity it reads as, because rules apply. Test ids `export-what`,
+  `export-confirm`, `export-progress`.
 - There is no undo: the write log and its undo were taken out (see "The
   write log and its undo were taken out" under Design), and there is no
   `changelog.rs`, `GET /changelog` or `POST /undo`.
-- Rules are a page of their own — see "Security rules" below. `?view=rules`
-  and `/requests` redirect there.
+- Rules are a page of their own — see "Security rules" below.
 - ⌘K is the shell's palette; pages contribute through
   `usePaletteProviders.register(key, (query) => groups)` (`src/lib/palette.ts`).
-  Firestore's provider (`src/firestore/palette.tsx`) adds Go-to for
-  path-shaped text, recents (`src/firestore/recents.ts`, localStorage per
-  project+database, twelve kept), every pattern of the schema tree (a nested one opens
-  as its group) and its actions; the panel toggle (`t`) and the nav modes
+  Firestore's provider (`src/firestore/palette.tsx`) adds recents
+  (`src/firestore/recents.ts`, localStorage per project+database, twelve
+  kept) and its actions. Collections and documents are the engine's
+  search hits alone (its "Collections" and "Documents" groups, from any
+  page, a typed document path read exactly); the page once listed the
+  schema tree and a "Go to" row as well, which only repeated them and the
+  path bar. The panel toggle (`t`) and the nav modes
   are the shell's "Layout" group. `matchesQuery` is word-wise: every word
   of the query must appear in the title, breadcrumbs or keywords.
 - The root landing shows **one row of recents, in the collection cards'

@@ -85,8 +85,8 @@ The official data and requests pages (`components/Firestore/*`).
 | Clear all data | Overview › Data › Reset Firestore: every database, as a job, no Functions triggers unless asked, open pages reload once at its start and end | observe | [x] |
 | Typed editors: string, number, boolean, timestamp, geopoint, reference, map and array JSON | Firestore › Data: a typed editor per value in the inspector and in the grid's cells, the JSON view beside them | foundation | [x] |
 | Collection filter: conditions and sort | Firestore › Data: the query line (`where(…).orderBy(…).limit(n)`), column header sort and filter, explain | foundation | [x] |
-| Requests table | Firestore › Rules › Decisions (every rules decision, live, narrowed by path, uid, verdict and operation) | foundation | [x] |
-| Request detail: the rules code, inspection | Firestore › Rules › Decisions › a decision: the lines that decided it lit in the editor, each expression's value, why | foundation | [x] |
+| Requests table | Firestore › Rules › Decisions (every rules decision, live on the `firestore.decisions` topic every tab shares, the newest 10,000, narrowed by the engine by path, uid, verdict and operation; the official Requests socket is unchanged for the Google UI) | foundation | [x] |
+| Request detail: the rules code, inspection | Firestore › Rules › Decisions › a decision: the lines that decided it lit in the editor, each expression's value, why (the newest 2,000 re-run), the documents, Open in Data; and "See why" on a denied read in Data explains it in place | foundation | [x] |
 | Copy a path | Firestore › Data: the path bar's copy, the inspector's title (click to copy) | foundation | [x] |
 | Database picker | Firestore › Data and Rules: the database picker, which a database a client writes to joins | foundation | [x] |
 

@@ -229,4 +229,20 @@ describe('the confirmation outside its dialog', () => {
       'demo.appspot.com',
     )
   })
+
+  it('says how far work that is not a job has got, while it runs', async () => {
+    await renderInConsole(
+      () => (
+        <DangerConfirmBody
+          title="Delete 40 documents"
+          description="They are removed from the emulator."
+          pending
+          progress="12 of 40 deleted…"
+          testId="looping"
+        />
+      ),
+      { status: testStatus() },
+    )
+    expect(screen.getByTestId('looping-progress').textContent).toBe('12 of 40 deleted…')
+  })
 })

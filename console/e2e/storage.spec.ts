@@ -1731,17 +1731,17 @@ test('links from elsewhere open a file, and a decision on the Rules page', async
   // `storage.decision` → the Rules page with that decision open.
   const token = await tokenFor(engine, person('grace').uid)
   expect((await getMetadata(engine, { bucket, name: seed.names.avatar, token })).status).toBe(403)
-  const decisions = await ownerJson<{
-    items: Array<{ id: string; path: string; uid: string | null }>
-  }>(
-    engine,
-    `/storage/rules/decisions?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(seed.names.avatar)}&denied=true`,
+  // Its id, as the Rules page's newest matching denial opens it.
+  const picker = await context.newPage()
+  await picker.goto(
+    `${engine.origin}/console/storage/rules?${new URLSearchParams({ path: seed.names.avatar, uid: person('grace').uid, denied: 'true', pick: 'true' })}`,
   )
-  const decision = decisions.items.find((item) => item.uid === person('grace').uid)
-  expect(decision).toBeDefined()
+  await expect.poll(() => new URL(picker.url()).searchParams.get('decision')).toBeTruthy()
+  const decision = new URL(picker.url()).searchParams.get('decision') ?? ''
+  await picker.close()
   const other = await context.newPage()
   await other.goto(
-    `${engine.origin}/console/storage/rules?${new URLSearchParams({ bucket, panel: 'decisions', decision: decision?.id ?? '' })}`,
+    `${engine.origin}/console/storage/rules?${new URLSearchParams({ bucket, panel: 'decisions', decision })}`,
   )
   const detail = other.getByTestId('decision-detail')
   await expect(detail).toBeVisible()
