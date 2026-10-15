@@ -8,9 +8,16 @@ describe('the overview’s address', () => {
       connect: 'env',
       dialog: 'save',
     })
-    expect(overviewSearchSchema.parse({ connect: 'cobol', dialog: 'delete-everything' })).toEqual({
+    expect(
+      overviewSearchSchema.parse({ connect: 'cobol', dialog: 'delete-everything', section: 'db' }),
+    ).toEqual({
       connect: undefined,
       dialog: undefined,
+      section: undefined,
+    })
+    expect(overviewSearchSchema.parse({ dialog: 'reset', section: 'auth' })).toEqual({
+      dialog: 'reset',
+      section: 'auth',
     })
     expect(overviewSearchSchema.parse({})).toEqual({})
   })

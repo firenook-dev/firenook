@@ -20,7 +20,7 @@ import { useNow } from '@/lib/clock'
 import { clockTime, formatDuration, formatNumber } from '@/lib/format'
 import { cancelJob } from '@/lib/jobs'
 import { CLEAR_JOB, EXPORT_JOB, SNAPSHOT_JOB } from '../api'
-import { holdsNothing, resettableSections } from '../model'
+import { holdsNothing, linkedReset, resettableSections } from '../model'
 import type { OverviewDialog } from '../search'
 import {
   type SnapshotView,
@@ -56,6 +56,7 @@ export function DataSection({
   status,
   project,
   dialog,
+  section,
   reset,
   onDialog,
   onReset,
@@ -64,6 +65,8 @@ export function DataSection({
   project: string
   /** The dialog the address opens (`?dialog=`). */
   dialog: OverviewDialog | undefined
+  /** The section a `?dialog=reset` link names (`?section=`), when it names one. */
+  section: string | undefined
   /** The reset this page opened from a row (not in the address). */
   reset: ResetTarget | undefined
   onDialog: (dialog: OverviewDialog | undefined) => void
@@ -73,14 +76,9 @@ export function DataSection({
   const resettable = resettableSections(status)
   const saveAsked = useAsked(dialog === 'save')
   const running = snapshot.running
-  // `?dialog=reset` names no section: the one there is, or all of them.
+  // `?dialog=reset` opens the section it names, else the one there is, or all of them.
   const resetTarget: ResetTarget | undefined =
-    reset ??
-    (dialog === 'reset'
-      ? resettable.length === 1 && resettable[0]
-        ? { kind: 'section', id: resettable[0].section.id }
-        : { kind: 'everything' }
-      : undefined)
+    reset ?? (dialog === 'reset' ? linkedReset(resettable, section) : undefined)
   const resetAsked = useAsked(resetTarget !== undefined)
 
   return (

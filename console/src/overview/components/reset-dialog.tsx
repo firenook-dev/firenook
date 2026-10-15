@@ -14,10 +14,10 @@ import type { SectionStatus } from '@/api/generated/SectionStatus'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import type { ConsoleSection } from '@/lib/services'
 import { startClear } from '../api'
-import { resetConsequence } from '../model'
+import { type ResetTarget, resetConsequence } from '../model'
 import { LINK_CLASS } from './text-link'
 
-export type ResetTarget = { kind: 'section'; id: string } | { kind: 'everything' }
+export type { ResetTarget } from '../model'
 
 /** "Firestore (211,260 documents)", or the label alone without a summary. */
 function withHeadline(section: ConsoleSection, status: SectionStatus): string {

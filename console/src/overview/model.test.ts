@@ -14,6 +14,7 @@ import {
   logsEntryLink,
   logsProblemsLink,
   noticeParts,
+  linkedReset,
   problemLink,
   resetConsequence,
   resettableSections,
@@ -265,6 +266,15 @@ describe('resets', () => {
         testStatus({ sections: [sectionEntry('firestore', { state: 'starting' })] }),
       ),
     ).toEqual([])
+  })
+
+  it('open the reset a link names, and never another section’s', () => {
+    const two = [{ section: { id: 'firestore' as const } }, { section: { id: 'auth' as const } }]
+    expect(linkedReset(two, 'auth')).toEqual({ kind: 'section', id: 'auth' })
+    expect(linkedReset(two, 'storage')).toBeUndefined()
+    expect(linkedReset(two, undefined)).toEqual({ kind: 'everything' })
+    expect(linkedReset(two.slice(1), undefined)).toEqual({ kind: 'section', id: 'auth' })
+    expect(linkedReset([], undefined)).toBeUndefined()
   })
 
   it('carry each section’s own consequence line', () => {

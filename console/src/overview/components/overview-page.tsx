@@ -52,7 +52,7 @@ export function OverviewPage() {
     revealById('overview-connect')
   }
   const setDialog = (dialog: OverviewDialog | undefined) =>
-    update({ dialog }, { replace: dialog === undefined })
+    update({ dialog, section: undefined }, { replace: dialog === undefined })
 
   useOverviewPalette({
     connect: () => openConnect(undefined),
@@ -130,6 +130,7 @@ export function OverviewPage() {
             status={status}
             project={project}
             dialog={search.dialog}
+            section={search.section}
             reset={reset}
             onDialog={setDialog}
             onReset={setReset}

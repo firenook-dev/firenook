@@ -222,6 +222,33 @@ test('connect: a snippet per platform, with the host the app sees', async ({ pag
   await expect(snippet).toContainText('FIRESTORE_EMULATOR_HOST=')
 })
 
+test('links from other pages: a reset for one section, and a connect tab', async ({
+  page,
+  engine,
+}) => {
+  // A section's page links to its reset: that section's confirmation,
+  // nothing deleted until its own button is pressed.
+  await page.goto(`${engine.origin}/console?dialog=reset&section=auth`)
+  const dialog = page.getByTestId('reset-dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('Reset Authentication')
+  await expect(dialog).toContainText('Everything Authentication holds is deleted')
+  await page.getByTestId('reset-dialog-cancel').click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page).toHaveURL(/\/console\/?$/)
+  // A section the engine cannot reset opens nothing: a link never resets another.
+  await page.goto(`${engine.origin}/console?dialog=reset&section=logs`)
+  await expect(page.getByTestId('overview')).toBeVisible()
+  await expect(dialog).toHaveCount(0)
+
+  // An empty state's "Connect" lands on its tab, in view.
+  await page.goto(`${engine.origin}/console?connect=python`)
+  const connect = page.getByTestId('overview-connect')
+  await expect(connect).toBeInViewport()
+  await expect(connect.getByRole('tab', { name: 'Python', selected: true })).toBeVisible()
+  await expect(page.getByTestId('overview-connect-snippet')).toContainText('firebase_admin')
+})
+
 test('the Admin snippet runs as printed', async ({ page, engine }) => {
   await page.goto(`${engine.origin}/console?connect=node`)
   const snippet = page.getByTestId('overview-connect-snippet')

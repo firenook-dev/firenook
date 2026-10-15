@@ -274,6 +274,28 @@ export function resettableSections(
   })
 }
 
+/** What a reset confirmation names: one section, or every one that can be reset. */
+export type ResetTarget = { kind: 'section'; id: string } | { kind: 'everything' }
+
+/**
+ * The reset a link opens (`?dialog=reset`, with `section` when another
+ * page names one): that section while it can be reset (nothing when it
+ * cannot, so a link never resets something else); without one, the only
+ * section there is, or all of them.
+ */
+export function linkedReset(
+  resettable: readonly { section: Pick<ConsoleSection, 'id'> }[],
+  section: string | undefined,
+): ResetTarget | undefined {
+  if (section !== undefined)
+    return resettable.some((entry) => entry.section.id === section)
+      ? { kind: 'section', id: section }
+      : undefined
+  const [only] = resettable
+  if (resettable.length === 1 && only) return { kind: 'section', id: only.section.id }
+  return resettable.length > 0 ? { kind: 'everything' } : undefined
+}
+
 /** A section whose summary says it holds nothing: its first figure is zero. */
 export function holdsNothing(summary: SectionSummary | null): boolean {
   return summary?.figures[0]?.value === 0
