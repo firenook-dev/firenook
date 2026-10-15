@@ -38,7 +38,6 @@ use crate::http::attachment;
 use crate::instance::random_id;
 use crate::jobs::{JobRegistry, accepted};
 use crate::json::ConsoleJson;
-use crate::section::section_label;
 use crate::sse::Shutdown;
 
 /// How long a prepared snapshot waits for its download.
@@ -66,17 +65,12 @@ pub(crate) struct OverviewSnapshotFile {
     pub(crate) expires_at: String,
 }
 
-/// `POST /overview/snapshots`.
-#[derive(Clone, Debug, Default, Deserialize, TS)]
+/// `POST /overview/snapshots`: `{}`. A snapshot holds every service this
+/// engine runs whose data an export keeps; choosing services is the save
+/// on the engine's machine's (`POST /suite/export`).
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[ts(export_to = "observe/")]
-pub(crate) struct OverviewSnapshotRequest {
-    /// `firestore`, `auth`, `storage`; absent means every one this engine
-    /// runs.
-    #[serde(default)]
-    #[ts(optional)]
-    pub(crate) targets: Option<Vec<String>>,
-}
+struct SnapshotRequest {}
 
 /// A snapshot waiting for its download.
 #[derive(Debug)]
@@ -231,31 +225,15 @@ fn stamp(now: OffsetDateTime) -> String {
     )
 }
 
-/// The services a snapshot request names, checked against what this
-/// engine runs; every running one when it names none.
-fn requested_targets(
-    port: &SnapshotPort,
-    request: OverviewSnapshotRequest,
-) -> Result<BTreeSet<String>, ApiError> {
-    let targets: BTreeSet<String> = match request.targets {
-        Some(targets) => {
-            for target in &targets {
-                if !SNAPSHOT_TARGETS.contains(&target.as_str()) {
-                    return Err(ApiError::invalid(format!(
-                        "`{target}` is not a service this engine can export. Use firestore, auth or storage."
-                    )));
-                }
-                if !port.targets.contains(target) {
-                    return Err(ApiError::invalid(format!(
-                        "{} does not run in this engine, so a snapshot cannot hold it.",
-                        section_label(target)
-                    )));
-                }
-            }
-            targets.into_iter().collect()
-        }
-        None => port.targets.iter().cloned().collect(),
-    };
+/// The services a snapshot holds: every one this engine runs whose data
+/// an export keeps.
+fn snapshot_targets(port: &SnapshotPort) -> Result<BTreeSet<String>, ApiError> {
+    let targets: BTreeSet<String> = port
+        .targets
+        .iter()
+        .filter(|target| SNAPSHOT_TARGETS.contains(&target.as_str()))
+        .cloned()
+        .collect();
     if targets.is_empty() {
         return Err(ApiError::precondition(
             "No service this engine runs keeps data a snapshot could hold.",
@@ -295,14 +273,14 @@ async fn check_space(
 /// result names the prepared snapshot once it is done.
 async fn prepare(
     State(snapshots): State<Snapshots>,
-    ConsoleJson(request): ConsoleJson<OverviewSnapshotRequest>,
+    ConsoleJson(SnapshotRequest {}): ConsoleJson<SnapshotRequest>,
 ) -> Result<Response, ApiError> {
     let Some(port) = snapshots.inner.port.clone() else {
         return Err(ApiError::precondition(
             "This console is not attached to a running suite, so there is nothing to export.",
         ));
     };
-    let targets = requested_targets(&port, request)?;
+    let targets = snapshot_targets(&port)?;
     let root = (port.staging)().map_err(|reason| {
         ApiError::precondition(format!(
             "The engine cannot prepare a snapshot here: {reason}"

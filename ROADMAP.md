@@ -965,8 +965,8 @@ served until every section has landed.
   address, its live figures, its current problems, why a section is not
   running and the exact fix, the recent errors, failures and denials over
   the last hour, the code to connect an app on every platform with the host
-  it sees, the engine's own configuration and what the console's buffers
-  cost. The suite's own warnings — an app writing to another project id,
+  it sees, and the engine's own configuration and where its data lives. The
+  suite's own warnings — an app writing to another project id,
   background triggers left paused by a test harness — lead the page in the
   same words every page uses; configuration the terminal prints once (a
   project that is not a demo, a public listen address, emulators missing

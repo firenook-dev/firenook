@@ -1,13 +1,13 @@
-// The "What" of a snapshot: one checkbox per service the engine runs whose
-// data a snapshot holds (Firestore, Authentication, Storage), each with the
-// figures its section already shows. Shared by the download and the save
-// dialogs.
+// The "What" of a snapshot saved on the engine's machine: one checkbox per
+// service the engine runs whose data a snapshot holds (Firestore,
+// Authentication, Storage), each with the figures its section already
+// shows. A download holds every one of them.
 
 import { Checkbox } from '@cloudflare/kumo'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import { serviceLabel } from '@/lib/services'
 
-export { listedLabels, snapshotServices } from '../snapshot'
+export { snapshotServices } from '../snapshot'
 
 export function SnapshotTargets({
   status,

@@ -50,6 +50,19 @@ export function bucketSentence(bucket: LogLevelCounts, span: string): string {
   return parts.join(' · ')
 }
 
+/**
+ * "12:05–12:06 · 3 errors · 18 warnings": a minute of the Overview's hour,
+ * which draws warnings and errors alone. Its state is not sent again for
+ * plain output, so the other lines are not counted here.
+ */
+export function problemSentence(bucket: LogLevelCounts, span: string): string {
+  const parts = [span]
+  if (bucket.error > 0) parts.push(formatCount(bucket.error, ERROR))
+  if (bucket.warn > 0) parts.push(formatCount(bucket.warn, WARNING))
+  if (parts.length === 1) parts.push('No warnings or errors')
+  return parts.join(' · ')
+}
+
 const LINE = { one: 'line', other: 'lines' }
 const ERROR = { one: 'error', other: 'errors' }
 const WARNING = { one: 'warning', other: 'warnings' }

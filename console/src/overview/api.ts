@@ -1,21 +1,21 @@
 // The Overview's server data: the engine's `overview` state (notices,
-// recent problems, the last hour, the log's totals), how the engine was
-// started, what the console's buffers hold, and the data jobs the page
-// starts (a snapshot to download, a reset). Section figures are not here:
-// they are each section's `SectionStatus.summary`, on the `shell` topic.
+// recent problems and how many were logged, the last hour), how the engine
+// was started, and the data jobs the page starts (a snapshot to download
+// or to save on the engine's machine, a reset). Section figures are not
+// here: they are each section's `SectionStatus.summary`, on the `shell`
+// topic.
 //
 // Nothing polls. The state is replaced by the `overview` topic while the
-// page is mounted; the engine details are fixed for an engine run; the
-// buffers are read when their row is shown and on its refresh button; a
-// job moves on the foundation's `jobs` topic (`useJobs('suite')`).
+// page is mounted; the engine details are fixed for an engine run; a job
+// moves on the foundation's `jobs` topic (`useJobs('suite')`).
 //
 // The route's loader reads `queries.ts` alone (it is in the first route's
 // bundle); this file is the page's.
 
 import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
-import { API_BASE, ApiError, apiSend } from '@/api/client'
+import { API_BASE, apiGet, apiSend } from '@/api/client'
+import type { ExportDestination } from '@/api/generated/ExportDestination'
 import type { Job } from '@/api/generated/Job'
-import type { OverviewSnapshotRequest } from '@/api/generated/observe/OverviewSnapshotRequest'
 import { download } from '@/lib/download'
 import { jobKey, mergeJob, sectionJobsKey, useJobs } from '@/lib/jobs'
 import type { LiveChannel, SubscriptionStatus } from '@/lib/live/channel'
@@ -25,7 +25,7 @@ import { useConsoleProject } from '@/lib/project'
 import '@/observe/live'
 import { overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
 
-export { engineQuery, memoryQuery, overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
+export { engineQuery, overviewKeys, overviewQuery, snapshotFileQuery } from './queries'
 
 /**
  * Keeps `['overview', project]` current from the `overview` topic while
@@ -59,8 +59,25 @@ export function useOverview() {
   return { project, state, live }
 }
 
+/**
+ * `GET /suite/destinations`: the folders on the engine's machine a snapshot
+ * may be saved to, each with why the engine refuses it now, when it does.
+ * Read when the save dialog opens.
+ */
+export const destinationsQuery = {
+  queryKey: ['suite', 'destinations'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    apiGet<ExportDestination[]>('/suite/destinations', undefined, signal),
+}
+
 /** The job kind a snapshot is prepared as. */
 export const SNAPSHOT_JOB = 'suite.snapshot'
+
+/** The job kind a snapshot is saved on the engine's machine as. */
+export const EXPORT_JOB = 'suite.export'
+
+/** The job kind a reset runs as. */
+export const CLEAR_JOB = 'suite.clear'
 
 /** What a finished `suite.snapshot` job produced (`Job.result`). */
 export interface SnapshotResult {
@@ -125,18 +142,14 @@ function remember(client: QueryClient, job: Job): Job {
 }
 
 /**
- * `POST /overview/snapshots`: starts preparing a snapshot of `targets`
- * (`firestore`, `auth`, `storage`; every service this engine runs when
- * absent) and answers the `suite.snapshot` job at once. Refused before any
- * job starts when there is not enough free space (`failed-precondition`,
- * with both figures) or another data job runs (`conflict`).
+ * `POST /overview/snapshots`: starts preparing a snapshot of every service
+ * this engine runs whose data an export keeps, and answers the
+ * `suite.snapshot` job at once. Refused before any job starts when there
+ * is not enough free space (`failed-precondition`, with both figures) or
+ * another data job runs (`conflict`).
  */
-export async function prepareSnapshot(
-  client: QueryClient,
-  targets?: readonly string[],
-): Promise<Job> {
-  const body: OverviewSnapshotRequest = targets ? { targets: [...targets] } : {}
-  return remember(client, await apiSend<Job>('POST', '/overview/snapshots', body))
+export async function prepareSnapshot(client: QueryClient): Promise<Job> {
+  return remember(client, await apiSend<Job>('POST', '/overview/snapshots', {}))
 }
 
 /** Where the browser downloads a prepared snapshot from (the engine streams the zip once). */
@@ -155,21 +168,6 @@ export async function downloadSnapshot(
   id: string,
 ): Promise<void> {
   await download(snapshotDownloadUrl(id))
-  client.removeQueries({ queryKey: overviewKeys.snapshot(project, id), exact: true })
-}
-
-/** `DELETE /overview/snapshots/{id}`: lets a prepared snapshot go before it expires. */
-export async function discardSnapshot(
-  client: QueryClient,
-  project: string,
-  id: string,
-): Promise<void> {
-  try {
-    await apiSend<unknown>('DELETE', `/overview/snapshots/${encodeURIComponent(id)}`, {})
-  } catch (error) {
-    // Already gone is what was asked for.
-    if (!(error instanceof ApiError && error.code === 'not-found')) throw error
-  }
   client.removeQueries({ queryKey: overviewKeys.snapshot(project, id), exact: true })
 }
 
@@ -192,6 +190,29 @@ export function useSnapshot(project: string, downloaded: ReadonlySet<string> = N
     enabled: result !== undefined && project !== '' && !downloaded.has(result.snapshot),
   })
   return { jobs, job, result, file, running: runningSuiteJob(jobs) }
+}
+
+/** `POST /suite/export`'s body: a destination the engine lists, the services (all when absent), and a yes to replace. */
+export interface SaveRequest {
+  destination: string
+  targets?: readonly string[]
+  overwrite?: boolean
+}
+
+/**
+ * `POST /suite/export`: starts saving a snapshot on the engine's machine
+ * and answers the `suite.export` job at once; its result names the folder
+ * written. Refused before any job starts when the folder already holds
+ * files (`already-exists`, until `overwrite`) or another data job runs
+ * (`conflict`).
+ */
+export async function saveSnapshot(client: QueryClient, request: SaveRequest): Promise<Job> {
+  const body = {
+    destination: request.destination,
+    ...(request.targets ? { targets: [...request.targets] } : {}),
+    ...(request.overwrite ? { overwrite: true } : {}),
+  }
+  return remember(client, await apiSend<Job>('POST', '/suite/export', body))
 }
 
 /** `POST /suite/clear`'s body: the sections, the project id when more than one, triggers on request. */

@@ -13,23 +13,17 @@ const titles = (query: string) =>
   provider()(query).flatMap((group) => group.items.map((item) => item.title))
 
 describe('the overview in ⌘K', () => {
-  it('offers one way into Connect, the save dialog and the engine while nothing is typed', () => {
+  it('offers one way into Connect while nothing is typed', () => {
     const connect = vi.fn()
-    const view = renderHook(() =>
-      useOverviewPalette({ connect, snippet: () => '', save: vi.fn(), engine: vi.fn() }),
-    )
-    expect(titles('')).toEqual([
-      'Connect your app',
-      'Save a snapshot on the engine’s machine…',
-      'Engine details',
-    ])
+    const view = renderHook(() => useOverviewPalette({ connect, snippet: () => '' }))
+    expect(titles('')).toEqual(['Connect your app'])
     provider()('')[0]?.items[0]?.run()
-    expect(connect).toHaveBeenCalledWith(undefined)
+    expect(connect).toHaveBeenCalledOnce()
     view.unmount()
     expect(usePaletteProviders.getState().providers[OVERVIEW_PALETTE]).toBeUndefined()
   })
 
-  it('offers each platform, and copies its snippet, once something is typed', async () => {
+  it('copies each platform’s snippet once something is typed', async () => {
     const connect = vi.fn()
     const writeText = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
@@ -37,16 +31,14 @@ describe('the overview in ⌘K', () => {
       useOverviewPalette({
         connect,
         snippet: (param) => `snippet for ${param}`,
-        save: vi.fn(),
-        engine: vi.fn(),
       }),
     )
-    expect(titles('flutter')).toEqual(['Connect with Flutter', 'Copy the Flutter snippet'])
+    expect(titles('flutter')).toEqual(['Copy the Flutter snippet'])
+    expect(titles('connect')).toEqual(expect.not.arrayContaining(['Connect with Web']))
     const [group] = provider()('copy python')
     group?.items[0]?.run()
     expect(writeText).toHaveBeenCalledWith('snippet for python')
-    provider()('connect env')[0]?.items[0]?.run()
-    expect(connect).toHaveBeenCalledWith('env')
+    expect(connect).not.toHaveBeenCalled()
     vi.unstubAllGlobals()
   })
 })

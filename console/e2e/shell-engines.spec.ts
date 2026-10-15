@@ -7,7 +7,15 @@ import { startEngine } from '../scripts/synthetic-engine.mjs'
 import { ENGINE_REVISION, RELEASE_ENV } from './engine'
 import { dedicated, expect } from './fixtures'
 import { ownerFetch } from './support/api'
-import { badgeOf, commit, documentsOf, firestoreReads, freePort, text } from './support/shell'
+import {
+  badgeOf,
+  commit,
+  documentsOf,
+  firestoreReads,
+  freePort,
+  statusOf,
+  text,
+} from './support/shell'
 
 // The shell's journeys that start engines of their own (foundation §9.3:
 // 3, 5, 7, 11, 15, 17 and 18): an engine stopped and restarted on the same
@@ -182,41 +190,37 @@ dedicated.describe('with engines of their own', () => {
   )
 
   dedicated(
-    'the engine popover says where the data lives, and exports where it is allowed to',
+    'the engine badge leads to the Overview’s engine facts, and ⌘K to saving a snapshot there',
     async ({ page, dedicatedEngine }) => {
       const engine = await dedicatedEngine('data')
+      const { data } = await statusOf(engine)
       await page.goto(`${engine.origin}/console/firestore`)
       await page.getByTestId('engine-badge-button').click()
-      await expect(page.getByTestId('engine-popover')).toBeVisible()
-      await expect(page.getByTestId('engine-data-mode')).toHaveText('on disk')
-      await expect(page.getByTestId('engine-state-dir')).toHaveAttribute(
-        'title',
-        join(engine.directory, 'state'),
-      )
-      await page.getByTestId('export-now').click()
-      await page.getByTestId('export-to-project').click()
-      await expect(page.getByText('Exported to')).toBeVisible({ timeout: 30_000 })
-      const exported = join(engine.directory, 'firenook-export')
-      expect(existsSync(join(exported, 'firebase-export-metadata.json'))).toBe(true)
-      await engine.stop()
+      await expect(page).toHaveURL(/\/console\/?#engine$/)
+      const details = page.getByTestId('overview-engine-details')
+      await expect(details).toBeInViewport()
+      await expect(page.getByTestId('engine-data')).toContainText('On disk')
+      await expect(page.getByTestId('engine-data')).toContainText(join(engine.directory, 'state'))
+      await expect(page.getByTestId('engine-writes')).toContainText(data.durability)
 
-      // An engine that resumes its state from a seed never writes over the
-      // seed. Resuming needs Firestore, Auth and Storage (the state receipt
-      // covers all three), so this one runs Storage too.
-      const resumed = await dedicatedEngine('storage', {
-        only: 'firestore,auth,storage',
-        seed: false,
-        args: ['--import', exported, '--resume-state'],
-      })
-      await page.goto(`${resumed.origin}/console/firestore`)
+      // Scrolled away on the Overview, the badge brings the section back.
+      await page.getByTestId('overview-scroll').evaluate((column) => column.scrollTo({ top: 0 }))
+      await expect(details).not.toBeInViewport()
       await page.getByTestId('engine-badge-button').click()
-      await page.getByTestId('export-now').click()
-      const seed = page.getByTestId('export-to-seed')
-      await expect(seed).toHaveAttribute('aria-disabled', 'true')
-      await expect(seed).toContainText('The engine resumed its state, so the seed must not change.')
-      await expect(page.getByTestId('export-to-project')).not.toHaveAttribute(
-        'aria-disabled',
-        'true',
+      await expect(details).toBeInViewport()
+
+      // ⌘K's one way to save a snapshot opens the Overview's save dialog,
+      // with the folders this engine lists.
+      await page.keyboard.press('ControlOrMeta+k')
+      await page.getByTestId('palette-input').fill('save a snapshot')
+      const save = page
+        .getByRole('option')
+        .filter({ hasText: 'Save a snapshot on the engine’s machine…' })
+      await expect(save).toHaveCount(1)
+      await save.click()
+      await expect(page).toHaveURL(/\/console\/?\?dialog=save$/)
+      await expect(page.getByTestId('save-destination-project')).toContainText(
+        join(engine.directory, 'firenook-export'),
       )
     },
   )

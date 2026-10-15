@@ -4,8 +4,8 @@
 // helper's signature.
 //
 // Logs is one page with no sub-pages: a problem list, one invocation or a
-// time range are filters of the one stream, not other jobs. Its ⌘K actions,
-// and the Overview's suite-wide ones, are in `./logs-actions.ts`.
+// time range are filters of the one stream, not other jobs. Its ⌘K actions
+// are in `./logs-actions.ts`.
 
 import { ScrollIcon } from '@phosphor-icons/react'
 import type { ConsoleSection, SectionLink } from '../services'

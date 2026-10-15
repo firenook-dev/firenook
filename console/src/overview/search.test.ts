@@ -4,13 +4,20 @@ import { overviewSearchSchema } from './search'
 
 describe('the overview’s address', () => {
   it('reads the snippet and the dialog, and drops what it does not know rather than failing', () => {
-    expect(overviewSearchSchema.parse({ connect: 'env', dialog: 'snapshot' })).toEqual({
+    expect(overviewSearchSchema.parse({ connect: 'env', dialog: 'save' })).toEqual({
       connect: 'env',
-      dialog: 'snapshot',
+      dialog: 'save',
     })
-    expect(overviewSearchSchema.parse({ connect: 'cobol', dialog: 'delete-everything' })).toEqual({
+    expect(
+      overviewSearchSchema.parse({ connect: 'cobol', dialog: 'delete-everything', section: 'db' }),
+    ).toEqual({
       connect: undefined,
       dialog: undefined,
+      section: undefined,
+    })
+    expect(overviewSearchSchema.parse({ dialog: 'reset', section: 'auth' })).toEqual({
+      dialog: 'reset',
+      section: 'auth',
     })
     expect(overviewSearchSchema.parse({})).toEqual({})
   })

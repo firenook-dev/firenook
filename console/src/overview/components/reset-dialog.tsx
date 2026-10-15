@@ -1,10 +1,11 @@
 // Resetting one section, or every section the console can reset, through
 // the foundation's confirmation: what goes (the figures already on screen,
 // no preview request), what it sets off, and the way back. The engine runs
-// it as one suite job; the dialog follows that job's progress and Cancel,
-// and every tab hears how it ended. A Firestore reset runs no Functions
-// triggers unless asked: it commits as maintenance, which listeners still
-// see. Resetting more than one section asks for the project id.
+// it as one suite job; the dialog closes once the job has started, the
+// Reset card follows its progress and Cancel, and every tab hears how it
+// ended. A Firestore reset runs no Functions triggers unless asked: it
+// commits as maintenance, which listeners still see. Resetting more than
+// one section asks for the project id.
 
 import { useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
@@ -13,10 +14,10 @@ import type { SectionStatus } from '@/api/generated/SectionStatus'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import type { ConsoleSection } from '@/lib/services'
 import { startClear } from '../api'
-import { resetConsequence } from '../model'
+import { type ResetTarget, resetConsequence } from '../model'
 import { LINK_CLASS } from './text-link'
 
-export type ResetTarget = { kind: 'section'; id: string } | { kind: 'everything' }
+export type { ResetTarget } from '../model'
 
 /** "Firestore (211,260 documents)", or the label alone without a summary. */
 function withHeadline(section: ConsoleSection, status: SectionStatus): string {
@@ -50,13 +51,17 @@ export function ResetDialog({
   onSnapshot: () => void
 }) {
   const client = useQueryClient()
-  const [jobId, setJobId] = useState<string | undefined>(undefined)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [runTriggers, setRunTriggers] = useState(false)
-  // What the dialog said when the reset started: the figures it names keep
-  // moving as the job deletes, and "deleted: 1,096 documents" would be wrong.
-  const [said, setSaid] = useState<string | undefined>(undefined)
+  // Each opening is a fresh confirmation (nothing typed): the dialog closes
+  // itself once the reset has started, not through its own Cancel.
+  const [round, setRound] = useState(0)
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) setRound((count) => count + 1)
+  }
 
   const named =
     target?.kind === 'section'
@@ -69,10 +74,8 @@ export function ResetDialog({
 
   const close = (next: boolean) => {
     if (!next) {
-      setJobId(undefined)
       setError(undefined)
       setRunTriggers(false)
-      setSaid(undefined)
     }
     onOpenChange(next)
   }
@@ -80,19 +83,17 @@ export function ResetDialog({
   const confirm = async () => {
     setPending(true)
     setError(undefined)
-    setSaid(description)
     try {
-      const job = await startClear(client, {
+      await startClear(client, {
         sections: named.map((entry) => entry.section.id),
         ...(named.length > 1 || everything ? { confirm: status.projectId } : {}),
         ...(firestore && runTriggers ? { runTriggers: true } : {}),
       })
-      setJobId(job.id)
-    } catch (thrown) {
-      setSaid(undefined)
-      setError(thrown instanceof Error ? thrown.message : String(thrown))
-    } finally {
       setPending(false)
+      close(false)
+    } catch (thrown) {
+      setPending(false)
+      setError(thrown instanceof Error ? thrown.message : String(thrown))
     }
   }
 
@@ -103,7 +104,7 @@ export function ResetDialog({
         type="button"
         className={LINK_CLASS}
         onClick={onSnapshot}
-        disabled={snapshotting || jobId !== undefined}
+        disabled={snapshotting}
         data-testid="reset-snapshot"
       >
         {snapshotting ? 'Preparing a snapshot…' : 'Download a snapshot'}
@@ -137,10 +138,11 @@ export function ResetDialog({
 
   return (
     <DangerConfirm
+      key={round}
       open={open && target !== undefined && named.length > 0}
       onOpenChange={close}
       title={title}
-      description={said ?? description}
+      description={description}
       consequences={consequences}
       {...(everything ? { confirmText: status.projectId } : {})}
       {...(firestore && functionsRun
@@ -152,9 +154,7 @@ export function ResetDialog({
             },
           }
         : {})}
-      {...(jobId ? { jobId } : {})}
       {...(error ? { error } : {})}
-      progressVerb="deleted"
       pending={pending}
       onConfirm={() => void confirm()}
       testId="reset-dialog"

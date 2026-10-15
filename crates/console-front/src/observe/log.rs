@@ -12,7 +12,7 @@
 //! text, the interned labels and the problem, internal and marker flags.
 //! Readers take a snapshot of the rings and filter outside every lock.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::fields::LogFilter;
@@ -280,7 +280,6 @@ impl Interner {
 struct LogState {
     interner: Interner,
     totals: TotalsSnapshot,
-    kinds: BTreeMap<&'static str, u64>,
     minutes: [Minute; 60],
     /// The last `functions.reloaded` line (sequence and time), kept after
     /// the line itself leaves both rings, so `from=reload` still resolves.
@@ -291,8 +290,11 @@ struct Shared {
     epoch: u32,
     state: Mutex<LogState>,
     /// Ticks with the entry count after every line, for the badges and the
-    /// Overview.
+    /// Logs card.
     changes: watch::Sender<u64>,
+    /// Ticks after every warning, error or problem only: what the Overview
+    /// draws, so a flood of plain output never wakes it.
+    notable: watch::Sender<u64>,
 }
 
 /// Every line the suite writes, as the console keeps it. Cloning shares it.
@@ -394,11 +396,11 @@ impl ConsoleLog {
                 state: Mutex::new(LogState {
                     interner: Interner::default(),
                     totals: TotalsSnapshot::default(),
-                    kinds: BTreeMap::new(),
                     minutes: [Minute::default(); 60],
                     last_reload: None,
                 }),
                 changes: watch::Sender::new(0),
+                notable: watch::Sender::new(0),
             }),
         }
     }
@@ -421,6 +423,11 @@ impl ConsoleLog {
     /// Ticks with the entry count after every line.
     pub(crate) fn changes(&self) -> watch::Receiver<u64> {
         self.shared.changes.subscribe()
+    }
+
+    /// Ticks after every warning, error or problem, never for plain output.
+    pub(crate) fn notable_changes(&self) -> watch::Receiver<u64> {
+        self.shared.notable.subscribe()
     }
 
     /// Lines kept: the main ring, plus problems it has already evicted.
@@ -506,12 +513,6 @@ impl ConsoleLog {
     /// Counts since the log was created.
     pub(crate) fn totals(&self) -> TotalsSnapshot {
         lock(&self.shared.state).totals.clone()
-    }
-
-    /// How many lines of each kind since the log was created.
-    #[cfg(test)]
-    pub(crate) fn kind_totals(&self) -> BTreeMap<&'static str, u64> {
-        lock(&self.shared.state).kinds.clone()
     }
 
     /// The last Functions reload: its sequence and time.
@@ -664,7 +665,6 @@ impl ConsoleLog {
             totals.problems += 1;
         }
         if let Some(kind) = line.kind {
-            *state.kinds.entry(kind).or_insert(0) += 1;
             match kind {
                 kinds::RULES_DENIED => {
                     state.totals.denials += 1;
@@ -686,6 +686,9 @@ impl ConsoleLog {
         let entries = state.totals.entries;
         drop(state);
         self.shared.changes.send_replace(entries);
+        if line.flags.problem || line.level == LogLevel::Warn {
+            self.shared.notable.send_replace(entries);
+        }
     }
 }
 

@@ -49,6 +49,7 @@ export async function statusOf(engine: Engine) {
     projectId: string
     backgroundTriggers: { enabled: boolean; since: string | null; dropped: unknown[] }
     services: { name: string; host: string; port: number }[]
+    data: { mode: 'memory' | 'disk'; stateDir: string | null; durability: string }
   }
 }
 

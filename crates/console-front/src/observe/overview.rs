@@ -1,11 +1,12 @@
 //! The Overview's own API under `/api/v1/overview`: the state (configuration
-//! notices, the newest problems, the last hour's volume and the log's
-//! totals), the engine details, and the `overview` topic.
+//! notices, the newest problems, how many were logged, and the last hour's
+//! volume), the engine details, and the `overview` topic.
 //!
 //! Section figures are not here: they are each section's summary in the
 //! console status. Everything the state holds is O(1) to read: the notices
-//! are fixed for the engine run, the totals and the hour are counters the
-//! log keeps, and the problems are the newest entries of the problem ring.
+//! are fixed for the engine run, the problem count and the hour are
+//! counters the log keeps, and the problems are the newest entries of the
+//! problem ring.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,7 +35,7 @@ const FIRST_LINE_CHARS: usize = 200;
 const STATE_EVERY: Duration = Duration::from_millis(500);
 
 /// `GET /overview` and the `overview` topic's `state`: notices, recent
-/// problems and the log's own figures.
+/// problems, how many were logged, and the last hour.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "observe/")]
@@ -45,10 +46,13 @@ pub(crate) struct OverviewState {
     /// The newest problems (errors, failures, denials), newest first, at
     /// most 8, from the problem ring: a flood does not empty it.
     pub(crate) problems: Vec<OverviewProblem>,
+    /// Problems logged since the engine started (errors, failures,
+    /// denials), however many the problem ring still holds.
+    #[ts(type = "number")]
+    pub(crate) problems_logged: u64,
     /// Lines per minute over the last hour by level, oldest first (60
     /// buckets, the last one the current minute).
     pub(crate) hour: Vec<LogLevelCounts>,
-    pub(crate) logs: LogTotals,
 }
 
 /// A problem as the Overview lists it: no payload, the first line only.
@@ -68,20 +72,6 @@ pub(crate) struct OverviewProblem {
     /// The message's first line, at most 200 characters.
     pub(crate) first_line: String,
     pub(crate) refs: Vec<EntityRef>,
-}
-
-/// The log's totals since the engine started.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
-#[ts(export_to = "observe/")]
-pub(crate) struct LogTotals {
-    #[ts(type = "number")]
-    pub(crate) entries: u64,
-    #[ts(type = "number")]
-    pub(crate) errors: u64,
-    #[ts(type = "number")]
-    pub(crate) warnings: u64,
-    #[ts(type = "number")]
-    pub(crate) problems: u64,
 }
 
 /// `overview` parameters: none.
@@ -105,11 +95,10 @@ impl OverviewApi {
                 generated_at: rfc3339_now(),
                 notices: self.notices.as_ref().clone(),
                 problems: Vec::new(),
+                problems_logged: 0,
                 hour: vec![LogLevelCounts::default(); 60],
-                logs: LogTotals::default(),
             };
         };
-        let totals = log.totals();
         OverviewState {
             generated_at: rfc3339_now(),
             notices: self.notices.as_ref().clone(),
@@ -119,21 +108,21 @@ impl OverviewApi {
                 .filter_map(|line| serde_json::from_str::<LogEntry>(&line.json).ok())
                 .map(problem)
                 .collect(),
+            problems_logged: log.totals().problems,
             hour: log.hour(now_ms).to_vec(),
-            logs: LogTotals {
-                entries: totals.entries,
-                errors: totals.levels.error,
-                warnings: totals.levels.warn,
-                problems: totals.problems,
-            },
         }
     }
 
-    /// What a state answers for: the lines logged and the minute it is,
-    /// so a state is resent when either moves.
+    /// What a state answers for: the problems and warnings logged (what the
+    /// Overview draws: the problem list and the hour's warnings and errors;
+    /// every error is a problem) and the minute it is, so a state is resent
+    /// when one of them moves, never for a line of plain output.
     fn generation(&self, now_ms: i64) -> String {
-        let entries = self.log.as_ref().map_or(0, |log| log.totals().entries);
-        format!("{entries}.{}", now_ms.div_euclid(60_000))
+        let (problems, warnings) = self.log.as_ref().map_or((0, 0), |log| {
+            let totals = log.totals();
+            (totals.problems, totals.levels.warn)
+        });
+        format!("{problems}.{warnings}.{}", now_ms.div_euclid(60_000))
     }
 }
 
@@ -181,8 +170,9 @@ async fn engine(State(api): State<OverviewApi>) -> Json<OverviewEngineDetails> {
 }
 
 /// The `overview` topic: the state on open (unless the subscriber's
-/// cursor says it has this one), then again whenever lines arrive or the
-/// minute turns, at most twice a second.
+/// cursor says it has this one), then again whenever a warning or a
+/// problem arrives or the minute turns, at most twice a second. A flood of
+/// plain output neither wakes it nor resends anything.
 pub(crate) struct OverviewTopic {
     pub(crate) api: OverviewApi,
     /// The wall clock, in milliseconds since the epoch. A generation names
@@ -223,7 +213,7 @@ impl LiveTopic for OverviewTopic {
         let following = Following {
             api: self.api.clone(),
             now: self.now,
-            changes: self.api.log.as_ref().map(ConsoleLog::changes),
+            changes: self.api.log.as_ref().map(ConsoleLog::notable_changes),
             seen: after.map(str::to_owned),
             sent: false,
         };
@@ -242,7 +232,7 @@ impl LiveTopic for OverviewTopic {
                         following,
                     ));
                 }
-                // Nothing new: wait for a line or the next minute.
+                // Nothing new: wait for a warning or a problem, or the next minute.
                 let now = (following.now)();
                 let next_minute = Instant::now()
                     + Duration::from_millis(

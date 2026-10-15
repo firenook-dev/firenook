@@ -9,8 +9,9 @@
 // A query is the Google UI's when one of its pairs is there: a pair with
 // one of those keys and `=`. Only those pairs are rewritten; every other
 // item is left exactly as it was typed, so a filter of ours is never
-// touched. The route rewrites before the page loads, so this module is in
-// the first chunk: it stays small and imports nothing.
+// touched. The route rewrites before the page loads, importing this module
+// only for a query that has a `key=value` pair, so it is a small chunk of
+// its own and never part of the first route; it imports nothing.
 
 /** One item of a query: a `key=value` pair, or anything else, with the text it was written as. */
 type LegacyItem = { key: string; value: string; quoted: boolean; raw: string } | { raw: string }

@@ -14,7 +14,7 @@
 import { Button, Empty, Tooltip } from '@cloudflare/kumo'
 import { ArrowDownIcon, FunnelIcon, ScrollIcon } from '@phosphor-icons/react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useRouter } from '@tanstack/react-router'
 import { type MouseEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LogEntry } from '@/api/generated/observe/LogEntry'
 import { statusQuery } from '@/api/queries'
@@ -63,7 +63,7 @@ import { LOGS_PLACEHOLDER, LOG_FIELDS, logFields } from '../fields'
 import { entriesAsText, entryAsJson, entryAsText } from '../format'
 import { highlighter } from '../highlight'
 import { useLogsPalette } from '../palette'
-import { type SavedFilter, useLogsPrefs, useSavedFilters } from '../prefs'
+import { useLogsPrefs } from '../prefs'
 import { aroundWindow, bucketWindow } from '../range'
 import { type LogItem, itemKey } from '../rows'
 import type { LogsSearch } from '../search'
@@ -137,6 +137,7 @@ async function copy(text: string, title: string) {
 export function LogsPage() {
   const { search, update } = useRouteSearch<LogsSearch>('/logs', '/logs')
   const navigate = useNavigate()
+  const router = useRouter()
   const queryClient = useQueryClient()
   const { project } = useConsoleProject()
   const status = useQuery(statusQuery)
@@ -145,9 +146,6 @@ export function LogsPage() {
   const keep = useLogsPrefs((state) => state.keepAcrossRestarts)
   const setWrap = useLogsPrefs((state) => state.setWrap)
   const setKeep = useLogsPrefs((state) => state.setKeepAcrossRestarts)
-  const saveFilter = useLogsPrefs((state) => state.save)
-  const forgetFilter = useLogsPrefs((state) => state.forget)
-  const saved = useSavedFilters(project)
   const expanded = useLogsUi((state) => state.expanded)
   const toggleExpanded = useLogsUi((state) => state.toggleExpanded)
 
@@ -361,6 +359,17 @@ export function LogsPage() {
       `Copied ${formatNumber(lines.length)} ${lines.length === 1 ? 'line' : 'lines'}`,
     )
   }
+  // The view as an address: its filter and window, not the line open or
+  // whether the feed is paused, so whoever opens it reads the view live.
+  const copyLink = () => {
+    const at = router.buildLocation({
+      to: '/logs',
+      search: { q: q === '' ? undefined : q, from: search.from, to: search.to },
+    })
+    void copyToClipboard(new URL(at.publicHref, window.location.origin).href, {
+      what: 'the link to this view',
+    })
+  }
   const canClear = state.mode === 'tail' && state.phase === 'ready'
   const clearView = () => {
     if (!canClear) return
@@ -504,7 +513,6 @@ export function LogsPage() {
       reloaded: Boolean(facets.data?.lastReload),
       wrap,
       keep,
-      saved,
       facets: facets.data,
     },
     {
@@ -517,10 +525,9 @@ export function LogsPage() {
       downloadNdjson: downloads.ndjson,
       downloadText: downloads.text,
       copyVisible,
+      copyLink,
       setWrap,
       setKeep,
-      applySaved: (filter: SavedFilter) =>
-        update({ q: filter.q || undefined, from: filter.from, to: filter.to }),
       addTerm: (term) => setQ(addTerm(q, term)),
     },
   )
@@ -628,20 +635,15 @@ export function LogsPage() {
             keep={keep}
             cleared={cleared !== undefined}
             canClear={canClear ? undefined : 'Back to the latest lines first'}
-            hasFilter={narrowed}
-            saved={saved}
             actions={{
               downloadNdjson: downloads.ndjson,
               downloadText: downloads.text,
               copyVisible,
+              copyLink,
               clearView,
               showCleared,
               setWrap,
               setKeep,
-              applySaved: (filter) =>
-                update({ q: filter.q || undefined, from: filter.from, to: filter.to }),
-              save: (name) => saveFilter(project, { name, q, from: search.from, to: search.to }),
-              forget: (name) => forgetFilter(project, name),
             }}
           />
         </ToolbarRow>

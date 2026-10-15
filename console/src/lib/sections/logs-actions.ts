@@ -1,15 +1,9 @@
-// What ⌘K offers from anywhere for Logs, and the Overview's suite-wide
-// actions (a snapshot, a reset, the environment block): the Overview has
-// no registry of its own. Only the palette reads it
-// (`lib/palette-actions.ts`), so these icons stay off the first route.
+// What ⌘K offers from anywhere for Logs. Only the palette reads it
+// (`lib/palette-actions.ts`), so these icons stay off the first route. The
+// suite-wide actions (a snapshot, a reset, the environment block) are the
+// palette's own Suite group, not a section's.
 
-import {
-  ArrowCounterClockwiseIcon,
-  DownloadSimpleIcon,
-  PlugsConnectedIcon,
-  WarningCircleIcon,
-  WarningIcon,
-} from '@phosphor-icons/react'
+import { WarningCircleIcon, WarningIcon } from '@phosphor-icons/react'
 import type { SectionAction } from '../services'
 import { linkToLogs } from './logs'
 
@@ -29,29 +23,5 @@ export const logsActions: readonly SectionAction[] = [
     keywords: 'logs problems denials failures timeouts',
     icon: WarningIcon,
     link: { to: '/logs', search: { q: 'is:problem' } },
-  },
-  {
-    id: 'overview.snapshot',
-    title: 'Download a snapshot…',
-    description: "The emulators' data as an export the engine imports with --import",
-    keywords: 'snapshot export backup download data zip',
-    icon: DownloadSimpleIcon,
-    link: { to: '/', search: { dialog: 'snapshot' } },
-  },
-  {
-    id: 'overview.reset',
-    title: 'Reset data…',
-    description: 'Delete the data of one section or of all of them',
-    keywords: 'reset clear delete wipe data',
-    icon: ArrowCounterClockwiseIcon,
-    link: { to: '/', search: { dialog: 'reset' } },
-  },
-  {
-    id: 'overview.env',
-    title: 'Environment variables for your app',
-    description: 'The variables the Admin SDKs and gcloud clients read to find the emulators',
-    keywords: 'environment variables env connect admin sdk emulator host',
-    icon: PlugsConnectedIcon,
-    link: { to: '/', search: { connect: 'env' } },
   },
 ]

@@ -3,17 +3,22 @@
 // menu); what the engine's search finds across sections, one group per
 // kind of thing, each opening through the target section's registry like
 // any link; the sections, their pages and what their registries offer from
-// anywhere; the suite-wide actions the shell owns; the layout.
+// anywhere; the suite-wide actions the shell owns (`suiteItems`: the
+// Overview's data actions among them); the layout.
 
 import { CommandPalette as KumoCommandPalette } from '@cloudflare/kumo'
 import {
+  ArrowCounterClockwiseIcon,
   ArrowSquareOutIcon,
+  CpuIcon,
   DownloadSimpleIcon,
+  FloppyDiskIcon,
   GaugeIcon,
   KeyboardIcon,
   MagnifyingGlassIcon,
   PauseIcon,
   PlayIcon,
+  PlugsConnectedIcon,
   ProhibitIcon,
 } from '@phosphor-icons/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -39,6 +44,9 @@ import { SECTIONS, type SectionLink, sectionById } from '@/lib/services'
 import { describeKey } from '@/lib/shortcuts'
 import { useConsoleUi } from '@/lib/store'
 import { toast } from '@/lib/toasts'
+import { resettableSections } from '@/overview/model'
+import { snapshotServices, startSnapshot } from '@/overview/snapshot'
+import { type OverviewPart, openOverviewPart } from './overview-parts'
 import { THEME_CHOICES } from './theme-picker'
 
 /** The shortest text the engine is asked to search, and how long typing settles first. */
@@ -160,6 +168,89 @@ export function engineGroups(
   return groups
 }
 
+/** What the suite's ⌘K rows do; the palette wires them to the router, the engine and the snapshot. */
+export interface SuiteActions {
+  go: (link: SectionLink) => () => void
+  /** Opens a part of the Overview (its data cards, its engine section). */
+  openPart: (part: OverviewPart) => void
+  /** Starts the Data card's snapshot download. */
+  download: () => void
+  /** Pauses (`false`) or resumes (`true`) background triggers. */
+  setBackground: (enabled: boolean) => void
+}
+
+/**
+ * ⌘K's Suite group: what acts on the whole emulator rather than one
+ * section, from any page. Background triggers while Functions runs; a
+ * snapshot to download while a service a snapshot holds runs; saving one
+ * on the engine's machine; a reset while a section can be reset; the
+ * environment block for an app; the engine's details. Each is offered
+ * once, here: the Overview's own palette adds only what is about its page.
+ */
+export function suiteItems(status: ConsoleStatus, actions: SuiteActions): PaletteItem[] {
+  const items: PaletteItem[] = []
+  if (status.services.some((service) => service.name === 'functions')) {
+    const enabled = status.backgroundTriggers.enabled
+    items.push({
+      id: 'suite:background',
+      title: enabled ? 'Pause background triggers' : 'Resume background triggers',
+      description: enabled
+        ? 'Events are dropped, not queued, until they are resumed'
+        : 'Events reach the functions that listen for them again',
+      keywords: 'background triggers functions pause resume events',
+      icon: enabled ? <PauseIcon size={16} /> : <PlayIcon size={16} />,
+      run: () => actions.setBackground(!enabled),
+    })
+  }
+  if (snapshotServices(status).length > 0)
+    items.push(
+      {
+        id: 'suite:snapshot',
+        title: 'Download a snapshot',
+        description: 'The emulators’ data as a zip of an export the engine imports with --import',
+        keywords: 'snapshot export backup download data zip',
+        icon: <DownloadSimpleIcon size={16} />,
+        run: actions.download,
+      },
+      {
+        id: 'suite:save',
+        title: 'Save a snapshot on the engine’s machine…',
+        description: 'A standard export in a folder the engine lists',
+        keywords: 'snapshot export save folder disk backup data',
+        icon: <FloppyDiskIcon size={16} />,
+        run: actions.go({ to: '/', search: { dialog: 'save' } }),
+      },
+    )
+  if (resettableSections(status).length > 0)
+    items.push({
+      id: 'suite:reset',
+      title: 'Reset data…',
+      description: 'Delete the data of one section or of all of them',
+      keywords: 'reset clear delete wipe data',
+      icon: <ArrowCounterClockwiseIcon size={16} />,
+      run: actions.go({ to: '/', search: { dialog: 'reset' } }),
+    })
+  items.push(
+    {
+      id: 'suite:env',
+      title: 'Environment variables for your app',
+      description: 'The variables the Admin SDKs and gcloud clients read to find the emulators',
+      keywords: 'environment variables env connect admin sdk emulator host',
+      icon: <PlugsConnectedIcon size={16} />,
+      run: actions.go({ to: '/', search: { connect: 'env' } }),
+    },
+    {
+      id: 'suite:engine',
+      title: 'Engine details',
+      description: 'Version, where the data lives, folders and the switches it was started with',
+      keywords: 'engine version config data disk memory state durability debug log node',
+      icon: <CpuIcon size={16} />,
+      run: () => actions.openPart('engine'),
+    },
+  )
+  return items
+}
+
 /**
  * One group per label, in the order labels first appear: the page's
  * "Collections" and the engine's are one list, and no two groups share a
@@ -192,7 +283,6 @@ export function CommandPalette() {
   const mode = useTheme((state) => state.mode)
   const setTheme = useTheme((state) => state.setChoice)
   const setShortcutsOpen = useConsoleUi((state) => state.setShortcutsOpen)
-  const setEnginePopoverOpen = useConsoleUi((state) => state.setEnginePopoverOpen)
   const engine = useEngineSearch(search, open)
 
   const go = useMemo(
@@ -274,49 +364,37 @@ export function CommandPalette() {
   }, [go, status.data])
 
   // The suite's own actions, registered once, here.
-  const suite = useMemo<PaletteItem[]>(() => {
-    const data = status.data
-    if (!data) return []
-    const items: PaletteItem[] = []
-    if (data.services.some((service) => service.name === 'functions')) {
-      const enabled = data.backgroundTriggers.enabled
-      items.push({
-        id: 'suite:background',
-        title: enabled ? 'Pause background triggers' : 'Resume background triggers',
-        description: enabled
-          ? 'Events are dropped, not queued, until they are resumed'
-          : 'Events reach the functions that listen for them again',
-        keywords: 'background triggers functions pause resume events',
-        icon: enabled ? <PauseIcon size={16} /> : <PlayIcon size={16} />,
-        run: () =>
-          void apiSend<BackgroundTriggers>('POST', '/suite/background', { enabled: !enabled })
-            .then((triggers) =>
-              client.setQueryData<ConsoleStatus>(statusQuery.queryKey, (current) =>
-                current ? { ...current, backgroundTriggers: triggers } : current,
-              ),
-            )
-            .catch((error: unknown) =>
-              toast({
-                key: 'suite-background',
-                title: enabled
-                  ? 'Background triggers were not paused'
-                  : 'Background triggers were not resumed',
-                description: error instanceof Error ? error.message : String(error),
-                tone: 'danger',
+  const suite = useMemo<PaletteItem[]>(
+    () =>
+      status.data
+        ? suiteItems(status.data, {
+            go,
+            openPart: (part) => openOverviewPart(navigate, part),
+            download: () =>
+              void startSnapshot(client).then((started) => {
+                if (started) openOverviewPart(navigate, 'data')
               }),
-            ),
-      })
-    }
-    items.push({
-      id: 'suite:export',
-      title: 'Export now…',
-      description: 'Save the emulator’s data to a folder the engine lists',
-      keywords: 'export save snapshot data backup',
-      icon: <DownloadSimpleIcon size={16} />,
-      run: () => setEnginePopoverOpen(true),
-    })
-    return items
-  }, [status.data, client, setEnginePopoverOpen])
+            setBackground: (enabled) =>
+              void apiSend<BackgroundTriggers>('POST', '/suite/background', { enabled })
+                .then((triggers) =>
+                  client.setQueryData<ConsoleStatus>(statusQuery.queryKey, (current) =>
+                    current ? { ...current, backgroundTriggers: triggers } : current,
+                  ),
+                )
+                .catch((error: unknown) =>
+                  toast({
+                    key: 'suite-background',
+                    title: enabled
+                      ? 'Background triggers were not resumed'
+                      : 'Background triggers were not paused',
+                    description: error instanceof Error ? error.message : String(error),
+                    tone: 'danger',
+                  }),
+                ),
+          })
+        : [],
+    [status.data, client, go, navigate],
+  )
 
   // How the shell is laid out: the navigation and the section panel.
   const layout = useMemo<PaletteItem[]>(() => {

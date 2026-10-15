@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { Job } from '@/api/generated/Job'
+import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngineDetails'
 import type { OverviewState } from '@/api/generated/observe/OverviewState'
 import { statusQuery } from '@/api/queries'
 import { renderInConsole } from '@/test/render'
@@ -13,6 +14,7 @@ import { createNoticeStore } from '../notices'
 import type { SnapshotView } from '../snapshot'
 import { ConnectSection } from './connect'
 import { DataCards } from './data-section'
+import { EngineDetails } from './engine-details'
 import { Notices } from './notices'
 import { RecentProblems } from './problems'
 import { SectionCard } from './section-card'
@@ -45,7 +47,7 @@ const state = (overrides: Partial<OverviewState> = {}): OverviewState => ({
   notices: [],
   problems: [],
   hour: Array.from({ length: 60 }, () => ({ debug: 0, info: 2, warn: 0, error: 0 })),
-  logs: { entries: 120, errors: 0, warnings: 0, problems: 0 },
+  problemsLogged: 0,
   ...overrides,
 })
 
@@ -227,7 +229,7 @@ describe('recent problems', () => {
             state={answered(
               state({
                 generatedAt: '2026-10-12T04:06:58.900Z',
-                logs: { entries: 120, errors: 1, warnings: 0, problems: 1 },
+                problemsLogged: 1,
                 problems: [
                   {
                     cursor: 'e1.9',
@@ -260,7 +262,7 @@ describe('recent problems', () => {
           live="live"
           state={answered(
             state({
-              logs: { entries: 120, errors: 1, warnings: 1, problems: 2 },
+              problemsLogged: 2,
               problems: [
                 {
                   cursor: 'e1.9',
@@ -414,6 +416,33 @@ describe('the data cards', () => {
     expect(screen.getByTestId('overview-reset-firestore-open')).toBeDisabled()
   })
 
+  it('follow a snapshot being saved on the engine’s machine on the Snapshot card, with no Cancel', async () => {
+    const status = withDocuments(1596)
+    const saving = job({
+      kind: 'suite.export',
+      title: "Save a snapshot to the project's export folder",
+      total: 1,
+      done: 0,
+    })
+    await renderInConsole(
+      () => (
+        <DataCards
+          status={status}
+          snapshot={view({ running: saving, job: saving })}
+          onDialog={() => {}}
+          onReset={() => {}}
+        />
+      ),
+      { status },
+    )
+    const line = within(screen.getByTestId('overview-snapshot')).getByTestId('overview-job')
+    expect(line).toHaveTextContent(/^Save a snapshot to the project's export folder… [\d.]+ s$/)
+    // The hub's export is one command: it cannot be stopped once it runs.
+    expect(screen.queryByTestId('overview-job-cancel')).toBeNull()
+    expect(within(screen.getByTestId('overview-reset')).queryByTestId('overview-job')).toBeNull()
+    expect(screen.getByTestId('overview-reset-firestore-open')).toBeDisabled()
+  })
+
   it('offer a prepared snapshot for download, and open a reset for its row', async () => {
     const user = userEvent.setup()
     const status = withDocuments(1596)
@@ -449,5 +478,45 @@ describe('the data cards', () => {
     expect(download).toHaveBeenCalledOnce()
     await user.click(screen.getByTestId('overview-reset-firestore-open'))
     expect(onReset).toHaveBeenCalledWith({ kind: 'section', id: 'firestore' })
+  })
+})
+
+describe('the engine section', () => {
+  /** The engine details before `/overview/engine` has answered: the data facts alone. */
+  const unanswered = {
+    data: undefined,
+    isError: false,
+  } as unknown as UseQueryResult<OverviewEngineDetails>
+  const disk = testStatus({
+    data: {
+      mode: 'disk',
+      stateDir: '/work/app/state',
+      resumed: true,
+      importedFrom: null,
+      exportOnExit: '/work/app/export',
+      durability: 'per-commit',
+    },
+  })
+
+  it('says where the data lives, how writes reach the disk, and where it goes on exit', async () => {
+    await renderInConsole(() => <EngineDetails status={disk} details={unanswered} />, {
+      status: disk,
+    })
+    expect(screen.getByTestId('engine-data')).toHaveTextContent('On disk·resumed·/work/app/state')
+    expect(screen.getByTestId('engine-writes')).toHaveTextContent(
+      'per-commit(each commit reaches the disk before it answers)',
+    )
+    expect(screen.getByTestId('engine-export-on-exit')).toHaveTextContent('/work/app/export')
+  })
+
+  it('in memory, says the data is gone when the engine stops and has no writes to describe', async () => {
+    const memory = testStatus()
+    await renderInConsole(() => <EngineDetails status={memory} details={unanswered} />, {
+      status: memory,
+    })
+    expect(screen.getByTestId('engine-data')).toHaveTextContent(
+      'In memory(gone when the engine stops)',
+    )
+    expect(screen.queryByTestId('engine-writes')).toBeNull()
   })
 })
