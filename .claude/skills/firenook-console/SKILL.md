@@ -75,6 +75,11 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
 - The content column has no padding of its own. Document-like pages wrap
   themselves in `<Page>` (`page.tsx`, the reading gutter); workbenches fill
   it edge to edge with their own toolbar and borders.
+- The top bar's engine badge says the live channel's state and is a link to
+  the Overview's engine section (`/#engine`, `components/shell/overview-parts.ts`):
+  the engine's facts (version, where the data lives, how writes reach the
+  disk, folders, switches) are drawn once, there. Its popover, with its own
+  copy of those facts and an "Export now", was cut in the trim.
 
 ## Speed rules, enforced
 
@@ -89,7 +94,7 @@ DB and Store (pre-1.0), MobX, `dark:` variants, CDN fonts.
   budget" is never by itself a reason to refuse something a route loads
   lazily. Check the manifest before claiming it; the rules editor carried
   that wrong claim in a header comment for months. The Overview's dialogs
-  (snapshot, save, reset) load when first asked for, which kept the
+  (save, reset) load when first asked for, which kept the
   dropdown, dialog, radio, checkbox and danger-confirm chunks off the
   landing route.
 - Every script, stylesheet and SVG over 1 KB gets a gzip copy at build time
@@ -441,8 +446,8 @@ title or the body.
   (`serviceAddress`).
 - **Section hooks**: `Section::summary` (the Overview's figures) and
   `Section::clear` (`POST /suite/clear`); suite controls (`/suite/background`,
-  `/suite/destinations`, `/suite/export`); `ForeignProjects` and
-  `projectScope`.
+  `/suite/destinations`, `/suite/export` as a `suite.export` job);
+  `ForeignProjects` and `projectScope`.
 - **Late services**: a service that starts after the console is a `Late<T>`
   (`get()` answers `ApiError::starting` with its label until `set`);
   `late_native` serves a native mount the same way; a topic waits for it.
@@ -3285,7 +3290,8 @@ job and its file). Producers write `LogInput` (`suite-front`
 `src/overview/` (`/`), `src/observe/` (only what those two share: the topic
 declarations, kinds, `LevelWord`, `SourceChip`, the level series and
 `LevelStrip`), the registry `src/lib/sections/logs.ts` (badge, routes,
-`linkToLogs`) and `logs-actions.ts` beside it (the suite-wide ⌘K actions). Journeys: `e2e/logs.spec.ts`,
+`linkToLogs`) and `logs-actions.ts` beside it (Logs' own ⌘K rows; the suite-wide
+ones are the palette's Suite group, `suiteItems` in `command-palette.tsx`). Journeys: `e2e/logs.spec.ts`,
 `e2e/overview*.spec.ts`, helpers `e2e/support/observe.ts`, profile `observe`.
 
 - **The log ring.** One `ReplayRing` of 20,000 lines / 16 MiB, and a problem
@@ -3339,11 +3345,39 @@ declarations, kinds, `LevelWord`, `SourceChip`, the level series and
   move a separate count by revision, so an app writing to another project
   id never inflates this project's card.
 - **Data actions are foundation jobs.** Never run a reset or an export inside
-  a request: a snapshot is a `suite.snapshot` job, a reset `/suite/clear`,
-  and the registry's one-`suite.*`-job rule keeps them apart (the next is
-  `409`). The snapshot's id is `job.result.snapshot` (128 random bits), not
-  the job id; the engine keeps the newest one for 10 minutes or until it is
-  downloaded, and only the tab that started it downloads it by itself.
+  a request: a snapshot is a `suite.snapshot` job, saving one on the engine's
+  machine a `suite.export` job (`POST /suite/export` answers `202`; its
+  result is the `ExportResult`, and it cannot be stopped once the hub has the
+  command), a reset `/suite/clear`, and the registry's one-`suite.*`-job rule
+  keeps them apart both ways (the next is `409`) — an export once captured a
+  half-done reset. The snapshot's id is `job.result.snapshot` (128 random
+  bits), not the job id; the engine keeps the newest one for 10 minutes or
+  until it is downloaded, and only the tab that started it (its button, or
+  ⌘K's "Download a snapshot") downloads it by itself. A snapshot download
+  holds every service the engine runs; choosing services is the save's.
+- **A data job's progress is shown once.** On the Overview its Data card
+  follows it (snapshot and save on the Snapshot card, a reset on the Reset
+  card, with Cancel when it can stop): each dialog closes once the engine
+  has started the job, and the shell's job toasts (`JobsWatch`, `jobToast`)
+  leave a running suite job alone while the Overview is on screen. Every
+  other page and tab follows it in the toast; how it ended is toasted
+  everywhere.
+- **The Overview's links.** Other pages lead here with `/?connect=<tab>`
+  (Connect on that tab, in view), `/?dialog=reset&section=<id>` (that
+  section's reset, nothing while it cannot be reset), `/?dialog=save`, and
+  the hashes `#engine` and `#data` (`useRevealHash`, which reveals in the
+  column, never `scrollIntoView`, and again on each ask while the page is
+  open, since a link to the address shown changes nothing the router sees).
+  ⌘K's Suite group (`suiteItems`) holds the suite-wide actions once, from
+  any page; the Overview's own palette adds "Connect your app" and the
+  snippet copies.
+- **The `overview` topic ignores plain output.** Its generation is the
+  problems and warnings logged and the minute, and it follows the log's
+  `notable_changes` watch (warnings, errors, problems), not every line: an
+  info flood resent the whole state twice a second before. The state
+  carries `problemsLogged`, not the log's totals, and the strip's tooltip
+  names warnings and errors only, because the minute's other lines go stale
+  between states.
 - **A reset is maintenance.** Firestore's clear commits through
   `commit_maintenance`: listeners and the change feed see it, the trigger
   observer does not (unless `runTriggers`), and open Firestore pages reload

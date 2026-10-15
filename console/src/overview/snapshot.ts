@@ -1,8 +1,8 @@
 // The snapshot download as this tab follows it. Preparing one is a suite
-// job every tab sees (`useSnapshot`); only the tab that pressed the button
-// downloads it by itself, once it is done — every other tab, and this one
-// after a reload, shows "Snapshot ready · Download" while the engine keeps
-// it. The engine serves the file once, so a snapshot this tab downloaded
+// job every tab sees (`useSnapshot`); only the tab that started it (the
+// card's button, or ⌘K) downloads it by itself, once it is done — every
+// other tab, and this one after a reload, shows "Snapshot ready · Download"
+// while the engine keeps it. The engine serves the file once, so a snapshot this tab downloaded
 // is remembered and never offered again. If the tab goes away before the
 // download starts, the engine is told to let the file go (best effort).
 
