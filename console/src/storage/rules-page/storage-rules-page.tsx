@@ -193,7 +193,7 @@ function StorageRulesBody({
     line: search.line,
     onLineShown: () => update({ line: undefined }, { replace: true }),
   })
-  const [coverageOn, setCoverageOn] = useCoveragePreference()
+  const [coverageOn, setCoverageOn] = useCoveragePreference('storage')
 
   // The draft, checked as it is typed: the compiler's errors and the
   // engine's warnings (Storage's own among them: uploads with no size
@@ -204,7 +204,11 @@ function StorageRulesBody({
 
   // How often each expression has run, moving as the app makes requests:
   // the decisions feed asks for the report again (at most once a second).
-  const coverage = useQuery({ ...storageCoverageQuery(project, scope), enabled: diagnostics })
+  // Read only while coverage is shown.
+  const coverage = useQuery({
+    ...storageCoverageQuery(project, scope),
+    enabled: diagnostics && coverageOn,
+  })
   const covered = useMemo(
     () => (coverageOn ? coverageView(coverage.data, draft.source) : undefined),
     [coverageOn, coverage.data, draft.source],

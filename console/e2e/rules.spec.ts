@@ -155,6 +155,11 @@ test('the rules are checked as they are typed, and a draft is not in force until
 })
 
 test('a denied read links to the decision behind it, drawn into the rules', async ({ page }) => {
+  // Coverage is off until asked for, and nothing reads the report meanwhile.
+  const coverageReads: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes(':ruleCoverage')) coverageReads.push(request.url())
+  })
   await page.goto(`${origin()}/console/firestore?path=users&as=anonymous`)
   await expect(page.getByText('Denied by security rules')).toBeVisible()
   await page.getByTestId('see-why').click()
@@ -183,12 +188,14 @@ test('a denied read links to the decision behind it, drawn into the rules', asyn
     .evaluateAll((items) => items.map((item) => item.getAttribute('data-outcome'))))
     expect(outcome).not.toBe('allow')
 
-  // How often each rule has run, in the gutter, and gone when asked.
+  // How often each rule has run, in the gutter once asked for, and gone again.
+  await expect(page.locator('.cm-note-hit')).toHaveCount(0)
+  expect(coverageReads).toHaveLength(0)
+  await page.getByTestId('rules-coverage').click()
   await expect(page.locator('.cm-note-hit').first()).toHaveText(/^\d+×$/)
+  expect(coverageReads.length).toBeGreaterThan(0)
   await page.getByTestId('rules-coverage').click()
   await expect(page.locator('.cm-note-hit')).toHaveCount(0)
-  await page.getByTestId('rules-coverage').click()
-  await expect(page.locator('.cm-note-hit').first()).toBeVisible()
 
   // An empty list says what appears here, and what never does.
   await page.getByRole('button', { name: 'Clear the list' }).click()

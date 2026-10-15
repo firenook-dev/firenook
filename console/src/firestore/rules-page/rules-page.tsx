@@ -106,7 +106,7 @@ function RulesBody({ project }: { project: string }) {
     line: search.line,
     onLineShown: () => update({ line: undefined }, { replace: true }),
   })
-  const [coverageOn, setCoverageOn] = useCoveragePreference()
+  const [coverageOn, setCoverageOn] = useCoveragePreference('firestore')
 
   // The draft, checked as it is typed: the compiler's errors and the
   // engine's warnings, where they are, before anything is applied.
@@ -115,8 +115,9 @@ function RulesBody({ project }: { project: string }) {
   )
 
   // How often each rule has run, moving as the app makes requests: the
-  // feed's arrivals are the signal to count again, not a timer.
-  const coverage = useQuery(coverageQuery(project, database))
+  // feed's arrivals are the signal to count again, not a timer. Read only
+  // while coverage is shown; an invalidation while it is off fetches nothing.
+  const coverage = useQuery({ ...coverageQuery(project, database), enabled: coverageOn })
   useEffect(() => {
     let timer: number | undefined
     const unsubscribe = useDecisions.subscribe((state, previous) => {
