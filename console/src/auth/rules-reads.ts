@@ -8,8 +8,7 @@
 //
 // Firestore's documents come from `GET /firestore/rules?database=` for
 // each database (shared with the Firestore rules page's cache); Storage's
-// from `GET /storage/rules?bucket=` for each bucket, once the Storage
-// section is built and serves them.
+// from `GET /storage/rules?bucket=` for each bucket.
 
 import { queryOptions, useQueries, useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/api/client'
@@ -19,7 +18,6 @@ import type { RulesDocument } from '@/api/generated/RulesDocument'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
 import type { StorageRulesDocument } from '@/api/generated/storage/StorageRulesDocument'
 import { statusQuery } from '@/api/queries'
-import { storage } from '@/lib/sections/storage'
 import type { RulesTarget } from './links'
 
 /** Where one ruleset is, as its rules page names it. */
@@ -89,9 +87,9 @@ const firestoreRulesQuery = (database: string) =>
   })
 
 /**
- * Every ruleset's claim reads while its service runs: Firestore's databases,
- * and Storage's buckets once the Storage section is built. Read when the
- * claims tab is open, refreshed whenever it opens again.
+ * Every ruleset's claim reads while its service runs: Firestore's databases
+ * and Storage's buckets. Read when the claims tab is open, refreshed
+ * whenever it opens again.
  */
 export function useClaimReadSources(enabled: boolean): {
   sources: RulesSource[]
@@ -102,7 +100,7 @@ export function useClaimReadSources(enabled: boolean): {
   const runs = (name: string) =>
     status.data?.services.some((service) => service.name === name) === true
   const firestore = enabled && runs('firestore')
-  const storageOn = enabled && runs('storage') && storage.built
+  const storageOn = enabled && runs('storage')
   const databases = useQuery({ ...databasesQuery, enabled: firestore })
   const buckets = useQuery({
     queryKey: ['storage', 'claim-read-buckets'],

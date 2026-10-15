@@ -34,7 +34,7 @@ import {
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { SECTIONS, type SectionLink, sectionById, shownPages } from '@/lib/services'
+import { SECTIONS, type SectionLink, sectionById } from '@/lib/services'
 import { describeKey } from '@/lib/shortcuts'
 import { useConsoleUi } from '@/lib/store'
 import { toast } from '@/lib/toasts'
@@ -87,20 +87,20 @@ export function refId(ref: { kind: string; key: string }): string {
   return `${ref.kind} ${ref.key}`
 }
 
-/**
- * ⌘K's engine groups: one per kind of hit, labelled by the target
- * section's `searchLabels`; hits of a section that is not built, or that
- * open nowhere, are dropped, and so are hits the page on screen already
- * offers (`offered`, by `refId`); each section's last group ends with
- * "Search <section> for “text”" where the section has a filter to search
- * with, even when the page offered every hit.
- */
 /** The section a kind of thing belongs to (`extensions.instance` → Extensions). */
 function ownerOf(kind: string) {
   const dot = kind.indexOf('.')
   return dot > 0 ? sectionById(kind.slice(0, dot)) : undefined
 }
 
+/**
+ * ⌘K's engine groups: one per kind of hit, labelled by the target
+ * section's `searchLabels`; hits that open nowhere (their section absent
+ * from this engine) are dropped, and so are hits the page on screen already
+ * offers (`offered`, by `refId`); each section's last group ends with
+ * "Search <section> for “text”" where the section has a filter to search
+ * with, even when the page offered every hit.
+ */
 export function engineGroups(
   results: SearchResults | null | undefined,
   text: string,
@@ -112,7 +112,7 @@ export function engineGroups(
   const groups: PaletteGroup[] = []
   for (const group of results.groups) {
     const section = sectionById(group.section)
-    if (!section?.built) continue
+    if (!section) continue
     const byKind = new Map<string, PaletteItem[]>()
     let found = 0
     for (const hit of group.hits) {
@@ -225,7 +225,7 @@ export function CommandPalette() {
         run: go({ to: section.to }),
       })
       // A section's other pages, under its name: `Firestore › Rules`.
-      for (const page of shownPages(section)?.slice(1) ?? [])
+      for (const page of section.pages?.slice(1) ?? [])
         items.push({
           id: page.to,
           title: page.label,
@@ -256,20 +256,19 @@ export function CommandPalette() {
     return items
   }, [go, status.data])
 
-  // What each built, running section's registry offers from anywhere.
+  // What each running section's registry offers from anywhere.
   const actions = useMemo<PaletteItem[]>(() => {
     const entries = new Map(status.data?.sections.map((entry) => [entry.id, entry]))
-    return SECTIONS.filter(
-      (section) => section.built && entries.get(section.id)?.state !== 'absent',
-    ).flatMap((section) =>
-      (section.actions ?? []).map<PaletteItem>((action) => ({
-        id: `action:${action.id}`,
-        title: action.title,
-        description: action.description,
-        keywords: [section.label, action.keywords ?? ''].join(' '),
-        icon: <action.icon size={16} />,
-        run: go(action.link),
-      })),
+    return SECTIONS.filter((section) => entries.get(section.id)?.state !== 'absent').flatMap(
+      (section) =>
+        (section.actions ?? []).map<PaletteItem>((action) => ({
+          id: `action:${action.id}`,
+          title: action.title,
+          description: action.description,
+          keywords: [section.label, action.keywords ?? ''].join(' '),
+          icon: <action.icon size={16} />,
+          run: go(action.link),
+        })),
     )
   }, [go, status.data])
 

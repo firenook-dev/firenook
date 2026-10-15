@@ -35,7 +35,6 @@ export const firestore: ConsoleSection = {
   services: ['firestore'],
   area: 'data',
   icon: DatabaseIcon,
-  built: true,
   summary:
     'Path bar, document grid with inferred columns, a query builder that runs the same engine query the app runs, and view-as-user over the rules engine. Security rules have their own page: an editor that knows the language, every decision with the line and values behind it, a playground and saved tests.',
   // Rules are their own page, not a mode of the data view: a different job —

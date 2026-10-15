@@ -2,8 +2,6 @@ import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { ActivityPage } from '@/auth/components/activity-page'
 import { SectionFrame } from '@/components/console/section-gate'
-import { UnbuiltSection } from '@/components/section-placeholder'
-import { auth } from '@/lib/sections/auth'
 import { zFlag } from '@/lib/search-params'
 
 // Every view of Activity is a link: the project and tenant it shows, its
@@ -46,8 +44,6 @@ export const Route = createFileRoute('/auth_/activity')({
 })
 
 function ActivityRoute() {
-  // The section's placeholder until its journeys pass.
-  if (!auth.built) return <UnbuiltSection section={auth} />
   return (
     <SectionFrame section="auth">
       <ActivityPage />

@@ -2,8 +2,8 @@
 // (`useTriggersFor('auth', tenant)`, the one the Functions runtime uses)
 // narrowed to the event a dialog is about — `user.create` for a new user,
 // `user.delete` for a delete. While the matcher does not know (Functions
-// starting, the Functions section not built), the answer stays `'unknown'`
-// and the dialog says nothing rather than guessing.
+// starting, not answered yet), the answer stays `'unknown'` and the dialog
+// says nothing rather than guessing.
 
 import { type TriggersAnswer, useTriggersFor } from '@/lib/triggers'
 

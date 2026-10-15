@@ -52,7 +52,6 @@ import { linkTo } from '@/lib/links'
 import { liveChannel } from '@/lib/live/channel'
 import { useConsoleProject } from '@/lib/project'
 import { useRouteSearch } from '@/lib/search-params'
-import { sectionById } from '@/lib/services'
 import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
 import { callJson, curlCommand, replayBlocked, tokenOfRequest } from '../activity'
@@ -103,11 +102,6 @@ export function mayCarryToken(call: Pick<AuthActivitySummary, 'operation' | 'cal
   return /\.(lookup|update|delete|sendOobCode|mfaEnrollment\.\w+|passkeyEnrollment\.\w+)$/.test(
     operation,
   )
-}
-
-/** Whether a section's pages are in this console, so a link into it goes somewhere. */
-function shown(section: string): boolean {
-  return sectionById(section)?.built === true
 }
 
 export function ActivityPage() {
@@ -168,9 +162,7 @@ export function ActivityPage() {
     const link = userLink(call.tenant, call.uid)
     navigateTo({ ...link, search: { ...link.search, project: search.project } })
   }
-  const logs = shown('logs')
-    ? (call: AuthActivitySummary) => navigateTo(logsForCall(call))
-    : undefined
+  const logs = (call: AuthActivitySummary) => navigateTo(logsForCall(call))
   const inspect = (token?: string) => {
     if (token) inspectThisToken(token)
     update({ panel: 'inspect', entry: undefined, method: undefined })
@@ -302,14 +294,13 @@ export function ActivityPage() {
         })
       break
     }
-    if (logs)
-      items.push({
-        id: 'logs',
-        label: 'Open in Logs',
-        icon: FileTextIcon,
-        shortcut: 'l',
-        run: () => logs(call),
-      })
+    items.push({
+      id: 'logs',
+      label: 'Open in Logs',
+      icon: FileTextIcon,
+      shortcut: 'l',
+      run: () => logs(call),
+    })
     items.push({
       id: 'copy-json',
       label: 'Copy as JSON',
@@ -387,9 +378,9 @@ export function ActivityPage() {
       key: 'l',
       label: 'Open in Logs',
       group: 'Activity',
-      when: () => target !== undefined && logs !== undefined,
+      when: () => target !== undefined,
       run: () => {
-        if (target) logs?.(target)
+        if (target) logs(target)
       },
     },
     {

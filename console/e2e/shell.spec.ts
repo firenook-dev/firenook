@@ -49,8 +49,8 @@ test('one live connection serves every page and every tab of a browser', async (
   await expect(page.getByTestId('rules-source')).toBeVisible()
   await expect.poll(() => subscriptions.added.includes('firestore.rules')).toBe(true)
   await expect.poll(() => subscriptions.removed.includes('firestore.changes')).toBe(true)
-  // Authentication's first page: its Users page once built, its entry before.
-  await page.getByTestId('nav-page-users').or(page.locator('a[data-testid="nav-auth"]')).click()
+  // Authentication's first page: its Users page.
+  await page.getByTestId('nav-page-users').click()
   await expect(page).toHaveURL(/\/console\/auth$/)
   await expect.poll(() => subscriptions.removed.includes('firestore.rules')).toBe(true)
   // Functions has pages of its own: its heading folds them, the page leads there.

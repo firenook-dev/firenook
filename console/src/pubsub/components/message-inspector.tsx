@@ -26,7 +26,6 @@ import { StatusDot } from '@/components/kit'
 import { useNow } from '@/lib/clock'
 import { formatBytes, formatDuration, formatNumber } from '@/lib/format'
 import { linkToLogs } from '@/lib/sections/logs'
-import { sectionById } from '@/lib/services'
 import { shortName } from '../names'
 import { messageQuery } from '../queries'
 import { DispatchView } from './dispatch-view'
@@ -41,7 +40,7 @@ function engineAttribute(key: string): boolean {
   return key.startsWith('googclient_') || key.startsWith('CloudPubSubDeadLetter')
 }
 
-/** A link to the Logs page, filtered, once Logs is built; nothing before. */
+/** A link to the Logs page, filtered. */
 export function LogsLink({
   filter,
   children,
@@ -51,7 +50,6 @@ export function LogsLink({
   children: ReactNode
   testId?: string | undefined
 }) {
-  if (!sectionById('logs')?.built) return null
   const link = linkToLogs(filter)
   return (
     <Link

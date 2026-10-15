@@ -86,7 +86,7 @@ function ReadySection({ section, children }: { section: ConsoleSection; children
   return <>{children}</>
 }
 
-/** The title row every state shares: the section's name and its state, as the placeholder writes it. */
+/** The title row both states share: the section's name, its state and what it does. */
 function TitleRow({ section, state }: { section: ConsoleSection; state: 'absent' | 'starting' }) {
   return (
     <div className="grid gap-1.5">

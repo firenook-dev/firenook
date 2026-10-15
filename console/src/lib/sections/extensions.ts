@@ -14,7 +14,6 @@ export const extensions: ConsoleSection = {
   services: ['functions'],
   area: 'compute',
   icon: PuzzlePieceIcon,
-  built: true,
   summary:
     'Each instance with its source and offline readiness, its configuration and where every value comes from, the functions it adds and the events it emits; reconfigure and reload in place.',
   searchLabels: { 'extensions.instance': 'Extensions' },

@@ -1,8 +1,6 @@
 import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { SectionFrame } from '@/components/console/section-gate'
-import { SectionPlaceholder } from '@/components/section-placeholder'
-import { pubsub } from '@/lib/sections/pubsub'
 import { zFlag } from '@/lib/search-params'
 import { TopicsPage } from '@/pubsub/components/topics-page'
 
@@ -72,7 +70,7 @@ export const Route = createFileRoute('/pubsub')({
 function PubsubTopicsRoute() {
   return (
     <SectionFrame section="pubsub">
-      {pubsub.built ? <TopicsPage /> : <SectionPlaceholder section={pubsub} />}
+      <TopicsPage />
     </SectionFrame>
   )
 }

@@ -1,20 +1,19 @@
 // Where an attempt's logs are: Logs filtered by the queue's function and
 // the invocation the attempt caused, or the attempt's own second when that
 // invocation is not known (foundation `linkToLogs`, never a hand-spelled
-// URL). Like every link between sections, it exists only while Logs is
-// built and running here; until then the attempt shows no Logs link.
+// URL). Like every link between sections, it exists only while this engine
+// runs Logs; otherwise the attempt shows no Logs link.
 
 import { useQuery } from '@tanstack/react-query'
 import type { TasksAttempt } from '@/api/generated/messaging/TasksAttempt'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import { statusQuery } from '@/api/queries'
 import { linkToLogs } from '@/lib/sections/logs'
-import { type SectionLink, sectionById } from '@/lib/services'
+import type { SectionLink } from '@/lib/services'
 
-/** Whether Logs can be linked to now: built, and part of this engine. */
+/** Whether Logs can be linked to now: it is part of this engine. */
 export function useLogsLinkable(): boolean {
   const status = useQuery(statusQuery)
-  if (!sectionById('logs')?.built) return false
   return status.data?.sections.find((section) => section.id === 'logs')?.state !== 'absent'
 }
 

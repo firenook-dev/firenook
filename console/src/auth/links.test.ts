@@ -64,9 +64,8 @@ describe('where Authentication things open', () => {
     expect(route('auth.message', '312')).toEqual({ to: '/auth/inbox', search: { message: '312' } })
   })
 
-  it('names its kinds for ⌘K, and is shown now its journeys pass', () => {
+  it('names its kinds for ⌘K, its pages and its project scope', () => {
     expect(auth.searchLabels).toEqual({ 'auth.user': 'Users' })
-    expect(auth.built).toBe(true)
     expect(auth.projectScope).toBe(true)
     expect(auth.pages?.map((page) => page.to)).toEqual([
       '/auth',

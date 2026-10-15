@@ -5,8 +5,8 @@
 //
 // The trigger line is computed, never written by the caller: from
 // `useTriggersFor`'s answer and whether background triggers are delivered
-// at all. While that answer is unknown — compute not built, Functions
-// starting — there is no line: "No function listens" is only ever said
+// at all. While that answer is unknown — Functions starting, not answered
+// yet — there is no line: "No function listens" is only ever said
 // when the engine knows it. Bulk work is a job: its progress, skipped
 // items, failures and Cancel come from the job itself.
 

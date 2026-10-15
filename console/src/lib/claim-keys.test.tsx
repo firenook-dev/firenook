@@ -4,9 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AuthClaimKeys } from '@/api/generated/auth/AuthClaimKeys'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
 import { CLAIM_KEYS_FRESH_MS, useClaimKeys } from './claim-keys'
-import { auth } from './sections/auth'
 
 const ANSWER: AuthClaimKeys = {
   keys: [
@@ -65,7 +63,7 @@ describe('claim keys for completion', () => {
     expect(asked).toHaveLength(2)
   })
 
-  it('ask nothing while Authentication is absent, starting or not built', async () => {
+  it('ask nothing while Authentication is absent or starting', async () => {
     withAuth('absent')
     const absent = renderHook(() => useClaimKeys('demo-console'), { wrapper })
     expect(await absent.result.current.fresh()).toEqual([])
@@ -74,11 +72,6 @@ describe('claim keys for completion', () => {
     const starting = renderHook(() => useClaimKeys('demo-console'), { wrapper })
     expect(await starting.result.current.fresh()).toEqual([])
     expect(starting.result.current.now()).toEqual([])
-    withAuth('ready')
-    await whileUnbuilt(auth, async () => {
-      const { result } = renderHook(() => useClaimKeys('demo-console'), { wrapper })
-      expect(await result.current.fresh()).toEqual([])
-    })
     expect(asked).toEqual([])
   })
 

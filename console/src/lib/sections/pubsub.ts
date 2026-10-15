@@ -33,7 +33,6 @@ export const pubsub: ConsoleSection = {
   area: 'messaging',
   icon: BroadcastIcon,
   // Every page's journeys pass (messaging spec §11, commit 18).
-  built: true,
   summary:
     'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them, pull, replay and snapshots, Avro schemas with revisions, and the scheduled functions with run now and pause.',
   pages: [

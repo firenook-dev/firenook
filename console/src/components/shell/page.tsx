@@ -1,6 +1,6 @@
 // The reading layout: a page with a gutter and a measure, for sections that
-// are documents rather than workbenches (the overview, a placeholder, a
-// settings form). Workbenches fill the content column edge to edge instead.
+// are documents rather than workbenches (the overview, a section's gate,
+// a settings form). Workbenches fill the content column edge to edge instead.
 
 import type { ReactNode } from 'react'
 

@@ -1,8 +1,6 @@
 import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { SectionFrame } from '@/components/console/section-gate'
-import { SectionPlaceholder } from '@/components/section-placeholder'
-import { pubsub } from '@/lib/sections/pubsub'
 import { SchedulesPage } from '@/pubsub/schedules/schedules-page'
 
 // The Schedules page: the schedule open in the inspector is the link.
@@ -28,7 +26,7 @@ export const Route = createFileRoute('/pubsub_/schedules')({
 function PubsubSchedulesRoute() {
   return (
     <SectionFrame section="pubsub">
-      {pubsub.built ? <SchedulesPage /> : <SectionPlaceholder section={pubsub} />}
+      <SchedulesPage />
     </SectionFrame>
   )
 }

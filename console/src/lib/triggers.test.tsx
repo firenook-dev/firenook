@@ -32,25 +32,10 @@ const fake = vi.hoisted(() => {
   }
 })
 
-/** Whether the Functions section is built, as its registry says. */
-const registry = vi.hoisted(() => ({ built: true }))
-
 vi.mock('./live/channel', async (original) => ({
   ...(await original<typeof import('./live/channel')>()),
   liveChannel: fake.channel,
 }))
-
-vi.mock('./sections/functions', async (original) => {
-  const actual = await original<typeof import('./sections/functions')>()
-  return {
-    functions: {
-      ...actual.functions,
-      get built() {
-        return registry.built
-      },
-    },
-  }
-})
 
 const { useTriggersFor } = await import('./triggers')
 
@@ -104,7 +89,6 @@ beforeEach(() => {
   })
   asked = []
   fake.subscriptions.length = 0
-  registry.built = true
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -157,15 +141,6 @@ describe('which functions fire for a resource', () => {
     ])
   })
 
-  it('is unknown while the Functions section is not built, and asks nothing', () => {
-    registry.built = false
-    withFunctions('ready')
-    const { result } = renderHook(() => useTriggersFor('firestore', RESOURCE), { wrapper })
-    expect(result.current).toBe('unknown')
-    expect(asked).toEqual([])
-    expect(fake.subscriptions).toEqual([])
-  })
-
   it('is unknown while Functions start, then asks once they are ready', async () => {
     withFunctions('starting')
     const { result } = renderHook(() => useTriggersFor('firestore', RESOURCE), { wrapper })
@@ -186,11 +161,10 @@ describe('which functions fire for a resource', () => {
     expect(asked).toEqual([])
   })
 
-  it('is absent when the suite runs no Functions, built or not', () => {
+  it('is absent when the suite runs no Functions', () => {
     withFunctions('absent')
     expect(renderHook(() => useTriggersFor('auth', ''), { wrapper }).result.current).toBe('absent')
-    registry.built = false
-    expect(renderHook(() => useTriggersFor('auth', ''), { wrapper }).result.current).toBe('absent')
+    expect(fake.subscriptions).toEqual([])
     expect(asked).toEqual([])
   })
 

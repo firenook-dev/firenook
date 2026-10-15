@@ -19,7 +19,6 @@ export const tasks: ConsoleSection = {
   services: ['tasks'],
   area: 'messaging',
   icon: QueueIcon,
-  built: true,
   summary:
     'Queues with their configuration and live counters, every pending and running task with its attempts, responses and next retry, every attempt as it happens, finished tasks with their outcome, enqueue by hand, run now, pause, hold and purge.',
   // `tasks.jobs` (run and delete jobs) is the engine's automatic gauge.

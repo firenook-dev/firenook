@@ -19,7 +19,6 @@ export const eventarc: ConsoleSection = {
   services: ['eventarc'],
   area: 'messaging',
   icon: ShareNetworkIcon,
-  built: true,
   summary:
     'Every event on every channel with the trigger each one reached or missed, publish a custom event, and who publishes and who listens.',
   pages: [

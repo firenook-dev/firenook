@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import order from './section-order.json'
-import { SECTIONS, itemBadges, sectionAt, sectionById, shownPages } from './services'
+import { SECTIONS, itemBadges, sectionAt, sectionById } from './services'
 
 describe('the one section order', () => {
   it('is the sidebar order, which the engine sorts its status by', () => {
@@ -38,17 +38,5 @@ describe('a section item’s badges', () => {
       'firestore.x',
       'firestore.jobs',
     ])
-  })
-})
-
-describe('the pages shown under a section', () => {
-  it('are its registry’s once it is built, and none before', () => {
-    const firestore = sectionById('firestore')
-    if (!firestore) throw new Error('no Firestore section')
-    expect(shownPages(firestore)?.map((page) => page.to)).toEqual([
-      '/firestore',
-      '/firestore/rules',
-    ])
-    expect(shownPages({ ...firestore, built: false })).toBeUndefined()
   })
 })

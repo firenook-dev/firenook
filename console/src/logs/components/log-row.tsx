@@ -1,7 +1,7 @@
 // One row of the Logs feed, as `FeedList` draws it: the shared `LogLine`
 // (time, level, the source chip, the message) with the Logs trail — the
 // ×N of a repeated line, `+N lines`, the payload caret and the line's
-// primary link, drawn only where the section it opens is built — or a
+// primary link, drawn only where this engine runs its section — or a
 // marker line (a reload, a reset), or an edge at the top of the feed.
 //
 // Rows are memoized and fed the row, its flags and a ref of the page's

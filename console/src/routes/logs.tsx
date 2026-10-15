@@ -1,7 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { SectionFrame } from '@/components/console/section-gate'
-import { UnbuiltSection } from '@/components/section-placeholder'
-import { logs } from '@/lib/sections/logs'
 import { LogsPage } from '@/logs/components/logs-page'
 import { logsSearchSchema } from '@/logs/search'
 
@@ -21,10 +19,7 @@ export const Route = createFileRoute('/logs')({
   component: LogsRoute,
 })
 
-// Logs stays behind its placeholder until its journeys pass (`built` in the
-// registry): nothing is presented as available before it works.
 function LogsRoute() {
-  if (!logs.built) return <UnbuiltSection section={logs} />
   return (
     <SectionFrame section="logs">
       <LogsPage />

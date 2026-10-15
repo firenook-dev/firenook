@@ -34,8 +34,8 @@ export interface CardProblem {
   id: string
   /** "1 rules file does not compile", from the badge's own noun. */
   text: string
-  /** The page that carries the badge; `null` while that page is not built (never a placeholder). */
-  link: SectionLink | null
+  /** The page that carries the badge. */
+  link: SectionLink
 }
 
 /** A running section, as its card draws it. */
@@ -48,12 +48,12 @@ export interface SectionCard {
   sharedWith: ConsoleSection | undefined
   problems: CardProblem[]
   health: CardHealth
-  /** The section's pages after its first, as links on the card ("Rules"); none while it is not built. */
+  /** The section's pages after its first, as links on the card ("Rules"). */
   pages: readonly { to: string; label: string }[]
   /**
    * The section's own lines in Logs: the Functions card's "Logs", as the
    * official Functions card linked to the log viewer. `null` for every
-   * other section, and while Logs is not built or does not run.
+   * other section, and while Logs does not run.
    */
   logs: SectionLink | null
 }
@@ -84,7 +84,7 @@ export function cardProblems(
     problems.push({
       id,
       text: formatCount(badge.count, badge.noun),
-      link: section.built ? { to: page?.to ?? section.to } : null,
+      link: { to: page?.to ?? section.to },
     })
   }
   return problems
@@ -124,7 +124,7 @@ export function sectionCards(
       sharedWith,
       problems,
       health: cardHealth(entry, problems),
-      pages: section.built ? (section.pages ?? []).slice(1) : [],
+      pages: (section.pages ?? []).slice(1),
       logs:
         entry.id === 'functions' && logsOpen(status) ? linkToLogs({ service: 'functions' }) : null,
     })
@@ -260,18 +260,16 @@ export function resetConsequence(id: string): string | undefined {
 
 /**
  * The sections a reset can name now: those whose data the console can
- * clear, that are ready, and whose console section is built. `SectionStatus`
- * does not say whether a section implements `clear`, and every section's
- * stream lands its `clear` with its pages, so a built section is one whose
- * reset works end to end; offering any other would answer "<Section> cannot
- * be cleared from the console."
+ * clear (`RESETS`) and that are ready. `SectionStatus` does not say whether
+ * a section implements `clear`; offering any other would answer "<Section>
+ * cannot be cleared from the console."
  */
 export function resettableSections(
   status: ConsoleStatus,
 ): { section: ConsoleSection; status: SectionStatus }[] {
   return status.sections.flatMap((entry) => {
     const section = sectionById(entry.id)
-    if (!section?.built || entry.state !== 'ready' || !Object.hasOwn(RESETS, entry.id)) return []
+    if (!section || entry.state !== 'ready' || !Object.hasOwn(RESETS, entry.id)) return []
     return [{ section, status: entry }]
   })
 }
@@ -371,18 +369,17 @@ export function problemLink(
   return undefined
 }
 
-/** Where a line opens in Logs (`/logs?entry=`); `null` while Logs is not built or absent. */
+/** Where a line opens in Logs (`/logs?entry=`); `null` while Logs is absent. */
 export function logsEntryLink(cursor: string, status?: ConsoleStatus): SectionLink | null {
   return linkTo({ kind: 'logs.entry', key: cursor }, status)
 }
 
-/** Whether a link into Logs opens: the page is built and this engine runs it. */
+/** Whether a link into Logs opens: this engine runs it. */
 function logsOpen(status?: ConsoleStatus): boolean {
-  if (!sectionById('logs')?.built) return false
   return status?.sections.find((entry) => entry.id === 'logs')?.state !== 'absent'
 }
 
-/** Where "Open logs" goes from the recent problems; `null` while Logs is not built or absent. */
+/** Where "Open logs" goes from the recent problems; `null` while Logs is absent. */
 export function logsProblemsLink(status?: ConsoleStatus): SectionLink | null {
   return logsOpen(status) ? { to: '/logs', search: { q: 'is:problem' } } : null
 }

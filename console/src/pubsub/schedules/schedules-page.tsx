@@ -41,7 +41,6 @@ import { useNow } from '@/lib/clock'
 import { formatNumber } from '@/lib/format'
 import { linkTo } from '@/lib/links'
 import { linkToLogs } from '@/lib/sections/logs'
-import { sectionById } from '@/lib/services'
 import { liveChannel } from '@/lib/live/channel'
 import { type PaletteItem, matchesQuery, usePaletteProviders } from '@/lib/palette'
 import { useConsoleProject } from '@/lib/project'
@@ -67,11 +66,6 @@ import { useRunNow } from './run-now-popover'
 import { ScheduleInspector, runLogs } from './schedule-inspector'
 
 const TABLE = 'pubsub-schedules-table'
-
-/** Whether the Logs section is shown in this console, so a run's logs can be opened. */
-function logsShown(): boolean {
-  return sectionById('logs')?.built === true
-}
 
 /** A schedule's newest run: the latest kept, else the first. */
 export function lastRun(schedule: PubsubSchedule) {
@@ -313,7 +307,7 @@ function SchedulesTable({
     {
       key: 'l',
       label: 'Open the latest run’s logs',
-      when: () => open !== undefined && lastRun(open) !== undefined && logsShown(),
+      when: () => open !== undefined && lastRun(open) !== undefined,
       run: () => {
         const run = open ? lastRun(open) : undefined
         if (!open || !run) return

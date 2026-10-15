@@ -2,9 +2,7 @@ import { cleanup, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderInConsole } from '@/test/render'
-import { auth } from '@/lib/sections/auth'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
 import { EntityLink } from './entity-link'
 
 afterEach(() => {
@@ -23,21 +21,19 @@ describe('an entity link', () => {
     expect(link.getAttribute('href')).toBe('/firestore?path=users&doc=users%2Fu_1')
   })
 
-  it('is plain text while its section is absent or not built', async () => {
+  it('is plain text while its section is absent, or for a kind nothing routes', async () => {
     await renderInConsole(() => <EntityLink entity={doc} testId="ref" />, {
       status: testStatus({ sections: [sectionEntry('firestore', { state: 'absent' })] }),
     })
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByTestId('ref')).toHaveTextContent('users/u_1')
     cleanup()
-    await whileUnbuilt(auth, async () => {
-      await renderInConsole(
-        () => <EntityLink entity={{ kind: 'auth.user', key: 'u_9f3k2' }} testId="user" />,
-        { status: testStatus({ sections: [sectionEntry('auth')] }) },
-      )
-      expect(screen.queryByRole('link')).not.toBeInTheDocument()
-      expect(screen.getByTestId('user')).toHaveTextContent('u_9f3k2')
-    })
+    await renderInConsole(
+      () => <EntityLink entity={{ kind: 'auth.session', key: 'u_9f3k2' }} testId="user" />,
+      { status: testStatus({ sections: [sectionEntry('auth')] }) },
+    )
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByTestId('user')).toHaveTextContent('u_9f3k2')
   })
 
   it('copies what it shows', async () => {

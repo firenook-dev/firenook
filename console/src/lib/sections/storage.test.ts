@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { shownPages } from '../services'
 import { storage } from './storage'
 
 const storageRoute = (kind: string, key: string) => storage.routes?.[kind]?.(key)
@@ -61,9 +60,7 @@ describe('where Storage things open', () => {
     expect(storage.pages?.[1]?.badges).toEqual(['storage.rules'])
   })
 
-  it('is built: the nav lists its pages, and the shell mounts its beacon', () => {
-    expect(storage.built).toBe(true)
-    expect(shownPages(storage)?.map((page) => page.label)).toEqual(['Files', 'Rules'])
+  it('mounts its beacon in the shell and has no project scope', () => {
     expect(storage.shellMount).toBeDefined()
     expect(storage.projectScope).toBeUndefined()
   })

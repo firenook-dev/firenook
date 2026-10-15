@@ -8,14 +8,13 @@
 // Completion asks when it opens: an answer younger than a few seconds is
 // used as it is, an older one is asked again, so a key set a moment ago in
 // another tab is offered the next time without anything polling. Nothing is
-// asked while Authentication is absent, starting or not built; completion
-// then offers the standard claims only.
+// asked while Authentication is absent or starting; completion then offers
+// the standard claims only.
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { statusQuery } from '@/api/queries'
 import { claimKeysQuery } from '@/auth/queries'
-import { auth } from './sections/auth'
 
 /** How long an answer is used before completion asks again, ms. */
 export const CLAIM_KEYS_FRESH_MS = 5_000
@@ -34,7 +33,7 @@ export function useClaimKeys(project: string | undefined, tenant?: string): Clai
   const client = useQueryClient()
   const status = useQuery(statusQuery)
   const entry = status.data?.sections.find((section) => section.id === 'auth')
-  const ready = auth.built && entry?.state === 'ready' && project !== undefined && project !== ''
+  const ready = entry?.state === 'ready' && project !== undefined && project !== ''
   return useMemo(() => {
     if (!ready) return { now: () => NONE, fresh: () => Promise.resolve(NONE) }
     const options = { ...claimKeysQuery(project, tenant), staleTime: CLAIM_KEYS_FRESH_MS }

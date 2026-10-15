@@ -114,8 +114,7 @@ describe('the Logs registry entry', () => {
     })
   })
 
-  it('is built: its journeys pass against a real engine (e2e/logs.spec.ts)', () => {
-    expect(logs.built).toBe(true)
+  it('is one page with no project scope', () => {
     expect(logs.pages).toBeUndefined()
     expect(logs.projectScope).toBeUndefined()
   })

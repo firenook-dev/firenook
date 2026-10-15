@@ -17,7 +17,8 @@ Hard rules:
 4. The Console API types are generated from Rust. Change the Rust type, run
    `cargo test -p firenook-console-front`, commit the generated files.
 5. The first route stays under its gzip budget (`npm run budget`).
-6. A section that is not finished says so on screen; nothing is presented as
-   available before it works end to end against the engine.
+6. Nothing is presented as available before it works end to end against the
+   engine: a section or a feature lands with its journeys, never behind a
+   flag.
 7. Tests: unit with Vitest, behaviour with Playwright against a real engine.
    No mocked API in end-to-end tests.

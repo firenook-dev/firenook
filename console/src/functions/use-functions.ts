@@ -8,7 +8,7 @@ import type { FunctionSummary } from '@/api/generated/compute/FunctionSummary'
 import { statusQuery } from '@/api/queries'
 import { serviceAddress } from '@/components/console/request/address'
 import { linkToLogs } from '@/lib/sections/logs'
-import { type SectionLink, sectionById } from '@/lib/services'
+import type { SectionLink } from '@/lib/services'
 import { toast } from '@/lib/toasts'
 import { answersOnUrl } from './kinds'
 import { urlPath } from './trigger-text'
@@ -38,13 +38,12 @@ export function functionUrl(
   return address && path ? `${address}${path}` : summary.url
 }
 
-/** A link into Logs filtered as asked, or null while Logs is not built or not running. */
+/** A link into Logs filtered as asked, or null while Logs is not running. */
 export function useLogsLink(
   filter: Parameters<typeof linkToLogs>[0] | undefined,
 ): SectionLink | null {
   const status = useQuery(statusQuery)
-  const logs = sectionById('logs')
-  if (!filter || !logs?.built) return null
+  if (!filter) return null
   if (status.data?.sections.find((entry) => entry.id === 'logs')?.state === 'absent') return null
   return linkToLogs(filter)
 }

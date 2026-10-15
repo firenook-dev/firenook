@@ -36,7 +36,6 @@ export const auth: ConsoleSection = {
   area: 'data',
   icon: UsersIcon,
   // False keeps the placeholder until the Authentication journeys pass.
-  built: true,
   summary:
     'Users with search and live rows, a claims editor that shows the token it produces, an inbox for every link and code the emulator sends, every call with its exact error, tenants and blocking functions.',
   pages: [
@@ -101,7 +100,7 @@ export const auth: ConsoleSection = {
   // Users, Inbox, Activity and Settings for the project the app used.
   projectScope: true,
   // The newest code and link in ⌘K, and fresh engine tokens for whoever a
-  // page reads as; mounted while the section is ready and built.
+  // page reads as; mounted while the section is ready.
   shellMount: () => import('@/auth/beacon'),
   searchLabels: { 'auth.user': 'Users' },
   // One field routes every Auth entity: ⌘K hits and every EntityRef

@@ -177,7 +177,7 @@ export function EventsPage() {
           title:
             index === -1
               ? 'No function ran for this event.'
-              : 'Its invocation opens in Functions once that section is built.',
+              : 'Functions is not running here, so its invocation cannot be opened.',
         })
     })
   }

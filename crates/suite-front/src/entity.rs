@@ -3,8 +3,8 @@
 //! A section's payload that points at something another section shows (a
 //! log line's function, an invocation's document, a decision's user)
 //! carries an [`EntityRef`], and the console turns it into a link through
-//! the target section's registry, or plain text when that section is
-//! absent or not built yet. Every key is written by the constructors here,
+//! the target section's registry, or plain text when the engine does not
+//! run that section. Every key is written by the constructors here,
 //! so no section formats one by hand. A key splits at its first `|` (the
 //! first two for a Cloud Tasks queue, the first three for a task): every
 //! leading part is an id that cannot contain `|`, so the last part may hold

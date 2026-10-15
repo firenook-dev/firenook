@@ -64,13 +64,12 @@ describe('pages and badges', () => {
   })
 })
 
-describe('built once their journeys pass', () => {
+describe('links into Functions, Extensions and Eventarc', () => {
   const status = testStatus({
     sections: ['functions', 'extensions', 'eventarc'].map((id) => sectionEntry(id)),
   })
 
-  it('Functions, Extensions and Eventarc are built, so a link into them opens their page', () => {
-    expect([functions.built, extensions.built, eventarc.built]).toEqual([true, true, true])
+  it('open their page', () => {
     expect(linkTo({ kind: 'functions.function', key: 'us-central1-api' }, status)).toEqual({
       to: '/functions',
       search: { function: 'us-central1-api' },
@@ -89,7 +88,7 @@ describe('built once their journeys pass', () => {
     })
   })
 
-  it('a built section absent from this engine reads as text too', () => {
+  it('read as text while the section is absent from this engine', () => {
     const absent = testStatus({
       sections: [sectionEntry('extensions', { state: 'absent' }), sectionEntry('eventarc')],
     })

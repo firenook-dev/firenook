@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PaletteGroup, PaletteItem } from '@/lib/palette'
 import type { SectionLink } from '@/lib/services'
-import { auth } from '@/lib/sections/auth'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
 import { engineGroups, mergeGroups } from './command-palette'
 
-// Storage stands in for a built section whose `q` is a text filter, so the
+// Storage stands in for a section whose `q` is a text filter, so the
 // "Search <section> for" row has a section to belong to.
 vi.mock('@/lib/services', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/services')>()
@@ -14,7 +12,6 @@ vi.mock('@/lib/services', async (importOriginal) => {
   if (!base) throw new Error('the registry has no storage section')
   const storage = {
     ...base,
-    built: true,
     searchLabels: { 'storage.object': 'Objects' },
     routes: { 'storage.object': (key: string) => ({ to: '/storage', search: { object: key } }) },
   }
@@ -73,7 +70,7 @@ describe('what ⌘K shows of the engine’s search', () => {
     ).toBe(false)
   })
 
-  it('drops hits of a section that is not built, or that the engine does not run', async () => {
+  it('drops hits of a section the engine does not run', () => {
     const results = {
       partial: false,
       groups: [
@@ -89,13 +86,19 @@ describe('what ⌘K shows of the engine’s search', () => {
         },
       ],
     }
-    await whileUnbuilt(auth, () => {
-      expect(engineGroups(results, 'ada', status, go).map((group) => group.label)).toEqual([
-        'Collections',
-      ])
-      const absent = testStatus({ sections: [sectionEntry('firestore', { state: 'absent' })] })
-      expect(engineGroups(results, 'ada', absent, go)).toEqual([])
+    const noAuth = testStatus({
+      sections: [sectionEntry('firestore'), sectionEntry('auth', { state: 'absent' })],
     })
+    expect(engineGroups(results, 'ada', noAuth, go).map((group) => group.label)).toEqual([
+      'Collections',
+    ])
+    const neither = testStatus({
+      sections: [
+        sectionEntry('firestore', { state: 'absent' }),
+        sectionEntry('auth', { state: 'absent' }),
+      ],
+    })
+    expect(engineGroups(results, 'ada', neither, go)).toEqual([])
   })
 
   it('labels a hit by the section it opens in, whichever source found it', () => {

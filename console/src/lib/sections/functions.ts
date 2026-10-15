@@ -18,7 +18,6 @@ export const functions: ConsoleSection = {
   services: ['functions'],
   area: 'compute',
   icon: LightningIcon,
-  built: true,
   summary:
     'Every function by codebase with its trigger and health, invoke HTTP and callable functions as any user, send test events or do the real thing, and every invocation with its own logs, replay and timing.',
   // Each badge sits on the page it is about, so the page that shows the

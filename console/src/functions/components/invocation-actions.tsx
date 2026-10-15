@@ -24,7 +24,6 @@ import { statusQuery } from '@/api/queries'
 import type { RowMenuItem } from '@/components/console/row-menu'
 import { linkTo } from '@/lib/links'
 import { linkToLogs } from '@/lib/sections/logs'
-import { sectionById } from '@/lib/services'
 import { toast } from '@/lib/toasts'
 import { getInvocation } from '../api'
 import { replayInvocation } from '../invoke-stream'
@@ -109,9 +108,7 @@ export function useInvocationActions({
 }): InvocationActions {
   const navigate = useNavigate()
   const status = useQuery(statusQuery)
-  const logsBuilt =
-    sectionById('logs')?.built === true &&
-    status.data?.sections.find((entry) => entry.id === 'logs')?.state !== 'absent'
+  const logsRun = status.data?.sections.find((entry) => entry.id === 'logs')?.state !== 'absent'
   const [asking, setAsking] = useState<InvocationSummary | null>(null)
   const [replaying, setReplaying] = useState(false)
 
@@ -171,7 +168,7 @@ export function useInvocationActions({
           description:
             causeRefs(view.refs).length === 0
               ? 'This invocation was called directly; nothing in another section caused it.'
-              : 'What caused it lives in a section that is not built yet.',
+              : 'What caused it lives in a section this engine does not run.',
           tone: 'info',
         })
       })
@@ -185,7 +182,7 @@ export function useInvocationActions({
       )
   }
 
-  const openLogs = logsBuilt
+  const openLogs = logsRun
     ? (invocation: InvocationSummary) => {
         const link = linkToLogs({ function: invocation.functionId, execution: invocation.id })
         void navigate({ to: link.to as never, search: link.search as never })

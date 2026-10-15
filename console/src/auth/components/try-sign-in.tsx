@@ -26,7 +26,6 @@ import { JsonTree } from '@/components/console/json-tree'
 import { OutcomeChip } from '@/components/console/outcome-chip'
 import { PanelTitle } from '@/components/kit'
 import type { ViewAs } from '@/lib/identity'
-import { sectionById } from '@/lib/services'
 import { latencyText, stepChips } from '../activity'
 import { AuthEmulatorError, callAuthEmulator, getMessagesOfCall, getUser } from '../api'
 import { copyWithToast } from '../clipboard'
@@ -730,9 +729,8 @@ function Result({
     typeof firebase?.sign_in_provider === 'string' ? firebase.sign_in_provider : undefined
   const uid = tokens.uid ?? (typeof payload?.user_id === 'string' ? payload.user_id : undefined)
   const email = typeof payload?.email === 'string' ? payload.email : undefined
-  // Only while Firestore is part of this engine (and its pages are in the console).
+  // Only while Firestore is part of this engine.
   const firestore =
-    sectionById('firestore')?.built === true &&
     status.data?.sections.find((section) => section.id === 'firestore')?.state !== 'absent'
   return (
     <InspectorSection title="Result" testId="try-result">

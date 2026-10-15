@@ -4,10 +4,8 @@
 
 import { cleanup, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { logs } from '@/lib/sections/logs'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
 import { dispatchJson, dispatchLabel } from './dispatch-view'
 import { DeliveriesView, deliveryLogs, outcomeCounts, shownOutcomes } from './deliveries-table'
 import { runAgainText } from './run-again'
@@ -76,13 +74,12 @@ describe('a delivery’s request and links', () => {
     expect(dispatchJson('not json')).toBeUndefined()
   })
 
-  it('opens the function’s lines in Logs, and no logs while the Logs section is not built', async () => {
+  it('opens the function’s lines in Logs', () => {
     const row = { functionId: 'us-central1-onOrderPlaced', invocation: null }
     expect(deliveryLogs(row)).toEqual({
       to: '/logs',
       search: { q: 'function:us-central1-onOrderPlaced' },
     })
-    expect(await whileUnbuilt(logs, () => deliveryLogs(row))).toBeNull()
   })
 
   it('asks before a run again, naming the function and the message', () => {

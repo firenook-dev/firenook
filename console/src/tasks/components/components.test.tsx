@@ -4,10 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/client'
 import type { TasksTaskDetail } from '@/api/generated/messaging/TasksTaskDetail'
 import { SectionGate } from '@/components/console/section-gate'
-import { logs } from '@/lib/sections/logs'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
-import { whileUnbuilt } from '@/test/unbuilt'
 import type { TasksAttemptEvent } from '@/api/generated/messaging/TasksAttemptEvent'
 import { useFeedPending } from '@/components/console/feed-list'
 import { PauseButton } from '@/components/console/pause-button'
@@ -273,13 +271,17 @@ describe('the attempts timeline (TK-22)', () => {
       expect.stringContaining('/logs?q=function%3Aus-central1-processOrder&from='),
       expect.stringContaining('/logs?q=function%3Aus-central1-processOrder&from='),
     ])
-    // While Logs is not built: no link into a placeholder.
+    // While this engine runs no Logs: no link into a page that cannot show them.
     cleanup()
-    await whileUnbuilt(logs, () =>
-      renderInConsole(() => <AttemptsTimeline detail={detail} queue={testQueue()} />, {
-        status: ready(),
+    await renderInConsole(() => <AttemptsTimeline detail={detail} queue={testQueue()} />, {
+      status: testStatus({
+        sections: [
+          sectionEntry('tasks'),
+          sectionEntry('functions'),
+          sectionEntry('logs', { state: 'absent' }),
+        ],
       }),
-    )
+    })
     expect(screen.getAllByTestId('attempt')).toHaveLength(2)
     expect(screen.queryByTestId('attempt-logs')).not.toBeInTheDocument()
   })

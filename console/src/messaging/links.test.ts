@@ -126,12 +126,6 @@ describe('where Cloud Tasks things open (U-19)', () => {
 })
 
 describe('the registries', () => {
-  it('stay behind their placeholders until their journeys pass', () => {
-    // Pub/Sub's journeys pass (pubsub*.spec.ts); so do Cloud Tasks' (tasks*.spec.ts).
-    expect(pubsub.built).toBe(true)
-    expect(tasks.built).toBe(true)
-  })
-
   it('label every kind they route, and route every kind they label', () => {
     for (const section of [pubsub, tasks])
       expect(Object.keys(section.searchLabels ?? {}).toSorted()).toEqual(

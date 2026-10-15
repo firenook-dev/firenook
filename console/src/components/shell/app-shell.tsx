@@ -51,7 +51,6 @@ import {
   type SectionLink,
   type ServiceArea,
   itemBadges,
-  shownPages,
 } from '@/lib/services'
 import { useConsoleUi } from '@/lib/store'
 import { SHELL_SCOPE, describeKey, useShortcutListener, useShortcuts } from '@/lib/shortcuts'
@@ -246,7 +245,7 @@ function ShellMounts() {
   )
   return (
     <>
-      {SECTIONS.filter((section) => section.built && ready.has(section.id)).map((section) => {
+      {SECTIONS.filter((section) => ready.has(section.id)).map((section) => {
         const Mounted = shellMountOf(section)
         return Mounted ? <Mounted key={section.id} /> : null
       })}
@@ -298,7 +297,7 @@ function Navigation() {
               {SECTIONS.filter((section) => section.area === area).map((section) =>
                 // A section the engine does not run is one dimmed item that
                 // says why and leads to its gate: its pages have nothing to show.
-                shownPages(section) && entries.get(section.id)?.state !== 'absent' ? (
+                section.pages && entries.get(section.id)?.state !== 'absent' ? (
                   <SectionWithPages
                     key={section.id}
                     section={section}
@@ -424,12 +423,12 @@ function SectionWithPages({
   pathname: string
 }) {
   const go = useGo()
-  const pages = shownPages(section) ?? []
+  const pages = section.pages ?? []
   const everyBadge = [...itemBadges(section), ...pages.flatMap((page) => page.badges ?? [])]
   const badge = useNavBadge(everyBadge)
   const state = entry?.state ?? 'ready'
   // The section's id, as its single-entry form has it: `nav-auth` names
-  // Authentication whether it is a heading over pages or not yet built.
+  // Authentication whether it is a heading over pages or a single entry.
   const testId = `nav-${section.id}`
   return (
     <Sidebar.MenuItem>

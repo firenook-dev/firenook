@@ -216,8 +216,9 @@ One file per section, assembled by `lib/services.ts` in the order of
 route, so it holds icons, types and pure string helpers only — never a
 component import beyond `shellMount`'s lazy one.
 
-- `built` — `false` keeps the route's honest `SectionPlaceholder` until the
-  section's journeys pass. Never flip it before.
+- A section joins the registry with its pages, when its journeys pass
+  against a real engine; there is no flag for a section that is not
+  finished, so a half-built page never ships behind one.
 - `pages` (sub-items, each with its own `badges`), `badges` (ids from the
   badge table), `actions` (⌘K rows; `?new=` and `?dialog=` open dialogs).
 - `routes` — `kind → (key) => SectionLink`: serves engine search hits and
@@ -414,7 +415,7 @@ title or the body.
   names encoded); `lib/download.ts` on the client.
 - **Links between sections**: `EntityRef { kind, key, label? }`, built only
   through `entity.rs`'s constructors; rendered with `EntityLink` (plain text
-  while the target section is absent or not built).
+  while the target section is absent from the engine).
 - **The guard** (`guard.rs`, on the whole mount): a change is JSON, or
   carries `x-firenook-console` (`[a-z0-9-]{1,16}`) for a binary body — a
   bodiless POST is a simple request any page can send; `Sec-Fetch-Site`
@@ -811,7 +812,7 @@ only at `size="lg"`). The console uses it by surface, not by taste:
 
 | | title | body | chrome, counts |
 | --- | --- | --- | --- |
-| page (Overview, a section placeholder) | 20 px `heading size="lg"`, sections 16 px | 14 px | — |
+| page (Overview, a section's gate) | 20 px `heading size="lg"`, sections 16 px | 14 px | — |
 | dialog — it owns the screen | 16 px `text-lg font-semibold` | 14 px | 13 px |
 | popover, dropdown, the inspector | **14 px `PanelTitle`** | 13 px `size="sm"` | 12 px, figures 11 px |
 | toolbar, grid, chips | — | — | 12 px, figures 11 px, `kbd` 10 px |

@@ -53,7 +53,7 @@ import { linkTo } from '@/lib/links'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { createInvalidator, readStarted } from '@/lib/live/use-live-topic'
 import { linkToLogs } from '@/lib/sections/logs'
-import { type SectionLink, sectionById } from '@/lib/services'
+import type { SectionLink } from '@/lib/services'
 import { useShortcuts } from '@/lib/shortcuts'
 import { toast } from '@/lib/toasts'
 import { rowElement } from '@/messaging/confirm-popover'
@@ -477,7 +477,7 @@ function DeliveriesTable({
   const logsOf = deliveryLogs
   const openLogs = (row: PubsubDeliveryRow) => {
     const link = logsOf(row)
-    if (link) void navigate({ to: link.to as never, search: link.search as never })
+    void navigate({ to: link.to as never, search: link.search as never })
   }
   const askAgain = (row: PubsubDeliveryRow) => runAgain.ask(row, rowElement(TABLE, row.eventId))
 
@@ -507,7 +507,7 @@ function DeliveriesTable({
     {
       key: 'l',
       label: 'Open the delivery’s logs',
-      when: () => cursorRow !== undefined && logsOf(cursorRow) !== null,
+      when: () => cursorRow !== undefined,
       run: () => {
         if (cursorRow) openLogs(cursorRow)
       },
@@ -559,7 +559,6 @@ function DeliveriesTable({
         label: 'Logs',
         icon: ListMagnifyingGlassIcon,
         shortcut: 'l',
-        disabled: logsOf(row) === null ? 'Logs is not shown in this console yet.' : undefined,
         run: () => openLogs(row),
       },
       {
@@ -713,12 +712,11 @@ function DeliveriesTable({
 
 /**
  * Where a delivery's logs open: Logs filtered by the function and, once it
- * ran, its invocation; null while the Logs section is not shown here.
+ * ran, its invocation.
  */
 export function deliveryLogs(
   row: Pick<PubsubDeliveryRow, 'functionId' | 'invocation'>,
-): SectionLink | null {
-  if (!sectionById('logs')?.built) return null
+): SectionLink {
   return linkToLogs({
     function: row.functionId,
     ...(row.invocation ? { execution: row.invocation.key } : {}),

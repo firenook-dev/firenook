@@ -196,7 +196,7 @@ function RecentEvents({ project, instance }: { project: string; instance: string
   const { format } = useClockFormat()
   const now = useNow(format === 'relative' ? 'second' : 'minute')
   const navigate = useNavigate()
-  // Opened in Eventarc, where its delivery trace is, once that section is built.
+  // Opened in Eventarc, where its delivery trace is.
   const open = (event: EventarcEventSummary) => {
     const link = linkTo({ kind: 'eventarc.event', key: event.id })
     if (link) void navigate({ to: link.to as never, search: link.search as never })
