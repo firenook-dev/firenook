@@ -1,7 +1,8 @@
 // The Overview's server data: the engine's `overview` state (notices,
 // recent problems, the last hour, the log's totals), how the engine was
 // started, what the console's buffers hold, and the data jobs the page
-// starts (a snapshot to download, a reset). Section figures are not here:
+// starts (a snapshot to download or to save on the engine's machine, a
+// reset). Section figures are not here:
 // they are each section's `SectionStatus.summary`, on the `shell` topic.
 //
 // Nothing polls. The state is replaced by the `overview` topic while the
@@ -73,6 +74,12 @@ export const destinationsQuery = {
 
 /** The job kind a snapshot is prepared as. */
 export const SNAPSHOT_JOB = 'suite.snapshot'
+
+/** The job kind a snapshot is saved on the engine's machine as. */
+export const EXPORT_JOB = 'suite.export'
+
+/** The job kind a reset runs as. */
+export const CLEAR_JOB = 'suite.clear'
 
 /** What a finished `suite.snapshot` job produced (`Job.result`). */
 export interface SnapshotResult {
@@ -204,6 +211,29 @@ export function useSnapshot(project: string, downloaded: ReadonlySet<string> = N
     enabled: result !== undefined && project !== '' && !downloaded.has(result.snapshot),
   })
   return { jobs, job, result, file, running: runningSuiteJob(jobs) }
+}
+
+/** `POST /suite/export`'s body: a destination the engine lists, the services (all when absent), and a yes to replace. */
+export interface SaveRequest {
+  destination: string
+  targets?: readonly string[]
+  overwrite?: boolean
+}
+
+/**
+ * `POST /suite/export`: starts saving a snapshot on the engine's machine
+ * and answers the `suite.export` job at once; its result names the folder
+ * written. Refused before any job starts when the folder already holds
+ * files (`already-exists`, until `overwrite`) or another data job runs
+ * (`conflict`).
+ */
+export async function saveSnapshot(client: QueryClient, request: SaveRequest): Promise<Job> {
+  const body = {
+    destination: request.destination,
+    ...(request.targets ? { targets: [...request.targets] } : {}),
+    ...(request.overwrite ? { overwrite: true } : {}),
+  }
+  return remember(client, await apiSend<Job>('POST', '/suite/export', body))
 }
 
 /** `POST /suite/clear`'s body: the sections, the project id when more than one, triggers on request. */

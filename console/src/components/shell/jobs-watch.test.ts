@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Job } from '@/lib/jobs'
-import { jobEndToast, jobFailure, jobProgress } from './jobs-watch'
+import {
+  UNSTOPPABLE_JOBS,
+  jobEndToast,
+  jobFailure,
+  jobProgress,
+  savedTo,
+  shortPath,
+} from './jobs-watch'
 
 const job = (overrides: Partial<Job>): Job => ({
   id: 'j1',
@@ -58,5 +65,44 @@ describe('how a job’s ending is said', () => {
       description: 'The engine stopped.',
       tone: 'danger',
     })
+  })
+
+  it('says where a saved snapshot went, and copies the whole path', () => {
+    const saved = job({
+      kind: 'suite.export',
+      title: "Save a snapshot to the project's export folder",
+      total: 1,
+      done: 1,
+      state: 'done',
+      result: {
+        destination: 'project',
+        path: '/work/app/firenook-export',
+        targets: [],
+        tookMs: 1_250,
+      },
+    })
+    expect(savedTo(saved)).toEqual({ path: '/work/app/firenook-export', tookMs: 1_250 })
+    expect(jobEndToast(saved)).toMatchObject({
+      title: "Save a snapshot to the project's export folder: done",
+      description: '/work/app/firenook-export · 1.3 s',
+      action: { label: 'Copy path' },
+    })
+    expect(savedTo(job({ state: 'done', result: [{ section: 'firestore', removed: 3 }] }))).toBe(
+      undefined,
+    )
+    expect(UNSTOPPABLE_JOBS.has('suite.export')).toBe(true)
+    expect(UNSTOPPABLE_JOBS.has('suite.clear')).toBe(false)
+  })
+
+  it('keeps a long path’s end, which names the folder', () => {
+    expect(shortPath('./export')).toBe('./export')
+    expect(
+      shortPath(
+        '/var/folders/17/97zrc8dn5kj9m8sn51kc0h3w0000gn/T/firenook-console-x/firenook-export',
+      ),
+    ).toBe('…/T/firenook-console-x/firenook-export')
+    expect(shortPath('/a/a-folder-name-so-long-that-it-fills-the-room-alone')).toBe(
+      '…/a-folder-name-so-long-that-it-fills-the-room-alone',
+    )
   })
 })

@@ -4,6 +4,7 @@ import type { Page, Request } from '@playwright/test'
 import { seedBulk, seedCarts } from '../scripts/seed/observe.mjs'
 import { dedicated, expect } from './fixtures'
 import { ownerFetch } from './support/api'
+import { readClipboard } from './support/clipboard'
 import { freePort } from './support/shell'
 import {
   type ObservedEngine,
@@ -140,10 +141,21 @@ dedicated.describe('the Overview with engines of their own', () => {
       await expect(project).toContainText(join(engine.directory, 'firenook-export'))
       await project.click()
       await page.getByTestId('save-snapshot-confirm').click()
-      await expect(page.getByText('Snapshot saved')).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByText(join(engine.directory, 'firenook-export')).first()).toBeVisible()
+      // A suite job: the dialog hands over once the engine has started it,
+      // and its end says where it went.
+      await expect(dialog).toHaveCount(0)
+      await expect(
+        page.getByText("Save a snapshot to the project's export folder: done"),
+      ).toBeVisible({ timeout: 30_000 })
       const exported = join(engine.directory, 'firenook-export')
+      // The toast keeps the path's end; Copy path takes all of it.
+      await page.getByRole('button', { name: 'Copy path' }).click()
+      await expect.poll(() => readClipboard(page)).toBe(exported)
       expect(existsSync(join(exported, 'firebase-export-metadata.json'))).toBe(true)
+      const jobs = await suiteJobs(engine)
+      expect(jobs.filter((job) => job.kind === 'suite.export').map((job) => job.state)).toEqual([
+        'done',
+      ])
       await engine.stop()
 
       // An engine that resumes its state from that export offers no seed to overwrite.

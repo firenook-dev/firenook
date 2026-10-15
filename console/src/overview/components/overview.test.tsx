@@ -414,6 +414,33 @@ describe('the data cards', () => {
     expect(screen.getByTestId('overview-reset-firestore-open')).toBeDisabled()
   })
 
+  it('follow a snapshot being saved on the engine’s machine on the Snapshot card, with no Cancel', async () => {
+    const status = withDocuments(1596)
+    const saving = job({
+      kind: 'suite.export',
+      title: "Save a snapshot to the project's export folder",
+      total: 1,
+      done: 0,
+    })
+    await renderInConsole(
+      () => (
+        <DataCards
+          status={status}
+          snapshot={view({ running: saving, job: saving })}
+          onDialog={() => {}}
+          onReset={() => {}}
+        />
+      ),
+      { status },
+    )
+    const line = within(screen.getByTestId('overview-snapshot')).getByTestId('overview-job')
+    expect(line).toHaveTextContent(/^Save a snapshot to the project's export folder… [\d.]+ s$/)
+    // The hub's export is one command: it cannot be stopped once it runs.
+    expect(screen.queryByTestId('overview-job-cancel')).toBeNull()
+    expect(within(screen.getByTestId('overview-reset')).queryByTestId('overview-job')).toBeNull()
+    expect(screen.getByTestId('overview-reset-firestore-open')).toBeDisabled()
+  })
+
   it('offer a prepared snapshot for download, and open a reset for its row', async () => {
     const user = userEvent.setup()
     const status = withDocuments(1596)

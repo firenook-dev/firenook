@@ -531,6 +531,7 @@ pub fn console_router(mut services: ConsoleServices) -> Router {
         .merge(search::Search::new(sources).router())
         .merge(suite::memory_router(context.rings.clone()))
         .merge(services.suite.router())
+        .merge(services.suite.export_router(context.jobs.clone()))
         .merge(suite::clear_router(
             sections.clone(),
             context.jobs.clone(),
