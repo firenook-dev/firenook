@@ -658,6 +658,14 @@ stream, loaded by glob). A few behaviours worth knowing:
   `cards/shared.tsx` in its providers, so nothing opens a connection; and
   answers any API read from the query cache. `npm run design-system` fails
   on any browser error.
+- Times have one formatter each way (`lib/format.ts`): `clockTime(at,
+  'minute' | 'second' | 'ms')` is the wall clock (`14:02`, `14:02:11`,
+  `14:02:11.348`, local), `formatClock(iso, format)` a feed's time in the
+  console-wide clock setting (`useClockFormat`: time, relative or UTC),
+  `clockOrDate` the time today and the date before it on another day,
+  `pad` the one zero-padder. A feed row's time cell is `FeedTime`
+  (`components/console/feed-time.tsx`: the setting, the other forms on
+  hover); a fact's age is `RelativeTime`. Never slice a formatted time.
 
 ### End-to-end
 

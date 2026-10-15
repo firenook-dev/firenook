@@ -1,7 +1,10 @@
 // A feed row's time, in the console-wide clock format (`lib/format.ts`:
 // `14:02:11.348`, `3 s ago` or the UTC instant), with the other forms a hover
-// away. One shared clock turns "3 s ago" over every second; the other two
-// forms never change, so they ask for the minute clock only.
+// away: the one time cell of every feed that follows the clock setting
+// (Auth's Inbox and Activity draw it). One shared clock turns "3 s ago"
+// over every second; the other two forms never change, so they ask for the
+// minute clock only. `RelativeTime` is the other kind: always "3 min ago",
+// for a time that is a fact about a thing rather than a row of a feed.
 
 import { Tooltip, cn } from '@cloudflare/kumo'
 import { useNow } from '@/lib/clock'

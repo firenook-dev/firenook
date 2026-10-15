@@ -17,7 +17,7 @@ import { EntityLink } from '@/components/console/entity-link'
 import { InspectorSection } from '@/components/console/inspector'
 import { exactTime } from '@/components/console/relative-time'
 import { useNow } from '@/lib/clock'
-import { formatBytes, formatClock, useClockFormat } from '@/lib/format'
+import { clockTime, formatBytes, formatClock, useClockFormat } from '@/lib/format'
 import { useTriggersFor } from '@/lib/triggers'
 import { Verdict } from '@/rules/verdict'
 import { useStorageDecisionsLive } from '../../live'
@@ -321,13 +321,13 @@ export function ActivityTab({ object }: { object: StorageObjectDetail }) {
         )}
         <p className="mt-1 text-[11px] text-kumo-subtle" data-testid="activity-windows">
           {since
-            ? `Since ${formatClock(since, 'time').slice(0, 8)} (changes)`
+            ? `Since ${clockTime(since, 'second')} (changes)`
             : 'Every change since the engine started'}
           {' · '}
           {!diagnostics
             ? 'Rules decisions are off: the suite was started with --no-diagnostics.'
             : activity.data.decisionsSince
-              ? `since ${formatClock(activity.data.decisionsSince, 'time').slice(0, 8)} (decisions)`
+              ? `since ${clockTime(activity.data.decisionsSince, 'second')} (decisions)`
               : 'no rules decision on this name yet'}
         </p>
       </InspectorSection>

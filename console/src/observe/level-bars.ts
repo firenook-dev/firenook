@@ -7,7 +7,7 @@
 
 import type { LogLevelCounts } from '@/api/generated/observe/LogLevelCounts'
 import type { MiniBarTone } from '@/components/console/mini-bars'
-import { formatCount } from '@/lib/format'
+import { clockTime, formatCount } from '@/lib/format'
 
 /** The three series, bottom first (`MiniBars`' order). */
 export const LEVEL_SERIES: readonly { label: string; tone: MiniBarTone }[] = [
@@ -35,19 +35,10 @@ export function bucketTotal(bucket: LogLevelCounts): number {
   return bucket.debug + bucket.info + bucket.warn + bucket.error
 }
 
-const pad = (value: number) => String(value).padStart(2, '0')
-
-/** `12:05`, or `12:05:10` when a bucket is shorter than a minute; local time. */
-function clockAt(ms: number, seconds: boolean): string {
-  const date = new Date(ms)
-  const minutes = `${pad(date.getHours())}:${pad(date.getMinutes())}`
-  return seconds ? `${minutes}:${pad(date.getSeconds())}` : minutes
-}
-
 /** `12:05–12:06`: the span a bucket covers, in local time. */
 export function bucketSpan(startMs: number, bucketMs: number): string {
-  const seconds = bucketMs < 60_000 || startMs % 60_000 !== 0
-  return `${clockAt(startMs, seconds)}–${clockAt(startMs + bucketMs, seconds)}`
+  const precision = bucketMs < 60_000 || startMs % 60_000 !== 0 ? 'second' : 'minute'
+  return `${clockTime(startMs, precision)}–${clockTime(startMs + bucketMs, precision)}`
 }
 
 /** "12:05–12:06 · 412 lines · 3 errors · 18 warnings": one bucket's tooltip. */

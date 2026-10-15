@@ -20,7 +20,7 @@ import { InspectorSection } from '@/components/console/inspector'
 import { MaskedValue } from '@/components/console/masked-value'
 import { RelativeTime } from '@/components/console/relative-time'
 import { PanelTitle } from '@/components/kit'
-import { relativeTime, utcStamp } from '@/lib/format'
+import { clockTime, relativeTime, utcStamp } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { providerGlyph, providerLabel } from '../providers'
 import {
@@ -246,7 +246,7 @@ function TimeBox({
               <input
                 type="time"
                 step="1"
-                value={`${pad(base.getHours())}:${pad(base.getMinutes())}:${pad(base.getSeconds())}`}
+                value={clockTime(base, 'second')}
                 onChange={(event) => {
                   const [hours = 0, minutes = 0, seconds = 0] = event.target.value
                     .split(':')
@@ -270,10 +270,6 @@ function TimeBox({
       )}
     </div>
   )
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 /** A value shown, not edited: the data face, or a short rule for none. */

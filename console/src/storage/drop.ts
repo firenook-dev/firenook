@@ -4,6 +4,7 @@
 // can say so), and what a paste means — an image uploads, a Storage
 // location of this project offers a copy here, other text does nothing.
 
+import { pad } from '@/lib/format'
 import { type StorageLocation, parseLocation } from './paths'
 
 /** A file and where it goes under the drop's folder (`photos/2026/a.png`). */
@@ -141,10 +142,6 @@ export function pasteMeaning(
       return { kind: 'location', location }
   }
   return { kind: 'none' }
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 /** `pasted-20261012-091504.png`: a pasted image's name, from the moment and its type. */

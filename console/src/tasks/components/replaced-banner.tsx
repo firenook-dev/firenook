@@ -8,7 +8,7 @@ import { useState } from 'react'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import { SectionBanner } from '@/components/console/section-banner'
 import { formatNumber } from '@/lib/format'
-import { clockTime } from '../retry-plan'
+import { clockTime } from '@/lib/format'
 
 const storageKey = (queue: TasksQueue) =>
   `firenook.console.tasks.replaced.${queue.key}.${queue.registrations}`
@@ -29,7 +29,7 @@ export function replacedText(queue: Pick<TasksQueue, 'id' | 'lastReplaced'>): st
     replaced.dropped === 0
       ? 'no task was waiting'
       : `${formatNumber(replaced.dropped)} ${replaced.dropped === 1 ? 'task was' : 'tasks were'} dropped (see History)`
-  return `${queue.id} re-registered at ${clockTime(replaced.at)} with new options; ${dropped}.`
+  return `${queue.id} re-registered at ${clockTime(replaced.at, 'second')} with new options; ${dropped}.`
 }
 
 export function ReplacedBanner({

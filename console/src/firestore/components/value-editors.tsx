@@ -15,6 +15,7 @@ import { relativeTime } from '../value'
 import { Anchored, Completion, Completions } from '@/components/console/completions'
 import { useFieldEditing, useFocusTarget } from './field-context'
 import { StripButton } from '@/components/console/strip-button'
+import { clockTime } from '@/lib/format'
 import { useWorkbench } from './workbench-context'
 
 export interface EditorProps {
@@ -462,7 +463,7 @@ function TimestampEditor({ node, onChange, label, invalid }: EditorProps) {
               <input
                 type="time"
                 step="1"
-                value={timeOf(base)}
+                value={clockTime(base, 'second')}
                 onChange={(event) => set(withTime(base, event.target.value))}
                 className="h-8 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring ring-kumo-line outline-none focus:ring-kumo-focus"
                 aria-label={`${label} time of day`}
@@ -494,20 +495,12 @@ function withTime(base: Date, value: string): Date {
   return next
 }
 
-function timeOf(date: Date): string {
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
-
 /** The panel's name, which is also how a blur tells inside from outside. */
 const PANEL = 'timestamp-picker'
 
 /** The browser's own zone, named, because the picker works in it. */
 function timeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
 }
 
 function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {

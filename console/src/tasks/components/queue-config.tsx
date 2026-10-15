@@ -18,13 +18,13 @@ import { CopyButton } from '@/components/console/copy-button'
 import { EntityLink } from '@/components/console/entity-link'
 import { MiniBars } from '@/components/console/mini-bars'
 import { RelativeTime } from '@/components/console/relative-time'
-import { formatNumber } from '@/lib/format'
+import { clockTime, formatNumber } from '@/lib/format'
 import { useAgedBuckets, useAgedCount, useTokens } from '@/messaging/windows'
 import { holdQueue } from '../api'
 import { errorText } from '@/lib/error-text'
 import { queueQuery } from '../queries'
 import { queueResourceName } from '../queue-address'
-import { clockTime, ladderTotal, maxAttemptsNote } from '../retry-plan'
+import { ladderTotal, maxAttemptsNote } from '../retry-plan'
 import { secondsText } from '../states'
 
 /** Where a value came from, in words. */
@@ -362,7 +362,7 @@ function Registration({ queue }: { queue: TasksQueue }) {
           className="m-0 flex flex-wrap items-center gap-x-1.5 text-kumo-default"
           data-testid="config-registered"
         >
-          <span className="font-mono">{clockTime(queue.registeredAt)}</span>
+          <span className="font-mono">{clockTime(queue.registeredAt, 'second')}</span>
           {queue.function ? (
             <>
               from the function{' '}

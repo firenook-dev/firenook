@@ -13,7 +13,7 @@ import { callerChip, latencyText, stepChips } from '../activity'
 import { sdkCode } from '../errors'
 import { callLabel } from '../operations'
 import { type FeedMenuHandle, FeedMenuRow } from './feed-menu'
-import { FeedTime } from './feed-time'
+import { FeedTime } from '@/components/console/feed-time'
 import { QUIET_CHIP } from './message-row'
 
 /** At most this many step chips; the rest are counted. */

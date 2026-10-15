@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { pad } from '@/lib/format'
 import {
   LEVEL_SERIES,
   bucketSentence,
@@ -16,7 +17,6 @@ const counts = (debug: number, info: number, warn: number, error: number) => ({
   error,
 })
 
-const pad = (value: number) => String(value).padStart(2, '0')
 const local = (ms: number) => {
   const date = new Date(ms)
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`

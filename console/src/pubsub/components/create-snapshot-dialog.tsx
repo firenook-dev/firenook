@@ -8,13 +8,12 @@ import { XIcon } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { errorText } from '@/lib/error-text'
+import { pad } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { createSnapshot } from '../api'
 import { fullName, idProblem, shortName } from '../names'
 import { pubsubKeys } from '../queries'
 import { useGeneration } from './create-topic-dialog'
-
-const pad = (value: number) => String(value).padStart(2, '0')
 
 /** A snapshot id nobody has used yet today: `orders-worker-1002`. */
 export function suggestedSnapshotId(subscription: string, at: Date = new Date()): string {

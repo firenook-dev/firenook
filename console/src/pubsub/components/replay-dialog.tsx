@@ -11,7 +11,7 @@ import { useState } from 'react'
 import { errorText } from '@/lib/error-text'
 import type { PubsubSubscription } from '@/api/generated/messaging/PubsubSubscription'
 import { DangerConfirm } from '@/components/console/danger-confirm'
-import { formatNumber } from '@/lib/format'
+import { clockTime, formatNumber, pad } from '@/lib/format'
 import { toast } from '@/lib/toasts'
 import { seek } from '../api'
 import { shortName } from '../names'
@@ -19,13 +19,6 @@ import { pubsubKeys, snapshotsQuery, topicQuery } from '../queries'
 import { type SeekMode, seekResultText, seekSentence, seekTime } from '../seek-text'
 import { useGeneration } from './create-topic-dialog'
 import { topicSnapshots } from './snapshots-table'
-
-const pad = (value: number) => String(value).padStart(2, '0')
-
-/** `10:02:13`, local. */
-export function timeOfDay(date: Date): string {
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
 
 /** `2026-10-12`, local. */
 function dayText(date: Date): string {
@@ -38,11 +31,6 @@ function ago(milliseconds: number): Date {
 }
 
 /** `10:01`, local, for a snapshot's time. */
-function clockText(iso: string): string {
-  const at = new Date(iso)
-  return `${pad(at.getHours())}:${pad(at.getMinutes())}`
-}
-
 export function ReplayDialog({
   open,
   project,
@@ -106,7 +94,7 @@ function ReplayForm({
   const [mode, setMode] = useState<SeekMode>(initialSnapshot ? 'snapshot' : 'time')
   const [start] = useState(() => ago(60_000))
   const [day, setDay] = useState<Date>(start)
-  const [time, setTime] = useState(timeOfDay(start))
+  const [time, setTime] = useState(clockTime(start, 'second'))
   const [calendar, setCalendar] = useState(false)
   const [snapshot, setSnapshot] = useState(initialSnapshot ?? '')
   const [purging, setPurging] = useState(false)
@@ -117,7 +105,7 @@ function ReplayForm({
   const goBack = (milliseconds: number) => {
     const next = ago(milliseconds)
     setDay(next)
-    setTime(timeOfDay(next))
+    setTime(clockTime(next, 'second'))
     setMode('time')
   }
 
@@ -139,7 +127,7 @@ function ReplayForm({
             ? `Purged ${id}`
             : mode === 'snapshot'
               ? `Replayed ${id} to ${chosen?.id ?? shortName(snapshot)}`
-              : `Replayed ${id} to ${timeOfDay(at)}`,
+              : `Replayed ${id} to ${clockTime(at, 'second')}`,
         description: seekResultText(result.available, result.acked),
         tone: 'success',
       })
@@ -296,7 +284,8 @@ function ReplayForm({
                   </Select>
                   {chosen && (
                     <span className="text-[12px] whitespace-nowrap text-kumo-subtle">
-                      recorded {clockText(chosen.createdAt)}, {formatNumber(chosen.unacked)} unacked
+                      recorded {clockTime(chosen.createdAt, 'minute')},{' '}
+                      {formatNumber(chosen.unacked)} unacked
                     </span>
                   )}
                 </>

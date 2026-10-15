@@ -13,7 +13,7 @@ import type { AuthMessage } from '@/api/generated/auth/AuthMessage'
 import { CopyStripButton } from '@/components/console/strip-button'
 import { isSms, messageLabel, statusChip } from '../messages'
 import { type FeedMenuHandle, FeedMenuRow } from './feed-menu'
-import { FeedTime } from './feed-time'
+import { FeedTime } from '@/components/console/feed-time'
 
 /**
  * The Inbox row's columns: the unread dot, the channel, who it went to and

@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { pad } from '@/lib/format'
 import { LogLine, extraLines } from './log-line'
 
 afterEach(() => {
@@ -7,7 +8,6 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const pad = (value: number, width = 2) => String(value).padStart(width, '0')
 const part = (row: HTMLElement, name: string) => row.querySelector(`[data-part="${name}"]`)
 
 const AT = '2026-10-12T06:09:09.126Z'

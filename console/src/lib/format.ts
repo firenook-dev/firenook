@@ -207,11 +207,39 @@ export function formatClock(iso: string, format: ClockFormat, now = Date.now()):
   if (Number.isNaN(then)) return iso
   if (format === 'utc') return date.toISOString()
   if (format === 'relative') return clockAgo(now - then)
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`
+  return clockTime(date)
 }
 
-function pad(value: number, width = 2): string {
+/** A number to a fixed width with leading zeros: `7` → `07`; width 3 for milliseconds. */
+export function pad(value: number, width = 2): string {
   return String(value).padStart(width, '0')
+}
+
+/** How much of a time of day a clock shows: `14:02`, `14:02:11` or `14:02:11.348`. */
+export type ClockPrecision = 'minute' | 'second' | 'ms'
+
+/**
+ * A time of day in local time, the console's one wall clock: `14:02:11.348`,
+ * or to the `second` (`14:02:11`, a planned retry) or the `minute`
+ * (`14:02`, a histogram bucket). `formatClock` draws its `time` form with
+ * it. Text that is not a time comes back as it was.
+ */
+export function clockTime(at: string | number | Date, precision: ClockPrecision = 'ms'): string {
+  const date = at instanceof Date ? at : new Date(at)
+  if (Number.isNaN(date.getTime())) return String(at)
+  const minute = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  if (precision === 'minute') return minute
+  const second = `${minute}:${pad(date.getSeconds())}`
+  return precision === 'second' ? second : `${second}.${pad(date.getMilliseconds(), 3)}`
+}
+
+/** `14:02:11` today, `2026-10-12 14:02:11` on another day; local time. */
+export function clockOrDate(iso: string, now = Date.now()): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const time = clockTime(date, 'second')
+  if (date.toDateString() === new Date(now).toDateString()) return time
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
 }
 
 /** Seconds count in a feed, where "just now" would hide the order of events. */

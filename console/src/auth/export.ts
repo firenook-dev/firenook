@@ -5,16 +5,13 @@
 // accounts.json, password hashes included, so it loads back here and with
 // `--import`; CSV is for a spreadsheet and carries no hashes.
 
+import { pad } from '@/lib/format'
 import { exportUsersHref } from './api'
 
 /** The most users a selection export names one by one. */
 export const SELECTED_EXPORT_MAX = 500
 
 export type ExportScope = 'filter' | 'selected' | 'all'
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
-}
 
 /** The file name the engine gives the export, so a saved file reads the same either way. */
 export function exportFilename(

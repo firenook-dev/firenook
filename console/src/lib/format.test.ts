@@ -1,12 +1,15 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  clockOrDate,
+  clockTime,
   compactIso,
   formatBytes,
   formatClock,
   formatCount,
   formatDuration,
   formatNumber,
+  pad,
   relativeTime,
   utcStamp,
   whenParts,
@@ -145,6 +148,25 @@ describe('the clock format', () => {
     expect(formatClock(iso, 'relative', at.getTime() + 125_000)).toBe('2 min ago')
     expect(formatClock(iso, 'relative', at.getTime() - 2_000)).toBe('in 2 s')
     expect(formatClock('soon', 'time')).toBe('soon')
+  })
+
+  it('is one wall clock at three precisions, from a string, a number or a date', () => {
+    const at = new Date(2026, 8, 20, 9, 2, 1, 48)
+    expect(clockTime(at)).toBe('09:02:01.048')
+    expect(clockTime(at.toISOString(), 'second')).toBe('09:02:01')
+    expect(clockTime(at.getTime(), 'minute')).toBe('09:02')
+    expect(clockTime('soon', 'minute')).toBe('soon')
+  })
+
+  it('writes the day before a time that is not today', () => {
+    const at = new Date(2026, 8, 20, 14, 2, 11)
+    expect(clockOrDate(at.toISOString(), at.getTime() + 60_000)).toBe('14:02:11')
+    expect(clockOrDate(at.toISOString(), at.getTime() + 86_400_000)).toBe('2026-09-20 14:02:11')
+    expect(clockOrDate('never')).toBe('never')
+  })
+
+  it('pads to a width', () => {
+    expect([pad(7), pad(12), pad(5, 3)]).toEqual(['07', '12', '005'])
   })
 
   it('is remembered per browser and follows other tabs', async () => {

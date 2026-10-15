@@ -15,7 +15,7 @@ import type { MemoryReport } from '@/api/generated/MemoryReport'
 import type { OverviewEngineDetails } from '@/api/generated/observe/OverviewEngineDetails'
 import { CopyField } from '@/components/console/copy-button'
 import { useNow } from '@/lib/clock'
-import { formatBytes, formatNumber } from '@/lib/format'
+import { clockOrDate, formatBytes, formatNumber } from '@/lib/format'
 import { serviceLabel } from '@/lib/services'
 import { memoryQuery } from '../api'
 import { uptime } from '../model'
@@ -28,17 +28,6 @@ const RING_LABELS: Record<string, string> = {
   logging: 'official log feed',
   'firestore.changes': 'Firestore changes',
   jobs: 'jobs',
-}
-
-const pad = (value: number) => String(value).padStart(2, '0')
-
-/** "12:02:41" today; with the date in front on another day. */
-function startedAt(iso: string, now: number): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  if (date.toDateString() === new Date(now).toDateString()) return time
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
 }
 
 /** "18.2 MB of 64 MB" and each buffer holding anything, largest first. */
@@ -120,7 +109,7 @@ export function EngineDetails({
             )}
           </Row>
           <Row label="Running since" testId="engine-started">
-            <span className="font-mono">{startedAt(status.startedAt, now)}</span>
+            <span className="font-mono">{clockOrDate(status.startedAt, now)}</span>
             <Note>{uptime(status.startedAt, now)}</Note>
           </Row>
           {config && (

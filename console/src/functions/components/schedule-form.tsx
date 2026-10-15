@@ -17,7 +17,7 @@ import { SendButton } from '@/components/console/request/send-button'
 import { Link } from '@tanstack/react-router'
 import { useNow } from '@/lib/clock'
 import { useLinkTo } from '@/lib/links'
-import { formatClock } from '@/lib/format'
+import { clockTime } from '@/lib/format'
 import { functionKeys, runSchedule } from '../api'
 import { chipStatus } from '../kinds'
 import { lastSegment } from '../trigger-text'
@@ -37,7 +37,7 @@ function NextRun({ at }: { at: string }) {
   return (
     <span className="flex min-w-0 items-baseline gap-1.5" title={exactTime(at)}>
       <span className="font-mono text-[12px] text-kumo-default tabular-nums">
-        {formatClock(at, 'time').slice(0, 8)}
+        {clockTime(at, 'second')}
       </span>
       <span className="text-[12px] text-kumo-subtle">({countdownText(at, now)})</span>
     </span>
@@ -123,7 +123,7 @@ export function ScheduleForm({
           {last ? (
             <span className="flex min-w-0 items-center gap-2">
               <span className="font-mono text-[12px] text-kumo-default">
-                {formatClock(last.startedAt, 'time').slice(0, 8)}
+                {clockTime(last.startedAt, 'second')}
               </span>
               <OutcomeChip
                 outcome={last.outcome}

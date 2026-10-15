@@ -16,7 +16,7 @@ import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { Job } from '@/api/generated/Job'
 import { CopyField } from '@/components/console/copy-button'
 import { useNow } from '@/lib/clock'
-import { formatClock, formatDuration, formatNumber } from '@/lib/format'
+import { clockTime, formatDuration, formatNumber } from '@/lib/format'
 import { cancelJob } from '@/lib/jobs'
 import { SNAPSHOT_JOB } from '../api'
 import { holdsNothing, resettableSections } from '../model'
@@ -315,7 +315,7 @@ function SnapshotState({ snapshot }: { snapshot: SnapshotView }) {
               content="The engine keeps the newest snapshot for 10 minutes, or until it is downloaded."
               render={
                 <span className="text-kumo-subtle">
-                  until {formatClock(file.data.expiresAt, 'time').slice(0, 5)}
+                  until {clockTime(file.data.expiresAt, 'minute')}
                 </span>
               }
             />

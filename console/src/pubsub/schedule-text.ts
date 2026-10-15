@@ -8,7 +8,7 @@
 
 import type { PubsubSchedule } from '@/api/generated/messaging/PubsubSchedule'
 import type { StatusTone } from '@/components/kit'
-import { relativeTime } from '@/lib/format'
+import { pad, relativeTime } from '@/lib/format'
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const MONTHS = [
@@ -54,8 +54,6 @@ function joined(items: readonly string[]): string {
   if (items.length <= 1) return items[0] ?? ''
   return `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`
 }
-
-const pad = (value: number) => String(value).padStart(2, '0')
 
 // ------------------------------------------------------------ cron
 
