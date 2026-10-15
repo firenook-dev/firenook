@@ -1,7 +1,7 @@
 // The words and tones a Cloud Tasks row speaks in: where a task is, which
 // attempt it is on, what its last attempt answered, how it finished. One
-// file, so the table, the inspector, the attempts feed and the history say
-// the same thing the same way, in the console's dot vocabulary: a breathing
+// file, so the table, the inspector and the history say the same thing the
+// same way, in the console's dot vocabulary: a breathing
 // dot for what is in flight, warning for backoff, success and danger for
 // outcomes, neutral for everything else.
 
@@ -162,37 +162,6 @@ export function executionText(attempt: Pick<TasksAttempt, 'countedExecution' | '
   if (attempt.status !== null && attempt.status >= 500) return 'not counted as an execution (5xx)'
   if (attempt.status !== null && attempt.status < 300) return 'not counted as an execution'
   return 'not counted as an execution (no answer)'
-}
-
-/** The first line of a response or an error, for a one-line cell. */
-export function firstLine(text: string | null | undefined): string {
-  if (!text) return ''
-  const line = text.split(/\r?\n/, 1)[0] ?? ''
-  return line.trim()
-}
-
-/**
- * What a response says in one line: the message of an error body the
- * Functions SDK writes (`{"error":{"message":"card declined",…}}`, an
- * `HttpsError` from `onTaskDispatched`), else the body's first line.
- */
-export function responseSummary(text: string | null | undefined): string {
-  if (!text) return ''
-  const trimmed = text.trim()
-  if (trimmed.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(trimmed) as { error?: { message?: unknown } | unknown }
-      const error = parsed.error
-      if (typeof error === 'object' && error !== null && 'message' in error) {
-        const message = (error as { message?: unknown }).message
-        if (typeof message === 'string' && message !== '') return message
-      }
-      if (typeof error === 'string' && error !== '') return error
-    } catch {
-      // A body cut at 1 KiB is not JSON any more: its first line it is.
-    }
-  }
-  return firstLine(trimmed)
 }
 
 /** How a finished task left its queue, as History's chip says it. */

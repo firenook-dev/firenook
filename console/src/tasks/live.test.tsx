@@ -2,14 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { TasksAttemptEvent } from '@/api/generated/messaging/TasksAttemptEvent'
 import type { TasksCountersFrame } from '@/api/generated/messaging/TasksCountersFrame'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import type { TasksQueueCounters } from '@/api/generated/messaging/TasksQueueCounters'
 import type { TasksQueueList } from '@/api/generated/messaging/TasksQueueList'
 
 // As in Pub/Sub's live tests: `useLiveTopic` is stood in for, so what each
-// event does to the cache and the feed is what is tested.
+// event does to the cache is what is tested.
 const calls = vi.hoisted(() => ({
   topics: [] as Array<{ name: string; params: unknown; handlers: Record<string, unknown> }>,
 }))
@@ -191,32 +190,5 @@ describe('the Cloud Tasks topics (U-15)', () => {
     const batch = { latestId: '3', added: 1, ids: ['3'], overflow: false }
     act(() => (held.handlers.onFinished as (b: typeof batch) => void)(batch))
     expect(onFinished).toHaveBeenCalledWith(batch)
-  })
-
-  it('tasks.attempts keeps each attempt once, by task and number', () => {
-    const { result } = renderHook(() => live.useAttemptsFeed(PROJECT, KEY), { wrapper })
-    const onAttempts = subscribed('tasks.attempts').handlers.onAttempts as (b: {
-      items: TasksAttemptEvent[]
-    }) => void
-    const attempt = (n: number): TasksAttemptEvent => ({
-      queue: KEY,
-      taskId: '7',
-      taskName: 'order-1',
-      attempt: {
-        attempt: n,
-        startedAt: '2026-10-12T10:00:00.000Z',
-        durationMs: 3,
-        status: 500,
-        error: null,
-        response: 'card declined',
-        countedExecution: false,
-        retryCount: n - 1,
-        invocation: null,
-      },
-    })
-    act(() => onAttempts({ items: [attempt(1), attempt(2)] }))
-    act(() => onAttempts({ items: [attempt(2)] }))
-    expect(result.current.store.size()).toBe(2)
-    expect(subscribed('tasks.attempts').params).toEqual({ project: PROJECT, queue: KEY })
   })
 })

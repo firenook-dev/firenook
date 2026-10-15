@@ -563,7 +563,6 @@ defaults never in the URL):
 | `pubsub.schedules` | `{ project? }` | `schedules` | compare |
 | `tasks.counters` | `{ project? }` | `counters`, `queues` | compare |
 | `tasks.queue` | `{ project?, queue }` | `stale`, `finished` | none |
-| `tasks.attempts` | `{ project?, queue?, task? }` | `attempts` | replay |
 | `logs.entries` | `{ q?, from?, to? }` | `entries` | replay |
 | `overview` | `{}` | `state` | compare |
 
@@ -3139,8 +3138,11 @@ lives under Pub/Sub because a tick is a publish to `firebase-schedule-<name>`;
 this stream owns the scheduler and the `ScheduleControl` trait
 (`crates/pubsub-front/src/schedule_control.rs`) that compute's Run now calls.
 Cloud Tasks is one page (`/tasks`, `routes/tasks.tsx`): the queues in the
-panel, a queue with Tasks, Attempts, History and Configuration, a task in the
-inspector (Payload, Request, Attempts).
+panel, a queue with Tasks, History and Configuration, a task in the
+inspector (Payload, Request, Attempts). A queue's attempts as they happen
+are Functions › Invocations filtered to its function (every attempt is an
+invocation): row two links there through the queue function's
+`invocationsRef` (`functions.invocations`, keyed by the filter).
 
 **Search parameters.** Topics: `topic` and `subscription` (an id under the
 page's project, or a full name that travelled whole), `view` (`messages`,
@@ -3152,7 +3154,7 @@ page's project, or a full name that travelled whole), `view` (`messages`,
 `panel=test`, `new=schema`. Schedules: `schedule` (the function id). Tasks:
 `queue` by id with `location` only when two locations register that id (the
 page drops it otherwise), `view`, `task` (the console's decimal id), `tab`,
-`state`, `outcome`, `q`, `paused`, `new=task`, `prefill`. The router parses
+`state`, `outcome`, `q`, `new=task`, `prefill`. The router parses
 query values as JSON, so `?message=40` arrives as a number and an id of
 digits is written quoted (`message=%2246%22`): the schemas accept a string or
 a number and normalize (`text` in `routes/pubsub.tsx`, `src/tasks/search.ts`).
@@ -3167,7 +3169,7 @@ carries no topic, which the Topics page completes from its index. These pages
 link out only through `EntityLink`, `linkTo` and `linkToLogs`, and never
 write another section's URL.
 
-**Topics, not streams.** Eight, declared in `src/pubsub/live.ts` and
+**Topics, not streams.** Seven, declared in `src/pubsub/live.ts` and
 `src/tasks/live.ts`: `pubsub.counters`, `pubsub.schedules` and
 `tasks.counters` are `compare` (state: without a cursor they open with every
 entity of the project, and over 1,000 they answer a reset instead; then
@@ -3175,8 +3177,8 @@ changes after the revision, at most every 250 ms and 200 a frame, throughput
 for at most 24 topics on screen); `pubsub.topic`, `pubsub.deliveries` and
 `tasks.queue` are invalidation (published ids, moved backlog keys, delivery
 event ids, task row keys and finished ids, which the page reads back through
-`:batchGet`); `pubsub.push` and `tasks.attempts` are `replay` over a console
-ring fed inline by the runtime's sink. Time is a stamp, not a window: a
+`:batchGet`); `pubsub.push` is `replay` over a console ring fed inline by
+the runtime's sink. Time is a stamp, not a window: a
 throughput window carries its end and the client ages it
 (`src/messaging/windows.ts`). A list read again catches up with the frames
 that arrived meanwhile (`src/messaging/frames.ts`, 32 frames or 10 s per
@@ -3262,10 +3264,9 @@ banner).
 
 **Keys**: the foundation's reserved-keys table, no new row. `n` publishes on
 a topic (a new schema on Schemas, Enqueue on a queue), `p` pauses the Push
-and Attempts feeds, `r` and Shift+R run again (behind a confirmation, or
-through a form), `l` opens in Logs while Logs is built, `a`/`x`/`e` only in
-the Pull tab, Delete acknowledges ticked backlog rows, `c` and Shift+C copy
-in the Attempts feed.
+feed, `r` and Shift+R run again (behind a confirmation, or through a form),
+`l` opens in Logs while Logs is built, `a`/`x`/`e` only in the Pull tab,
+Delete acknowledges ticked backlog rows.
 
 **Testing gotchas.** Kumo `Select` does not forward `data-testid`: find it with
 `getByRole('combobox', { name })`. A single-key shortcut pressed while focus

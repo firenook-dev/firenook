@@ -7,9 +7,7 @@ import {
   displayName,
   errorWord,
   executionText,
-  firstLine,
   lastResult,
-  responseSummary,
   outcomeChip,
   stateTone,
   stateWord,
@@ -97,19 +95,6 @@ describe('task states (U-16)', () => {
     expect(executionText(testAttempt({ countedExecution: false, status: null }))).toMatch(
       /no answer/,
     )
-  })
-
-  it('keep the first line of a response, or the message of an SDK error body', () => {
-    expect(firstLine('card declined\n    at handler (index.js:3)')).toBe('card declined')
-    expect(firstLine(null)).toBe('')
-    expect(responseSummary('{"error":{"message":"card declined","status":"INTERNAL"}}')).toBe(
-      'card declined',
-    )
-    expect(responseSummary('{"error":"Bad Request"}')).toBe('Bad Request')
-    expect(responseSummary('{"error":{"message":"cut at 1 Ki')).toBe(
-      '{"error":{"message":"cut at 1 Ki',
-    )
-    expect(responseSummary('attempt 2 refused\nmore')).toBe('attempt 2 refused')
   })
 
   it('give each outcome its word and tone, and say what replaced means', () => {

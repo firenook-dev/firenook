@@ -1,13 +1,15 @@
 // One queue (S20…S22): row one is the queue — its id, location and the
 // function it dispatches to, with Pause or Resume, Purge and Enqueue; row
-// two is its tabs (Tasks, Attempts, History, Configuration) with the open
-// tab's switch at the right end — the state counts and the slots and
-// tokens, the outcome counts, or the Attempts feed's pause. The tab draws
-// the rest. The view holds the queue's one `tasks.queue` subscription,
-// which the lists listen to, and the Attempts feed while its tab is open.
+// two is its tabs (Tasks, History, Configuration), then where its attempts
+// are — every attempt is an invocation of the queue's function, so they
+// are Functions › Invocations filtered to it — with the open tab's switch
+// at the right end: the state counts and the slots, or the outcome counts.
+// The tab draws the rest. The view holds the queue's one `tasks.queue`
+// subscription, which the lists listen to.
 
 import { Button, Tabs, Tooltip } from '@cloudflare/kumo'
 import {
+  ArrowRightIcon,
   LightningIcon,
   PauseIcon,
   PlayIcon,
@@ -16,6 +18,7 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
 import type { TasksOutcome } from '@/api/generated/messaging/TasksOutcome'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
@@ -23,28 +26,25 @@ import type { TasksQueueList } from '@/api/generated/messaging/TasksQueueList'
 import { CopyButton } from '@/components/console/copy-button'
 import { DangerConfirm } from '@/components/console/danger-confirm'
 import { EntityLink } from '@/components/console/entity-link'
-import { useFeedPending } from '@/components/console/feed-list'
 import { LiveNotice } from '@/components/console/live-notice'
-import { PauseButton } from '@/components/console/pause-button'
 import { SectionBody } from '@/components/console/section-page'
 import { SectionToolbar, ToolbarDivider, ToolbarRow } from '@/components/console/toolbar'
 import { PanelToggle } from '@/components/shell/section-panel'
 import { Kbd } from '@/components/kit'
 import { liveChannel } from '@/lib/live/channel'
 import { formatNumber } from '@/lib/format'
+import { useLinkTo } from '@/lib/links'
 import { toast } from '@/lib/toasts'
 import { useShortcuts } from '@/lib/shortcuts'
 import { useTokens } from '@/messaging/windows'
 import { holdQueue, pauseQueue, purgeQueue, resumeQueue } from '../api'
 import { errorText } from '@/lib/error-text'
-import { attemptKey, useAttemptsFeed } from '../live'
 import { useTasksPalette } from '../palette'
 import { tasksKeys } from '../queries'
 import { QueueLiveContext, useQueueHub } from '../queue-live'
 import { queueResourceName } from '../queue-address'
 import { type TasksView, useTasksSearch } from '../search'
 import { OUTCOMES, type StateFilter } from '../states'
-import { AttemptsView } from './attempts-feed'
 import { HistoryView } from './history-table'
 import { QueueConfig } from './queue-config'
 import { RefusedBanners } from './refused-banner'
@@ -188,6 +188,33 @@ export function SlotsAndTokens({ queue }: { queue: TasksQueue }) {
   )
 }
 
+/**
+ * Where the queue's attempts are: each is an invocation of the function the
+ * queue dispatches to, listed live in Functions › Invocations with its
+ * request, response, timing and logs. Absent for a queue a client
+ * registered (its tasks go to a URL) and while Functions is not running.
+ */
+export function AttemptsLink({ queue }: { queue: TasksQueue }) {
+  const link = useLinkTo(queue.function?.invocationsRef)
+  if (!queue.function || !link) return null
+  return (
+    <Tooltip
+      content={`Every attempt of a task in ${queue.id} is an invocation of ${queue.function.name}: open them in Functions › Invocations.`}
+      render={
+        <Link
+          to={link.to as never}
+          search={link.search as never}
+          className="flex shrink-0 items-center gap-1 text-[13px] whitespace-nowrap text-kumo-link underline-offset-2 hover:underline"
+          data-testid="queue-attempts-link"
+        >
+          Attempts in Invocations
+          <ArrowRightIcon size={12} />
+        </Link>
+      }
+    />
+  )
+}
+
 const OUTCOME_LABEL: Record<TasksOutcome, string> = {
   succeeded: 'Succeeded',
   failed: 'Failed',
@@ -213,9 +240,8 @@ export function QueueView({
   const view: TasksView = search.view ?? 'tasks'
   const { status, hub } = useQueueHub(project, queue.key)
   const actions = useTaskActions(queue)
-  const feed = useAttemptsFeed(project, view === 'attempts' ? queue.key : undefined)
-  const paused = search.paused === true
-  const pending = useFeedPending(feed.store, paused, attemptKey)
+  const navigate = useNavigate()
+  const attempts = useLinkTo(queue.function?.invocationsRef)
   const { counters } = queue
 
   // A control's answer is the queue as it is now: put it in the list at once.
@@ -323,6 +349,9 @@ export function QueueView({
           outcome: undefined,
           q: undefined,
         }),
+      attempts: attempts
+        ? () => void navigate({ to: attempts.to as never, search: attempts.search as never })
+        : undefined,
     },
     open: onOpenQueue,
     key: 'tasks.queue',
@@ -482,16 +511,15 @@ export function QueueView({
                 q: undefined,
                 task: undefined,
                 tab: undefined,
-                paused: undefined,
               })
             }
             tabs={[
               { value: 'tasks', label: <TabLabel label="Tasks" count={tasksCount} /> },
-              { value: 'attempts', label: <TabLabel label="Attempts" /> },
               { value: 'history', label: <TabLabel label="History" count={counters.history} /> },
               { value: 'config', label: <TabLabel label="Configuration" /> },
             ]}
           />
+          <AttemptsLink queue={queue} />
           <span className="ml-auto flex shrink-0 items-center gap-3">
             {view === 'tasks' && wide && (
               <>
@@ -500,14 +528,6 @@ export function QueueView({
               </>
             )}
             {view === 'history' && wide && outcomeSwitch}
-            {view === 'attempts' && (
-              <PauseButton
-                paused={paused}
-                pending={pending}
-                onChange={(next) => update({ paused: next }, { replace: true })}
-                testId="attempts-pause"
-              />
-            )}
           </span>
         </ToolbarRow>
       </SectionToolbar>
@@ -541,18 +561,6 @@ export function QueueView({
           banners={banners}
           inspector={inspector}
           aside={wide ? undefined : outcomeSwitch}
-        />
-      )}
-      {view === 'attempts' && (
-        <AttemptsView
-          queue={queue}
-          store={feed.store}
-          paused={paused}
-          onPaused={(next) => update({ paused: next }, { replace: true })}
-          onOpen={openTask}
-          banners={banners}
-          inspector={inspector}
-          taskId={search.task}
         />
       )}
       {view === 'config' && (

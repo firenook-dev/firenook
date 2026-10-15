@@ -165,6 +165,7 @@ pub(crate) fn queue(view: &QueueView) -> TasksQueue {
             name: function.name.clone(),
             region: function.region.clone(),
             function_ref: EntityRef::function(&function.function_id),
+            invocations_ref: EntityRef::invocations(&format!("function:{}", function.function_id)),
         }),
         default_uri: view.default_uri.clone(),
         registered_at: time(view.registered_at),

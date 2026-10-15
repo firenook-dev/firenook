@@ -476,37 +476,36 @@ test('J-TK-14 an enqueue into a queue in another region is listed, with where th
   await expect(page.getByTestId('queue-field-id')).toHaveText('processOrder')
 })
 
-test('J-TK-15 the Attempts feed shows attempts as they happen, expands a response, pauses with p, and opens a task', async ({
+test('J-TK-15 a queue’s attempts are its function’s invocations: the link opens them filtered, live', async ({
   page,
   engine,
 }) => {
-  const queue = await registerQueue(engine, uniqueId('tk15'), {
-    retryConfig: { maxAttempts: 3, minBackoffSeconds: 1, maxBackoffSeconds: 1 },
-  })
-  await openQueue(page, engine, queue.queue, '&view=attempts')
-  await expect(page.getByTestId('attempts-empty')).toBeVisible()
-  await enqueueOverPort(engine, queue, { orderId: 'o_15', fail: true }, { id: 'feed-1' })
-  const feed = page.getByTestId('attempts-feed')
-  const rows = feed.getByTestId('attempt-row')
-  await expect(rows.first()).toContainText('500', { timeout: 15_000 })
-  await expect(rows.first()).toContainText('card declined')
-  await expect(rows.first()).toContainText('feed-1')
-
-  // p holds the feed still and counts what arrives.
-  await page.keyboard.press('p')
-  const pause = page.getByTestId('attempts-pause')
-  await expect(pause).toHaveAttribute('data-paused', '')
-  await expect(pause).toHaveText(/^Paused · \d+ new$/, { timeout: 15_000 })
-  const shown = await rows.count()
-  await page.keyboard.press('p')
-  await expect(pause).toHaveText('Pause')
-  await expect.poll(async () => rows.count(), { timeout: 15_000 }).toBeGreaterThan(shown)
-
-  // Selecting a row opens its task; → expands the whole response.
-  await rows.first().click()
-  await expect(page.getByTestId('task-inspector')).toBeVisible()
-  await page.keyboard.press('ArrowRight')
-  await expect(feed.getByTestId('attempt-expanded')).toBeVisible()
+  await openQueue(page, engine, 'processOrder')
+  const link = page.getByTestId('queue-attempts-link')
+  await expect(link).toHaveText('Attempts in Invocations')
+  await link.click()
+  await expect(page).toHaveURL(/\/console\/functions\/invocations\?/)
+  await expect(page.getByTestId('invocations-filter-input')).toHaveValue(
+    'function:us-central1-processOrder',
+  )
+  // A failing task's attempts arrive there as they happen, one row each.
+  const id = uniqueId('tk15')
+  expect(
+    (
+      await enqueueOverPort(
+        engine,
+        { queue: 'processOrder' },
+        { orderId: 'o_15', fail: true },
+        { id },
+      )
+    ).status,
+  ).toBe(200)
+  const attempts = page
+    .getByTestId('invocations-list')
+    .getByTestId('invocation-row')
+    .filter({ hasText: `task ${id}` })
+  await expect(attempts.filter({ hasText: 'attempt 2' })).toHaveCount(1, { timeout: 20_000 })
+  await expect(attempts.filter({ hasText: 'attempt 1' })).toHaveAttribute('data-outcome', 'failed')
 })
 
 test('J-TK-16 ticked tasks delete and run as jobs; a task prints as code for the Tasks port', async ({

@@ -86,6 +86,14 @@ async fn tasks_through_the_console() {
         queue["function"]["functionRef"]["key"],
         "us-central1-processOrder"
     );
+    // Its attempts are the function's invocations, which Functions lists.
+    assert_eq!(
+        queue["function"]["invocationsRef"],
+        json!({
+            "kind": "functions.invocations",
+            "key": "function:us-central1-processOrder",
+        })
+    );
     let (_, other) = suite
         .call(Method::GET, "/api/v1/tasks/queues?project=demo-other", None)
         .await;

@@ -1,17 +1,10 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { useState } from 'react'
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/client'
 import type { TasksTaskDetail } from '@/api/generated/messaging/TasksTaskDetail'
 import { SectionGate } from '@/components/console/section-gate'
 import { renderInConsole } from '@/test/render'
 import { sectionEntry, testStatus } from '@/test/status'
-import type { TasksAttemptEvent } from '@/api/generated/messaging/TasksAttemptEvent'
-import { useFeedPending } from '@/components/console/feed-list'
-import { PauseButton } from '@/components/console/pause-button'
-import type { FeedStore } from '@/lib/live/feed-store'
-import { dispatchShortcut } from '@/lib/shortcuts'
-import { attemptKey, createAttemptsStore } from '../live'
 import { tasksKeys } from '../queries'
 import {
   LOCATION,
@@ -23,11 +16,11 @@ import {
   testQueue,
   testRow,
 } from '../fixtures.test-support'
-import { AttemptsView } from './attempts-feed'
 import { AttemptsTimeline } from './attempts-timeline'
 import { type ConfirmRequest, useConfirmPopover } from '@/components/console/confirm-popover'
 import { QueuesLanding } from './queues-landing'
 import { panelNodes } from './queues-panel'
+import { AttemptsLink } from './queue-view'
 import { meantQueue, refusedText } from './refused-banner'
 import { replacedText } from './replaced-banner'
 import type { TaskActions } from './task-actions'
@@ -440,54 +433,28 @@ describe('the task inspector (TK-20…TK-24)', () => {
   })
 })
 
-/** The Attempts tab as the queue view lays it out: the feed, and row two's pause. */
-function AttemptsHarness({ store }: { store: FeedStore<TasksAttemptEvent> }) {
-  const [paused, setPaused] = useState(false)
-  const pending = useFeedPending(store, paused, attemptKey)
-  return (
-    <>
-      <PauseButton paused={paused} pending={pending} onChange={setPaused} testId="attempts-pause" />
-      <AttemptsView
-        queue={testQueue()}
-        store={store}
-        paused={paused}
-        onPaused={setPaused}
-        onOpen={() => {}}
-        banners={null}
-        inspector={() => null}
-        taskId={undefined}
-      />
-    </>
-  )
-}
+describe('where a queue’s attempts are', () => {
+  it('links to Functions › Invocations filtered to the queue’s function', async () => {
+    await renderInConsole(() => <AttemptsLink queue={testQueue()} />, { status: ready() })
+    const link = screen.getByTestId('queue-attempts-link')
+    expect(link).toHaveTextContent('Attempts in Invocations')
+    const href = new URL(link.getAttribute('href') ?? '', 'http://console.test')
+    expect(href.pathname).toBe('/functions/invocations')
+    expect(href.searchParams.get('q')).toBe(`function:${LOCATION}-processOrder`)
+  })
 
-const attemptEvent = (attempt: number): TasksAttemptEvent => ({
-  queue: testQueue().key,
-  taskId: '7',
-  taskName: 'order-1',
-  attempt: testAttempt({ attempt, retryCount: attempt - 1 }),
-})
-
-describe('the Attempts feed’s pause (U-18)', () => {
-  it('p holds the feed still and counts what arrives; p again lets it in', async () => {
-    const store = createAttemptsStore()
-    store.push([attemptEvent(1)])
-    await renderInConsole(() => <AttemptsHarness store={store} />, { status: ready() })
-    const button = screen.getByTestId('attempts-pause')
-    expect(button).toHaveTextContent(/^Pause$/)
-    act(() => dispatchShortcut(new KeyboardEvent('keydown', { key: 'p' })))
-    expect(button).toHaveAttribute('aria-pressed', 'true')
-    expect(button).toHaveTextContent(/^Paused$/)
-
-    // The store tells its readers on the next frame.
-    act(() => store.push([attemptEvent(2), attemptEvent(3)]))
-    await waitFor(() => expect(button).toHaveTextContent('Paused · 2 new'))
-
-    act(() => dispatchShortcut(new KeyboardEvent('keydown', { key: 'p' })))
-    expect(button).toHaveAttribute('aria-pressed', 'false')
-    expect(button).toHaveTextContent(/^Pause$/)
-    expect(store.size()).toBe(3)
-    expect(store.pending()).toBe(0)
+  it('is absent for a queue a client registered, and while Functions is not running', async () => {
+    await renderInConsole(() => <AttemptsLink queue={testQueue('ping', { function: null })} />, {
+      status: ready(),
+    })
+    expect(screen.queryByTestId('queue-attempts-link')).not.toBeInTheDocument()
+    cleanup()
+    await renderInConsole(() => <AttemptsLink queue={testQueue()} />, {
+      status: testStatus({
+        sections: [sectionEntry('tasks'), sectionEntry('functions', { state: 'absent' })],
+      }),
+    })
+    expect(screen.queryByTestId('queue-attempts-link')).not.toBeInTheDocument()
   })
 })
 

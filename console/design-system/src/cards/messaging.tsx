@@ -5,9 +5,9 @@
 // composer, and every mark a row can carry. Cloud Tasks: a queue's row two
 // with its state counts and token bucket, task rows in each state, the
 // re-registration banner, one task's attempts with its retry plan and the
-// emulator's off-by-one said where the figure is, and the Attempts feed
-// held still. Every piece is the console's own component over answers
-// shaped as the engine sends them.
+// emulator's off-by-one said where the figure is, and row two's link to the
+// queue's attempts in Functions › Invocations. Every piece is the console's
+// own component over answers shaped as the engine sends them.
 
 import { Tabs, Text, TooltipProvider } from '@cloudflare/kumo'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -25,21 +25,18 @@ import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctio
 import type { PubsubMessageRow } from '@/api/generated/messaging/PubsubMessageRow'
 import type { PubsubMessageState } from '@/api/generated/messaging/PubsubMessageState'
 import type { TasksAttempt } from '@/api/generated/messaging/TasksAttempt'
-import type { TasksAttemptEvent } from '@/api/generated/messaging/TasksAttemptEvent'
 import type { TasksLadderStep } from '@/api/generated/messaging/TasksLadderStep'
 import type { TasksQueue } from '@/api/generated/messaging/TasksQueue'
 import type { TasksTaskRow } from '@/api/generated/messaging/TasksTaskRow'
 import { statusQuery } from '@/api/queries'
 import { useColumnWidths } from '@/components/console/column-widths'
 import { DataTable } from '@/components/console/data-table'
-import { useFeedPending } from '@/components/console/feed-list'
 import { FilterField } from '@/components/console/filter-field'
 import { storageKeyFor } from '@/components/console/inspector-width'
 import { rowId } from '@/components/console/key-value-editor'
 import { MatchCount } from '@/components/console/match-count'
 import { PanelFilter, PanelHeader } from '@/components/console/panel'
 import { PanelTree } from '@/components/console/panel-tree'
-import { PauseButton } from '@/components/console/pause-button'
 import { ScopeSelect } from '@/components/console/scope-select'
 import { SectionBody } from '@/components/console/section-page'
 import { TableFooter } from '@/components/console/table-footer'
@@ -58,13 +55,11 @@ import {
   topicSummary,
 } from '@/pubsub/index-fixture.test-support'
 import { topicTree } from '@/pubsub/tree'
-import { AttemptsView } from '@/tasks/components/attempts-feed'
-import { SlotsAndTokens, SwitchLabel, TabLabel } from '@/tasks/components/queue-view'
+import { AttemptsLink, SlotsAndTokens, SwitchLabel, TabLabel } from '@/tasks/components/queue-view'
 import { ReplacedBanner } from '@/tasks/components/replaced-banner'
 import { TaskInspector } from '@/tasks/components/task-inspector'
 import type { TaskActions } from '@/tasks/components/task-actions'
 import { taskColumns } from '@/tasks/components/task-table'
-import { attemptKey } from '@/tasks/live'
 import { taskQuery } from '@/tasks/queries'
 import {
   PROJECT as TASKS_PROJECT,
@@ -77,7 +72,6 @@ import {
 import { triggersKey } from '@/lib/triggers'
 import { sectionEntry, testStatus } from '@/test/status'
 import { useNow } from '@/lib/clock'
-import { createFeedStore } from '@/lib/live/feed-store'
 import { defineCards } from '../registry'
 import { Section, Stack, quietLiveChannel } from './shared'
 
@@ -760,11 +754,11 @@ function QueueRowTwo({ view, end }: { view: string; end: ReactNode }) {
           value={view}
           tabs={[
             { value: 'tasks', label: <TabLabel label="Tasks" count={12} /> },
-            { value: 'attempts', label: <TabLabel label="Attempts" /> },
             { value: 'history', label: <TabLabel label="History" count={counters.history} /> },
             { value: 'config', label: <TabLabel label="Configuration" /> },
           ]}
         />
+        <AttemptsLink queue={QUEUE} />
         <span className="ml-auto flex shrink-0 items-center gap-3">{end}</span>
       </ToolbarRow>
     </SectionToolbar>
@@ -845,79 +839,6 @@ function InspectorSample() {
   )
 }
 
-/** One attempt as the feed carries it: welcome-ada's 503s, other tasks' 204s. */
-function feedEvent(
-  task: { id: string; name: string },
-  number: number,
-  seconds: number,
-): TasksAttemptEvent {
-  const failing = task.id === BACKOFF_ROW.id
-  return {
-    queue: QUEUE.key,
-    taskId: task.id,
-    taskName: taskName(task.name),
-    attempt: testAttempt({
-      attempt: number,
-      retryCount: number - 1,
-      startedAt: AGO(seconds),
-      durationMs: failing ? 40 + number : 118,
-      status: failing ? 503 : 204,
-      response: failing ? 'Service Unavailable' : null,
-      countedExecution: !failing,
-    }),
-  }
-}
-
-const ADA = { id: BACKOFF_ROW.id, name: 'welcome-ada' }
-const receipt = (id: number) => ({ id: String(id), name: `receipt-o_${1000 + id}` })
-
-function FeedSample() {
-  // A frozen store, so the card draws what the reader holds and counts the
-  // rest; the page's store buffers above the reader's place instead, and
-  // its button counts the same.
-  const [store] = useState(() => {
-    const created = createFeedStore<TasksAttemptEvent>({
-      max: 2_000,
-      key: attemptKey,
-      pausedMode: 'freeze',
-    })
-    created.push([
-      feedEvent(receipt(37), 1, 30),
-      feedEvent(ADA, 5, 25),
-      feedEvent(ADA, 6, 21),
-      feedEvent(receipt(38), 1, 19),
-      feedEvent(ADA, 7, 17),
-      feedEvent(ADA, 8, 13),
-    ])
-    created.pause()
-    created.push([
-      feedEvent(ADA, 9, 9),
-      ...[39, 40, 41, 42, 43, 44, 45, 46, 47].map((id, index) =>
-        feedEvent(receipt(id), 1, 8 - index * 0.7),
-      ),
-      feedEvent(ADA, 10, 5),
-      feedEvent(ADA, 11, 1),
-    ])
-    return created
-  })
-  const pending = useFeedPending(store, true, attemptKey)
-  return (
-    <Frame height={300}>
-      <QueueRowTwo view="attempts" end={<PauseButton paused pending={pending} onChange={noop} />} />
-      <AttemptsView
-        queue={QUEUE}
-        store={store}
-        paused
-        onPaused={noop}
-        onOpen={noop}
-        banners={null}
-        inspector={() => null}
-        taskId={undefined}
-      />
-    </Frame>
-  )
-}
-
 function HistorySample() {
   const { counters } = QUEUE
   const outcomes = counters.outcomes
@@ -974,14 +895,9 @@ function TasksCard() {
           >
             <InspectorSample />
           </Section>
-          <div className="grid gap-8">
-            <Sample label="The Attempts feed, held still: what arrives is counted on the button">
-              <FeedSample />
-            </Sample>
-            <Sample label="History's row two: counts by outcome, the engine's own">
-              <HistorySample />
-            </Sample>
-          </div>
+          <Sample label="History's row two: counts by outcome, the engine's own; the attempts are Functions › Invocations'">
+            <HistorySample />
+          </Sample>
         </div>
       </Stack>
     </Kit>

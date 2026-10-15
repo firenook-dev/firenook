@@ -87,6 +87,9 @@ pub(crate) struct TasksQueueFunction {
     pub region: String,
     /// `functions.function`.
     pub function_ref: EntityRef,
+    /// `functions.invocations` of this function: every attempt of the
+    /// queue's tasks is one of them.
+    pub invocations_ref: EntityRef,
 }
 
 /// The last time a re-registration replaced the queue.

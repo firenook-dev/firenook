@@ -63,6 +63,7 @@ export function testQueue(
       name: id,
       region: location,
       functionRef: { kind: 'functions.function', key: `${location}-${id}`, label: id },
+      invocationsRef: { kind: 'functions.invocations', key: `function:${location}-${id}` },
     },
     defaultUri: `http://127.0.0.1:5001/${PROJECT}/${location}/${id}`,
     registeredAt: '2026-10-12T10:00:00.000Z',

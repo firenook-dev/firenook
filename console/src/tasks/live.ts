@@ -8,20 +8,18 @@
 // - `tasks.queue` (invalidation): the keys of task rows that changed phase,
 //   appeared or left, the tasks whose detail changed, and the tasks that
 //   finished (History's head).
-// - `tasks.attempts` (a feed): every attempt of the queue (or one task) as
-//   it happens, after the attempts the engine still keeps.
+//
+// A queue's attempts as they happen are Functions › Invocations': each is
+// an invocation of the queue's function.
 
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import type { TasksAttemptEvent } from '@/api/generated/messaging/TasksAttemptEvent'
-import type { TasksAttempts } from '@/api/generated/messaging/TasksAttempts'
 import type { TasksCountersFrame } from '@/api/generated/messaging/TasksCountersFrame'
 import type { TasksFinishedBatch } from '@/api/generated/messaging/TasksFinishedBatch'
 import type { TasksQueueList } from '@/api/generated/messaging/TasksQueueList'
 import type { TasksQueuesChanged } from '@/api/generated/messaging/TasksQueuesChanged'
 import type { TasksStale } from '@/api/generated/messaging/TasksStale'
 import type { SubscriptionStatus } from '@/lib/live/channel'
-import { type FeedStore, createFeedStore } from '@/lib/live/feed-store'
 import { declareTopic } from '@/lib/live/topics'
 import { createInvalidator, useLiveTopic } from '@/lib/live/use-live-topic'
 import { applyQueueCounters, countersLog } from './counters'
@@ -37,21 +35,11 @@ declare module '@/lib/live/topics' {
       params: { project?: string; queue: string }
       events: { stale: TasksStale; finished: TasksFinishedBatch }
     }
-    'tasks.attempts': {
-      params: { project?: string; queue: string; task?: string }
-      events: { attempts: TasksAttempts }
-    }
   }
 }
 
 declareTopic('tasks.counters', 'compare')
 declareTopic('tasks.queue', 'none')
-declareTopic('tasks.attempts', 'replay')
-
-/** Attempts an Attempts feed holds. */
-export const ATTEMPTS_FEED_MAX = 2_000
-/** Attempts the engine keeps across queues, for a gap row's sentence. */
-export const ATTEMPTS_RING = 10_000
 
 // ------------------------------------------------------------ counters
 
@@ -168,48 +156,4 @@ export function useQueueLive(
     onEnd: () => handlers.onReset?.(),
     onTaken: () => handlers.onTaken?.(),
   })
-}
-
-// ------------------------------------------------------------ attempts
-
-/** An attempt's key in a feed: its task and its number. */
-export function attemptKey(event: TasksAttemptEvent): string {
-  return `${event.taskId}:${event.attempt.attempt}`
-}
-
-/** An Attempts feed's store. */
-export function createAttemptsStore(): FeedStore<TasksAttemptEvent> {
-  return createFeedStore<TasksAttemptEvent>({
-    max: ATTEMPTS_FEED_MAX,
-    key: attemptKey,
-    pausedMode: 'buffer',
-  })
-}
-
-/**
- * Holds `tasks.attempts` for a queue (and one task, when given): the
- * attempts the engine still keeps, then each as it happens. A new store per
- * queue and task; pause it with the `PauseButton`.
- */
-export function useAttemptsFeed(
-  project: string | undefined,
-  queue: string | undefined,
-  task?: string,
-): { store: FeedStore<TasksAttemptEvent>; status: SubscriptionStatus } {
-  const id = project && queue ? `${project}\u0000${queue}\u0000${task ?? ''}` : ''
-  const [feed, setFeed] = useState(() => ({ id, store: createAttemptsStore() }))
-  let store = feed.store
-  if (feed.id !== id) {
-    store = createAttemptsStore()
-    setFeed({ id, store })
-  }
-  const status = useLiveTopic(
-    'tasks.attempts',
-    project && queue ? { project, queue, ...(task ? { task } : {}) } : null,
-    {
-      onAttempts: (batch) => store.upsert(batch.items),
-      onReset: (_reason, missed) => store.gap(missed, ATTEMPTS_RING),
-    },
-  )
-  return { store, status }
 }

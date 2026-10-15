@@ -2,7 +2,7 @@
 // §4.8): every queue of the project to open (by the same `tasks.queue` ref
 // the engine's search answers with, so ⌘K shows each once), and for the
 // queue in view what acts on it — Enqueue, Pause or Resume, Purge, Hold
-// scheduled tasks, and its tabs.
+// scheduled tasks, its tabs, and its attempts in Functions › Invocations.
 
 import {
   ClockCounterClockwiseIcon,
@@ -30,7 +30,9 @@ export interface QueueCommands {
   pause: (paused: boolean) => void
   purge: () => void
   hold: (hold: boolean) => void
-  view: (view: 'tasks' | 'attempts' | 'history' | 'config') => void
+  view: (view: 'tasks' | 'history' | 'config') => void
+  /** Opens the queue's attempts in Functions › Invocations; absent when there is no link. */
+  attempts?: (() => void) | undefined
 }
 
 /** The groups for `query`: the queue in view's commands, then every queue to open. */
@@ -85,12 +87,17 @@ export function tasksPaletteGroups(options: {
             icon: <ClockIcon size={16} />,
             run: () => commands.hold(true),
           },
-      {
-        id: 'tasks.view-attempts',
-        title: `${id}: attempts`,
-        icon: <LightningIcon size={16} />,
-        run: () => commands.view('attempts'),
-      },
+      ...(commands.attempts
+        ? [
+            {
+              id: 'tasks.attempts',
+              title: `${id}: attempts in Invocations`,
+              keywords: 'invocations functions retries',
+              icon: <LightningIcon size={16} />,
+              run: commands.attempts,
+            },
+          ]
+        : []),
       {
         id: 'tasks.view-history',
         title: `${id}: history`,
