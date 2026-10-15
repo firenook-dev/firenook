@@ -28,10 +28,10 @@ import { formatBytes } from '@/lib/format'
 import { eventQuery } from '../api'
 import { draftFromEvent } from '../publish'
 import { channelLabel, channelNamed, nearMisses } from '../topology'
-import { CopyAsMenu } from './copy-as-menu'
+import { EventCode } from './event-code'
 import { DeliveryList, invocationFigure } from './delivery-list'
 
-/** The width below which the footer's "Copy as" keeps only its glyph, px. */
+/** The width below which the footer's "Code" keeps only its glyph, px. */
 const COPY_AS_LABEL_AT = 500
 
 /** An event id's figure: `#212` for `a3f9c1-212`. */
@@ -283,10 +283,10 @@ function EventFooter({
       testId="event-footer"
       tools={
         <>
-          <CopyAsMenu
+          <EventCode
             draft={draftFromEvent(view)}
             label={width >= COPY_AS_LABEL_AT}
-            testId="event-copy-as"
+            testId="event-code"
           />
           <Tooltip
             content={
