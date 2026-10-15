@@ -3100,10 +3100,13 @@ Generated types in `src/api/generated/compute/`.
   mount.
 - **Outcome words and classes** come from the engine; the client never
   derives a class. `OutcomeChip` is the foundation's.
-- **Invocation logs** are observe's `LogLine` rows through `LogLines`: in
-  an invocation, a 52 px offset column (84 px once a line is a minute in)
-  and no level column while every line is info, so a one-line message
-  gets the row; a codebase's load log keeps the clock column.
+- **Invocation logs** are observe's `LogLine` rows through `LogLines`, on
+  the kit's `FeedList` (`inline`: selectable text, no keys of its own, so
+  the page's invocation list keeps j/k): in an invocation, a 52 px offset
+  column (84 px once a line is a minute in) and no level column while
+  every line is info, so a one-line message gets the row; a codebase's
+  load log keeps the clock column. Fields and cut lines open under the
+  row, in the message's column.
 - **Per browser**: run drafts per tab in sessionStorage
   (`firenook.console.run-drafts`) and the editor that stack frames open in
   (`firenook.console.editor`: VS Code, Cursor, JetBrains). There are no
