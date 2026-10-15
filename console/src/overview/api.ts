@@ -13,7 +13,7 @@
 // bundle); this file is the page's.
 
 import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
-import { API_BASE, ApiError, apiGet, apiSend } from '@/api/client'
+import { API_BASE, apiGet, apiSend } from '@/api/client'
 import type { ExportDestination } from '@/api/generated/ExportDestination'
 import type { Job } from '@/api/generated/Job'
 import { download } from '@/lib/download'
@@ -168,21 +168,6 @@ export async function downloadSnapshot(
   id: string,
 ): Promise<void> {
   await download(snapshotDownloadUrl(id))
-  client.removeQueries({ queryKey: overviewKeys.snapshot(project, id), exact: true })
-}
-
-/** `DELETE /overview/snapshots/{id}`: lets a prepared snapshot go before it expires. */
-export async function discardSnapshot(
-  client: QueryClient,
-  project: string,
-  id: string,
-): Promise<void> {
-  try {
-    await apiSend<unknown>('DELETE', `/overview/snapshots/${encodeURIComponent(id)}`, {})
-  } catch (error) {
-    // Already gone is what was asked for.
-    if (!(error instanceof ApiError && error.code === 'not-found')) throw error
-  }
   client.removeQueries({ queryKey: overviewKeys.snapshot(project, id), exact: true })
 }
 

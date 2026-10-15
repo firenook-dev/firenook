@@ -27,7 +27,6 @@ vi.mock('@/lib/toasts', () => ({ toast: calls.toast }))
 const { ApiError } = await import('@/api/client')
 const { jobKey, sectionJobsKey } = await import('@/lib/jobs')
 const {
-  discardSnapshot,
   downloadSnapshot,
   engineQuery,
   laterJob,
@@ -260,18 +259,6 @@ describe('snapshots', () => {
       `/console/api/v1/overview/snapshots/${SNAPSHOT}/download`,
     )
     expect(client.getQueryData(overviewKeys.snapshot('p', SNAPSHOT))).toBeUndefined()
-  })
-
-  it('discard one the engine keeps, and treat one already gone as discarded', async () => {
-    client.setQueryData(overviewKeys.snapshot('p', SNAPSHOT), { id: SNAPSHOT })
-    calls.send.mockResolvedValueOnce({})
-    await discardSnapshot(client, 'p', SNAPSHOT)
-    expect(calls.send).toHaveBeenCalledWith('DELETE', `/overview/snapshots/${SNAPSHOT}`, {})
-    expect(client.getQueryData(overviewKeys.snapshot('p', SNAPSHOT))).toBeUndefined()
-    calls.send.mockRejectedValueOnce(new ApiError(404, 'gone', 'not-found'))
-    await expect(discardSnapshot(client, 'p', SNAPSHOT)).resolves.toBeUndefined()
-    calls.send.mockRejectedValueOnce(new ApiError(0, 'down', 'network'))
-    await expect(discardSnapshot(client, 'p', SNAPSHOT)).rejects.toThrow('down')
   })
 })
 
