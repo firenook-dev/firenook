@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { authorizationHeader, customTokenSnippet, mintedToken, tokenRequest } from './token-request'
+import { authorizationHeader, customTokenSnippet, tokenRequest } from './token-request'
 
 describe('what Auth asks POST /auth/tokens for', () => {
   it('sends the foundation’s { uid, tenant? } and nothing it did not choose', () => {
@@ -30,13 +30,6 @@ describe('what Auth asks POST /auth/tokens for', () => {
     expect(tokenRequest({ uid: 'u1', secondFactor: 'none', runBeforeSignIn: false })).toEqual({
       uid: 'u1',
       secondFactor: { kind: 'none' },
-    })
-  })
-
-  it('reads idToken and expiresAt as the foundation’s client does', () => {
-    expect(mintedToken({ idToken: 'a.b.', expiresAt: '2026-10-12T10:00:00Z' })).toEqual({
-      idToken: 'a.b.',
-      expiresAt: Date.parse('2026-10-12T10:00:00Z'),
     })
   })
 

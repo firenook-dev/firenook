@@ -50,11 +50,6 @@ export function userLink(tenant: string | null | undefined, uid: string): Sectio
   return route(userRef(tenant, uid))
 }
 
-/** The Activity page with this call open. */
-export function callLink(id: number): SectionLink {
-  return route(callRef(id))
-}
-
 /** The Inbox with this message open. */
 export function messageLink(id: number): SectionLink {
   return route(messageRef(id))

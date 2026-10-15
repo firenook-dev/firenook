@@ -26,7 +26,6 @@ import {
   getHooks,
   getMessage,
   getMessages,
-  getMessagesOfCall,
   getSummary,
   getTenants,
   getUser,
@@ -88,7 +87,6 @@ export const authKeys = {
   /** The newest message of the project, whatever its tenant: where the Inbox's unread dots start. */
   newestMessage: (project: string) => [AUTH, project, 'newest-message'] as const,
   /** The messages one call created (`?activity=`). */
-  callMessages: (project: string, call: number) => [AUTH, project, 'call-messages', call] as const,
   /** The beacon's newest code or link of one channel. */
   latest: (project: string, channel: 'sms' | 'email') =>
     [AUTH, project, 'latest', channel] as const,
@@ -379,17 +377,4 @@ export const messageQuery = (project: string, id: number) =>
     queryKey: authKeys.message(project, id),
     queryFn: ({ signal }) => getMessage(id, signal),
     retry: false,
-  })
-
-/**
- * The messages one console call created, by the id its answer carried
- * (`x-firenook-activity`): the code Try a sign-in fills in, the "Open in
- * inbox" toast's target. The observer records a call before it answers, so
- * they are there when asked for.
- */
-export const callMessagesQuery = (project: string, call: number) =>
-  queryOptions({
-    queryKey: authKeys.callMessages(project, call),
-    queryFn: async ({ signal }) => (await getMessagesOfCall(project, call, signal)).items,
-    staleTime: Number.POSITIVE_INFINITY,
   })

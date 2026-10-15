@@ -6,7 +6,6 @@ import { authActions } from '@/lib/sections/auth-actions'
 import {
   ACTION_PATH,
   activityLink,
-  callLink,
   callRef,
   consoleActionLink,
   firestoreAsUser,
@@ -99,7 +98,7 @@ describe('Auth refs and links', () => {
       to: '/auth',
       search: { tenant: 'acme', user: 'a|b' },
     })
-    expect(callLink(7)).toEqual({ to: '/auth/activity', search: { entry: '7' } })
+    expect(route('auth.call', '7')).toEqual({ to: '/auth/activity', search: { entry: '7' } })
     expect(messageLink(9)).toEqual({ to: '/auth/inbox', search: { message: '9' } })
   })
 

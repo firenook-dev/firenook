@@ -291,7 +291,7 @@ export function SettingsPage() {
 }
 
 /** Where the Overview's Data part starts: its reset rows, Authentication's among them. */
-export const OVERVIEW_DATA = 'overview-data-title'
+const OVERVIEW_DATA = 'overview-data-title'
 
 /** A link in the page's sentences: the console's link colour, underlined on hover. */
 const TEXT_LINK =

@@ -480,9 +480,6 @@ export function emulatorPath(
   return `/emulator/v1/projects/${encodeURIComponent(project)}${scope}/${rest}`
 }
 
-/** The secure token endpoint (the refresh grant). */
-export const SECURE_TOKEN_PATH = '/securetoken.googleapis.com/v1/token'
-
 /** One call to the Auth emulator through the console's mount. */
 export interface EmulatorRequest {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
