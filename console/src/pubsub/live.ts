@@ -9,7 +9,7 @@
 //   hold it.
 // - `pubsub.topic` (invalidation): new message ids of the topic in view, and
 //   the keys of rows that moved — backlog positions of the scoped
-//   subscription, messages whose marks moved, the snapshots list.
+//   subscription, messages whose marks moved.
 // - `pubsub.push` (a feed): push streaks, upserted in place by streak.
 // - `pubsub.deliveries` (invalidation): event ids whose outcome moved, and
 //   how many deliveries are new.
@@ -92,8 +92,6 @@ export function resourceKeys(project: string, kinds: readonly string[]): QueryKe
         pubsubKeys.topicDetails(project),
         pubsubKeys.subscriptionDetails(project),
       )
-    else if (kind === 'snapshots')
-      keys.push(pubsubKeys.snapshots(project), pubsubKeys.topicDetails(project))
     else if (kind === 'schemas')
       keys.push(
         pubsubKeys.topics(project),
@@ -111,7 +109,6 @@ export function countersKeys(project: string): QueryKey[] {
     pubsubKeys.topics(project),
     pubsubKeys.topicDetails(project),
     pubsubKeys.subscriptionDetails(project),
-    pubsubKeys.snapshots(project),
     pubsubKeys.rejected(project),
   ]
 }
@@ -215,18 +212,14 @@ export function splitStaleKeys(keys: readonly string[]): {
   backlog: string[]
   /** Message ids whose subscription or function marks moved. */
   messages: string[]
-  /** The topic's snapshots changed. */
-  snapshots: boolean
 } {
   const backlog: string[] = []
   const messages: string[] = []
-  let snapshots = false
   for (const key of keys) {
     if (key.startsWith('backlog:')) backlog.push(key.slice('backlog:'.length))
     else if (key.startsWith('message:')) messages.push(key.slice('message:'.length))
-    else if (key === 'snapshots') snapshots = true
   }
-  return { backlog, messages, snapshots }
+  return { backlog, messages }
 }
 
 export interface TopicLiveHandlers {
@@ -280,8 +273,8 @@ export function publishedStep(
 
 /**
  * Holds `pubsub.topic` for the topic in view (and the subscription in view,
- * whose backlog rows it names). Message details and the snapshots list are
- * read again here; rows go to the handlers.
+ * whose backlog rows it names). Message details are read again here; rows
+ * go to the handlers.
  */
 export function useTopicLive(
   project: string | undefined,
@@ -302,10 +295,6 @@ export function useTopicLive(
         handlers.onMessageKeys?.(split.messages)
         for (const id of split.messages)
           void client.invalidateQueries({ queryKey: pubsubKeys.message(project, topic, id) })
-      }
-      if (split.snapshots) {
-        void client.invalidateQueries({ queryKey: pubsubKeys.snapshots(project) })
-        void client.invalidateQueries({ queryKey: pubsubKeys.topic(project, topic) })
       }
     },
     onReset: () => {

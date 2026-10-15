@@ -15,7 +15,6 @@ import type { PubsubBacklogRow } from '@/api/generated/messaging/PubsubBacklogRo
 import type { PubsubBacklogState } from '@/api/generated/messaging/PubsubBacklogState'
 import type { PubsubCommitSchemaBody } from '@/api/generated/messaging/PubsubCommitSchemaBody'
 import type { PubsubCreateSchemaBody } from '@/api/generated/messaging/PubsubCreateSchemaBody'
-import type { PubsubCreateSnapshotBody } from '@/api/generated/messaging/PubsubCreateSnapshotBody'
 import type { PubsubCreateSubscriptionBody } from '@/api/generated/messaging/PubsubCreateSubscriptionBody'
 import type { PubsubCreateTopicBody } from '@/api/generated/messaging/PubsubCreateTopicBody'
 import type { PubsubDeleteRevisionBody } from '@/api/generated/messaging/PubsubDeleteRevisionBody'
@@ -36,6 +35,7 @@ import type { PubsubPreview } from '@/api/generated/messaging/PubsubPreview'
 import type { PubsubPublishBody } from '@/api/generated/messaging/PubsubPublishBody'
 import type { PubsubPublishJobBody } from '@/api/generated/messaging/PubsubPublishJobBody'
 import type { PubsubPublishResult } from '@/api/generated/messaging/PubsubPublishResult'
+import type { PubsubPurged } from '@/api/generated/messaging/PubsubPurged'
 import type { PubsubPushConfigBody } from '@/api/generated/messaging/PubsubPushConfigBody'
 import type { PubsubRedeliverBody } from '@/api/generated/messaging/PubsubRedeliverBody'
 import type { PubsubRedelivery } from '@/api/generated/messaging/PubsubRedelivery'
@@ -50,11 +50,8 @@ import type { PubsubSchemaDetail } from '@/api/generated/messaging/PubsubSchemaD
 import type { PubsubSchemaExample } from '@/api/generated/messaging/PubsubSchemaExample'
 import type { PubsubSchemaExampleBody } from '@/api/generated/messaging/PubsubSchemaExampleBody'
 import type { PubsubSchemaSummary } from '@/api/generated/messaging/PubsubSchemaSummary'
-import type { PubsubSeekBody } from '@/api/generated/messaging/PubsubSeekBody'
-import type { PubsubSeekResult } from '@/api/generated/messaging/PubsubSeekResult'
 import type { PubsubSetup } from '@/api/generated/messaging/PubsubSetup'
 import type { PubsubSetupResult } from '@/api/generated/messaging/PubsubSetupResult'
-import type { PubsubSnapshot } from '@/api/generated/messaging/PubsubSnapshot'
 import type { PubsubSubscriptionDetail } from '@/api/generated/messaging/PubsubSubscriptionDetail'
 import type { PubsubSubscriptionSummary } from '@/api/generated/messaging/PubsubSubscriptionSummary'
 import type { PubsubTopicDetail } from '@/api/generated/messaging/PubsubTopicDetail'
@@ -73,7 +70,7 @@ export function getTopicIndex(project: string, signal?: AbortSignal): Promise<Pu
   return apiGet('/pubsub/topics', { project }, signal)
 }
 
-/** One topic: its configuration, schema binding, history window, subscriptions and snapshots. */
+/** One topic: its configuration, schema binding, history window and subscriptions. */
 export function getTopic(name: string, signal?: AbortSignal): Promise<PubsubTopicDetail> {
   return apiGet('/pubsub/topic', { name }, signal)
 }
@@ -245,9 +242,9 @@ export function setPushConfig(body: PubsubPushConfigBody): Promise<void> {
   return apiSend('POST', '/pubsub/subscription/push-config', body)
 }
 
-/** Replays a subscription to a time or a snapshot, or purges it (`now`). */
-export function seek(body: PubsubSeekBody): Promise<PubsubSeekResult> {
-  return apiSend('POST', '/pubsub/subscription/seek', body)
+/** Acknowledges every message waiting at a subscription now (a seek to now). */
+export function purgeSubscription(body: PubsubNameBody): Promise<PubsubPurged> {
+  return apiSend('POST', '/pubsub/subscription/purge', body)
 }
 
 // ------------------------------------------------------------ backlogs
@@ -329,21 +326,6 @@ export function batchGetDeliveries(
     request,
     signal ? { signal } : {},
   )
-}
-
-// ------------------------------------------------------------ snapshots
-
-/** Every snapshot of `project`, one page. */
-export function getSnapshots(project: string, signal?: AbortSignal): Promise<Page<PubsubSnapshot>> {
-  return apiGet('/pubsub/snapshots', { project }, signal)
-}
-
-export function createSnapshot(body: PubsubCreateSnapshotBody): Promise<PubsubSnapshot> {
-  return apiSend('POST', '/pubsub/snapshots', body)
-}
-
-export function deleteSnapshot(body: PubsubNameBody): Promise<void> {
-  return apiSend('DELETE', '/pubsub/snapshot', body)
 }
 
 // ------------------------------------------------------------ schemas

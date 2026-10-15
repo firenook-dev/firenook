@@ -1,14 +1,14 @@
 //! Pub/Sub's console routes, under `/api/v1/pubsub`: the topics index and
 //! details, a topic's history, publishing (at once and as jobs), message
-//! actions, subscriptions with pull, ack and seek, backlogs, deliveries to
-//! functions, snapshots, schemas and their checks, filter checks, schedules,
-//! the setup export and import.
+//! actions, subscriptions with their purge, backlogs, deliveries to
+//! functions, schemas and their checks, filter checks, schedules, the setup
+//! export and import.
 //!
 //! Resource names travel whole (`projects/p/topics/t`) in query strings and
 //! JSON bodies, never as path segments. Every handler first resolves the
 //! late runtime (`503 starting` until Pub/Sub is up). Lists answer a
-//! `Page`; the bounded ones (topics, snapshots, schemas, schedules,
-//! refusals) are one page holding every item. Bodies are read with
+//! `Page`; the bounded ones (topics, schemas, schedules, refusals) are one
+//! page holding every item. Bodies are read with
 //! [`ConsoleJson`]: 64 MiB on the publish, schema and import routes (the
 //! Pub/Sub port's own limit), 1 MiB everywhere else.
 
@@ -44,27 +44,24 @@ use firenook_pubsub_front::templates::{self, Draft, DraftData};
 use firenook_pubsub_front::{PubsubError, ScheduleControl as _, avro, names};
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use self::convert::{Join, Targets};
 use self::errors::{functions_absent, pubsub_error, redeliver_error, schedule_error};
 use self::filters::message_query;
 use self::types::{
     PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody, PubsubCreateSchemaBody,
-    PubsubCreateSnapshotBody, PubsubCreateSubscriptionBody, PubsubCreateTopicBody, PubsubData,
-    PubsubDeleteRevisionBody, PubsubDeleteSubscriptions, PubsubDeleteTopicBody,
-    PubsubDeliveryCounts, PubsubDeliveryPage, PubsubDeliveryRow, PubsubDispatchBody,
-    PubsubFilterCheck, PubsubFilterCheckBody, PubsubFunctionMark, PubsubMessageActionBody,
-    PubsubMessageCheck, PubsubMessageCheckBody, PubsubMessageDetail, PubsubMessageRow,
-    PubsubNameBody, PubsubOutgoingMessage, PubsubPreview, PubsubPublishBody, PubsubPublishResult,
-    PubsubPushConfigBody, PubsubRedeliverBody, PubsubRedelivery, PubsubRejectedList,
-    PubsubRollbackSchemaBody, PubsubSchedule, PubsubScheduleBody, PubsubScheduleRun,
-    PubsubSchemaBinding, PubsubSchemaCheck, PubsubSchemaCheckBody, PubsubSchemaDetail,
-    PubsubSchemaExample, PubsubSchemaExampleBody, PubsubSchemaProblem, PubsubSchemaSummary,
-    PubsubSeekBody, PubsubSeekResult, PubsubSnapshot, PubsubSubscriptionDetail,
-    PubsubSubscriptionSummary, PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary,
-    PubsubUpdateSubscriptionBody, PubsubUpdateTopicBody,
+    PubsubCreateSubscriptionBody, PubsubCreateTopicBody, PubsubData, PubsubDeleteRevisionBody,
+    PubsubDeleteSubscriptions, PubsubDeleteTopicBody, PubsubDeliveryCounts, PubsubDeliveryPage,
+    PubsubDeliveryRow, PubsubDispatchBody, PubsubFilterCheck, PubsubFilterCheckBody,
+    PubsubFunctionMark, PubsubMessageActionBody, PubsubMessageCheck, PubsubMessageCheckBody,
+    PubsubMessageDetail, PubsubMessageRow, PubsubNameBody, PubsubOutgoingMessage, PubsubPreview,
+    PubsubPublishBody, PubsubPublishResult, PubsubPurged, PubsubPushConfigBody,
+    PubsubRedeliverBody, PubsubRedelivery, PubsubRejectedList, PubsubRollbackSchemaBody,
+    PubsubSchedule, PubsubScheduleBody, PubsubScheduleRun, PubsubSchemaBinding, PubsubSchemaCheck,
+    PubsubSchemaCheckBody, PubsubSchemaDetail, PubsubSchemaExample, PubsubSchemaExampleBody,
+    PubsubSchemaProblem, PubsubSchemaSummary, PubsubSubscriptionDetail, PubsubSubscriptionSummary,
+    PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary, PubsubUpdateSubscriptionBody,
+    PubsubUpdateTopicBody,
 };
 use super::PubsubConsole;
 use super::shared::{time, u32_of, u64_of};
@@ -153,15 +150,13 @@ pub(crate) fn router(api: PubsubApi) -> Router {
                 .delete(delete_subscription),
         )
         .route("/pubsub/subscription/push-config", post(push_config))
-        .route("/pubsub/subscription/seek", post(seek))
+        .route("/pubsub/subscription/purge", post(purge))
         .route("/pubsub/backlog", get(backlog))
         .route("/pubsub/backlog:batchGet", post(backlog_batch))
         .route("/pubsub/backlog:ack", post(jobs::backlog_ack))
         .route("/pubsub/backlog:release", post(jobs::backlog_release))
         .route("/pubsub/deliveries", get(deliveries))
         .route("/pubsub/deliveries:batchGet", post(deliveries_batch))
-        .route("/pubsub/snapshots", get(snapshots).post(create_snapshot))
-        .route("/pubsub/snapshot", axum::routing::delete(delete_snapshot))
         .route("/pubsub/schema", get(schema_detail).delete(delete_schema))
         .route("/pubsub/schema/rollback", post(rollback_schema))
         .route(
@@ -1273,44 +1268,21 @@ fn timestamp(at: SystemTime) -> pbjson_types::Timestamp {
     }
 }
 
-async fn seek(
+/// Purge: every message waiting at the subscription is acknowledged, as a
+/// seek to now does; what is published after arrives as usual.
+async fn purge(
     State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubSeekBody>,
-) -> Answer<PubsubSeekResult> {
+    ConsoleJson(body): ConsoleJson<PubsubNameBody>,
+) -> Answer<PubsubPurged> {
     let console = api.console()?;
     let broker = console.runtime.broker();
-    let targets = [body.time.is_some(), body.snapshot.is_some(), body.now]
-        .iter()
-        .filter(|set| **set)
-        .count();
-    if targets != 1 {
-        return Err(ApiError::invalid(
-            "A seek names exactly one of time, snapshot or now.",
-        ));
-    }
-    if let Some(snapshot) = &body.snapshot {
-        broker
-            .seek_to_snapshot(&body.subscription, snapshot)
-            .map_err(pubsub_error)?;
-    } else {
-        let at = match &body.time {
-            Some(text) => OffsetDateTime::parse(text, &Rfc3339)
-                .map(SystemTime::from)
-                .map_err(|_| {
-                    ApiError::invalid(format!(
-                        "`{text}` is not a time; write it in RFC 3339, like 2026-10-01T09:00:00Z."
-                    ))
-                })?,
-            None => SystemTime::now(),
-        };
-        broker
-            .seek_to_time(&body.subscription, &timestamp(at))
-            .map_err(pubsub_error)?;
-    }
+    broker
+        .seek_to_time(&body.name, &timestamp(SystemTime::now()))
+        .map_err(pubsub_error)?;
     let counts = broker
-        .subscription_counts(&body.subscription)
+        .subscription_counts(&body.name)
         .ok_or_else(subscription_missing)?;
-    Ok(Json(PubsubSeekResult {
+    Ok(Json(PubsubPurged {
         available: counts.available,
         acked: counts.retained_acked,
     }))
@@ -1598,57 +1570,6 @@ async fn deliveries_batch(
         })
         .collect();
     Ok(Json(BatchGetResponse { items }))
-}
-
-// ------------------------------------------------------------ snapshots
-
-async fn snapshots(
-    State(api): State<PubsubApi>,
-    Query(query): Query<ProjectQuery>,
-) -> Answer<Page<PubsubSnapshot>> {
-    let console = api.console()?;
-    let project = api.project(query.project.as_deref());
-    Ok(Json(whole(
-        console
-            .runtime
-            .broker()
-            .snapshots_view(&project)
-            .iter()
-            .map(convert::snapshot)
-            .collect(),
-    )))
-}
-
-async fn create_snapshot(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubCreateSnapshotBody>,
-) -> Result<Response, ApiError> {
-    let console = api.console()?;
-    let broker = console.runtime.broker();
-    broker
-        .create_snapshot(&body.name, &body.subscription, BTreeMap::new())
-        .map_err(pubsub_error)?;
-    let parsed = names::parse("snapshots", &body.name).map_err(pubsub_error)?;
-    let snapshot = broker
-        .snapshots_view(&parsed.project)
-        .iter()
-        .find(|snapshot| snapshot.name == body.name)
-        .map(convert::snapshot)
-        .ok_or_else(|| ApiError::internal("The snapshot was created but cannot be read."))?;
-    Ok((StatusCode::CREATED, Json(snapshot)).into_response())
-}
-
-async fn delete_snapshot(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubNameBody>,
-) -> Result<StatusCode, ApiError> {
-    let console = api.console()?;
-    console
-        .runtime
-        .broker()
-        .delete_snapshot(&body.name)
-        .map_err(pubsub_error)?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 // ------------------------------------------------------------ schemas
@@ -2172,11 +2093,8 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubNameBody,
         types::PubsubPushConfigBody,
         types::PubsubMessageActionBody,
-        types::PubsubSeekBody,
-        types::PubsubSeekResult,
+        types::PubsubPurged,
         types::PubsubBacklogJobBody,
-        types::PubsubSnapshot,
-        types::PubsubCreateSnapshotBody,
         types::PubsubSchemaSummary,
         types::PubsubSchemaDetail,
         types::PubsubCreateSchemaBody,

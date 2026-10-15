@@ -230,55 +230,25 @@ async fn pubsub_through_the_console() {
     let waiting = backlog["items"].as_array().expect("items");
     assert_eq!(waiting.len(), 1, "the filter passed the eu message only");
     assert_eq!(waiting[0]["attributes"]["region"], "eu");
-    let (status, sought) = suite
+    // Purge: what waits is acknowledged, and kept as acked.
+    let (status, purged) = suite
         .call(
             Method::POST,
-            "/api/v1/pubsub/subscription/seek",
-            Some(json!({ "subscription": workers, "now": true })),
+            "/api/v1/pubsub/subscription/purge",
+            Some(json!({ "name": workers })),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "{sought}");
-    assert_eq!(sought["available"], 0);
+    assert_eq!(status, StatusCode::OK, "{purged}");
+    assert_eq!(purged["available"], 0);
+    assert_eq!(purged["acked"], 1, "retainAcked keeps it");
     let (status, refused) = suite
         .call(
             Method::POST,
-            "/api/v1/pubsub/subscription/seek",
-            Some(json!({ "subscription": workers, "now": true, "snapshot": "x" })),
+            "/api/v1/pubsub/subscription/purge",
+            Some(json!({ "name": subscription_name("nope") })),
         )
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
-
-    // A snapshot, a seek back to it.
-    let snapshot = format!("projects/{PROJECT}/snapshots/before");
-    let (status, created) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/snapshots",
-            Some(json!({ "name": snapshot, "subscription": workers })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    assert_eq!(created["source"], workers);
-    let (_, snapshots) = suite
-        .call(Method::GET, "/api/v1/pubsub/snapshots", None)
-        .await;
-    assert_eq!(snapshots["total"]["count"], 1);
-    let (status, _) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/subscription/seek",
-            Some(json!({ "subscription": workers, "snapshot": snapshot })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = suite
-        .call(
-            Method::DELETE,
-            "/api/v1/pubsub/snapshot",
-            Some(json!({ "name": snapshot })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
 
     // Schemas: create, commit, roll back, delete a revision, delete.
     let schema = format!("projects/{PROJECT}/schemas/order");
@@ -1447,7 +1417,6 @@ async fn lists_are_pages() {
     // The bounded lists are one page with an exact total.
     for uri in [
         "/api/v1/pubsub/topics",
-        "/api/v1/pubsub/snapshots",
         "/api/v1/pubsub/schemas",
         "/api/v1/pubsub/schedules",
         "/api/v1/pubsub/rejected",

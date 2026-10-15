@@ -2667,10 +2667,18 @@ mod console {
         let mut lister = ConsoleCursor::at(delta.revision);
         publish(&broker, ORDERS, vec![message("r")]);
         broker
-            .create_snapshot("projects/p/snapshots/listed", &worker, BTreeMap::new())
-            .expect("snapshot");
+            .create_schema(
+                "projects/p",
+                "listed-schema",
+                Some(crate::google::pubsub::v1::Schema {
+                    r#type: crate::google::pubsub::v1::schema::Type::Avro as i32,
+                    definition: r#"{"type":"record","name":"Listed","fields":[{"name":"id","type":"string"}]}"#.to_owned(),
+                    ..Default::default()
+                }),
+            )
+            .expect("schema");
         let delta = broker.console_delta(&mut lister, &resources_only);
-        assert_eq!(delta.resources, vec![ResourceKind::Snapshots]);
+        assert_eq!(delta.resources, vec![ResourceKind::Schemas]);
         assert!(delta.topics.is_empty() && delta.subscriptions.is_empty());
 
         // Past the cap the delta says so instead of listing.

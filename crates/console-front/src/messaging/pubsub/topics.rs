@@ -643,9 +643,6 @@ impl TopicWatcher {
             self.keys.add(format!("backlog:{key}"));
             self.keys.add(format!("message:{}", key.id));
         }
-        if delta.resources.contains(&ResourceKind::Snapshots) {
-            self.keys.add("snapshots".to_owned());
-        }
         if let Some(fanouts) = delta.deliveries {
             if fanouts.overflow {
                 self.keys.overflow();

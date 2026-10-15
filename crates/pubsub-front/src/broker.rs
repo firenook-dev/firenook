@@ -575,9 +575,6 @@ struct SnapshotEntry {
     topic_generation: u64,
     unacked: BTreeSet<u64>,
     created: Instant,
-    created_at: SystemTime,
-    /// The subscription it was taken from.
-    source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -663,18 +660,16 @@ struct State {
 pub enum ResourceKind {
     Topics,
     Subscriptions,
-    Snapshots,
     Schemas,
 }
 
 impl ResourceKind {
-    /// `topics`, `subscriptions`, `snapshots` or `schemas`.
+    /// `topics`, `subscriptions` or `schemas`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Topics => "topics",
             Self::Subscriptions => "subscriptions",
-            Self::Snapshots => "snapshots",
             Self::Schemas => "schemas",
         }
     }
@@ -684,7 +679,6 @@ impl ResourceKind {
 struct ResourceStamps {
     topics: u64,
     subscriptions: u64,
-    snapshots: u64,
     schemas: u64,
 }
 
@@ -2066,14 +2060,11 @@ impl Broker {
                 topic_generation: generation,
                 unacked,
                 created: Instant::now(),
-                created_at: now,
-                source: subscription.to_owned(),
             },
         );
         if let Some(generation) = state.generations.get_mut(&generation) {
             generation.snapshots += 1;
         }
-        state.touch(ResourceKind::Snapshots);
         self.finish(state, false);
         Ok(snapshot)
     }
@@ -2124,7 +2115,6 @@ impl Broker {
             return Err(PubsubError::not_found("Snapshot does not exist"));
         };
         state.snapshot_removed(snapshot.topic_generation);
-        state.touch(ResourceKind::Snapshots);
         self.finish(state, false);
         Ok(())
     }
@@ -2463,7 +2453,6 @@ impl Broker {
         for kind in [
             ResourceKind::Topics,
             ResourceKind::Subscriptions,
-            ResourceKind::Snapshots,
             ResourceKind::Schemas,
         ] {
             state.touch(kind);
@@ -2722,7 +2711,6 @@ impl State {
         let stamp = match kind {
             ResourceKind::Topics => &mut self.resources.topics,
             ResourceKind::Subscriptions => &mut self.resources.subscriptions,
-            ResourceKind::Snapshots => &mut self.resources.snapshots,
             ResourceKind::Schemas => &mut self.resources.schemas,
         };
         *stamp = self.revision;

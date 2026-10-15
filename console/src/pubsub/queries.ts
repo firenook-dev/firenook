@@ -12,8 +12,8 @@
 //   const query = useInfiniteQuery(list.options)
 //   const rows = useCursorRows(query, { ...list, q })
 //
-// and live keys go to `rows.applyKeys`. The bounded lists (topics,
-// snapshots, schemas, schedules, refusals) are one page holding every item.
+// and live keys go to `rows.applyKeys`. The bounded lists (topics, schemas,
+// schedules, refusals) are one page holding every item.
 
 import { queryOptions } from '@tanstack/react-query'
 import type { PubsubBacklogState } from '@/api/generated/messaging/PubsubBacklogState'
@@ -42,7 +42,6 @@ import {
   getSchema,
   getSchemas,
   getSetup,
-  getSnapshots,
   getSubscription,
   getTopic,
   getTopicIndex,
@@ -94,7 +93,6 @@ export const pubsubKeys = {
   /** A topic's delivery counts by outcome, over every delivery kept (one function's, or all). */
   deliveryCounts: (project: string, topic: string, functionId?: string) =>
     ['pubsub', project, 'deliveries', topic, functionId ?? '', 'counts'] as const,
-  snapshots: (project: string) => ['pubsub', project, 'snapshots'] as const,
   schemas: (project: string) => ['pubsub', project, 'schemas'] as const,
   /** Every schema detail of the project (a prefix). */
   schemaDetails: (project: string) => ['pubsub', project, 'schema'] as const,
@@ -168,13 +166,6 @@ export const rejectedQuery = (project: string) =>
   queryOptions({
     queryKey: pubsubKeys.rejected(project),
     queryFn: ({ signal }) => getRejected(project, signal),
-    enabled: project !== '',
-  })
-
-export const snapshotsQuery = (project: string) =>
-  queryOptions({
-    queryKey: pubsubKeys.snapshots(project),
-    queryFn: ({ signal }) => getSnapshots(project, signal),
     enabled: project !== '',
   })
 

@@ -570,8 +570,8 @@ export function BacklogView({
         }
         consequences={[
           config.retainAcked
-            ? 'The subscription keeps acknowledged messages, so a replay brings them back.'
-            : 'The subscription does not keep acknowledged messages: only a snapshot taken before brings them back.',
+            ? 'The subscription keeps acknowledged messages: they stay in its backlog, listed as acked.'
+            : 'The subscription does not keep acknowledged messages, so they do not come back.',
           'A subscriber holding one of their leases gets an error or a duplicate when it acks.',
         ]}
         {...(jobId ? { jobId } : {})}

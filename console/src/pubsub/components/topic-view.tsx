@@ -1,11 +1,11 @@
 // One topic: row two is its tabs — Messages, Subscriptions, Deliveries,
-// Snapshots, Settings — with how much it publishes at the right end (since
+// Settings — with how much it publishes at the right end (since
 // start, the last minute's rate, and the bars, aged on the shared
 // one-second clock so a topic that went quiet decays to zero by itself);
 // below, the tab.
 
 import { Button, Tabs } from '@cloudflare/kumo'
-import { BroadcastIcon, CameraIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
+import { BroadcastIcon, PaperPlaneTiltIcon, PlusIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError } from '@/api/client'
 import type { PubsubFunctionMark } from '@/api/generated/messaging/PubsubFunctionMark'
@@ -17,30 +17,28 @@ import { formatNumber } from '@/lib/format'
 import type { SubscriptionStatus } from '@/lib/live/channel'
 import { useThroughput } from '../live'
 import { shortName } from '../names'
-import { snapshotsQuery, topicQuery } from '../queries'
+import { topicQuery } from '../queries'
 import { Composer } from './composer'
-import { CreateSnapshotDialog } from './create-snapshot-dialog'
 import { DeliveriesView } from './deliveries-table'
 import { JobStrip } from './job-strip'
 import type { MessageTab } from './message-inspector'
 import { type MessagesSearch, MessagesView } from './message-table'
-import { SnapshotsTable, topicSnapshots } from './snapshots-table'
 import { SubscriptionsTable, subscriptionRows } from './subscriptions-table'
 import type { SubscriptionViewName } from './subscription-view'
 import { ThroughputBars, useLastMinute } from './throughput-bars'
 import { TopicSettings } from './topic-settings'
 
-export type TopicViewName = 'messages' | 'subscriptions' | 'deliveries' | 'snapshots' | 'settings'
+export type TopicViewName = 'messages' | 'subscriptions' | 'deliveries' | 'settings'
 
 export interface TopicSearch extends MessagesSearch {
   /** A topic's view, or a subscription's (the page's one parameter for both). */
   view?: TopicViewName | SubscriptionViewName | undefined
   tab?: MessageTab | undefined
   /** `message` opens the composer in the inspector's place. */
-  new?: 'topic' | 'subscription' | 'message' | 'snapshot' | undefined
+  new?: 'topic' | 'subscription' | 'message' | undefined
   /** With new=message: the message that fills the composer. */
   prefill?: string | undefined
-  dialog?: 'replay' | 'setup' | 'export' | undefined
+  dialog?: 'setup' | 'export' | undefined
   /** Deliveries: one function's, by its id. */
   function?: string | undefined
   /** Deliveries: one outcome's. */
@@ -52,7 +50,6 @@ export const TOPIC_VIEWS: readonly TopicViewName[] = [
   'messages',
   'subscriptions',
   'deliveries',
-  'snapshots',
   'settings',
 ]
 
@@ -112,7 +109,6 @@ export function TopicView({
   onCreateSubscription,
   onCreateTopic,
   onLiveStatus,
-  onReplay,
   onDeleted,
 }: {
   project: string
@@ -125,12 +121,9 @@ export function TopicView({
   onCreateSubscription: () => void
   onCreateTopic: (id: string) => void
   onLiveStatus: (status: SubscriptionStatus) => void
-  /** Opens the replay of a subscription, with a snapshot chosen. */
-  onReplay: (subscription: string, snapshot: string) => void
   onDeleted: () => void
 }) {
   const detail = useQuery(topicQuery(project, topic))
-  const snapshots = useQuery(snapshotsQuery(project))
   const topicId = shortName(topic)
   const view = topicView(search.view)
   const missing = detail.error instanceof ApiError && detail.error.code === 'not-found'
@@ -157,11 +150,6 @@ export function TopicView({
     update({ new: 'message', prefill: id, message: undefined, tab: undefined })
   const openComposer = () =>
     update({ new: 'message', prefill: undefined, message: undefined, tab: undefined })
-  const snapshotCount = topicSnapshots(snapshots.data?.items, topic).length
-  // A snapshot is of a subscription the console tracks; the functions' own are drained.
-  const snapshotSources = (detail.data?.subscriptions ?? [])
-    .filter((item) => item.summary.managed !== 'functions')
-    .map((item) => item.summary.name)
   return (
     <>
       <ToolbarRow variant="line" testId="pubsub-topic-tabs">
@@ -192,34 +180,10 @@ export function TopicView({
               ),
             },
             { value: 'deliveries', label: 'Deliveries' },
-            {
-              value: 'snapshots',
-              label: (
-                <span>
-                  Snapshots{' '}
-                  <span className="font-mono text-[11px] text-kumo-subtle">
-                    {formatNumber(snapshotCount)}
-                  </span>
-                </span>
-              ),
-            },
             { value: 'settings', label: 'Settings' },
           ]}
         />
-        {view === 'snapshots' ? (
-          <span className="ml-auto flex shrink-0 items-center">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<CameraIcon />}
-              disabled={snapshotSources.length === 0}
-              onClick={() => update({ new: 'snapshot' })}
-              data-testid="pubsub-new-snapshot"
-            >
-              New snapshot
-            </Button>
-          </span>
-        ) : view === 'subscriptions' ? (
+        {view === 'subscriptions' ? (
           <span className="ml-auto flex shrink-0 items-center">
             <Button
               variant="secondary"
@@ -306,24 +270,9 @@ export function TopicView({
           onOpen={onOpenSubscription}
           onCreate={onCreateSubscription}
         />
-      ) : view === 'snapshots' ? (
-        <SnapshotsTable
-          project={project}
-          topic={topic}
-          onCreate={() => update({ new: 'snapshot' })}
-          onReplay={onReplay}
-        />
       ) : detail.data ? (
         <TopicSettings key={topic} project={project} detail={detail.data} onDeleted={onDeleted} />
       ) : null}
-      <CreateSnapshotDialog
-        open={search.new === 'snapshot'}
-        project={project}
-        subscriptions={snapshotSources}
-        onOpenChange={(open) => {
-          if (!open) update({ new: undefined }, { replace: true })
-        }}
-      />
     </>
   )
 }

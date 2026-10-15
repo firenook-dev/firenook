@@ -28,14 +28,14 @@ export const pubsub: ConsoleSection = {
   area: 'messaging',
   icon: BroadcastIcon,
   summary:
-    'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them, pull, replay and snapshots, Avro schemas with revisions, and the scheduled functions with run now and pause.',
+    'Topics with their subscriptions and the functions they trigger, every message with who received it, a composer that publishes JSON, text or bytes with attributes, backlogs you can read without taking them and purge, Avro schemas with revisions, and the scheduled functions with run now and pause.',
   pages: [
     {
       to: '/pubsub',
       label: 'Topics',
       exact: true,
       badges: ['pubsub.rejected', 'pubsub.dead-lettered'],
-      keywords: 'subscriptions messages publish pull backlog push dead letters snapshots',
+      keywords: 'subscriptions messages publish backlog purge push dead letters',
     },
     { to: '/pubsub/schemas', label: 'Schemas', keywords: 'avro revisions' },
     { to: '/pubsub/schedules', label: 'Schedules', keywords: 'cron onSchedule scheduler' },

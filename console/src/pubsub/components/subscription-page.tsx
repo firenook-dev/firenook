@@ -1,7 +1,6 @@
 // A subscription in view: its tabs, each with its body and row two's end —
 // Backlog (read without leasing, with the state switch), Push (the
-// attempts, live) for a push subscription, Dead letters with a policy — and
-// the snapshot dialog it opens. The Push feed's
+// attempts, live) for a push subscription, Dead letters with a policy. The Push feed's
 // store lives here, so the pause button at row two's end and the feed below
 // read the same rows.
 
@@ -18,7 +17,6 @@ import { usePushFeed } from '../live'
 import { shortName } from '../names'
 import { subscriptionQuery } from '../queries'
 import { BacklogSwitch, BacklogView } from './backlog-table'
-import { CreateSnapshotDialog } from './create-snapshot-dialog'
 import { DeadLetters } from './dead-letters'
 import { MessageInspector } from './message-inspector'
 import { PushEnd, PushFeed } from './push-feed'
@@ -216,39 +214,28 @@ export function SubscriptionPage({
     : {}
 
   return (
-    <>
-      <SubscriptionView
-        key={subscription}
-        project={project}
-        subscription={subscription}
-        topic={topic}
-        topics={topics}
-        view={search.view}
-        onView={(next) =>
-          update({
-            view: next === 'backlog' ? undefined : next,
-            message: undefined,
-            tab: undefined,
-            state: undefined,
-            paused: undefined,
-            q: undefined,
-          })
-        }
-        onOpenTopic={onOpenTopic}
-        onDeleted={onDeleted}
-        tabs={TABS}
-        body={content.body}
-        end={content.end}
-      />
-      <CreateSnapshotDialog
-        open={search.new === 'snapshot'}
-        project={project}
-        subscriptions={[subscription]}
-        initialSubscription={subscription}
-        onOpenChange={(open) => {
-          if (!open) update({ new: undefined }, { replace: true })
-        }}
-      />
-    </>
+    <SubscriptionView
+      key={subscription}
+      project={project}
+      subscription={subscription}
+      topic={topic}
+      topics={topics}
+      view={search.view}
+      onView={(next) =>
+        update({
+          view: next === 'backlog' ? undefined : next,
+          message: undefined,
+          tab: undefined,
+          state: undefined,
+          paused: undefined,
+          q: undefined,
+        })
+      }
+      onOpenTopic={onOpenTopic}
+      onDeleted={onDeleted}
+      tabs={TABS}
+      body={content.body}
+      end={content.end}
+    />
   )
 }

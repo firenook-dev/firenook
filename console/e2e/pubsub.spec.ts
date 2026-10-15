@@ -798,10 +798,12 @@ test('J-PS-08 a connected subscriber is said in the tree', async ({ page, engine
   }
 })
 
-test('J-PS-10 replay: purge, back to a time, and back to a snapshot', async ({ page, engine }) => {
+test('J-PS-10 purge: what waits is acknowledged, and kept when the subscription keeps it', async ({
+  page,
+  engine,
+}) => {
   const topic = uniqueId('ps10')
   const subscription = `${topic}-sub`
-  const snapshot = `${topic}-before`
   try {
     await createTopic(engine, topic)
     await createSubscription(engine, subscription, topic, { retainAcked: true })
@@ -816,52 +818,21 @@ test('J-PS-10 replay: purge, back to a time, and back to a snapshot', async ({ p
     const available = rows.filter({ hasText: 'available' })
     const acked = rows.filter({ hasText: 'acked (retained)' })
     await expect(available).toHaveCount(3)
-    const purge = async () => {
-      await page.getByTestId('pubsub-replay').click()
-      await page.getByRole('radio', { name: /^Purge/ }).click()
-      await expect(page.getByTestId('replay-sentence')).toHaveText(
-        'The 3 messages waiting now are acknowledged; messages published from now on arrive as usual.',
-      )
-      await page.getByTestId('replay-submit').click()
-      await page.getByTestId('replay-purge-confirm-confirm').click()
-      await expect(acked).toHaveCount(3)
-      await expect(available).toHaveCount(0)
-      expect((await countersOf(engine, subscription)).backlog).toBe(0)
-    }
-    await purge()
-
-    // Kept acknowledged, they come back from a minute ago.
-    await expect(page.getByTestId('replay')).toHaveCount(0)
-    await page.keyboard.press('r')
-    await expect(page.getByTestId('replay-sentence')).toContainText(
-      'acknowledged ones too, because this subscription keeps acknowledged messages',
+    await page.getByTestId('pubsub-purge').click()
+    const confirm = page.getByTestId('pubsub-purge-confirm')
+    await expect(confirm).toContainText(
+      'The 3 messages waiting now are acknowledged, as if a subscriber had acked them; messages published from now on arrive as usual.',
     )
-    await page.getByTestId('replay-back-1min').click()
-    await page.getByTestId('replay-submit').click()
-    await expect(available).toHaveCount(3)
-    await expect(acked).toHaveCount(0)
-
-    // A snapshot of the three, a purge, and back to the snapshot.
-    await page.getByTestId('pubsub-new-menu').click()
-    await page.getByTestId('pubsub-new-snapshot-item').click()
-    await page.getByTestId('create-snapshot-id').fill(snapshot)
-    await page.getByTestId('create-snapshot-submit').click()
-    await expect(page.getByTestId('create-snapshot')).toHaveCount(0)
-    await purge()
-    await page.getByTestId('pubsub-replay').click()
-    await page.getByRole('radio', { name: 'To a snapshot' }).click()
-    await page.getByRole('combobox', { name: 'Snapshot' }).click()
-    await page.getByRole('option', { name: snapshot }).click()
-    await expect(page.getByTestId('replay-sentence')).toContainText(
-      'the 3 messages it recorded as waiting',
-    )
-    await page.getByTestId('replay-submit').click()
-    await expect(available).toHaveCount(3)
-    expect((await countersOf(engine, subscription)).backlog).toBe(3)
+    await expect(confirm).toContainText('they stay in its backlog, listed as acked')
+    await page.getByTestId('pubsub-purge-confirm-confirm').click()
+    await expect(confirm).toHaveCount(0)
+    await expect(acked).toHaveCount(3)
+    await expect(available).toHaveCount(0)
+    expect((await countersOf(engine, subscription)).backlog).toBe(0)
+    // What is published after arrives as usual.
+    await publishOverPort(engine, topic, [{ data: { n: 4 } }])
+    await expect(available).toHaveCount(1)
   } finally {
-    await consoleCall(engine, 'DELETE', '/pubsub/snapshot', {
-      name: `projects/${engine.project}/snapshots/${snapshot}`,
-    }).catch(() => undefined)
     await deleteTopic(engine, topic)
   }
 })

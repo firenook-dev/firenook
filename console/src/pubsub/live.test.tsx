@@ -167,15 +167,21 @@ describe('counters frames on the topics index (U-06)', () => {
 })
 
 describe('stale keys (U-06)', () => {
-  it('sort backlog rows, messages and snapshots apart', () => {
-    expect(
-      live.splitStaleKeys(['backlog:1.4.4', 'message:12', 'snapshots', 'backlog:0.9.3', 'other']),
-    ).toEqual({ backlog: ['1.4.4', '0.9.3'], messages: ['12'], snapshots: true })
+  it('sort backlog rows and messages apart', () => {
+    expect(live.splitStaleKeys(['backlog:1.4.4', 'message:12', 'backlog:0.9.3', 'other'])).toEqual({
+      backlog: ['1.4.4', '0.9.3'],
+      messages: ['12'],
+    })
   })
 
   it('name the lists each resource kind makes stale', () => {
-    const keys = live.resourceKeys(PROJECT, ['snapshots']).map((key) => key.join('/'))
-    expect(keys).toEqual(['pubsub/demo-console/snapshots', 'pubsub/demo-console/topic'])
+    const keys = live.resourceKeys(PROJECT, ['schemas']).map((key) => key.join('/'))
+    expect(keys).toEqual([
+      'pubsub/demo-console/topics',
+      'pubsub/demo-console/schemas',
+      'pubsub/demo-console/schema',
+      'pubsub/demo-console/topic',
+    ])
   })
 })
 

@@ -13,8 +13,8 @@ use firenook_functions_runtime::monitor::{
 };
 use firenook_pubsub_front::broker::inspect::{
     BacklogRow, BacklogState, HistoryRow, MessageAtSubscription, MessageView, PayloadEncoding,
-    PayloadPreview, SchemaDetail, SchemaSummary, SnapshotView, SubscriptionCountersView,
-    SubscriptionSummary, SubscriptionView, TopicCounters, TopicSummary, TopicView,
+    PayloadPreview, SchemaDetail, SchemaSummary, SubscriptionCountersView, SubscriptionSummary,
+    SubscriptionView, TopicCounters, TopicSummary, TopicView,
 };
 use firenook_pubsub_front::broker::{Fanout, FanoutSkip, FanoutTarget, MessageMark, StoredMessage};
 use firenook_pubsub_front::{
@@ -31,9 +31,9 @@ use super::types::{
     PubsubMessageSchema, PubsubMessageState, PubsubMostBehind, PubsubPayloadEncoding,
     PubsubPayloadPreview, PubsubPushStreak, PubsubRejected, PubsubRetry, PubsubSchedule,
     PubsubScheduleRun, PubsubSchemaDetail, PubsubSchemaRevision, PubsubSchemaSummary,
-    PubsubSchemaUse, PubsubSnapshot, PubsubSubscription, PubsubSubscriptionCounters,
-    PubsubSubscriptionSummary, PubsubTargetKind, PubsubTopicCounters, PubsubTopicDetail,
-    PubsubTopicKind, PubsubTopicSchema, PubsubTopicSummary,
+    PubsubSchemaUse, PubsubSubscription, PubsubSubscriptionCounters, PubsubSubscriptionSummary,
+    PubsubTargetKind, PubsubTopicCounters, PubsubTopicDetail, PubsubTopicKind, PubsubTopicSchema,
+    PubsubTopicSummary,
 };
 use crate::entity::EntityRef;
 use crate::messaging::shared::{millis, second_window, time, time_of, u32_of};
@@ -228,20 +228,6 @@ pub(crate) fn subscription(
     }
 }
 
-pub(crate) fn snapshot(view: &SnapshotView) -> PubsubSnapshot {
-    PubsubSnapshot {
-        name: view.name.clone(),
-        project: view.project.clone(),
-        id: view.id.clone(),
-        topic: view.topic.clone(),
-        topic_deleted: view.topic_deleted,
-        source: view.source.clone(),
-        created_at: time(view.created_at),
-        expire_time: time(view.expire_time),
-        unacked: view.unacked,
-    }
-}
-
 pub(crate) fn topic_detail(
     view: &TopicView,
     targets: &Targets,
@@ -276,7 +262,6 @@ pub(crate) fn topic_detail(
             .map(|view| subscription(view, managed_by))
             .collect(),
         dead_letter_for: view.dead_letter_for.clone(),
-        snapshots: view.snapshots.iter().map(snapshot).collect(),
         ordering_keys: view.keys.ordering_keys.clone(),
         attribute_keys: view.keys.attribute_keys.clone(),
     }

@@ -19,7 +19,7 @@
 
 import { splitKey } from '@/lib/sections/keys'
 
-export type ResourceCollection = 'topics' | 'subscriptions' | 'schemas' | 'snapshots'
+export type ResourceCollection = 'topics' | 'subscriptions' | 'schemas'
 
 /** `projects/<project>/<collection>/<id>` split, or null when `name` is not one. */
 export function splitResourceName(

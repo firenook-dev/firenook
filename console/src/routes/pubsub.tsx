@@ -16,7 +16,7 @@ const text = z
   .transform((value) => String(value))
   .optional()
 
-const topicView = z.enum(['messages', 'subscriptions', 'deliveries', 'snapshots', 'settings'])
+const topicView = z.enum(['messages', 'subscriptions', 'deliveries', 'settings'])
 const subscriptionView = z.enum(['backlog', 'push', 'dead-letters', 'settings'])
 
 const searchSchema = z.object({
@@ -48,9 +48,9 @@ const searchSchema = z.object({
   // The Push feed is paused (absent: following).
   paused: zFlag,
   // A create dialog or the composer: `message` opens the composer.
-  new: z.enum(['topic', 'subscription', 'message', 'snapshot']).optional(),
+  new: z.enum(['topic', 'subscription', 'message']).optional(),
   // Any other dialog a link can open.
-  dialog: z.enum(['replay', 'setup', 'export']).optional(),
+  dialog: z.enum(['setup', 'export']).optional(),
   // With new=topic: the id to fill in. With new=message: the message id whose
   // data, attributes and key fill the composer.
   prefill: text,

@@ -24,7 +24,7 @@ function isIdChar(char: string): boolean {
 }
 
 /**
- * What is wrong with `id` as a topic, subscription, snapshot or schema id,
+ * What is wrong with `id` as a topic, subscription or schema id,
  * or undefined when the engine would take it. One sentence, the first
  * problem only, so the line under the field stays one line.
  */

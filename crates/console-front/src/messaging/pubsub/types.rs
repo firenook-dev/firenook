@@ -257,7 +257,6 @@ pub(crate) struct PubsubTopicDetail {
     pub subscriptions: Vec<PubsubSubscription>,
     /// Subscriptions that dead-letter into this topic.
     pub dead_letter_for: Vec<String>,
-    pub snapshots: Vec<PubsubSnapshot>,
     /// Ordering keys seen on this topic, kept as messages arrive (newest 50).
     pub ordering_keys: Vec<String>,
     /// Attribute keys seen on this topic, kept as messages arrive (first 100).
@@ -984,31 +983,14 @@ pub(crate) struct PubsubMessageActionBody {
     pub message_id: String,
 }
 
-/// `POST /pubsub/subscription/seek`: exactly one of `time`, `snapshot`,
-/// `now`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSeekBody {
-    pub subscription: String,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub time: Option<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub snapshot: Option<String>,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub now: bool,
-}
-
-/// What a seek left in the subscription.
+/// What `POST /pubsub/subscription/purge` left in the subscription.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSeekResult {
+pub(crate) struct PubsubPurged {
     #[ts(type = "number")]
     pub available: u64,
+    /// Acknowledged messages it keeps (`retainAckedMessages`).
     #[ts(type = "number")]
     pub acked: u64,
 }
@@ -1020,32 +1002,6 @@ pub(crate) struct PubsubSeekResult {
 pub(crate) struct PubsubBacklogJobBody {
     pub subscription: String,
     pub target: BulkTarget,
-}
-
-/// A snapshot.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSnapshot {
-    pub name: String,
-    pub project: String,
-    pub id: String,
-    pub topic: String,
-    pub topic_deleted: bool,
-    /// The subscription it was taken from (console-recorded).
-    pub source: Option<String>,
-    pub created_at: String,
-    pub expire_time: String,
-    pub unacked: u32,
-}
-
-/// `POST /pubsub/snapshots`.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubCreateSnapshotBody {
-    pub name: String,
-    pub subscription: String,
 }
 
 // ------------------------------------------------------------ schemas

@@ -146,7 +146,6 @@ pub struct TopicView {
     pub subscriptions: Vec<SubscriptionView>,
     /// Subscriptions that dead-letter into this topic.
     pub dead_letter_for: Vec<String>,
-    pub snapshots: Vec<SnapshotView>,
     pub keys: SeenKeys,
 }
 
@@ -171,21 +170,6 @@ pub struct SubscriptionView {
     pub created_at: SystemTime,
     /// The dead-letter topic's kept messages that came from this subscription.
     pub dead_lettered_in_history: u32,
-}
-
-/// A snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SnapshotView {
-    pub name: String,
-    pub project: String,
-    pub id: String,
-    pub topic: String,
-    pub topic_deleted: bool,
-    /// The subscription it was taken from.
-    pub source: Option<String>,
-    pub created_at: SystemTime,
-    pub expire_time: SystemTime,
-    pub unacked: u32,
 }
 
 /// A schema as the schemas list shows it.
@@ -771,12 +755,6 @@ impl Broker {
                 })
                 .map(|(member, _)| member.clone())
                 .collect();
-            let snapshots = state
-                .snapshots
-                .iter()
-                .filter(|(_, snapshot)| snapshot.topic_generation == entry.generation)
-                .map(|(snapshot, found)| snapshot_view(&state, snapshot, found))
-                .collect();
             let (capacity_messages, capacity_bytes) = entry.capacity(&state.limits);
             let schema = entry.topic.schema_settings.as_ref().map(|settings| {
                 let bound = entry.schema.as_ref();
@@ -811,7 +789,6 @@ impl Broker {
                 throughput: entry.throughput.window(),
                 subscriptions,
                 dead_letter_for,
-                snapshots,
                 keys: SeenKeys {
                     ordering_keys: entry.ordering_keys.iter().rev().cloned().collect(),
                     attribute_keys: entry.attribute_keys.iter().cloned().collect(),
@@ -1224,19 +1201,6 @@ impl Broker {
                 (BacklogKey::of(key.id, tracked) == *key)
                     .then(|| backlog_row(entry, *key, tracked, None, now))
             })
-            .collect()
-    }
-
-    /// The snapshots of `project`.
-    #[must_use]
-    pub fn snapshots_view(&self, project: &str) -> Vec<SnapshotView> {
-        let state = lock(&self.inner.state);
-        let prefix = format!("projects/{project}/snapshots/");
-        state
-            .snapshots
-            .iter()
-            .filter(|(name, _)| name.starts_with(&prefix))
-            .map(|(name, snapshot)| snapshot_view(&state, name, snapshot))
             .collect()
     }
 
@@ -1682,7 +1646,6 @@ fn resources_since(state: &State, since: u64) -> Vec<ResourceKind> {
     [
         (ResourceKind::Topics, resources.topics),
         (ResourceKind::Subscriptions, resources.subscriptions),
-        (ResourceKind::Snapshots, resources.snapshots),
         (ResourceKind::Schemas, resources.schemas),
     ]
     .into_iter()
@@ -1931,33 +1894,6 @@ fn subscription_view(
         detached: entry.topic_deleted || subscription.detached,
         created_at: entry.created_at,
         dead_lettered_in_history: 0,
-    }
-}
-
-fn snapshot_view(state: &State, name: &str, snapshot: &super::SnapshotEntry) -> SnapshotView {
-    let (project, id) = split_name("snapshots", name);
-    let expire = snapshot
-        .snapshot
-        .expire_time
-        .as_ref()
-        .map_or(snapshot.created_at, |time| {
-            std::time::UNIX_EPOCH
-                + Duration::from_secs(u64::try_from(time.seconds).unwrap_or(0))
-                + Duration::from_nanos(u64::try_from(time.nanos).unwrap_or(0))
-        });
-    SnapshotView {
-        name: name.to_owned(),
-        project,
-        id,
-        topic: snapshot.snapshot.topic.clone(),
-        topic_deleted: !state
-            .topics
-            .values()
-            .any(|topic| topic.generation == snapshot.topic_generation),
-        source: Some(snapshot.source.clone()),
-        created_at: snapshot.created_at,
-        expire_time: expire,
-        unacked: u32::try_from(snapshot.unacked.len()).unwrap_or(u32::MAX),
     }
 }
 
