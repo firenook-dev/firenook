@@ -2042,35 +2042,65 @@ mod console {
             "the evicted one left the count"
         );
 
-        // 33 bodies of 1 MiB: the history keeps at most 32 MiB.
-        let heavy = client_queue(
-            &runtime,
-            "heavy",
-            &json!({"rateLimits": {"maxDispatchesPerSecond": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
-        )
-        .await;
+        // Five bodies of 1 MiB: a queue's history keeps at most 4 MiB.
         let body = format!("\"{}\"", "x".repeat(1024 * 1024));
-        for index in 0..33 {
-            runtime
-                .enqueue(
-                    &heavy,
-                    record(&format!("h{index}"), "http://127.0.0.1:1/x", &body),
+        let heavy = |name: String| {
+            let runtime = &runtime;
+            let body = &body;
+            async move {
+                let key = client_queue(
+                    runtime,
+                    &name,
+                    &json!({"rateLimits": {"maxDispatchesPerSecond": 0}, "defaultUri": "http://127.0.0.1:1/x"}),
                 )
-                .unwrap();
-        }
-        runtime.purge(&heavy, false).unwrap();
-        let (bytes, kept, total) = runtime.with_state(|state| {
-            let console = &state.console[&heavy];
-            (
-                console.history_bytes,
-                console.history.len(),
-                state.history_bytes,
-            )
+                .await;
+                for index in 0..5 {
+                    runtime
+                        .enqueue(
+                            &key,
+                            record(&format!("{name}-{index}"), "http://127.0.0.1:1/x", body),
+                        )
+                        .unwrap();
+                }
+                runtime.purge(&key, false).unwrap();
+                key
+            }
+        };
+        let first = heavy("heavy0".to_owned()).await;
+        let (bytes, kept) = runtime.with_state(|state| {
+            let console = &state.console[&first];
+            (console.history_bytes, console.history.len())
         });
         assert!(bytes <= crate::runtime::HISTORY_BYTES);
-        assert_eq!(kept, 31, "33 MiB of bodies trimmed under 32 MiB");
-        assert!(total >= bytes);
-        assert_eq!(outcomes(&runtime, &heavy).purged, 31);
+        assert_eq!(kept, 3, "5 MiB of bodies trimmed under 4 MiB");
+        assert_eq!(outcomes(&runtime, &first).purged, 3);
+        assert_eq!(history(&runtime, &first)[0].finished.task.name, "heavy0-2");
+
+        // Eleven such queues hold about 33 MiB: every history together keeps
+        // at most 32 MiB, the oldest of the largest going first.
+        let mut keys = vec![first];
+        for index in 1..11 {
+            keys.push(heavy(format!("heavy{index}")).await);
+        }
+        let (total, each) = runtime.with_state(|state| {
+            let each: Vec<usize> = keys
+                .iter()
+                .map(|key| state.console[key].history_bytes)
+                .collect();
+            (state.history_bytes, each)
+        });
+        assert!(total <= crate::runtime::ALL_HISTORY_BYTES, "{total}");
+        assert!(
+            each.iter()
+                .all(|bytes| *bytes <= crate::runtime::HISTORY_BYTES)
+        );
+        assert!(
+            each.iter().any(|bytes| *bytes < 3 * 1024 * 1024),
+            "a queue gave up part of its history: {each:?}"
+        );
+        for key in &keys {
+            outcomes(&runtime, key);
+        }
         runtime.shutdown().await;
     }
 

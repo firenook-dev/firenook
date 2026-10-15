@@ -116,10 +116,12 @@ const SNIPPET_BYTES: usize = 1_024;
 const SNIPPET_WAIT: Duration = Duration::from_millis(500);
 /// Finished tasks a queue's history keeps.
 pub const HISTORY_CAPACITY: usize = 1_000;
-/// The bytes a queue's history keeps.
-pub const HISTORY_BYTES: usize = 32 * 1024 * 1024;
-/// The bytes every queue's history keeps together.
-pub const ALL_HISTORY_BYTES: usize = 256 * 1024 * 1024;
+/// The bytes a queue's history keeps: a thousand ordinary tasks fit with
+/// room, a run of large bodies is cut to its newest.
+pub const HISTORY_BYTES: usize = 4 * 1024 * 1024;
+/// The bytes every queue's history keeps together, taken first from the
+/// queue holding the most.
+pub const ALL_HISTORY_BYTES: usize = 32 * 1024 * 1024;
 /// Changed rows a queue remembers for live views.
 const CHANGE_RING: usize = 1_000;
 /// Refused requests kept.

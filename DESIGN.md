@@ -720,7 +720,7 @@ disagree with what happens.
 | Recent fanouts per topic, changed keys per scope | 1,000 each |
 | Schedule runs | the first and the nineteen latest per schedule |
 | Refused requests (Pub/Sub, Tasks) | 200 each, coalesced with a count |
-| Tasks history | 1,000 tasks and 32 MiB per queue, 256 MiB in all |
+| Tasks history | 1,000 tasks and 4 MiB per queue, 32 MiB in all (the largest queue's oldest go first) |
 | Task attempt log | the first and the nine latest, 1 KiB of response each |
 | Tasks statistics windows | five minutes, trimmed each second |
 
