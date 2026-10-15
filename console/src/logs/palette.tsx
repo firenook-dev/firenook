@@ -1,18 +1,18 @@
 // What Logs adds to ⌘K while the page is on screen: level views, problems,
-// engine internals, following, clearing, windows, downloads, how rows are
-// drawn, saved filters, and a "Filter by" row for every function and
+// engine internals, following, clearing, windows, downloads, a link to the
+// view, how rows are drawn, and a "Filter by" row for every function and
 // service the engine has counted. The cursor row's own menu is offered by
 // `useRowMenuPalette` beside it.
 
 import {
   ArrowsInLineVerticalIcon,
-  BookmarkSimpleIcon,
   BroomIcon,
   ClipboardTextIcon,
   ClockIcon,
   DownloadSimpleIcon,
   EyeIcon,
   FunnelIcon,
+  LinkSimpleIcon,
   PauseIcon,
   PlayIcon,
   TextAlignLeftIcon,
@@ -24,7 +24,6 @@ import type { LogFacets } from '@/api/generated/observe/LogFacets'
 import { filterValueText } from '@/lib/filter'
 import { type ClockFormat, useClockFormat } from '@/lib/format'
 import { type PaletteItem, matchesQuery, usePaletteProviders } from '@/lib/palette'
-import type { SavedFilter } from './prefs'
 
 export interface LogsPaletteActions {
   setQ: (q: string) => void
@@ -36,9 +35,9 @@ export interface LogsPaletteActions {
   downloadNdjson: () => void
   downloadText: () => void
   copyVisible: () => void
+  copyLink: () => void
   setWrap: (wrap: boolean) => void
   setKeep: (keep: boolean) => void
-  applySaved: (filter: SavedFilter) => void
   addTerm: (term: string) => void
 }
 
@@ -50,7 +49,6 @@ export interface LogsPaletteFacts {
   reloaded: boolean
   wrap: boolean
   keep: boolean
-  saved: readonly SavedFilter[]
   facets: LogFacets | undefined
 }
 
@@ -173,6 +171,14 @@ export function useLogsPalette(facts: LogsPaletteFacts, actions: LogsPaletteActi
         run: actions.copyVisible,
       },
       {
+        id: 'logs:copy-link',
+        title: 'Copy link to this view',
+        description: 'The filter and the window, as an address to keep or share',
+        keywords: 'logs link url share bookmark save filter view',
+        icon: icon(LinkSimpleIcon),
+        run: actions.copyLink,
+      },
+      {
         id: 'logs:wrap',
         title: facts.wrap ? 'Wrap lines: off' : 'Wrap lines: on',
         keywords: 'logs wrap long lines',
@@ -198,15 +204,6 @@ export function useLogsPalette(facts: LogsPaletteFacts, actions: LogsPaletteActi
         icon: icon(TextAlignLeftIcon),
         run: () => actions.setKeep(!facts.keep),
       },
-      ...facts.saved.map((filter) => ({
-        id: `logs:saved:${filter.name}`,
-        title: filter.name,
-        breadcrumbs: ['Saved filter'],
-        description: filter.q || 'Every line',
-        keywords: `logs saved filter ${filter.q}`,
-        icon: icon(BookmarkSimpleIcon),
-        run: () => actions.applySaved(filter),
-      })),
       ...(facts.facets?.functions ?? [])
         .filter((count) => count.value !== 'Other')
         .map((count) => ({

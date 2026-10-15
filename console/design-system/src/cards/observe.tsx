@@ -543,13 +543,11 @@ const MENU: LogMenuActions = {
   downloadNdjson: noop,
   downloadText: noop,
   copyVisible: noop,
+  copyLink: noop,
   clearView: noop,
   showCleared: noop,
   setWrap: noop,
   setKeep: noop,
-  applySaved: noop,
-  save: noop,
-  forget: noop,
 }
 const EDGES: EdgeFacts = {
   evicted: false,
@@ -628,13 +626,6 @@ function LogsPageSample() {
               keep={false}
               cleared={false}
               canClear={undefined}
-              hasFilter
-              saved={[
-                {
-                  name: 'Checkout, warn and up',
-                  q: 'function:us-central1-checkout -level:info -level:debug',
-                },
-              ]}
               actions={MENU}
             />
           </ToolbarRow>
