@@ -482,7 +482,7 @@ test('documents are added and deleted from the workbench', async ({ page }) => {
   await put(page.request, 'teams/t_journey/notes/n1', { body: { stringValue: 'beneath' } })
   await page.getByLabel('Select t_journey').click()
   await page.getByTestId('delete-selected').click()
-  await page.getByTestId('confirm-delete').click()
+  await page.getByTestId('delete-dialog-confirm').click()
   await expect(page.getByText('2 documents deleted')).toBeVisible()
   await expect(page.getByTestId('grid-row').filter({ hasText: 't_journey' })).toHaveCount(0)
   const gone = await page.request.get(`${documents()}/teams/t_journey`, { headers: owner })
@@ -3826,7 +3826,7 @@ test('ticked rows turn the query line into their own bar, which reaches every do
   await expect(
     page.getByRole('dialog').filter({ hasText: 'Delete all 130 documents' }),
   ).toBeVisible()
-  await page.getByTestId('confirm-delete').click()
+  await page.getByTestId('delete-dialog-confirm').click()
   await expect(page.getByText('131 documents deleted')).toBeVisible()
   await expect(bar).toHaveCount(0)
   const left = await page.request.get(`${documents()}/bulk/s129`, { headers: owner })
