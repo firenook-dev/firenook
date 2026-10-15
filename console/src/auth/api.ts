@@ -39,6 +39,7 @@ import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import type { AuthTenantCreate } from '@/api/generated/auth/AuthTenantCreate'
 import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import type { AuthTokenInspection } from '@/api/generated/auth/AuthTokenInspection'
+import type { AuthTokenInspectRequest } from '@/api/generated/auth/AuthTokenInspectRequest'
 import type { AuthTokenRequest } from '@/api/generated/auth/AuthTokenRequest'
 import type { AuthUserDetail } from '@/api/generated/auth/AuthUserDetail'
 import type { AuthUsersBatchGet } from '@/api/generated/auth/AuthUsersBatchGet'
@@ -173,10 +174,11 @@ export function inspectToken(
   token: string,
   signal?: AbortSignal,
 ): Promise<AuthTokenInspection> {
+  const body: AuthTokenInspectRequest = { token }
   return apiSend<AuthTokenInspection>(
     'POST',
     withQuery('/auth/token/inspect', scoped(project)),
-    { token },
+    body,
     cancellable(signal),
   )
 }
