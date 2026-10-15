@@ -1427,6 +1427,11 @@ test('the keyboard reaches everything: rows, ticks, Quick Look, the row menu and
   await expect(cursor().getByRole('checkbox')).toBeChecked()
   await page.keyboard.press('Space')
   await expect(cursor().getByRole('checkbox')).not.toBeChecked()
+  // ⌘C copies the cursor row's name cell: its gs:// URL.
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect
+    .poll(() => readClipboard(page))
+    .toBe(`gs://${bucketsOf(engine).default}/${seed.names.events}`)
   // ⇧Space: Quick Look, a link of its own, stepping with the arrows.
   await page.keyboard.press('Shift+Space')
   await expect(page).toHaveURL(/dialog=quick-look/)
@@ -1693,46 +1698,6 @@ test('upload options travel with the files and are remembered; many files are ed
     })
     .toBe(true)
   expect((await objectOf(engine, bucket, 'options/o1.png')).customMetadata.place).toBe('été')
-})
-
-test('a pasted gs:// location of this bucket is copied into the folder on screen', async ({
-  page,
-  engine,
-}) => {
-  const { default: bucket } = bucketsOf(engine)
-  const source = await objectOf(engine, bucket, seed.names.avatar)
-  await openFiles(page, engine, { path: `users/${seed.users.ada}/` })
-  // ⌘C on a row copies its name cell's value: the gs:// URL.
-  await row(page, seed.names.avatar).locator('td[data-column="name"]').click()
-  await page.keyboard.press('Escape')
-  await page.keyboard.press('ControlOrMeta+c')
-  await expect.poll(() => readClipboard(page)).toBe(`gs://${bucket}/${seed.names.avatar}`)
-  const copied = await readClipboard(page)
-
-  await putFile(engine, { bucket, name: 'pasted/readme.txt', size: 4, contentType: 'text/plain' })
-  await openFiles(page, engine, { path: 'pasted/' })
-  await page.locator('body').evaluate((body, text) => {
-    const browser = globalThis as unknown as {
-      DataTransfer: new () => { setData(type: string, value: string): void }
-      ClipboardEvent: new (type: string, init: object) => unknown
-    }
-    const transfer = new browser.DataTransfer()
-    transfer.setData('text/plain', text)
-    body.ownerDocument.dispatchEvent(
-      new browser.ClipboardEvent('paste', { clipboardData: transfer, bubbles: true }) as never,
-    )
-  }, copied)
-  await expect(page.getByText('Copy avatar.png here?')).toBeVisible()
-  const started = page.waitForResponse(
-    (response) =>
-      response.url().endsWith('/storage/objects:copy') && response.request().method() === 'POST',
-  )
-  await page.getByRole('button', { name: 'Copy here' }).click()
-  expect((await started).status()).toBe(202)
-  await expect(row(page, 'pasted/avatar.png')).toBeVisible()
-  const copy = await objectOf(engine, bucket, 'pasted/avatar.png')
-  expect(copy.downloadTokens).toHaveLength(1)
-  expect(source.downloadTokens).not.toContain(copy.downloadTokens[0])
 })
 
 test('links from elsewhere open a file, and a decision on the Rules page', async ({

@@ -1,11 +1,10 @@
 // What a drop, a file picker or a paste brings: files with the path each
 // takes under the folder they land in (a dropped folder keeps its
 // structure), operating-system litter left out (and counted, so the tray
-// can say so), and what a paste means — an image uploads, a Storage
-// location of this project offers a copy here, other text does nothing.
+// can say so), and the image a paste brings, which uploads as a file of
+// its own.
 
 import { pad } from '@/lib/format'
-import { type StorageLocation, parseLocation } from './paths'
 
 /** A file and where it goes under the drop's folder (`photos/2026/a.png`). */
 export interface DroppedFile {
@@ -116,32 +115,9 @@ export function carriesFiles(transfer: DataTransfer | null): boolean {
   return Boolean(transfer && Array.from(transfer.types).includes('Files'))
 }
 
-/** What a paste means on the Files page. */
-export type PasteMeaning =
-  | { kind: 'image'; file: File }
-  | { kind: 'location'; location: StorageLocation }
-  | { kind: 'none' }
-
-export function pasteMeaning(
-  paste: { files: readonly File[]; text: string },
-  context: { buckets: readonly string[]; bucket: string },
-): PasteMeaning {
-  const image = paste.files.find((file) => file.type.startsWith('image/'))
-  if (image) return { kind: 'image', file: image }
-  const text = paste.text.trim()
-  // Only a location that names a bucket this engine knows: a bare word is
-  // somebody's clipboard, not a request to copy anything.
-  if (/^(gs:\/\/|https?:\/\/)/i.test(text)) {
-    const location = parseLocation(text, context)
-    if (
-      location &&
-      context.buckets.includes(location.bucket) &&
-      location.path !== '' &&
-      !location.path.endsWith('/')
-    )
-      return { kind: 'location', location }
-  }
-  return { kind: 'none' }
+/** The image a paste on the Files page brings, if it brings one; text does nothing. */
+export function pastedImage(files: readonly File[]): File | undefined {
+  return files.find((file) => file.type.startsWith('image/'))
 }
 
 /** `pasted-20261012-091504.png`: a pasted image's name, from the moment and its type. */
