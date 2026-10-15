@@ -3236,9 +3236,10 @@ browser. A newly enqueued task opens in the inspector. A real
 `onTaskDispatched` answers 204, and an `HttpsError` arrives in the attempt's
 response snippet, not its error. Live traffic is Configuration's alone (the
 queue list says state, not rates), and the token bucket shows only while
-the rate limit is what holds tasks back (`rateLimiting` in
-`src/tasks/states.ts`, read from the engine's last figures so it does not
-blink); otherwise the rate is said in words.
+the rate limit is what holds tasks back: tasks pending, a slot free, no
+whole token at the engine's last figures (`rateLimiting` in
+`src/tasks/states.ts`, so it does not blink between a refill and the
+dispatch that spends it); otherwise the rate is said in words.
 
 **Names travel whole in query strings**, never as path segments; a queue
 travels to the engine as its opaque key.

@@ -3,7 +3,7 @@
 // function's row), the filter line with a `q` token, an attributes
 // expression and the count, message rows with their delivery marks, the
 // composer, and every mark a row can carry. Cloud Tasks: a queue's row two
-// with its state counts, slots and (rate-limited) token bucket, task rows in each state, the
+// with its state counts and slots, task rows in each state, the
 // re-registration banner, one task's attempts with its retry plan and the
 // emulator's off-by-one said where the figure is, and row two's link to the
 // queue's attempts in Functions › Invocations. Every piece is the console's
@@ -612,8 +612,7 @@ const QUEUE: TasksQueue = testQueue('sendEmail', {
     running: 1,
     backoff: 1,
     slotsInUse: 2,
-    // Under one token with tasks waiting: the rate limit holds them back.
-    tokens: 0.4,
+    tokens: 3.2,
     refilledAt: AGO(0),
     oldestPendingAt: AGO(30),
     history: 46,
@@ -884,7 +883,7 @@ function TasksCard() {
       <Stack>
         <Section
           title="A queue's tasks"
-          note="Row two counts by state and shows the slots, and the token bucket refilling while the rate limit is what holds tasks back; a re-registration says what it dropped; each row says where its task is, the attempt it is on out of the runs the emulator allows, and what the handler last answered."
+          note="Row two counts by state and shows the slots (and the token bucket refilling while the rate limit, not the slots, is what holds tasks back); a re-registration says what it dropped; each row says where its task is, the attempt it is on out of the runs the emulator allows, and what the handler last answered."
         >
           <TasksSample />
         </Section>

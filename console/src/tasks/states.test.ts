@@ -17,10 +17,10 @@ import { NOW, testAttempt, testRow } from './fixtures.test-support'
 
 const at = (ms: number) => new Date(NOW + ms).toISOString()
 
-/** A queue as `rateLimiting` reads it. */
-const queue = (pending: number, tokens: number, paused = false) => ({
+/** A queue as `rateLimiting` reads it: two slots, `busy` of them in use. */
+const queue = (pending: number, tokens: number, paused = false, busy = 0) => ({
   paused,
-  counters: { pending, tokens },
+  counters: { pending, tokens, slots: 2, slotsInUse: busy },
 })
 
 describe('task states (U-16)', () => {
@@ -104,7 +104,7 @@ describe('task states (U-16)', () => {
     )
   })
 
-  it('say the rate limit holds a queue back only while tasks wait on an empty bucket', () => {
+  it('say the rate limit holds a queue back only while tasks wait on an empty bucket, a slot free', () => {
     expect(rateLimiting(queue(3, 0.4))).toBe(true)
     // A full bucket: the slots, not the rate, hold whatever waits.
     expect(rateLimiting(queue(3, 10))).toBe(false)
@@ -112,6 +112,8 @@ describe('task states (U-16)', () => {
     expect(rateLimiting(queue(0, 0))).toBe(false)
     // Paused: the pause holds the tasks, whatever the bucket.
     expect(rateLimiting(queue(3, 0, true))).toBe(false)
+    // Every slot busy: the slots hold them, and a refill sends nothing.
+    expect(rateLimiting(queue(3, 0, false, 2))).toBe(false)
   })
 
   it('give each outcome its word and tone, and say what replaced means', () => {

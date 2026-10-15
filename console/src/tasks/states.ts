@@ -167,17 +167,25 @@ export function executionText(attempt: Pick<TasksAttempt, 'countedExecution' | '
 
 /**
  * Whether the rate limit is what holds the queue back now: tasks wait to be
- * sent and the bucket had no whole token at its last change (a dispatch
- * takes one; it refills once a second by maxDispatchesPerSecond). Read from
- * the engine's last figures, not the clock's refill, so it does not blink
- * between a refill and the dispatch that spends it. A paused queue is held
- * by its pause, not its rate. Only then are the tokens worth showing.
+ * sent, a slot is free for them, and the bucket had no whole token at its
+ * last change (a dispatch takes one; it refills once a second by
+ * maxDispatchesPerSecond). Read from the engine's last figures, not the
+ * clock's refill, so it does not blink between a refill and the dispatch
+ * that spends it: with a slot free, that refill dispatches at once and the
+ * engine sends new figures. Every slot busy, the slots hold the tasks back;
+ * paused, the pause does. Only then are the tokens worth showing.
  */
 export function rateLimiting(queue: {
   paused: boolean
-  counters: Pick<TasksQueueCounters, 'pending' | 'tokens'>
+  counters: Pick<TasksQueueCounters, 'pending' | 'tokens' | 'slots' | 'slotsInUse'>
 }): boolean {
-  return !queue.paused && queue.counters.pending > 0 && queue.counters.tokens < 1
+  const { counters } = queue
+  return (
+    !queue.paused &&
+    counters.pending > 0 &&
+    counters.slotsInUse < counters.slots &&
+    counters.tokens < 1
+  )
 }
 
 /** How a finished task left its queue, as History's chip says it. */

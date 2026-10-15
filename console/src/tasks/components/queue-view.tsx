@@ -225,7 +225,8 @@ export function AttemptsLink({ queue }: { queue: TasksQueue }) {
           className="flex shrink-0 items-center gap-1 text-[13px] whitespace-nowrap text-kumo-link underline-offset-2 hover:underline"
           data-testid="queue-attempts-link"
         >
-          Attempts in Invocations
+          {/* The words give way on a narrow window; the tooltip says them whole. */}
+          Attempts<span className="hidden min-[1400px]:inline"> in Invocations</span>
           <ArrowRightIcon size={12} />
         </Link>
       }
