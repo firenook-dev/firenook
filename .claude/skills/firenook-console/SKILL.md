@@ -666,6 +666,13 @@ stream, loaded by glob). A few behaviours worth knowing:
   `pad` the one zero-padder. A feed row's time cell is `FeedTime`
   (`components/console/feed-time.tsx`: the setting, the other forms on
   hover); a fact's age is `RelativeTime`. Never slice a formatted time.
+- "Connect your app" has one tab list, `CONNECT_TABS` in
+  `lib/connect-tabs.ts` (each tab's `?connect=` value, generator target,
+  label and title; data only, because the Overview's route schema reads
+  it in the first route). `connectSnippet(target, …)` writes one snippet;
+  `connectDialects(status, { services, params? })` in `lib/connect.ts`
+  gives a `CodeBlock` its tabs from that list (an empty section shows
+  `EMPTY_CONNECT`: web, node, python, go).
 
 ### End-to-end
 

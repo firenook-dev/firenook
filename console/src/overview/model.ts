@@ -18,7 +18,7 @@ import { formatBytes, formatCount, formatDuration, formatNumber } from '@/lib/fo
 import { linkTo } from '@/lib/links'
 import { linkToLogs } from '@/lib/sections/logs'
 import { type ConsoleSection, type SectionId, type SectionLink, sectionById } from '@/lib/services'
-import type { ConnectParam } from './search'
+import type { ConnectParam } from '@/lib/connect-tabs'
 
 /** A card's state: the dot and the word beside the section's name. */
 export interface CardHealth {

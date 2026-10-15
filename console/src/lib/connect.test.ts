@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
-import { type ConnectTarget, connectHosts, connectSnippet, defaultConnectHost } from './connect'
+import { connectDialects, connectHosts, connectSnippet, defaultConnectHost } from './connect'
+import { CONNECT_TABS, type ConnectTarget } from './connect-tabs'
 
 const PORTS: Record<string, number> = {
   auth: 9099,
@@ -180,21 +181,22 @@ describe('connection snippets', () => {
   })
 
   it('writes every target without throwing', () => {
-    const targets: ConnectTarget[] = [
-      'web',
-      'flutter',
-      'apple',
-      'android',
-      'admin-node',
-      'python',
-      'go',
-      'java',
-      'env',
-      'firebase-json',
-    ]
+    const targets: ConnectTarget[] = CONNECT_TABS.map((tab) => tab.target)
+    expect(new Set(targets).size).toBe(10)
     for (const target of targets)
       for (const services of [ALL, [], ['firestore']])
         expect(typeof connectSnippet(target, { services, status: status() })).toBe('string')
+  })
+
+  it('draws a CodeBlock’s tabs from the one tab list, named by their connect value', () => {
+    const all = connectDialects(status(), { services: ['firestore'] })
+    expect(all.map((dialect) => dialect.id)).toEqual(CONNECT_TABS.map((tab) => tab.param))
+    const some = connectDialects(status(), { services: ['firestore'], params: ['go', 'web'] })
+    expect(some.map((dialect) => [dialect.id, dialect.label])).toEqual([
+      ['web', 'Web'],
+      ['go', 'Go'],
+    ])
+    expect(some[0]?.code).toBe(connectSnippet('web', { services: ['firestore'], status: status() }))
   })
 })
 

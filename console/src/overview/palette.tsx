@@ -14,8 +14,7 @@ import {
   matchesQuery,
   usePaletteProviders,
 } from '@/lib/palette'
-import { CONNECT_TABS } from './connect-tabs'
-import type { ConnectParam } from './search'
+import { CONNECT_TABS, type ConnectParam } from '@/lib/connect-tabs'
 
 export const OVERVIEW_PALETTE = 'overview'
 

@@ -5,25 +5,11 @@
 // button pressed.
 //
 // The route file imports this (its schema is in the first route's bundle),
-// so it holds zod and plain data only.
+// so it holds zod and plain data only (the connect values come from
+// `lib/connect-tabs.ts`, the one tab list).
 
 import { z } from 'zod'
-
-/** The `connect` values, in the order the tabs show them. */
-export const CONNECT_PARAMS = [
-  'web',
-  'flutter',
-  'apple',
-  'android',
-  'node',
-  'python',
-  'go',
-  'java',
-  'env',
-  'firebase-json',
-] as const
-
-export type ConnectParam = (typeof CONNECT_PARAMS)[number]
+import { CONNECT_PARAMS } from '@/lib/connect-tabs'
 
 /** The dialogs a link opens: download a snapshot, save one on the engine's machine, reset data. */
 export const OVERVIEW_DIALOGS = ['snapshot', 'save', 'reset'] as const

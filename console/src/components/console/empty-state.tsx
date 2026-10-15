@@ -7,9 +7,9 @@ import { FunnelIcon, type Icon, LockKeyIcon, WarningIcon } from '@phosphor-icons
 import { useQuery } from '@tanstack/react-query'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { ApiError } from '@/api/client'
-import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import { statusQuery } from '@/api/queries'
-import { type ConnectTarget, connectSnippet } from '@/lib/connect'
+import { connectDialects } from '@/lib/connect'
+import type { ConnectParam } from '@/lib/connect-tabs'
 import { type SectionId, sectionById } from '@/lib/services'
 import { CodeBlock } from './code-block'
 import { ServiceStarting, sectionStatus } from './section-gate'
@@ -29,22 +29,8 @@ export function useDelayedFlag(on: boolean, delayMs = 150): boolean {
   return on && late
 }
 
-/** The SDKs an empty section shows its connection snippet for, in tab order. */
-const CONNECT_DIALECTS: readonly { id: ConnectTarget; label: string }[] = [
-  { id: 'web', label: 'Web' },
-  { id: 'admin-node', label: 'Admin (Node.js)' },
-  { id: 'python', label: 'Python' },
-  { id: 'go', label: 'Go' },
-]
-
-/** The connection snippet's tabs for one service on this engine. */
-export function connectDialects(status: ConsoleStatus, service: string) {
-  return CONNECT_DIALECTS.map((dialect) => ({
-    id: dialect.id,
-    label: dialect.label,
-    code: connectSnippet(dialect.id, { services: [service], status }),
-  }))
-}
+/** The snippets an empty section shows, of the one tab list (`lib/connect-tabs.ts`). */
+export const EMPTY_CONNECT: readonly ConnectParam[] = ['web', 'node', 'python', 'go']
 
 /**
  * Nothing exists yet. It says how things get here from the app first — the
@@ -101,7 +87,10 @@ export function EmptyState({
         <div className="w-full text-left">
           <CodeBlock
             label="From your app"
-            dialects={connectDialects(status.data, service)}
+            dialects={connectDialects(status.data, {
+              services: [service],
+              params: EMPTY_CONNECT,
+            })}
             testId={`${testId}-connect`}
           />
         </div>

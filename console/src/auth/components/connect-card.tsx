@@ -8,13 +8,8 @@ import { useQuery } from '@tanstack/react-query'
 import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import { statusQuery } from '@/api/queries'
 import { type CodeDialect, CodeBlock } from '@/components/console/code-block'
-import {
-  ANDROID_HOST,
-  type ConnectTarget,
-  connectSnippet,
-  defaultConnectHost,
-  isLoopback,
-} from '@/lib/connect'
+import { ANDROID_HOST, connectSnippet, defaultConnectHost, isLoopback } from '@/lib/connect'
+import type { ConnectTarget } from '@/lib/connect-tabs'
 
 /** The tabs, in order: the client SDKs, then the Admin SDK and its environment. */
 export const CONNECT_TABS: readonly { id: ConnectTarget; label: string }[] = [
