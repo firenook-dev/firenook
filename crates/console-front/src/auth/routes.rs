@@ -37,7 +37,7 @@ use super::wire::{
     AuthDeleteUsersRequest, AuthHeader, AuthHooks, AuthImportPreview, AuthImportRequest,
     AuthMessage, AuthMessageFacets, AuthMessageKind, AuthMessageKindCount, AuthMessagePage,
     AuthRemoveClaimsRequest, AuthSetClaimsRequest, AuthSummary, AuthTenant, AuthTenantCreate,
-    AuthTenantPage, AuthTokenCheck, AuthTokenConsumer, AuthTokenInspectRequest,
+    AuthTenantList, AuthTokenCheck, AuthTokenConsumer, AuthTokenInspectRequest,
     AuthTokenInspection, AuthUserDetail, AuthUserFacets, AuthUserRow, AuthUsersBatchGet,
     AuthUsersPage,
 };
@@ -87,7 +87,6 @@ pub(crate) fn router(state: AuthRoutes) -> Router {
         .route("/activity", get(activity).delete(clear_activity))
         .route("/activity/{id}", get(activity_entry))
         .route("/tenants", get(tenants).post(create_tenant))
-        .route("/tenants/meta", get(tenants_meta))
         .route("/tenants:batchGet", post(tenants_batch))
         .route("/hooks", get(hooks))
         .route("/summary", get(summary))
@@ -1473,60 +1472,35 @@ struct TenantsParams {
     #[serde(default)]
     q: Option<String>,
     #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
     limit: Option<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TenantCursor {
-    after: String,
-}
-
-/// `GET /tenants`: never creates.
+/// `GET /tenants`: the tenants `q` matches, the first 500 at most in id
+/// order (the picker asks for fewer), with how many it matches. Never
+/// creates. Live changes are `auth.config` events, which the page answers by
+/// reading the list again.
 async fn tenants(
     State(state): State<AuthRoutes>,
     Query(params): Query<TenantsParams>,
-) -> Result<Json<AuthTenantPage>, ApiError> {
+) -> Json<AuthTenantList> {
     let project = project_of(&state, params.project.as_ref());
-    let after = params
-        .cursor
-        .as_deref()
-        .map(decode_cursor::<TenantCursor>)
-        .transpose()?
-        .map(|cursor| cursor.after);
-    let first_page = after.is_none();
-    let page = state.console.runtime.tenant_page(
-        &project,
-        params.q.as_deref().unwrap_or_default(),
-        after.as_deref(),
-        limit_of(params.limit),
-    );
-    Ok(Json(AuthTenantPage {
-        page: Page {
-            items: page.tenants.into_iter().map(AuthTenant::from).collect(),
-            next_cursor: page
-                .next
-                .map(|after| encode_cursor(&TenantCursor { after })),
-            prev_cursor: None,
-            total: first_page.then(|| wire::exact(page.total)),
-            scanned: None,
-        },
-        project_users: first_page.then_some(page.project_users),
-    }))
-}
-
-/// `GET /tenants/meta`.
-async fn tenants_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: vec!["tenantId".to_owned()],
-        default_sort: "tenantId:asc".to_owned(),
-        fields: Vec::new(),
+    let limit = params
+        .limit
+        .map_or(0, |limit| usize::try_from(limit).unwrap_or(usize::MAX));
+    let list =
+        state
+            .console
+            .runtime
+            .tenant_list(&project, params.q.as_deref().unwrap_or_default(), limit);
+    Json(AuthTenantList {
+        items: list.tenants.into_iter().map(AuthTenant::from).collect(),
+        total: list.total,
+        project_users: list.project_users,
     })
 }
 
-/// `POST /tenants:batchGet`: rows an `auth.config` event names.
+/// `POST /tenants:batchGet`: tenants by id, `null` for one that does not
+/// exist (the tenant a page is scoped to, read without creating it).
 async fn tenants_batch(
     State(state): State<AuthRoutes>,
     Query(params): Query<ProjectParams>,

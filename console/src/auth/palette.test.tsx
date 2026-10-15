@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import { usersPaletteGroups } from './palette'
 
-const tenants: AuthTenantPage = {
+const tenants: AuthTenantList = {
   projectUsers: 3,
   items: [
     {
@@ -17,10 +17,7 @@ const tenants: AuthTenantPage = {
       mfaProviders: [],
     },
   ],
-  nextCursor: null,
-  prevCursor: null,
-  total: { count: 1, exact: true },
-  scanned: null,
+  total: 1,
 }
 
 describe('the Users page in ⌘K', () => {

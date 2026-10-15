@@ -10,7 +10,6 @@ import type { BatchGetRequest } from '@/api/generated/BatchGetRequest'
 import type { Total } from '@/api/generated/Total'
 import type { AuthActivityPage } from '@/api/generated/auth/AuthActivityPage'
 import type { AuthMessagePage } from '@/api/generated/auth/AuthMessagePage'
-import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import type { AuthUserFacets } from '@/api/generated/auth/AuthUserFacets'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import type { AuthUsersBatchGet } from '@/api/generated/auth/AuthUsersBatchGet'
@@ -30,7 +29,6 @@ import {
   getMessagesOfCall,
   getSummary,
   getTenants,
-  getTenantsMeta,
   getUser,
   getUsers,
   getUsersMeta,
@@ -66,10 +64,9 @@ export const authKeys = {
   user: (project: string, tenant: string, uid: string) =>
     [AUTH, project, 'user', tenant, uid] as const,
   claims: (project: string, tenant: string) => [AUTH, project, 'claims', tenant] as const,
-  /** Every tenants list (the Settings table, infinite). */
+  /** Every tenants list (the Settings table, read again on `auth.config`). */
   allTenants: (project: string) => [AUTH, project, 'tenants'] as const,
   tenants: (project: string, q: string) => [AUTH, project, 'tenants', q] as const,
-  tenantsMeta: (project: string) => [AUTH, project, 'tenants-meta'] as const,
   /** Every answer of the tenant picker (its first page, and what it finds as you type). */
   allTenantPicker: (project: string) => [AUTH, project, 'tenant-picker'] as const,
   tenantPicker: (project: string, q: string) => [AUTH, project, 'tenant-picker', q] as const,
@@ -234,25 +231,15 @@ export const claimKeysQuery = (project: string, tenant: string | undefined) =>
 
 // ------------------------------------------------------------------ tenants, config, hooks
 
-/** The Settings tenants table (infinite; `auth.config` events patch its rows). */
-export function tenantsList(project: string, q: string) {
-  const queryKey = authKeys.tenants(project, q)
-  const fetchPage = (page: CursorPageParam, signal: AbortSignal) =>
-    getTenants(project, { q, cursor: page.cursor, limit: page.limit ?? PAGE_SIZE }, signal)
-  return {
-    queryKey,
-    fetchPage,
-    batchGet: (request: BatchGetRequest, signal: AbortSignal) =>
-      batchGetTenants(project, request, signal),
-    rowKey: (tenant: AuthTenant) => tenant.tenantId,
-  }
-}
-
-export const tenantsMetaQuery = (project: string) =>
+/**
+ * The Settings tenants table: every tenant `q` matches, up to the engine's
+ * 500, in one request. An `auth.config` event reads it again
+ * (`useConfigLive`); a project has a handful of tenants, not a page of them.
+ */
+export const tenantsQuery = (project: string, q: string) =>
   queryOptions({
-    queryKey: authKeys.tenantsMeta(project),
-    queryFn: ({ signal }) => getTenantsMeta(project, signal),
-    staleTime: Number.POSITIVE_INFINITY,
+    queryKey: authKeys.tenants(project, q),
+    queryFn: ({ signal }) => getTenants(project, { q }, signal),
   })
 
 /**

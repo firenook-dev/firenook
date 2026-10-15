@@ -37,7 +37,7 @@ import type { AuthSetClaimsRequest } from '@/api/generated/auth/AuthSetClaimsReq
 import type { AuthSummary } from '@/api/generated/auth/AuthSummary'
 import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
 import type { AuthTenantCreate } from '@/api/generated/auth/AuthTenantCreate'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import type { AuthTokenInspection } from '@/api/generated/auth/AuthTokenInspection'
 import type { AuthTokenRequest } from '@/api/generated/auth/AuthTokenRequest'
 import type { AuthUserDetail } from '@/api/generated/auth/AuthUserDetail'
@@ -397,33 +397,27 @@ export function clearActivity(project: string): Promise<void> {
 export interface TenantsRequest {
   /** Filters by id and display name. */
   q?: string | undefined
-  cursor?: string | undefined
+  /** At most this many (the engine's default and most: 500). */
   limit?: number | undefined
 }
 
-/** `GET /tenants`: tenants by id, each with its user count; never creates one. */
+/**
+ * `GET /tenants`: the tenants `q` matches in id order, each with its user
+ * count, and how many it matches; never creates one.
+ */
 export function getTenants(
   project: string,
   request: TenantsRequest,
   signal?: AbortSignal,
-): Promise<AuthTenantPage> {
-  return apiGet<AuthTenantPage>(
+): Promise<AuthTenantList> {
+  return apiGet<AuthTenantList>(
     '/auth/tenants',
-    scoped(project, {
-      q: request.q || undefined,
-      cursor: request.cursor,
-      limit: request.limit,
-    }),
+    scoped(project, { q: request.q || undefined, limit: request.limit }),
     signal,
   )
 }
 
-/** `GET /tenants/meta`. */
-export function getTenantsMeta(project: string, signal?: AbortSignal): Promise<ListMeta> {
-  return apiGet<ListMeta>('/auth/tenants/meta', scoped(project), signal)
-}
-
-/** `POST /tenants:batchGet`: the tenants an `auth.config` event names (`row: null` once deleted). */
+/** `POST /tenants:batchGet`: tenants by id (`row: null` for one that does not exist, or no longer does). */
 export function batchGetTenants(
   project: string,
   request: BatchGetRequest,

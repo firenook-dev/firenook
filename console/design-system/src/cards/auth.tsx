@@ -18,7 +18,7 @@ import type { ConsoleStatus } from '@/api/generated/ConsoleStatus'
 import type { AuthActivitySummary } from '@/api/generated/auth/AuthActivitySummary'
 import type { AuthMessage } from '@/api/generated/auth/AuthMessage'
 import type { AuthTenant } from '@/api/generated/auth/AuthTenant'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import type { AuthTokenInspection } from '@/api/generated/auth/AuthTokenInspection'
 import type { AuthUserRow } from '@/api/generated/auth/AuthUserRow'
 import { statusQuery } from '@/api/queries'
@@ -797,19 +797,12 @@ function tenant(tenantId: string, displayName: string | null, users: number): Au
   }
 }
 
-function tenantPage(items: AuthTenant[], count: number): AuthTenantPage {
-  return {
-    projectUsers: 45,
-    items,
-    nextCursor: null,
-    prevCursor: null,
-    total: { count, exact: true },
-    scanned: null,
-  }
+function tenantList(items: AuthTenant[], total: number): AuthTenantList {
+  return { projectUsers: 45, items, total }
 }
 
-const FEW = tenantPage([tenant('acme', 'Acme Corp', 5), tenant('globex', 'Globex', 27)], 2)
-const MANY = tenantPage(
+const FEW = tenantList([tenant('acme', 'Acme Corp', 5), tenant('globex', 'Globex', 27)], 2)
+const MANY = tenantList(
   Array.from({ length: 20 }, (_, index) =>
     tenant(`tenant-${String(index + 1).padStart(2, '0')}`, null, index * 3),
   ),

@@ -5,7 +5,7 @@
 
 import { ArrowsLeftRightIcon, PushPinIcon, PushPinSlashIcon } from '@phosphor-icons/react'
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import type { AuthTenantPage } from '@/api/generated/auth/AuthTenantPage'
+import type { AuthTenantList } from '@/api/generated/auth/AuthTenantList'
 import {
   type PaletteGroup,
   type PaletteItem,
@@ -17,7 +17,7 @@ import type { TenantScope } from './tenant-scope'
 export interface UsersPaletteOptions {
   scope: TenantScope
   /** The picker's first page of tenants (with the project users' count). */
-  tenants: AuthTenantPage | undefined
+  tenants: AuthTenantList | undefined
   onScope: (scope: TenantScope) => void
   /** The User column scrolls with the others (it is pinned by default). */
   unfrozen: boolean

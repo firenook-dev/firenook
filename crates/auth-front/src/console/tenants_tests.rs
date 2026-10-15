@@ -90,13 +90,10 @@ fn a_tenant_is_created_with_the_id_asked_for_and_recorded() {
 }
 
 #[test]
-fn tenant_pages_filter_count_users_and_create_nothing() {
+fn tenant_lists_filter_count_users_and_create_nothing() {
     let runtime = test_runtime();
     let handle = runtime.runtime();
-    assert_eq!(
-        handle.tenant_page(PROJECT, "", None, 0),
-        TenantPage::default()
-    );
+    assert_eq!(handle.tenant_list(PROJECT, "", 0), TenantList::default());
     assert!(
         lock(&handle.inner.data).projects.is_empty(),
         "a read creates nothing"
@@ -124,25 +121,24 @@ fn tenant_pages_filter_count_users_and_create_nothing() {
                 .expect("create");
         })
         .expect("users");
-    let page = handle.tenant_page(PROJECT, "", None, 2);
+    // At most `limit`, in id order; the total counts the ones past it.
+    let first = handle.tenant_list(PROJECT, "", 2);
     assert_eq!(
-        page.tenants
+        first
+            .tenants
             .iter()
             .map(|tenant| tenant.tenant_id.as_str())
             .collect::<Vec<_>>(),
         ["acme", "beta-co"]
     );
-    assert_eq!(page.tenants[0].users, 2);
-    assert_eq!(page.next.as_deref(), Some("beta-co"));
-    assert_eq!(page.total, 3);
-    assert_eq!(page.project_users, 1);
-    let next = handle.tenant_page(PROJECT, "", page.next.as_deref(), 2);
-    assert_eq!(next.tenants.len(), 1);
-    assert_eq!(next.next, None);
-    let found = handle.tenant_page(PROJECT, "BETA", None, 0);
+    assert_eq!(first.tenants[0].users, 2);
+    assert_eq!(first.total, 3);
+    assert_eq!(first.project_users, 1);
+    assert_eq!(handle.tenant_list(PROJECT, "", 0).tenants.len(), 3);
+    let found = handle.tenant_list(PROJECT, "BETA", 0);
     assert_eq!(found.total, 1);
     assert_eq!(found.tenants[0].tenant_id, "beta-co");
-    let by_name = handle.tenant_page(PROJECT, "gamma corp", None, 0);
+    let by_name = handle.tenant_list(PROJECT, "gamma corp", 0);
     assert_eq!(by_name.total, 1);
     let batch = handle.tenants_by_id(PROJECT, &["gamma".to_owned(), "gone".to_owned()]);
     assert_eq!(
