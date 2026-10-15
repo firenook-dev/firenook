@@ -523,7 +523,6 @@ fn totals_are_monotonic_across_eviction() {
     assert_eq!(totals.newest_error, Some(1));
     assert_eq!(totals.newest_denial, Some(2));
     assert_eq!(totals.levels.total(), totals.entries);
-    assert_eq!(log.kind_totals()[kinds::RULES_DENIED_CONSOLE], 1);
 }
 
 #[test]

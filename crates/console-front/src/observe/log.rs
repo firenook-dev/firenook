@@ -12,7 +12,7 @@
 //! text, the interned labels and the problem, internal and marker flags.
 //! Readers take a snapshot of the rings and filter outside every lock.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::fields::LogFilter;
@@ -280,7 +280,6 @@ impl Interner {
 struct LogState {
     interner: Interner,
     totals: TotalsSnapshot,
-    kinds: BTreeMap<&'static str, u64>,
     minutes: [Minute; 60],
     /// The last `functions.reloaded` line (sequence and time), kept after
     /// the line itself leaves both rings, so `from=reload` still resolves.
@@ -397,7 +396,6 @@ impl ConsoleLog {
                 state: Mutex::new(LogState {
                     interner: Interner::default(),
                     totals: TotalsSnapshot::default(),
-                    kinds: BTreeMap::new(),
                     minutes: [Minute::default(); 60],
                     last_reload: None,
                 }),
@@ -515,12 +513,6 @@ impl ConsoleLog {
     /// Counts since the log was created.
     pub(crate) fn totals(&self) -> TotalsSnapshot {
         lock(&self.shared.state).totals.clone()
-    }
-
-    /// How many lines of each kind since the log was created.
-    #[cfg(test)]
-    pub(crate) fn kind_totals(&self) -> BTreeMap<&'static str, u64> {
-        lock(&self.shared.state).kinds.clone()
     }
 
     /// The last Functions reload: its sequence and time.
@@ -673,7 +665,6 @@ impl ConsoleLog {
             totals.problems += 1;
         }
         if let Some(kind) = line.kind {
-            *state.kinds.entry(kind).or_insert(0) += 1;
             match kind {
                 kinds::RULES_DENIED => {
                     state.totals.denials += 1;
