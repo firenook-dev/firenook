@@ -59,8 +59,8 @@ describe('pages and badges', () => {
     expect(seenBadges(functions, '/functions/invocations')).toEqual(['functions.failed'])
   })
 
-  it('Eventarc has its events and its channels, and no Alerts page without alert delivery', () => {
-    expect(eventarc.pages?.map((page) => page.to)).toEqual(['/eventarc', '/eventarc/channels'])
+  it('Eventarc is one page (its channels over their events), and no Alerts page without alert delivery', () => {
+    expect(eventarc.pages?.map((page) => page.to)).toEqual(['/eventarc'])
     expect(eventarcActions[0]?.link).toEqual({ to: '/eventarc', search: { new: 'event' } })
   })
 })

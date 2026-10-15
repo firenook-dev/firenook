@@ -2964,8 +2964,12 @@ inspector `tab=run|trigger|environment`, an invocation with `invocation=`,
 edit and replay with `prefill=`, `paused`, `q`, `sort`, `source`),
 `/functions/invocations` (`q`, `invocation`, `paused`), `/extensions`
 (`instance`, `view=overview|configuration|functions|events|readme`, `edit`,
-`q`), `/eventarc` (`channel`, `q`, `event`, `new=event`, `prefill`,
-`paused`) and `/eventarc/channels` (`channel`). Each schema lives in the
+`q`) and `/eventarc` (`channel`, `q`, `event`, `new=event`, `prefill`,
+`paused`); a channel in scope shows its publishers, subscribers and
+warnings over its events (there is no channels page, and a publisher's
+warning is said there only, linking to its instance's Events tab, which
+counts the instance's events and opens them in Eventarc filtered by
+`publisher:`). Each schema lives in the
 section's `search.ts`; the pages read it through `useRouteSearch`, so the
 first route carries the schemas alone. There is no `/eventarc/alerts`: the
 engine does not deliver Firebase Alerts yet, an alert function is

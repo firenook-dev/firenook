@@ -1,7 +1,8 @@
 // The Eventarc panel: every channel in use — the ones functions listen on,
 // extensions publish to, or events arrived on — and the native channel,
-// each with how many events the engine keeps from it, under a row for all
-// of them. Picking one scopes the page to it.
+// each with how many events the engine keeps from it (amber where
+// something on it does not line up), under a row for all of them. Picking
+// one scopes the page to it.
 
 import { BroadcastIcon, SquaresFourIcon, StarIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
@@ -9,7 +10,7 @@ import type { EventarcSnapshot } from '@/api/generated/compute/EventarcSnapshot'
 import { PanelFilter, PanelHeader } from '@/components/console/panel'
 import { PanelTree, type PanelTreeNode } from '@/components/console/panel-tree'
 import { SectionPanel } from '@/components/shell/section-panel'
-import { channelLabel } from '../topology'
+import { channelLabel, channelWarnings } from '../topology'
 
 /** The panel's node for every channel at once. */
 export const ALL_CHANNELS = '\u0000all'
@@ -26,17 +27,25 @@ export function channelNodes(snapshot: EventarcSnapshot | undefined): PanelTreeN
       count: snapshot ? total : undefined,
       title: 'Every event the engine keeps, on every channel',
     },
-    ...channels.map((channel) => {
+    ...channels.map((channel): PanelTreeNode => {
       const label = channelLabel(channel)
+      const warnings = channelWarnings(channel, channels).length
+      const title =
+        channel.name === 'google'
+          ? "The native channel, where Firebase's own events arrive"
+          : channel.name
+      // A channel where something does not line up says so on its count;
+      // opening it shows what, over its events.
       return {
         id: channel.name,
         label: label.where ? `${label.id} · ${label.where}` : label.id,
         icon: channel.name === 'google' ? StarIcon : BroadcastIcon,
         count: channel.events,
+        tone: warnings > 0 ? 'warning' : undefined,
         title:
-          channel.name === 'google'
-            ? "The native channel, where Firebase's own events arrive"
-            : channel.name,
+          warnings > 0
+            ? `${title} · ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`
+            : title,
       }
     }),
   ]
