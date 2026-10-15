@@ -10,7 +10,6 @@
 
 import type { PubsubData } from '@/api/generated/messaging/PubsubData'
 import type { PubsubPayloadPreview } from '@/api/generated/messaging/PubsubPayloadPreview'
-import { decodeBase64 } from '@/components/console/payload-view'
 import { formatBytes, formatNumber } from '@/lib/format'
 
 /** How typed data is written: JSON, text, base64 bytes, or JSON sent as a BINARY topic's Avro. */
@@ -183,9 +182,4 @@ export function editableData(
   } catch {
     return { kind: 'text', data: dataText }
   }
-}
-
-/** The bytes of base64 data, decoded; undefined when it is not base64. */
-export function decodeData(base64: string): Uint8Array | undefined {
-  return decodeBase64(base64)
 }

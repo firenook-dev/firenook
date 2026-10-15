@@ -16,6 +16,7 @@ use firenook_functions_runtime::{Monitor, MonitorLimits};
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
+use super::filters::MESSAGE_FIELDS;
 use super::*;
 use crate::messaging::tests::{
     ORDERS, PROJECT, SCHEDULE_TOPIC, Suite, begin_dispatch, create_subscription, create_topic,
@@ -356,7 +357,7 @@ async fn pubsub_through_the_console() {
         .call(Method::GET, "/api/v1/pubsub/schemas", None)
         .await;
     assert_eq!(schemas["items"][0]["kind"], "AVRO");
-    // Checks: definition, message, example, encode.
+    // Checks: definition, message, example.
     let (_, check) = suite
         .call(
             Method::POST,
@@ -395,14 +396,6 @@ async fn pubsub_through_the_console() {
         )
         .await;
     assert_eq!(status, StatusCode::CREATED);
-    let (_, encoded_avro) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/schema/encode",
-            Some(json!({ "topic": bound, "json": "{\"id\":\"o1\",\"total\":10.5}" })),
-        )
-        .await;
-    assert!(encoded_avro["base64"].is_string(), "{encoded_avro}");
     let (status, published) = suite
         .call(
             Method::POST,
@@ -825,17 +818,7 @@ async fn publish_jobs_run_on_the_job_registry() {
     let paced = topic_name("paced");
     create_topic(&suite.pubsub, &paced);
     create_subscription(&suite.pubsub, &subscription_name("paced-sub"), &paced);
-    // A preview answers at once and starts nothing.
     let draft = json!({ "data": { "text": "n{{i}}" } });
-    let (status, preview) = suite
-        .call(
-            Method::POST,
-            "/api/v1/pubsub/messages:publish",
-            Some(json!({ "topic": paced, "messages": [draft], "repeat": 3, "template": true, "dryRun": true })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{preview}");
-    assert_eq!(preview["dataText"], "n1");
     // A burst: one job, counted to the end.
     let (status, job) = suite
         .call(
@@ -1466,32 +1449,12 @@ async fn batch_gets_patch_rows() {
 // ------------------------------------------------------------ R-CF-16
 
 #[tokio::test]
-async fn lists_are_pages_with_meta() {
+async fn lists_are_pages() {
     let suite = suite(None);
-    for (uri, default_sort) in [
-        ("/api/v1/pubsub/messages/meta", "id:desc"),
-        ("/api/v1/pubsub/backlog/meta", "delivery:asc"),
-        ("/api/v1/pubsub/deliveries/meta", "publishedAt:desc"),
-        ("/api/v1/pubsub/snapshots/meta", "name:asc"),
-        ("/api/v1/pubsub/schemas/meta", "name:asc"),
-        ("/api/v1/pubsub/schedules/meta", "nextRunAt:asc"),
-    ] {
-        let (status, meta) = suite.call(Method::GET, uri, None).await;
-        assert_eq!(status, StatusCode::OK, "{uri}");
-        assert_eq!(meta["defaultSort"], default_sort, "{uri}");
-        assert_eq!(meta["sortable"], json!([]), "{uri}");
-    }
-    let (_, meta) = suite
-        .call(Method::GET, "/api/v1/pubsub/messages/meta", None)
-        .await;
-    let fields: Vec<&str> = meta["fields"]
-        .as_array()
-        .expect("fields")
-        .iter()
-        .filter_map(|field| field["key"].as_str())
-        .collect();
+    // The golden file declares the fields the engine validates with.
+    let infos = MESSAGE_FIELDS.infos();
+    let fields: Vec<&str> = infos.iter().map(|info| info.key.as_str()).collect();
     assert_eq!(fields, ["id", "key", "attributes", "has", "is"]);
-    // The golden file declares the same fields the engine validates with.
     let cases: Value = serde_json::from_str(MESSAGE_CASES).expect("cases");
     let declared: Vec<&str> = cases["fields"]
         .as_array()
@@ -1504,7 +1467,7 @@ async fn lists_are_pages_with_meta() {
         .as_array()
         .expect("fields")
         .iter()
-        .zip(MESSAGE_FIELDS.infos())
+        .zip(&infos)
     {
         assert_eq!(field["kind"], info.kind);
         assert_eq!(field["help"], info.help);

@@ -49,7 +49,7 @@ use time::format_description::well_known::Rfc3339;
 
 use self::convert::{Join, Targets};
 use self::errors::{functions_absent, pubsub_error, redeliver_error, schedule_error};
-use self::filters::{MESSAGE_FIELDS, message_query};
+use self::filters::message_query;
 use self::types::{
     PubsubAckBody, PubsubBacklogRow, PubsubBacklogState, PubsubCommitSchemaBody,
     PubsubCreateSchemaBody, PubsubCreateSnapshotBody, PubsubCreateSubscriptionBody,
@@ -62,11 +62,10 @@ use self::types::{
     PubsubPushConfigBody, PubsubReceived, PubsubRedeliverBody, PubsubRedelivery,
     PubsubRejectedList, PubsubRollbackSchemaBody, PubsubSchedule, PubsubScheduleBody,
     PubsubScheduleRun, PubsubSchemaBinding, PubsubSchemaCheck, PubsubSchemaCheckBody,
-    PubsubSchemaDetail, PubsubSchemaEncodeBody, PubsubSchemaEncoded, PubsubSchemaExample,
-    PubsubSchemaExampleBody, PubsubSchemaProblem, PubsubSchemaSummary, PubsubSeekBody,
-    PubsubSeekResult, PubsubSnapshot, PubsubSubscriptionDetail, PubsubSubscriptionSummary,
-    PubsubTopicDetail, PubsubTopicIndex, PubsubTopicSummary, PubsubUpdateSubscriptionBody,
-    PubsubUpdateTopicBody,
+    PubsubSchemaDetail, PubsubSchemaExample, PubsubSchemaExampleBody, PubsubSchemaProblem,
+    PubsubSchemaSummary, PubsubSeekBody, PubsubSeekResult, PubsubSnapshot,
+    PubsubSubscriptionDetail, PubsubSubscriptionSummary, PubsubTopicDetail, PubsubTopicIndex,
+    PubsubTopicSummary, PubsubUpdateSubscriptionBody, PubsubUpdateTopicBody,
 };
 use super::PubsubConsole;
 use super::shared::{time, u32_of, u64_of};
@@ -77,8 +76,8 @@ use crate::jobs::JobRegistry;
 use crate::json::{BodyLimit, ConsoleJson};
 use crate::late::Late;
 use crate::paging::{
-    BatchGetItem, BatchGetRequest, BatchGetResponse, DEFAULT_LIMIT, ListMeta, MAX_LIMIT, Page,
-    PageBuilder, Total, decode_cursor, encode_cursor, page_of,
+    BatchGetItem, BatchGetRequest, BatchGetResponse, DEFAULT_LIMIT, MAX_LIMIT, Page, PageBuilder,
+    Total, decode_cursor, encode_cursor, page_of,
 };
 use crate::sse::Shutdown;
 
@@ -129,7 +128,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
         .route("/pubsub/schema/commit", post(commit_schema))
         .route("/pubsub/schema/check", post(check_schema))
         .route("/pubsub/schema/validate-message", post(validate_message))
-        .route("/pubsub/schema/encode", post(encode_schema))
         .route("/pubsub/schema/example", post(example_schema))
         .route("/pubsub/setup/import", post(setup::import))
         .layer(Extension(BodyLimit(LARGE_BODY)));
@@ -140,7 +138,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
             get(topic_detail).patch(update_topic).delete(delete_topic),
         )
         .route("/pubsub/messages", get(messages))
-        .route("/pubsub/messages/meta", get(messages_meta))
         .route("/pubsub/messages:batchGet", post(messages_batch))
         .route("/pubsub/messages:export", get(export_messages))
         .route("/pubsub/message", get(message_detail))
@@ -165,17 +162,13 @@ pub(crate) fn router(api: PubsubApi) -> Router {
         )
         .route("/pubsub/subscription/seek", post(seek))
         .route("/pubsub/backlog", get(backlog))
-        .route("/pubsub/backlog/meta", get(backlog_meta))
         .route("/pubsub/backlog:batchGet", post(backlog_batch))
         .route("/pubsub/backlog:ack", post(jobs::backlog_ack))
         .route("/pubsub/backlog:release", post(jobs::backlog_release))
         .route("/pubsub/deliveries", get(deliveries))
-        .route("/pubsub/deliveries/meta", get(deliveries_meta))
         .route("/pubsub/deliveries:batchGet", post(deliveries_batch))
         .route("/pubsub/snapshots", get(snapshots).post(create_snapshot))
-        .route("/pubsub/snapshots/meta", get(snapshots_meta))
         .route("/pubsub/snapshot", axum::routing::delete(delete_snapshot))
-        .route("/pubsub/schemas/meta", get(schemas_meta))
         .route("/pubsub/schema", get(schema_detail).delete(delete_schema))
         .route("/pubsub/schema/rollback", post(rollback_schema))
         .route(
@@ -184,7 +177,6 @@ pub(crate) fn router(api: PubsubApi) -> Router {
         )
         .route("/pubsub/filter/check", post(check_filter))
         .route("/pubsub/schedules", get(schedules))
-        .route("/pubsub/schedules/meta", get(schedules_meta))
         .route("/pubsub/schedule/run", post(run_schedule))
         .route("/pubsub/schedule/pause", post(pause_schedule))
         .route("/pubsub/schedule/resume", post(resume_schedule))
@@ -577,7 +569,7 @@ pub(crate) fn draft(message: &PubsubOutgoingMessage) -> Draft {
 }
 
 /// Message 1 as the publish would send it, or why it would not.
-pub(crate) fn preview(
+fn preview(
     console: &PubsubConsole,
     topic: &str,
     message: &PubsubOutgoingMessage,
@@ -726,14 +718,6 @@ async fn messages(
         )))
     })
     .await
-}
-
-async fn messages_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "id:desc".to_owned(),
-        fields: MESSAGE_FIELDS.infos(),
-    })
 }
 
 /// The loaded page a row falls in, for a list in descending order: page `i`
@@ -1502,14 +1486,6 @@ async fn backlog(
     }))
 }
 
-async fn backlog_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "delivery:asc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
 async fn backlog_batch(
     State(api): State<PubsubApi>,
     Query(scope): Query<BacklogScope>,
@@ -1685,14 +1661,6 @@ async fn deliveries(
     .await
 }
 
-async fn deliveries_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "publishedAt:desc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
 async fn deliveries_batch(
     State(api): State<PubsubApi>,
     Query(scope): Query<TopicQuery>,
@@ -1752,14 +1720,6 @@ async fn snapshots(
     )))
 }
 
-async fn snapshots_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "name:asc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
 async fn create_snapshot(
     State(api): State<PubsubApi>,
     ConsoleJson(body): ConsoleJson<PubsubCreateSnapshotBody>,
@@ -1809,14 +1769,6 @@ async fn list_schemas(
             .map(convert::schema_summary)
             .collect(),
     )))
-}
-
-async fn schemas_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "name:asc".to_owned(),
-        fields: Vec::new(),
-    })
 }
 
 fn schema_detail_of(console: &PubsubConsole, name: &str) -> Result<PubsubSchemaDetail, ApiError> {
@@ -2047,33 +1999,6 @@ async fn validate_message(
     }
 }
 
-async fn encode_schema(
-    State(api): State<PubsubApi>,
-    ConsoleJson(body): ConsoleJson<PubsubSchemaEncodeBody>,
-) -> Answer<PubsubSchemaEncoded> {
-    let console = api.console()?;
-    let (schema, _) = console
-        .runtime
-        .broker()
-        .topic_schema(&body.topic)
-        .ok_or_else(|| {
-            ApiError::precondition("The topic has no schema bound, so there is nothing to encode.")
-                .with_fix("Bind a schema in the topic's settings, or publish the JSON as JSON.")
-        })?;
-    Ok(Json(
-        match avro::encode_json(&schema, body.json.as_bytes()) {
-            Ok(bytes) => PubsubSchemaEncoded {
-                base64: Some(BASE64.encode(bytes)),
-                problem: None,
-            },
-            Err(found) => PubsubSchemaEncoded {
-                base64: None,
-                problem: Some(problem(found)),
-            },
-        },
-    ))
-}
-
 async fn example_schema(
     State(api): State<PubsubApi>,
     ConsoleJson(body): ConsoleJson<PubsubSchemaExampleBody>,
@@ -2256,14 +2181,6 @@ async fn schedules(
     .await
 }
 
-async fn schedules_meta() -> Json<ListMeta> {
-    Json(ListMeta {
-        sortable: Vec::new(),
-        default_sort: "nextRunAt:asc".to_owned(),
-        fields: Vec::new(),
-    })
-}
-
 fn schedule_of(console: &PubsubConsole, function_id: &str) -> Result<PubsubSchedule, ApiError> {
     schedule_list(console)
         .into_iter()
@@ -2375,8 +2292,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         types::PubsubSchemaCheck,
         types::PubsubMessageCheckBody,
         types::PubsubMessageCheck,
-        types::PubsubSchemaEncodeBody,
-        types::PubsubSchemaEncoded,
         types::PubsubSchemaExampleBody,
         types::PubsubSchemaExample,
         types::PubsubFilterCheckBody,

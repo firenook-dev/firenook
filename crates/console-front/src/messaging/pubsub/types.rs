@@ -714,8 +714,8 @@ pub(crate) struct PubsubPublishResult {
     pub functions_skipped: u32,
 }
 
-/// `dryRun: true` on either publish route: message 1 as the publish would
-/// send it.
+/// `dryRun: true` on `POST /pubsub/topic/publish`: message 1 as the publish
+/// would send it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "messaging/")]
@@ -759,10 +759,6 @@ pub(crate) struct PubsubPublishJobBody {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub template: bool,
-    /// Answer `PubsubPreview` and start nothing.
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub dry_run: bool,
 }
 
 /// A request the wire refused, coalesced by operation, resource and error.
@@ -1258,25 +1254,6 @@ pub(crate) struct PubsubMessageCheck {
     pub ok: bool,
     /// What a publish would answer (`Could not parse message`), when it fails.
     pub engine_message: Option<String>,
-    pub problem: Option<PubsubSchemaProblem>,
-}
-
-/// `POST /pubsub/schema/encode`: JSON written as Avro binary for a topic's
-/// bound schema.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSchemaEncodeBody {
-    pub topic: String,
-    pub json: String,
-}
-
-/// The Avro binary, or where the JSON stops matching.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "messaging/")]
-pub(crate) struct PubsubSchemaEncoded {
-    pub base64: Option<String>,
     pub problem: Option<PubsubSchemaProblem>,
 }
 

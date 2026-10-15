@@ -26,7 +26,6 @@ import type { CursorPages } from '@/components/console/use-cursor-rows'
 import { cursorPagesOptions } from '@/components/console/use-cursor-rows'
 import {
   type PageAt,
-  type PubsubList,
   batchGetBacklog,
   batchGetDeliveries,
   batchGetMessages,
@@ -36,7 +35,6 @@ import {
   getBacklog,
   getDeliveries,
   getDispatch,
-  getListMeta,
   getMessage,
   getMessages,
   getRejected,
@@ -104,7 +102,6 @@ export const pubsubKeys = {
   schedules: (project: string) => ['pubsub', project, 'schedules'] as const,
   rejected: (project: string) => ['pubsub', project, 'rejected'] as const,
   setup: (project: string) => ['pubsub', project, 'setup'] as const,
-  meta: (project: string, list: PubsubList) => ['pubsub', project, 'meta', list] as const,
   /** Checks the pages make as text is typed: read-only answers, keyed by what was asked. */
   check: (project: string, kind: string, ...asked: readonly (string | undefined)[]) =>
     ['pubsub', project, 'check', kind, ...asked.map((part) => part ?? '')] as const,
@@ -207,14 +204,6 @@ export const setupQuery = (project: string) =>
     queryKey: pubsubKeys.setup(project),
     queryFn: ({ signal }) => getSetup(project, signal),
     enabled: project !== '',
-  })
-
-/** A list's order and filter fields: fixed for the engine's life. */
-export const listMetaQuery = (project: string, list: PubsubList) =>
-  queryOptions({
-    queryKey: pubsubKeys.meta(project, list),
-    queryFn: ({ signal }) => getListMeta(list, signal),
-    staleTime: Number.POSITIVE_INFINITY,
   })
 
 // ------------------------------------------------------------ cursor lists

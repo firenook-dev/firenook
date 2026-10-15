@@ -9,7 +9,6 @@ import { API_BASE, apiGet, apiSend } from '@/api/client'
 import type { BatchGetRequest } from '@/api/generated/BatchGetRequest'
 import type { BatchGetResponse } from '@/api/generated/BatchGetResponse'
 import type { Job } from '@/api/generated/Job'
-import type { ListMeta } from '@/api/generated/ListMeta'
 import type { Page } from '@/api/generated/Page'
 import type { PubsubAckBody } from '@/api/generated/messaging/PubsubAckBody'
 import type { PubsubBacklogJobBody } from '@/api/generated/messaging/PubsubBacklogJobBody'
@@ -52,8 +51,6 @@ import type { PubsubScheduleRun } from '@/api/generated/messaging/PubsubSchedule
 import type { PubsubSchemaCheck } from '@/api/generated/messaging/PubsubSchemaCheck'
 import type { PubsubSchemaCheckBody } from '@/api/generated/messaging/PubsubSchemaCheckBody'
 import type { PubsubSchemaDetail } from '@/api/generated/messaging/PubsubSchemaDetail'
-import type { PubsubSchemaEncodeBody } from '@/api/generated/messaging/PubsubSchemaEncodeBody'
-import type { PubsubSchemaEncoded } from '@/api/generated/messaging/PubsubSchemaEncoded'
 import type { PubsubSchemaExample } from '@/api/generated/messaging/PubsubSchemaExample'
 import type { PubsubSchemaExampleBody } from '@/api/generated/messaging/PubsubSchemaExampleBody'
 import type { PubsubSchemaSummary } from '@/api/generated/messaging/PubsubSchemaSummary'
@@ -121,21 +118,8 @@ export function previewPublish(
 }
 
 /** A `pubsub.publish` job: many messages, again, repeated or on an interval. Answers the job at once. */
-export function startPublishJob(body: Omit<PubsubPublishJobBody, 'dryRun'>): Promise<Job> {
-  return apiSend('POST', '/pubsub/messages:publish', { ...body, dryRun: false })
-}
-
-/** Message 1 as the job would send it; starts nothing. */
-export function previewPublishJob(
-  body: Omit<PubsubPublishJobBody, 'dryRun'>,
-  signal?: AbortSignal,
-): Promise<PubsubPreview> {
-  return apiSend(
-    'POST',
-    '/pubsub/messages:publish',
-    { ...body, dryRun: true },
-    signal ? { signal } : {},
-  )
+export function startPublishJob(body: PubsubPublishJobBody): Promise<Job> {
+  return apiSend('POST', '/pubsub/messages:publish', body)
 }
 
 // ------------------------------------------------------------ messages
@@ -435,14 +419,6 @@ export function checkMessage(
   return apiSend('POST', '/pubsub/schema/validate-message', body, signal ? { signal } : {})
 }
 
-/** JSON written for a BINARY topic, encoded as the Avro the topic takes. */
-export function encodeForTopic(
-  body: PubsubSchemaEncodeBody,
-  signal?: AbortSignal,
-): Promise<PubsubSchemaEncoded> {
-  return apiSend('POST', '/pubsub/schema/encode', body, signal ? { signal } : {})
-}
-
 /** An example message the engine builds from a definition, checked before it is answered. */
 export function schemaExample(
   body: PubsubSchemaExampleBody,
@@ -489,27 +465,7 @@ export function getSetup(project: string, signal?: AbortSignal): Promise<PubsubS
   return apiGet('/pubsub/setup', { project }, signal)
 }
 
-/** The address of the setup as a file, for a link the browser downloads. */
-export function setupUrl(project: string): string {
-  return `${API_BASE}${withQuery('/pubsub/setup', { project })}`
-}
-
 /** Creates what a setup file holds in dependency order, skipping what exists. */
 export function importSetup(setup: PubsubSetup): Promise<PubsubSetupResult> {
   return apiSend('POST', '/pubsub/setup/import', setup)
-}
-
-// ------------------------------------------------------------ list metadata
-
-export type PubsubList =
-  | 'messages'
-  | 'backlog'
-  | 'deliveries'
-  | 'snapshots'
-  | 'schemas'
-  | 'schedules'
-
-/** A list's order and filter fields (`GET /pubsub/<list>/meta`). */
-export function getListMeta(list: PubsubList, signal?: AbortSignal): Promise<ListMeta> {
-  return apiGet(`/pubsub/${list}/meta`, {}, signal)
 }

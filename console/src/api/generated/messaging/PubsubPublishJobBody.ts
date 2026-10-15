@@ -27,8 +27,4 @@ repeat?: number | null,
  * 0 (at once, in batches of 1,000), 100, 1,000 or 5,000 ms between
  * messages.
  */
-intervalMs?: number, template?: boolean, 
-/**
- * Answer `PubsubPreview` and start nothing.
- */
-dryRun?: boolean, };
+intervalMs?: number, template?: boolean, };
