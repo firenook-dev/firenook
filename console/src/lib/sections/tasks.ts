@@ -37,3 +37,19 @@ export const tasks: ConsoleSection = {
     'tasks.task': (key) => open(taskSearch(key)),
   },
 }
+
+/**
+ * Another section's way into a queue it names (Functions' task form): its
+ * Configuration (`config`: retries, rate limits, the retry ladder) or the
+ * Enqueue dialog open on it (`enqueue`, the page's own `new=task`). `key`
+ * is the queue's `tasks.queue` key, `<project>|<location>|<queue id>`; a
+ * key that is not one opens the page.
+ */
+export function tasksQueueLink(key: string, where: 'config' | 'enqueue'): SectionLink {
+  const search = queueSearch(key)
+  if (search.queue === undefined) return { to: '/tasks' }
+  return {
+    to: '/tasks',
+    search: where === 'config' ? { ...search, view: 'config' } : { ...search, new: 'task' },
+  }
+}
