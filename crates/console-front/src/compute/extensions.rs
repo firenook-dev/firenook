@@ -2,7 +2,9 @@
 //! the instances (`GET /extensions/instances`), one instance with its
 //! configuration, functions, APIs and events, reconfigure (writing the file
 //! that actually set each value and reloading the instance in place),
-//! reload, vendor, and the one route that reveals a secret param.
+//! reload, and the one route that reveals a secret param. Vendoring a
+//! registry source is the CLI's (`firenook ext:vendor`); Reload then loads
+//! the copy.
 //!
 //! Every instance-changing route goes through the Extensions control,
 //! which runs one operation at a time per instance and announces the
@@ -350,14 +352,6 @@ pub(crate) struct ExtensionParamProblem {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "compute/")]
-pub(crate) struct ExtensionVendorResult {
-    pub(crate) directory: String,
-    pub(crate) version: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "compute/")]
 pub(crate) struct ExtensionRevealedValue {
     pub(crate) value: String,
 }
@@ -387,10 +381,6 @@ pub(crate) fn router(state: ComputeState) -> Router {
         .route(
             "/extensions/instances/{instance}/reload",
             post(reload).layer(limit),
-        )
-        .route(
-            "/extensions/instances/{instance}/vendor",
-            post(vendor).layer(limit),
         )
         .with_state(state)
 }
@@ -537,41 +527,6 @@ async fn reload(
     Ok(Json(
         instance_detail(&state, &control, &instance, &reloaded).await,
     ))
-}
-
-async fn vendor(
-    State(state): State<ComputeState>,
-    Path(instance): Path<String>,
-    ConsoleJson(NoBody {}): ConsoleJson<NoBody>,
-) -> Result<Json<ExtensionVendorResult>, ApiError> {
-    let control = state.control()?;
-    let found = instance_state(&control, &instance).await?;
-    let extensions = control
-        .extensions
-        .clone()
-        .ok_or_else(|| no_instance(&instance))?;
-    if found.status.kind == "local" {
-        return Err(ApiError::invalid(format!(
-            "{instance} is a local extension ({}); its source is already in the project.",
-            found.status.written
-        )));
-    }
-    let offline = extensions.config().offline;
-    let vendored = extensions.vendor(&instance).await.map_err(|error| {
-        if offline {
-            ApiError::conflict(
-                "The source is not in the shared cache and the suite runs with --offline.",
-            )
-            .with_fix("Vendor once with network access, or start without --offline.")
-            .with_extra("detail", Value::String(error.0))
-        } else {
-            ApiError::unavailable(error.0)
-        }
-    })?;
-    Ok(Json(ExtensionVendorResult {
-        directory: vendored.directory,
-        version: vendored.version,
-    }))
 }
 
 // ── Mapping ──────────────────────────────────────────────────────────────

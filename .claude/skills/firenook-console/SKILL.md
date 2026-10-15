@@ -2967,8 +2967,12 @@ inspector `tab=run|trigger|environment`, an invocation with `invocation=`,
 edit and replay with `prefill=`, `paused`, `q`, `sort`, `source`),
 `/functions/invocations` (`q`, `invocation`, `paused`), `/extensions`
 (`instance`, `view=overview|configuration|functions|events|readme`, `edit`,
-`q`), `/eventarc` (`channel`, `q`, `event`, `new=event`, `prefill`,
-`paused`) and `/eventarc/channels` (`channel`). Each schema lives in the
+`q`) and `/eventarc` (`channel`, `q`, `event`, `new=event`, `prefill`,
+`paused`); a channel in scope shows its publishers, subscribers and
+warnings over its events (there is no channels page, and a publisher's
+warning is said there only, linking to its instance's Events tab, which
+counts the instance's events and opens them in Eventarc filtered by
+`publisher:`). Each schema lives in the
 section's `search.ts`; the pages read it through `useRouteSearch`, so the
 first route carries the schemas alone. There is no `/eventarc/alerts`: the
 engine does not deliver Firebase Alerts yet, an alert function is
@@ -2977,9 +2981,11 @@ engine does not deliver Firebase Alerts yet, an alert function is
 **Where things are.** Pure logic with Vitest beside it in
 `src/functions/*.ts` (kinds and their verbs, trigger text, the panel tree,
 filters, envelopes, callable, identity headers, blocking, Copy as commands,
-curl paste, the invoke request and stream, run drafts, saved tests);
+curl paste, the invoke request and stream, run drafts);
 pages and forms in `src/functions/components/` (overview, codebase view,
-workbench and its Run / Trigger / Environment tabs, the six run forms on
+workbench and its Run / Trigger / Environment tabs — the inspector,
+`run-side-panel.tsx`, loads through `lazy-inspector.ts` once a function is
+open, so nothing else may import the forms statically — the six run forms on
 `run-parts.tsx`, invocation list, row and detail, `request-view.tsx`,
 `invocation-actions.tsx`). `src/extensions/` and `src/eventarc/` follow
 the same split. UI shared by the three lives in `src/compute/`:
@@ -3061,8 +3067,17 @@ Generated types in `src/api/generated/compute/`.
   (`entity.rs` constructors); filtered Logs go through `linkToLogs`.
   Compute exports no link builder. Task causes link the task by
   `task_id(queue, task)` and the queue; Run now goes through messaging's
-  `ScheduleControl::run` and Enqueue through `TasksConsole::enqueue_console`
-  (a reserved name or a full queue is a conflict, said in the form).
+  `ScheduleControl::run`. The Run tab has no broker routes of its own:
+  "Publish to <topic>" is Pub/Sub's console publish (`POST
+  /pubsub/topic/publish`, `publish_from_console`, so a refusal is never
+  counted as the app's) and Enqueue is Cloud Tasks' (`POST /tasks/tasks`,
+  its refusals and fixes said in the form).
+- **Invocations is where every run is listed.** Other sections do not keep
+  their own delivery or attempt lists; they link to
+  `/functions/invocations` with the engine's filter: `function:`,
+  `topic:` (a Pub/Sub or schedule topic, by name or full name) or
+  `queue:` (a Cloud Tasks queue key, with or without its `queue:`), all
+  held to `invocation-filter-cases.json` on both sides.
 - **"Which functions fire here" has one matcher**: `GET
   /functions/triggers` (through `useTriggersFor`, `'unknown'` while
   starting, one reference-counted `functions.events {changesOnly}`
@@ -3100,15 +3115,18 @@ Generated types in `src/api/generated/compute/`.
   mount.
 - **Outcome words and classes** come from the engine; the client never
   derives a class. `OutcomeChip` is the foundation's.
-- **Invocation logs** are observe's `LogLine` rows through `LogLines`: in
-  an invocation, a 52 px offset column (84 px once a line is a minute in)
-  and no level column while every line is info, so a one-line message
-  gets the row; a codebase's load log keeps the clock column.
+- **Invocation logs** are observe's `LogLine` rows through `LogLines`, on
+  the kit's `FeedList` (`inline`: selectable text, no keys of its own, so
+  the page's invocation list keeps j/k): in an invocation, a 52 px offset
+  column (84 px once a line is a minute in) and no level column while
+  every line is info, so a one-line message gets the row; a codebase's
+  load log keeps the clock column. Fields and cut lines open under the
+  row, in the message's column.
 - **Per browser**: run drafts per tab in sessionStorage
-  (`firenook.console.run-drafts`), saved tests in localStorage (50 per
-  function, 1 MB per project, export and import as JSON), the editor that
-  stack frames open in (`firenook.console.editor`: VS Code, Cursor,
-  JetBrains).
+  (`firenook.console.run-drafts`) and the editor that stack frames open in
+  (`firenook.console.editor`: VS Code, Cursor, JetBrains). There are no
+  saved tests: a run is kept as its invocation (Replay, Edit and replay),
+  its URL and Copy as.
 
 **Journeys** (`--project compute`): `e2e/functions*.spec.ts`,
 `extensions.spec.ts`, `eventarc.spec.ts`, helpers in

@@ -161,12 +161,23 @@ test('replay publishes an event again with a new id, behind a confirmation from 
   expect(replayed?.eventId).not.toBe(first?.eventId)
 })
 
-test('channels show who publishes what to whom, and what does not line up', async ({
+test('a channel in scope shows who publishes what to whom over its events, and what does not line up', async ({
   page,
   engine,
 }) => {
-  await page.goto(`${engine.origin}/console/eventarc/channels`)
-  const channel = page.locator(`[data-testid="channel-flow"][data-channel="${channelOf(engine)}"]`)
+  await page.goto(`${engine.origin}/console/eventarc`)
+  // Every channel's events: no flow until one is picked; the channels where
+  // something does not line up are named, each opened from there.
+  await expect(page.getByTestId('events-channel-flow')).toHaveCount(0)
+  const warned = page.getByTestId('events-channel-warnings')
+  await expect(warned).toHaveText(
+    'Something does not line up on firebase (1 warning); open it to see what.',
+  )
+  await warned.getByTestId('events-channel-warning').click()
+  await expect(page).toHaveURL(/channel=/)
+  const channel = page
+    .getByTestId('events-channel-flow')
+    .locator(`[data-testid="channel-flow"][data-channel="${channelOf(engine)}"]`)
   await expect(channel).toBeVisible()
   const publisher = channel.locator('[data-testid="channel-publisher"][data-instance="greeter"]')
   await expect(publisher.locator('[data-type="test.greeter.v1.greeted"]')).toHaveAttribute(
@@ -182,11 +193,17 @@ test('channels show who publishes what to whom, and what does not line up', asyn
   await expect(
     channel.locator('[data-testid="channel-subscriber"][data-function="us-central1-onGreetedVip"]'),
   ).toContainText('subject=greetings/vip-1')
-  await expect(
-    channel.locator('[data-testid="channel-warning"][data-kind="not-allowed"]'),
-  ).toHaveText(
+  const warning = channel.locator('[data-testid="channel-warning"][data-kind="not-allowed"]')
+  await expect(warning).toContainText(
     'test.greeter.v1.failed is declared by greeter but not allowed, so it is never published.',
   )
+  // The events below are the channel's.
+  await expect(page.getByTestId('events-scope')).toContainText('firebase')
+  // A publisher's warning opens its instance's Events tab, where its types are set.
+  await warning.getByTestId('channel-warning-publisher').click()
+  await expect(page).toHaveURL(/\/console\/extensions\?instance=greeter&view=events/)
+  await expect(page.getByTestId('instance-events')).toBeVisible()
+  await page.goBack()
   // The publisher is a link into Extensions.
   await publisher.getByTestId('channel-publisher-link-link').click()
   await expect(page).toHaveURL(/\/console\/extensions\?instance=greeter/)
@@ -199,9 +216,12 @@ test('without alert delivery there is no Alerts page', async ({ page, engine }) 
   expect(snapshot.alertsDelivered).toBe(false)
   await page.goto(`${engine.origin}/console/eventarc`)
   await expect(page.getByTestId('nav-page-events')).toBeVisible()
-  await expect(page.getByTestId('nav-page-channels')).toBeVisible()
   await expect(page.locator('[data-testid^="nav-page-alerts"]')).toHaveCount(0)
   const response = await page.goto(`${engine.origin}/console/eventarc/alerts`)
   expect(response?.ok()).toBe(true)
+  await expect(page.getByText('Nothing at this address')).toBeVisible()
+  // Channels are shown on the events page, over a channel's events: no page of their own.
+  await expect(page.locator('[data-testid^="nav-page-channels"]')).toHaveCount(0)
+  await page.goto(`${engine.origin}/console/eventarc/channels`)
   await expect(page.getByText('Nothing at this address')).toBeVisible()
 })

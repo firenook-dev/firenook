@@ -1577,11 +1577,6 @@ impl Monitor {
         drop(removed);
     }
 
-    /// Drops every kept Eventarc event.
-    pub fn clear_events(&self) {
-        self.lock().events.clear();
-    }
-
     fn update_codebase(&self, id: &str, change: impl FnOnce(&mut FunctionCodebase)) {
         let mut state = self.lock();
         let Some(entry) = state.codebase_mut(id) else {

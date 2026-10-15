@@ -167,7 +167,6 @@ const definitions: Record<string, BackendDefinition> = {
       channel: `projects/${PROJECT}/locations/us-central1/channels/firebase`,
     },
   },
-  tasks: { name: 'resize', platform: 'gcfv2', taskQueueTrigger: {}, httpsTrigger: {} },
 }
 
 const cases: [string, unknown, object][] = [
@@ -188,7 +187,6 @@ const cases: [string, unknown, object][] = [
   ['scheduleV1', undefined, {}],
   ['scheduleV2', undefined, {}],
   ['eventarc', { name: 'Ada' }, {}],
-  ['tasks', { url: 'a.png' }, {}],
 ]
 
 describe('test events are the functions shell envelopes', () => {
@@ -207,6 +205,9 @@ describe('test events are the functions shell envelopes', () => {
   it("refuses what the shell refuses, in the shell's words", () => {
     const http: BackendDefinition = { name: 'api', httpsTrigger: {} }
     expect(() => buildTestEvent(http, PROJECT, {})).toThrow(/is an HTTPS function/)
+    const tasks: BackendDefinition = { name: 'resize', platform: 'gcfv2', taskQueueTrigger: {} }
+    expect(() => buildTestEvent(tasks, PROJECT, {})).toThrow(/enqueue a task for it/)
+    expect(triggerKind(tasks)).toBe(cli.triggerKind(tasks))
     expect(() =>
       buildTestEvent(
         { name: 'db', eventTrigger: { eventType: 'google.firebase.database.ref.v1.written' } },

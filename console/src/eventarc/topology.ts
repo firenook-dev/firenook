@@ -1,8 +1,10 @@
 // Who publishes what to whom, and what is wrong with it: the warnings the
-// channels page draws under each channel, and the near misses an unheard
+// events page draws under the channel in scope (the one place a publisher's
+// configuration is warned about), and the near misses an unheard
 // event suggests ("Did you mean test.greeter.v1.greeted?"). Pure, from the
 // engine's channel snapshot, so a test can hold every case.
 
+import type { EntityRef } from '@/api/generated/EntityRef'
 import type { EventarcChannel } from '@/api/generated/compute/EventarcChannel'
 
 /** Attributes every CloudEvent carries; a filter on anything else needs the publisher to set it. */
@@ -19,6 +21,7 @@ export const CORE_ATTRIBUTES: ReadonlySet<string> = new Set([
 
 export type ChannelWarningKind =
   | 'not-allowed'
+  | 'undeclared-type'
   | 'unheard-type'
   | 'unpublished-type'
   | 'other-location'
@@ -30,6 +33,8 @@ export interface ChannelWarning {
   text: string
   /** What the sentence is about (an event type, a channel id, an attribute), for keys and tests. */
   subject: string
+  /** The extension instance whose configuration it is about: its Events tab is where to look. */
+  publisher?: EntityRef | undefined
 }
 
 /** The function a subscription belongs to, by its short name, or the trigger key when it has none. */
@@ -51,12 +56,23 @@ export function channelWarnings(
   const listened = new Set(channel.subscriptions.map((subscription) => subscription.eventType))
   const published = new Set(channel.publishers.flatMap((publisher) => publisher.allowed))
   for (const publisher of channel.publishers) {
+    const about = publisher.instance
     for (const declared of publisher.declared) {
       if (declared.allowed) continue
       warnings.push({
         kind: 'not-allowed',
         subject: declared.type,
         text: `${declared.type} is declared by ${publisher.instanceId} but not allowed, so it is never published.`,
+        publisher: about,
+      })
+    }
+    for (const type of publisher.allowed) {
+      if (publisher.declared.some((declared) => declared.type === type)) continue
+      warnings.push({
+        kind: 'undeclared-type',
+        subject: type,
+        text: `${publisher.instanceId} is allowed to publish ${type}, which it does not declare; check ALLOWED_EVENT_TYPES in its parameter file.`,
+        publisher: about,
       })
     }
     for (const type of publisher.allowed) {
@@ -65,6 +81,7 @@ export function channelWarnings(
         kind: 'unheard-type',
         subject: type,
         text: `${publisher.instanceId} publishes ${type} here, but no function listens for it.`,
+        publisher: about,
       })
     }
   }

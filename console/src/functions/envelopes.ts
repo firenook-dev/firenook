@@ -67,7 +67,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
 
 /** UTF-8 text as base64 (the CLI's `Buffer.from(text).toString('base64')`). */
-export function utf8Base64(text: string): string {
+function utf8Base64(text: string): string {
   const bytes = new TextEncoder().encode(text)
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
@@ -136,16 +136,6 @@ export function cloudEvent(
     data,
     ...extensions,
   }
-}
-
-/** LocalFunction.constructAuth for the user form; the shell's own {admin, variable} passes through. */
-export function eventAuth(auth: unknown): EventAuth | undefined {
-  if (auth === undefined) return undefined
-  if (!isObject(auth))
-    throw new Error('Auth must be a JSON object: {"uid": "...", "token": {...}} or {"admin": true}')
-  if (auth.admin !== undefined || auth.variable !== undefined)
-    return { admin: Boolean(auth.admin), variable: auth.variable }
-  return { admin: false, variable: { uid: auth.uid ?? '', token: auth.token ?? {} } }
 }
 
 /**
@@ -333,7 +323,8 @@ export interface EnvelopeOptions {
 /** A test event: the body to post to the trigger route, and what the shell would also say about it. */
 export interface TestEnvelope {
   kind: ShellKind
-  transport: 'functions' | 'tasks'
+  /** Always the functions trigger route (the CLI's own envelope says the same). */
+  transport: 'functions'
   body?: Record<string, unknown>
   headers?: Record<string, string>
   /** Firestore: the full document name. */
@@ -341,8 +332,6 @@ export interface TestEnvelope {
   /** Pub/Sub: the message and its topic (short name). */
   message?: Record<string, unknown>
   topic?: string
-  /** A task queue's task, as the CLI enqueues it. */
-  task?: Record<string, unknown>
 }
 
 function firestoreEnvelope(
@@ -667,18 +656,11 @@ export function buildTestEvent(
     case 'unknown':
       throw new Error(`${trigger.name} has no trigger Firenook can drive`)
     case 'taskQueue':
-      return {
-        kind,
-        transport: 'tasks',
-        task: {
-          httpRequest: {
-            url: '',
-            oidcToken: { serviceAccountEmail: 'emulated-service-acct@email.com' },
-            body: utf8Base64(JSON.stringify({ data: eventData ?? {} })),
-            headers: { 'Content-Type': 'application/json' },
-          },
-        },
-      }
+      // The Run tab enqueues through Cloud Tasks instead (the shell's own
+      // task envelope is a task the Tasks API takes, not an event).
+      throw new Error(
+        `${trigger.name} is a task queue function; enqueue a task for it through Cloud Tasks`,
+      )
     case 'firestore':
       return firestoreEnvelope(trigger, project, eventData, opts, clock, random)
     case 'storage':

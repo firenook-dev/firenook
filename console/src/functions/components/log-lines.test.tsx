@@ -2,14 +2,13 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FunctionLogLine } from '@/api/generated/compute/FunctionLogLine'
 import { createFeedStore } from '@/lib/live/feed-store'
+import { scrollTo, stubLayout } from '@/test/layout'
 import { giveListsALayout } from '@/test/virtual'
 import {
   LogLines,
   MINUTE_OFFSET_MS,
-  VIRTUAL_FROM,
   canOpen,
   fieldsOf,
-  lineGapText,
   lineKey,
   offsetColumns,
   offsetText,
@@ -89,14 +88,6 @@ describe('the pieces of a line', () => {
     expect([0, 1, 2].map((index) => returnsBefore(store, index))).toEqual([false, true, false])
     const late = storeOf([line(5, { afterFinish: true })])
     expect(returnsBefore(late, 0)).toBe(true)
-  })
-
-  it('says how many lines a gap missed', () => {
-    expect(lineGapText(1, 200)).toBe('1 line was missed here; the engine keeps the last 200.')
-    expect(lineGapText(1_204, 200)).toBe(
-      '1,204 lines were missed here; the engine keeps the last 200.',
-    )
-    expect(lineGapText(null, 200)).toBe('Lines from an earlier run were missed here.')
   })
 })
 
@@ -188,7 +179,15 @@ describe("a codebase's load log", () => {
     const open = screen.getByRole('button', { name: 'Show the whole message' })
     expect(open).toHaveTextContent('+2 lines')
     fireEvent.click(open)
-    expect(rows[1]?.querySelector('[data-part="message"]')).toHaveTextContent('at b')
+    // The cut lines open under the message, in its column.
+    expect(screen.getByTestId('log-opened')).toHaveTextContent('at a at b')
+    expect(screen.getByTestId('log-opened')).toHaveClass(
+      'grid-cols-[104px_44px_minmax(0,1fr)_auto]',
+    )
+    expect(screen.getByRole('button', { name: 'Show one line' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
     expect(screen.queryByTestId('log-returned')).toBeNull()
   })
 
@@ -200,8 +199,8 @@ describe("a codebase's load log", () => {
       store.marker({ kind: 'marker', key: 'restart', text: 'The engine restarted.' })
     })
     await frame()
-    expect(screen.getByTestId('log-gap')).toHaveTextContent('312 lines were missed here')
-    expect(screen.getByTestId('log-marker')).toHaveTextContent('The engine restarted.')
+    expect(screen.getByTestId('feed-gap')).toHaveTextContent('312 entries were missed here')
+    expect(screen.getByTestId('feed-marker')).toHaveTextContent('The engine restarted.')
   })
 
   it('holds still while paused, counting new lines, and jumps back on asking', async () => {
@@ -227,7 +226,7 @@ describe("a codebase's load log", () => {
     )
     act(() => store.push([line(2), line(3), line(4)]))
     await frame()
-    const pill = screen.getByTestId('log-lines-latest')
+    const pill = screen.getByTestId('jump-to-latest')
     expect(pill).toHaveTextContent('3 new · Jump to latest')
     fireEvent.click(pill)
     expect(onFollowChange).toHaveBeenCalledWith(true)
@@ -235,17 +234,36 @@ describe("a codebase's load log", () => {
 })
 
 describe('a long log', () => {
-  it('draws only what is on screen above 200 lines', () => {
-    const lines = Array.from({ length: VIRTUAL_FROM + 100 }, (_, index) => line(index))
+  it('draws only what is on screen', () => {
+    const lines = Array.from({ length: 2_000 }, (_, index) => line(index))
     render(<LogLines ariaLabel="Logs" store={storeOf(lines)} mode="invocation" />)
     const drawn = screen.getAllByTestId('log-line').length
     expect(drawn).toBeGreaterThan(0)
     expect(drawn).toBeLessThan(80)
   })
 
-  it('draws every line at or below 200', () => {
-    const lines = Array.from({ length: VIRTUAL_FROM }, (_, index) => line(index))
-    render(<LogLines ariaLabel="Logs" store={storeOf(lines)} mode="invocation" />)
-    expect(screen.getAllByTestId('log-line')).toHaveLength(VIRTUAL_FROM)
+  it('holds still once the reader scrolls up, without a page to hold it', async () => {
+    const restore = stubLayout({ height: 240 })
+    try {
+      const store = storeOf(Array.from({ length: 50 }, (_, index) => line(index)))
+      render(<LogLines ariaLabel="Logs" store={store} mode="codebase" />)
+      const scroller = screen.getByTestId('log-lines-list-scroll')
+      act(() => {
+        fireEvent.wheel(scroller)
+        scrollTo(scroller, 0)
+      })
+      act(() => store.push([line(50), line(51)]))
+      await frame()
+      expect(screen.getByTestId('jump-to-latest')).toHaveTextContent('2 new · Jump to latest')
+    } finally {
+      restore()
+    }
+  })
+
+  it('takes no keys: the page around it keeps them', () => {
+    render(<LogLines ariaLabel="Logs" store={storeOf([line(0), line(1)])} mode="codebase" />)
+    fireEvent.keyDown(document.body, { key: 'j' })
+    expect(document.querySelector('[data-testid="feed-row"][aria-selected="true"]')).toBeNull()
+    expect(screen.getAllByTestId('feed-row')[0]).toHaveClass('select-text')
   })
 })

@@ -34,7 +34,6 @@ use firenook_functions_runtime::monitor::{
     InvocationQuery, InvocationSummary, InvocationTarget, format_timestamp,
 };
 use firenook_pubsub_front::{RunScheduleError, ScheduleControl as _};
-use firenook_tasks_front::{ConsoleTask, EnqueueError};
 use futures_util::stream::{self, Stream, StreamExt as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -453,40 +452,12 @@ pub(crate) struct FunctionTestEventRequest {
     pub(crate) headers: Vec<FunctionHeaderInput>,
 }
 
-/// A message to publish to a Pub/Sub function's topic.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "compute/")]
-pub(crate) struct FunctionPublishRequest {
-    #[serde(default)]
-    pub(crate) data: String,
-    #[serde(default = "empty_encoding")]
-    pub(crate) encoding: FunctionBodyEncoding,
-    #[serde(default)]
-    pub(crate) attributes: BTreeMap<String, String>,
-    #[serde(default)]
-    pub(crate) ordering_key: Option<String>,
-}
-
-/// A task for a task queue function.
-#[derive(Clone, Debug, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "compute/")]
-pub(crate) struct FunctionEnqueueRequest {
-    #[ts(type = "unknown")]
-    pub(crate) payload: Value,
-    /// Accepted only when the queue holds scheduled tasks.
-    #[serde(default)]
-    pub(crate) run_after_seconds: Option<u32>,
-}
-
 /// Which broker took a console request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "compute/")]
 pub(crate) enum FunctionBrokerTransport {
     Pubsub,
-    Tasks,
     Direct,
 }
 
@@ -745,8 +716,6 @@ pub(crate) fn router(state: ComputeState) -> Router {
         .route("/functions/{id}", get(detail))
         .route("/functions/{id}/invoke", post(invoke).layer(call))
         .route("/functions/{id}/send-event", post(send_event).layer(call))
-        .route("/functions/{id}/publish", post(publish).layer(limit))
-        .route("/functions/{id}/enqueue", post(enqueue).layer(limit))
         .route("/functions/{id}/run", post(run).layer(limit))
         .with_state(state)
 }
@@ -928,134 +897,6 @@ async fn send_event(
         .await
         .map_err(console_error)?;
     Ok(frames_response(&state, stream))
-}
-
-async fn publish(
-    State(state): State<ComputeState>,
-    Path(id): Path<String>,
-    ConsoleJson(request): ConsoleJson<FunctionPublishRequest>,
-) -> Result<Json<FunctionBrokerResult>, ApiError> {
-    let runtime = state.runtime()?;
-    let view = function_view(&runtime, &id).await?;
-    if view.kind != FunctionKind::Pubsub {
-        return Err(ApiError::invalid(format!(
-            "{} does not listen to a Pub/Sub topic.",
-            view.name
-        )));
-    }
-    let topic = trigger_of(&view.definition, &state.project)
-        .topic
-        .ok_or_else(|| ApiError::invalid(format!("{} names no topic.", view.name)))?;
-    let data = decode_body(&request.data, request.encoding)?;
-    if data.is_empty() && request.attributes.is_empty() {
-        return Err(ApiError::invalid(
-            "A Pub/Sub message needs data or at least one attribute.",
-        ));
-    }
-    if !runtime.background_enabled() {
-        return Err(paused(
-            "Background triggers are paused, so Pub/Sub would accept this message and deliver it to no function.",
-        ));
-    }
-    let mut message = json!({ "data": BASE64.encode(&data) });
-    if !request.attributes.is_empty() {
-        message["attributes"] = json!(request.attributes);
-    }
-    if let Some(key) = request.ordering_key.filter(|key| !key.is_empty()) {
-        message["orderingKey"] = Value::String(key);
-    }
-    let message_id = publish_to(&state, &topic, message).await?;
-    Ok(Json(FunctionBrokerResult {
-        transport: FunctionBrokerTransport::Pubsub,
-        target: Some(EntityRef::pubsub_message(&topic, &message_id)),
-        topic: Some(topic),
-        message_id: Some(message_id),
-        queue: None,
-        task: None,
-        invocation: None,
-    }))
-}
-
-async fn enqueue(
-    State(state): State<ComputeState>,
-    Path(id): Path<String>,
-    ConsoleJson(request): ConsoleJson<FunctionEnqueueRequest>,
-) -> Result<Json<FunctionBrokerResult>, ApiError> {
-    let runtime = state.runtime()?;
-    let view = function_view(&runtime, &id).await?;
-    if view.kind != FunctionKind::Tasks {
-        return Err(ApiError::invalid(format!(
-            "{} is not a task queue function.",
-            view.name
-        )));
-    }
-    let Some(tasks) = &state.tasks else {
-        return Err(ApiError::unavailable(
-            "Cloud Tasks is not running in this suite.",
-        ));
-    };
-    let tasks = tasks.get()?;
-    let queue = queue_key(&state.project, &view.region, &view.name);
-    let holds = tasks
-        .runtime
-        .queue_view(&queue)
-        .is_some_and(|held| held.hold_scheduled);
-    if request.run_after_seconds.is_some() && !holds {
-        return Err(ApiError::invalid(
-            "This queue runs a task at once whatever its schedule time, as the official emulator does, so a delay would do nothing.",
-        ));
-    }
-    let data = serde_json::to_string(&request.payload)
-        .map_err(|error| ApiError::invalid(format!("The payload is not JSON: {error}.")))?;
-    // The task the Admin SDK's `TaskQueue.enqueue(payload)` sends, through
-    // the console's one enqueue path (the wire's own preparation and limit).
-    let task = ConsoleTask {
-        data: Some(data),
-        schedule_delay_seconds: request
-            .run_after_seconds
-            .filter(|seconds| *seconds > 0)
-            .map(f64::from),
-        ..ConsoleTask::default()
-    };
-    let enqueued = tasks
-        .enqueue_console(&queue, task)
-        .map_err(|error| enqueue_refused(&error, &view.name))?;
-    Ok(Json(FunctionBrokerResult {
-        transport: FunctionBrokerTransport::Tasks,
-        topic: None,
-        message_id: None,
-        target: Some(EntityRef::tasks_task(
-            &state.project,
-            &view.region,
-            &view.name,
-            &enqueued.id.to_string(),
-        )),
-        queue: Some(queue),
-        task: Some(enqueued.name),
-        invocation: None,
-    }))
-}
-
-/// Cloud Tasks' refusal of a console task, with what to do about it.
-fn enqueue_refused(error: &EnqueueError, queue: &str) -> ApiError {
-    match error {
-        EnqueueError::UnknownQueue => ApiError::not_found(format!(
-            "Cloud Tasks has no queue {queue} registered."
-        ))
-        .with_fix("The queue registers when its codebase loads; reload it, or look in Cloud Tasks for why it was refused."),
-        EnqueueError::NameReserved => ApiError::conflict(
-            "A task with this name was enqueued before in this run.",
-        )
-        .with_fix("The emulator keeps every task name until it stops; enqueue without a name."),
-        EnqueueError::QueueFull { .. } => ApiError::conflict(format!(
-            "{queue} holds as many pending tasks as the emulator keeps."
-        ))
-        .with_fix("Purge the queue in Cloud Tasks or let it drain."),
-        EnqueueError::TooLarge { .. } => ApiError::too_large(error.to_string())
-            .with_fix("Send less data: the Admin SDK would be refused the same task."),
-        EnqueueError::Invalid(reason) => ApiError::invalid(reason.clone()),
-        EnqueueError::UnknownTask => ApiError::not_found(error.to_string()),
-    }
 }
 
 async fn run(

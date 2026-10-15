@@ -276,13 +276,13 @@ async fn reconfigure_lists_every_problem_or_writes_the_files_and_reloads() {
         .await;
     assert_eq!(status, StatusCode::OK, "{reloaded}");
     assert_eq!(reloaded["summary"]["state"], "running");
-    let (status, vendor) = suite
+    // Vendoring is the CLI's: there is no console route for it.
+    let (status, _) = suite
         .post("/extensions/instances/greeter/vendor", json!({}))
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{vendor}");
+    assert_eq!(status, StatusCode::NOT_FOUND);
     for uri in [
         "/extensions/instances/nothing/reload",
-        "/extensions/instances/nothing/vendor",
         "/extensions/instances/nothing/reconfigure",
     ] {
         let (status, _) = suite.post(uri, json!({})).await;

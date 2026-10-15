@@ -1,6 +1,7 @@
-// Eventarc's registry entry: the events page and the channels page, and
-// where an event or a channel opens when another section's payload points
-// at one (an `EntityRef`: an invocation's cause, an extension's channel).
+// Eventarc's registry entry: the events page (a channel in scope shows who
+// publishes to it and who listens, over its events), and where an event or
+// a channel opens when another section's payload points at one (an
+// `EntityRef`: an invocation's cause, an extension's channel).
 // The publish action ⌘K offers from anywhere is in `./eventarc-actions.ts`.
 //
 // Firebase Alerts would add a third page, `/eventarc/alerts`, only together
@@ -20,11 +21,11 @@ export const eventarc: ConsoleSection = {
   summary:
     'Every event on every channel with the trigger each one reached or missed, publish a custom event, and who publishes and who listens.',
   pages: [
-    { to: '/eventarc', label: 'Events', exact: true, keywords: 'cloudevents deliveries' },
     {
-      to: '/eventarc/channels',
-      label: 'Channels',
-      keywords: 'publishers subscribers triggers topology',
+      to: '/eventarc',
+      label: 'Events',
+      exact: true,
+      keywords: 'cloudevents deliveries channels publishers subscribers triggers topology',
     },
   ],
   routes: {

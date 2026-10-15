@@ -118,7 +118,7 @@ The official extensions pages (`components/Extensions/*`).
 | Instances table | Extensions › the overview's instances table | compute | [x] |
 | Detail: parameters, a secret shown on demand | Extensions › an instance › Configuration (a secret revealed on request; SecretInput when editing) | compute | [x] |
 | Detail: APIs and resources | Extensions › an instance › Overview (the APIs, emulated or not, and external services) | compute | [x] |
-| Detail: events and their snippet | Extensions › an instance › Events | compute | [x] |
+| Detail: events and their snippet | Extensions › an instance › Events (channel, declared and allowed types, a handler snippet, and how many events it published, opened in Eventarc filtered to the instance) | compute | [x] |
 | Detail: access and roles | Extensions › an instance › Overview (roles) | compute | [x] |
 | Detail: README | Extensions › an instance › How it works (POSTINSTALL, README) | compute | [x] |
 | Detail: related links | Extensions › an instance › Overview (source URL, author) | compute | [x] |

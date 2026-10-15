@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use firenook_functions_bridge::TriggerRegistry;
 use firenook_functions_runtime::{
@@ -413,7 +413,10 @@ async fn a_reconfigure_and_a_watcher_reload_never_overlap() {
 }
 
 #[tokio::test]
-async fn vendoring_reloads_from_the_vendored_copy() {
+/// The console's Vendor: `firenook ext:vendor` (the CLI's `crate::vendor`)
+/// copies the source into the project, and a Reload then runs the
+/// instance from the copy.
+async fn a_reload_after_the_cli_vendors_runs_from_the_copy() {
     let directory = tempfile::tempdir().unwrap();
     let project = directory.path().canonicalize().unwrap();
     std::fs::create_dir_all(project.join("extensions")).unwrap();
@@ -445,19 +448,29 @@ async fn vendoring_reloads_from_the_vendored_copy() {
         &project,
         vec![("stripe".to_owned(), "acme/greeter@1.2.3".to_owned())],
     );
-    let (control, runtime, _monitor) = start(config, &project).await;
+    let (control, runtime, _monitor) = start(config.clone(), &project).await;
     let before = control.instance("stripe").await.expect("running");
     assert_eq!(before.loaded.expect("loaded").origin, SourceOrigin::Cache);
-    let vendored = control.vendor("stripe").await.expect("vendored");
-    assert_eq!(vendored.directory, "extensions/.sources/acme/greeter@1.2.3");
-    assert_eq!(vendored.version, "1.2.3");
-    let loaded = vendored.state.loaded.expect("loaded");
+    let (log, _events) = LogSink::recording();
+    let directory = crate::vendor(&config, "stripe", "acme/greeter@1.2.3", &log)
+        .await
+        .expect("vendored");
+    assert_eq!(
+        directory,
+        project.join("extensions/.sources/acme/greeter@1.2.3")
+    );
+    assert_eq!(
+        crate::source::vendored_version(&project, "acme/greeter@1.2.3").as_deref(),
+        Some("1.2.3")
+    );
+    let state = control.reload("stripe").await.expect("reloaded");
+    let loaded = state.loaded.expect("loaded");
     assert_eq!(loaded.origin, SourceOrigin::Vendored);
     assert_eq!(
         loaded.backend.functions_dir,
         project.join("extensions/.sources/acme/greeter@1.2.3/functions")
     );
-    assert_eq!(vendored.state.status.source, Some("vendored"));
+    assert_eq!(state.status.source, Some("vendored"));
     runtime.shutdown().await;
 }
 

@@ -56,8 +56,29 @@ describe('what does not line up on a channel', () => {
         kind: 'not-allowed',
         subject: 'test.greeter.v1.failed',
         text: 'test.greeter.v1.failed is declared by greeter but not allowed, so it is never published.',
+        publisher: { kind: 'extensions.instance', key: 'greeter' },
       },
     ])
+  })
+
+  it('an allowed type the instance does not declare, with the instance to look at', () => {
+    const typo = channel({
+      publishers: [{ ...channel().publishers[0]!, allowed: ['test.greeter.v1.greted'] }],
+    })
+    const warnings = channelWarnings(typo, [typo])
+    // The typo also leaves the real type unpublished for its listener.
+    expect(kinds(warnings)).toEqual([
+      'not-allowed',
+      'undeclared-type',
+      'unheard-type',
+      'unpublished-type',
+    ])
+    expect(warnings[1]).toEqual({
+      kind: 'undeclared-type',
+      subject: 'test.greeter.v1.greted',
+      text: 'greeter is allowed to publish test.greeter.v1.greted, which it does not declare; check ALLOWED_EVENT_TYPES in its parameter file.',
+      publisher: { kind: 'extensions.instance', key: 'greeter' },
+    })
   })
 
   it('an allowed type nobody listens for, and a listened type nobody publishes', () => {

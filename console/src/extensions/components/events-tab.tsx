@@ -1,29 +1,22 @@
 // What an instance publishes on Eventarc: its channel, the event types it
 // declares and which of them it is allowed to publish, a handler to paste
-// for the first one, and the events it actually published, live, each with
-// what became of it — opened in Eventarc for the delivery trace.
+// for the first one, and how many events it published, opened in Eventarc
+// (filtered to it), where each one's delivery trace is. What does not line
+// up on the channel is said once, in Eventarc.
 
-import { Tooltip, cn } from '@cloudflare/kumo'
-import { ArrowRightIcon, BroadcastIcon } from '@phosphor-icons/react'
+import { Tooltip } from '@cloudflare/kumo'
+import { ArrowRightIcon } from '@phosphor-icons/react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
-import type { EventarcEventSummary } from '@/api/generated/compute/EventarcEventSummary'
+import { Link } from '@tanstack/react-router'
+import type { EntityRef } from '@/api/generated/EntityRef'
+import type { Total } from '@/api/generated/Total'
 import type { ExtensionEvents } from '@/api/generated/compute/ExtensionEvents'
 import { CodeBlock } from '@/components/console/code-block'
 import { CopyButton } from '@/components/console/copy-button'
-import { FeedList } from '@/components/console/feed-list'
 import { StatusDot } from '@/components/kit'
-import { EVENT_LIST, EventCells, EventHeader } from '@/compute/event-row'
-import { eventPageQuery } from '@/eventarc/api'
-import { useEventarcEvents } from '@/eventarc/live'
-import { useNow } from '@/lib/clock'
-import { useClockFormat } from '@/lib/format'
-import { linkTo, useLinkTo } from '@/lib/links'
-import { createFeedStore } from '@/lib/live/feed-store'
-
-/** How many of the instance's events the tab keeps: its own newest page. */
-const KEPT = 200
+import { eventarcKeys, getEvents } from '@/eventarc/api'
+import { formatCount } from '@/lib/format'
+import { useLinkTo } from '@/lib/links'
 
 /** `test.greeter.v1.greeted` → `onGreeted`: a handler name a person would write. */
 export function handlerName(eventType: string): string {
@@ -69,6 +62,9 @@ export function EventsTab({
 }) {
   const snippet = handlerSnippet(events)
   const channelLink = useLinkTo(events.channelRef ?? undefined)
+  const undeclared = events.allowed.filter(
+    (type) => !events.declared.some((declared) => declared.type === type),
+  )
   return (
     <div
       className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-kumo-base"
@@ -148,15 +144,21 @@ export function EventsTab({
               ))}
             </ul>
           )}
-          {events.allowed.some((type) => !events.declared.some((d) => d.type === type)) && (
-            <p className="m-0 text-[12px] text-kumo-warning">
-              Allowed but not declared:{' '}
-              <span className="font-mono">
-                {events.allowed
-                  .filter((type) => !events.declared.some((d) => d.type === type))
-                  .join(', ')}
-              </span>
-            </p>
+          {undeclared.length > 0 && (
+            <ul className="m-0 grid list-none gap-2 p-0">
+              {undeclared.map((type) => (
+                <li
+                  key={type}
+                  className="flex min-w-0 items-center gap-2"
+                  data-testid="declared-event"
+                  data-type={type}
+                  data-allowed=""
+                >
+                  <span className="truncate font-mono text-[12px] text-kumo-default">{type}</span>
+                  <span className="text-[12px] text-kumo-subtle">Allowed, not declared</span>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
         {snippet && (
@@ -167,81 +169,67 @@ export function EventsTab({
             testId="events-snippet"
           />
         )}
-        <RecentEvents project={project} instance={instance} />
+        <PublishedEvents project={project} instance={instance} channel={events.channelRef} />
       </div>
     </div>
   )
 }
 
-/** The instance's own events, newest first, live: the engine filters them by publisher. */
-function RecentEvents({ project, instance }: { project: string; instance: string }) {
+/** How many events an instance published, as the tab says it. */
+export function publishedText(
+  instance: string,
+  count: { isPending: boolean; isError: boolean; data?: Total | null | undefined },
+): string {
+  if (count.isPending) return 'Counting…'
+  if (count.isError) return 'Eventarc could not be read.'
+  const total = count.data
+  if (!total) return 'Its events are in Eventarc.'
+  if (total.count === 0) return `${instance} has published no events since the engine started.`
+  const counted = formatCount(total.count, { one: 'event', other: 'events' })
+  return `${counted}${total.exact ? '' : ' or more'} since the engine started.`
+}
+
+/**
+ * How many events the instance published, and a link to them in Eventarc,
+ * filtered to it (`publisher:<id>`), where each has its delivery trace.
+ * Read when the tab opens; Eventarc follows them live.
+ */
+function PublishedEvents({
+  project,
+  instance,
+  channel,
+}: {
+  project: string
+  instance: string
+  channel: EntityRef | null
+}) {
   const q = `publisher:${instance}`
-  const page = useQuery(eventPageQuery(project, '', q))
-  const [store] = useState(() =>
-    createFeedStore<EventarcEventSummary>({ max: KEPT, key: (event) => event.id }),
-  )
-  // Seeded once per page answer (newest first, so pushed reversed); the
-  // topic then upserts from the page's cursor on.
-  useEffect(() => {
-    if (!page.data) return
-    store.clear()
-    store.push(page.data.page.items.toReversed())
-  }, [page.data, store])
-  useEventarcEvents(page.data?.liveCursor ? { q } : null, {
-    after: page.data?.liveCursor ?? undefined,
-    onItems: (items) => store.upsert(items),
-    onReset: () => void page.refetch(),
+  const count = useQuery({
+    queryKey: [...eventarcKeys.events(project), 'count', q],
+    queryFn: ({ signal }) => getEvents({ q, limit: 1 }, signal),
+    enabled: project !== '',
+    select: (result) => result.page.total,
   })
-  const [follow, setFollow] = useState(true)
-  const { format } = useClockFormat()
-  const now = useNow(format === 'relative' ? 'second' : 'minute')
-  const navigate = useNavigate()
-  // Opened in Eventarc, where its delivery trace is.
-  const open = (event: EventarcEventSummary) => {
-    const link = linkTo({ kind: 'eventarc.event', key: event.id })
-    if (link) void navigate({ to: link.to as never, search: link.search as never })
-  }
+  const channelLink = useLinkTo(channel ?? undefined)
   return (
-    <section className="grid gap-2.5" aria-label="Published events" data-testid="events-recent">
-      <h2 className="m-0 flex items-baseline gap-3 text-[16px] leading-6 font-semibold text-kumo-default">
+    <section className="grid gap-2.5" aria-label="Published events" data-testid="events-published">
+      <h2 className="m-0 text-[16px] leading-6 font-semibold text-kumo-default">
         Published events
-        <span className="text-[13px] font-normal text-kumo-subtle">
-          The newest {KEPT} this instance published, as they arrive.
-        </span>
       </h2>
-      <div
-        className={cn(
-          EVENT_LIST,
-          'h-[320px] flex-none overflow-hidden rounded-lg ring ring-kumo-line',
+      <p className="m-0 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px] text-kumo-subtle">
+        <span data-testid="events-published-count">{publishedText(instance, count)}</span>
+        {channelLink && (
+          <Link
+            to={channelLink.to as never}
+            search={{ ...channelLink.search, q } as never}
+            className="flex shrink-0 items-center gap-1 text-kumo-link underline-offset-2 hover:underline"
+            data-testid="events-open-published"
+          >
+            Open them in Eventarc
+            <ArrowRightIcon size={12} />
+          </Link>
         )}
-      >
-        <FeedList
-          ariaLabel={`Events published by ${instance}`}
-          store={store}
-          order="newest-first"
-          rowHeight={32}
-          rowKey={(event) => event.id}
-          renderRow={(event) => <EventCells event={event} clock={format} now={now} />}
-          onSelect={open}
-          follow={follow}
-          onFollowChange={setFollow}
-          header={<EventHeader />}
-          empty={
-            <div
-              className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center"
-              data-testid="events-recent-empty"
-            >
-              <BroadcastIcon size={28} className="text-kumo-inactive" />
-              <span className="text-[13px] text-kumo-subtle">
-                {page.isPending
-                  ? 'Reading the events…'
-                  : `${instance} has published no events since the engine started.`}
-              </span>
-            </div>
-          }
-          testId="events-recent-list"
-        />
-      </div>
+      </p>
     </section>
   )
 }
