@@ -25,7 +25,7 @@ import { statusQuery } from '@/api/queries'
 import { ActivityRow } from '@/auth/components/activity-row'
 import { ClaimsMeter } from '@/auth/components/claims-editor'
 import type { FeedMenuHandle } from '@/auth/components/feed-menu'
-import { TokenVerdict, kindLine } from '@/auth/components/inspect-token'
+import { MintedNoteView, TokenVerdict, kindLine } from '@/auth/components/inspect-token'
 import { MessageRow } from '@/auth/components/message-row'
 import { ProviderGlyphs } from '@/auth/components/provider-glyphs'
 import { TenantPicker } from '@/auth/components/tenant-picker'
@@ -529,8 +529,8 @@ const CALLS: AuthActivitySummary[] = [
     id: 1204,
     operation: 'identitytoolkit.accounts.signInWithPhoneNumber',
     path: '/identitytoolkit.googleapis.com/v1/accounts:signInWithPhoneNumber',
-    caller: 'console',
-    origin: 'try',
+    caller: 'client',
+    origin: null,
     at: agoIso(5 * MINUTE),
     identifier: '+15550100',
     provider: 'phone',
@@ -742,6 +742,45 @@ function TokenVerdictsCard() {
   )
 }
 
+/** When the card's minted token stops being accepted: within the hour, as a minted one does. */
+const MINTED_EXPIRES = new Date(ago(-59 * MINUTE)).toISOString()
+
+/** What Sign in as said of a token it minted, as Inspect a token shows it above the verdicts. */
+function MintedNoteCard() {
+  return (
+    <Kit>
+      <Frame className="w-[440px] py-2">
+        <MintedNoteView
+          note={{
+            who: 'mfa-ada@example.test',
+            minted: {
+              idToken: 'eyJhbGciOiJub25lIn0.e30.',
+              provider: 'password',
+              secondFactor: {
+                enrollmentId: 'mfa-1',
+                displayName: 'Phone',
+                phoneNumber: '+15550111',
+                enrolledAt: null,
+              },
+              expiresAt: MINTED_EXPIRES,
+              beforeSignIn: {
+                function: 'beforeSignIn',
+                durationMicros: 41_000,
+                customClaims: ['tester'],
+                sessionClaims: ['session'],
+                call: 1207,
+              },
+              differences: [
+                'beforeSignIn ran, but the account was not changed: what it set is in this token only.',
+              ],
+            },
+          }}
+        />
+      </Frame>
+    </Kit>
+  )
+}
+
 // ---- tenant picker -------------------------------------------------------
 
 function tenant(tenantId: string, displayName: string | null, users: number): AuthTenant {
@@ -914,7 +953,7 @@ defineCards([
     id: 'auth-activity-rows',
     group: 'Patterns',
     name: 'Activity rows',
-    subtitle: 'OutcomeChip, SDK error name, steps and latency; Try and Replay chips',
+    subtitle: 'OutcomeChip, SDK error name, steps and latency; the Replay chip',
     width: 1100,
     surface: 'canvas',
     render: () => <ActivityRowsCard />,
@@ -927,6 +966,15 @@ defineCards([
     width: 640,
     surface: 'canvas',
     render: () => <TokenVerdictsCard />,
+  },
+  {
+    id: 'auth-minted-note',
+    group: 'Patterns',
+    name: 'Minted by Sign in as',
+    subtitle: 'Above the verdicts of a token View the token handed to Inspect',
+    width: 520,
+    surface: 'canvas',
+    render: () => <MintedNoteCard />,
   },
   {
     id: 'auth-tenant-picker',

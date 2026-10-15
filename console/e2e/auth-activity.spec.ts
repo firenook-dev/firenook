@@ -439,6 +439,22 @@ test('A9 Inspect a token says how each consumer judges it, and how to fix it', a
       `initializeApp({ projectId: '${engine.project}' })`,
     )
     expect((await userDetail(engine, user.localId))?.row.disabled).toBe(false)
+
+    // Sign in as › View the token… opens the minted token here, with what
+    // the engine said as it minted it, for as long as it is in the box.
+    await page.goto(`${engine.origin}/console/auth?user=${user.localId}`)
+    await page.getByTestId('user-inspector').getByTestId('sign-in-as').click()
+    await page.getByTestId('view-token').click()
+    await expect(page).toHaveURL(/\/console\/auth\/activity\?.*panel=inspect/)
+    const minted = page.getByTestId('inspect-token-minted')
+    await expect(minted).toContainText(`For ${email}, as a password sign-in`)
+    await expect(minted).toContainText('Nothing was stored.')
+    await expect(input).toHaveValue(/^ey/)
+    expect(payloadOf(await input.inputValue()).sub).toBe(user.localId)
+    await expect(verdict('verify')).toHaveAttribute('data-ok', 'true')
+    await expect(verdict('rules')).toHaveAttribute('data-ok', 'true')
+    await input.fill(early)
+    await expect(minted).toHaveCount(0)
   } finally {
     await deleteAccounts(engine, [user.localId])
   }

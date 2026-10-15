@@ -56,7 +56,7 @@ import { callJson, curlCommand, replayBlocked, tokenOfRequest } from '../activit
 import { clearActivity } from '../api'
 import { copyToClipboard } from '@/lib/copy'
 import { activityFacetGroups, activityFields } from '../fields'
-import { inspectThisToken } from '../inspect-draft'
+import { handOffToken } from '../inspect-handoff'
 import { logsForCall, userLink } from '../links'
 import { useActivityFeed } from '../live'
 import { callLabel } from '../operations'
@@ -158,7 +158,7 @@ export function ActivityPage() {
   }
   const logs = (call: AuthActivitySummary) => navigateTo(logsForCall(call))
   const inspect = (token?: string) => {
-    if (token) inspectThisToken(token)
+    if (token) handOffToken(token)
     update({ panel: 'inspect', entry: undefined })
   }
 

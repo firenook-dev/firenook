@@ -5,7 +5,8 @@
 // a sign-in runs it (its claims and session claims in the token; the
 // account not changed; its own side effects happen). Copied as a token, an
 // Authorization header, a custom token for the app's devtools, a Firestore
-// request; or opened in Firestore and the rules playground as this user.
+// request; viewed in Inspect a token, with what still differs from a real
+// sign-in; or opened in Firestore and the rules playground as this user.
 
 import { Button, DropdownMenu, Tooltip } from '@cloudflare/kumo'
 import {
@@ -28,9 +29,12 @@ import { MenuCheck } from '@/components/kit'
 import { hostLiteral, defaultConnectHost } from '@/lib/connect'
 import { toast } from '@/lib/toasts'
 import { mintToken } from '../api'
+import { identifierOf } from '../identifier'
+import { handOffToken } from '../inspect-handoff'
 import { firestoreAsUser, playgroundAsUser } from '../links'
 import { providerLabel } from '../providers'
 import { hooksQuery } from '../queries'
+import { projectParam } from '../tenant-scope'
 import {
   type FactorChoice,
   type TokenChoice,
@@ -45,13 +49,10 @@ import { type UserTarget, refusal } from '../user-actions'
 export function SignInAsMenu({
   detail,
   target,
-  onView,
   words = true,
 }: {
   detail: AuthUserDetail
   target: UserTarget
-  /** "View the token…": the token dialog, with what it was minted with. */
-  onView: (minted: AuthMintedToken, choice: TokenChoice) => void
   /** Room for the word on the trigger (the footer gives it up by width). */
   words?: boolean
 }) {
@@ -271,7 +272,12 @@ export function SignInAsMenu({
             icon={EyeIcon}
             onClick={() =>
               void mint('a token to view').then((minted) => {
-                if (minted) onView(minted, choice)
+                if (!minted) return
+                handOffToken(minted.idToken, { who: identifierOf(detail.row).text, minted })
+                void navigate({
+                  to: '/auth/activity' as never,
+                  search: { panel: 'inspect', project: projectParam(target.project) } as never,
+                })
               })
             }
             data-testid="view-token"

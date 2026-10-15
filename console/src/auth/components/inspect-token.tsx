@@ -5,7 +5,10 @@
 // each with the reason and the fix: expired, issued before the user's tokens
 // were revoked, a disabled or unknown user, another tenant, another project,
 // signed by production. The engine decodes and judges (`POST
-// /auth/token/inspect`); nothing changes.
+// /auth/token/inspect`); nothing changes. A token Sign in as minted
+// ("View the token…") comes with what the engine said as it minted it —
+// for whom, the beforeSignIn run, what differs from a real sign-in — said
+// above the verdicts for as long as that token is the one in the box.
 
 import { Button, InputArea, Text } from '@cloudflare/kumo'
 import { XIcon } from '@phosphor-icons/react'
@@ -19,11 +22,11 @@ import { EntityLink } from '@/components/console/entity-link'
 import { Inspector, InspectorSection } from '@/components/console/inspector'
 import { JsonTree } from '@/components/console/json-tree'
 import { PanelTitle, StatusDot } from '@/components/kit'
+import { formatDuration, relativeTime } from '@/lib/format'
 import { inspectToken } from '../api'
-import { takeInspectDraft, useInspectDraft } from '../inspect-draft'
-import { takeHandedOffToken } from '../inspect-handoff'
+import { type MintedNote, takeHandedOffToken, useInspectHandoff } from '../inspect-handoff'
 import { AUTH } from '../queries'
-import { userRef } from '../links'
+import { callRef, userRef } from '../links'
 
 const KINDS: Readonly<Record<AuthTokenKind, string>> = {
   idToken: 'ID token',
@@ -67,14 +70,18 @@ export function kindLine(inspection: AuthTokenInspection): string {
 const SETTLE_MS = 300
 
 export function InspectToken({ project, onClose }: { project: string; onClose: () => void }) {
-  // The token dialog hands its token over through inspect-handoff; a call's
-  // "Inspect this token" through the draft, which also reaches an open panel.
-  const [text, setText] = useState(() => takeHandedOffToken() ?? takeInspectDraft())
+  const [opened] = useState(takeHandedOffToken)
+  const [text, setText] = useState(opened?.token ?? '')
+  const [note, setNote] = useState<MintedNote | undefined>(opened?.minted)
   // A token handed over while the panel is already open replaces what is in it.
   useEffect(
     () =>
-      useInspectDraft.subscribe((state) => {
-        if (state.token) setText(takeInspectDraft())
+      useInspectHandoff.subscribe((state) => {
+        if (!state.handed) return
+        const handed = takeHandedOffToken()
+        if (!handed) return
+        setText(handed.token)
+        setNote(handed.minted)
       }),
     [],
   )
@@ -92,6 +99,8 @@ export function InspectToken({ project, onClose }: { project: string; onClose: (
     retry: false,
   })
   const result = settled === '' ? undefined : inspection.data
+  // The note speaks for the minted token only: another one in the box drops it.
+  const minted = note && note.minted.idToken === text.trim() ? note : undefined
   return (
     <Inspector
       widthKey="auth.tools"
@@ -161,6 +170,7 @@ export function InspectToken({ project, onClose }: { project: string; onClose: (
           </p>
         )}
       </div>
+      {minted && <MintedNoteView note={minted} />}
       {result && (
         <>
           <InspectorSection title="Verdicts" testId="inspect-token-verdicts">
@@ -194,6 +204,46 @@ export function InspectToken({ project, onClose }: { project: string; onClose: (
         </p>
       )}
     </Inspector>
+  )
+}
+
+/** What Sign in as said as it minted the token: for whom, beforeSignIn, what differs from a real sign-in. */
+export function MintedNoteView({ note }: { note: MintedNote }) {
+  const { minted } = note
+  const factor = minted.secondFactor?.phoneNumber
+  const before = minted.beforeSignIn
+  return (
+    <InspectorSection title="Minted by Sign in as" testId="inspect-token-minted">
+      <div className="grid gap-2 text-[13px]">
+        <p className="m-0 text-kumo-default">
+          For {note.who}, as a {minted.provider} sign-in{factor ? ` with the factor ${factor}` : ''}
+          ; expires {relativeTime(minted.expiresAt)}. Nothing was stored.
+        </p>
+        {before && (
+          <p className="m-0 text-kumo-default" data-testid="inspect-token-before-sign-in">
+            beforeSignIn ({before.function ?? 'your function'}) ran in{' '}
+            {formatDuration(before.durationMicros / 1_000)}
+            {before.customClaims.length > 0
+              ? `; custom claims ${before.customClaims.join(', ')}`
+              : ''}
+            {before.sessionClaims.length > 0
+              ? `; session claims ${before.sessionClaims.join(', ')}`
+              : ''}
+            ; its call <EntityLink entity={callRef(before.call, `#${before.call}`)} />.
+          </p>
+        )}
+        {minted.differences.length > 0 && (
+          <div className="grid gap-1" data-testid="inspect-token-differences">
+            <PanelTitle as="h4">What differs from a real sign-in</PanelTitle>
+            <ul className="m-0 grid list-disc gap-1 pl-5 text-kumo-subtle">
+              {minted.differences.map((difference) => (
+                <li key={difference}>{difference}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </InspectorSection>
   )
 }
 
