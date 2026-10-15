@@ -3853,7 +3853,7 @@ test('every copy answers with the same tick', async ({ page }) => {
   // The document as code, in the inspector.
   await page.goto(`${origin()}/console/firestore?path=users&doc=users%2Fu_k65eq`)
   await page.getByTestId('inspector').getByTestId('document-code').click()
-  const copyCode = page.getByTestId('copy-code')
+  const copyCode = page.getByTestId('document-code-block-copy')
   await copyCode.click()
   await expect(copyCode).toContainText('Copied')
   await ticked(copyCode)
