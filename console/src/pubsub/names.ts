@@ -41,10 +41,6 @@ export function idProblem(id: string): string | undefined {
   return undefined
 }
 
-export function isValidId(id: string): boolean {
-  return idProblem(id) === undefined
-}
-
 /** A resource's full name; the same function the links use, so the two cannot disagree. */
 export function fullName(project: string, collection: ResourceCollection, id: string): string {
   return resourceName(project, collection, id)
