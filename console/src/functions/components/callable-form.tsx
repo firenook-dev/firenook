@@ -26,7 +26,7 @@ import { type IdentityHeader, identityHeaders, useIdentityHeaders } from '../ide
 import { callableInvokeCommand } from '../invoke-command'
 import { createResponseBuilder, invokeFunction, stopWaiting } from '../invoke-stream'
 import { type CallableDraft, useRunDraft } from '../run-drafts'
-import { CopyAsMenu, FormRow, RunAnswer, RunError, RunFooter, SavedMenu } from './run-parts'
+import { CopyAsMenu, FormRow, RunAnswer, RunError, RunFooter } from './run-parts'
 
 /** A recorded call's `data` as text to edit (the body was `{"data": …}`). */
 export function recordedData(body: string): string {
@@ -330,13 +330,6 @@ export function CallableForm({
       <RunFooter
         tools={
           <>
-            <SavedMenu
-              project={project}
-              functionId={summary.id}
-              kind="callable"
-              current={() => draft}
-              onLoad={(test) => test.draft.kind === 'callable' && setDraft(test.draft)}
-            />
             <CopyAsMenu
               dialects={[
                 { id: 'curl', label: 'curl', text: requestAsCode(composed, 'curl', project) },

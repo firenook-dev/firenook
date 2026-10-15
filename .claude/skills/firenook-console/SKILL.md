@@ -2974,7 +2974,7 @@ engine does not deliver Firebase Alerts yet, an alert function is
 **Where things are.** Pure logic with Vitest beside it in
 `src/functions/*.ts` (kinds and their verbs, trigger text, the panel tree,
 filters, envelopes, callable, identity headers, blocking, Copy as commands,
-curl paste, the invoke request and stream, run drafts, saved tests);
+curl paste, the invoke request and stream, run drafts);
 pages and forms in `src/functions/components/` (overview, codebase view,
 workbench and its Run / Trigger / Environment tabs, the six run forms on
 `run-parts.tsx`, invocation list, row and detail, `request-view.tsx`,
@@ -3102,10 +3102,10 @@ Generated types in `src/api/generated/compute/`.
   and no level column while every line is info, so a one-line message
   gets the row; a codebase's load log keeps the clock column.
 - **Per browser**: run drafts per tab in sessionStorage
-  (`firenook.console.run-drafts`), saved tests in localStorage (50 per
-  function, 1 MB per project, export and import as JSON), the editor that
-  stack frames open in (`firenook.console.editor`: VS Code, Cursor,
-  JetBrains).
+  (`firenook.console.run-drafts`) and the editor that stack frames open in
+  (`firenook.console.editor`: VS Code, Cursor, JetBrains). There are no
+  saved tests: a run is kept as its invocation (Replay, Edit and replay),
+  its URL and Copy as.
 
 **Journeys** (`--project compute`): `e2e/functions*.spec.ts`,
 `extensions.spec.ts`, `eventarc.spec.ts`, helpers in

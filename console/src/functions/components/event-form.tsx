@@ -56,7 +56,6 @@ import {
   RunAnswer,
   RunError,
   RunFooter,
-  SavedMenu,
   useNextInvocation,
 } from './run-parts'
 import { Sentence } from './summary-strip'
@@ -670,18 +669,6 @@ export function EventForm({
       <RunFooter
         tools={
           <>
-            <SavedMenu
-              project={project}
-              functionId={summary.id}
-              kind="event"
-              current={() => ({
-                ...draft,
-                envelope: draft.edited
-                  ? draft.envelope
-                  : JSON.stringify(built?.body ?? {}, null, 2),
-              })}
-              onLoad={(test) => test.draft.kind === 'event' && setDraft(test.draft)}
-            />
             <CopyAsMenu
               dialects={[
                 draft.edited || 'problem' in input
