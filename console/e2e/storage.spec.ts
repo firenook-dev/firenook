@@ -613,10 +613,12 @@ test('each kind of file previews as what it is, and a wrong content type is fixe
     )
     .toBeGreaterThan(0)
 
-  // A zip lists its entries; bytes show as hex.
+  // A zip shows its bytes and says what they are; other bytes show as hex too.
   await open(seed.names.zip)
-  await expect(panel.getByTestId('archive-entry')).toHaveCount(2)
-  await expect(panel.getByTestId('preview-archive')).toContainText('readme.md')
+  await expect(panel.getByTestId('hex-row').first()).toBeVisible()
+  await expect(panel.getByTestId('preview-section')).toContainText(
+    'The first bytes say: ZIP archive',
+  )
   await open(seed.names.blob)
   await expect(panel.getByTestId('hex-row').first()).toBeVisible()
 

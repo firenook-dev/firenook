@@ -31,7 +31,6 @@ import type { RulesVersion } from '@/api/generated/RulesVersion'
 import type { StorageAccess } from '@/api/generated/storage/StorageAccess'
 import type { StorageAccessBody } from '@/api/generated/storage/StorageAccessBody'
 import type { StorageActivity } from '@/api/generated/storage/StorageActivity'
-import type { StorageArchive } from '@/api/generated/storage/StorageArchive'
 import type { StorageBatchGetRequest } from '@/api/generated/storage/StorageBatchGetRequest'
 import type { StorageBuckets } from '@/api/generated/storage/StorageBuckets'
 import type { StorageBulkBody } from '@/api/generated/storage/StorageBulkBody'
@@ -387,17 +386,6 @@ export function resendEvent(
   options?: CallOptions,
 ): Promise<StorageResendResult> {
   return call('POST', '/object/resend', body, options)
-}
-
-/** A zip's entries from its central directory (≤ 2,000). */
-export function getArchive(
-  bucket: string,
-  name: string,
-  generation: string,
-  limit?: number,
-  signal?: AbortSignal,
-): Promise<StorageArchive> {
-  return get('/object/archive', { bucket, name, g: generation, limit }, { signal })
 }
 
 /** The object's changes and the rules decisions on its name, newest first. */

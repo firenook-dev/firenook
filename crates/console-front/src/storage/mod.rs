@@ -251,7 +251,6 @@ impl Section for StorageSection {
             .route("/object/resend", post(files::resend))
             .route("/object/media", get(files::media))
             .route("/object/thumbnail", get(files::thumbnail))
-            .route("/object/archive", get(files::archive))
             .route("/object/activity", get(files::activity))
             .route("/object/events", get(files::events))
             .route("/rules", get(rules::read_rules).put(rules::write_rules))
@@ -395,8 +394,6 @@ pub(crate) fn export_bindings(config: &ts_rs::Config) {
         files::StorageResendEventBody,
         files::StorageResendEvent,
         files::StorageResendResult,
-        files::StorageArchive,
-        files::StorageArchiveEntry,
         files::StorageProfile,
         files::StorageContentTypeCount,
         files::StorageExportBody,

@@ -1,7 +1,7 @@
 //! The Files page's API: buckets, listings both ways, batch reads of the
 //! rows a live event named, one object (read, upload, metadata, tokens,
-//! delete), its bytes, thumbnail, archive entries, activity and event
-//! bodies, folders and zip downloads.
+//! delete), its bytes, thumbnail, activity and event bodies, folders and
+//! zip downloads.
 //!
 //! Routes marked as rules routes read the `Authorization` header exactly as
 //! the protocol does (owner credentials are Admin and skip the rules; any
@@ -618,30 +618,6 @@ pub(crate) enum StorageResendEvent {
 pub(crate) struct StorageResendResult {
     pub sent: bool,
     pub delivery: StorageEventDelivery,
-}
-
-/// The first entries of a `.zip` object.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageArchive {
-    pub entries: Vec<StorageArchiveEntry>,
-    /// Entries in the whole archive.
-    pub total: u32,
-    pub truncated: bool,
-}
-
-/// One entry of an archive.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "storage/")]
-pub(crate) struct StorageArchiveEntry {
-    pub name: String,
-    #[ts(type = "number")]
-    pub size: u64,
-    #[ts(type = "number")]
-    pub compressed: u64,
-    pub directory: bool,
 }
 
 /// What a folder holds, for starter rules, completion and filter
@@ -1450,52 +1426,6 @@ pub(crate) async fn thumbnail(
         }),
     );
     Ok(response)
-}
-
-/// `?bucket&name&g&limit`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ArchiveQuery {
-    bucket: String,
-    name: String,
-    #[allow(
-        dead_code,
-        reason = "the generation the URL names, for the browser's cache"
-    )]
-    g: Option<String>,
-    limit: Option<usize>,
-}
-
-/// `GET /storage/object/archive`: a zip's entries from its central
-/// directory.
-pub(crate) async fn archive(
-    State(routes): State<StorageRoutes>,
-    Query(query): Query<ArchiveQuery>,
-) -> Result<Json<StorageArchive>, ApiError> {
-    let listing = routes
-        .api
-        .archive(
-            &query.bucket,
-            &query.name,
-            query
-                .limit
-                .unwrap_or(firenook_storage_front::ARCHIVE_ENTRIES),
-        )
-        .await?;
-    Ok(Json(StorageArchive {
-        entries: listing
-            .entries
-            .into_iter()
-            .map(|entry| StorageArchiveEntry {
-                name: entry.name,
-                size: entry.size,
-                compressed: entry.compressed,
-                directory: entry.directory,
-            })
-            .collect(),
-        total: listing.total,
-        truncated: listing.truncated,
-    }))
 }
 
 /// `GET /storage/object/activity`: the object's changes and the decisions

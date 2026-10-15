@@ -37,7 +37,6 @@ import {
   coverageUrl,
   getAccess,
   getActivity,
-  getArchive,
   getBuckets,
   getDecision,
   getDecisions,
@@ -110,8 +109,6 @@ export const storageKeys = {
     [ST, project, bucket, 'events', name] as const,
   events: (project: string, bucket: string, name: string, generation: string) =>
     [ST, project, bucket, 'events', name, generation] as const,
-  archive: (project: string, bucket: string, name: string, generation: string) =>
-    [ST, project, bucket, 'archive', name, generation] as const,
   profilesOf: (project: string, bucket: string) => [ST, project, bucket, 'profile'] as const,
   profile: (project: string, bucket: string, prefix: string) =>
     [ST, project, bucket, 'profile', prefix] as const,
@@ -319,14 +316,6 @@ export const eventsQuery = (project: string, bucket: string, name: string, gener
     queryKey: storageKeys.events(project, bucket, name, generation),
     queryFn: ({ signal }) => getEventPayloads(bucket, name, signal),
     staleTime: FOREVER,
-  })
-
-export const archiveQuery = (project: string, bucket: string, name: string, generation: string) =>
-  queryOptions({
-    queryKey: storageKeys.archive(project, bucket, name, generation),
-    queryFn: ({ signal }) => getArchive(bucket, name, generation, undefined, signal),
-    staleTime: FOREVER,
-    retry: false,
   })
 
 /**

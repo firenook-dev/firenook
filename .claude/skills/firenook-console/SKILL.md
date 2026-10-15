@@ -2836,8 +2836,9 @@ sends `nosniff` and a sandbox CSP (PDF excepted) with an inline
 disposition; HTML is shown as source or in a script-less `srcdoc` frame,
 never `<iframe src>`; "Open in new tab" stays on the console's origin.
 **Previews ask for what they draw**: 256 KB of text ("Load all" up to 16 MB),
-64 KB of hex, a zip's central directory, a 320 px thumbnail; a gzip-encoded
-object is read decoded and never by range (`media.ts`). Text up to 1 MB that
+64 KB of hex (a zip too, with what its first bytes say), a 320 px
+thumbnail; a gzip-encoded object is read decoded and never by range
+(`media.ts`). Text up to 1 MB that
 is valid UTF-8 and not gzip-encoded edits in place; Save writes it as one
 upload that keeps the metadata. The list draws type icons; only the grid
 and the inspector show pictures, and SVG, AVIF, ICO and images up to

@@ -35,7 +35,6 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncWriteExt as _, BufReader};
 
-mod archive;
 mod bulk;
 mod changes;
 mod console;
@@ -60,7 +59,6 @@ mod thumbnails;
 mod view_cache;
 mod write;
 mod zip_stream;
-pub use archive::{ARCHIVE_ENTRIES, ArchiveEntry, ArchiveListing};
 pub use bulk::{
     BULK_BATCH, BulkPreview, BulkProgress, BulkRequest, BulkSource, BulkVerb, ConflictPolicy,
     Destination, MetadataPatch, QUEUE_LIMIT,
