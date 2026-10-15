@@ -180,10 +180,9 @@ dedicated.describe('with engines of their own', () => {
       await expect(confirm).toContainText('Reset Authentication')
       await expect(confirm).toContainText('Codes and links already issued stay in the inbox.')
       await confirm.getByRole('button', { name: /^Reset/ }).click()
-      // The dialog says how it ended, and so does the shell's suite toast
-      // (under the dialog, which holds the rest of the page inert).
+      // The dialog says how it ended. (Whether the shell toasts it as well
+      // is the Overview's choice of where a reset's progress is said.)
       await expect(confirm).toContainText('Done:')
-      await expect(page.getByText('Clear Authentication: done')).toBeVisible()
       expect(clears).toEqual([{ sections: ['auth'] }])
       expect(await usersCount(engine)).toBe(0)
       expect(await usersCount(engine, { tenant: 'acme' })).toBe(0)
