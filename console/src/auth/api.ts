@@ -8,7 +8,8 @@
 // Console API. Edits go through the official API instead — the Identity
 // Toolkit as the Admin SDK or an app calls it — so each one behaves exactly
 // as it would from code, and Activity records it (`x-firenook-console:
-// write`, hidden there by default; `try` and `replay` are always shown).
+// write`, hidden there by default; a replay, and the beforeSignIn run of
+// Sign in as, are always shown).
 //
 // Every Console API route takes `project`; absent is the configured one.
 // Nothing here creates a project or a tenant by reading it.

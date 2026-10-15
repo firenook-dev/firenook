@@ -5,7 +5,6 @@
 import {
   BuildingsIcon,
   MagnifyingGlassIcon,
-  SignInIcon,
   UploadSimpleIcon,
   UserPlusIcon,
   UsersThreeIcon,
@@ -30,12 +29,6 @@ export const authActions: readonly SectionAction[] = [
     title: 'Add sample users',
     icon: UsersThreeIcon,
     link: { to: '/auth', search: { new: 'sample' } },
-  },
-  {
-    id: 'auth.try',
-    title: 'Try a sign-in',
-    icon: SignInIcon,
-    link: { to: '/auth/activity', search: { panel: 'try' } },
   },
   {
     id: 'auth.inspect',

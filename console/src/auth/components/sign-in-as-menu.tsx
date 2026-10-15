@@ -15,7 +15,6 @@ import {
   EyeIcon,
   FlaskIcon,
   KeyIcon,
-  SignInIcon,
   TerminalIcon,
   UserFocusIcon,
 } from '@phosphor-icons/react'
@@ -279,9 +278,9 @@ export function SignInAsMenu({
           >
             View the token…
           </DropdownMenu.Item>
-          <DropdownMenu.Separator />
           {firestore && (
             <>
+              <DropdownMenu.Separator />
               <DropdownMenu.Item
                 icon={DatabaseIcon}
                 onClick={() => {
@@ -304,23 +303,6 @@ export function SignInAsMenu({
               </DropdownMenu.Item>
             </>
           )}
-          <DropdownMenu.Item
-            icon={SignInIcon}
-            onClick={() =>
-              void navigate({
-                to: '/auth/activity' as never,
-                search: {
-                  panel: 'try',
-                  method: detail.row.phoneNumber && !detail.row.email ? 'phone' : 'password',
-                  tenant: target.tenant,
-                  project: target.project,
-                } as never,
-              })
-            }
-            data-testid="sign-in-for-real"
-          >
-            Sign in for real… (Try a sign-in)
-          </DropdownMenu.Item>
         </div>
       </DropdownMenu.Content>
     </DropdownMenu>

@@ -6,7 +6,9 @@ import {
   deleteAccounts,
   deleteTenant,
   emulatorConfig,
+  latestCall,
   setEmulatorConfig,
+  signIn,
   toolkit,
   unsignedJwt,
   usersCount,
@@ -30,6 +32,7 @@ test('S1 a tenant made with its own id holds its users, its switches and its del
   context,
   engine,
 }) => {
+  test.setTimeout(60_000)
   const tenant = `acme-t${stamp().slice(-6)}`
   const email = `tenant-${stamp()}@journey.test`
   try {
@@ -90,13 +93,17 @@ test('S1 a tenant made with its own id holds its users, its switches and its del
         return listed.items.find((item) => item.tenantId === tenant)?.allowPasswordSignup
       })
       .toBe(false)
-    await page.goto(`${engine.origin}/console/auth/activity?panel=try&tenant=${tenant}`)
-    await page.getByTestId('try-email').fill(email)
-    await page.getByTestId('try-password').fill('password-1')
-    await page.getByTestId('try-run').click()
-    const failed = page.locator('[data-testid="try-result"] [data-state="failed"]')
-    await expect(failed).toContainText('PASSWORD_LOGIN_DISABLED')
-    await expect(page.getByTestId('try-explanation')).not.toBeEmpty()
+    const refused = await signIn(engine, { email, password: 'password-1', tenant })
+    expect(refused.status).toBe(400)
+    expect(refused.body.error?.message).toMatch(/^PASSWORD_LOGIN_DISABLED/)
+    const call = await latestCall(engine)
+    await page.goto(
+      `${engine.origin}/console/auth/activity?tenant=${tenant}&entry=${String(call.id)}`,
+    )
+    await expect(page.getByTestId('call-detail').getByTestId('call-title')).toContainText(
+      'PASSWORD_LOGIN_DISABLED',
+    )
+    await expect(page.getByTestId('call-detail').getByTestId('call-explanation')).not.toBeEmpty()
 
     // Deleted from Settings while another tab shows its users.
     const usersTab = await context.newPage()

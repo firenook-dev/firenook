@@ -79,7 +79,6 @@ describe('where Authentication things open', () => {
       { to: '/auth', search: { new: 'user' } },
       { to: '/auth', search: { new: 'import' } },
       { to: '/auth', search: { new: 'sample' } },
-      { to: '/auth/activity', search: { panel: 'try' } },
       { to: '/auth/activity', search: { panel: 'inspect' } },
       { to: '/auth/settings', search: { new: 'tenant' } },
     ])

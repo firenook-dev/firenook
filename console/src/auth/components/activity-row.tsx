@@ -1,6 +1,7 @@
 // One call to the Auth emulator: 32 px like every list. The time in the
-// console-wide clock format, who called (a quiet chip; Try and Replay for
-// the calls the developer asked the console to make), what it was, the
+// console-wide clock format, who called (a quiet chip, in the default ink
+// for the calls the developer asked the console to make: a Replay, or the
+// beforeSignIn run of Sign in as), what it was, the
 // identifier and the provider in the data face, how it ended — `ok` in the
 // success tone, else the emulator's code in the danger tone with the name
 // the SDK gives it — what it caused, and how long it took.
