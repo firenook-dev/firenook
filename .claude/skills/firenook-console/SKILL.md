@@ -666,9 +666,9 @@ stream, loaded by glob). A few behaviours worth knowing:
   `-see-why`. Its card is `design-system/src/cards/console-shared.tsx`.
 - `DangerConfirm` draws `DangerConfirmBody`, which is exported: a card (or
   any page that needs the confirmation at rest) draws the real body framed,
-  handed a `Job` instead of subscribing. `TriggerLineItem` and
-  `triggerLine` are the trigger line any destructive dialog draws
-  (Firestore's delete dialog uses them).
+  handed a `Job` instead of subscribing. `triggerLine` is the trigger
+  line any destructive dialog draws; `progress` says how far work that is
+  not a job has got (Firestore's browser-side delete loop).
 - `StatusDot` keeps its width; let it shrink (`className="min-w-0
   shrink"`) and its word ends in an ellipsis. `OutcomeChip` keeps its width
   beside a truncating sibling; `shrink` lets it give way (put the whole word

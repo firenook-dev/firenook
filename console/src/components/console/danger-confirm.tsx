@@ -75,6 +75,7 @@ export function DangerConfirm({
   option,
   jobId,
   progressVerb = 'deleted',
+  progress,
   error,
   pending,
   onConfirm,
@@ -96,6 +97,8 @@ export function DangerConfirm({
   jobId?: string
   /** The word for what the job did to each item ("deleted", "purged"). */
   progressVerb?: string
+  /** How far work the page runs itself has got, when it is not a job ("12 of 40 deleted…"). */
+  progress?: ReactNode
   error?: string
   pending: boolean
   onConfirm: () => void
@@ -151,6 +154,7 @@ export function DangerConfirm({
           option={option}
           job={job}
           progressVerb={progressVerb}
+          progress={progress}
           error={error}
           pending={pending}
           cancelling={cancelling}
@@ -181,6 +185,7 @@ export function DangerConfirmBody({
   option,
   job,
   progressVerb = 'deleted',
+  progress,
   error,
   pending = false,
   cancelling = false,
@@ -202,6 +207,8 @@ export function DangerConfirmBody({
   /** The job the confirm started, as it stands. */
   job?: Job | undefined
   progressVerb?: string
+  /** Progress of work that is not a job, said under the description while it runs. */
+  progress?: ReactNode
   error?: string | undefined
   pending?: boolean
   cancelling?: boolean
@@ -336,6 +343,13 @@ export function DangerConfirmBody({
           )}
         </div>
       )}
+      {!job && progress !== undefined && progress !== null && (
+        <div className="mt-3" data-testid={`${testId}-progress`}>
+          <Text variant="secondary" size="sm">
+            {progress}
+          </Text>
+        </div>
+      )}
       {error && (
         <div className="mt-2" data-testid={`${testId}-error`}>
           <Text variant="error" size="sm">
@@ -377,7 +391,7 @@ export function DangerConfirmBody({
 }
 
 /** The trigger line's items (`<li>`s for a list): each function and how often it runs, or why none does. */
-export function TriggerLineItem({ line, testId }: { line: TriggerLine; testId: string }) {
+function TriggerLineItem({ line, testId }: { line: TriggerLine; testId: string }) {
   if (line.kind === 'none')
     return <li data-testid={`${testId}-triggers`}>No function listens to this.</li>
   if (line.kind === 'paused')
