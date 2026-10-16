@@ -83,22 +83,26 @@ struct Subscriber {
     last_badges: Option<Instant>,
 }
 
-/// When something last sent at `last` may be sent again.
-fn due(last: Option<Instant>) -> Instant {
-    last.map_or_else(Instant::now, |last| last + COALESCE)
+/// When something last sent at `last` may be sent again: at once (`now`)
+/// when it was never sent. `now` is the caller's one reading of the clock;
+/// reading it again here would put a first event a few nanoseconds after
+/// the `now` it is compared with, for ever, wherever two readings differ
+/// (always on Linux, on any slow core).
+fn due(last: Option<Instant>, now: Instant) -> Instant {
+    last.map_or(now, |last| last + COALESCE)
 }
 
 impl Subscriber {
     async fn next(mut self) -> Option<(TopicEvent, Self)> {
         loop {
             let now = Instant::now();
-            if self.status_pending && due(self.last_status) <= now {
+            if self.status_pending && due(self.last_status, now) <= now {
                 self.status_pending = false;
                 self.last_status = Some(now);
                 let event = TopicEvent::json("status", None, &self.status.status());
                 return Some((event, self));
             }
-            if self.badges_pending && due(self.last_badges) <= now {
+            if self.badges_pending && due(self.last_badges, now) <= now {
                 self.badges_pending = false;
                 self.last_badges = Some(now);
                 let set = self.board.as_mut().map_or_else(
@@ -108,8 +112,8 @@ impl Subscriber {
                 return Some((TopicEvent::json("badges", None, &set), self));
             }
             let wake = [
-                self.status_pending.then(|| due(self.last_status)),
-                self.badges_pending.then(|| due(self.last_badges)),
+                self.status_pending.then(|| due(self.last_status, now)),
+                self.badges_pending.then(|| due(self.last_badges, now)),
             ]
             .into_iter()
             .flatten()
@@ -179,6 +183,26 @@ mod tests {
             .find(|section| section["id"] == id)
             .unwrap_or_else(|| panic!("{id} in {status}"))["state"]
             .clone()
+    }
+
+    /// Never sent means due at the very reading it is compared with, and
+    /// on a clock that runs: the paused clock of the tests below reads the
+    /// same twice, which hid a first event that never came on Linux.
+    #[test]
+    fn a_first_event_is_due_at_the_callers_reading() {
+        let now = Instant::now();
+        std::thread::sleep(Duration::from_millis(1));
+        assert_eq!(due(None, now), now);
+        assert_eq!(due(Some(now), now), now + COALESCE);
+    }
+
+    #[tokio::test]
+    async fn status_and_badges_on_open_on_a_running_clock() {
+        let source = StatusSource::for_tests(directory_services());
+        let topic = ShellTopic::new(source, BadgeBoard::default());
+        let mut stream = topic.open(&json!({}), None).expect("opened");
+        assert_eq!(next(&mut stream).await.0, "status");
+        assert_eq!(next(&mut stream).await.0, "badges");
     }
 
     #[tokio::test(start_paused = true)]
