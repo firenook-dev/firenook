@@ -8,7 +8,7 @@ import type { ReactNode } from 'react'
 
 /** The box a dialog's value is typed into. */
 export const DIALOG_INPUT =
-  'h-8 w-full min-w-0 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring outline-none placeholder:font-sans placeholder:text-kumo-inactive focus:ring-kumo-focus'
+  'h-8 w-full min-w-0 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring outline-none placeholder:font-sans placeholder:text-kumo-placeholder focus:ring-kumo-focus'
 
 export function DialogField({
   label,

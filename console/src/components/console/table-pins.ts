@@ -59,4 +59,4 @@ export const CURSOR = 'shadow-[inset_0_0_0_1.5px_var(--color-kumo-brand)]'
 
 /** The row the keyboard is on (or the one in the inspector): tinted, with the accent bar on its first cell. */
 export const CURSOR_ROW =
-  'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)] [&>td:first-child]:shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
+  'bg-kumo-tint [--kumo-table-row-bg:var(--color-kumo-tint)] [&>td:first-child]:shadow-[inset_2px_0_0_var(--color-firenook-flame)]'

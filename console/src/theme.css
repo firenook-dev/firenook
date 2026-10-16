@@ -1,14 +1,32 @@
 /*
- * Firenook's identity on top of Kumo: one accent and one type pair. Inter
- * is the face Kumo's own documentation renders in, so every component
+ * Firenook's identity on top of Kumo: the logo's colours and one type pair.
+ * Inter is the face Kumo's own documentation renders in, so every component
  * looks exactly as Kumo designed it; IBM Plex Mono carries paths, ids,
  * values and code. Every other token is Kumo's, so components keep their
- * tested light and dark behaviour. Change the accent here and nowhere else.
- * The @font-face rules live in fonts.css so the component library can ship
- * the same faces from its own path.
+ * tested light and dark behaviour, but for four set darker where Kumo's
+ * read below AA (below). Change the colours here and nowhere else. The @font-face rules live in fonts.css so the component library
+ * can ship the same faces from its own path.
  *
- * Accent "ember": oklch(0.55 0.19 35). White text on it and the colour as
- * text on white both measure 5.3:1; the hover step is darker still.
+ * The colours are the brand kit's (brand/README.md), split by job the way
+ * Kumo splits its own, an orange logo colour beside a blue for everything
+ * that can be pressed:
+ *
+ * - Ink, the brand's charcoal #202124 (near-white in dark mode), is Kumo's
+ *   brand colour: the primary button, focus rings, progress, an in-flight
+ *   state, and the unsaved dot that waits on the primary Save. White on
+ *   it measures 16:1 in light mode and charcoal on it 13.5:1 in dark.
+ * - Flame, the logo's own vermilion #F23818, unchanged in both modes, marks
+ *   where you are: the active tab's underline, the selected row of a tree,
+ *   a table or the schema, the open document, the current sort, the
+ *   checked menu item, a drop target. A feed's selected row (Logs, events)
+ *   keeps an ink bar, because a log line's left edge is its level's. As text (links) it is darkened until it
+ *   reads: 5.3:1 on white, and lightened to 6.2:1 on dark.
+ *
+ * The flame never fills a button or colours a state. A fire's two colours
+ * are an interface's two alarms: vermilion is within ten degrees of Kumo's
+ * danger red and amber is its warning, and an ember Save beside a red
+ * Delete was the same button twice. Red means delete or failed and amber
+ * means a warning, nothing else.
  */
 
 @theme {
@@ -17,9 +35,9 @@
   --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --default-font-family: var(--font-sans);
   --default-mono-font-family: var(--font-mono);
-  --color-firenook-ember: oklch(0.55 0.19 35);
-  --color-firenook-ember-hover: oklch(0.48 0.17 35);
-  --color-firenook-ember-bright: oklch(0.68 0.17 40);
+  /* The logo's vermilion, as a mark: 3.5:1 or more against every light
+     surface and 3.9:1 or more against every dark one (a mark needs 3:1). */
+  --color-firenook-flame: #f23818;
   /*
    * The hover fill: a step of ink laid over whatever is under it, so a
    * hover is darker than its ground in light mode and lighter in dark,
@@ -50,8 +68,8 @@
  * on the wheel. Punctuation stays grey; it is scaffolding.
  *
  * Red and amber are deliberately absent: in this console they are the
- * error and the mixed-type column, and a string is neither. Hue 35 is
- * the brand's, and a number is not that either.
+ * error and the mixed-type column, and a string is neither. Hue 32 is
+ * the flame's, and a number is not that either.
  *
  * Every chroma here sits under its hue's sRGB ceiling at that
  * lightness. An `oklch()` outside the gamut is not an error — the
@@ -108,14 +126,20 @@
 /*
  * Kumo's own brand values come out of its @theme block unlayered, so an
  * override in @layer base never wins on :root. These rules are unlayered
- * too and come later, which is what makes them apply.
+ * too and come later, which is what makes them apply. Each block sets the
+ * Kumo tokens itself rather than leaving them to follow a Firenook token:
+ * a custom property is resolved where it is declared, so a nested dark
+ * block that changed only the Firenook token would inherit light ink.
  */
 :root,
 [data-theme='kumo'] {
-  --color-kumo-brand: var(--color-firenook-ember);
-  --color-kumo-brand-hover: var(--color-firenook-ember-hover);
-  --text-color-kumo-brand: var(--color-firenook-ember);
-  --text-color-kumo-link: var(--color-firenook-ember);
+  --color-firenook-ink: #202124;
+  --color-firenook-on-ink: #ffffff;
+  --color-firenook-flame-text: oklch(0.55 0.19 35);
+  --color-kumo-brand: var(--color-firenook-ink);
+  --color-kumo-brand-hover: #34353a;
+  --text-color-kumo-brand: var(--color-firenook-flame-text);
+  --text-color-kumo-link: var(--color-firenook-flame-text);
 }
 
 :root[data-mode='dark'],
@@ -123,11 +147,91 @@
 [data-mode='dark'] [data-theme='kumo'],
 [data-theme='kumo'][data-mode='dark'],
 [data-theme='kumo'] [data-mode='dark'] {
-  --color-kumo-brand: oklch(0.58 0.19 35);
-  --color-kumo-brand-hover: var(--color-firenook-ember);
+  --color-firenook-ink: #eaebed;
+  --color-firenook-on-ink: #202124;
+  --color-firenook-flame-text: oklch(0.68 0.17 40);
+  --color-kumo-brand: var(--color-firenook-ink);
+  --color-kumo-brand-hover: #ffffff;
   --color-firenook-hover: oklch(100% 0 0 / 0.096);
-  --text-color-kumo-brand: var(--color-firenook-ember-bright);
-  --text-color-kumo-link: var(--color-firenook-ember-bright);
+  --text-color-kumo-brand: var(--color-firenook-flame-text);
+  --text-color-kumo-link: var(--color-firenook-flame-text);
+}
+
+/*
+ * Four of Kumo's colours read below WCAG AA on this console's grounds,
+ * measured as the browser paints them (`shell-theme.spec.ts`). In light
+ * mode: secondary text (neutral-500) at 4.3:1 on the recessed and tinted
+ * rows every table and panel has, warning text at 3.8 to 4.2:1, and the
+ * warning fill that draws a warning dot, bar or meter at 2.2 to 2.4:1 (a
+ * mark needs 3:1). In both: placeholder text, 2.6:1 in light and 4.0:1 in
+ * dark, and the console's example hints (`""`, `users/u_9f3k2`) took the
+ * fainter `inactive` at 1.5:1 — but a placeholder is read, it is the
+ * filter syntax or the shape a value takes. Each is the smallest step that
+ * passes on every ground it sits on: secondary and warning text 4.7:1 or
+ * more, the warning fill 3:1 or more, a placeholder 4.8:1 in light and
+ * 5.3:1 in dark, still well short of typed text (17:1). Dark mode's other
+ * values pass as Kumo has them and are Kumo's own, restated because these
+ * blocks would otherwise carry the light ones into it.
+ */
+:root,
+[data-theme='kumo'] {
+  --text-color-kumo-subtle: oklch(0.53 0 0);
+  --text-color-kumo-warning: oklch(0.54 0.13 57.5);
+  --text-color-kumo-placeholder: oklch(0.55 0 0);
+  --color-kumo-warning: oklch(0.65 0.16 58);
+}
+
+:root[data-mode='dark'],
+[data-mode='dark']:not([data-theme]),
+[data-mode='dark'] [data-theme='kumo'],
+[data-theme='kumo'][data-mode='dark'],
+[data-theme='kumo'] [data-mode='dark'] {
+  --text-color-kumo-subtle: oklch(0.708 0 0);
+  --text-color-kumo-warning: oklch(0.75 0.183 55.934);
+  --text-color-kumo-placeholder: oklch(0.64 0 0);
+  --color-kumo-warning: oklch(0.645 0.168 50);
+}
+
+/*
+ * Kumo writes a primary button's label in white whatever its fill
+ * (`!text-white`), which on dark mode's near-white ink is white on white.
+ * The label's white is redefined on the button alone, to the colour that
+ * reads on ink in each mode. Kumo marks a primary button only by the
+ * gradient it mixes from the brand token in the button's own style, so
+ * that is what the rule keys on; `shell-theme.spec.ts` measures every
+ * button variant in both modes and fails if a Kumo upgrade moves it.
+ */
+:is(
+  [data-kumo-component='Button'],
+  [data-kumo-component='LinkButton']
+)[style*='--color-kumo-brand'] {
+  --color-white: var(--color-firenook-on-ink);
+}
+
+/*
+ * Kumo fills a Delete button with its danger red (red-500 light, red-600
+ * dark) and writes white on it. Measured where the label sits, halfway down
+ * the button's gradient, that is 3.4:1 at rest and 3.0:1 hovered in light
+ * mode and 4.3 and 3.7:1 in dark: below AA for text in both. The button
+ * keeps the red and goes deeper, 5.6:1 at rest and 4.75:1 hovered in both
+ * modes. The danger token is redefined on the button alone, because Kumo
+ * mixes the gradient from it there; dots, bars and danger text keep Kumo's
+ * red.
+ */
+:is(
+  [data-kumo-component='Button'],
+  [data-kumo-component='LinkButton']
+)[style*='--color-kumo-danger'] {
+  --color-kumo-danger: oklch(0.5 0.2 27);
+}
+
+/*
+ * The active tab's underline is a "you are here", so it is drawn in the
+ * flame rather than Kumo's brand colour (ink, here). Unlayered, so it beats
+ * the indicator's utility class.
+ */
+.kumo-tabs-list .bg-kumo-brand {
+  background-color: var(--color-firenook-flame);
 }
 
 /*

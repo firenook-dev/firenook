@@ -224,7 +224,7 @@ function StringEditor({ node, onChange, label, invalid }: EditorProps) {
           }}
           spellCheck={false}
           placeholder={'""'}
-          className={`${WRAP_TEXT} placeholder:text-kumo-inactive`}
+          className={`${WRAP_TEXT} placeholder:text-kumo-placeholder`}
           aria-label={`${label} value`}
         />
       </Grows>
@@ -569,7 +569,7 @@ function ReferenceEditor({ node, onChange, label, invalid }: EditorProps) {
             spellCheck={false}
             autoComplete="off"
             placeholder="users/u_9f3k2"
-            className={`${WRAP_TEXT} placeholder:font-sans placeholder:text-kumo-inactive`}
+            className={`${WRAP_TEXT} placeholder:font-sans placeholder:text-kumo-placeholder`}
             aria-label={`${label} value`}
           />
         </Grows>
@@ -662,7 +662,7 @@ function BytesEditor({ node, onChange, label, invalid }: EditorProps) {
             }}
             spellCheck={false}
             placeholder="base64"
-            className={`${WRAP_TEXT} placeholder:font-sans placeholder:text-kumo-inactive`}
+            className={`${WRAP_TEXT} placeholder:font-sans placeholder:text-kumo-placeholder`}
             aria-label={`${label} value`}
           />
         </Grows>

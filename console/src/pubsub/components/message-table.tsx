@@ -105,7 +105,7 @@ const GLYPH: Record<ReturnType<typeof functionMark>['glyph'], Icon> = {
 const TONE_TEXT: Record<ReturnType<typeof functionMark>['tone'], string> = {
   success: 'text-kumo-success',
   danger: 'text-kumo-danger',
-  brand: 'text-kumo-brand',
+  brand: 'text-kumo-default',
   warning: 'text-kumo-warning',
   neutral: 'text-kumo-subtle',
 }

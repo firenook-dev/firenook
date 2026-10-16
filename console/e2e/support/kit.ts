@@ -1,5 +1,6 @@
-// The kit's perf harness (`e2e/kit-harness/`): built once for the perf
-// journeys that measure FeedList and JsonView on a page of their own, and
+// The kit's harness (`e2e/kit-harness/`): built once for the perf journeys
+// that measure FeedList and JsonView on a page of their own and the theme's
+// contrast journeys, and
 // served from that build under the engine's own `/console/`, so the page
 // takes the console's fonts from the engine and runs at its origin. Only
 // the harness's own files are served this way; nothing of the console API
@@ -11,7 +12,7 @@ import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 
-export type { FeedRun, JsonRun, KitHarness } from '../kit-harness/runs'
+export type { FeedRun, JsonRun, KitHarness, ThemeRun } from '../kit-harness/runs'
 
 /** Where the harness is served, beside the console it borrows fonts from. */
 export const KIT_BASE = '/console/__kit/'
@@ -59,12 +60,12 @@ export async function buildKitHarness(): Promise<KitBuild> {
   return { directory, remove: () => rmSync(directory, { recursive: true, force: true }) }
 }
 
-/** Opens a view of the harness (`feed`, `json`) at the engine's origin and waits for it. */
+/** Opens a view of the harness (`feed`, `json`, `theme`) at the engine's origin and waits for it. */
 export async function openKitHarness(
   page: Page,
   origin: string,
   kit: KitBuild,
-  view: 'feed' | 'json',
+  view: 'feed' | 'json' | 'theme',
   mode: 'light' | 'dark' = 'light',
 ): Promise<void> {
   const root = resolve(kit.directory)

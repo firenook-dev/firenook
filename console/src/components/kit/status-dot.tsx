@@ -25,7 +25,7 @@ const TEXT: Record<StatusTone, string> = {
   warning: 'text-kumo-warning',
   danger: 'text-kumo-danger',
   neutral: 'text-kumo-subtle',
-  brand: 'text-kumo-brand',
+  brand: 'text-kumo-default',
 }
 
 export function StatusDot({

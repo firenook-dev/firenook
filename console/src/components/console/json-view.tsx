@@ -120,7 +120,7 @@ export function JsonView({
               spellCheck={false}
               autoComplete="off"
               aria-label="Search keys and values"
-              className="h-full min-w-0 flex-1 bg-transparent px-1 font-mono text-[12px] text-kumo-default outline-none placeholder:font-sans placeholder:text-kumo-inactive"
+              className="h-full min-w-0 flex-1 bg-transparent px-1 font-mono text-[12px] text-kumo-default outline-none placeholder:font-sans placeholder:text-kumo-placeholder"
               data-testid={`${ids}-search`}
             />
             {searching && (

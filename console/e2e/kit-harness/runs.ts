@@ -29,6 +29,16 @@ export interface JsonRun {
   drawn: number
 }
 
+/** What the theme view measured: each contrast a reader meets, and the two colour choices. */
+export interface ThemeRun {
+  /** WCAG 2 contrast ratios, rounded to hundredths, with the minimum each needs. */
+  checks: Array<{ what: string; ratio: number; need: number }>
+  /** OKLCH chroma of Kumo's brand token, which is the brand's ink: a grey. */
+  primaryChroma: number
+  /** Whether the active tab's underline is drawn in the logo's flame. */
+  underlineIsFlame: boolean
+}
+
 /** `window.__kit`. */
 export interface KitHarness {
   ready: boolean
@@ -36,4 +46,6 @@ export interface KitHarness {
   feed(perSecond: number, seconds: number): Promise<FeedRun>
   /** Builds a JSON text of about `megabytes`, parses it, hands it over and times the first paint. */
   json(megabytes: number): Promise<JsonRun>
+  /** Measures the theme view's contrast as the browser paints it. */
+  theme(): ThemeRun
 }

@@ -308,7 +308,7 @@ function AddField({
         placeholder="New field name"
         spellCheck={false}
         autoComplete="off"
-        className="h-8 min-w-0 flex-1 rounded-md bg-kumo-control px-2 text-[13px] text-kumo-default ring ring-kumo-line outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus"
+        className="h-8 min-w-0 flex-1 rounded-md bg-kumo-control px-2 text-[13px] text-kumo-default ring ring-kumo-line outline-none placeholder:text-kumo-placeholder focus:ring-kumo-focus"
         aria-label="New field name"
         data-testid="new-field-name"
       />

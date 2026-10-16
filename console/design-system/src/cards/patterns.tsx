@@ -82,7 +82,7 @@ function SchemaTreeRows({ rows }: { rows: typeof SHELL_SHAPE }) {
           <div
             className={`flex h-7 items-center rounded-md pr-1.5 ${
               'current' in node && node.current
-                ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]'
+                ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-firenook-flame)]'
                 : ''
             }`}
           >

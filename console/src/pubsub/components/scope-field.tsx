@@ -150,7 +150,7 @@ export function ScopeField({
               120,
             )
           }
-          className="h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none placeholder:font-sans placeholder:text-kumo-inactive"
+          className="h-full min-w-0 flex-1 bg-transparent px-1.5 font-mono text-[12px] text-kumo-default outline-none placeholder:font-sans placeholder:text-kumo-placeholder"
           placeholder="orders, orders/orders-worker or a full name"
           spellCheck={false}
           autoComplete="off"

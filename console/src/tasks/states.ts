@@ -25,7 +25,7 @@ export interface Chip {
 /**
  * The tone of each state's dot: amber for a task waiting out a failure,
  * neutral for everything else — a running task breathes instead (the
- * console's running chip), since the ember accent beside a red 500 reads
+ * console's running chip), since a coloured dot beside a red 500 reads
  * as a second failure.
  */
 export function stateTone(state: TasksTaskState): StatusTone {

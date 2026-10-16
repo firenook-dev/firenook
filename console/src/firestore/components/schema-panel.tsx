@@ -198,7 +198,9 @@ function TreeNode({
     >
       <div
         className={`group flex h-7 items-center rounded-md pr-1.5 ${
-          isCurrent ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-kumo-brand)]' : 'hover:ink'
+          isCurrent
+            ? 'bg-kumo-tint shadow-[inset_2px_0_0_var(--color-firenook-flame)]'
+            : 'hover:ink'
         }`}
         data-testid="schema-node"
         data-pattern={node.pattern}

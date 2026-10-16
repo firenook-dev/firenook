@@ -880,10 +880,24 @@ Follow the `kumo-design` skill (vendored Kumo rules) and `console/AGENTS.md`.
 Semantic tokens only (`bg-kumo-base`, `text-kumo-subtle`, `ring-kumo-line`),
 14 px content text, sentence-case headings, `font-semibold` not `font-bold`,
 no colour transitions on hover, dialogs always mounted and toggled with
-`open`. Firenook's identity lives in `src/theme.css` alone: the ember accent
-(`--color-kumo-brand` and the link colour) and the type pair (Inter for
-the interface, the face Kumo's docs render in; IBM Plex Mono for data),
-self-hosted from `public/fonts`. The sans face is registered as
+`open`. Firenook's identity lives in `src/theme.css` alone: the brand kit's
+colours split by job, and the type pair (Inter for the interface, the face
+Kumo's docs render in; IBM Plex Mono for data), self-hosted from
+`public/fonts`. **Ink** (the brand's charcoal `#202124`, near-white in dark
+mode) is `--color-kumo-brand`: the primary button, focus rings, progress,
+an in-flight state, the unsaved dot. **Flame** (the logo's vermilion
+`#F23818`, `bg-firenook-flame`) marks where you are and nothing else: the
+active tab's underline, the selected row's bar in a tree, a table or the
+schema, the open document, the current sort, a checked menu item, a drop
+target; links and `text-kumo-brand` take it darkened for text. The flame
+never fills a button or colours a state, because vermilion is the danger
+red within ten degrees and amber is the warning. A feed's selected row
+(Logs, events) keeps an ink bar: a log line's left edge is its level's.
+A primary button's label is `--color-firenook-on-ink` (Kumo forces white),
+a Delete button fills deeper than Kumo's red so its white label reads, and
+secondary, warning and placeholder text and the warning fill are set
+darker where Kumo's measure below AA; `e2e/shell-theme.spec.ts` holds every
+one of those ratios in both modes on the kit harness. The sans face is registered as
 `InterVariable`, not `Inter`: the TanStack devtools inject a document-level
 `@font-face` named Inter in dev builds, and the last declared face wins, so
 a face named Inter would render the devtools' build on the dev server.
@@ -1636,9 +1650,9 @@ text right and break the value column the whole layout exists for.
 Remember that `html` is 14 px here, so `max-w-40` is 140 px, not 160.
 
 Once a panel is that quiet, **the footer's count needs somewhere to point**:
-a field the next Save will write carries a small ember dot beside its name.
-That is the accent doing the job it is reserved for — Save is the row's
-primary action and this is what it is about to write.
+a field the next Save will write carries a small ink dot beside its name,
+in the primary's own colour: Save is the row's primary action and this is
+what it is about to write.
 
 `TypeBadge` takes `menu` where the chip opens the type menu, and the two
 places differ on purpose: in a grid header it is a label in a dense row and

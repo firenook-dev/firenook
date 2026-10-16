@@ -199,7 +199,7 @@ function CreateForm({
               spellCheck={false}
               autoFocus
               placeholder="invoices"
-              className={`h-8 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring outline-none placeholder:font-sans placeholder:text-kumo-inactive focus:ring-kumo-focus ${
+              className={`h-8 rounded-md bg-kumo-control px-2 font-mono text-[12px] text-kumo-default ring outline-none placeholder:font-sans placeholder:text-kumo-placeholder focus:ring-kumo-focus ${
                 collectionId && collectionError ? 'ring-kumo-danger' : 'ring-kumo-line'
               }`}
               data-testid="new-collection-id"
@@ -377,7 +377,7 @@ function ImportForm({ collection, onClose }: { collection: string; onClose: () =
           placeholder={
             '{\n  "inv_001": { "total": 120, "paidAt": "2026-09-20T09:00:00Z" },\n  "inv_002": { "total": 80 }\n}'
           }
-          className="w-full resize-y rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none placeholder:text-kumo-inactive focus:ring-kumo-focus"
+          className="w-full resize-y rounded-md bg-kumo-control p-2 font-mono text-[12px] leading-5 text-kumo-default ring ring-kumo-line outline-none placeholder:text-kumo-placeholder focus:ring-kumo-focus"
           aria-label="Documents as JSON"
           data-testid="import-json"
         />

@@ -30,10 +30,20 @@ function Colours() {
       </Section>
       <Section
         title="Brand and status"
-        note="Solid tokens for fills, dots and bars; tints for badges and banners."
+        note="Solid tokens for fills, dots and bars; tints for badges and banners. Ink is Kumo's brand token here; the flame only marks where you are, and never a state."
       >
         <div className="flex flex-wrap gap-4">
-          <Swatch token="bg-kumo-brand" className="bg-kumo-brand" text="text-white" />
+          <Swatch
+            token="bg-kumo-brand"
+            className="bg-kumo-brand"
+            text="text-(--color-firenook-on-ink)"
+            label="ink: primary, focus"
+          />
+          <Swatch
+            token="bg-firenook-flame"
+            className="bg-firenook-flame"
+            label="flame: where you are"
+          />
           <Swatch token="bg-kumo-info" className="bg-kumo-info" text="text-white" />
           <Swatch token="bg-kumo-success" className="bg-kumo-success" text="text-white" />
           <Swatch token="bg-kumo-warning" className="bg-kumo-warning" text="text-black" />
